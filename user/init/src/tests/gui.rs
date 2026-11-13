@@ -580,7 +580,7 @@ fn terminal_shot(startup: &Startup, s: &mut State) -> TestResult {
 /// handlu, proto se handle aplikace i zavreny klient (nahradni kanal relace)
 /// zahodi; jinak kazde okno terminalu drzi ~20 MiB do konce testu a pamet
 /// v dalsich testech dojde.
-fn close_terminal(startup: &Startup, s: &mut State, app: usize, name: &str) -> TestResult {
+pub(super) fn close_terminal(startup: &Startup, s: &mut State, app: usize, name: &str) -> TestResult {
     if let Some(a) = s.gui.apps.get(app) {
         let _ = a.process.kill();
         let _ = a.process.wait_exit(Some(time::deadline_after(TIMEOUT)));

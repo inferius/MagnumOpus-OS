@@ -1,6 +1,6 @@
 # user/termd
 
-Prostředník terminálu (milník 6b). Interpret v něm **není**. Bootstrap kanál = spojení s oknem terminálu (nativní protokol `term::proto`); handly `kind::USER` podle pořadí: kanál fsd, kanál registru relací, kanál napájení; volitelné handly se štítkem (brána agenta AI, relace zvukové služby a její lístek); `kind::INITFS` = obraz initfs, odkud se spouští `shsess`. Každá relace shellu běží ve vlastním procesu `user/shsess` (`libs/term::broker`); termd mezi oknem a relacemi směruje zprávy. Popis: `docs/cs/navrh-shell.md#terminál-a-služba-relací`, `docs/cs/init.md#terminál`.
+Prostředník terminálu (milník 6b). Interpret v něm **není**. Bootstrap kanál = spojení s oknem terminálu (nativní protokol `term::proto`); handly `kind::USER` podle pořadí: kanál fsd, kanál registru relací, kanál napájení; volitelné handly se štítkem (brána agenta AI, relace zvukové služby a její lístek, kanál služby „otevři cestu“ - každá relace dostane duplikát zprávou `SessMsg::Open`); `kind::INITFS` = obraz initfs, odkud se spouští `shsess`. Každá relace shellu běží ve vlastním procesu `user/shsess` (`libs/term::broker`); termd mezi oknem a relacemi směruje zprávy. Popis: `docs/cs/navrh-shell.md#terminál-a-služba-relací`, `docs/cs/init.md#terminál`.
 
 ## Klíčové soubory
 

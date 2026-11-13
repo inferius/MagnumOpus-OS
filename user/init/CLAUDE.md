@@ -16,6 +16,7 @@ První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`,
 - Po pádu `compd` se spustí záložní konzole; po pádu `termd` zůstanou relace (`shsess`).
 - Instalátor (`src/install.rs`): `installd` se spouští až na první `OpenInstaller` a jen jednou dostane raw kanály disků (`Devices.raw`). Při startu se čte `/system/config/system.toml` (pásmo pro timed, rozložení klávesnice pro inputd); chybějící soubor = výchozí. Soubor `install-answers` v initfs spustí test instalace (jen obraz testu, nikdy instalovaný initfs).
 - Uživatelská čísla služeb: ACCOUNTD 902, LOGD 903 - nové číslo nesmí kolidovat.
+- Kanál služby „otevři cestu“ dostane jen okno terminálu přihlášeného uživatele (`terminal.rs`, štítek `term::ctl::tag::OPEN`, relace = `Client.open_session`); záložní konzole ne.
 - `open::poll` nesmí spouštět aplikaci se zámkem služby (spuštění Souborů si bere `open::endpoint`): spouštění až po `drop` zámku.
 - Pořadí startu je závislostní: `fsd` čeká na disk od `devmgr`, `netd` na síťovou kartu atd. Nové pořadí = upravit `docs/cs/init.md`.
 

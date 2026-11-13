@@ -4,7 +4,7 @@
 
 ## Index
 
-- **Files:** [`ls`](#ls), [`cd`](#cd), [`pwd`](#pwd), [`open`](#open), [`save`](#save), [`rm`](#rm), [`cp`](#cp), [`mv`](#mv), [`mkdir`](#mkdir), [`exists`](#exists), [`df`](#df)
+- **Files:** [`ls`](#ls), [`cd`](#cd), [`pwd`](#pwd), [`open`](#open), [`start`](#start), [`save`](#save), [`rm`](#rm), [`cp`](#cp), [`mv`](#mv), [`mkdir`](#mkdir), [`exists`](#exists), [`df`](#df)
 - **Text and output:** [`echo`](#echo), [`log`](#log), [`lines`](#lines), [`split`](#split), [`join`](#join), [`trim`](#trim), [`upper`](#upper), [`lower`](#lower), [`contains`](#contains), [`starts-with`](#starts-with), [`ends-with`](#ends-with), [`replace`](#replace)
 - **Lists and tables:** [`where`](#where), [`each`](#each), [`select`](#select), [`sort`](#sort), [`first`](#first), [`last`](#last), [`count`](#count), [`sum`](#sum), [`group`](#group), [`reverse`](#reverse), [`range`](#range)
 - **Conversions and time:** [`from`](#from), [`to`](#to), [`convert`](#convert), [`describe`](#describe), [`now`](#now), [`sleep`](#sleep)
@@ -205,6 +205,41 @@ Eva    31
 **Errors:** `NOT_FOUND`, `ACCESS_DENIED`
 
 **Related:** [`save`](#save), [`from`](#from), [`lines`](#lines)
+
+
+### `start`
+
+opens a file or folder in an application by its type (like a double click)
+
+Opens a file or folder in an application by its type, like a double click in Files (and `start` on Windows). The "open a path" service picks the application from the associations in application manifests (`[open]`). A file no application opens is shown by Files; a folder opens in Files. A bare path to a file on the command line does the same, only without Files: with no application it shows a summary like `open`. `open` reads the file content, not `start`. The text console (no graphical interface) has no such service and `start` fails with `NOT_SUPPORTED`.
+
+```shell
+start path
+```
+
+Full name `file-start` · input: nothing · output: nothing
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `path` | path |  | file or folder |
+
+Opens the text in the editor.
+
+```shell
+start zprava.txt
+```
+
+Opens the folder in Files.
+
+```shell
+start ~/Obrázky
+```
+
+**Needs:** the graphical interface (the "open a path" service)
+
+**Errors:** `NOT_FOUND`, `NOT_SUPPORTED`, `SH_OPEN`
+
+**Related:** [`open`](#open), [`ls`](#ls)
 
 
 ### `save`

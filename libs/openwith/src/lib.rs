@@ -139,19 +139,32 @@ impl Registry {
 }
 
 /// Zpravy sluzby "otevri cestu" (v initu, kanal relace): zadost
-/// `open <cesta>` s jednim handlem (kanal pro odpoved), odpoved
-/// [`Reply`]. Text UTF-8; cesta muze obsahovat mezery.
+/// `open <cesta>` nebo `open-app <cesta>` s jednim handlem (kanal pro
+/// odpoved), odpoved [`Reply`]. Text UTF-8; cesta muze obsahovat mezery.
 pub mod msg {
     use alloc::string::String;
     use alloc::vec::Vec;
 
+    /// Otevrit jako dvojklik: bez aplikace soubor ukaze spravce souboru.
     pub fn request(path: &str) -> Vec<u8> {
         alloc::format!("open {path}").into_bytes()
     }
 
-    /// Cesta ze zadosti (`None` = neplatna zprava).
-    pub fn parse_request(b: &[u8]) -> Option<&str> {
-        core::str::from_utf8(b).ok()?.strip_prefix("open ").filter(|p| p.starts_with('/'))
+    /// Jen aplikace s asociaci (hola cesta v shellu): bez ni odpoved
+    /// [`Reply::NoApp`], nic se neotevre.
+    pub fn request_app(path: &str) -> Vec<u8> {
+        alloc::format!("open-app {path}").into_bytes()
+    }
+
+    /// Cesta ze zadosti a zda jen aplikace (`open-app`); `None` = neplatna
+    /// zprava.
+    pub fn parse_request(b: &[u8]) -> Option<(&str, bool)> {
+        let s = core::str::from_utf8(b).ok()?;
+        let (p, app_only) = match s.strip_prefix("open-app ") {
+            Some(p) => (p, true),
+            None => (s.strip_prefix("open ")?, false),
+        };
+        p.starts_with('/').then_some((p, app_only))
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +173,10 @@ pub mod msg {
         Opened(String),
         /// Zadna aplikace soubor neotevre; ukazan ve spravci (id).
         Revealed(String),
+        /// Zadna aplikace cestu neotevre (zadost `open-app`, nebo neni
+        /// spravce souboru s `reveal`); nic se neotevrelo. Pripona malymi
+        /// pismeny ([`super::extension`], `""` = bez pripony, slozka).
+        NoApp(String),
         /// Chyba (text pro cloveka).
         Failed(String),
     }
@@ -169,6 +186,7 @@ pub mod msg {
             match self {
                 Reply::Opened(a) => alloc::format!("ok {a}"),
                 Reply::Revealed(a) => alloc::format!("reveal {a}"),
+                Reply::NoApp(ext) => alloc::format!("none {ext}"),
                 Reply::Failed(m) => alloc::format!("err {m}"),
             }
             .into_bytes()
@@ -181,6 +199,7 @@ pub mod msg {
             match k {
                 "ok" => Some(Reply::Opened(rest)),
                 "reveal" => Some(Reply::Revealed(rest)),
+                "none" => Some(Reply::NoApp(rest)),
                 "err" => Some(Reply::Failed(rest)),
                 _ => None,
             }

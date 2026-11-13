@@ -582,7 +582,12 @@ for f in (ls ~/Fotky | where ext == "jpg") {
   `..`; `libs/shlang/src/eval/bare.rs`): složka = `cd`, skript `.mos` =
   `run` (s kontrolou `needs`), program (ELF) = spuštění stejnou cestou jako
   program podle jména (práva z manifestu, náhled, undo; argumenty dostane
-  program), jiný soubor = obsah jako `open` (nic nespouští ani nemění).
+  program), jiný soubor = aplikace podle typu přes službu „otevři cestu“
+  (`open-app`, jen aplikace s asociací); bez aplikace obsah jako `open`
+  a poznámka „Pro typ .xyz není aplikace.“ (bez služby, např. v záložní
+  konzoli, jen obsah). Příkaz `start <cesta>` otevře soubor nebo složku
+  jako dvojklik (soubor bez aplikace ukáže správce souborů); popis služby
+  `docs/cs/spravce-souboru.md` **[ověřeno v QEMU]**.
   Složka, skript ani soubor argumenty neberou (`SH_ARGS`); neexistující
   cesta je `NOT_FOUND` s radou. Zvýraznění ukazuje holou cestu jako cestu,
   ne jako neznámý příkaz. Hostitel v OS (`shsess`) zatím programy z cesty
@@ -1246,6 +1251,16 @@ vše (pamatuje se 16 příkazů).
 spotřeba zásobníku, ne počet volání.
 
 **Co s tím:** přepište rekurzi na cyklus (`for`, `while`).
+
+### `SH_OPEN` (otevření v aplikaci)
+
+**Význam:** aplikace cestu neotevřela.
+
+**Kdy vzniká:** `start` nebo holá cesta k souboru, když služba „otevři
+cestu“ aplikaci nespustí, aplikace do 20 s neodpoví nebo akci odmítne.
+Chybějící soubor nebo právo je `NOT_FOUND` / `ACCESS_DENIED`, ne `SH_OPEN`.
+
+**Co s tím:** zpráva říká aplikaci a důvod. Obsah souboru ukáže `open`.
 
 ### `SH_CONFLICT` (konflikt)
 

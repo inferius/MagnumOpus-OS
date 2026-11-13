@@ -2548,6 +2548,7 @@ dependencies = [
  "fsproto",
  "installplan",
  "libos",
+ "openwith",
  "powerproto",
  "shlang",
  "spin 0.12.3",

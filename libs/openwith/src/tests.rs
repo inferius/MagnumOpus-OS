@@ -88,10 +88,12 @@ fn extensions() {
 #[test]
 fn messages() {
     use crate::msg::{Reply, parse_request, request};
-    assert_eq!(parse_request(&request("/home/a/b c.txt")), Some("/home/a/b c.txt"));
+    assert_eq!(parse_request(&request("/home/a/b c.txt")), Some(("/home/a/b c.txt", false)));
+    assert_eq!(parse_request(&crate::msg::request_app("/a.xyz")), Some(("/a.xyz", true)));
     assert_eq!(parse_request(b"open relativni"), None);
+    assert_eq!(parse_request(b"open-app relativni"), None);
     assert_eq!(parse_request(b"jine /a"), None);
-    for r in [Reply::Opened("org.x".into()), Reply::Revealed("org.y".into()), Reply::Failed("cesta neexistuje".into())] {
+    for r in [Reply::Opened("org.x".into()), Reply::Revealed("org.y".into()), Reply::NoApp("xyz".into()), Reply::NoApp(alloc::string::String::new()), Reply::Failed("cesta neexistuje".into())] {
         assert_eq!(Reply::decode(&r.encode()), Some(r));
     }
     assert_eq!(Reply::decode(b"nesmysl"), None);

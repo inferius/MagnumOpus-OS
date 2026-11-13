@@ -147,18 +147,18 @@ fn poll_with(mut launcher: Option<(&Startup, &mut Supervisor)>) {
         s.registry = Some(registry());
     }
     // Zadosti.
-    let mut requests: Vec<(u64, String, Channel)> = Vec::new();
+    let mut requests: Vec<(u64, String, bool, Channel)> = Vec::new();
     for o in &s.sessions {
         while let Ok(m) = o.mine.try_read() {
             let Some(reply_ch) = m.handles.into_iter().next().map(Channel::from_handle) else { continue };
             match parse_request(&m.data) {
-                Some(p) => requests.push((o.session, String::from(p), reply_ch)),
+                Some((p, app_only)) => requests.push((o.session, String::from(p), app_only, reply_ch)),
                 None => reply(&reply_ch, Reply::Failed(String::from("neplatná žádost"))),
             }
         }
     }
-    for (session, path, reply_ch) in requests {
-        request(&mut s, session, path, reply_ch);
+    for (session, path, app_only, reply_ch) in requests {
+        request(&mut s, session, path, app_only, reply_ch);
     }
     // Odpovedi kompozitoru.
     let mut results = Vec::new();
@@ -211,7 +211,9 @@ fn poll_with(mut launcher: Option<(&Startup, &mut Supervisor)>) {
     }
 }
 
-fn request(s: &mut State, session: u64, path: String, reply_ch: Channel) {
+/// `app_only` (`open-app`, hola cesta v shellu): bez asociace odpoved
+/// `NoApp` misto ukazani ve spravci souboru.
+fn request(s: &mut State, session: u64, path: String, app_only: bool, reply_ch: Channel) {
     let Some(o) = s.sessions.iter_mut().find(|o| o.session == session) else { return };
     if o.fs.is_none() {
         o.fs = crate::session::connect(session).ok();
@@ -225,8 +227,9 @@ fn request(s: &mut State, session: u64, path: String, reply_ch: Channel) {
     };
     let is_dir = matches!(st.kind, kind::DIR | kind::DATASET);
     let target = s.registry.as_ref().and_then(|r| r.resolve(&path, is_dir)).map(|t| (t.assoc().clone(), matches!(t, Target::Reveal(_))));
-    let Some((a, reveal)) = target else {
-        return reply(&reply_ch, Reply::Failed(alloc::format!("{path}: žádná aplikace ho neotevře")));
+    let Some((a, reveal)) = target.filter(|(_, reveal)| !(app_only && *reveal)) else {
+        let ext = if is_dir { String::new() } else { openwith::extension(&path) };
+        return reply(&reply_ch, Reply::NoApp(ext));
     };
     let p = Pending { call: 0, session, program: a.program, app: a.app, action: a.action, path, reveal, reply: reply_ch, launched: false, deadline: time::now() + PENDING_NS };
     send_call(s, p);

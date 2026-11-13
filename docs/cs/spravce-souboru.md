@@ -154,17 +154,21 @@ v QEMU]** (část „otevri cestu“ testu správce souborů):
 | Co | Jak |
 |---|---|
 | kanál | konec kanálu služby relace: init ho dá procesu ve startovní zprávě (`crate::open::endpoint(session)`; duplikát, každý proces relace má vlastní handle téhož kanálu) |
-| žádost | `openwith::msg::request(cesta)` = text `open <absolutní cesta>` (UTF-8, mezery v cestě povolené) a **přesně jeden handle**: konec nového kanálu, na který přijde odpověď |
-| odpověď | `openwith::msg::Reply::decode`: `ok <id aplikace>` (otevřeno), `reveal <id aplikace>` (žádná aplikace typ neotevře, soubor ukázal správce), `err <důvod pro člověka>` (cesta neexistuje: `<cesta>: NOT_FOUND`, bez práva, aplikace nejde spustit, neodpověděla do 20 s) |
+| žádost | `openwith::msg::request(cesta)` = text `open <absolutní cesta>` (UTF-8, mezery v cestě povolené) a **přesně jeden handle**: konec nového kanálu, na který přijde odpověď. `request_app(cesta)` = `open-app <cesta>`: jen aplikace s asociací, soubor bez ní se neukáže (holá cesta v shellu) |
+| odpověď | `openwith::msg::Reply::decode`: `ok <id aplikace>` (otevřeno), `reveal <id aplikace>` (žádná aplikace typ neotevře, soubor ukázal správce), `none <přípona>` (žádná aplikace cestu neotevře: žádost `open-app` nebo chybí správce s `reveal`; nic se neotevřelo; přípona malými písmeny, u složky a souboru bez přípony prázdná), `err <důvod pro člověka>` (cesta neexistuje: `<cesta>: NOT_FOUND`, bez práva, aplikace nejde spustit, neodpověděla do 20 s) |
 | identita | cestu ověří init relací FS uživatele, které kanál patří (relativní cestu si klient musí doplnit sám; relativní = `err`) |
 | neplatná zpráva | bez handlu se zahodí; s handlem odpověď `err neplatná žádost` |
 
-Shell **[navrženo]** (vlákno shellu, rozhodnutí koordinátora): `open`
-zůstává čtení souboru; holá cesta k souboru na příkazové řádce a nový
-příkaz `start <cesta>` pošlou žádost službě a vypíšou odpověď. Kanál
-služby pro relaci terminálu musí init přidat k handlům relace shellu
-(`termd`/`shsess`), stejně jako to dělá pro okno Soubory
-(`user/init/src/files.rs`, `window_handles`). Omezení: kompozitor
+Shell **[ověřeno v QEMU]** (část „otevri cestu“ testu správce souborů,
+`shell_start`): `open` zůstává čtení souboru. Příkaz `start <cesta>`
+pošle `open` (jako dvojklik: soubor bez aplikace ukáže správce, složku
+otevře správce). Holá cesta k souboru pošle `open-app`; při `none` ukáže
+souhrn obsahu jako `open` a poznámku „Pro typ .xyz není aplikace.“
+Terminál vypíše, kde se cesta otevřela. Kanál dostane jen okno terminálu
+přihlášeného uživatele: init ho přidá termd (štítek
+`term::ctl::tag::OPEN`) a termd pošle duplikát každé relaci shellu
+(`SessMsg::Open`). Záložní konzole kanál nemá: `start` je tam
+`NOT_SUPPORTED` a holá cesta ukáže souhrn. Omezení: kompozitor
 vybírá aplikaci podle id, ne podle relace (více současně přihlášených
 uživatelů zatím není).
 

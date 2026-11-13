@@ -4,7 +4,7 @@
 
 ## Rejstřík
 
-- **Soubory:** [`ls`](#ls), [`cd`](#cd), [`pwd`](#pwd), [`open`](#open), [`save`](#save), [`rm`](#rm), [`cp`](#cp), [`mv`](#mv), [`mkdir`](#mkdir), [`exists`](#exists), [`df`](#df)
+- **Soubory:** [`ls`](#ls), [`cd`](#cd), [`pwd`](#pwd), [`open`](#open), [`start`](#start), [`save`](#save), [`rm`](#rm), [`cp`](#cp), [`mv`](#mv), [`mkdir`](#mkdir), [`exists`](#exists), [`df`](#df)
 - **Text a výstup:** [`echo`](#echo), [`log`](#log), [`lines`](#lines), [`split`](#split), [`join`](#join), [`trim`](#trim), [`upper`](#upper), [`lower`](#lower), [`contains`](#contains), [`starts-with`](#starts-with), [`ends-with`](#ends-with), [`replace`](#replace)
 - **Seznamy a tabulky:** [`where`](#where), [`each`](#each), [`select`](#select), [`sort`](#sort), [`first`](#first), [`last`](#last), [`count`](#count), [`sum`](#sum), [`group`](#group), [`reverse`](#reverse), [`range`](#range)
 - **Převody a čas:** [`from`](#from), [`to`](#to), [`convert`](#convert), [`describe`](#describe), [`now`](#now), [`sleep`](#sleep)
@@ -205,6 +205,41 @@ Eva    31
 **Chyby:** `NOT_FOUND`, `ACCESS_DENIED`
 
 **Souvisí:** [`save`](#save), [`from`](#from), [`lines`](#lines)
+
+
+### `start`
+
+otevře soubor nebo složku v aplikaci podle typu (jako dvojklik)
+
+Otevře soubor nebo složku v aplikaci podle typu, jako dvojklik ve Správci souborů (a `start` ve Windows). Aplikaci vybere služba „otevři cestu“ podle asociací v manifestech aplikací (`[open]`). Soubor, který žádná aplikace neotevře, ukáže Správce souborů; složku otevře Správce souborů. Holá cesta k souboru na příkazové řádce dělá totéž, jen bez Správce souborů: bez aplikace ukáže souhrn jako `open`. Obsah souboru čte `open`, ne `start`. V textové konzoli (bez grafického rozhraní) služba není a `start` skončí chybou `NOT_SUPPORTED`.
+
+```shell
+start path
+```
+
+Plné jméno `file-start` · vstup: nic · výstup: nic
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `path` | cesta |  | soubor nebo složka |
+
+Otevře text v editoru.
+
+```shell
+start zprava.txt
+```
+
+Otevře složku ve Správci souborů.
+
+```shell
+start ~/Obrázky
+```
+
+**Potřebuje:** grafické rozhraní (služba „otevři cestu“)
+
+**Chyby:** `NOT_FOUND`, `NOT_SUPPORTED`, `SH_OPEN`
+
+**Souvisí:** [`open`](#open), [`ls`](#ls)
 
 
 ### `save`

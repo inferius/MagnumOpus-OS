@@ -70,6 +70,21 @@ pub const DOCS: &[Doc] = &[
         needs_en: "read access to the file",
     },
     Doc {
+        name: "start",
+        short_en: "opens a file or folder in an application by its type (like a double click)",
+        long_cs: "Otevře soubor nebo složku v aplikaci podle typu, jako dvojklik ve Správci souborů (a `start` ve Windows). Aplikaci vybere služba „otevři cestu“ podle asociací v manifestech aplikací (`[open]`). Soubor, který žádná aplikace neotevře, ukáže Správce souborů; složku otevře Správce souborů. Holá cesta k souboru na příkazové řádce dělá totéž, jen bez Správce souborů: bez aplikace ukáže souhrn jako `open`. Obsah souboru čte `open`, ne `start`. V textové konzoli (bez grafického rozhraní) služba není a `start` skončí chybou `NOT_SUPPORTED`.",
+        long_en: "Opens a file or folder in an application by its type, like a double click in Files (and `start` on Windows). The \"open a path\" service picks the application from the associations in application manifests (`[open]`). A file no application opens is shown by Files; a folder opens in Files. A bare path to a file on the command line does the same, only without Files: with no application it shows a summary like `open`. `open` reads the file content, not `start`. The text console (no graphical interface) has no such service and `start` fails with `NOT_SUPPORTED`.",
+        args: &[Arg { name: "path", default: "", cs: "soubor nebo složka", en: "file or folder" }],
+        examples: &[
+            Ex { code: "start zprava.txt", cs: "Otevře text v editoru.", en: "Opens the text in the editor.", check: Skip },
+            Ex { code: "start ~/Obrázky", cs: "Otevře složku ve Správci souborů.", en: "Opens the folder in Files.", check: Skip },
+        ],
+        related: &["open", "ls"],
+        errors: &["NOT_FOUND", "NOT_SUPPORTED", "SH_OPEN"],
+        needs_cs: "grafické rozhraní (služba „otevři cestu“)",
+        needs_en: "the graphical interface (the \"open a path\" service)",
+    },
+    Doc {
         name: "save",
         short_en: "saves bytes or text to a file (records only after `to text`/`to json`)",
         long_cs: "Uloží vstup z roury do souboru. Ukládá jen bajty a text; záznamy je potřeba nejdřív převést (`to json`, `to text`). Soubor se nahradí celý najednou: při chybě zůstane původní obsah. Změnu vrátí `undo`.",
