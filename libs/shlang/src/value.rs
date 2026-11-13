@@ -24,6 +24,51 @@ pub struct ClosureVal {
     pub captured: Vec<(String, Value)>,
 }
 
+/// Velicina z tabulky jednotek (`crate::units`) mimo velikost a dobu:
+/// frekvence, procenta (a dalsi rozmery pridane do tabulky). `value` je
+/// v zakladni jednotce rozmeru (Hz, pomer 1 = 100 %).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Quantity {
+    pub dim: crate::units::Dim,
+    pub value: f64,
+}
+
+/// Proc hodnota chybi ([`Value::Missing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Why {
+    /// Hodnota existuje, ale relace ji nesmi videt (chybi pravo, napr.
+    /// souhrn podstromu bez prava spravovat).
+    Hidden,
+    /// FS ani zdroj hodnotu nevede (napr. cas vytvoreni na FS, ktery ho
+    /// neuklada).
+    Unavailable,
+}
+
+impl Why {
+    pub const fn code(self) -> u8 {
+        match self {
+            Why::Hidden => 0,
+            Why::Unavailable => 1,
+        }
+    }
+
+    pub const fn from_code(c: u8) -> Option<Why> {
+        match c {
+            0 => Some(Why::Hidden),
+            1 => Some(Why::Unavailable),
+            _ => None,
+        }
+    }
+
+    /// Vysvetlivka (pata tabulky v terminalu).
+    pub const fn text_cs(self) -> &'static str {
+        match self {
+            Why::Hidden => "skryté (chybí právo)",
+            Why::Unavailable => "nedostupné (zdroj hodnotu nevede)",
+        }
+    }
+}
+
 /// Odkaz na soubor (cesta absolutni, druh podle zacatku obsahu).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileRef {
@@ -45,6 +90,13 @@ pub enum Value {
     Size(i64),
     /// Doba v nanosekundach.
     Duration(i64),
+    /// Velicina z tabulky jednotek (frekvence, procenta, ...).
+    Quantity(Quantity),
+    /// Chybejici hodnota s duvodem (skryta, nedostupna): chova se jako
+    /// `null` (rovnost s `null`, porovnani `<`/`>` je `false`), terminal ji
+    /// ukaze jako pomlcku s vysvetlivkou. Prazdna slozka ma 0 B a 0 polozek,
+    /// ne `Missing`.
+    Missing(Why),
     /// Okamzik: nanosekundy od 1970-01-01 UTC.
     Time(i64),
     Str(String),
@@ -62,12 +114,13 @@ impl Value {
     pub fn type_name(&self) -> &'static str {
         match self {
             Value::Nothing => "nothing",
-            Value::Null => "null",
+            Value::Null | Value::Missing(_) => "null",
             Value::Bool(_) => "bool",
             Value::Int(_) => "int",
             Value::Float(_) => "float",
             Value::Size(_) => "size",
             Value::Duration(_) => "duration",
+            Value::Quantity(q) => q.dim.type_name(),
             Value::Time(_) => "time",
             Value::Str(_) => "text",
             Value::Bytes(_) => "bytes",
@@ -147,6 +200,27 @@ pub fn human_size(b: i64) -> String {
     }
 }
 
+/// Velicina v nejvhodnejsi jednotce (`2.4 GHz`, `50%`): nejvys dve
+/// desetinna mista bez koncovych nul.
+pub fn human_quantity(q: &Quantity) -> String {
+    let u = crate::units::Unit::for_display(q.dim, q.value);
+    let v = q.value / u.scale();
+    let mut t = alloc::format!("{v:.2}");
+    if t.contains('.') {
+        while t.ends_with('0') {
+            t.pop();
+        }
+        if t.ends_with('.') {
+            t.pop();
+        }
+    }
+    if t == "-0" {
+        t = String::from("0");
+    }
+    // Procenta bez mezery (`50%`), ostatni jako velikosti (`2.4 GHz`).
+    if u.name() == "%" { alloc::format!("{t}%") } else { alloc::format!("{t} {}", u.name()) }
+}
+
 /// Lidsky citelna doba.
 pub fn human_duration(ns: i64) -> String {
     let neg = ns < 0;
@@ -197,11 +271,14 @@ impl fmt::Display for Value {
         match self {
             Value::Nothing => Ok(()),
             Value::Null => f.write_str("null"),
+            // Pomlcka (znak navrhu terminalu, ne text v kodu).
+            Value::Missing(_) => f.write_str("\u{2014}"),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Int(i) => write!(f, "{i}"),
             Value::Float(x) => f.write_str(&crate::fmt::num_text(*x)),
             Value::Size(b) => f.write_str(&human_size(*b)),
             Value::Duration(d) => f.write_str(&human_duration(*d)),
+            Value::Quantity(q) => f.write_str(&human_quantity(q)),
             Value::Time(t) => f.write_str(&format_time(*t)),
             Value::Str(s) => f.write_str(s),
             Value::File(r) => write!(f, "<soubor {}: {}, {}>", r.path, r.kind, human_size(r.size as i64)),

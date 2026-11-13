@@ -7,7 +7,7 @@
 - **Soubory:** [`ls`](#ls), [`cd`](#cd), [`pwd`](#pwd), [`open`](#open), [`save`](#save), [`rm`](#rm), [`cp`](#cp), [`mv`](#mv), [`mkdir`](#mkdir), [`exists`](#exists), [`df`](#df)
 - **Text a výstup:** [`echo`](#echo), [`log`](#log), [`lines`](#lines), [`split`](#split), [`join`](#join), [`trim`](#trim), [`upper`](#upper), [`lower`](#lower), [`contains`](#contains), [`starts-with`](#starts-with), [`ends-with`](#ends-with), [`replace`](#replace)
 - **Seznamy a tabulky:** [`where`](#where), [`each`](#each), [`select`](#select), [`sort`](#sort), [`first`](#first), [`last`](#last), [`count`](#count), [`sum`](#sum), [`group`](#group), [`reverse`](#reverse), [`range`](#range)
-- **Převody a čas:** [`from`](#from), [`to`](#to), [`describe`](#describe), [`now`](#now), [`sleep`](#sleep)
+- **Převody a čas:** [`from`](#from), [`to`](#to), [`convert`](#convert), [`describe`](#describe), [`now`](#now), [`sleep`](#sleep)
 - **Úlohy:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Relace a bezpečnost:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Nápověda:** [`help`](#help), [`explain`](#explain)
@@ -1228,6 +1228,58 @@ Seznam jako JSON.
 **Chyby:** `SH_FORMAT`
 
 **Souvisí:** [`from`](#from), [`save`](#save)
+
+
+### `convert`
+
+převede jednotky, číselné soustavy, kódování textu a časová pásma
+
+Univerzální převod. Jednotky z tabulky jednotek: `1GiB | convert MB` vrátí číslo v cílové jednotce, číslo bez jednotky převede `--from jednotka`. Soustavy `hex`, `bin`, `oct`, `dec`: celé číslo na text s předponou (`0xff`) a text s číslem zpět (`"ff" | convert dec --from hex`). Kódování `utf8`, `utf16le`, `utf16be`, `latin2` převede text na bajty, `base64` a `hex` bajty na text; zpět `--from kódování`. Čas převede do časového pásma (jméno IANA nebo posun `UTC+2`) jako místní čas s letním časem. Formáty dat (json, řádky) jsou `from` a `to`.
+
+```shell
+convert [target] [--from hodnota]
+```
+
+Plné jméno `value-convert` · vstup: libovolná hodnota · výstup: libovolná hodnota
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[target]` | text |  | cílová jednotka, soustava, kódování nebo časové pásmo |
+| `-f, --from` | text |  | zdrojová jednotka, soustava nebo kódování |
+
+Dvojkové gigabajty na desítkové megabajty.
+
+```shell
+1GiB | convert MB
+```
+
+```text
+1073.741824
+```
+
+Číslo šestnáctkově.
+
+```shell
+255 | convert hex
+```
+
+```text
+0xff
+```
+
+Text v base64.
+
+```shell
+"ahoj" | convert base64
+```
+
+```text
+YWhvag==
+```
+
+**Chyby:** `SH_ARGS`, `SH_TYPE`
+
+**Souvisí:** [`from`](#from), [`to`](#to), [`describe`](#describe)
 
 
 ### `describe`

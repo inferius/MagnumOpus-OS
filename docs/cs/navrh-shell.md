@@ -217,8 +217,39 @@ for f in (ls ~/Fotky | where ext == "jpg") {
 
   | Druh | Jednotky | Hodnota |
   |---|---|---|
-  | velikost | `B`, `KB`, `MB`, `GB`, `TB` (×1000), `KiB`, `MiB`, `GiB`, `TiB` (×1024) | bajty |
-  | doba | `ns`, `us`, `ms`, `s`, `min`, `h`, `d`, `w`, `y` (365 dní) | nanosekundy |
+  | velikost | `B`, `KB`, `MB`, `GB`, `TB` (×1000), `KiB`, `MiB`, `GiB`, `TiB` (×1024) | bajty (celé číslo) |
+  | doba | `ns`, `us`, `ms`, `s`, `m` (minuta), `min`, `h`, `d`, `w`, `y` (365 dní) | nanosekundy (celé číslo) |
+  | frekvence | `Hz`, `kHz`, `MHz`, `GHz` | hertzy (desetinné) |
+  | procenta | `%` | poměr, 1 = 100 % (desetinné) |
+
+  **Složená doba** jde od větší jednotky k menší, každá jednotka jednou:
+  `1h30m`, `2m30s`, `1d12h`. `%` za číslem je procento jen tehdy, když za
+  ním nenásleduje číslo ani jméno (`10%3` je zbytek po dělení).
+  Počítá se jen se stejnou veličinou nebo s číslem (`440Hz + 60Hz`,
+  `1MHz / 4`); procento z hodnoty `50% * 200MB` dá 100 MB, `10% * 1h`
+  6 minut. Různé veličiny sečíst ani porovnat nejde (chyba `SH_TYPE`).
+  Výpis volí největší jednotku, ve které je hodnota aspoň 1 (`2.4 GHz`,
+  `50%`) **[implementováno]**.
+
+  Jednotky jsou data: tabulka `shlang::units::TABLE` (zápis, veličina,
+  násobek základní jednotky). Novou veličinu (délka, teplota, rychlost
+  přenosu) přidá řádek tabulky a rozměr; lexer, výpis a nápověda k neznámé
+  jednotce ji převezmou. Velikost a doba jsou dál přesná celá čísla,
+  ostatní veličiny desetinné číslo v základní jednotce.
+
+  **Převody** dělá `convert` ([Příkazy shellu](prikazy-shellu.md#convert)):
+  jednotky z téže tabulky (`1GiB | convert MB` = 1073.741824, číslo
+  v cílové jednotce), číselné soustavy (`255 | convert hex` = `0xff`),
+  kódování textu (`utf8`, `utf16le`, `utf16be`, `latin2`, `base64`, `hex`;
+  zpět `--from`) a časová pásma (`now | convert Europe/Prague`). Pásma
+  bere ze stejné knihovny jako služba času, hodiny v liště a instalátor
+  (`libs/tz` přes `libos::time::zone`: jména IANA, pevný posun, letní čas
+  podle současných pravidel bez historie). Formáty dat (json, řádky) zůstávají
+  na `from` / `to` **[implementováno]**.
+
+  **Otevřená otázka:** `m` je dnes minuta. Až přibude délka, `m` (metr)
+  by kolidovalo; řešení (metr jen v `convert`, jiný zápis minuty, nebo
+  podle kontextu) zatím není rozhodnuté **[navrženo]**.
 
 - **Řetězce:** `"..."` s escape sekvencemi `\n \t \r \0 \\ \" \{ \}`
   a vloženými výrazy `{výraz}`; `'...'` je doslovný text bez escape sekvencí
@@ -350,7 +381,8 @@ pole: `where mtime < now() - 1y`.
 |---|---|---|
 | `int`, `float` | `42`, `1.5` | celé číslo se v aritmetice s desetinným převede (jediný automatický převod) |
 | `size` | `100MB` | velikost se nesčítá ani neporovnává s číslem: `size > 100` je chyba s radou `100B` |
-| `duration` | `30s`, `1h` | |
+| `duration` | `30s`, `1h`, `1h30m` | |
+| `frequency`, `percent` | `2.4GHz`, `50%` | veličiny z tabulky jednotek (viz Čísla) |
 | `time` | `now()` | `time - duration` = `time`, `time - time` = `duration` |
 | `text` | `"abc"` | |
 | `bytes` | `open f` | **bajtový proud**, jiný typ než text a záznamy |
@@ -358,7 +390,17 @@ pole: `where mtime < now() - 1y`.
 | `closure` | `x => x * 2` | zachytí kopie použitých proměnných |
 | `error` | `e` v `try ... else e => ...` | pole `code`, `message`, `hint`, `cause` |
 | `null`, `nothing` | | `nothing` = příkaz nic nevrátil |
+| chybějící hodnota | `size` cizí složky | `null` s důvodem: **skrytá** (chybí právo) nebo **nedostupná** (zdroj ji nevede); viz níže |
 
+- **Chybějící hodnota** (`Value::Missing`) se chová jako `null`: rovná se
+  `null`, porovnání `<` / `>` je `false` (`where size > 1MB` ji vynechá
+  místo chyby), při řazení jde na začátek. Terminál ji ukáže jako „—“
+  a v patičce tabulky vysvětlí důvod. Prázdná složka není chybějící
+  hodnota: má 0 B, 0 souborů a 0 složek. Dnes shell stav odhaduje
+  z odpovědi fsd (složka bez práva spravovat = souhrn skrytý, nulový čas =
+  nedostupný) **[implementováno]**; přesné příznaky ve fsproto (masky
+  `known` / `hidden` u `Stat` a `LIST_STAT_PAGE`) jsou zadání pro vlákno
+  FS **[navrženo]**.
 - **Žádné skryté převody.** Mezi bajty, textem a záznamy se převádí
   jen výslovně: `from json`, `from text`, `lines`, `to text`, `to json`.
   `open data.json | where ...` je chyba s radou `from json`.
@@ -391,6 +433,10 @@ zahodí; poznámku vypíše `log`.
 - Chyba nese kód, popis, místo ve zdroji (řádek, sloupec, podtržení),
   radu a příčinu. `explain kód` ukáže vysvětlení z [Kódů chyb](chyby.md)
   a z [kapitoly Chyby shellu](#chyby-shellu).
+- Příčina z chyby systému se ukáže česky z téhož katalogu (věta
+  **Význam** v [Kódech chyb](chyby.md)), např. `příčina: NOT_FOUND:
+  požadovaná věc neexistuje`. Popisy v `abi` zůstávají ASCII a slouží jen
+  jako náhrada **[implementováno]**.
 
 ### Funkce, closure, úlohy
 
@@ -532,6 +578,15 @@ for f in (ls ~/Fotky | where ext == "jpg") {
 - **Zámek nebezpečných operací:** příkaz, který by změnil víc než N
   souborů mimo `/tmp` (výchozí N = 20), se před převzetím vždy zeptá. Je to
   stejný dotaz jako u `preview`. Bez připojeného okna se odmítne.
+- **Holá cesta jako příkaz** (`/`, `./x`, `../`, `~`, `~/Dokumenty`, `.`,
+  `..`; `libs/shlang/src/eval/bare.rs`): složka = `cd`, skript `.mos` =
+  `run` (s kontrolou `needs`), program (ELF) = spuštění stejnou cestou jako
+  program podle jména (práva z manifestu, náhled, undo; argumenty dostane
+  program), jiný soubor = obsah jako `open` (nic nespouští ani nemění).
+  Složka, skript ani soubor argumenty neberou (`SH_ARGS`); neexistující
+  cesta je `NOT_FOUND` s radou. Zvýraznění ukazuje holou cestu jako cestu,
+  ne jako neznámý příkaz. Hostitel v OS (`shsess`) zatím programy z cesty
+  nespouští: chyba `NOT_SUPPORTED` **[implementováno]**.
 - **Manifest `needs`:** `run skript` před spuštěním ukáže, co skript chce
   (`read`, `write`, `net`), a po potvrzení ho omezí: přístup mimo uvedené
   cesty je `SH_NEEDS`. Skript dostane nejvýš průsečík s právy toho, kdo ho
@@ -935,11 +990,18 @@ a podle rolí řádků (`term::ui::draw::Role`) nad ní dokreslí prvky návrhu
 |---|---|
 | levý pruh bloku podle stavu (běží, hotovo, chyba), příkaz tučně, čas a výsledek vpravo písmem UI | **[implementováno]** |
 | rámeček chyby (danger-soft, okraj danger) | **[implementováno]** |
-| řádek vstupu: linka nad ním, pilulka se složkou | **[implementováno]** (bez ikony složky) |
+| řádek vstupu: linka nad ním, pilulka s ikonou a složkou | **[implementováno]** |
+| náhled změn (zámek nebezpečných operací, `preview`): rámeček se seznamem změn (nejvýš 6, pak „… a N dalších“) a tlačítky „Převzít N změn“ / „Zahodit“; tlačítka jsou i v přístupnosti, seznam změn ukazuje i konzole | **[ověřeno v QEMU]** |
 | nápověda kláves jako štítky | **[implementováno]** |
 | linka pod záhlavím tabulky | **[implementováno]** (typ sloupce pod jménem zatím ne) |
 | doplňování jako nabídka nad řádkem, myš, výběr textu a schránka | **[navrženo]** (krok 4, komponenty 6c) |
-| panel úloh vpravo, náhled změn s tlačítky, karty relací a přepínač B/C v titulku, akce bloku, animace | **[navrženo]** (krok 5) |
+| přepínač zápisu B / C v titulku (stav `App::notation_c`; klik, Ctrl+F i přístupnost převedou rozepsaný řádek) | **[ověřeno v QEMU]** |
+| nový blok se prolne (`motion.base`, křivka `ease_enter`); bloky přehrané po připojení ne. Posun o 6 px z návrhu mřížka nedělá (prolnutí je zároveň náhrada pro „Omezit pohyb“) | **[implementováno]** |
+| panel úloh vpravo (šířka `size.side_panel`): karty úloh se stavem, pruhem průběhu a tlačítkem Zrušit, v přístupnosti seznam. Sám se ukáže jen na obrazovce širší než 1280 px a v okně aspoň 900 px, jinak úlohy ukáže Ctrl-T. Výchozí okno 1040 px (kompozitor ho ořízne na obrazovku; omezení na 85 % šířky obrazovky čeká na změnu velikosti okna z aplikace) | **[implementováno]** (testy v QEMU mají obrazovku 1280 px, panel ověřen jednorázově se sníženou hranicí) |
+| karty relací v titulku: karta každé relace služby (ostatní se štítkem „odpojená“), tlačítko + pro novou relaci; klik i přístupnost přepnou relaci (odpojit a připojit jinou). Přehrání po přepnutí se nezasekne: na `AttachRecent` (tag 15, jen okno, které umí vkládat starší bloky; `Attach` přehraje vše v pořadí před `Attached`, např. pro adaptér VT) relace pošle nejdřív posledních 12 bloků, pak `Attached` a starší bloky po dávkách 16 od nejnovějších, okno je vloží před novější podle čísla bloku a zpracuje nejvýš 64 zpráv na snímek | **[ověřeno v QEMU]** |
+| akce bloku: u bloku pod ukazatelem tlačítka Sbalit / Rozbalit a Spustit znovu (čas bloku se posune vlevo), v přístupnosti u všech viditelných bloků | **[ověřeno v QEMU]** (přes přístupnost; vzhled při najetí myší zatím bez snímku) |
+| akce bloku „kopírovat výstup“ | **[navrženo]** (po schránce `clipproto` od 6c) |
+| akce bloku „porovnat s předchozím během“: rozdíl výstupu proti poslednímu běhu stejného příkazu | **[navrženo]** (samostatný kus po kroku 5) |
 
 ### Ukazatel činnosti a průběh
 

@@ -36,6 +36,18 @@ fn agent_chip(c: &mut Canvas<'_>, look: &mut crate::Look, icons: &mut gfx::icon:
     w
 }
 
+/// Pruh prubehu (`value` 0-100) v `r`: draha `surface_3`, vypln akcentem
+/// (uloha agenta barvou `ai`). Sdileny s aplikacemi, ktere kresli samy
+/// (panel uloh terminalu).
+pub fn progress_bar(c: &mut Canvas<'_>, r: Rect, value: u32, agent: bool, col: &theme::Colors) {
+    c.round_fill(r, r.h / 2, col.surface_3);
+    let w = r.w * value.min(100) / 100;
+    let fill = if agent { col.ai } else { col.accent };
+    if w > 0 {
+        c.round_fill(Rect::new(r.x, r.y, w.max(r.h), r.h), r.h / 2, fill);
+    }
+}
+
 /// Ramecek fokusu kolem `r` (vne prvku, zaobleni o odsazeni vetsi).
 pub(crate) fn focus_ring(c: &mut Canvas<'_>, r: Rect, radius: u32, ring: u32, offset: u32, color: u32) {
     let e = ring + offset;
@@ -152,14 +164,7 @@ impl<M: Clone> Ui<M> {
                     f.draw_ellipsized(c, x, b, text, s.size, col.ink, room);
                     c.set_clip(old);
                 }
-                ElemKind::Progress { value } => {
-                    c.round_fill(r, r.h / 2, col.surface_3);
-                    let w = r.w * (*value).min(100) / 100;
-                    let fill = if e.agent { col.ai } else { col.accent };
-                    if w > 0 {
-                        c.round_fill(Rect::new(r.x, r.y, w.max(r.h), r.h), r.h / 2, fill);
-                    }
-                }
+                ElemKind::Progress { value } => progress_bar(c, r, *value, e.agent, col),
                 ElemKind::Table(_) => self.draw_table(c, i, st),
                 ElemKind::Select { .. } => self.draw_select(c, i, st),
                 ElemKind::Image { w, h, px, .. } => {

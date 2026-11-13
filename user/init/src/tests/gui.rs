@@ -358,6 +358,16 @@ fn terminal_window(startup: &Startup) -> TestResult {
             t.iter().any(|n| n.role == Role::Terminal && n.value.contains("Napište help"))
         })?;
         check!(has(&t, Role::Titlebar, "Terminál"), "vlastni titulek je v pristupnosti");
+        // Prepinac zapisu B / C v titulku: B zvoleny, ACTIVATE na C prepne.
+        let checked = |t: &[guiproto::a11y::Node], name: &str| {
+            t.iter().any(|n| n.role == Role::Button && n.name.starts_with(name) && n.state & guiproto::a11y::state::CHECKED != 0)
+        };
+        check!(checked(&t, "Zápis B"), "zapis B zvoleny");
+        let zc = node(&t, Role::Button, "Zápis C (výrazový)")?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: zc.id, action: actions::ACTIVATE, value: String::new() })?;
+        let t = wait_tree(&s.inspect, w.id, "prepnuti na zapis C", |t| checked(t, "Zápis C"))?;
+        let zb = node(&t, Role::Button, "Zápis B (příkazový)")?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: zb.id, action: actions::ACTIVATE, value: String::new() })?;
         let term = t.iter().find(|n| n.role == Role::Terminal).unwrap();
         // Radek pres pristupnost (SET_VALUE = napsat a odeslat) jde do shellu.
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: "echo ahoj z GUI".into() })?;
@@ -386,6 +396,44 @@ fn terminal_window(startup: &Startup) -> TestResult {
         wait_tree(&s.inspect, w.id, "tasks v terminalu", |t| {
             pump();
             t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "1"))
+        })?;
+        // Karty relaci: nova relace (+), pak zpet na prvni; ta prehraje sve
+        // bloky (vysledek posledniho bloku, `count` = 1, je zase videt).
+        let t = wait_tree(&s.inspect, w.id, "karta relace", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Button && n.name == "Nová relace")
+        })?;
+        let plus = node(&t, Role::Button, "Nová relace")?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: plus.id, action: actions::ACTIVATE, value: String::new() })?;
+        let t = wait_tree(&s.inspect, w.id, "nova relace v karte", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Button && n.name == "Relace 1, odpojená")
+        })?;
+        let first = node(&t, Role::Button, "Relace 1, odpojená")?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: first.id, action: actions::ACTIVATE, value: String::new() })?;
+        wait_tree(&s.inspect, w.id, "navrat na relaci 1", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "1"))
+                && t.iter().any(|n| n.role == Role::Button && n.name == "Relace 2, odpojená")
+        })?;
+        // Akce bloku (pristupnost = stejna cesta jako klik): Spustit znovu
+        // prida druhy blok s prikazem, Sbalit ho sbali.
+        let cmd = "tasks | where state == \"running\" | count";
+        let t = wait_tree(&s.inspect, w.id, "akce bloku", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Button && n.name == alloc::format!("Spustit znovu {cmd}"))
+        })?;
+        let again = node(&t, Role::Button, &alloc::format!("Spustit znovu {cmd}"))?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: again.id, action: actions::ACTIVATE, value: String::new() })?;
+        let t = wait_tree(&s.inspect, w.id, "blok spusteny znovu", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Terminal && n.value.matches("tasks | where").count() >= 2)
+        })?;
+        let fold = t.iter().rev().find(|n| n.role == Role::Button && n.name == alloc::format!("Sbalit blok {cmd}")).ok_or("akce Sbalit chybi")?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: fold.id, action: actions::ACTIVATE, value: String::new() })?;
+        wait_tree(&s.inspect, w.id, "sbaleny blok", |t| {
+            pump();
+            t.iter().any(|n| n.role == Role::Button && n.name == alloc::format!("Rozbalit blok {cmd}"))
         })?;
         // Odznak duvery kresli system i nad vlastnim titulkem aplikace.
         settle(&s.inspect)?;
@@ -503,9 +551,25 @@ fn terminal_shot(startup: &Startup, s: &mut State) -> TestResult {
         pump();
         t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "16"))
     })?;
+    // Nahled zmen s tlacitky (zamek / preview): na snimku je ramecek se
+    // seznamem zmen a tlacitkem Prevzit.
+    let line = "preview { echo a > /tmp/nahled-a.txt; echo b > /tmp/nahled-b.txt; echo c > /tmp/nahled-c.txt }";
+    ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: line.into() })?;
+    let t = wait_tree(&s.inspect, w.id, "nahled zmen v terminalu", |t| {
+        pump();
+        t.iter().any(|n| n.role == Role::Button && n.name.starts_with("Převzít 3 změn"))
+    })?;
     time::sleep(Duration::from_millis(2500));
     println!("{QEMU_SHOT}terminal");
     time::sleep(Duration::from_millis(1500));
+    // Tlacitko "Zahodit" (pristupnost = stejna cesta jako klik): nic se
+    // nezmeni, blok skonci odmitnutim.
+    let drop = t.iter().find(|n| n.role == Role::Button && n.name.starts_with("Zahodit")).ok_or("tlacitko Zahodit chybi")?;
+    ask(&s.inspect, InspectRequest::Act { window: w.id, node: drop.id, action: actions::ACTIVATE, value: String::new() })?;
+    wait_tree(&s.inspect, w.id, "odmitnuti nahledu", |t| {
+        pump();
+        t.iter().any(|n| n.role == Role::Terminal && n.value.contains("nebyly převzaty"))
+    })?;
     close_terminal(startup, s, app, "gui-term (snimek)")
 }
 

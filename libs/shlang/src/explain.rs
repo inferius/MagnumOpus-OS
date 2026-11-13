@@ -54,6 +54,26 @@ pub fn explain(what: &str) -> Option<String> {
     section(ERRORS, &upper).or_else(|| section(SHELL, &upper)).or_else(|| message(w))
 }
 
+/// Kratky cesky vyznam kodu chyby systemu z katalogu (`**Význam:**`
+/// v `docs/cs/chyby.md`) bez tecky na konci: do hlaseni "příčina: KOD:
+/// vyznam". `None` = kod v katalogu neni.
+pub fn meaning(code: &str) -> Option<String> {
+    let head = alloc::format!("### `{code}`");
+    let start = ERRORS.find(&head)?;
+    let rest = &ERRORS[start + head.len()..];
+    let end = rest.find("
+#").unwrap_or(rest.len());
+    let body = &rest[..end];
+    let tag = "**Význam:**";
+    let at = body.find(tag)? + tag.len();
+    // Odstavec az do prazdneho radku, radky spojit mezerou.
+    let para = body[at..].split("\n\n").next()?;
+    let text: alloc::vec::Vec<&str> = para.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let text = text.join(" ");
+    let text = text.trim().trim_end_matches('.');
+    (!text.is_empty()).then(|| String::from(text))
+}
+
 /// Je kod shellu popsany v dokumentaci (pro test)?
 pub fn documented(code: &str) -> bool {
     section(SHELL, code).is_some()

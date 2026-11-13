@@ -2,7 +2,7 @@
 
 use fs::{FormatOptions, Fs, Kind, MemDevice};
 use osfs::api::{Code, Host, ListCache, handle};
-use osfs_proto::{Hidden, ListPage, PathArg, Request, Response, error};
+use osfs_proto::{Hidden, ListPage, PathArg, Request, Response, avail, error};
 
 #[derive(Default)]
 struct TestHost {
@@ -155,6 +155,12 @@ fn hidden_entries_and_tree_sizes() {
     assert_eq!(d.name, "d");
     assert_eq!(d.tree_bytes, 20);
     assert_eq!(d.tree_files, 5);
+    // Masky dostupnosti: u adresare zname casy i souhrny, nic skryteho
+    // (osfs nema uzivatele); u souboru souhrny podstromu nedostupne.
+    let times = avail::MTIME | avail::CTIME | avail::BTIME;
+    assert_eq!((d.known, d.withheld), (avail::SIZE | times | avail::TREE, 0));
+    let f = get("Normal.txt");
+    assert_eq!((f.known, f.withheld), (avail::SIZE | times, 0));
     // Stat vrati ulozene jmeno (velikost pismen), i kdyz se pta jinak.
     let Response::Entry(e) = s
         .call(&Request::Stat {
@@ -351,7 +357,7 @@ fn garbage_input_gives_error_reply() {
         Err(error::INVALID_ARGS)
     );
     // Hello a info.
-    assert!(matches!(s.call(&Request::Hello), Ok(Response::Hello(h)) if h.version == 1));
+    assert!(matches!(s.call(&Request::Hello), Ok(Response::Hello(h)) if h.version == osfs_proto::VERSION));
     assert!(matches!(
         s.call(&Request::VolumeInfo),
         Ok(Response::VolumeInfo(_))

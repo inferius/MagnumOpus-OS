@@ -134,6 +134,8 @@ bar_indicator_active_w = 20
 switch_w = 44
 switch_h = 26
 switch_knob = 18
+# Bocni panel okna (panel uloh v terminalu): sirka.
+side_panel = 280
 
 [radius]
 xs = 6

@@ -9,7 +9,9 @@
 
 pub mod draw;
 pub mod editor;
+pub mod preview;
 pub mod progress;
+pub mod sessions;
 pub mod table;
 pub mod tasks;
 
@@ -121,6 +123,13 @@ pub struct App {
     /// Jak kreslit ukazatel cinnosti a pruh ([`crate::activity`]): okno
     /// GUI vlastnim prvkem, konzole znaky, "Omezit pohyb" staticky.
     pub glyphs: crate::activity::Glyphs,
+    /// Okno GUI kresli pred slozku ve vyzve ikonu: radek vstupu pro ni
+    /// nechava dve bunky (pilulka podle `design/terminal.html`).
+    pub icon_room: bool,
+    /// Zvoleny zapis jazyka: `false` = B (prikazovy), `true` = C
+    /// (vyrazovy). Ctrl+F a prepinac v titulku okna ho meni a rozepsany
+    /// radek prevedou.
+    pub notation_c: bool,
     /// Pocitadlo snimku (tocici se znak u bezicich bloku).
     tick: u32,
     /// Radky napsane behem behu prikazu (pobezi po nem, v poradi).
@@ -151,6 +160,8 @@ pub struct App {
     /// Panel uloh: vybrana uloha (`None` = zavreny).
     task_sel: Option<usize>,
     notice: Option<tasks::Notice>,
+    /// Relace sluzby (karty v titulku okna GUI).
+    sessions: Vec<sessions::SessionInfo>,
 }
 
 /// Uvodni napoveda nove relace (blok bez prikazu).
@@ -183,6 +194,8 @@ impl App {
             out: Vec::new(),
             now: None,
             glyphs: crate::activity::Glyphs::Text,
+            icon_room: false,
+            notation_c: false,
             tick: 0,
             scroll: 0,
             queued: Vec::new(),
@@ -199,6 +212,7 @@ impl App {
             tasks: Vec::new(),
             task_sel: None,
             notice: None,
+            sessions: Vec::new(),
         }
     }
 
@@ -218,7 +232,7 @@ impl App {
     /// Prvni zpravy po pripojeni (nova relace, nebo `session`).
     pub fn start(&mut self, session: u64) {
         self.out.push(ClientMsg::Hello { version: VERSION, cols: self.cols as u16, rows: self.rows as u16 });
-        self.out.push(ClientMsg::Attach { session });
+        self.out.push(sessions::attach(session));
     }
 
     /// Zpravy k odeslani sluzbe.
@@ -253,11 +267,13 @@ impl App {
             ServerMsg::Attached { session, cwd, blocks } => {
                 self.session = session;
                 self.cwd = cwd;
+                // Karty relaci: aktualni seznam od sluzby.
+                self.out.push(ClientMsg::Sessions);
                 if self.welcome && blocks == 0 && !self.welcomed && self.blocks.is_empty() {
                     self.welcomed = true;
                     let items = WELCOME.iter().map(|l| Item::Note((*l).into())).collect();
                     self.blocks.push(UiBlock {
-                        id: u64::MAX - 1_000_000,
+                        id: sessions::LOCAL_BLOCKS,
                         line: String::new(),
                         items,
                         ok: Some(true),
@@ -274,10 +290,18 @@ impl App {
                 }
             }
             ServerMsg::BlockStart { block, line, .. } => {
-                // Novy blok: zpet dolu (vystup je videt).
-                self.scroll = 0;
                 self.blocks.retain(|b| b.id != block);
-                self.blocks.push(UiBlock {
+                // Starsi blok z prehrani po pripojeni jde pred novejsi
+                // (sessions.rs); novy blok na konec a zpet dolu.
+                let Some(at) = self.place_block(block, KEEP_BLOCKS) else { return };
+                if at == self.blocks.len() {
+                    self.scroll = 0;
+                } else if let Focus::Block(i) | Focus::Filter(i) = &mut self.focus
+                    && *i >= at
+                {
+                    *i += 1;
+                }
+                self.blocks.insert(at, UiBlock {
                     id: block,
                     line,
                     items: Vec::new(),
@@ -294,7 +318,7 @@ impl App {
                     self.expect_start = false;
                     self.fg = Some(block);
                 }
-                if self.blocks.len() > KEEP_BLOCKS {
+                if self.blocks.len() > KEEP_BLOCKS && at == self.blocks.len() - 1 {
                     self.blocks.remove(0);
                     if let Focus::Block(i) | Focus::Filter(i) = self.focus {
                         self.focus = if i == 0 { Focus::Editor } else { Focus::Block(i - 1) };
@@ -407,7 +431,7 @@ impl App {
                     started: None,
                 });
             }
-            ServerMsg::SessionList { .. } => {}
+            ServerMsg::SessionList { sessions } => self.set_sessions(sessions),
             ServerMsg::Cwd { session, cwd } => {
                 if session == self.session {
                     self.cwd = cwd;
@@ -559,64 +583,6 @@ impl App {
         self.scroll = (self.scroll as isize + d).clamp(0, max as isize) as usize;
     }
 
-    fn key_prompt(&mut self, k: Key) {
-        if self.prompt.as_ref().is_some_and(|p| p.input.is_some()) {
-            return self.key_ask(k);
-        }
-        let Some(p) = self.prompt.as_mut() else { return };
-        let n = if p.choices.is_empty() { 2 } else { p.choices.len() };
-        let answer = match k {
-            Key::Left | Key::Up | Key::BackTab => {
-                p.sel = (p.sel + n - 1) % n;
-                None
-            }
-            Key::Right | Key::Down | Key::Tab => {
-                p.sel = (p.sel + 1) % n;
-                None
-            }
-            Key::Char('a' | 'y' | 'A' | 'Y') if p.choices.is_empty() => Some(0),
-            Key::Char('n' | 'N') if p.choices.is_empty() => Some(1),
-            Key::Char(c) if c.is_ascii_digit() && !p.choices.is_empty() => {
-                let i = c as usize - '1' as usize;
-                (i < n).then_some(i)
-            }
-            Key::Esc | Key::Ctrl('c') => Some(if p.choices.is_empty() { 1 } else { usize::MAX }),
-            Key::Enter => Some(p.sel),
-            _ => None,
-        };
-        let Some(a) = answer else { return };
-        let p = self.prompt.take().unwrap();
-        if p.choices.is_empty() {
-            self.out.push(ClientMsg::Answer { prompt: p.id, yes: a == 0 });
-        } else if a == usize::MAX {
-            self.out.push(ClientMsg::Interrupt { session: self.session });
-        } else {
-            self.out.push(ClientMsg::Choose { prompt: p.id, index: a as u32 });
-        }
-    }
-
-    /// Psani odpovedi na dotaz na text.
-    fn key_ask(&mut self, k: Key) {
-        let Some(p) = self.prompt.as_mut() else { return };
-        let Some((_, text)) = p.input.as_mut() else { return };
-        match k {
-            Key::Char(c) => text.push(c),
-            Key::Backspace => {
-                text.pop();
-            }
-            Key::Enter => {
-                let p = self.prompt.take().unwrap();
-                let text = p.input.map(|(_, t)| t).unwrap_or_default();
-                self.out.push(ClientMsg::Text { prompt: p.id, text });
-            }
-            Key::Esc | Key::Ctrl('c') => {
-                self.prompt = None;
-                self.out.push(ClientMsg::Interrupt { session: self.session });
-            }
-            _ => {}
-        }
-    }
-
     fn key_editor(&mut self, k: Key) {
         if let Some(m) = self.menu.as_mut() {
             match k {
@@ -713,17 +679,7 @@ impl App {
                     b.collapsed = true;
                 }
             }
-            Key::Ctrl('f') => {
-                // Prevod rozepsaneho radku do druheho zapisu (B <-> C).
-                let c = self.editor.text.contains('(') && self.editor.text.contains(").");
-                self.req = self.req.wrapping_add(1);
-                self.out.push(ClientMsg::Format {
-                    session: self.session,
-                    line: self.editor.text.clone(),
-                    style: if c { 0 } else { 1 },
-                    seq: self.req,
-                });
-            }
+            Key::Ctrl('f') => self.set_notation(!self.notation_c),
             Key::Tab => {
                 self.req = self.req.wrapping_add(1);
                 self.out.push(ClientMsg::Complete {
@@ -871,31 +827,7 @@ impl App {
         let t = &self.theme;
         let mut bottom: Vec<Line> = Vec::new();
         // Vyzva.
-        if let Some(p) = &self.prompt
-            && let Some((secret, text)) = &p.input
-        {
-            bottom.push(Line::new().text(Some(Style { bold: true, ..Style::fg(t.ui.fg) }), &p.question));
-            let shown: String = if *secret { text.chars().map(|_| '*').collect() } else { text.clone() };
-            bottom.push(Line::new().text(Some(Style::fg(t.ui.fg)), &alloc::format!("> {shown}_")));
-        } else if let Some(p) = &self.prompt {
-            bottom.push(Line::new().text(Some(Style { bold: true, ..Style::fg(t.ui.fg) }), &p.question));
-            let mut l = Line::new();
-            let opts: Vec<String> = if p.choices.is_empty() {
-                alloc::vec!["Ano (a)".into(), "Ne (n)".into()]
-            } else {
-                p.choices.iter().enumerate().map(|(i, c)| alloc::format!("{} {c}", i + 1)).collect()
-            };
-            for (i, o) in opts.iter().enumerate() {
-                l.push(None, " ");
-                let st = Style::fg(if i == p.sel { t.ui.fg } else { t.ui.muted });
-                if i == p.sel {
-                    l.push_bg(Some(st), t.ui.select, &alloc::format!(" {o} "));
-                } else {
-                    l.push(Some(st), &alloc::format!(" {o} "));
-                }
-            }
-            bottom.push(l);
-        }
+        self.draw_prompt(&mut bottom);
         // Nabidka doplnovani.
         if let Some(m) = &self.menu {
             // Okno kolem vyberu (dlouhy seznam se posouva se sipkami).
@@ -1012,6 +944,9 @@ impl App {
         let t = &self.theme;
         let mut l = Line::new();
         // Vyzva: kde jsem (tucne, zvyraznene), pak oddelovac.
+        if self.icon_room {
+            l.push(None, "  ");
+        }
         l.push(Some(Style { bold: true, ..Style::fg(t.ui.accent) }), &self.cwd_short());
         l.push(Some(Style { bold: true, ..Style::fg(t.ui.fg) }), " \u{276F} ");
         let text = &self.editor.text;
@@ -1054,7 +989,21 @@ impl App {
         if let Some(e) = &h.error {
             l.push(Some(Style::fg(t.ui.err)), &alloc::format!("   {}", e.message));
         }
-        l.role(draw::Role::Input { prefix: 2, cwd: self.cwd_short() })
+        l.role(draw::Role::Input { prefix: if self.icon_room { 3 } else { 2 }, cwd: self.cwd_short() })
+    }
+
+    /// Zvoli zapis B (`false`) nebo C (`true`) a rozepsany radek do nej
+    /// prevede (odpoved `Formatted`). Stejny zapis = nic.
+    pub fn set_notation(&mut self, c: bool) {
+        if self.notation_c == c {
+            return;
+        }
+        self.notation_c = c;
+        if self.editor.text.trim().is_empty() {
+            return;
+        }
+        self.req = self.req.wrapping_add(1);
+        self.out.push(ClientMsg::Format { session: self.session, line: self.editor.text.clone(), style: c as u8, seq: self.req });
     }
 
     fn cwd_short(&self) -> String {
@@ -1074,7 +1023,8 @@ impl App {
             Some(true) => draw::Mark::Ok,
             Some(false) => draw::Mark::Err,
         };
-        let body = |error: bool, table_head: bool| draw::Role::Body { mark, error, table_head };
+        let block = b.id;
+        let body = |error: bool, table_head: bool| draw::Role::Body { mark, error, table_head, block };
         let mut out = Vec::new();
         if !b.line.is_empty() {
             let mut l = Line::new();
@@ -1103,7 +1053,7 @@ impl App {
                 ),
                 _ => {}
             }
-            out.push(l.role(draw::Role::Head { mark, meta }));
+            out.push(l.role(draw::Role::Head { mark, meta, block }));
         }
         if b.collapsed {
             out.push(Line::new().text(Some(Style::fg(t.ui.muted)), &alloc::format!("  ({} položek, mezera rozbalí)", b.items.len())).role(body(false, false)));
@@ -1199,6 +1149,13 @@ impl App {
         }
         let more = tv.view.len().saturating_sub(tv.top + height);
         let mut foot = alloc::format!("  {}", tv.status());
+        // Vysvetlivka k pomlckam: proc hodnota chybi (skryta, nedostupna).
+        for why in [shlang::value::Why::Hidden, shlang::value::Why::Unavailable] {
+            let seen = tv.visible(height).any(|(_, r)| tv.cols.iter().any(|c| r.field(c) == Some(Value::Missing(why))));
+            if seen {
+                foot.push_str(&alloc::format!(" · \u{2014} {}", why.text_cs()));
+            }
+        }
         if more > 0 {
             foot.push_str(&alloc::format!(" · další {more} (PgUp/PgDn)"));
         }
@@ -1286,7 +1243,7 @@ fn cell_style(col: &str, v: &Value, rec: &Value, t: &Theme, now: Option<i64>) ->
         Value::Time(m) => now.map(|n| Style::fg(t.scale[render::age_level(*m, n)])),
         Value::Bool(true) => Some(Style::fg(t.ui.ok)),
         Value::Bool(false) | Value::Error(_) => Some(Style::fg(t.ui.err)),
-        Value::Null | Value::Nothing => Some(Style::fg(t.ui.muted)),
+        Value::Null | Value::Nothing | Value::Missing(_) => Some(Style::fg(t.ui.muted)),
         _ if col == "name" => render::file_class(rec, t).map(|c| t.file(c)),
         _ if matches!(col, "kind" | "ext" | "access" | "dataset") => Some(Style::fg(t.ui.muted)),
         _ => None,

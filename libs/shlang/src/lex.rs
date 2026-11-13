@@ -24,6 +24,8 @@ pub enum Tok {
     Ident(String),
     Num(Num),
     Unit(Num, Unit),
+    /// Slozena doba (`1h30m`).
+    Compound(Vec<(Num, Unit)>),
     Str(Vec<RawPart>),
     Punct(&'static str),
     Newline,
@@ -166,6 +168,81 @@ impl<'a> Lexer<'a> {
 
     fn number(&mut self) -> Result<Tok, ShError> {
         let start = self.pos;
+        let num = self.num_only()?;
+        // Jednotka hned za cislem (bez mezery).
+        let Some(u) = self.unit_suffix(start)? else { return Ok(Tok::Num(num)) };
+        // Slozena doba: dalsi cislo s mensi jednotkou hned za tim (`1h30m`).
+        let mut parts = alloc::vec![(num, u)];
+        let order = || ShError::new(code::PARSE, "složená doba jde od větší jednotky k menší, každá jednou (např. 1h30m)");
+        while u.dim() == crate::units::Dim::Duration && self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+            let at = self.pos;
+            let n = self.num_only()?;
+            let Some(nu) = self.unit_suffix(at)? else {
+                return Err(ShError::new(code::PARSE, "ve složené době chybí jednotka (např. 1h30m)").at(Span::new(at, self.pos)));
+            };
+            let last = parts.last().unwrap().1;
+            if nu.dim() != crate::units::Dim::Duration || nu.factor() >= last.factor() {
+                return Err(order().at(Span::new(start, self.pos)));
+            }
+            parts.push((n, nu));
+        }
+        // Za jednotkou hned cislo nebo jmeno (`5MB2`) neni nic platneho.
+        if self.peek_char().is_some_and(|c| c.is_alphanumeric() || c == '_') {
+            let mut e = self.clone();
+            e.ident();
+            return Err(ShError::new(code::PARSE, alloc::format!("neznámá jednotka '{}'", &self.src[start..e.pos]))
+                .at(Span::new(start, e.pos))
+                .hint(crate::units::hint()));
+        }
+        Ok(if parts.len() == 1 { Tok::Unit(num, u) } else { Tok::Compound(parts) })
+    }
+
+    /// Jednotka hned za cislem (`MB`, `ms`, `kHz`, `%`); `None` = zadna.
+    /// Procento jen kdyz za `%` neni cislo ani jmeno (`10%3` je zbytek po
+    /// deleni).
+    fn unit_suffix(&mut self, start: usize) -> Result<Option<Unit>, ShError> {
+        if self.peek_char() == Some('%') {
+            let mut l = self.clone();
+            l.pos += 1;
+            let next = l.peek_char();
+            if !next.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '(') {
+                self.pos = l.pos;
+                return Ok(Unit::parse("%"));
+            }
+            return Ok(None);
+        }
+        // Zapis jednotky jsou jen pismena (`1h30m`: `h`, pak dalsi cislo).
+        let mut l = self.clone();
+        let from = l.pos;
+        while l.peek_char().is_some_and(|c| c.is_alphabetic()) {
+            l.pos += l.peek_char().unwrap().len_utf8();
+        }
+        let suffix = &self.src[from..l.pos];
+        if suffix.is_empty() {
+            return Ok(None);
+        }
+        // Za jednotkou nesmi pokracovat jmeno (`5MB_x`, `1h_`).
+        if l.peek_char().is_some_and(|c| c == '_') {
+            let mut e = l.clone();
+            e.ident();
+            return Err(ShError::new(code::PARSE, alloc::format!("neznámá jednotka '{}'", &self.src[from..e.pos]))
+                .at(Span::new(start, e.pos))
+                .hint(crate::units::hint()));
+        }
+        match Unit::parse(suffix) {
+            Some(u) => {
+                self.pos = l.pos;
+                Ok(Some(u))
+            }
+            None => Err(ShError::new(code::PARSE, alloc::format!("neznámá jednotka '{suffix}'"))
+                .at(Span::new(start, l.pos))
+                .hint(crate::units::hint())),
+        }
+    }
+
+    /// Cislo bez jednotky (cele nebo desetinne, `_` jako oddelovac).
+    fn num_only(&mut self) -> Result<Num, ShError> {
+        let start = self.pos;
         let mut text = String::new();
         let mut float = false;
         while let Some(c) = self.peek_char() {
@@ -187,19 +264,7 @@ impl<'a> Lexer<'a> {
         } else {
             Num::Int(text.parse::<i64>().map_err(|_| bad_number(start, self.pos))?)
         };
-        // Jednotka hned za cislem (bez mezery).
-        let mut l = self.clone();
-        let suffix = l.ident();
-        if !suffix.is_empty() {
-            if let Some(u) = Unit::parse(suffix) {
-                self.pos = l.pos;
-                return Ok(Tok::Unit(num, u));
-            }
-            return Err(ShError::new(code::PARSE, alloc::format!("neznámá jednotka '{suffix}'"))
-                .at(Span::new(start, l.pos))
-                .hint("velikosti: B KB MB GB TB KiB MiB GiB TiB, doby: ns us ms s min h d w y"));
-        }
-        Ok(Tok::Num(num))
+        Ok(num)
     }
 
     /// Retezec `"..."` s escape sekvencemi a vlozenymi vyrazy `{...}`.
@@ -322,6 +387,12 @@ pub fn word_number(word: &str) -> Option<Tok> {
     Some(match t {
         Tok::Num(n) => Tok::Num(negate(n)),
         Tok::Unit(n, u) => Tok::Unit(negate(n), u),
+        Tok::Compound(mut parts) => {
+            if let Some(p) = parts.first_mut() {
+                p.0 = negate(p.0);
+            }
+            Tok::Compound(parts)
+        }
         other => other,
     })
 }

@@ -26,6 +26,21 @@ use crate::tasks::{self, Clock, Joinable, Notify};
 
 /// Nejdelsi cekani v `await` mezi kontrolami okna (Ctrl-C).
 const WAIT_STEP: i64 = 50_000_000;
+/// Prehrani relace po pripojeni: kolik poslednich bloku jde pred
+/// `Attached` (viditelna cast) a po kolika se posilaji starsi.
+const REPLAY_VISIBLE: usize = 12;
+const REPLAY_BATCH: usize = 16;
+
+/// Jeden blok prehrani: zacatek, polozky, konec (pokud dobehl).
+fn replay_block(link: &mut dyn Link, session: u64, b: &Block) {
+    link.send(&ServerMsg::BlockStart { session, block: b.id, line: b.line.clone() });
+    for it in &b.items {
+        link.send(&ServerMsg::Item { session, block: b.id, item: it.clone() });
+    }
+    if let Some(ok) = b.ok {
+        link.send(&ServerMsg::BlockEnd { session, block: b.id, ok, duration: b.duration });
+    }
+}
 
 /// Spojeni s oknem terminalu (kanal v systemu, fronta v testech).
 pub trait Link {
@@ -858,7 +873,8 @@ impl Service {
     fn handle_one(&mut self, msg: ClientMsg, link: &mut dyn Link, fs: &mut dyn Fs, env: &mut dyn Env) {
         match msg {
             ClientMsg::Hello { .. } => link.send(&ServerMsg::Welcome { version: VERSION }),
-            ClientMsg::Attach { session } => {
+            ClientMsg::Attach { session } | ClientMsg::AttachRecent { session } => {
+                let recent = matches!(msg, ClientMsg::AttachRecent { .. });
                 let first = self.fixed.is_some_and(|f| f == session) && self.sessions.is_empty();
                 let id = if session == 0 || first { self.new_session() } else { session };
                 let Some(i) = self.session_index(id) else {
@@ -867,21 +883,22 @@ impl Service {
                 };
                 let s = &mut self.sessions[i];
                 s.attached = true;
-                // Prehrat bloky (i ty, ktere dobehly bez okna).
-                for b in &s.blocks {
-                    link.send(&ServerMsg::BlockStart { session: id, block: b.id, line: b.line.clone() });
-                    for it in &b.items {
-                        link.send(&ServerMsg::Item { session: id, block: b.id, item: it.clone() });
-                    }
-                    if let Some(ok) = b.ok {
-                        link.send(&ServerMsg::BlockEnd { session: id, block: b.id, ok, duration: b.duration });
-                    }
-                }
+                // Prehrat bloky (i ty, ktere dobehly bez okna). `Attach`:
+                // vse v poradi pred `Attached`. `AttachRecent` (okno GUI):
+                // nejdriv posledni (viditelna cast), po `Attached` starsi po
+                // davkach od nejnovejsich; okno je vlozi pred novejsi podle
+                // cisla bloku (`ui::sessions`), takze se nezasekne ani
+                // u dlouhe historie.
+                let split = if recent { s.blocks.len().saturating_sub(REPLAY_VISIBLE) } else { 0 };
+                s.blocks[split..].iter().for_each(|b| replay_block(link, id, b));
                 // Seznam uloh (jen s prehledem uloh) pred `Attached`.
                 if self.board.available() {
                     link.send(&ServerMsg::Tasks { tasks: self.board.list.tasks.clone() });
                 }
                 link.send(&ServerMsg::Attached { session: id, cwd: s.interp.cwd.clone(), blocks: s.blocks.len() as u32 });
+                for chunk in s.blocks[..split].rchunks(REPLAY_BATCH) {
+                    chunk.iter().for_each(|b| replay_block(link, id, b));
+                }
             }
             ClientMsg::Detach { session } => {
                 if let Some(i) = self.session_index(session) {

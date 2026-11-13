@@ -79,6 +79,17 @@ Source: protocol and client `libs/osfs-proto`, server `tools/osfs/src/api.rs`
   dates before 1970 too; `Time::to_filetime()` for Win32), `tree_*`, `dataset` (dataset
   number, 1 = root), `link_target`, `truncated`. The root of a nested
   dataset has `kind = Dataset` (a folder for the user).
+- **Value availability** (`known`, `withheld`; the bits `osfs_proto::avail`
+  are the same as `fsproto::avail`, see
+  [Value availability](file-system.md#value-availability-known-hidden-unavailable))
+  **[implemented]**: a bit in `known` = the value is valid, in `withheld` =
+  it exists but the caller must not see it (field 0), neither =
+  unavailable. It carries the bits `SIZE`, `MTIME`, `CTIME`, `BTIME`,
+  `TREE`. `osfs` has no users, so `withheld` is always 0 today; subtree
+  summaries are unavailable for a file (not zeros), for the boundary of a
+  nested dataset also the size and times. A message with overlapping masks
+  or an unknown bit is corrupted (`CORRUPTED`). Because of the masks the
+  protocol has version 2 (`VERSION`).
   `windows_name` describes only the name itself: an entry inside a hidden
   directory is unreachable from Windows even if its own name is valid.
 - **Deleting a snapshot** is deliberately not offered: snapshots protect
@@ -108,7 +119,11 @@ if Client::is_osfs(root) {
     for e in c.list_all("", &PathArg::from_windows_full("Q:\\Photos"))? {
         let size = if e.kind == osfs_proto::Kind::Dir { e.tree_bytes } else { e.size };
         let note = if e.hidden == Hidden::Visible { "" } else { " (hidden on Windows)" };
-        println!("{} {size} B{note}", e.name);
+        if e.known & osfs_proto::avail::SIZE != 0 {
+            println!("{} {size} B{note}", e.name);
+        } else {
+            println!("{} - B{note}", e.name);
+        }
     }
 
     // An old version of a file from a snapshot.

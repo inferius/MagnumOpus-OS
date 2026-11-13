@@ -1221,6 +1221,7 @@ dependencies = [
  "guiproto",
  "inputproto",
  "libos",
+ "taskproto",
  "term",
  "theme",
  "ui",
@@ -2468,6 +2469,7 @@ dependencies = [
  "audiomix",
  "audioproto",
  "installplan",
+ "tz",
 ]
 
 [[package]]

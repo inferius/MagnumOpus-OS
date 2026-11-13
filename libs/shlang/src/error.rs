@@ -69,7 +69,7 @@ impl ShError {
     /// Chyba systemu (`abi::Error`) s popisem, co se delalo.
     pub fn sys(e: abi::Error, what: impl Into<String>) -> Self {
         let mut s = Self::new(e.name(), what);
-        s.cause = Some(Box::new(Self::new(e.name(), e.description())));
+        s.cause = Some(Box::new(Self::from(e)));
         s
     }
 
@@ -139,7 +139,10 @@ impl fmt::Display for ShError {
 
 impl From<abi::Error> for ShError {
     fn from(e: abi::Error) -> Self {
-        Self::new(e.name(), e.description().to_string())
+        // Cesky vyznam z katalogu chyb (docs/cs/chyby.md); popis z abi je
+        // ASCII a jen nahradni.
+        let text = crate::explain::meaning(e.name()).unwrap_or_else(|| e.description().to_string());
+        Self::new(e.name(), text)
     }
 }
 

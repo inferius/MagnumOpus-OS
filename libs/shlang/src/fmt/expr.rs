@@ -68,6 +68,7 @@ pub(crate) fn lit(l: &Lit) -> String {
         Lit::Int(i) => alloc::format!("{i}"),
         Lit::Float(f) => num(Num::Float(*f)),
         Lit::Unit { value, unit } => alloc::format!("{}{}", num(*value), unit.name()),
+        Lit::Compound(parts) => parts.iter().map(|(v, u)| alloc::format!("{}{}", num(*v), u.name())).collect(),
         Lit::Str(s) => quote(s),
     }
 }
@@ -84,6 +85,11 @@ fn negative(l: &Lit) -> bool {
         Lit::Float(f) => *f < 0.0 || f.is_sign_negative(),
         Lit::Unit { value: Num::Int(i), .. } => *i < 0,
         Lit::Unit { value: Num::Float(f), .. } => f.is_sign_negative(),
+        Lit::Compound(parts) => match parts.first() {
+            Some((Num::Int(i), _)) => *i < 0,
+            Some((Num::Float(f), _)) => f.is_sign_negative(),
+            None => false,
+        },
         _ => false,
     }
 }

@@ -223,8 +223,39 @@ for f in (ls ~/Photos | where ext == "jpg") {
 
   | Kind | Units | Value |
   |---|---|---|
-  | size | `B`, `KB`, `MB`, `GB`, `TB` (×1000), `KiB`, `MiB`, `GiB`, `TiB` (×1024) | bytes |
-  | duration | `ns`, `us`, `ms`, `s`, `min`, `h`, `d`, `w`, `y` (365 days) | nanoseconds |
+  | size | `B`, `KB`, `MB`, `GB`, `TB` (×1000), `KiB`, `MiB`, `GiB`, `TiB` (×1024) | bytes (integer) |
+  | duration | `ns`, `us`, `ms`, `s`, `m` (minute), `min`, `h`, `d`, `w`, `y` (365 days) | nanoseconds (integer) |
+  | frequency | `Hz`, `kHz`, `MHz`, `GHz` | hertz (decimal) |
+  | percent | `%` | ratio, 1 = 100 % (decimal) |
+
+  A **compound duration** goes from the larger unit to the smaller one,
+  each unit once: `1h30m`, `2m30s`, `1d12h`. `%` after a number is a
+  percentage only when no number or name follows it (`10%3` is the
+  remainder). Arithmetic works only with the same quantity or with a number
+  (`440Hz + 60Hz`, `1MHz / 4`); a percentage of a value `50% * 200MB` gives
+  100 MB, `10% * 1h` 6 minutes. Different quantities cannot be added or
+  compared (error `SH_TYPE`). Output picks the largest unit in which the
+  value is at least 1 (`2.4 GHz`, `50%`) **[implemented]**.
+
+  Units are data: the table `shlang::units::TABLE` (symbol, quantity,
+  multiple of the base unit). A new quantity (length, temperature, transfer
+  rate) is a table row and a dimension; the lexer, output and the hint for
+  an unknown unit pick it up. Size and duration stay exact integers, other
+  quantities are a decimal number in the base unit.
+
+  **Conversions** are done by `convert` ([Shell commands](shell-commands.md#convert)):
+  units from the same table (`1GiB | convert MB` = 1073.741824, a number in
+  the target unit), number bases (`255 | convert hex` = `0xff`), text
+  encodings (`utf8`, `utf16le`, `utf16be`, `latin2`, `base64`, `hex`; back
+  with `--from`) and time zones (`now | convert Europe/Prague`). Zones come
+  from the same library as the time service, the clock in the bar and the
+  installer (`libs/tz` through `libos::time::zone`: IANA names, a fixed
+  offset, daylight saving by the current rules without history). Data
+  formats (json, lines) stay on `from` / `to` **[implemented]**.
+
+  **Open question:** `m` is a minute today. Once length is added, `m`
+  (metre) would collide; the solution (metre only in `convert`, a different
+  minute symbol, or by context) is not decided yet **[designed]**.
 
 - **Strings:** `"..."` with the escapes `\n \t \r \0 \\ \" \{ \}` and
   embedded expressions `{expr}`; `'...'` is literal text without escapes and
@@ -359,7 +390,8 @@ bare word is a field: `where mtime < now() - 1y`.
 |---|---|---|
 | `int`, `float` | `42`, `1.5` | an integer is converted in arithmetic with a float (the only automatic conversion) |
 | `size` | `100MB` | a size is never added to or compared with a number: `size > 100` is an error with the hint `100B` |
-| `duration` | `30s`, `1h` | |
+| `duration` | `30s`, `1h`, `1h30m` | |
+| `frequency`, `percent` | `2.4GHz`, `50%` | quantities from the unit table (see Numbers) |
 | `time` | `now()` | `time - duration` = `time`, `time - time` = `duration` |
 | `text` | `"abc"` | |
 | `bytes` | `open f` | a **byte stream**, a different type from text and records |
@@ -367,7 +399,17 @@ bare word is a field: `where mtime < now() - 1y`.
 | `closure` | `x => x * 2` | captures copies of the variables it uses |
 | `error` | `e` in `try ... else e => ...` | fields `code`, `message`, `hint`, `cause` |
 | `null`, `nothing` | | `nothing` = the command returned nothing |
+| missing value | `size` of someone else's folder | `null` with a reason: **hidden** (no right) or **unavailable** (the source does not keep it); see below |
 
+- **A missing value** (`Value::Missing`) behaves like `null`: it equals
+  `null`, a `<` / `>` comparison is `false` (`where size > 1MB` skips it
+  instead of failing), sorting puts it first. The terminal shows it as "—"
+  and explains the reason in the table footer. An empty folder is not a
+  missing value: it has 0 B, 0 files and 0 folders. Today the shell infers
+  the state from the fsd reply (a folder without the manage right = hidden
+  summary, a zero time = unavailable) **[implemented]**; exact flags in
+  fsproto (`known` / `hidden` masks on `Stat` and `LIST_STAT_PAGE`) are a
+  task for the FS thread **[designed]**.
 - **No hidden conversions.** Bytes, text and records are converted only
   explicitly: `from json`, `from text`, `lines`, `to text`, `to json`.
   `open data.json | where ...` is an error with the hint `from json`.
@@ -403,6 +445,10 @@ earlier statements are dropped there; use `log` for a note.
   column, underline), a hint and a cause. `explain code` shows the
   explanation from [Error codes](errors.md) and from the
   [Shell errors chapter](#shell-errors).
+- The cause from a system error is shown in Czech from the same catalog
+  (the **Význam** sentence in the Czech error codes page), e.g.
+  `příčina: NOT_FOUND: požadovaná věc neexistuje`. The descriptions in
+  `abi` stay ASCII and are only a fallback **[implemented]**.
 
 ### Functions, closures, jobs
 
@@ -554,6 +600,16 @@ for f in (ls ~/Photos | where ext == "jpg") {
   files outside `/tmp` (default N = 20) always asks before the changes are
   applied. It is the same question as with `preview`. Without an attached
   window it is refused.
+- **A bare path as a command** (`/`, `./x`, `../`, `~`, `~/Documents`,
+  `.`, `..`; `libs/shlang/src/eval/bare.rs`): a folder = `cd`, a `.mos`
+  script = `run` (with the `needs` check), a program (ELF) = started the
+  same way as a program by name (rights from the manifest, preview, undo;
+  the program gets the arguments), another file = content like `open`
+  (nothing runs or changes). A folder, script or file takes no arguments
+  (`SH_ARGS`); a missing path is `NOT_FOUND` with a hint. Highlighting shows
+  a bare path as a path, not as an unknown command. The host in the OS
+  (`shsess`) does not start programs from a path yet: error `NOT_SUPPORTED`
+  **[implemented]**.
 - **The `needs` manifest:** `run script` shows what the script wants
   (`read`, `write`, `net`) before it starts and, after confirmation,
   restricts it: access outside the listed paths is `SH_NEEDS`. A script gets
@@ -990,11 +1046,18 @@ comparison: `target/shots/terminal.png` (look test `look_shots`).
 |---|---|
 | block left bar by state (running, done, error), bold command, time and result on the right in the UI font | **[implemented]** |
 | error box (danger-soft, danger border) | **[implemented]** |
-| input row: a line above it, a folder pill | **[implemented]** (no folder icon) |
+| input row: a line above it, a pill with a folder icon and name | **[implemented]** |
+| change preview (dangerous operation lock, `preview`): a box with the list of changes (at most 6, then "... and N more") and buttons "Take N changes" / "Discard"; the buttons are in accessibility too, the console shows the list of changes as well | **[verified in QEMU]** |
 | key hints as chips | **[implemented]** |
 | a line under the table header | **[implemented]** (no column type under the name yet) |
 | completion as a menu above the line, mouse, text selection and clipboard | **[designed]** (step 4, 6c components) |
-| task panel on the right, change preview with buttons, session tabs and B/C switch in the title, block actions, animation | **[designed]** (step 5) |
+| notation switch B / C in the title (state `App::notation_c`; a click, Ctrl+F and accessibility convert the line being typed) | **[verified in QEMU]** |
+| a new block fades in (`motion.base`, curve `ease_enter`); blocks replayed after connecting do not. The grid does not do the 6 px shift from the design (the fade is also the substitute for "Reduce motion") | **[implemented]** |
+| task panel on the right (width `size.side_panel`): task cards with state, progress bar and a Cancel button, a list in accessibility. It shows by itself only on a screen wider than 1280 px and in a window at least 900 px wide, otherwise Ctrl-T shows the tasks. Default window 1040 px (the compositor clips it to the screen; the limit to 85 % of the screen width waits for window resizing from the application) | **[implemented]** (QEMU tests have a 1280 px screen, the panel was verified once with a lowered limit) |
+| session tabs in the title: a tab for each session of the service (the others labelled "detached"), a + button for a new session; a click and accessibility switch the session (detach and attach another). The replay after a switch does not freeze: on `AttachRecent` (tag 15, only for a window that can insert older blocks; `Attach` replays everything in order before `Attached`, e.g. for the VT adapter) the session first sends the last 12 blocks, then `Attached` and older blocks in batches of 16 from the newest, the window inserts them before newer ones by block number and handles at most 64 messages per frame | **[verified in QEMU]** |
+| block actions: for the block under the pointer, Fold / Unfold and Run again buttons (the block time moves left), in accessibility for all visible blocks | **[verified in QEMU]** (through accessibility; the hover look has no screenshot yet) |
+| block action "copy output" | **[designed]** (after the `clipproto` clipboard from 6c) |
+| block action "compare with the previous run": output difference against the last run of the same command | **[designed]** (a separate piece after step 5) |
 
 ### Activity indicator and progress
 

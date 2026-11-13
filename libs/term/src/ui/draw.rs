@@ -26,16 +26,32 @@ pub enum Role {
     /// Stavovy radek nahore.
     Status,
     /// Hlavicka bloku: prvni usek je znacka (`| `), od useku `meta` cas
-    /// a vysledek (okno je kresli vpravo pismem UI).
-    Head { mark: Mark, meta: usize },
+    /// a vysledek (okno je kresli vpravo pismem UI). `block` = cislo bloku
+    /// (okno podle nej prolne novy blok).
+    Head { mark: Mark, meta: usize, block: u64 },
     /// Radek obsahu bloku; `error` = hlaseni chyby, `table_head` = zahlavi
     /// tabulky.
-    Body { mark: Mark, error: bool, table_head: bool },
+    Body { mark: Mark, error: bool, table_head: bool, block: u64 },
     /// Radek vstupu: prvnich `prefix` useku je slozka a oddelovac (okno je
     /// nahradi pilulkou s textem `cwd`).
     Input { prefix: usize, cwd: String },
     /// Napoveda klaves: (klavesa, popis).
     Hints(Vec<(String, String)>),
+    /// Vyzva nad radkem vstupu (`ui::preview`).
+    Prompt(PromptRow),
+}
+
+/// Radek vyzvy: okno GUI kolem nahledu zmen kresli ramecek (zluty okraj,
+/// zahlavi `warn_soft`) a volby jako tlacitka.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PromptRow {
+    /// Otazka; `preview` = nahled zmen (zahlavi ramecku).
+    Question { preview: bool },
+    /// Jedna zmena nahledu (nebo "... a N dalsich").
+    Change,
+    /// Volby: popisky v poradi odpovedi, vybrana, nahled zmen (prvni
+    /// tlacitko hlavni).
+    Buttons { labels: Vec<String>, sel: usize, preview: bool },
 }
 
 #[derive(Debug, Clone, Default)]
