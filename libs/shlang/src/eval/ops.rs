@@ -39,10 +39,27 @@ pub fn lit_value(l: &Lit) -> Result<Value, ShError> {
         Lit::Float(f) => Value::Float(*f),
         Lit::Str(s) => Value::Str(s.clone()),
         Lit::Unit { value, unit } => unit_value(*value, *unit)?,
+        Lit::Compound(parts) => {
+            // Soucet casti (`1h30m` = 1h + 30m); vsechny jsou doby.
+            let mut total = Value::Duration(0);
+            for (v, u) in parts {
+                total = binary(BinOp::Add, total, unit_value(*v, *u)?)?;
+            }
+            total
+        }
     })
 }
 
 pub fn unit_value(value: Num, unit: Unit) -> Result<Value, ShError> {
+    use crate::units::Dim;
+    // Rozmery mimo velikost a dobu: desetinna velicina v zakladni jednotce.
+    if !matches!(unit.dim(), Dim::Size | Dim::Duration) {
+        let x = match value {
+            Num::Int(i) => i as f64,
+            Num::Float(f) => f,
+        };
+        return Ok(Value::Quantity(crate::value::Quantity { dim: unit.dim(), value: x * unit.scale() }));
+    }
     let f = unit.factor();
     let n: i64 = match value {
         Num::Int(i) => {
@@ -80,6 +97,7 @@ pub fn unary(op: UnOp, v: Value) -> Result<Value, ShError> {
         (UnOp::Neg, Value::Float(f)) => Ok(Value::Float(-f)),
         (UnOp::Neg, Value::Size(s)) => s.checked_neg().map(Value::Size).ok_or_else(overflow),
         (UnOp::Neg, Value::Duration(d)) => d.checked_neg().map(Value::Duration).ok_or_else(overflow),
+        (UnOp::Neg, Value::Quantity(q)) => Ok(Value::Quantity(crate::value::Quantity { value: -q.value, ..q })),
         (UnOp::Not, v) => Err(ShError::new(code::TYPE, alloc::format!("'!' patří jen na bool, ne na {}", v.type_name()))),
         (UnOp::Neg, v) => Err(ShError::new(code::TYPE, alloc::format!("'-' nejde použít na {}", v.type_name()))),
     }
@@ -173,6 +191,33 @@ pub fn binary(op: BinOp, a: Value, b: Value) -> Result<Value, ShError> {
         }
         (BinOp::Sub, Time(t), Duration(d)) => t.checked_sub(*d).map(Time).ok_or_else(overflow)?,
         (BinOp::Sub, Time(x), Time(y)) => x.checked_sub(*y).map(Duration).ok_or_else(overflow)?,
+        // veliciny z tabulky jednotek (frekvence, procenta): jen se stejnym
+        // rozmerem nebo s cislem
+        (BinOp::Add | BinOp::Sub, Quantity(x), Quantity(y)) if x.dim == y.dim => {
+            let v = if op == BinOp::Add { x.value + y.value } else { x.value - y.value };
+            Quantity(crate::value::Quantity { dim: x.dim, value: v })
+        }
+        (BinOp::Div, Quantity(x), Quantity(y)) if x.dim == y.dim => {
+            if y.value == 0.0 {
+                return Err(ShError::new(code::ARITH, "dělení nulou"));
+            }
+            Float(x.value / y.value)
+        }
+        (BinOp::Mul, Quantity(x), Int(_) | Float(_)) | (BinOp::Mul, Int(_) | Float(_), Quantity(x)) => {
+            let n = as_f64(if matches!(a, Quantity(_)) { &b } else { &a }).unwrap();
+            Quantity(crate::value::Quantity { dim: x.dim, value: x.value * n })
+        }
+        (BinOp::Div, Quantity(x), Int(_) | Float(_)) => {
+            let n = as_f64(&b).unwrap();
+            if n == 0.0 {
+                return Err(ShError::new(code::ARITH, "dělení nulou"));
+            }
+            Quantity(crate::value::Quantity { dim: x.dim, value: x.value / n })
+        }
+        // procenta z hodnoty (`50% * 200MB` = 100 MB, `10% * 1h` = 6 min)
+        (BinOp::Mul, Quantity(p), other) | (BinOp::Mul, other, Quantity(p)) if p.dim == crate::units::Dim::Ratio => {
+            return percent_of(p.value, other).ok_or_else(|| type_err(sym, &a, &b));
+        }
         // text, seznamy, zaznamy
         (BinOp::Add, Str(x), Str(y)) => {
             let mut s = String::from(x.as_str());
@@ -199,6 +244,18 @@ pub fn binary(op: BinOp, a: Value, b: Value) -> Result<Value, ShError> {
     Ok(r)
 }
 
+/// Podil `r` (pomer) z hodnoty: cislo, velikost, doba, velicina.
+fn percent_of(r: f64, v: &Value) -> Option<Value> {
+    Some(match v {
+        Value::Int(i) => Value::Float(*i as f64 * r),
+        Value::Float(f) => Value::Float(f * r),
+        Value::Size(s) => Value::Size(round(*s as f64 * r)),
+        Value::Duration(d) => Value::Duration(round(*d as f64 * r)),
+        Value::Quantity(q) => Value::Quantity(crate::value::Quantity { value: q.value * r, ..*q }),
+        _ => return None,
+    })
+}
+
 /// Rovnost. Ruzne typy (krome cisel a `null`) jsou chyba - `size == 5`
 /// by jinak tise vratilo `false`.
 pub fn equal(a: &Value, b: &Value) -> Result<bool, ShError> {
@@ -207,6 +264,7 @@ pub fn equal(a: &Value, b: &Value) -> Result<bool, ShError> {
         (Null, Null) => true,
         (Null, _) | (_, Null) => false,
         (Int(x), Float(y)) | (Float(y), Int(x)) => (*x as f64) == *y,
+        (Quantity(x), Quantity(y)) if x.dim != y.dim => return Err(type_err("==", a, b)),
         (List(x), List(y)) => {
             if x.len() != y.len() {
                 return Ok(false);
@@ -232,6 +290,7 @@ pub fn compare(a: &Value, b: &Value) -> Result<Ordering, ShError> {
             let (x, y) = (as_f64(a).unwrap(), as_f64(b).unwrap());
             x.partial_cmp(&y).unwrap_or(Ordering::Equal)
         }
+        (Quantity(x), Quantity(y)) if x.dim == y.dim => x.value.partial_cmp(&y.value).unwrap_or(Ordering::Equal),
         (Str(x), Str(y)) => x.cmp(y),
         (Bool(x), Bool(y)) => x.cmp(y),
         (Null, Null) => Ordering::Equal,

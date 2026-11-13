@@ -329,6 +329,7 @@ impl<'a> Parser<'a> {
             Tok::Num(Num::Int(i)) => Ok(Expr::Lit(Lit::Int(i), span)),
             Tok::Num(Num::Float(f)) => Ok(Expr::Lit(Lit::Float(f), span)),
             Tok::Unit(value, unit) => Ok(Expr::Lit(Lit::Unit { value, unit }, span)),
+            Tok::Compound(parts) => Ok(Expr::Lit(Lit::Compound(parts), span)),
             Tok::Str(parts) => self.interp(parts, span),
             Tok::Ident(w) => self.ident_expr(w, span),
             Tok::Punct("(") => {

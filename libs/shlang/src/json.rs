@@ -235,6 +235,9 @@ fn write(out: &mut String, v: &Value, pretty: bool, lvl: usize) -> Result<(), Sh
             }
         }
         Value::Time(t) => esc(out, &format_time(*t)),
+        // Velicina jako cislo v zakladni jednotce (Hz, pomer), jako velikost
+        // v bajtech.
+        Value::Quantity(q) => out.push_str(&crate::fmt::num_text(q.value)),
         Value::Str(s) => esc(out, s),
         Value::List(items) => {
             out.push('[');

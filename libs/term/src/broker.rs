@@ -92,7 +92,7 @@ impl Broker {
                 self.routes.push(Route { id, tag: tag.clone(), cwd: String::new(), blocks: 0, attached: true });
                 alloc::vec![Out::Spawn { session: id, tag }, Out::Session(id, ClientMsg::Attach { session: id })]
             }
-            ClientMsg::Attach { session } => {
+            ClientMsg::Attach { session } | ClientMsg::AttachRecent { session } => {
                 let Some(r) = self.route(session) else { return Self::unknown(session) };
                 r.attached = true;
                 r.blocks = 0;

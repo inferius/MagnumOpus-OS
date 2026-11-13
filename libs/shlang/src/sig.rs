@@ -161,7 +161,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("Soubory", &["ls", "cd", "pwd", "open", "save", "rm", "cp", "mv", "mkdir", "exists", "df"]),
     ("Text a výstup", &["echo", "log", "lines", "split", "join", "trim", "upper", "lower", "contains", "starts-with", "ends-with", "replace"]),
     ("Seznamy a tabulky", &["where", "each", "select", "sort", "first", "last", "count", "sum", "group", "reverse", "range"]),
-    ("Převody a čas", &["from", "to", "describe", "now", "sleep"]),
+    ("Převody a čas", &["from", "to", "convert", "describe", "now", "sleep"]),
     ("Úlohy", &["tasks", "jobs", "fg", "wait", "kill", "cancel"]),
     ("Relace a bezpečnost", &["undo", "preview", "history", "run", "error", "exit"]),
     ("Nápověda", &["help", "explain"]),
@@ -229,6 +229,9 @@ pub const BUILTINS: &[Sig] = &[
         "převede bajty/text na hodnoty (json, text, lines)"),
     sig!("to", "data-to", &[p("format", Kind::Str)], None, NOFLAGS, IA, IA, "převede hodnoty na text (json, text)"),
     sig!("describe", "value-type", NONE, None, NOFLAGS, IA, IT, "typ hodnoty"),
+    sig!("convert", "value-convert", &[opt("target", Kind::Str)], None,
+        &[Flag { long: "from", short: Some('f'), value: Some(Kind::Str), help: "zdrojová jednotka, soustava nebo kódování" }],
+        IA, IA, "převede jednotky, číselné soustavy, kódování textu a časová pásma"),
     // cas
     sig!("now", "time-now", NONE, None, NOFLAGS, IN, IA, "aktuální čas"),
     sig!("sleep", "time-sleep", &[p("time", Kind::Duration)], None, NOFLAGS, IN, IN, "počká"),

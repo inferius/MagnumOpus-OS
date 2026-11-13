@@ -49,7 +49,11 @@ mod tests_eta;
 #[cfg(test)]
 mod tests_line;
 #[cfg(test)]
+mod tests_preview;
+#[cfg(test)]
 mod tests_render;
+#[cfg(test)]
+mod tests_sessions;
 #[cfg(test)]
 mod tests_taskd;
 #[cfg(test)]

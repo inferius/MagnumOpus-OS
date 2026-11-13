@@ -59,94 +59,8 @@ pub enum Stmt {
     Expr(Expr),
 }
 
-/// Druh cisla s jednotkou.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Unit {
-    // velikosti (desitkove a dvojkove)
-    B,
-    KB,
-    MB,
-    GB,
-    TB,
-    KiB,
-    MiB,
-    GiB,
-    TiB,
-    // doby
-    Ns,
-    Us,
-    Ms,
-    S,
-    Min,
-    H,
-    D,
-    W,
-    Y,
-}
-
-impl Unit {
-    pub const ALL: &'static [(Unit, &'static str)] = &[
-        (Unit::KiB, "KiB"),
-        (Unit::MiB, "MiB"),
-        (Unit::GiB, "GiB"),
-        (Unit::TiB, "TiB"),
-        (Unit::KB, "KB"),
-        (Unit::MB, "MB"),
-        (Unit::GB, "GB"),
-        (Unit::TB, "TB"),
-        (Unit::B, "B"),
-        (Unit::Min, "min"),
-        (Unit::Ns, "ns"),
-        (Unit::Us, "us"),
-        (Unit::Ms, "ms"),
-        (Unit::S, "s"),
-        (Unit::H, "h"),
-        (Unit::D, "d"),
-        (Unit::W, "w"),
-        (Unit::Y, "y"),
-    ];
-
-    pub fn name(self) -> &'static str {
-        Self::ALL.iter().find(|(u, _)| *u == self).map(|(_, n)| *n).unwrap_or("?")
-    }
-
-    pub fn parse(s: &str) -> Option<Unit> {
-        Self::ALL.iter().find(|(_, n)| *n == s).map(|(u, _)| *u)
-    }
-
-    /// Je to velikost (bajty)? Jinak doba.
-    pub fn is_size(self) -> bool {
-        matches!(
-            self,
-            Unit::B | Unit::KB | Unit::MB | Unit::GB | Unit::TB | Unit::KiB | Unit::MiB | Unit::GiB | Unit::TiB
-        )
-    }
-
-    /// Nasobek zakladni jednotky (bajt, nanosekunda).
-    pub fn factor(self) -> u128 {
-        const S: u128 = 1_000_000_000;
-        match self {
-            Unit::B => 1,
-            Unit::KB => 1000,
-            Unit::MB => 1_000_000,
-            Unit::GB => 1_000_000_000,
-            Unit::TB => 1_000_000_000_000,
-            Unit::KiB => 1 << 10,
-            Unit::MiB => 1 << 20,
-            Unit::GiB => 1 << 30,
-            Unit::TiB => 1 << 40,
-            Unit::Ns => 1,
-            Unit::Us => 1000,
-            Unit::Ms => 1_000_000,
-            Unit::S => S,
-            Unit::Min => 60 * S,
-            Unit::H => 3600 * S,
-            Unit::D => 86400 * S,
-            Unit::W => 7 * 86400 * S,
-            Unit::Y => 365 * 86400 * S,
-        }
-    }
-}
+/// Jednotka cisla (radek tabulky `crate::units`).
+pub use crate::units::Unit;
 
 /// Literal.
 #[derive(Debug, Clone, PartialEq)]
@@ -157,6 +71,8 @@ pub enum Lit {
     Float(f64),
     /// Cislo s jednotkou (`100MB`, `1.5h`); `value` je cele nebo desetinne.
     Unit { value: Num, unit: Unit },
+    /// Slozena doba (`1h30m`, `2m30s`): casti od nejvetsi jednotky.
+    Compound(Vec<(Num, Unit)>),
     Str(String),
 }
 

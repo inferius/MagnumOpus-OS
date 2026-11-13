@@ -2,6 +2,8 @@
 //! interpret, souborove vrstvy, doplnovani, vysvetleni chyb.
 
 mod async_tasks;
+mod bare;
+mod convert;
 mod audio;
 mod doc;
 mod draft;
@@ -13,3 +15,4 @@ mod misc;
 mod power;
 mod regress;
 mod roundtrip;
+mod units;

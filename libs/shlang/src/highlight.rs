@@ -485,6 +485,9 @@ impl Scan<'_, '_> {
                 let w = &self.src[i..e];
                 let class = match self.ctx {
                     _ if self.is_var(w) => Class::Var,
+                    // Hola cesta (slozka, skript, program): cesta, ne
+                    // neznamy prikaz.
+                    _ if crate::eval::is_bare_path(w) => Class::Path,
                     None => Class::Command,
                     Some(x) if x.known(w) => Class::Command,
                     Some(_) => Class::Unknown,
