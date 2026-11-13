@@ -106,6 +106,9 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
             let v = a.pos(0).cloned().ok_or_else(|| a.err(code::ARGS, "cancel: chybí úloha"))?;
             it.cancel_value(host, &v, a.span)
         }
+        // Rizeni uloh terminalu: `fg` obsluhuje relace (radek ve vlakne);
+        // sem dojde jen mimo terminal (skript, test).
+        "fg" => Err(a.err(code::ARGS, "fg funguje jen v terminálu (řádky na pozadí: Ctrl+Z, příkaz &)")),
         "kill" => {
             let id = int_arg(&a, 0, "id")?.unwrap_or(0) as u64;
             match it.jobs.iter_mut().find(|j| j.id == id) {

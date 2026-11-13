@@ -106,6 +106,7 @@ impl Broker {
             }
             ClientMsg::Run { session, .. }
             | ClientMsg::Interrupt { session }
+            | ClientMsg::Background { session }
             | ClientMsg::Complete { session, .. }
             | ClientMsg::Format { session, .. }
             | ClientMsg::Highlight { session, .. }

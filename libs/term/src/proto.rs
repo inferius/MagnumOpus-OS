@@ -59,6 +59,9 @@ pub enum ClientMsg {
     /// Akce nad ulohou z panelu uloh (`action`: 0 zrusit, 1 pozastavit,
     /// 2 pokracovat).
     TaskAction { session: u64, task: u64, action: u8 },
+    /// Ctrl+Z: bezici radek relace na pozadi (bezi dal jako uloha, relace
+    /// prijima dalsi radky).
+    Background { session: u64 },
 }
 
 /// Sluzba -> terminal.
@@ -464,6 +467,10 @@ impl ClientMsg {
                 w.u64(*task);
                 w.u8(*action);
             }
+            ClientMsg::Background { session } => {
+                w.u8(13);
+                w.u64(*session);
+            }
         }
         w.0
     }
@@ -483,6 +490,7 @@ impl ClientMsg {
             10 => ClientMsg::Highlight { session: r.u64()?, line: r.str()?, seq: r.u32()? },
             11 => ClientMsg::Choose { prompt: r.u64()?, index: r.u32()? },
             12 => ClientMsg::TaskAction { session: r.u64()?, task: r.u64()?, action: r.u8()? },
+            13 => ClientMsg::Background { session: r.u64()? },
             _ => return Err(DecodeError),
         };
         r.done()?;

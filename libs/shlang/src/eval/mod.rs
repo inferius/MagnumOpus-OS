@@ -19,7 +19,7 @@ pub mod ops;
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use alloc::rc::Rc;
+use alloc::sync::Arc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -171,7 +171,7 @@ pub struct Outcome {
 pub struct Interp {
     pub sigs: Box<dyn Sigs>,
     frames: Vec<BTreeMap<String, Value>>,
-    fns: BTreeMap<String, Rc<FnDef>>,
+    fns: BTreeMap<String, Arc<FnDef>>,
     pub cwd: String,
     pub home: String,
     /// Historie slozek relace (`cd -`, `cd +`, `cd --history`): drivejsi
@@ -237,6 +237,25 @@ impl Interp {
     }
 
     /// Jmena promennych (pro parser: rozsah, `$x`, pole `where`).
+    /// Kopie stavu relace pro pokracovani po Ctrl+Z (radek bezi dal na
+    /// pozadi s puvodnim interpretem): globalni promenne, funkce, slozka,
+    /// historie a nastaveni. Koncept, undo, ulohy a cekajici prace se
+    /// nekopiruji - patri radku na pozadi.
+    pub fn fork(&self, sigs: Box<dyn Sigs>) -> Interp {
+        let mut i = Interp::new(sigs, &self.home);
+        i.frames = alloc::vec![self.frames[0].clone()];
+        i.fns = self.fns.clone();
+        i.cwd = self.cwd.clone();
+        i.dirs_back = self.dirs_back.clone();
+        i.dirs_fwd = self.dirs_fwd.clone();
+        i.lock_threshold = self.lock_threshold;
+        i.history = self.history.clone();
+        i.max_depth = self.max_depth;
+        i.stack_budget = self.stack_budget;
+        i.next_job = self.next_job;
+        i
+    }
+
     pub fn var_names(&self) -> Vec<String> {
         let mut v = Vec::new();
         for f in &self.frames {
@@ -555,7 +574,7 @@ impl Interp {
                 }
             }
             Stmt::Fn { name, params, body, .. } => {
-                self.fns.insert(name.clone(), Rc::new(FnDef { params: params.clone(), body: body.clone() }));
+                self.fns.insert(name.clone(), Arc::new(FnDef { params: params.clone(), body: body.clone() }));
                 Ok(Value::Nothing)
             }
             Stmt::Return { value, .. } => {
@@ -693,7 +712,7 @@ impl Interp {
                 let b = self.eval(host, r)?;
                 Ok(ops::binary(*op, a, b)?)
             }
-            Expr::Closure(c, _) => Ok(Value::Closure(Rc::new(self.make_closure(&c.params, &c.body)))),
+            Expr::Closure(c, _) => Ok(Value::Closure(Arc::new(self.make_closure(&c.params, &c.body)))),
             Expr::Block(b, _) => self.block(host, b, false),
             Expr::If { cond, then, els, span } => {
                 if self.cond(host, cond, *span)? {
@@ -926,4 +945,11 @@ fn index(b: &Value, i: &Value) -> Result<Value, ShError> {
             alloc::format!("{} nejde indexovat hodnotou {}", b.type_name(), i.type_name()),
         )),
     }
+}
+
+/// Interpret relace jde predat vlaknu (radek poprede ve vlakne, Ctrl+Z).
+#[allow(dead_code)]
+fn _interp_is_send() {
+    fn send<T: Send>() {}
+    send::<Interp>();
 }

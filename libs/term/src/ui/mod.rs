@@ -660,6 +660,17 @@ impl App {
                     self.editor.clear();
                 }
             }
+            // Ctrl+Z: radek v poprede na pozadi (bezi dal jako uloha),
+            // vyzva se vrati a fronta radku pokracuje.
+            Key::Ctrl('z') if self.fg_busy() => {
+                self.out.push(ClientMsg::Background { session: self.session });
+                self.fg = None;
+                self.notice = Some(tasks::Notice::new("příkaz běží na pozadí (jobs, fg)", false, self.tick));
+                if !self.queued.is_empty() {
+                    let next = self.queued.remove(0);
+                    self.run(next);
+                }
+            }
             Key::Ctrl('l') => {
                 for b in &mut self.blocks {
                     b.collapsed = true;
@@ -1073,7 +1084,7 @@ impl App {
             let secs = (n - s) / 1_000_000_000;
             let mut l = Line::new();
             l.push(Some(Style::fg(t.ui.accent)), &alloc::format!("  {} ", self.spinner()));
-            l.push(Some(Style::fg(t.ui.muted)), &alloc::format!("běží {} · Ctrl+C přerušit", progress::human_eta(secs * 1_000_000_000)));
+            l.push(Some(Style::fg(t.ui.muted)), &alloc::format!("běží {} · Ctrl+C přerušit · Ctrl+Z na pozadí", progress::human_eta(secs * 1_000_000_000)));
             if !self.queued.is_empty() {
                 l.push(Some(Style::fg(t.ui.muted)), &alloc::format!(" · ve frontě {}", self.queued.len()));
             }

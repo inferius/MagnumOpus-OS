@@ -8,7 +8,7 @@
 - **Text and output:** [`echo`](#echo), [`log`](#log), [`lines`](#lines), [`split`](#split), [`join`](#join), [`trim`](#trim), [`upper`](#upper), [`lower`](#lower), [`contains`](#contains), [`starts-with`](#starts-with), [`ends-with`](#ends-with), [`replace`](#replace)
 - **Lists and tables:** [`where`](#where), [`each`](#each), [`select`](#select), [`sort`](#sort), [`first`](#first), [`last`](#last), [`count`](#count), [`sum`](#sum), [`group`](#group), [`reverse`](#reverse), [`range`](#range)
 - **Conversions and time:** [`from`](#from), [`to`](#to), [`describe`](#describe), [`now`](#now), [`sleep`](#sleep)
-- **Tasks:** [`tasks`](#tasks), [`jobs`](#jobs), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
+- **Tasks:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Session and safety:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Help:** [`help`](#help), [`explain`](#explain)
 - **System:** [`audio`](#audio), [`loglevel`](#loglevel), [`report`](#report), [`shutdown`](#shutdown), [`reboot`](#reboot)
@@ -1346,7 +1346,7 @@ tasks log 12 -n 50
 
 background jobs
 
-This session's background jobs (`bg`, `async`) with their state.
+This session's background jobs with their state. `&` at the end of a line starts a command in the background (`cp big.img /backup &`), Ctrl+Z moves a running command there. The job keeps running and the session takes further commands; the end of the job is announced by a line in its block. `fg N` brings it back to the foreground, `kill N` ends it. What a background job changes in variables and the folder does not show up in the session.
 
 ```shell
 jobs
@@ -1364,7 +1364,34 @@ jobs | count
 0
 ```
 
-**Related:** [`tasks`](#tasks), [`wait`](#wait), [`kill`](#kill)
+**Related:** [`fg`](#fg), [`kill`](#kill), [`tasks`](#tasks)
+
+
+### `fg`
+
+brings a job from the background to the foreground (Ctrl+C interrupts it, Ctrl+Z sends it back)
+
+Brings a job from the background (Ctrl+Z or `&`) to the foreground: the terminal waits for it like for a normal command, Ctrl+C interrupts it and Ctrl+Z sends it back. Without a number it takes the last job. Works in the terminal, not in a script.
+
+```shell
+fg [id]
+```
+
+Full name `job-foreground` · input: nothing · output: nothing
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `[id]` | number | poslední | job number from `jobs` (default: the last one) |
+
+Job 1 back to the foreground.
+
+```shell
+fg 1
+```
+
+**Errors:** `SH_ARGS`
+
+**Related:** [`jobs`](#jobs), [`kill`](#kill)
 
 
 ### `wait`

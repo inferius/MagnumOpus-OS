@@ -8,7 +8,7 @@
 - **Text a výstup:** [`echo`](#echo), [`log`](#log), [`lines`](#lines), [`split`](#split), [`join`](#join), [`trim`](#trim), [`upper`](#upper), [`lower`](#lower), [`contains`](#contains), [`starts-with`](#starts-with), [`ends-with`](#ends-with), [`replace`](#replace)
 - **Seznamy a tabulky:** [`where`](#where), [`each`](#each), [`select`](#select), [`sort`](#sort), [`first`](#first), [`last`](#last), [`count`](#count), [`sum`](#sum), [`group`](#group), [`reverse`](#reverse), [`range`](#range)
 - **Převody a čas:** [`from`](#from), [`to`](#to), [`describe`](#describe), [`now`](#now), [`sleep`](#sleep)
-- **Úlohy:** [`tasks`](#tasks), [`jobs`](#jobs), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
+- **Úlohy:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Relace a bezpečnost:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Nápověda:** [`help`](#help), [`explain`](#explain)
 - **Systém:** [`audio`](#audio), [`loglevel`](#loglevel), [`report`](#report), [`shutdown`](#shutdown), [`reboot`](#reboot)
@@ -1346,7 +1346,7 @@ tasks log 12 -n 50
 
 úlohy na pozadí
 
-Úlohy této relace spuštěné na pozadí (`bg`, `async`) se stavem.
+Úlohy této relace na pozadí se stavem. Příkaz na pozadí spustí `&` na konci řádku (`cp velky.img /zaloha &`), běžící příkaz tam přesune Ctrl+Z. Úloha běží dál, relace přijímá další příkazy; konec úlohy se ohlásí řádkem v jejím bloku. `fg N` ji vrátí do popředí, `kill N` ukončí. Co úloha na pozadí změní v proměnných a ve složce, se do relace nepromítne.
 
 ```shell
 jobs
@@ -1364,7 +1364,34 @@ jobs | count
 0
 ```
 
-**Souvisí:** [`tasks`](#tasks), [`wait`](#wait), [`kill`](#kill)
+**Souvisí:** [`fg`](#fg), [`kill`](#kill), [`tasks`](#tasks)
+
+
+### `fg`
+
+vrátí úlohu z pozadí do popředí (Ctrl+C ji přeruší, Ctrl+Z vrátí zpět)
+
+Vrátí úlohu z pozadí (Ctrl+Z nebo `&`) do popředí: terminál na ni čeká jako na běžný příkaz, Ctrl+C ji přeruší a Ctrl+Z ji vrátí zpět na pozadí. Bez čísla vezme poslední úlohu. Funguje v terminálu, ve skriptu ne.
+
+```shell
+fg [id]
+```
+
+Plné jméno `job-foreground` · vstup: nic · výstup: nic
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[id]` | číslo | poslední | číslo úlohy z `jobs` |
+
+Úloha 1 zpět do popředí.
+
+```shell
+fg 1
+```
+
+**Chyby:** `SH_ARGS`
+
+**Souvisí:** [`jobs`](#jobs), [`kill`](#kill)
 
 
 ### `wait`
@@ -1398,7 +1425,7 @@ wait 2
 
 ukončí úlohu
 
-Ukončí úlohu na pozadí podle čísla z `jobs`.
+Ukončí úlohu na pozadí podle čísla z `jobs` (příkaz spuštěný s `&` nebo přesunutý Ctrl+Z).
 
 ```shell
 kill id
