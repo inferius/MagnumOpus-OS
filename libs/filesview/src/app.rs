@@ -443,7 +443,7 @@ impl<B: Backend> FileManager<B> {
             Some(Reply::Opened(app)) => format!("Otevřeno v aplikaci {app}."),
             // Soubor zadna aplikace neotevre: ukazal ho spravce (tohle okno
             // nebo jine), nahled uz je videt.
-            Some(Reply::Revealed(_)) => String::from("Pro tento typ souboru zatím není aplikace."),
+            Some(Reply::Revealed(_)) | Some(Reply::NoApp(_)) => String::from("Pro tento typ souboru zatím není aplikace."),
             Some(Reply::Failed(why)) => format!("Nejde otevřít: {why}"),
             None => return false,
         };
