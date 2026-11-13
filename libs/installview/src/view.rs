@@ -77,6 +77,8 @@ fn body(s: &Installer) -> Node<Msg> {
 
 fn keyboard(s: &Installer, c: &mut Vec<Node<Msg>>) {
     c.push(label("Jazyk systému: čeština (další jazyky se připravují)."));
+    c.push(label("Časové pásmo"));
+    c.push(text_input(&s.zone).placeholder("Europe/Prague").on_change(Msg::Zone).key("pasmo"));
     if s.keyboards.is_empty() {
         c.push(label("Načítám rozložení klávesnice..."));
         return;
@@ -124,8 +126,6 @@ fn keyboard(s: &Installer, c: &mut Vec<Node<Msg>>) {
     }
     let list: Vec<String> = s.chosen.iter().map(|&i| s.keyboards[i].description.clone()).collect();
     c.push(label(&format!("Zvolené: {}", list.join(", "))).key("zvolene"));
-    c.push(label("Časové pásmo"));
-    c.push(text_input(&s.zone).placeholder("Europe/Prague").on_change(Msg::Zone).key("pasmo"));
 }
 
 fn check(s: &Installer, c: &mut Vec<Node<Msg>>) {

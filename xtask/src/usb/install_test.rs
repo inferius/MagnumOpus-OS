@@ -70,13 +70,89 @@ pub fn run(opts: &mut Options) -> Result<()> {
 
 /// Graficky instalator na prazdny disk se snimky kroku.
 pub fn run_gui(opts: &mut Options) -> Result<()> {
+    real_input(opts)?;
     whole_disk(opts, true)
 }
 
-fn live_image(opts: &mut Options, mode: &str, gui: bool) -> Result<PathBuf> {
+/// Skutecny vstup (bez autopilota): okno instalatoru se po prihlaseni
+/// otevre samo, QMP klikne do pole casoveho pasma, Ctrl+A, napise `utc`
+/// a klikne na Pokracovat. Overi zalogovane pasmo a druhy krok.
+///
+/// Souradnice jsou z rozvrzeni okna na obrazovce 1280 x 800 (okno
+/// 900 x 680 na 168, 50; snimky `vstup-*.png` ukazuji, kam se klika).
+fn real_input(opts: &mut Options) -> Result<()> {
+    const ZONE: (i32, i32) = (730, 214);
+    const NEXT: (i32, i32) = (997, 697);
+    const SCREEN: (i32, i32) = (1280, 800);
+    let arch: &Arch = opts.arch;
+    let usb = live_image(opts, None)?;
+    let dir = target_dir().join("shots").join(format!("instalace-gui-{}", arch.name));
+    std::fs::create_dir_all(&dir)?;
+    let shot = |port: u16, name: &str| {
+        let file = dir.join(format!("{name}.png")).display().to_string().replace('\\', "/");
+        let cmd = format!(r#"{{"execute":"screendump","arguments":{{"filename":"{file}","format":"png"}}}}"#);
+        let _ = crate::qmp::command(port, &cmd);
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        let _ = crate::qmp::command(port, &cmd);
+    };
+    let send = |port: u16, events: &[String]| {
+        let cmd = format!(r#"{{"execute":"input-send-event","arguments":{{"events":[{}]}}}}"#, events.join(","));
+        if let Err(e) = crate::qmp::command(port, &cmd) {
+            println!("xtask: vstup QMP: {e}");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    };
+    let abs = |axis: &str, v: i32, max: i32| format!(r#"{{"type":"abs","data":{{"axis":"{axis}","value":{}}}}}"#, v * 0x7fff / max);
+    let btn = |down: bool| format!(r#"{{"type":"btn","data":{{"down":{down},"button":"left"}}}}"#);
+    let key = |k: &str, down: bool| format!(r#"{{"type":"key","data":{{"down":{down},"key":{{"type":"qcode","data":"{k}"}}}}}}"#);
+    let click = |port: u16, (x, y): (i32, i32)| {
+        send(port, &[abs("x", x, SCREEN.0), abs("y", y, SCREEN.1)]);
+        send(port, &[btn(true)]);
+        send(port, &[btn(false)]);
+    };
+    let mut opened: Option<std::time::Instant> = None;
+    let mut done = false;
+    let mut hook = |text: &str, port: u16| {
+        if done || !text.contains("gui-install: krok 1 ") {
+            return;
+        }
+        // Debug build pod TCG okno otevira a kresli nekolik sekund.
+        let at = *opened.get_or_insert_with(std::time::Instant::now);
+        if at.elapsed() < std::time::Duration::from_secs(15) {
+            return;
+        }
+        done = true;
+        shot(port, "vstup-1");
+        click(port, ZONE);
+        send(port, &[key("ctrl", true)]);
+        send(port, &[key("a", true)]);
+        send(port, &[key("a", false)]);
+        send(port, &[key("ctrl", false)]);
+        for k in ["u", "t", "c"] {
+            send(port, &[key(k, true)]);
+            send(port, &[key(k, false)]);
+        }
+        // Snimek po prekresleni (ladici build pod TCG kresli sekundy).
+        std::thread::sleep(std::time::Duration::from_secs(8));
+        shot(port, "vstup-2");
+        click(port, NEXT);
+    };
+    let r = boot::boot_with(arch, &usb, &[], Some(&mut hook), "skutecny vstup v okne instalatoru", |t| {
+        ["gui-install: klavesnice cz, pasmo utc", "gui-install: krok 2 "].into_iter().filter(|m| !t.contains(m)).collect()
+    });
+    let _ = std::fs::remove_file(&usb);
+    r?;
+    println!("xtask: skutecny vstup v okne instalatoru prosel (klik, psani, Pokracovat)");
+    Ok(())
+}
+
+/// Obraz ziveho USB; `answers` = (zpusob, gui) pro soubor odpovedi.
+fn live_image(opts: &mut Options, answers_for: Option<(&str, bool)>) -> Result<PathBuf> {
     with_dev_profile(opts);
     opts.extra_initfs.retain(|(n, _)| n != INSTALL_ANSWERS);
-    opts.extra_initfs.push((String::from(INSTALL_ANSWERS), answers(mode, gui).into_bytes()));
+    if let Some((mode, gui)) = answers_for {
+        opts.extra_initfs.push((String::from(INSTALL_ANSWERS), answers(mode, gui).into_bytes()));
+    }
     let artifacts = crate::build(opts);
     opts.extra_initfs.retain(|(n, _)| n != INSTALL_ANSWERS);
     let artifacts = artifacts?;
@@ -118,9 +194,13 @@ fn gui_markers(t: &str) -> Vec<&'static str> {
 fn shots(arch: &Arch) -> Result<impl FnMut(&str, u16)> {
     let dir = target_dir().join("shots").join(format!("instalace-gui-{}", arch.name));
     std::fs::create_dir_all(&dir)?;
-    // Snimky predchoziho behu pryc (konec behu ceka na `hotovo.png`).
+    // Snimky pruchodu z predchoziho behu pryc (konec behu ceka na
+    // `hotovo.png`); `vstup-*` jsou z testu skutecneho vstupu.
     for e in std::fs::read_dir(&dir)?.flatten() {
-        let _ = std::fs::remove_file(e.path());
+        let n = e.file_name().to_string_lossy().into_owned();
+        if n.starts_with("krok-") || n == "hotovo.png" {
+            let _ = std::fs::remove_file(e.path());
+        }
     }
     let mut taken = std::collections::BTreeSet::new();
     let mut done_at: Option<std::time::Instant> = None;
@@ -157,7 +237,7 @@ fn shots(arch: &Arch) -> Result<impl FnMut(&str, u16)> {
 
 fn whole_disk(opts: &mut Options, gui: bool) -> Result<()> {
     let arch: &Arch = opts.arch;
-    let usb = live_image(opts, "cely-disk", gui)?;
+    let usb = live_image(opts, Some(("cely-disk", gui)))?;
     let target = target_dir().join(format!("install-target-{}.img", std::process::id()));
     sparse(&target, TARGET)?;
     let r = (|| -> Result<()> {
@@ -304,7 +384,7 @@ fn windows_snapshot(path: &Path) -> Result<Vec<u8>> {
 
 fn next_to_windows(opts: &mut Options) -> Result<()> {
     let arch: &Arch = opts.arch;
-    let usb = live_image(opts, "volne-misto", false)?;
+    let usb = live_image(opts, Some(("volne-misto", false)))?;
     let target = target_dir().join(format!("install-windows-{}.img", std::process::id()));
     windows_disk(&target)?;
     let before = windows_snapshot(&target)?;

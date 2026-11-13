@@ -278,6 +278,17 @@ fn keyboards() -> Reply {
                 name: String::from(id.name()),
                 description: String::from(id.description()),
                 rows: (0..keymap::PREVIEW_ROWS.len()).map(|r| l.preview_row(r).collect()).collect(),
+                // Klavesy, ktere neco pisou (zkusebni pole v GUI). Mrtva
+                // klavesa jako svuj znak (pole nesklada).
+                keys: (1u16..128)
+                    .filter_map(|code| {
+                        let levels = core::array::from_fn(|lv| match l.symbol(code, lv) {
+                            keymap::Symbol::Char(c) | keymap::Symbol::Dead(c) => Some(c),
+                            keymap::Symbol::None => None,
+                        });
+                        levels.iter().any(Option::is_some).then_some((code, levels))
+                    })
+                    .collect(),
             }
         })
         .collect();

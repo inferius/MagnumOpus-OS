@@ -32,6 +32,10 @@ pub struct KeyboardEntry {
     pub description: String,
     /// Nahled: radky klaves (pro GUI a vypis).
     pub rows: Vec<String>,
+    /// Klavesy: kod evdev a znak na urovnich 0 zaklad, 1 Shift, 2 AltGr,
+    /// 3 AltGr+Shift (`None` = nepise). GUI podle nich preklada zkusebni
+    /// pole na vybrane rozlozeni (zive rozlozeni systemu se nemeni).
+    pub keys: Vec<(u16, [Option<char>; 4])>,
 }
 
 /// Udaje uctu pro instalaci.
@@ -183,6 +187,13 @@ impl Reply {
                     for row in &k.rows {
                         w.str(row);
                     }
+                    w.u32(k.keys.len() as u32);
+                    for (code, levels) in &k.keys {
+                        w.u32(*code as u32);
+                        for c in levels {
+                            w.u32(c.map_or(0, |c| c as u32));
+                        }
+                    }
                 }
             }
             Reply::Preview { text, type_name, other_os, lines, before, after } => {
@@ -249,7 +260,18 @@ impl Reply {
                     let (name, description) = (r.str()?, r.str()?);
                     let nr = count(&mut r)?;
                     let rows = (0..nr).map(|_| r.str()).collect::<Result<Vec<_>>>()?;
-                    list.push(KeyboardEntry { name, description, rows });
+                    let nk = count(&mut r)?;
+                    let mut keys = Vec::with_capacity(nk);
+                    for _ in 0..nk {
+                        let code = u16::try_from(r.u32()?).map_err(|_| Error::InvalidArgs)?;
+                        let mut levels = [None; 4];
+                        for l in &mut levels {
+                            let v = r.u32()?;
+                            *l = if v == 0 { None } else { Some(char::from_u32(v).ok_or(Error::InvalidArgs)?) };
+                        }
+                        keys.push((code, levels));
+                    }
+                    list.push(KeyboardEntry { name, description, rows, keys });
                 }
                 Reply::Keyboards(list)
             }

@@ -212,7 +212,12 @@ fn proto_roundtrip() {
             parts: vec![String::from("EFI (537 MB)")],
             choices: choices(&d, None),
         }]),
-        Reply::Keyboards(vec![KeyboardEntry { name: String::from("cz"), description: String::from("Česká"), rows: vec![String::from("qwertz")] }]),
+        Reply::Keyboards(vec![KeyboardEntry {
+            name: String::from("cz"),
+            description: String::from("Česká"),
+            rows: vec![String::from("qwertz")],
+            keys: vec![(21, [Some('z'), Some('Z'), None, None]), (3, [Some('ě'), Some('2'), Some('@'), None])],
+        }]),
         Reply::Preview {
             text: String::from("x"),
             type_name: Some(String::from("disk")),

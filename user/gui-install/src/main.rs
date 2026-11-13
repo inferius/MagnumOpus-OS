@@ -55,7 +55,10 @@ fn main(startup: Startup) -> i64 {
     });
     app.on_log(|line| println!("{line}"));
     let extra = match answers {
-        None => installd,
+        None => {
+            app.mark();
+            installd
+        }
         Some(text) => match autopilot(&mut app, installd, &text) {
             Ok(c) => c,
             Err(e) => {

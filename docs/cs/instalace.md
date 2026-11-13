@@ -74,10 +74,15 @@ flashky). Stav: **[ověřeno v QEMU]** (x86_64, `--only instalace-gui`).
   službou installd mluví stejným protokolem `installplan::proto`. Plán
   disku, volby, náhled, pravidla jména a hesla jsou v `installplan`
   a v installd. Okno drží jen stav kroků a nic nerozhoduje samo.
-- **Krok 1, klávesnice.** Tabulka rozložení s náhledem řad kláves
-  vybraného rozložení. Tlačítka *Přidat*, *Odebrat* a *Nastavit jako
-  hlavní* (první je hlavní) a pole časového pásma. Data dává installd
-  z `libs/keymap`, stejně jako službě vstupu.
+- **Krok 1, klávesnice.** Pole časového pásma a tabulka rozložení
+  s náhledem řad kláves vybraného rozložení. Tlačítka *Přidat*,
+  *Odebrat* a *Nastavit jako hlavní* (první je hlavní). Data dává installd
+  z `libs/keymap`, stejně jako službě vstupu, včetně tabulky kláves (kód
+  evdev a znak na čtyřech úrovních). Podle ní okno překládá stisky na
+  vybrané rozložení (`Installer::translate`, Caps Lock jako
+  `keymap::Keyboard`); živé rozložení systému se nemění. Samotné pole
+  „Vyzkoušej klávesnici“ čeká na háček `key_map` v `libs/ui` (zadané
+  6c).
 - **Krok 4, náhled změn.** Mapa disku *Teď* a *Po instalaci*
   (`installplan::map`): úseky v pořadí na disku včetně volného místa,
   nové oddíly označené. Pod mapou je seznam změn *zůstane* / *nový* /
@@ -93,7 +98,15 @@ flashky). Stav: **[ověřeno v QEMU]** (x86_64, `--only instalace-gui`).
 - **Úzké okno.** Ve třídě šířky `compact` (pod 600 px) zmizí seznam
   kroků vlevo a nahoře je jen „Krok N z 8: ...“.
 
-Test v QEMU (`cargo xtask test --only instalace-gui`): soubor odpovědí
+Test v QEMU (`cargo xtask test --only instalace-gui`) má dvě části.
+Nejdřív **skutečný vstup**: živé USB bez souboru odpovědí, okno se po
+přihlášení otevře samo a QMP pošle skutečné události přes `usb-tablet`
+a `usb-kbd`. Test klikne do pole časového pásma, stiskne Ctrl+A, napíše
+`utc` a klikne na *Pokračovat*. Ověří zalogované pásmo a druhý krok;
+snímky jsou `vstup-1.png` a `vstup-2.png`. Souřadnice platí pro okno
+900 × 680 na obrazovce 1280 × 800.
+
+Pak **celý průchod**: soubor odpovědí
 s `rozhrani = "gui"` dostane okno instalátoru místo textové cesty.
 Autopilot (`Installer::autopilot`) vyplní krok podle odpovědí a každých
 8 s pokročí o krok (první krok po 12 s, okno se teprve otevírá). U každého
@@ -263,8 +276,7 @@ hostiteli, ne klikáním v GUI.
   entropii; test v QEMU proto na aarch64 přidává `virtio-rng-pci`.
 - Graf oddílů v grafickém průvodci se zatím kreslí jako text; pruhový
   graf čeká na komponentu `libs/ui`.
-- Pole „Vyzkoušej klávesnici“ z návrhu není: okno nemá právo přepnout
-  živé rozložení služby vstupu.
-- Grafický průvodce je ověřený jen autopilotem (vyplnění podle
-  odpovědí), ne klikáním myší; ovládání myší a klávesnicí pokrývají
-  testy `libs/ui`.
+- Pole „Vyzkoušej klávesnici“ zatím chybí: překlad podle vybraného
+  rozložení je hotový, pole čeká na háček v `libs/ui`.
+- Celý průchod ověřuje autopilot; skutečný vstup (klik, psaní, tlačítko)
+  ověřuje krátký test jen v kroku 1.

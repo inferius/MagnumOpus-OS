@@ -80,10 +80,15 @@ started from the live stick). Status: **[verified in QEMU]** (x86_64,
   choices, preview, and name and password rules live in `installplan`
   and installd. The window only holds the step state and decides nothing
   on its own.
-- **Step 1, keyboard.** A table of layouts with a preview of the key rows
-  of the selected layout. *Add*, *Remove* and *Make main* buttons (the
-  first layout is the main one) and a time zone field. installd supplies
-  the data from `libs/keymap`, the same source the input service uses.
+- **Step 1, keyboard.** A time zone field and a table of layouts with a
+  preview of the key rows of the selected layout. *Add*, *Remove* and
+  *Make main* buttons (the first layout is the main one). installd
+  supplies the data from `libs/keymap`, the same source the input service
+  uses, including a key table (evdev code and character on four levels).
+  With it the window translates key presses to the selected layout
+  (`Installer::translate`, Caps Lock as in `keymap::Keyboard`); the live
+  system layout does not change. The "try the keyboard" field itself
+  waits for a `key_map` hook in `libs/ui` (requested from 6c).
 - **Step 4, change preview.** A disk map *Now* and *After installation*
   (`installplan::map`): segments in disk order including free space, new
   partitions marked. Below the map are the changes *keep* / *new* /
@@ -102,7 +107,16 @@ started from the live stick). Status: **[verified in QEMU]** (x86_64,
   list on the left disappears and only "Krok N z 8: ..." (step N of 8)
   stays at the top.
 
-QEMU test (`cargo xtask test --only instalace-gui`): an answers file with
+The QEMU test (`cargo xtask test --only instalace-gui`) has two parts.
+First **real input**: the live USB without an answers file, the window
+opens by itself after login and QMP sends real events through
+`usb-tablet` and `usb-kbd`. The test clicks into the time zone field,
+presses Ctrl+A, types `utc` and clicks *Pokračovat* (Continue). It checks
+the logged time zone and the second step; the screenshots are
+`vstup-1.png` and `vstup-2.png`. The coordinates hold for a 900 × 680
+window on a 1280 × 800 screen.
+
+Then the **full run**: an answers file with
 `rozhrani = "gui"` goes to the installer window instead of the text path.
 The autopilot (`Installer::autopilot`) fills each step from the answers
 and moves one step forward every 8 s (the first step after 12 s, while the
@@ -285,8 +299,7 @@ level on the host, not by clicking in the GUI.
   `virtio-rng-pci` on aarch64.
 - The partition chart in the graphical wizard is drawn as text for now;
   the bar chart waits for a `libs/ui` component.
-- The design's "try the keyboard" field is missing: the window has no
-  right to switch the live layout of the input service.
-- The graphical wizard is verified only by the autopilot (filled from the
-  answers), not by mouse clicks; mouse and keyboard handling is covered by
-  the `libs/ui` tests.
+- The "try the keyboard" field is still missing: the translation to the
+  selected layout is done, the field waits for a hook in `libs/ui`.
+- The full run is verified by the autopilot; real input (click, typing,
+  button) is verified by a short test in step 1 only.

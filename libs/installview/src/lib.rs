@@ -205,6 +205,41 @@ impl Installer {
         self.waiting.is_some()
     }
 
+    /// Znak klavesy `code` s modifikatory `mods` (bity `inputproto::mods`)
+    /// v rozlozeni vybranem v kroku 1 (nahled), podle tabulky od installd.
+    /// Zkusebni pole tak pise podle vybraneho rozlozeni, ne podle ziveho
+    /// rozlozeni systemu. `None` = klavesa v rozlozeni nepise.
+    pub fn translate(&self, code: u16, mods: u16) -> Option<char> {
+        const SHIFT: u16 = 1 << 0;
+        const ALTGR: u16 = 1 << 3;
+        const CAPS: u16 = 1 << 5;
+        let kb = self.keyboards.get(self.kb_cursor?)?;
+        let levels = kb.keys.iter().find(|(c, _)| *c == code)?.1;
+        let shift = mods & SHIFT != 0;
+        let altgr = mods & ALTGR != 0;
+        let level = (shift as usize) | ((altgr as usize) << 1);
+        if altgr || mods & CAPS == 0 {
+            return levels[level];
+        }
+        // Caps Lock stejne jako `keymap::Keyboard`: u pismen prohodi
+        // velikost, u klaves s pismenem jen v zakladu (ceska horni rada)
+        // pise velke pismeno a se Shiftem cislici.
+        let upper1 = |c: char| {
+            let mut it = c.to_uppercase();
+            match (it.next(), it.next()) {
+                (Some(u), None) => Some(u),
+                _ => None,
+            }
+        };
+        match (levels[0], levels[1]) {
+            (Some(b), Some(u)) if b.is_alphabetic() && upper1(b) == Some(u) => {
+                if shift { Some(b) } else { Some(u) }
+            }
+            (Some(b), _) if b.is_alphabetic() && !shift => upper1(b).or(Some(b)),
+            _ => levels[level],
+        }
+    }
+
     /// Disky, na ktere jde instalovat (ne zive USB): indexy do `disks`.
     pub fn targets(&self) -> Vec<usize> {
         self.disks.as_ref().map(|d| (0..d.len()).filter(|&i| !d[i].live).collect()).unwrap_or_default()
@@ -327,11 +362,14 @@ impl Installer {
         self.mark();
     }
 
-    /// Znacka kroku do logu (testovaci beh: snimek obrazovky).
-    fn mark(&mut self) {
-        if self.auto.is_some() {
-            self.note(format!("gui-install: krok {} {}", self.step + 1, STEPS[self.step]));
+    /// Znacka kroku do logu (diagnostika; test podle ni dela snimky
+    /// a overuje skutecny vstup). Bez hesel a jmen uctu.
+    pub fn mark(&mut self) {
+        if self.step == step::CHECK {
+            let s = self.settings();
+            self.note(format!("gui-install: klavesnice {}, pasmo {}", s.keyboards.join(" "), s.zone));
         }
+        self.note(format!("gui-install: krok {} {}", self.step + 1, STEPS[self.step]));
     }
 
     /// Odpoved installd (`App::external`).

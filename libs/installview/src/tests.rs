@@ -28,8 +28,18 @@ fn installd(req: &[u8]) -> Vec<Reply> {
     let d = target();
     match Request::decode(req).unwrap() {
         Request::Keyboards => vec![Reply::Keyboards(vec![
-            KeyboardEntry { name: "cz".into(), description: "Česká (QWERTZ)".into(), rows: vec!["q w e r t z".into()] },
-            KeyboardEntry { name: "us".into(), description: "Anglická (US)".into(), rows: vec!["q w e r t y".into()] },
+            KeyboardEntry {
+                name: "cz".into(),
+                description: "Česká (QWERTZ)".into(),
+                rows: vec!["q w e r t z".into()],
+                keys: vec![(21, [Some('z'), Some('Z'), None, None]), (3, [Some('ě'), Some('2'), Some('@'), None])],
+            },
+            KeyboardEntry {
+                name: "us".into(),
+                description: "Anglická (US)".into(),
+                rows: vec!["q w e r t y".into()],
+                keys: vec![(21, [Some('y'), Some('Y'), None, None]), (3, [Some('2'), Some('@'), None, None])],
+            },
         ])],
         Request::Disks => vec![Reply::Disks(vec![
             DiskEntry { index: 0, model: "USB stick".into(), bytes: 8 * GIB, live: true, parts: vec!["MO-LOGY".into()], choices: vec![] },
@@ -204,10 +214,28 @@ fn default_keyboard_from_settings() {
     let out: Outbox = Rc::default();
     let o = out.clone();
     let mut m = Installer::new(move |b| o.borrow_mut().push(b));
-    let kb = |n: &str| KeyboardEntry { name: n.into(), description: n.into(), rows: vec![] };
+    let kb = |n: &str| KeyboardEntry { name: n.into(), description: n.into(), rows: vec![], keys: vec![] };
     m.reply(&Reply::Keyboards(vec![kb("us"), kb("cz")]).encode());
     assert_eq!(m.chosen, vec![1]);
     assert_eq!(m.settings().keyboards, vec!["cz"]);
+}
+
+#[test]
+fn try_field_uses_selected_layout() {
+    let mut r = rig();
+    // cz (index 0): klavesa 21 = z, 3 = e s hackem, AltGr+3 = @.
+    assert_eq!(r.m.translate(21, 0), Some('z'));
+    assert_eq!(r.m.translate(21, 1 << 5), Some('Z'), "Caps Lock u pismene");
+    assert_eq!(r.m.translate(21, (1 << 5) | 1), Some('z'), "Caps Lock + Shift");
+    // Ceska horni rada: Caps Lock pise velke pismeno, se Shiftem cislici.
+    assert_eq!(r.m.translate(3, 1 << 5), Some('Ě'));
+    assert_eq!(r.m.translate(3, (1 << 5) | 1), Some('2'));
+    assert_eq!(r.m.translate(3, 1 << 3), Some('@'));
+    assert_eq!(r.m.translate(99, 0), None);
+    // Vybrane us: stejna klavesa pise y.
+    r.m.update(Msg::KbCursor(vec![1]));
+    assert_eq!(r.m.translate(21, 0), Some('y'));
+    assert_eq!(r.m.translate(3, 1), Some('@'));
 }
 
 #[test]
