@@ -173,6 +173,16 @@ pub fn run_all(startup: &Startup) -> usize {
                     println!("[pomaly] {suite}: {name}: {ms} ms");
                 }
             }
+            // Pamet po sade (job initu = cely system): unik se pozna podle
+            // toho, ktera sada pamet nevrati.
+            if let Ok(i) = libos::job::current().and_then(|j| j.info()) {
+                let mib = |b: u64| b / (1024 * 1024);
+                println!(
+                    "init: pamet po sade {suite}: uzivatel {} MiB, jadro {} MiB",
+                    mib(i.user.used),
+                    mib(i.kernel.used)
+                );
+            }
         }
     }
     println!("{passed} testu userspace proslo, {failed} selhalo");

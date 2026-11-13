@@ -342,7 +342,8 @@ fn terminal_window(startup: &Startup) -> TestResult {
         // Jako v beznem behu: kanal pripojeni, termd spusti init
         // (`terminal.rs`); smycku supervisoru tu nahrazuje `poll`.
         let conn = crate::terminal::TERMINALS.lock().client("gui-term (test)").map_err(|e| fail("kanal terminalu", e))?;
-        s.gui
+        let app = s
+            .gui
             .launch_extra(startup, "gui-term", vec![StartHandle::user(conn.into_handle())])
             .map_err(|e| fail("spusteni gui-term", e))?;
         let pump = || crate::terminal::TERMINALS.lock().poll(startup);
@@ -385,7 +386,7 @@ fn terminal_window(startup: &Startup) -> TestResult {
         settle(&s.inspect)?;
         let px = pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?;
         check!(px == badge() || px == badge_inactive(), alloc::format!("odznak nad vlastnim titulkem: {px:#x}"));
-        Ok(())
+        close_terminal(startup, s, app, "gui-term (test)")
     })
 }
 
@@ -471,7 +472,8 @@ fn terminal_shot(startup: &Startup, s: &mut State) -> TestResult {
     // Okna terminalu z drivejsich testu: nove se pozna podle id.
     let before: Vec<u32> = windows(&s.inspect)?.into_iter().map(|w| w.id).collect();
     let conn = crate::terminal::TERMINALS.lock().client("gui-term (snimek)").map_err(|e| fail("kanal terminalu", e))?;
-    s.gui
+    let app = s
+        .gui
         .launch_extra(startup, "gui-term", vec![StartHandle::user(conn.into_handle())])
         .map_err(|e| fail("spusteni gui-term", e))?;
     let pump = || crate::terminal::TERMINALS.lock().poll(startup);
@@ -499,5 +501,34 @@ fn terminal_shot(startup: &Startup, s: &mut State) -> TestResult {
     time::sleep(Duration::from_millis(2500));
     println!("{QEMU_SHOT}terminal");
     time::sleep(Duration::from_millis(1500));
-    Ok(())
+    close_terminal(startup, s, app, "gui-term (snimek)")
+}
+
+/// Konec testu terminalu: okno zavrit, init pak ukonci jeho termd a relace
+/// shellu skonci. Pamet procesu jadro vrati az se zavrenim posledniho
+/// handlu, proto se handle aplikace i zavreny klient (nahradni kanal relace)
+/// zahodi; jinak kazde okno terminalu drzi ~20 MiB do konce testu a pamet
+/// v dalsich testech dojde.
+fn close_terminal(startup: &Startup, s: &mut State, app: usize, name: &str) -> TestResult {
+    if let Some(a) = s.gui.apps.get(app) {
+        let _ = a.process.kill();
+        let _ = a.process.wait_exit(Some(time::deadline_after(TIMEOUT)));
+    }
+    // Indexy aplikaci jinde drzi jen relace; posledni spustena jde odebrat.
+    if app + 1 == s.gui.apps.len() {
+        drop(s.gui.apps.pop());
+    }
+    let end = time::deadline_after(TIMEOUT);
+    loop {
+        let mut t = crate::terminal::TERMINALS.lock();
+        t.poll(startup);
+        if t.is_closed(name) {
+            // Smycku supervisoru tu nahrazuje test: zavrene klienty odebrat.
+            t.cleanup();
+            return Ok(());
+        }
+        drop(t);
+        check!(time::now() < end, "termd po zavreni okna terminalu neskoncil");
+        time::sleep(Duration::from_millis(50));
+    }
 }

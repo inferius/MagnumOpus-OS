@@ -427,6 +427,12 @@ impl Terminals {
         }
     }
 
+    /// Je klient `name` ukonceny (okno skoncilo, termd ukoncen)? Nezname
+    /// jmeno = ano.
+    pub fn is_closed(&self, name: &str) -> bool {
+        self.clients.iter().filter(|c| c.name == name).all(|c| c.closed)
+    }
+
     /// Bezi zalozni konzole?
     pub fn console_running(&self) -> bool {
         self.console.is_some()

@@ -258,6 +258,10 @@ impl Term {
         self.screen.write(&frame);
         if self.conn.conn.is_none() {
             self.screen.write("\r\n\x1b[31mTerminál nemá službu termd (spusťte ho přes init).\x1b[39m");
+        } else if let Some(why) = &self.conn.gave_up {
+            // Opakovani by nepomohlo (pamet, limit restartu): chyba a volba.
+            let text = alloc::format!("\r\n\x1b[31mSlužbu termd nejde spustit ({why}). Enter to zkusí znovu.\x1b[39m");
+            self.screen.write(&text);
         } else if self.termd.is_none() {
             self.screen.write("\r\n\x1b[33mSlužba termd není připojená, připojuji znovu...\x1b[39m");
         }
@@ -283,6 +287,11 @@ impl Term {
     fn event(&mut self, ev: Event) -> Option<bool> {
         Some(match ev {
             Event::Input(r) => match keys::key(&r) {
+                // termd nejde spustit (pamet): Enter to zkusi znovu (rucne).
+                Some(term::ui::Key::Enter) if self.conn.gave_up.is_some() && self.termd.is_none() => {
+                    self.conn.start();
+                    true
+                }
                 Some(k) => {
                     self.app.key(k);
                     true
@@ -352,7 +361,8 @@ fn main(startup: Startup) -> i64 {
         }
     };
     let mut t = Term::new(win, conn);
-    if t.regions().and_then(|_| t.render()).is_err() {
+    if let Err(e) = t.regions().and_then(|_| t.render()) {
+        println!("gui-term: prvni vykresleni selhalo: {e}");
         return 3;
     }
     let mut next_tick = time::deadline_after(TICK);

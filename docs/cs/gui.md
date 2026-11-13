@@ -1253,7 +1253,10 @@ Obsah je interaktivní terminál `term::ui` (editor se zvýrazněním,
 doplňování, bloky výstupu, tabulky, průběhy, výzvy) nad službou relací
 `termd`. Kanál k ní okno nedostane přímo: init mu dá kanál připojení a na
 `connect` spustí termd; po pádu termd se okno připojí znovu ke stejné
-relaci (viz [Init: Terminál](init.md#terminál)).
+relaci (viz [Init: Terminál](init.md#terminál)). Když init termd spustit
+nemůže a opakování nepomůže (`NO_MEMORY`, `NO_RESOURCES` po limitu
+restartů), okno i záložní konzole to přestanou zkoušet, ukážou chybu
+a znovu to zkusí až na Enter **[ověřeno v QEMU]**.
 
 ## Správce úloh
 
