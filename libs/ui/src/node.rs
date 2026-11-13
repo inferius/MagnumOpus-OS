@@ -145,6 +145,10 @@ pub struct Node<M> {
     pub menu: Option<Vec<MenuEntry<M>>>,
     /// Bublina s popisem (po 500 ms nad prvkem).
     pub tooltip: Option<String>,
+    /// Skupina fokusu (rada, sloupec, mrizka) s pameti, viz `ui::spatial`.
+    pub focus_group: Option<crate::spatial::Axis>,
+    /// Vychozi fokus obrazovky.
+    pub default_focus: bool,
 }
 
 /// Co polozka nabidky udela.
@@ -247,6 +251,8 @@ fn node<M>(kind: Kind<M>) -> Node<M> {
         skip_tab: false,
         menu: None,
         tooltip: None,
+        focus_group: None,
+        default_focus: false,
     }
 }
 
@@ -422,6 +428,19 @@ impl<M> Node<M> {
 
     pub fn skip_tab(mut self, s: bool) -> Self {
         self.skip_tab = s;
+        self
+    }
+
+    /// Skupina fokusu: sipky podel osy zustanou v ni, pri navratu do ni
+    /// dostane fokus naposledy vybrany prvek (rada dlazdic na televizi).
+    pub fn focus_group(mut self, a: crate::spatial::Axis) -> Self {
+        self.focus_group = Some(a);
+        self
+    }
+
+    /// Vychozi fokus obrazovky (pri startu a kdyz prvek s fokusem zmizi).
+    pub fn default_focus(mut self) -> Self {
+        self.default_focus = true;
         self
     }
 

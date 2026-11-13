@@ -1644,6 +1644,26 @@ files cost the same as twenty. The application can share data through
   to `App::external_from(index, data)`; `run_with` with one channel still
   calls `App::external`.
 
+### Spatial focus navigation
+
+A remote control or gamepad has neither Tab nor a mouse
+(`cx.focus_only()`), so the library moves focus with arrows spatially
+([TV](../../design/televize.html)):
+
+- An **arrow** the focused element did not consume (tables, fields,
+  sliders and tabs keep arrows) moves focus to the nearest focusable
+  element in that direction: the distance in the direction plus twice the
+  perpendicular offset. When nothing lies that way the application gets
+  the arrow (`App::key`).
+- **Focus group** `Node::focus_group(Axis::Horizontal | Vertical | Grid)`:
+  arrows along the axis stay in the group (at the edge focus does not
+  move), perpendicular ones leave it. Coming back into the group focuses
+  the last selected element, not the nearest (back into a row on the same
+  tile).
+- **Default focus** `Node::default_focus()`: when a screen starts and
+  whenever the focused element disappears; focus is always somewhere.
+- Tab order stays linear for the keyboard and the screen reader.
+
 ### Input source class
 
 Every input record carries a source class (`InputRecord::class`, flags

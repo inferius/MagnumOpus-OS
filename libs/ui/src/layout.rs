@@ -44,6 +44,8 @@ pub struct Element<M> {
     pub skip_tab: bool,
     pub menu: Option<Vec<crate::node::MenuEntry<M>>>,
     pub tooltip: Option<String>,
+    pub focus_group: Option<crate::spatial::Axis>,
+    pub default_focus: bool,
     /// Obdelnik v souradnicich prostoru `space`.
     pub rect: Rect,
     /// 0 = okno, jinak index prvku `Scroll` + 1.
@@ -211,8 +213,9 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
     let mut error = n.error;
     let mut menu = n.menu;
     let mut tooltip = n.tooltip;
+    let (focus_group, default_focus) = (n.focus_group, n.default_focus);
     let mut push = |out: &mut Vec<Element<M>>, kind: ElemKind<M>, rect: Rect| {
-        out.push(Element { kind, key, error: error.take(), skip_tab, menu: menu.take(), tooltip: tooltip.take(), rect, space, parent, disabled, agent });
+        out.push(Element { kind, key, error: error.take(), skip_tab, menu: menu.take(), tooltip: tooltip.take(), focus_group, default_focus, rect, space, parent, disabled, agent });
         out.len()
     };
     match n.kind {
@@ -240,6 +243,8 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
                     skip_tab: true,
                     menu: None,
                     tooltip: None,
+                    focus_group: None,
+                    default_focus: false,
                     rect: ir,
                     space,
                     parent: id,

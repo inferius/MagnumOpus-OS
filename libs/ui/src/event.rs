@@ -93,6 +93,10 @@ impl<M: Clone> Ui<M> {
     /// Udalost s casem zaznamu (ns): dvojklik a trojklik v textovem poli.
     pub fn event_at(&mut self, ev: InputEvent, mods_now: u16, time: Option<u64>) -> Response<M> {
         self.mods = mods_now;
+        // Pamet skupin fokusu pred zmenou (navrat do skupiny).
+        if matches!(ev, InputEvent::Key { .. } | InputEvent::Button { pressed: true, .. }) {
+            self.remember_focus();
+        }
         // Bublina zmizi pri kliku a klavese.
         let hid = matches!(ev, InputEvent::Button { pressed: true, .. } | InputEvent::Key { .. } | InputEvent::PointerLeave | InputEvent::Focus(false)) && self.tip_hide();
         if let Some(mut r) = self.popup_event(&ev, time) {
@@ -202,7 +206,13 @@ impl<M: Clone> Ui<M> {
             }
             InputEvent::Key { code, action, ch } if action != 0 => {
                 if !self.key(code, ch, &mut r) {
-                    r.unhandled_key = Some((code, ch, mods_now));
+                    // Nespotrebovana sipka: prostorova navigace fokusu.
+                    let plain = mods_now & (mods::CTRL | mods::ALT | mods::META | mods::SHIFT) == 0;
+                    if plain && matches!(code, KEY_LEFT | KEY_RIGHT | KEY_UP | KEY_DOWN) && self.spatial_move(code) {
+                        r.redraw = true;
+                    } else {
+                        r.unhandled_key = Some((code, ch, mods_now));
+                    }
                 }
             }
             InputEvent::Text(ch) => {

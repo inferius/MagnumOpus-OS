@@ -12,7 +12,7 @@ Nativní knihovna UI (milník 6c): jedna pro všechny aplikace. Aplikace popíš
 
 ## Testy
 
-- `cargo test -p ui` (`src/tests/`: `mod.rs` zakladni prvky, `keys.rs` klice, stav, heslo, `text.rs` editor, `field.rs` textova pole a schranka, `table.rs` tabulka, `controls.rs` prepinac, volba, posuvnik, segmenty, zalozky, graf podilu, `popup.rs` vyber, nabidky, bublina, `shots.rs` snimky vzhledu proti `tests/shots/*.png` (prepis jen `cargo xtask test --update-shots`), `context.rs` kontext okna); `client/` jen s `--features os` pro cíl OS. QEMU: `cargo xtask test --only gui`.
+- `cargo test -p ui` (`src/tests/`: `mod.rs` zakladni prvky, `keys.rs` klice, stav, heslo, `text.rs` editor, `field.rs` textova pole a schranka, `table.rs` tabulka, `controls.rs` prepinac, volba, posuvnik, segmenty, zalozky, graf podilu, `popup.rs` vyber, nabidky, bublina, `shots.rs` snimky vzhledu proti `tests/shots/*.png` (prepis jen `cargo xtask test --update-shots`), `context.rs` kontext okna, `spatial.rs` prostorova navigace fokusu); `client/` jen s `--features os` pro cíl OS. QEMU: `cargo xtask test --only gui`.
 
 ## Pasti
 

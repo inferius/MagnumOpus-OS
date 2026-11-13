@@ -325,5 +325,6 @@ mod field;
 mod keys;
 mod popup;
 mod shots;
+mod spatial;
 mod table;
 mod text;

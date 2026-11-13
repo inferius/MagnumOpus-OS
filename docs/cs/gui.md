@@ -1581,6 +1581,25 @@ tisíc souborů tak stojí stejně jako dvacet. Data může aplikace sdílet př
   `App::external_from(index, data)`; `run_with` s jedním kanálem dál
   volá `App::external`.
 
+### Prostorová navigace fokusu
+
+Dálkový ovladač a gamepad nemají Tab ani myš (`cx.focus_only()`), proto
+knihovna posouvá fokus šipkami prostorově ([Televize](../../design/televize.html)):
+
+- **Šipka**, kterou prvek s fokusem nespotřeboval (tabulka, pole,
+  posuvník, záložky si šipky nechají), přesune fokus na nejbližší
+  zaměřitelný prvek v daném směru: vzdálenost ve směru plus dvojnásobek
+  kolmé odchylky. Když v tom směru nic není, šipku dostane aplikace
+  (`App::key`).
+- **Skupina fokusu** `Node::focus_group(Axis::Horizontal | Vertical |
+  Grid)`: šipky podél osy zůstanou ve skupině (na kraji se fokus nehne),
+  kolmé ze skupiny vystoupí. Při návratu do skupiny dostane fokus
+  naposledy vybraný prvek, ne nejbližší (návrat do řady na stejnou
+  dlaždici).
+- **Výchozí fokus** `Node::default_focus()`: při startu obrazovky a vždy,
+  když prvek s fokusem zmizí; fokus je tak vždy někde.
+- Pořadí Tab zůstává lineární pro klávesnici a čtečku obrazovky.
+
 ### Třída zdroje vstupu
 
 Každý záznam vstupu nese třídu zdroje (`InputRecord::class`, příznaky

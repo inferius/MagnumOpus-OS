@@ -23,6 +23,7 @@ pub mod look;
 pub mod node;
 pub(crate) mod popup;
 pub mod scrollbar;
+pub mod spatial;
 mod table;
 pub mod text;
 
@@ -46,6 +47,7 @@ pub use node::*;
 use layout::{ElemKind, Element};
 pub use look::Look;
 pub use context::{Context, SizeClass};
+pub use spatial::Axis;
 
 /// Id uzlu s textem chyby prvku s id `id` (mimo rozsah id prvku).
 pub fn error_node(id: u32) -> u32 {
@@ -237,6 +239,8 @@ pub struct Ui<M> {
     pub(crate) input_class: u8,
     /// Trida zdroje gesta, ktere pozadalo o vlozeni.
     pub(crate) paste_class: u8,
+    /// Pamet skupin fokusu: klic skupiny -> naposledy vybrany prvek.
+    pub(crate) group_memory: BTreeMap<Key, Key>,
     /// Posun obsahu posouvanych oblasti podle klice prvku.
     pub(crate) scroll: BTreeMap<Key, i32>,
     /// Ukazatel (souradnice okna).
@@ -297,6 +301,7 @@ impl<M: Clone> Ui<M> {
             tip_shift: (0, 0),
             input_class: 0,
             paste_class: 0,
+            group_memory: BTreeMap::new(),
             scroll: BTreeMap::new(),
             pointer: (-1, -1),
             mods: 0,
@@ -388,7 +393,10 @@ impl<M: Clone> Ui<M> {
         self.assign_ids();
         let find = |k: Option<Key>| k.and_then(|k| self.by_key.get(&k).copied());
         let focus = find(fk).filter(|&i| self.elems[i].focusable());
-        self.focus = focus.or_else(|| self.elems.iter().position(|e| e.focusable()));
+        // Fokus je vzdy nekde: zmizely prvek -> vychozi fokus obrazovky.
+        self.focus = focus.or_else(|| self.default_focus_index());
+        let by_key = &self.by_key;
+        self.group_memory.retain(|g, _| by_key.contains_key(g));
         self.pressed = find(pk);
         self.key_pressed = find(kk);
         // Textova pole prevezmou hodnotu aplikace (kurzor a historie zustanou).
