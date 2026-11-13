@@ -203,3 +203,15 @@ fn big_file_is_read_lazily() {
     // Maly soubor zustava bajty (beze zmeny chovani).
     assert!(matches!(one("open a.txt"), Value::Bytes(_)));
 }
+
+#[test]
+fn system_error_cause_is_czech_from_catalog() {
+    // Kazdy kod chyby systemu ma v katalogu kratky cesky vyznam.
+    for e in abi::error::ALL {
+        let m = crate::explain::meaning(e.name());
+        assert!(m.as_deref().is_some_and(|t| !t.is_empty() && !t.ends_with('.')), "{}: {m:?}", e.name());
+    }
+    // Hlaseni chyby: "příčina: KOD: vyznam" cesky (s diakritikou).
+    let r = crate::error::ShError::sys(abi::Error::NotFound, "soubor nejde otevřít").report("");
+    assert!(r.contains("příčina: NOT_FOUND: požadovaná věc neexistuje"), "{r}");
+}

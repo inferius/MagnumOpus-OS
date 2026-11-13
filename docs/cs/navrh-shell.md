@@ -391,6 +391,10 @@ zahodí; poznámku vypíše `log`.
 - Chyba nese kód, popis, místo ve zdroji (řádek, sloupec, podtržení),
   radu a příčinu. `explain kód` ukáže vysvětlení z [Kódů chyb](chyby.md)
   a z [kapitoly Chyby shellu](#chyby-shellu).
+- Příčina z chyby systému se ukáže česky z téhož katalogu (věta
+  **Význam** v [Kódech chyb](chyby.md)), např. `příčina: NOT_FOUND:
+  požadovaná věc neexistuje`. Popisy v `abi` zůstávají ASCII a slouží jen
+  jako náhrada **[implementováno]**.
 
 ### Funkce, closure, úlohy
 

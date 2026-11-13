@@ -403,6 +403,10 @@ earlier statements are dropped there; use `log` for a note.
   column, underline), a hint and a cause. `explain code` shows the
   explanation from [Error codes](errors.md) and from the
   [Shell errors chapter](#shell-errors).
+- The cause from a system error is shown in Czech from the same catalog
+  (the **Význam** sentence in the Czech error codes page), e.g.
+  `příčina: NOT_FOUND: požadovaná věc neexistuje`. The descriptions in
+  `abi` stay ASCII and are only a fallback **[implemented]**.
 
 ### Functions, closures, jobs
 
