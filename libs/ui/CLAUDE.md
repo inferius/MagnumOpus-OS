@@ -1,0 +1,20 @@
+# libs/ui
+
+Nativní knihovna UI (milník 6c): jedna pro všechny aplikace. Aplikace popíše rozhraní deklarativně (`node`), knihovna ho rozvrhne (`layout`), vykreslí do bufferu (`draw`), převede vstup a akce přístupnosti na zprávy aplikace (`event`) a odvodí strom vrstev a strom přístupnosti. `Ui` (jádro) nezávisí na OS. Běhové prostředí pro aplikace v OS (kanál ke kompozitoru, buffery ve VMO, smyčka) je v `src/client/` za feature `os`. Popis: `docs/cs/gui.md#nativní-knihovna-ui-libsui`.
+
+## Invarianty
+
+- Aplikace nic z toho nepíše ručně: strom přístupnosti a vrstev se odvozuje, ne duplikuje.
+- Vzhled jen z tokenů (`libs/theme` / `look.rs`), žádná pevná čísla vzhledu v prvcích.
+- Jádro `Ui` zůstává bez závislosti na `libos`; všechno OS-specifické patří do `client/` (feature `os`).
+- Knihovna nenabízí aplikacím barvy `trust_*` (odznak důvěry, systémové dialogy) ani `ai_*` (jen agent AI); patří jen systému.
+- Protokol s kompozitorem je v `libs/guiproto`; změny drž kompatibilní s `libs/comp`.
+
+## Testy
+
+- `cargo test -p ui` (`src/tests.rs`); `client/` jen s `--features os` pro cíl OS. QEMU: `cargo xtask test --only gui`.
+
+## Pasti
+
+- Aplikace UI vykresluje do vlastního bufferu; kompozitor mu nevěří (viz `libs/comp/CLAUDE.md`), ale i klient musí ošetřit nesmyslné rozměry od kompozitoru.
+- `client/mod.rs` má ~700 řádků; při dalším růstu dělit (obnova po pádu je už v `restore.rs`).

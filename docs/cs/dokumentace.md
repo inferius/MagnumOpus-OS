@@ -73,6 +73,7 @@ Ryzen 7 5800X)“. Čísla bez podmínek se neporovnávají.
 - vlastnická stránka je aktuální, souhrny jen odkazují,
 - nová tvrzení mají test, nová čísla podmínky,
 - cs a en verze říkají totéž,
+- `CLAUDE.md` složky (deník pro agenty) odpovídá změně: aktualizovat ho, když se změní její invarianty nebo klíčové soubory,
 - `cargo xtask docs` projde. Kromě odkazů a kotev kontroluje značky stavu
   (neznámá značka je chyba) a vypíše varování: měření bez revize
   sestavení, cs a en verze s jiným počtem kapitol. Varování ze staré
