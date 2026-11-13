@@ -1,0 +1,632 @@
+//! Vyskakovaci prvky okna: rozbalovaci vyber (`select`), nabidka (kontextova
+//! `Node::context_menu`) a bublina (`Node::tooltip`).
+//!
+//! Vzhled podle `.popover` a `.menu` v `design/assets/mo.css`: karta
+//! `surface` s ramem `border` (vysoky kontrast 2 px), zaobleni `card`,
+//! okraj `space[2]`, polozky vysky `control_h` se zaoblenim `xs`, najeti
+//! a vyber `accent_soft`. Bublina jako v kompozitoru (`surface`, ram
+//! `border_strong`, pismo `small`).
+//!
+//! Ovladani nabidky: sipky (preskoci oddelovace a zakazane), Home/End,
+//! Enter / mezernik vybere, Esc zavre, psani skoci na polozku, mys: najeti,
+//! klik, stisk-tah-pusteni; klik mimo nabidku ji zavre (a nic dalsiho
+//! neudela). Vyber se otevre klikem, Enter, mezernikem, Alt+dolu nebo F4;
+//! zavreny vyber meni sipky nahoru / dolu primo. Kontextova nabidka: prave
+//! tlacitko, Shift+F10, klavesa Menu.
+//!
+//! Nabidka se kresli do okna (orizne se jeho okrajem); prekryti pres okraj
+//! okna bude systemovy popover kompozitoru (dalsi krok).
+
+use alloc::string::String;
+use alloc::vec::Vec;
+
+use gfx::{Canvas, Rect};
+use guiproto::a11y::{self, Node as A11yNode, Role};
+use guiproto::window::InputEvent;
+use inputproto::code::*;
+use inputproto::mods;
+
+use crate::event::Response;
+use crate::layout::ElemKind;
+use crate::node::{MenuAct, MenuEntry};
+use crate::{Key, State, Ui};
+
+/// Prodleva bubliny (ns, jako v kompozitoru).
+pub const TIP_DELAY: u64 = 500_000_000;
+
+/// Nejsirsi bublina (px).
+const TIP_MAX_W: u32 = 280;
+
+/// Klavesa Menu (kontextova nabidka).
+const KEY_MENU: u16 = 127;
+
+/// Co udela polozka otevrene nabidky.
+#[derive(Clone)]
+pub(crate) enum PAct<M> {
+    Msg(M),
+    Action(String, Vec<guiproto::action::Arg>),
+    /// Volba `k` rozbalovaciho vyberu.
+    Pick(usize),
+}
+
+#[derive(Clone)]
+pub(crate) struct PItem<M> {
+    label: String,
+    shortcut: String,
+    disabled: String,
+    checked: Option<bool>,
+    separator: bool,
+    act: Option<PAct<M>>,
+}
+
+impl<M> PItem<M> {
+    fn usable(&self) -> bool {
+        !self.separator && self.disabled.is_empty() && self.act.is_some()
+    }
+}
+
+/// Otevrena nabidka.
+#[derive(Clone)]
+pub(crate) struct Popup<M> {
+    owner: Key,
+    select: bool,
+    items: Vec<PItem<M>>,
+    /// Obdelnik v souradnicich okna.
+    rect: Rect,
+    hi: Option<usize>,
+    scroll: i32,
+    /// Stisk zacal uvnitr nabidky (pusteni nad polozkou ji vybere).
+    press_inside: bool,
+    /// Ukazatel se od otevreni pohnul (stisk-tah-pusteni u vyberu).
+    moved: bool,
+    opened_at: (i32, i32),
+}
+
+impl<M> Popup<M> {
+    pub(crate) fn owner(&self) -> Key {
+        self.owner
+    }
+}
+
+fn virt_id(el: u32, kind: u64, n: u64) -> u32 {
+    0x4000_0000 | (Key::ROOT.mix(el as u64).mix(kind).mix(n).0 as u32 & 0x3FFF_FFFF)
+}
+
+impl<M: Clone> Ui<M> {
+    fn row_h(&self, it: &PItem<M>) -> u32 {
+        if it.separator { self.look.theme.space[2] + 1 } else { self.look.control_h() }
+    }
+
+    /// Obdelnik prvku `i` v souradnicich okna (prvek v posouvane oblasti).
+    pub(crate) fn window_rect(&self, i: usize) -> Rect {
+        let r = self.elems[i].rect;
+        let sp = self.elems[i].space;
+        if sp == 0 {
+            return r;
+        }
+        match self.scroll_areas().into_iter().find(|a| a.index + 1 == sp) {
+            Some(a) => Rect::new(r.x + a.rect.x, r.y + a.rect.y - a.offset, r.w, r.h),
+            None => r,
+        }
+    }
+
+    /// Otevre nabidku s polozkami `items` u bodu / pod prvkem `anchor`
+    /// (souradnice okna), sirka nejmene `min_w`.
+    fn open_popup(&mut self, owner: Key, select: bool, items: Vec<PItem<M>>, anchor: Rect, min_w: u32, hi: Option<usize>) {
+        let th = &self.look.theme;
+        let pad = th.space[2];
+        let body = self.look.body();
+        let gap = th.space[3];
+        let check = th.size.icon_s + gap;
+        let label_w = items.iter().map(|i| self.look.width(&i.label, body)).max().unwrap_or(0);
+        let short_w = items.iter().map(|i| self.look.width(&i.shortcut, body)).max().unwrap_or(0);
+        let w = (label_w + if short_w > 0 { short_w + 2 * gap } else { 0 } + check + 2 * gap + 2 * pad).max(min_w).max(th.size.hit_min * 5).min(self.w);
+        let content: u32 = items.iter().map(|i| self.row_h(i)).sum::<u32>() + 2 * pad;
+        let h = content.min(self.h.saturating_sub(2 * th.space[2]));
+        // Pod kotvu, kdyz se nevejde, nad ni; vzdy uvnitr okna.
+        let below = anchor.bottom() as i32 + 2;
+        let y = if below + h as i32 <= self.h as i32 { below } else { (anchor.y - 2 - h as i32).max(0) };
+        let x = anchor.x.clamp(0, (self.w - w) as i32);
+        let p = self.pointer;
+        self.popup = Some(Popup { owner, select, items, rect: Rect::new(x, y, w, h), hi, scroll: 0, press_inside: false, moved: false, opened_at: p });
+        self.tip = None;
+        self.tip_shown = None;
+        if let Some(k) = hi {
+            self.popup_reveal(k);
+        }
+    }
+
+    fn popup_reveal(&mut self, k: usize) {
+        let Some(p) = &self.popup else { return };
+        let pad = self.look.theme.space[2] as i32;
+        let top: i32 = p.items[..k].iter().map(|i| self.row_h(i) as i32).sum();
+        let h = self.row_h(&p.items[k]) as i32;
+        let view = p.rect.h as i32 - 2 * pad;
+        let total: i32 = p.items.iter().map(|i| self.row_h(i) as i32).sum();
+        let mut s = p.scroll;
+        if top < s {
+            s = top;
+        } else if top + h > s + view {
+            s = top + h - view;
+        }
+        if let Some(p) = &mut self.popup {
+            p.scroll = s.clamp(0, (total - view).max(0));
+        }
+    }
+
+    /// Polozka nabidky pod bodem okna.
+    fn popup_item_at(&self, x: i32, y: i32) -> Option<usize> {
+        let p = self.popup.as_ref()?;
+        if !p.rect.contains(x, y) {
+            return None;
+        }
+        let pad = self.look.theme.space[2] as i32;
+        let mut top = p.rect.y + pad - p.scroll;
+        for (k, it) in p.items.iter().enumerate() {
+            let h = self.row_h(it) as i32;
+            if y >= top && y < top + h {
+                return it.usable().then_some(k);
+            }
+            top += h;
+        }
+        None
+    }
+
+    /// Polozky z `MenuEntry` (kontextova nabidka).
+    fn items_from(entries: &[MenuEntry<M>]) -> Vec<PItem<M>> {
+        entries
+            .iter()
+            .map(|e| PItem {
+                label: e.label.clone(),
+                shortcut: e.shortcut.clone(),
+                disabled: e.disabled.clone(),
+                checked: e.checked,
+                separator: e.separator,
+                act: e.act.clone().map(|a| match a {
+                    MenuAct::Msg(m) => PAct::Msg(m),
+                    MenuAct::Action(id, args) => PAct::Action(id, args),
+                }),
+            })
+            .collect()
+    }
+
+    /// Otevre rozbalovaci vyber `i`.
+    fn open_select(&mut self, i: usize) {
+        let ElemKind::Select { options, selected, .. } = &self.elems[i].kind else { return };
+        let items = options
+            .iter()
+            .enumerate()
+            .map(|(k, o)| PItem { label: o.clone(), shortcut: String::new(), disabled: String::new(), checked: Some(k == *selected), separator: false, act: Some(PAct::Pick(k)) })
+            .collect();
+        let sel = (*selected < options.len()).then_some(*selected);
+        let r = self.window_rect(i);
+        self.open_popup(self.elems[i].key, true, items, r, r.w, sel);
+    }
+
+    /// Kontextova nabidka prvku `i` nebo jeho nejblizsiho predka, ktery ji
+    /// ma; `at` = bod okna (mys) nebo `None` (klavesnice: pod prvkem).
+    pub(crate) fn open_context(&mut self, i: usize, at: Option<(i32, i32)>) -> bool {
+        let mut k = Some(i);
+        while let Some(j) = k {
+            if let Some(m) = &self.elems[j].menu {
+                let items = Self::items_from(m);
+                if items.is_empty() {
+                    return false;
+                }
+                let anchor = match at {
+                    Some((x, y)) => Rect::new(x, y - 2, 1, 1),
+                    None => self.window_rect(i),
+                };
+                self.open_popup(self.elems[j].key, false, items, anchor, 0, None);
+                return true;
+            }
+            k = self.elems[j].parent.checked_sub(1);
+        }
+        false
+    }
+
+    fn close_popup(&mut self, r: &mut Response<M>) {
+        if self.popup.take().is_some() {
+            r.redraw = true;
+        }
+    }
+
+    /// Vybere polozku `k` otevrene nabidky a zavre ji.
+    fn choose(&mut self, k: usize, r: &mut Response<M>) {
+        let Some(p) = self.popup.take() else { return };
+        r.redraw = true;
+        let Some(it) = p.items.get(k).filter(|i| i.usable()) else { return };
+        match it.act.clone() {
+            Some(PAct::Msg(m)) => r.msgs.push(m),
+            Some(PAct::Action(id, args)) => r.actions.push((id, args)),
+            Some(PAct::Pick(n)) => {
+                if let Some(i) = self.index_of(p.owner)
+                    && let ElemKind::Select { selected, on_select: Some(f), .. } = &self.elems[i].kind
+                    && *selected != n
+                {
+                    r.msgs.push(f(n));
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// Dalsi pouzitelna polozka od `from` smerem `dir`.
+    fn step_item(&self, from: Option<usize>, dir: i32) -> Option<usize> {
+        let p = self.popup.as_ref()?;
+        let n = p.items.len() as i32;
+        let mut k = match from {
+            Some(k) => k as i32,
+            None if dir > 0 => -1,
+            None => n,
+        };
+        for _ in 0..n {
+            k += dir;
+            if k < 0 || k >= n {
+                return from;
+            }
+            if p.items[k as usize].usable() {
+                return Some(k as usize);
+            }
+        }
+        from
+    }
+
+    /// Udalosti pri otevrene nabidce (vsechny jsou jeji) a otevirani
+    /// vyberu a kontextove nabidky. `None` = obecne zpracovani.
+    pub(crate) fn popup_event(&mut self, ev: &InputEvent, time: Option<u64>) -> Option<Response<M>> {
+        let mut r = Response::default();
+        if let Some(t) = time {
+            self.now = t;
+        }
+        if self.popup.is_none() {
+            return self.popup_open_event(ev);
+        }
+        match *ev {
+            InputEvent::PointerMove { x, y } => {
+                self.pointer = (x, y);
+                let hi = self.popup_item_at(x, y);
+                let p = self.popup.as_mut().unwrap();
+                if (x - p.opened_at.0).abs().max((y - p.opened_at.1).abs()) > 4 {
+                    p.moved = true;
+                }
+                if hi.is_some() && hi != p.hi {
+                    p.hi = hi;
+                    r.redraw = true;
+                }
+            }
+            InputEvent::Button { pressed: true, x, y, .. } => {
+                if self.popup.as_ref().unwrap().rect.contains(x, y) {
+                    self.popup.as_mut().unwrap().press_inside = true;
+                } else {
+                    // Klik mimo nabidku ji jen zavre.
+                    self.close_popup(&mut r);
+                    self.pressed = None;
+                }
+            }
+            InputEvent::Button { pressed: false, x, y, .. } => {
+                let p = self.popup.as_ref().unwrap();
+                let release_picks = p.press_inside || (p.select && p.moved);
+                if let Some(k) = self.popup_item_at(x, y)
+                    && release_picks
+                {
+                    self.choose(k, &mut r);
+                }
+                if let Some(p) = self.popup.as_mut() {
+                    p.press_inside = false;
+                }
+                self.pressed = None;
+            }
+            InputEvent::Scroll { dy, .. } => {
+                let pad = self.look.theme.space[2] as i32;
+                let p = self.popup.as_ref().unwrap();
+                let total: i32 = p.items.iter().map(|i| self.row_h(i) as i32).sum();
+                let max = (total - (p.rect.h as i32 - 2 * pad)).max(0);
+                let step = self.look.control_h() as i32;
+                let p = self.popup.as_mut().unwrap();
+                p.scroll = (p.scroll - dy * step).clamp(0, max);
+                r.redraw = true;
+            }
+            InputEvent::Key { code, action, ch } if action != 0 => {
+                let hi = self.popup.as_ref().unwrap().hi;
+                let to = match code {
+                    KEY_DOWN => self.step_item(hi, 1),
+                    KEY_UP => self.step_item(hi, -1),
+                    KEY_HOME => self.step_item(None, 1),
+                    KEY_END => self.step_item(None, -1),
+                    KEY_ENTER | KEY_KPENTER | KEY_SPACE => {
+                        if let Some(k) = hi {
+                            self.choose(k, &mut r);
+                        }
+                        return Some(r);
+                    }
+                    KEY_ESC | KEY_TAB => {
+                        self.close_popup(&mut r);
+                        return Some(r);
+                    }
+                    _ => {
+                        // Psani: prvni pouzitelna polozka zacinajici pismenem.
+                        let c = ch.filter(|c| !c.is_control()).map(|c| c.to_lowercase().collect::<String>());
+                        let p = self.popup.as_ref().unwrap();
+                        c.and_then(|c| {
+                            let n = p.items.len();
+                            let start = hi.map_or(0, |h| h + 1);
+                            (0..n).map(|d| (start + d) % n).find(|&k| p.items[k].usable() && p.items[k].label.to_lowercase().starts_with(&c))
+                        })
+                    }
+                };
+                if let Some(k) = to {
+                    self.popup.as_mut().unwrap().hi = Some(k);
+                    self.popup_reveal(k);
+                    r.redraw = true;
+                }
+            }
+            InputEvent::Focus(false) | InputEvent::PointerLeave => {
+                if matches!(ev, InputEvent::Focus(false)) {
+                    self.close_popup(&mut r);
+                }
+                return None;
+            }
+            _ => {}
+        }
+        Some(r)
+    }
+
+    /// Otevreni vyberu (stisk, klavesy) a kontextove nabidky; zavreny
+    /// vyber sipkami meni volbu. Ostatni udalosti `None`.
+    fn popup_open_event(&mut self, ev: &InputEvent) -> Option<Response<M>> {
+        let mut r = Response::default();
+        match *ev {
+            InputEvent::Button { code, pressed: true, x, y } if code == BTN_LEFT => {
+                let i = self.hit(x, y)?;
+                if !matches!(self.elems[i].kind, ElemKind::Select { .. }) || self.elems[i].disabled {
+                    return None;
+                }
+                self.pointer = (x, y);
+                self.focus = Some(i);
+                self.hover = Some(i);
+                self.open_select(i);
+                r.redraw = true;
+                Some(r)
+            }
+            InputEvent::Button { code, pressed: true, x, y } if code == BTN_RIGHT => {
+                let i = self.hit(x, y)?;
+                // Tabulka nejdriv vybere radek (`on_context`), nabidku otevre sama.
+                if matches!(self.elems[i].kind, ElemKind::Table(_)) {
+                    return None;
+                }
+                self.pointer = (x, y);
+                if self.elems[i].focusable() {
+                    self.focus = Some(i);
+                }
+                self.open_context(i, Some((x, y))).then(|| {
+                    r.redraw = true;
+                    r
+                })
+            }
+            InputEvent::Key { code, action, .. } if action != 0 => {
+                let i = self.focus?;
+                let shift = self.mods & mods::SHIFT != 0;
+                if code == KEY_MENU || (code == KEY_F10 && shift) {
+                    return self.open_context(i, None).then(|| {
+                        r.redraw = true;
+                        r
+                    });
+                }
+                let ElemKind::Select { options, selected, on_select } = &self.elems[i].kind else { return None };
+                let alt = self.mods & mods::ALT != 0;
+                match code {
+                    KEY_ENTER | KEY_KPENTER | KEY_SPACE | KEY_F4 => {}
+                    KEY_DOWN if alt => {}
+                    KEY_UP | KEY_DOWN => {
+                        let n = options.len();
+                        let k = if code == KEY_UP { selected.saturating_sub(1) } else { (selected + 1).min(n.saturating_sub(1)) };
+                        if k != *selected
+                            && let Some(f) = on_select
+                        {
+                            r.msgs.push(f(k));
+                        }
+                        r.redraw = true;
+                        return Some(r);
+                    }
+                    _ => return None,
+                }
+                if self.elems[i].disabled {
+                    return Some(r);
+                }
+                self.open_select(i);
+                r.redraw = true;
+                Some(r)
+            }
+            _ => None,
+        }
+    }
+
+    /// Nakresli rozbalovaci vyber (pole se sipkou).
+    pub(crate) fn draw_select(&mut self, c: &mut Canvas<'_>, i: usize, st: State) {
+        let th = self.look.theme.clone();
+        let col = &th.color;
+        let r = self.elems[i].rect;
+        let ElemKind::Select { options, selected, .. } = &self.elems[i].kind else { return };
+        let text = options.get(*selected).cloned().unwrap_or_default();
+        let k = if st.disabled { th.opacity.disabled } else { 255 };
+        let fade = |x: u32| crate::draw::fade(x, col.surface, k);
+        let bg = if st.hover || st.pressed { col.surface_3 } else { col.surface };
+        c.round_fill_bordered(r, th.radius.control, fade(bg), fade(col.border_strong), 1);
+        if st.focus_visible {
+            crate::draw::focus_ring(c, r, th.radius.control, th.size.focus_ring, th.size.focus_offset, col.focus);
+        }
+        let is = th.size.icon_s;
+        let body = self.look.body();
+        let room = r.w.saturating_sub(2 * th.space[4] + is + th.space[2]);
+        let f = self.look.face(body);
+        let b = r.y + f.baseline_in(body.size, r.h);
+        f.draw_ellipsized(c, r.x + th.space[4] as i32, b, &text, body.size, fade(col.ink), room);
+        self.icons.draw(c, "down", r.right() as i32 - (th.space[4] + is) as i32, r.y + (r.h - is) as i32 / 2, is, th.icon_stroke, fade(col.ink_muted));
+    }
+
+    /// Nakresli otevrenou nabidku a bublinu (vrstva okna, nad prvky).
+    pub(crate) fn draw_overlays(&mut self, c: &mut Canvas<'_>) {
+        self.draw_popup(c);
+        self.draw_tip(c);
+    }
+
+    fn draw_popup(&mut self, c: &mut Canvas<'_>) {
+        let Some(p) = self.popup.clone() else { return };
+        let th = self.look.theme.clone();
+        let col = &th.color;
+        let edge = if th.mode == theme::Mode::Contrast { 2 } else { 1 };
+        c.round_fill_bordered(p.rect, th.radius.card, col.surface, col.border, edge);
+        let pad = th.space[2] as i32;
+        let old = c.clip();
+        let inner = Rect::new(p.rect.x + pad, p.rect.y + pad, p.rect.w.saturating_sub(2 * pad as u32), p.rect.h.saturating_sub(2 * pad as u32));
+        c.set_clip(old.intersect(&inner));
+        let body = self.look.body();
+        let gap = th.space[3] as i32;
+        let is = th.size.icon_s;
+        let mut y = inner.y - p.scroll;
+        for (k, it) in p.items.iter().enumerate() {
+            let h = self.row_h(it) as i32;
+            if it.separator {
+                c.fill(Rect::new(inner.x + gap, y + h / 2, inner.w.saturating_sub(2 * gap as u32), 1), col.border);
+                y += h;
+                continue;
+            }
+            let row = Rect::new(inner.x, y, inner.w, h as u32);
+            if p.hi == Some(k) {
+                c.round_fill(row, th.radius.xs, col.accent_soft);
+            }
+            let ink = if it.disabled.is_empty() { col.ink } else { col.ink_faint };
+            let mut x = row.x + gap;
+            if it.checked == Some(true) {
+                self.icons.draw(c, "check", x, y + (h - is as i32) / 2, is, th.icon_stroke, ink);
+            }
+            x += (is + th.space[3]) as i32;
+            let f = self.look.face(body);
+            let b = y + f.baseline_in(body.size, h as u32);
+            let sw = if it.shortcut.is_empty() { 0 } else { f.width(&it.shortcut, body.size) as i32 + 2 * gap };
+            f.draw_ellipsized(c, x, b, &it.label, body.size, ink, (row.right() as i32 - x - sw).max(0) as u32);
+            if !it.shortcut.is_empty() {
+                let w = f.width(&it.shortcut, body.size) as i32;
+                f.draw(c, row.right() as i32 - gap - w, b, &it.shortcut, body.size, col.ink_muted);
+            }
+            y += h;
+        }
+        c.set_clip(old);
+    }
+
+    /// Obdelnik bubliny (pod ukazatelem, uvnitr okna).
+    fn tip_rect(&self, text: &str) -> Rect {
+        let th = &self.look.theme;
+        let s = th.text.small;
+        let w = (self.look.width(text, s) + 2 * th.space[4]).min(TIP_MAX_W).min(self.w);
+        let h = s.line + 2 * th.space[2];
+        let (px, py) = self.pointer;
+        let below = py + th.size.icon_m as i32;
+        let y = if below + h as i32 <= self.h as i32 { below } else { (py - h as i32 - th.space[2] as i32).max(0) };
+        Rect::new(px.clamp(0, (self.w - w) as i32), y, w, h)
+    }
+
+    fn tip_text(&self) -> Option<String> {
+        let k = self.tip_shown?;
+        self.elems[self.index_of(k)?].tooltip.clone()
+    }
+
+    fn draw_tip(&mut self, c: &mut Canvas<'_>) {
+        let Some(text) = self.tip_text() else { return };
+        let th = self.look.theme.clone();
+        let r = self.tip_rect(&text);
+        let s = th.text.small;
+        c.round_fill_bordered(r, th.radius.control, th.color.surface, th.color.border_strong, 1);
+        let f = self.look.face(s);
+        let b = r.y + f.baseline_in(s.size, r.h);
+        f.draw_ellipsized(c, r.x + th.space[4] as i32, b, &text, s.size, th.color.ink, r.w.saturating_sub(2 * th.space[4]));
+    }
+
+    /// Najeti na prvek s bublinou (cas `time`): odpocet, jinak bublinu
+    /// skryt. Volat po zmene najeti.
+    pub(crate) fn tip_hover(&mut self, time: Option<u64>) {
+        let k = self.hover.filter(|&i| self.elems[i].tooltip.is_some()).map(|i| self.elems[i].key);
+        if self.tip.map(|t| t.0) != k {
+            self.tip = k.map(|k| (k, time.unwrap_or(self.now)));
+            self.tip_shown = None;
+        }
+    }
+
+    /// Skryje bublinu (klik, klavesa, odjeti).
+    pub(crate) fn tip_hide(&mut self) -> bool {
+        let shown = self.tip_shown.take().is_some();
+        self.tip = None;
+        shown
+    }
+
+    /// Kdy klient ma probudit `Ui::timer` (bublina), `None` = nic neceka.
+    pub fn next_deadline(&self) -> Option<u64> {
+        match (self.tip, self.tip_shown) {
+            (Some((_, t)), None) => Some(t + TIP_DELAY),
+            _ => None,
+        }
+    }
+
+    /// Cas `now` (ns, stejne hodiny jako cas vstupu): ukaze bublinu, kdyz
+    /// uplynula prodleva. Vraci, zda prekreslit.
+    pub fn timer(&mut self, now: u64) -> bool {
+        self.now = now;
+        if let (Some((k, t)), None) = (self.tip, self.tip_shown)
+            && now >= t + TIP_DELAY
+            && self.popup.is_none()
+        {
+            self.tip_shown = Some(k);
+            return true;
+        }
+        false
+    }
+
+    /// Uzly pristupnosti otevrene nabidky a bubliny.
+    pub(crate) fn popup_a11y(&self, out: &mut Vec<A11yNode>) {
+        use a11y::state::*;
+        if let Some(p) = &self.popup {
+            let owner = self.index_of(p.owner).map_or(crate::WINDOW_NODE, |i| self.elem_ids[i]);
+            let mid = virt_id(owner, 6, 0);
+            out.push(A11yNode { id: mid, parent: owner, role: Role::Menu, name: String::new(), value: String::new(), state: 0, layer: crate::ROOT_LAYER, bounds: p.rect, actions: 0 });
+            let pad = self.look.theme.space[2] as i32;
+            let mut y = p.rect.y + pad - p.scroll;
+            for (k, it) in p.items.iter().enumerate() {
+                let h = self.row_h(it) as i32;
+                if !it.separator {
+                    let mut state = 0;
+                    if !it.disabled.is_empty() {
+                        state |= DISABLED;
+                    }
+                    if it.checked == Some(true) {
+                        state |= CHECKED;
+                    }
+                    if p.hi == Some(k) {
+                        state |= FOCUSED;
+                    }
+                    let name = if it.disabled.is_empty() { it.label.clone() } else { alloc::format!("{} ({})", it.label, it.disabled) };
+                    let bounds = Rect::new(p.rect.x + pad, y, p.rect.w.saturating_sub(2 * pad as u32), h as u32).intersect(&p.rect);
+                    out.push(A11yNode { id: virt_id(owner, 7, k as u64), parent: mid, role: Role::MenuItem, name, value: it.shortcut.clone(), state, layer: crate::ROOT_LAYER, bounds, actions: if it.usable() { a11y::actions::ACTIVATE } else { 0 } });
+                }
+                y += h;
+            }
+        }
+        if let Some(text) = self.tip_text()
+            && let Some(i) = self.tip_shown.and_then(|k| self.index_of(k))
+        {
+            let id = self.elem_ids[i];
+            out.push(A11yNode { id: virt_id(id, 8, 0), parent: id, role: Role::Tooltip, name: text.clone(), value: String::new(), state: 0, layer: crate::ROOT_LAYER, bounds: self.tip_rect(&text), actions: 0 });
+        }
+    }
+
+    /// Akce pristupnosti na polozce otevrene nabidky.
+    pub(crate) fn popup_a11y_action(&mut self, node: u32, action: u32, r: &mut Response<M>) -> bool {
+        let Some(p) = &self.popup else { return false };
+        let owner = self.index_of(p.owner).map_or(crate::WINDOW_NODE, |i| self.elem_ids[i]);
+        let Some(k) = (0..p.items.len()).find(|&k| virt_id(owner, 7, k as u64) == node) else { return false };
+        if action & a11y::actions::ACTIVATE != 0 {
+            self.choose(k, r);
+        }
+        true
+    }
+}

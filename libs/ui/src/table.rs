@@ -269,6 +269,7 @@ impl<M: Clone> Ui<M> {
                             r.msgs.push(f(id));
                         }
                     }
+                    self.open_context(i, Some((x, y)));
                     return Some(r);
                 }
                 if let Some(sb) = self.scrollbar(i)

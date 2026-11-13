@@ -1320,6 +1320,7 @@ Input (keys, text, mouse, accessibility actions) becomes `Msg` messages.
 | `table` | selection, sorting, dragging, scrollbar | see [Table and list](#table-and-list-virtualization) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (value in percent) |
 | `busy` | - | - | `progress` with the `busy` state (indeterminate, animated per frame) |
+| `select` | click, pick from the list | Enter, space, Alt+down, F4; closed: arrows | `combo-box`, `menu`, `menu-item` |
 | `segments` | - | - | `list` with `list-item` children (full label of each segment) |
 | `switch` | click | space, Enter (on release) | `switch`, `checked`, `toggle` |
 | `radio` | click | space, Enter | `radio`, `checked` |
@@ -1509,6 +1510,35 @@ a verified text contrast:
 
 The prototype has fixed colors for partitions; the system replaces them
 with these tones.
+
+### Select, menus and tooltips
+
+- **Select** `select(options, selected).on_pick(Msg::X)`: opens by click,
+  Enter, space, Alt+down or F4; closed, the up and down arrows change the
+  choice directly. Accessibility: `combo-box` with the value and the
+  `expanded` state, the open list as `menu` with `menu-item` nodes.
+- **Context menu** `Node::context_menu(vec![menu_item("Copy",
+  Msg::Copy).shortcut("Ctrl+C"), menu_separator(), ...])`: right button,
+  Shift+F10 or the Menu key; the element or its nearest ancestor owns the
+  menu. An item can be disabled with a reason (`.disabled("Clipboard is
+  empty")`, the screen reader reads the reason too) or checked.
+  `menu_from(&app.menu())` builds a context menu with the same items as the
+  window menu (manifest actions; the client calls them through
+  `App::action`). On a table the right button first selects the row and
+  sends `on_context`, then opens the menu.
+- **Menu control:** arrows skip separators and disabled items, Home/End,
+  Enter and space choose, Esc and Tab close, typing jumps to an item;
+  mouse: hover, click, press-drag-release; a click outside the menu only
+  closes it (the element under it gets nothing).
+- **Tooltip** `Node::tooltip("Settings")`: after 500 ms over the element
+  (the client wakes up by `Ui::next_deadline`, `Ui::timer`); a click or a
+  key hides it. It also names an icon-only button for the screen reader;
+  a shown tooltip is a `tooltip` node.
+- Look after `.popover` and `.menu` in the design (a `surface` card,
+  `border` frame, 2 px in high contrast, items `control_h` tall, hover
+  `accent_soft`). The menu is drawn into the window for now and is clipped
+  by its edge; overflowing the window edge will be a compositor system
+  popover (next step).
 
 ### Table and list (virtualization)
 

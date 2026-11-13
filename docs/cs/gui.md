@@ -1270,6 +1270,7 @@ převede na zprávy `Msg`.
 | `table` | výběr, řazení, tažení, posuvník | viz [Tabulka a seznam](#tabulka-a-seznam-virtualizace) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (hodnota v procentech) |
 | `busy` | - | - | `progress` se stavem `busy` (neurčitý průběh, animace po snímcích) |
+| `select` | klik, výběr ze seznamu | Enter, mezerník, Alt+dolů, F4; zavřený šipky | `combo-box`, `menu`, `menu-item` |
 | `segments` | - | - | `list` s položkami `list-item` (celý popisek každého úseku) |
 | `switch` | klik | mezerník, Enter (při puštění) | `switch`, `checked`, `toggle` |
 | `radio` | klik | mezerník, Enter | `radio`, `checked` |
@@ -1453,6 +1454,33 @@ dvojice barev s ověřeným kontrastem textu:
 | `Free` | šrafy `surface_3` a `surface` / `ink_muted` | volné místo |
 
 Prototyp má pro oddíly pevné barvy; systém je nahrazuje těmito tóny.
+
+### Výběr, nabídky a bubliny
+
+- **Rozbalovací výběr** `select(volby, vybraná).on_pick(Msg::X)`: otevře se
+  klikem, Enter, mezerníkem, Alt+dolů nebo F4; zavřený mění volbu šipky
+  nahoru a dolů přímo. Přístupnost: `combo-box` s hodnotou a stavem
+  `expanded`, otevřený seznam jako `menu` s `menu-item`.
+- **Kontextová nabídka** `Node::context_menu(vec![menu_item("Kopírovat",
+  Msg::Copy).shortcut("Ctrl+C"), menu_separator(), ...])`: pravé tlačítko,
+  Shift+F10 nebo klávesa Menu; nabídku má prvek nebo jeho nejbližší předek.
+  Položka může být zakázaná s důvodem (`.disabled("Schránka je prázdná")`,
+  čtečka přečte i důvod) nebo zaškrtnutá. `menu_from(&app.menu())` udělá
+  kontextovou nabídku se stejnými položkami jako menu okna (akce z
+  manifestu, klient je zavolá přes `App::action`). U tabulky pravé tlačítko
+  nejdřív vybere řádek a pošle `on_context`, pak otevře nabídku.
+- **Ovládání nabídky:** šipky přeskočí oddělovače a zakázané položky,
+  Home/End, Enter a mezerník vyberou, Esc a Tab zavřou, psaní skočí na
+  položku; myš: najetí, klik, stisk-tah-puštění; klik mimo nabídku ji jen
+  zavře (prvek pod ní nic nedostane).
+- **Bublina** `Node::tooltip("Nastavení")`: po 500 ms nad prvkem (klient
+  se probudí podle `Ui::next_deadline`, `Ui::timer`), klik a klávesa ji
+  skryjí. Tlačítku jen s ikonou dá i jméno pro čtečku; zobrazená bublina
+  je uzel `tooltip`.
+- Vzhled podle `.popover` a `.menu` v návrhu (karta `surface`, rám
+  `border`, ve vysokém kontrastu 2 px, položky výšky `control_h`, najetí
+  `accent_soft`). Nabídka se zatím kreslí do okna a ořízne se jeho okrajem;
+  přesah přes okraj okna bude systémový popover kompozitoru (další krok).
 
 ### Tabulka a seznam (virtualizace)
 

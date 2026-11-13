@@ -27,6 +27,9 @@ pub struct Response<M> {
     pub trace: Vec<String>,
     /// Pozadavek na schranku (klient ho preda kompozitoru).
     pub clipboard: Option<Clip>,
+    /// Akce z manifestu vybrane v nabidce (`MenuAct::Action`): klient
+    /// zavola `App::action`.
+    pub actions: Vec<(String, Vec<guiproto::action::Arg>)>,
     /// Stisk klavesy, ktery zadny prvek nespotreboval (kod, znak,
     /// modifikatory): klient ho preda aplikaci (`App::key`, zkratky jako
     /// F2, Delete, Ctrl+N, Alt+sipky).
@@ -50,6 +53,7 @@ impl<M> Default for Response<M> {
             scrolls: Vec::new(),
             trace: Vec::new(),
             clipboard: None,
+            actions: Vec::new(),
             unhandled_key: None,
         }
     }
@@ -89,6 +93,12 @@ impl<M: Clone> Ui<M> {
     /// Udalost s casem zaznamu (ns): dvojklik a trojklik v textovem poli.
     pub fn event_at(&mut self, ev: InputEvent, mods_now: u16, time: Option<u64>) -> Response<M> {
         self.mods = mods_now;
+        // Bublina zmizi pri kliku a klavese.
+        let hid = matches!(ev, InputEvent::Button { pressed: true, .. } | InputEvent::Key { .. } | InputEvent::PointerLeave | InputEvent::Focus(false)) && self.tip_hide();
+        if let Some(mut r) = self.popup_event(&ev, time) {
+            r.redraw |= hid;
+            return r;
+        }
         if let Some(r) = self.control_event(&ev) {
             return r;
         }
@@ -107,6 +117,10 @@ impl<M: Clone> Ui<M> {
                     self.hover = h;
                     r.redraw = true;
                 }
+                if self.tip_shown.is_some() && self.tip.map(|t| t.0) != h.map(|i| self.elems[i].key) {
+                    r.redraw = true;
+                }
+                self.tip_hover(time);
             }
             InputEvent::PointerLeave => {
                 self.pointer = (-1, -1);
@@ -323,7 +337,7 @@ impl<M: Clone> Ui<M> {
     pub fn a11y_action(&mut self, node: u32, action: u32, value: &str) -> Response<M> {
         let mut r = Response::default();
         let Some(i) = self.elem_ids.iter().position(|&id| id == node) else {
-            if !self.table_a11y_action(node, action, &mut r) {
+            if !self.popup_a11y_action(node, action, &mut r) && !self.table_a11y_action(node, action, &mut r) {
                 self.control_a11y_action(node, action, &mut r);
             }
             return r;

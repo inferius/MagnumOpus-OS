@@ -21,6 +21,7 @@ mod field;
 pub mod layout;
 pub mod look;
 pub mod node;
+pub(crate) mod popup;
 pub mod scrollbar;
 mod table;
 pub mod text;
@@ -211,6 +212,13 @@ pub struct Ui<M> {
     pub(crate) table_press: Option<table::Press>,
     /// Faze animace neurciteho prubehu (px, roste po snimcich).
     pub(crate) busy_phase: u32,
+    /// Otevrena nabidka (vyber, kontextova).
+    pub(crate) popup: Option<popup::Popup<M>>,
+    /// Bublina: prvek pod ukazatelem a od kdy (odpocet), zobrazena.
+    pub(crate) tip: Option<(Key, u64)>,
+    pub(crate) tip_shown: Option<Key>,
+    /// Cas posledni udalosti (ns).
+    pub(crate) now: u64,
     /// Posun obsahu posouvanych oblasti podle klice prvku.
     pub(crate) scroll: BTreeMap<Key, i32>,
     /// Ukazatel (souradnice okna).
@@ -262,6 +270,10 @@ impl<M: Clone> Ui<M> {
             tables: BTreeMap::new(),
             table_press: None,
             busy_phase: 0,
+            popup: None,
+            tip: None,
+            tip_shown: None,
+            now: 0,
             scroll: BTreeMap::new(),
             pointer: (-1, -1),
             mods: 0,
@@ -327,6 +339,14 @@ impl<M: Clone> Ui<M> {
         for (k, max) in areas {
             let s = self.scroll.entry(k).or_insert(0);
             *s = (*s).clamp(0, max);
+        }
+        // Nabidka a bublina zmizelych prvku pryc.
+        if self.popup.as_ref().is_some_and(|p| self.index_of(p.owner()).is_none()) {
+            self.popup = None;
+        }
+        if self.tip.is_some_and(|(k, _)| self.index_of(k).is_none()) {
+            self.tip = None;
+            self.tip_shown = None;
         }
         // Najeti podle ukazatele (prvky se mohly posunout).
         self.hover = if self.pointer.0 >= 0 { self.hit(self.pointer.0, self.pointer.1) } else { None };
@@ -429,7 +449,14 @@ impl<M: Clone> Ui<M> {
             } else {
                 match &e.kind {
                     ElemKind::Label { text, .. } => (Role::Label, if e.agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), 0),
-                    ElemKind::Button { text, .. } => (Role::Button, text.clone(), none(), ACTIVATE | FOCUS),
+                    // Tlacitko jen s ikonou: jmeno z bubliny.
+                    ElemKind::Button { text, .. } => (Role::Button, if text.is_empty() { e.tooltip.clone().unwrap_or_default() } else { text.clone() }, none(), ACTIVATE | FOCUS),
+                    ElemKind::Select { options, selected, .. } => {
+                        if self.popup.as_ref().is_some_and(|p| p.owner() == e.key) {
+                            extra = a11y::state::EXPANDED;
+                        }
+                        (Role::ComboBox, none(), options.get(*selected).cloned().unwrap_or_default(), ACTIVATE | FOCUS)
+                    }
                     // Heslo: hodnota se nikdy neposila (ani jeji delka).
                     ElemKind::TextInput { placeholder, secure: true, .. } => (Role::PasswordInput, placeholder.clone(), none(), SET_VALUE | FOCUS),
                     ElemKind::TextInput { value, placeholder, .. } => (Role::TextInput, placeholder.clone(), value.clone(), SET_VALUE | FOCUS),
@@ -457,6 +484,7 @@ impl<M: Clone> Ui<M> {
                 out.push(A11yNode { id: error_node(id), parent: id, role: Role::Label, name: err.clone(), value: none(), state: 0, layer, bounds: e.rect, actions: 0 });
             }
         }
+        self.popup_a11y(&mut out);
         out
     }
 

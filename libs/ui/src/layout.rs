@@ -30,6 +30,7 @@ pub enum ElemKind<M> {
     Tabs { labels: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>>, on_close: Option<Box<dyn Fn(usize) -> M>> },
     Busy,
     Segments { items: Vec<crate::node::Segment>, legend: bool },
+    Select { options: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
     Group,
     Scroll { content_h: u32 },
 }
@@ -40,6 +41,8 @@ pub struct Element<M> {
     pub key: Key,
     pub error: Option<String>,
     pub skip_tab: bool,
+    pub menu: Option<Vec<crate::node::MenuEntry<M>>>,
+    pub tooltip: Option<String>,
     /// Obdelnik v souradnicich prostoru `space`.
     pub rect: Rect,
     /// 0 = okno, jinak index prvku `Scroll` + 1.
@@ -66,6 +69,7 @@ impl<M> Element<M> {
                     | ElemKind::Slider { .. }
                     | ElemKind::Segmented { .. }
                     | ElemKind::Tabs { .. }
+                    | ElemKind::Select { .. }
             )
     }
 }
@@ -91,10 +95,11 @@ fn kind_tag<M>(k: &Kind<M>) -> usize {
         Kind::Tabs { .. } => 15,
         Kind::Busy => 16,
         Kind::Segments { .. } => 17,
+        Kind::Select { .. } => 18,
     }
 }
 
-const TAGS: usize = 18;
+const TAGS: usize = 19;
 
 /// Znacky odvozenych klicu (aby se nepotkaly s vlastnimi).
 const OWN: u64 = 1;
@@ -156,6 +161,10 @@ fn measure<M>(n: &Node<M>, t: &Look) -> (u32, u32) {
         }
         Kind::Tabs { .. } => (th.size.hit_min * 4, ctl),
         Kind::Busy => (th.size.hit_min * 4, sp[3]),
+        Kind::Select { options, .. } => {
+            let w = options.iter().map(|o| t.width(o, t.body())).max().unwrap_or(0);
+            (w + 2 * sp[4] + th.size.icon_s + sp[2], ctl)
+        }
         // Pruh 44 px (`.dbar`) a radek legendy.
         Kind::Segments { legend, .. } => (th.size.hit_min * 6, ctl + sp[2] + if *legend { sp[2] + th.text.caption.line } else { 0 }),
         Kind::Column(ch) => ch.iter().fold((0, 0), |(w, h), c| {
@@ -197,8 +206,10 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
     let agent = n.agent;
     let skip_tab = n.skip_tab;
     let mut error = n.error;
+    let mut menu = n.menu;
+    let mut tooltip = n.tooltip;
     let mut push = |out: &mut Vec<Element<M>>, kind: ElemKind<M>, rect: Rect| {
-        out.push(Element { kind, key, error: error.take(), skip_tab, rect, space, parent, disabled, agent });
+        out.push(Element { kind, key, error: error.take(), skip_tab, menu: menu.take(), tooltip: tooltip.take(), rect, space, parent, disabled, agent });
         out.len()
     };
     match n.kind {
@@ -224,6 +235,8 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
                     key: key.mix(ITEM).mix(i as u64),
                     error: None,
                     skip_tab: true,
+                    menu: None,
+                    tooltip: None,
                     rect: ir,
                     space,
                     parent: id,
@@ -258,6 +271,9 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
         }
         Kind::Segments { items, legend } => {
             push(out, ElemKind::Segments { items, legend }, r);
+        }
+        Kind::Select { options, selected, on_select } => {
+            push(out, ElemKind::Select { options, selected, on_select }, r);
         }
         Kind::Spacer => {}
         Kind::Column(children) => {

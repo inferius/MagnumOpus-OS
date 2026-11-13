@@ -108,6 +108,8 @@ pub enum Kind<M> {
     Busy,
     /// Pruhovy graf podilu (oddily disku, obsazeni, kvoty).
     Segments { items: Vec<Segment>, legend: bool },
+    /// Vyber jedne moznosti z rozbalovaciho seznamu.
+    Select { options: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
 
     Column(Vec<Node<M>>),
     Row(Vec<Node<M>>),
@@ -136,6 +138,97 @@ pub struct Node<M> {
     /// Fokus jen klikem, ne klavesou Tab (napr. pomocne tlacitko, ktere
     /// ma i klavesovou zkratku).
     pub skip_tab: bool,
+    /// Kontextova nabidka (prave tlacitko, Shift+F10, klavesa Menu).
+    pub menu: Option<Vec<MenuEntry<M>>>,
+    /// Bublina s popisem (po 500 ms nad prvkem).
+    pub tooltip: Option<String>,
+}
+
+/// Co polozka nabidky udela.
+#[derive(Clone)]
+pub enum MenuAct<M> {
+    /// Zprava aplikaci.
+    Msg(M),
+    /// Akce z manifestu (`App::action`), napr. polozka z `App::menu`.
+    Action(String, Vec<guiproto::action::Arg>),
+}
+
+/// Polozka nabidky (kontextove i rozbalovaci).
+#[derive(Clone)]
+pub struct MenuEntry<M> {
+    pub label: String,
+    /// Zkratka pro zobrazeni ("Ctrl+C").
+    pub shortcut: String,
+    /// Zakazano s duvodem (prazdny = povolena); duvod cte ctecka.
+    pub disabled: String,
+    /// Prepinac: `None` = neni.
+    pub checked: Option<bool>,
+    /// Oddelovac skupin.
+    pub separator: bool,
+    pub act: Option<MenuAct<M>>,
+}
+
+/// Polozka nabidky, ktera posle zpravu `m`.
+pub fn menu_item<M>(label: &str, m: M) -> MenuEntry<M> {
+    MenuEntry { label: label.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: Some(MenuAct::Msg(m)) }
+}
+
+/// Oddelovac skupin v nabidce.
+pub fn menu_separator<M>() -> MenuEntry<M> {
+    MenuEntry { label: String::new(), shortcut: String::new(), disabled: String::new(), checked: None, separator: true, act: None }
+}
+
+impl<M> MenuEntry<M> {
+    pub fn shortcut(mut self, s: &str) -> Self {
+        self.shortcut = s.into();
+        self
+    }
+
+    /// Zakazat s duvodem.
+    pub fn disabled(mut self, why: &str) -> Self {
+        self.disabled = why.into();
+        self
+    }
+
+    pub fn checked(mut self, c: bool) -> Self {
+        self.checked = Some(c);
+        self
+    }
+}
+
+/// Polozky z menu aplikace (`App::menu`, akce z manifestu): podnabidky se
+/// rozbali do jedne urovne oddelene oddelovaci (kontextova nabidka se
+/// stejnymi polozkami jako menu okna).
+pub fn menu_from<M>(items: &[guiproto::menu::MenuItem]) -> Vec<MenuEntry<M>> {
+    let mut out: Vec<MenuEntry<M>> = Vec::new();
+    for it in items {
+        if it.children.is_empty() {
+            if it.action.is_empty() {
+                continue;
+            }
+            out.push(MenuEntry {
+                label: it.label.clone(),
+                shortcut: it.shortcut.clone(),
+                disabled: it.disabled.clone(),
+                checked: it.checked,
+                separator: false,
+                act: Some(MenuAct::Action(it.action.clone(), it.args.clone())),
+            });
+        } else {
+            let sub = menu_from(&it.children);
+            if sub.is_empty() {
+                continue;
+            }
+            if !out.is_empty() && !out.last().is_some_and(|e| e.separator) {
+                out.push(menu_separator());
+            }
+            out.extend(sub);
+        }
+    }
+    while out.last().is_some_and(|e| e.separator) {
+        out.pop();
+    }
+    out
 }
 
 fn node<M>(kind: Kind<M>) -> Node<M> {
@@ -149,6 +242,8 @@ fn node<M>(kind: Kind<M>) -> Node<M> {
         key: None,
         error: None,
         skip_tab: false,
+        menu: None,
+        tooltip: None,
     }
 }
 
@@ -270,6 +365,11 @@ pub fn segments<M>(items: Vec<Segment>) -> Node<M> {
     node(Kind::Segments { items, legend: false })
 }
 
+/// Rozbalovaci vyber jedne z `options` (zprava `on_pick`).
+pub fn select<M>(options: impl IntoIterator<Item = String>, selected: usize) -> Node<M> {
+    node(Kind::Select { options: options.into_iter().collect(), selected, on_select: None })
+}
+
 /// Neurcity prubeh (animace po snimcich).
 pub fn busy<M>() -> Node<M> {
     node(Kind::Busy)
@@ -312,6 +412,19 @@ impl<M> Node<M> {
 
     pub fn skip_tab(mut self, s: bool) -> Self {
         self.skip_tab = s;
+        self
+    }
+
+    /// Kontextova nabidka prvku (prave tlacitko, Shift+F10, klavesa Menu).
+    pub fn context_menu(mut self, items: Vec<MenuEntry<M>>) -> Self {
+        self.menu = Some(items);
+        self
+    }
+
+    /// Bublina s popisem (po 500 ms nad prvkem). Tlacitku bez textu (jen
+    /// ikona) da i jmeno pro ctecku obrazovky.
+    pub fn tooltip(mut self, t: &str) -> Self {
+        self.tooltip = (!t.is_empty()).then(|| t.into());
         self
     }
 
@@ -399,7 +512,7 @@ impl<M> Node<M> {
     /// Vybrana volba segmentu nebo zalozka.
     pub fn on_pick(mut self, f: impl Fn(usize) -> M + 'static) -> Self {
         match &mut self.kind {
-            Kind::Segmented { on_select, .. } | Kind::Tabs { on_select, .. } => *on_select = Some(Box::new(f)),
+            Kind::Segmented { on_select, .. } | Kind::Tabs { on_select, .. } | Kind::Select { on_select, .. } => *on_select = Some(Box::new(f)),
             _ => {}
         }
         self

@@ -323,5 +323,6 @@ mod context;
 mod controls;
 mod field;
 mod keys;
+mod popup;
 mod table;
 mod text;

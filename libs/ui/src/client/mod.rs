@@ -655,9 +655,15 @@ pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u3
             let obs = match win.with_channel(|ch| {
                 let mut hs = alloc::vec![(ch.handle(), rd)];
                 hs.extend(extras.iter().map(|x| (x.handle(), Signals::READABLE)));
-                libos::wait_many(&hs, None)
+                libos::wait_many(&hs, ui.next_deadline())
             }) {
                 Ok(Ok((_, o))) => o,
+                Ok(Err(Error::TimedOut)) => {
+                    if ui.timer(libos::time::now()) {
+                        dirty = true;
+                    }
+                    continue;
+                }
                 Ok(Err(e)) | Err(e) => return Err(e),
             };
             for (k, x) in extras.iter().enumerate() {
@@ -671,8 +677,16 @@ pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u3
                 continue;
             }
         }
-        let ev = match win.next(None) {
+        // Bublina: probudit se v case jejiho zobrazeni.
+        let deadline = ui.next_deadline().map(|t| t / 1000 * 1000);
+        let ev = match win.next(deadline) {
             Ok(e) => e,
+            Err(Error::TimedOut) => {
+                if ui.timer(libos::time::now()) {
+                    dirty = true;
+                }
+                continue;
+            }
             Err(Error::PeerClosed) => return Ok(()),
             Err(e) => return Err(e),
         };
@@ -735,9 +749,15 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
             if changed {
                 libos::println!("vstup: id={id} aplikace zpracuje {} zprav", resp.msgs.len());
             }
-            let changed = changed || shortcut.is_some();
+            let changed = changed || shortcut.is_some() || !resp.actions.is_empty();
             for m in resp.msgs.into_iter().chain(shortcut) {
                 app.update(m);
+            }
+            // Polozky nabidky s akci z manifestu.
+            for (a, args) in &resp.actions {
+                if let Err(e) = app.action(a, args) {
+                    libos::println!("ui: akce {a} z nabidky: {e}");
+                }
             }
             INPUT_ID.store(0, core::sync::atomic::Ordering::Relaxed);
             if changed {
