@@ -355,6 +355,7 @@ impl Comp {
             self.damage_all();
         }
         self.services.client_gone(id, &mut self.out);
+        self.clip_client_gone(id);
     }
 
     pub(crate) fn drop_window(&mut self, gid: u32) {
@@ -482,6 +483,7 @@ impl Comp {
                 self.services.action_result(c, call, ok, value, message, &mut self.out);
             }
             ClientMsg::MenuUpdate { window, items } => self.menu_update(c, window, &items),
+            ClientMsg::Clipboard { data } => self.clipboard_msg(c, &data, now),
             _ => {}
         }
     }
@@ -790,6 +792,10 @@ impl Comp {
             self.z.push(g);
             self.damage_window(g);
             self.damage_panel();
+            // Nove okno s fokusem vi, co je ve schrance (menu Vlozit).
+            if !self.clipboard.formats().is_empty() {
+                self.clip_changed();
+            }
         }
     }
 }
@@ -826,5 +832,6 @@ pub(crate) fn op_of(m: &ClientMsg) -> u32 {
         ClientMsg::Pong { .. } => op::PONG,
         ClientMsg::ActionResult { .. } => op::ACTION_RESULT,
         ClientMsg::MenuUpdate { .. } => op::MENU_UPDATE,
+        ClientMsg::Clipboard { .. } => op::CLIPBOARD,
     }
 }

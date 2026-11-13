@@ -152,9 +152,16 @@ fn error_state_and_text() {
     assert_eq!(e.parent, p.id);
     assert_eq!(e.id, error_node(p.id));
     assert!(find(&u, Role::TextInput, "Jméno").state & state::INVALID == 0);
-    let mid = p.bounds.y + p.bounds.h as i32 / 2;
+    // Ramecek ma vysku ovladaciho prvku, pod nim je radek s textem chyby.
+    let mid = p.bounds.y + u.look.control_h() as i32 / 2;
     let edge = pixels(&mut u, Rect::new(p.bounds.x, mid, 1, 1));
     assert_eq!(edge, vec![u.look.theme.color.danger]);
+    let cap = u.look.theme.text.caption.line + u.look.theme.space[1];
+    assert_eq!(p.bounds.h, u.look.control_h() + cap, "misto pro text chyby");
+    // Text chyby je nakresleny barvou `danger` (nejaky pixel pod rameckem).
+    let (ch, danger) = (u.look.control_h() as i32, u.look.theme.color.danger);
+    let below = pixels(&mut u, Rect::new(p.bounds.x, p.bounds.y + ch, p.bounds.w, cap));
+    assert!(below.contains(&danger));
 }
 
 /// `skip_tab`: Tab prvek preskoci, klik mu fokus da.

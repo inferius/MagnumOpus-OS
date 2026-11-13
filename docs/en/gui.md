@@ -1279,7 +1279,7 @@ Input (keys, text, mouse, accessibility actions) becomes `Msg` messages.
 |---|---|---|---|
 | `label` | - | - | `label` |
 | `button` | click | Enter, space | `button`, `activate` |
-| `text_input` | click = cursor | text, Backspace, Delete, arrows, Home, End, Enter = `on_submit` | `text-input`, `set-value` |
+| `text_input`, `text_area` | click, drag, double and triple click | see [Text fields and the clipboard](#text-fields-and-the-clipboard) | `text-input`, `set-value` |
 | `password_input` | like `text_input` | like `text_input` | `password-input` without a value |
 | `checkbox` | click | space, Enter | `checkbox`, `toggle` |
 | `list` | click an item | up and down arrows | `list` and `list-item` |
@@ -1356,6 +1356,77 @@ column([
     button("Sign in").on_click(Msg::SignIn).key("ok"),
 ])
 ```
+
+### Text fields and the clipboard
+
+`text_input`, `password_input` and `text_area` (multi-line, `.rows(n)`)
+share one editor, `ui::text::TextEdit`: text, cursor and selection by the
+element key, undo and redo history. The application is the source of
+truth: it gets every change as `on_change`, and when it adjusts the value
+(e.g. to upper case) the field takes it over and the cursor stays on a
+character boundary.
+
+| Control | What it does |
+|---|---|
+| click, Shift+click, drag | cursor, extend selection, select by dragging |
+| double click, triple click | word, line (password: double click selects all) |
+| arrows, Ctrl+arrows, Shift | by grapheme, by word, with selection |
+| Home, End, Ctrl+Home, Ctrl+End | start and end of line and text |
+| up, down, PgUp, PgDn | `text_area` only: visual lines, keeps the x position |
+| Backspace, Delete, Ctrl+ | character (with combining marks), word |
+| Ctrl+A, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y | select all, undo, redo (typing a word is one step) |
+| Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Insert, Shift+Delete, Shift+Insert | clipboard |
+| Enter | submit (`on_submit`); in `text_area` a new line, Ctrl+Enter submits |
+| wheel | in `text_area` scrolls the field, not the window |
+
+- **Graphemes:** the cursor and deletion never split a letter with a
+  combining caron (`C` + U+030C), an emoji with a skin tone, a ZWJ family
+  or a flag. Word boundaries know diacritics ("Žluťoučký" is one word).
+- **Shortcuts by layout:** Ctrl+Z is the key producing `z` in the active
+  layout (on Czech QWERTZ a different physical key than on US).
+- **Wrapping** in `text_area` by words to the field width; a word longer
+  than a line breaks by graphemes. A single-line field scrolls so the
+  cursor stays visible; pasted line breaks become spaces.
+- **Password:** neither copy nor cut works (not even Ctrl+Insert);
+  Ctrl+arrows jump to start and end (words would reveal the spaces).
+- `ui::text` does not depend on drawing: the terminal uses its word and
+  grapheme boundaries for selection in the grid.
+
+The **clipboard** is a separate compositor module
+(`libs/comp/src/clipboard.rs`) with its own protocol `libs/clipproto`.
+Its messages travel in an envelope of the window protocol (`CLIPBOARD`) for
+now, so the clipboard can later move into its own service without
+changing its messages.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Clipboard flow">
+<defs><marker id="cb1e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="t" x="110" y="30" text-anchor="middle">app A</text><text class="t" x="380" y="30" text-anchor="middle">compd</text><text class="t" x="650" y="30" text-anchor="middle">app B</text>
+<path class="ln" d="M110 40 L110 290"/><path class="ln-acc" d="M380 40 L380 290"/><path class="ln" d="M650 40 L650 290"/>
+<path class="ln" d="M110 70 L378 70" marker-end="url(#cb1e)"/><text class="m" x="120" y="62">Offer [text] (Ctrl+C)</text>
+<path class="ln" d="M380 100 L112 100" marker-end="url(#cb1e)"/><text class="m" x="130" y="94">Send (copy kept after A exits)</text>
+<path class="ln" d="M110 130 L378 130" marker-end="url(#cb1e)"/><text class="m" x="130" y="124">Data</text>
+<path class="ln" d="M650 170 L382 170" marker-end="url(#cb1e)"/><text class="m" x="400" y="162">Request (Ctrl+V)</text>
+<path class="ln" d="M380 200 L112 200" marker-end="url(#cb1e)"/><text class="m" x="130" y="194">Send</text>
+<path class="ln" d="M110 230 L378 230" marker-end="url(#cb1e)"/><text class="m" x="130" y="224">Data</text>
+<path class="ln" d="M380 260 L648 260" marker-end="url(#cb1e)"/><text class="m" x="400" y="254">Deliver</text>
+</svg>
+<figcaption>Lazy transfer: data moves on paste; the compositor fetches text right away and keeps a copy.</figcaption>
+</figure>
+
+| Rule | How |
+|---|---|
+| only on user action | only the focused window may offer or request, within 1 s of a physical key or button press (not synthetic input); one gesture = one paste |
+| lazy transfer | the owner offers formats (`Offer`), sends data only on request (`Send` -> `Data` -> `Deliver`) |
+| after the owner exits | the compositor fetches text right after the offer and keeps a copy; pending pastes of other formats fail (`Denied: Unavailable`) |
+| secure fields | the library never puts a password on the clipboard; the compositor also refuses an offer from a window whose focused node is `password-input` |
+| large data | up to 60 KiB in the message; larger via shared memory (next step) |
+| history | not yet |
+
+The focused window gets `Changed` with the formats on the clipboard (when
+the content changes and when it gains focus) so it can enable "Paste".
+Applications that draw themselves call `Window::copy_text`,
+`Window::request_paste` and `Window::clipboard_event`.
 
 The `ui::client` runtime (feature `os`) keeps the window: double buffers
 in VMOs, layers, the whole accessibility tree after every change,

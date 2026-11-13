@@ -86,7 +86,8 @@ pub enum Kind<M> {
     Button { text: String, on_click: Option<M> },
     /// `secure` = heslo: kresli se teckami, hodnota se nedava do stromu
     /// pristupnosti ani do trasovani, kompozitor pole zakryje ve snimku.
-    TextInput { value: String, placeholder: String, secure: bool, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
+    /// `multiline` = viceradkove pole (`text_area`) s `rows` radky.
+    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, rows: u32, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     /// `agents[i]` = radek patri agentovi AI (stitek a pruh barvy `ai`).
     List { items: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>>, agents: Vec<bool> },
@@ -147,6 +148,8 @@ pub fn text_input<M>(value: &str) -> Node<M> {
         value: value.into(),
         placeholder: String::new(),
         secure: false,
+        multiline: false,
+        rows: 1,
         on_change: None,
         on_submit: None,
     })
@@ -157,6 +160,17 @@ pub fn password_input<M>(value: &str) -> Node<M> {
     let mut n = text_input(value);
     if let Kind::TextInput { secure, .. } = &mut n.kind {
         *secure = true;
+    }
+    n
+}
+
+/// Viceradkove pole (zalamuje podle slov, posouva se kolecko i kurzorem).
+/// Enter vlozi radek, Ctrl+Enter odesle (`on_submit`).
+pub fn text_area<M>(value: &str) -> Node<M> {
+    let mut n = text_input(value);
+    if let Kind::TextInput { multiline, rows, .. } = &mut n.kind {
+        *multiline = true;
+        *rows = 4;
     }
     n
 }
@@ -266,6 +280,14 @@ impl<M> Node<M> {
     pub fn on_click(mut self, m: M) -> Self {
         if let Kind::Button { on_click, .. } = &mut self.kind {
             *on_click = Some(m);
+        }
+        self
+    }
+
+    /// Pocet viditelnych radku viceradkoveho pole.
+    pub fn rows(mut self, n: u32) -> Self {
+        if let Kind::TextInput { rows, .. } = &mut self.kind {
+            *rows = n.max(1);
         }
         self
     }

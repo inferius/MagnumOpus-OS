@@ -15,9 +15,11 @@ extern crate alloc;
 
 pub mod draw;
 pub mod event;
+mod field;
 pub mod layout;
 pub mod look;
 pub mod node;
+pub mod text;
 
 #[cfg(feature = "os")]
 pub mod client;
@@ -147,8 +149,16 @@ pub struct Ui<M> {
     pub(crate) focus: Option<usize>,
     pub(crate) hover: Option<usize>,
     pub(crate) pressed: Option<usize>,
-    /// Kurzor v textovem poli (index znaku) podle klice prvku.
-    pub(crate) cursor: BTreeMap<Key, usize>,
+    /// Text, kurzor, vyber a historie textovych poli podle klice prvku.
+    pub(crate) edits: BTreeMap<Key, text::TextEdit>,
+    /// Posun obsahu textovych poli (x jednoradkove, y viceradkove).
+    pub(crate) tscroll: BTreeMap<Key, (i32, i32)>,
+    /// Posledni klik do pole (klic, cas, x, y, poradi) pro dvojklik.
+    pub(crate) last_click: Option<(Key, u64, i32, i32, u8)>,
+    /// Pole, ve kterem tah mysi vybira text.
+    pub(crate) drag_field: Option<Key>,
+    /// Pole, ktere pozadalo o vlozeni ze schranky (`Ui::paste`).
+    pub(crate) paste_target: Option<Key>,
     /// Posun obsahu posouvanych oblasti podle klice prvku.
     pub(crate) scroll: BTreeMap<Key, i32>,
     /// Ukazatel (souradnice okna).
@@ -189,7 +199,11 @@ impl<M: Clone> Ui<M> {
             focus: None,
             hover: None,
             pressed: None,
-            cursor: BTreeMap::new(),
+            edits: BTreeMap::new(),
+            tscroll: BTreeMap::new(),
+            last_click: None,
+            drag_field: None,
+            paste_target: None,
             scroll: BTreeMap::new(),
             pointer: (-1, -1),
             mods: 0,
@@ -220,20 +234,8 @@ impl<M: Clone> Ui<M> {
         self.focus = focus.or_else(|| self.elems.iter().position(|e| e.focusable()));
         self.pressed = find(pk);
         self.key_pressed = find(kk);
-        // Kurzor nejvys na konec hodnoty; stav zmizelych prvku pryc.
-        let (by_key, elems) = (&self.by_key, &self.elems);
-        self.cursor.retain(|k, c| match by_key.get(k).map(|&i| &elems[i].kind) {
-            Some(ElemKind::TextInput { value, .. }) => {
-                *c = (*c).min(value.chars().count());
-                true
-            }
-            _ => false,
-        });
-        for e in &self.elems {
-            if let ElemKind::TextInput { value, .. } = &e.kind {
-                self.cursor.entry(e.key).or_insert(value.chars().count());
-            }
-        }
+        // Textova pole prevezmou hodnotu aplikace (kurzor a historie zustanou).
+        self.sync_fields();
         // Posun nejvys do konce obsahu.
         let areas: Vec<(Key, i32)> = self.scroll_areas().iter().map(|a| (self.elems[a.index].key, (a.content_h as i32 - a.rect.h as i32).max(0))).collect();
         self.scroll.retain(|k, _| areas.iter().any(|(j, _)| j == k));

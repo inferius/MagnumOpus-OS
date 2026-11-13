@@ -7,10 +7,11 @@ description = "Nativni knihovna UI: deklarativni prvky, rozvrzeni, kresleni, vst
 
 [features]
 # Behove prostredi pro aplikace v OS (kanal ke kompozitoru, VMO bufferu).
-os = ["dep:libos", "dep:svcclient"]
+os = ["dep:libos", "dep:svcclient", "dep:clipproto"]
 
 [dependencies]
 guiproto = { path = "../guiproto" }
+clipproto = { path = "../clipproto", optional = true }
 gfx = { path = "../gfx" }
 theme = { path = "../theme" }
 # Rezy Interu, ktere prvky kresli (text 400, tlacitko 500 -> 400, tucne 600,

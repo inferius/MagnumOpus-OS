@@ -319,4 +319,6 @@ fn enter_and_space_activate_on_release() {
     assert_eq!(h.app.count, 1, "pusteni mimo tlacitko akci zrusi");
 }
 
+mod field;
 mod keys;
+mod text;

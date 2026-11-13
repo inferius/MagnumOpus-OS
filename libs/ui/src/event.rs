@@ -1,8 +1,8 @@
 //! Vstup a akce pristupnosti -> zpravy aplikace.
 //!
 //! Tab posouva fokus, Enter a mezernik aktivuji tlacitko, mezernik prepne
-//! zaskrtavaci pole, sipky meni vyber v seznamu, textove pole edituje
-//! vlozeny text (`Text`) a klavesy Backspace, Delete, sipky, Home, End.
+//! zaskrtavaci pole, sipky meni vyber v seznamu; textova pole viz
+//! [`crate::field`].
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -25,6 +25,17 @@ pub struct Response<M> {
     pub scrolls: Vec<(u32, i32)>,
     /// Kroky trasovani vstupu (klient je vypise s id udalosti).
     pub trace: Vec<String>,
+    /// Pozadavek na schranku (klient ho preda kompozitoru).
+    pub clipboard: Option<Clip>,
+}
+
+/// Pozadavek pole na schranku.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Clip {
+    /// Zkopirovat text (Ctrl+C, Ctrl+X).
+    Copy(String),
+    /// Vlozit (Ctrl+V): data prijdou pres [`Ui::paste`].
+    Paste,
 }
 
 impl<M> Default for Response<M> {
@@ -34,6 +45,7 @@ impl<M> Default for Response<M> {
             redraw: false,
             scrolls: Vec::new(),
             trace: Vec::new(),
+            clipboard: None,
         }
     }
 }
@@ -64,12 +76,21 @@ impl<M: Clone> Ui<M> {
         self.scroll_areas().into_iter().rev().find(|a| a.rect.contains(x, y))
     }
 
+    /// Udalost bez casu (dvojklik se nerozpozna).
     pub fn event(&mut self, ev: InputEvent, mods_now: u16) -> Response<M> {
+        self.event_at(ev, mods_now, None)
+    }
+
+    /// Udalost s casem zaznamu (ns): dvojklik a trojklik v textovem poli.
+    pub fn event_at(&mut self, ev: InputEvent, mods_now: u16, time: Option<u64>) -> Response<M> {
         self.mods = mods_now;
         let mut r = Response::default();
         match ev {
             InputEvent::PointerMove { x, y } => {
                 self.pointer = (x, y);
+                if self.field_drag(x, y) {
+                    r.redraw = true;
+                }
                 let h = self.hit(x, y);
                 if h != self.hover {
                     self.hover = h;
@@ -99,7 +120,10 @@ impl<M: Clone> Ui<M> {
                         if let ElemKind::ListItem { list, .. } = self.elems[i].kind {
                             self.focus = Some(list - 1);
                         }
-                        self.click_text(i, x);
+                        if self.field_kind(i).is_some() {
+                            let (sx, sy) = self.to_space(i, x, y);
+                            self.field_press(i, sx, sy, time);
+                        }
                     }
                     r.redraw = true;
                 } else {
@@ -107,6 +131,7 @@ impl<M: Clone> Ui<M> {
                     // se rozhrani muze znovu rozvrhnout (data ze sluzby),
                     // `rebuild` stisk prevede na novy index; klik se neztrati.
                     let p = self.pressed.take();
+                    self.drag_field = None;
                     if p.is_some() && p == h
                         && let Some(i) = h
                         && !self.elems[i].disabled
@@ -120,7 +145,12 @@ impl<M: Clone> Ui<M> {
                 }
             }
             InputEvent::Scroll { dy, .. } => {
-                if let Some(a) = self.scroll_at(self.pointer.0, self.pointer.1) {
+                // Viceradkove pole pod ukazatelem ma prednost pred oblasti.
+                if let Some(i) = self.hit(self.pointer.0, self.pointer.1)
+                    && self.field_wheel(i, dy, WHEEL_STEP)
+                {
+                    r.redraw = true;
+                } else if let Some(a) = self.scroll_at(self.pointer.0, self.pointer.1) {
                     let max = (a.content_h as i32 - a.rect.h as i32).max(0);
                     let new = (a.offset - dy * WHEEL_STEP).clamp(0, max);
                     if new != a.offset {
@@ -145,10 +175,15 @@ impl<M: Clone> Ui<M> {
                 }
                 r.redraw = true;
             }
-            InputEvent::Key { code, action, .. } if action != 0 => self.key(code, &mut r),
-            InputEvent::Text(ch) => self.insert(ch, &mut r),
+            InputEvent::Key { code, action, ch } if action != 0 => self.key(code, ch, &mut r),
+            InputEvent::Text(ch) => {
+                if let Some((f, _)) = self.focused_field() {
+                    self.field_insert(f, ch, &mut r);
+                }
+            }
             InputEvent::Focus(false) => {
                 self.pressed = None;
+                self.drag_field = None;
                 self.key_pressed = None;
                 self.hover = None;
                 self.active = false;
@@ -166,37 +201,6 @@ impl<M: Clone> Ui<M> {
     /// Ma prvek s fokusem akci az pri pusteni klavesy (tlacitko, pole)?
     fn activates_on_release(&self) -> bool {
         self.focus.is_some_and(|f| matches!(self.elems[f].kind, ElemKind::Button { .. } | ElemKind::Checkbox { .. }))
-    }
-
-    /// Klik do textoveho pole: kurzor na nejblizsi znak.
-    fn click_text(&mut self, i: usize, x: i32) {
-        if let ElemKind::TextInput { value, secure, .. } = &self.elems[i].kind {
-            let pos = self.text_positions(value, *secure);
-            let lx = x - self.elems[i].rect.x - self.look.theme.space[4] as i32;
-            let best = (0..pos.len()).min_by_key(|&k| (pos[k] - lx).abs()).unwrap_or(0);
-            self.cursor.insert(self.elems[i].key, best);
-        }
-    }
-
-    /// Polohy mezi znaky pole od zacatku textu (heslo: tecky se stalym
-    /// krokem, sirka pismen by prozradila znaky).
-    pub(crate) fn text_positions(&self, value: &str, secure: bool) -> Vec<i32> {
-        let b = self.look.body();
-        if secure {
-            let step = self.dot_step() as i32;
-            (0..=value.chars().count() as i32).map(|k| k * step).collect()
-        } else {
-            self.look.face_ref(b).positions(value, b.size)
-        }
-    }
-
-    /// Prumer tecky hesla a krok mezi teckami.
-    pub(crate) fn dot_size(&self) -> u32 {
-        (self.look.body().line * 3 / 10).max(4)
-    }
-
-    pub(crate) fn dot_step(&self) -> u32 {
-        self.dot_size() * 7 / 4
     }
 
     /// Aktivace prvku (klik, Enter, akce pristupnosti).
@@ -224,7 +228,13 @@ impl<M: Clone> Ui<M> {
         }
     }
 
-    fn key(&mut self, code: u16, r: &mut Response<M>) {
+    fn key(&mut self, code: u16, ch: Option<char>, r: &mut Response<M>) {
+        if let Some((f, _)) = self.focused_field()
+            && code != KEY_TAB
+        {
+            self.field_key(f, code, ch, r);
+            return;
+        }
         if code == KEY_TAB {
             let n = self.elems.len();
             let order: Vec<usize> = (0..n).filter(|&i| self.elems[i].focusable() && !self.elems[i].skip_tab).collect();
@@ -264,55 +274,7 @@ impl<M: Clone> Ui<M> {
                     r.msgs.push(sel(k));
                 }
             }
-            ElemKind::TextInput { value, on_change, on_submit, .. } => {
-                let len = value.chars().count();
-                let key = self.elems[f].key;
-                let cur = self.cursor.get(&key).copied().unwrap_or(len).min(len);
-                let mut chars: Vec<char> = value.chars().collect();
-                let mut changed = false;
-                let newcur = match code {
-                    KEY_LEFT => cur.saturating_sub(1),
-                    KEY_RIGHT => (cur + 1).min(len),
-                    KEY_HOME => 0,
-                    KEY_END => len,
-                    KEY_BACKSPACE if cur > 0 => {
-                        chars.remove(cur - 1);
-                        changed = true;
-                        cur - 1
-                    }
-                    KEY_DELETE if cur < len => {
-                        chars.remove(cur);
-                        changed = true;
-                        cur
-                    }
-                    KEY_ENTER | KEY_KPENTER => {
-                        if let Some(m) = on_submit {
-                            r.msgs.push(m.clone());
-                        }
-                        cur
-                    }
-                    _ => return,
-                };
-                if changed && let Some(f2) = on_change {
-                    r.msgs.push(f2(chars.into_iter().collect::<String>()));
-                }
-                self.cursor.insert(key, newcur);
-                r.redraw = true;
-            }
             _ => {}
-        }
-    }
-
-    fn insert(&mut self, ch: char, r: &mut Response<M>) {
-        let Some(f) = self.focus else { return };
-        if let ElemKind::TextInput { value, on_change: Some(cb), .. } = &self.elems[f].kind {
-            let key = self.elems[f].key;
-            let mut chars: Vec<char> = value.chars().collect();
-            let cur = self.cursor.get(&key).copied().unwrap_or(chars.len()).min(chars.len());
-            chars.insert(cur, ch);
-            r.msgs.push(cb(chars.into_iter().collect()));
-            self.cursor.insert(key, cur + 1);
-            r.redraw = true;
         }
     }
 
@@ -348,7 +310,10 @@ impl<M: Clone> Ui<M> {
             && let ElemKind::TextInput { on_change: Some(f), .. } = &self.elems[i].kind
         {
             r.msgs.push(f(value.into()));
-            self.cursor.insert(self.elems[i].key, value.chars().count());
+            if let Some(ed) = self.edits.get_mut(&self.elems[i].key) {
+                ed.set_text(value);
+                ed.set_cursor(value.len(), false);
+            }
         }
         r
     }

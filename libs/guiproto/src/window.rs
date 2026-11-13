@@ -34,6 +34,8 @@ pub mod op {
     pub const ACTION_RESULT: u32 = 18;
     /// Deklarace menu okna (`crate::menu`).
     pub const MENU_UPDATE: u32 = 19;
+    /// Obalka zpravy schranky (`clipproto::ClientMsg`).
+    pub const CLIPBOARD: u32 = 20;
     // Kompozitor -> aplikace.
     pub const WELCOME: u32 = 100;
     pub const CONFIGURE: u32 = 101;
@@ -50,6 +52,8 @@ pub mod op {
     pub const ERROR: u32 = 112;
     /// Rezim barev systemu (0 svetly, 1 tmavy, 2 vysoky kontrast).
     pub const THEME: u32 = 113;
+    /// Obalka zpravy schranky (`clipproto::ServerMsg`).
+    pub const CLIPBOARD_EVENT: u32 = 114;
 }
 
 /// Rezim okna (kdo kresli dekorace).
@@ -500,6 +504,9 @@ pub enum ClientMsg {
     ActionResult { call: u32, ok: bool, value: Option<action::Value>, message: String },
     /// Menu okna (cely strom; posila se pri zmene, kompozitor ho drzi).
     MenuUpdate { window: u32, items: Vec<crate::menu::MenuItem> },
+    /// Zprava schranky (`clipproto`): obalka, aby sla schranka pozdeji
+    /// prestehovat do vlastni sluzby bez zmeny jejich zprav.
+    Clipboard { data: Vec<u8> },
 }
 
 /// Zprava kompozitor -> aplikace.
@@ -523,6 +530,14 @@ pub enum ServerMsg {
     /// Rezim barev systemu: aplikace kresli stejnym motivem (tokeny
     /// `design/tokens.toml`). Prijde po `WELCOME` a pri kazde zmene.
     Theme { mode: u8 },
+    /// Zprava schranky (`clipproto::ServerMsg`).
+    Clipboard { data: Vec<u8> },
+}
+
+/// Data obalky schranky: delka a bajty (zkracena zprava = chyba).
+fn clip_r(r: &mut Reader<'_>) -> Result<Vec<u8>> {
+    let n = r.u32()? as usize;
+    Ok(r.take(n)?.to_vec())
 }
 
 fn u128w(w: &mut Writer, v: u128) {
@@ -651,6 +666,10 @@ impl ClientMsg {
                 w.u32(*window);
                 crate::menu::encode_menu(&mut w, items);
             }
+            Clipboard { data } => {
+                w = Writer::op(op::CLIPBOARD);
+                w.u32(data.len() as u32).bytes(data);
+            }
         }
         w.finish()
     }
@@ -751,6 +770,7 @@ impl ClientMsg {
                 ActionResult { call, ok, value, message }
             }
             op::MENU_UPDATE => MenuUpdate { window: r.u32()?, items: crate::menu::decode_menu(&mut r, len)? },
+            op::CLIPBOARD => Clipboard { data: clip_r(&mut r)? },
             _ => return Err(Error::NotSupported),
         };
         if !r.is_empty() {
@@ -864,6 +884,10 @@ impl ServerMsg {
                 w = Writer::op(op::THEME);
                 w.u8(*mode);
             }
+            Clipboard { data } => {
+                w = Writer::op(op::CLIPBOARD_EVENT);
+                w.u32(data.len() as u32).bytes(data);
+            }
         }
         w.finish()
     }
@@ -935,6 +959,7 @@ impl ServerMsg {
                 code: crate::Error::from_code(r.i32()? as i64).ok_or(crate::Error::InvalidArgs)?,
             },
             op::THEME => Theme { mode: r.u8()? },
+            op::CLIPBOARD_EVENT => Clipboard { data: clip_r(&mut r)? },
             _ => return Err(crate::Error::NotSupported),
         };
         if !r.is_empty() {

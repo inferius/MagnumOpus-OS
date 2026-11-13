@@ -21,6 +21,7 @@
 
 extern crate alloc;
 
+pub mod clipboard;
 pub mod diag;
 pub mod dialog;
 pub mod flyout;
@@ -124,6 +125,8 @@ pub struct Comp {
     pub(crate) frame: frame::FrameState,
     pub(crate) input: input::InputState,
     pub(crate) dialogs: dialog::Dialogs,
+    /// Schranka (`clipboard.rs`).
+    pub(crate) clipboard: clipboard::Clipboard,
     /// Prihlasovaci a zamykaci obrazovka.
     pub(crate) greeter: greeter::Greeter,
     pub(crate) services: services::Services,
@@ -200,6 +203,7 @@ impl Comp {
             frame: frame::FrameState::default(),
             input: input::InputState::new(w, h),
             dialogs: dialog::Dialogs::default(),
+            clipboard: clipboard::Clipboard::default(),
             greeter: greeter::Greeter::default(),
             services: services::Services::default(),
             token_source,

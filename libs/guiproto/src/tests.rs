@@ -127,6 +127,8 @@ fn client_messages_roundtrip() {
             value: Some(Value::Int(-3)),
             message: "hotovo".into(),
         },
+        ClientMsg::Clipboard { data: vec![1, 0, 0, 0, 0] },
+        ClientMsg::Clipboard { data: vec![] },
     ] {
         roundtrip_client(m);
     }
@@ -209,6 +211,7 @@ fn server_messages_roundtrip() {
             op: op::LAYER_SET,
             code: Error::InvalidArgs,
         },
+        ServerMsg::Clipboard { data: vec![104, 0, 0, 0] },
     ] {
         roundtrip_server(m);
     }

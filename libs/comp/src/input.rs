@@ -143,6 +143,10 @@ impl InputState {
 
 impl Comp {
     pub(crate) fn send_input(&mut self, c: ClientId, local: u32, event: InputEvent, mods: u16, synthetic: bool, time: u64) {
+        // Fyzicky stisk = gesto pro schranku (kopirovat, vlozit).
+        if !synthetic && matches!(event, InputEvent::Key { action: 1, .. } | InputEvent::Button { pressed: true, .. }) {
+            self.clip_gesture(c, self.input_now);
+        }
         self.send(
             c,
             ServerMsg::Input {

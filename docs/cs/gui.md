@@ -1231,7 +1231,7 @@ převede na zprávy `Msg`.
 |---|---|---|---|
 | `label` | - | - | `label` |
 | `button` | klik | Enter, mezerník | `button`, `activate` |
-| `text_input` | klik = kurzor | text, Backspace, Delete, šipky, Home, End, Enter = `on_submit` | `text-input`, `set-value` |
+| `text_input`, `text_area` | klik, tah, dvojklik, trojklik | viz [Textová pole a schránka](#textová-pole-a-schránka) | `text-input`, `set-value` |
 | `password_input` | jako `text_input` | jako `text_input` | `password-input` bez hodnoty |
 | `checkbox` | klik | mezerník, Enter | `checkbox`, `toggle` |
 | `list` | klik na položku | šipky nahoru a dolů | `list` a `list-item` |
@@ -1306,6 +1306,76 @@ column([
     button("Přihlásit").on_click(Msg::Prihlasit).key("ok"),
 ])
 ```
+
+### Textová pole a schránka
+
+`text_input`, `password_input` a `text_area` (víceřádkové, `.rows(n)`)
+sdílejí jeden editor `ui::text::TextEdit`:
+text, kurzor a výběr podle klíče prvku, historie zpět a znovu. Zdroj
+pravdy je aplikace: každou změnu dostane zprávou `on_change` a když hodnotu
+upraví (třeba převede na velká písmena), pole ji převezme a kurzor zůstane
+na hranici znaku.
+
+| Ovládání | Co dělá |
+|---|---|
+| klik, Shift+klik, tah | kurzor, rozšíření výběru, výběr tahem |
+| dvojklik, trojklik | slovo, řádek (heslo: dvojklik vybere vše) |
+| šipky, Ctrl+šipky, Shift | po grafémech, po slovech, s výběrem |
+| Home, End, Ctrl+Home, Ctrl+End | začátek a konec řádku a textu |
+| nahoru, dolů, PgUp, PgDn | jen `text_area`: viditelné řádky, pamatuje si polohu x |
+| Backspace, Delete, Ctrl+ | znak (i s kombinačními znaky), slovo |
+| Ctrl+A, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y | vybrat vše, zpět, znovu (psaní slova je jeden krok) |
+| Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Insert, Shift+Delete, Shift+Insert | schránka |
+| Enter | odeslat (`on_submit`); v `text_area` nový řádek, Ctrl+Enter odeslat |
+| kolečko | v `text_area` posune obsah pole, ne okno |
+
+- **Grafémy:** kurzor a mazání nikdy nerozdělí písmeno s kombinačním
+  háčkem (`C` + U+030C), emoji s barvou pleti, rodinu přes ZWJ ani vlajku.
+  Hranice slov znají diakritiku („Žluťoučký“ je jedno slovo).
+- **Zkratky podle rozložení:** Ctrl+Z je klávesa se znakem `z` v aktivním
+  rozložení (na české QWERTZ jiná fyzická klávesa než na US).
+- **Zalamování** v `text_area` podle slov na šířku pole; slovo delší než
+  řádek se zalomí po grafémech. Jednořádkové pole posouvá text tak, aby
+  byl kurzor vidět; vložené konce řádků nahradí mezerou.
+- **Heslo:** kopírovat ani vyjmout nejde (ani Ctrl+Insert), Ctrl+šipky
+  skáčou na začátek a konec (slova by prozradila mezery).
+- `ui::text` nezávisí na kreslení: terminál z něj používá hranice slov
+  a grafémů pro výběr v mřížce.
+
+**Schránka** je samostatný modul kompozitoru (`libs/comp/src/clipboard.rs`)
+s vlastním protokolem `libs/clipproto`. Zprávy zatím jdou v obálce
+okenního protokolu (`CLIPBOARD`), takže schránka půjde později přestěhovat
+do vlastní služby beze změny zpráv.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Prubeh schranky">
+<defs><marker id="cb1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="t" x="110" y="30" text-anchor="middle">aplikace A</text><text class="t" x="380" y="30" text-anchor="middle">compd</text><text class="t" x="650" y="30" text-anchor="middle">aplikace B</text>
+<path class="ln" d="M110 40 L110 290"/><path class="ln-acc" d="M380 40 L380 290"/><path class="ln" d="M650 40 L650 290"/>
+<path class="ln" d="M110 70 L378 70" marker-end="url(#cb1)"/><text class="m" x="120" y="62">Offer [text] (Ctrl+C)</text>
+<path class="ln" d="M380 100 L112 100" marker-end="url(#cb1)"/><text class="m" x="130" y="94">Send (kopie pro dobu po skončení A)</text>
+<path class="ln" d="M110 130 L378 130" marker-end="url(#cb1)"/><text class="m" x="130" y="124">Data</text>
+<path class="ln" d="M650 170 L382 170" marker-end="url(#cb1)"/><text class="m" x="400" y="162">Request (Ctrl+V)</text>
+<path class="ln" d="M380 200 L112 200" marker-end="url(#cb1)"/><text class="m" x="130" y="194">Send</text>
+<path class="ln" d="M110 230 L378 230" marker-end="url(#cb1)"/><text class="m" x="130" y="224">Data</text>
+<path class="ln" d="M380 260 L648 260" marker-end="url(#cb1)"/><text class="m" x="400" y="254">Deliver</text>
+</svg>
+<figcaption>Líný přenos: data jdou až při vložení; text si kompozitor vyžádá hned a drží kopii.</figcaption>
+</figure>
+
+| Pravidlo | Jak |
+|---|---|
+| jen na akci uživatele | nabídnout i vyžádat smí jen okno s fokusem do 1 s po fyzickém stisku klávesy nebo tlačítka (ne umělý vstup); jedno gesto = jedno vložení |
+| líný přenos | vlastník nabídne formáty (`Offer`), data pošle až na žádost (`Send` -> `Data` -> `Deliver`) |
+| po skončení vlastníka | text si kompozitor vyžádá hned po nabídce a drží kopii; čekající vložení jiných formátů selže (`Denied: Unavailable`) |
+| zabezpečená pole | knihovna heslo do schránky nedá; kompozitor navíc odmítne nabídku z okna, jehož uzel s fokusem je `password-input` |
+| velká data | do 60 KiB ve zprávě; větší přes sdílenou paměť (další krok) |
+| historie | zatím ne |
+
+Okno s fokusem dostane `Changed` s formáty ve schránce (při změně obsahu
+a při získání fokusu), aby mohlo povolit položku „Vložit“. Aplikace, které
+kreslí samy, volají `Window::copy_text`, `Window::request_paste`
+a `Window::clipboard_event`.
 
 Běhové prostředí `ui::client` (vlastnost `os`) drží okno: dvojité buffery
 ve VMO, vrstvy, celý strom přístupnosti po každé změně, `COMMIT`

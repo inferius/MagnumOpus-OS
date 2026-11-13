@@ -17,6 +17,7 @@
 //! dostane [`Event::Restored`]. Rozpracovana transakce a odpoved na akci
 //! vrati `SERVICE_RESTARTED` ([`run`] pak okno nakresli znovu).
 
+mod clip;
 mod restore;
 
 use alloc::collections::BTreeMap;
@@ -54,6 +55,8 @@ pub enum Event {
     Restored { generation: u64 },
     /// Rezim barev systemu (prekreslit stejnym motivem).
     Theme(theme::Mode),
+    /// Zprava schranky; zpracuje ji [`Window::clipboard_event`].
+    Clipboard(clipproto::ServerMsg),
 }
 
 /// Kanal okna a listek k jeho obnove ze startovni zpravy aplikace.
@@ -133,6 +136,11 @@ pub struct Window {
     groups: BTreeMap<u32, Rect>,
     /// Platny stav okna pro obnovu po padu kompozitoru.
     replay: Replay,
+    /// Text, ktery okno zkopirovalo (posle ho na zadost schranky).
+    clip_owned: Option<String>,
+    clip_serial: u32,
+    /// Formaty ve schrance (zprava `Changed`).
+    clip_formats: Vec<String>,
 }
 
 /// Zapis, ktery pri plne fronte kanalu chvili pocka (kompozitor zrovna
@@ -210,6 +218,9 @@ impl Window {
             a11y_ids: Default::default(),
             groups: BTreeMap::new(),
             replay,
+            clip_owned: None,
+            clip_serial: 0,
+            clip_formats: Vec::new(),
         };
         win.send(ClientMsg::LayerCreate { layer: ROOT_LAYER, window: 1, parent: 0, kind: LayerKind::Buffer })?;
         win.pairs.insert(ROOT_LAYER, Pair { bufs: [None, None], front: 1 });
@@ -322,6 +333,7 @@ impl Window {
                 _ => theme::Mode::Light,
             })),
             ServerMsg::A11yAction { node, action, value, .. } => Some(Event::A11yAction { node, action, value }),
+            ServerMsg::Clipboard { data } => clipproto::ServerMsg::decode(&data).ok().map(Event::Clipboard),
             ServerMsg::ActionInvoke { call, action, args, caller, synthetic } => Some(Event::Action { call, id: action, args, caller, synthetic }),
             _ => None,
         })
@@ -620,7 +632,16 @@ pub fn input_id() -> u64 {
 fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: Event, dirty: &mut bool) -> Result<bool> {
     match ev {
         Event::Input(r) => {
-            let resp = ui.event(r.event, r.mods);
+            let resp = ui.event_at(r.event, r.mods, Some(r.time));
+            // Schranka: Ctrl+C nabidne text, Ctrl+V si ho vyzada (data
+            // prijdou jako `Event::Clipboard`).
+            match &resp.clipboard {
+                Some(crate::event::Clip::Copy(t)) => win.copy_text(t.clone())?,
+                Some(crate::event::Clip::Paste) => {
+                    win.request_paste()?;
+                }
+                None => {}
+            }
             let changed = !resp.msgs.is_empty();
             // Trasovani vstupu (cil logu `vstup`): id = cas zaznamu z inputd.
             let id = r.time / 1000;
@@ -681,6 +702,19 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
             ui.look.set_mode(m);
             ui.rebuild(app.title(), app.view());
             *dirty = true;
+        }
+        Event::Clipboard(m) => {
+            if let Some(text) = win.clipboard_event(m)? {
+                let resp = ui.paste(&text);
+                let changed = !resp.msgs.is_empty();
+                for m in resp.msgs {
+                    app.update(m);
+                }
+                if changed {
+                    ui.rebuild(app.title(), app.view());
+                }
+                *dirty |= changed || resp.redraw;
+            }
         }
         Event::Frame => {}
     }
