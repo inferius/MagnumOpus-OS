@@ -22,7 +22,7 @@ Contents:
 ## Wizard steps
 
 The `install` command in the terminal (started from the live USB) walks
-the user through the steps of the design **[verified in QEMU]** (x86_64,
+the user through the steps of the design **[verified in QEMU]** (x86_64 and aarch64,
 `--only instalace`, unattended mode; the interactive prompts only by hand):
 
 1. **Language and keyboard** - Czech; several keyboard layouts (e.g. `cz`
@@ -125,7 +125,7 @@ copy.
 <figcaption>Disk after installing next to Windows (into free space).</figcaption>
 </figure>
 
-Steps of the `installd` service **[verified in QEMU]** (x86_64,
+Steps of the `installd` service **[verified in QEMU]** (x86_64 and aarch64,
 `--only instalace`):
 
 1. partition table (new, or adding into free slots),
@@ -147,7 +147,7 @@ Steps of the `installd` service **[verified in QEMU]** (x86_64,
 The installer writes `nvram = "zapsat"` and the default system
 (`vychozi = "magnumopus"` or `"jiny"`) into `\os\boot.cfg` on our ESP. On
 the first boot from the internal disk the loader (`loader/src/nvram.rs`)
-**[verified in QEMU]** (x86_64, OVMF, `--only instalace`):
+**[verified in QEMU]** (x86_64 OVMF and aarch64 AAVMF, `--only instalace`):
 
 1. adds nothing if a "MagnumOpus" entry already exists,
 2. checks the free space of UEFI variables (`QueryVariableInfo`, at least
@@ -165,7 +165,7 @@ Foreign `Boot####` entries are never deleted or overwritten.
 ## System settings
 
 `/system/config/system.toml` is written by the installer and read by init
-on every boot (`installplan::config`) **[verified in QEMU]** (x86_64):
+on every boot (`installplan::config`) **[verified in QEMU]** (x86_64 and aarch64):
 
 ```toml
 jazyk = "cs"
@@ -223,7 +223,9 @@ level on the host, not by clicking in the GUI.
 - No disk encryption and no recovery key yet.
 - No shrinking of a foreign (NTFS) partition; free space in the other
   system.
-- The installer builds for aarch64, the QEMU test runs only on x86_64 so
-  far.
+- The installer needs randomness (partition GUIDs, password salt). A
+  computer without a generator (aarch64 without TRNG and RNDR, QEMU without
+  virtio-rng) waits for entropy; the QEMU test therefore adds
+  `virtio-rng-pci` on aarch64.
 - The graphical wizard waits for `libs/ui` components (disk list, progress
   bar, partition preview bar, keyboard layout preview).

@@ -53,7 +53,11 @@ fn command(arch: &Arch, image: &Path, vars: &Path, serial: Option<&Path>, headle
     } else {
         cmd.args(["-machine", "virt,gic-version=3,its=on,virtualization=on,secure=off"])
             .args(["-cpu", "cortex-a76", "-smp", "4", "-m", "1G"])
-            .args(["-device", "ramfb"]);
+            .args(["-device", "ramfb"])
+            // cortex-a76 nema RNDR: bez virtio-rng jadro ceka na entropii
+            // a instalator (GUID, sul hesla) i TLS stoji. Deska s aarch64
+            // ma obvykle TRNG (SMCCC), x86_64 RDRAND.
+            .args(["-device", "virtio-rng-pci"]);
     }
     cmd.arg("-drive")
         .arg(crate::qemu::pflash_arg(&code, true))

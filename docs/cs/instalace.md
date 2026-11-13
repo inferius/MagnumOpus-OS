@@ -22,7 +22,7 @@ Obsah:
 ## Kroky průvodce
 
 Příkaz `install` v terminálu (spuštěném ze živého USB) vede uživatele
-kroky z návrhu **[ověřeno v QEMU]** (x86_64, `--only instalace`, režim
+kroky z návrhu **[ověřeno v QEMU]** (x86_64 i aarch64, `--only instalace`, režim
 bez dotazů; interaktivní dotazy jen ručně):
 
 1. **Jazyk a klávesnice** - čeština; víc rozložení klávesnice (např.
@@ -118,7 +118,7 @@ mezi oběma zápisy nechá platnou aspoň jednu kopii.
 <figcaption>Disk po instalaci vedle Windows (do volného místa).</figcaption>
 </figure>
 
-Postup služby `installd` **[ověřeno v QEMU]** (x86_64, `--only instalace`):
+Postup služby `installd` **[ověřeno v QEMU]** (x86_64 i aarch64, `--only instalace`):
 
 1. tabulka oddílů (nová, nebo přidání do volných slotů),
 2. formát ESP (FAT32, `libs/fatw`, jmenovka `MAGNUMOS`; jména souborů 8.3),
@@ -138,7 +138,7 @@ Postup služby `installd` **[ověřeno v QEMU]** (x86_64, `--only instalace`):
 Instalátor zapíše do `\os\boot.cfg` na naší ESP `nvram = "zapsat"`
 a výchozí systém (`vychozi = "magnumopus"` nebo `"jiny"`). Při prvním
 startu z interního disku zavaděč (`loader/src/nvram.rs`) **[ověřeno
-v QEMU]** (x86_64, OVMF, `--only instalace`):
+v QEMU]** (x86_64 OVMF i aarch64 AAVMF, `--only instalace`):
 
 1. když už položka „MagnumOpus“ existuje, nic nepřidá,
 2. ověří volné místo v proměnných UEFI (`QueryVariableInfo`, aspoň
@@ -154,7 +154,7 @@ Cizí položky `Boot####` se nikdy nemažou ani nepřepisují.
 ## Nastavení systému
 
 `/system/config/system.toml` zapisuje instalátor a čte init při každém
-startu (`installplan::config`) **[ověřeno v QEMU]** (x86_64):
+startu (`installplan::config`) **[ověřeno v QEMU]** (x86_64 i aarch64):
 
 ```toml
 jazyk = "cs"
@@ -210,6 +210,8 @@ hostiteli, ne klikáním v GUI.
   „přeinstalovat“.
 - Šifrování disku a obnovovací klíč zatím nejsou.
 - Zmenšení cizího oddílu (NTFS) není; uvolněte místo v druhém systému.
-- Instalace na aarch64 se sestaví, test v QEMU zatím běží jen na x86_64.
+- Instalátor potřebuje náhodu (GUID oddílů, sůl hesla). Počítač bez
+  generátoru (aarch64 bez TRNG a RNDR, v QEMU bez virtio-rng) čeká na
+  entropii; test v QEMU proto na aarch64 přidává `virtio-rng-pci`.
 - Grafický průvodce čeká na komponenty `libs/ui` (seznam disků, pruh
   průběhu, pruh náhledu oddílů, náhled rozložení klávesnice).
