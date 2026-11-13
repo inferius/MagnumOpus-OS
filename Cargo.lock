@@ -538,6 +538,7 @@ dependencies = [
  "guiproto",
  "inputproto",
  "theme",
+ "ui",
  "vkcomp",
 ]
 
