@@ -301,5 +301,7 @@ crash handler.
 - `cargo xtask test` also runs the USB boot after the main run;
   `--only zive-usb` runs only that. FS tests on the stick:
   `cargo xtask test --data-disk usb --only "souborovy system,data FS"`.
+- Installing from the stick to an internal disk: [Installation](installation.md)
+  (`--only instalace`).
 - Sources: `xtask/src/usb/` (image, listing and writing disks, boot in
   QEMU), `user/usb-storage/`, `libs/usbproto/src/storage.rs`.

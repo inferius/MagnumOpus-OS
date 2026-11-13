@@ -67,10 +67,12 @@ a podle výsledku omezí, co klient vidí a smí:
 
 Podrobnosti:
 
-- **Ve výchozím stavu jsou cizí disky jen pro čtení.** Přepínač, který by
-  zápis na cizí disk povolil, zatím neexistuje. Až bude potřeba (např.
-  instalace na prázdný disk), musí jít o výslovné rozhodnutí uživatele pro
-  jeden konkrétní disk, ne o globální volbu.
+- **Ve výchozím stavu jsou cizí disky jen pro čtení.** Globální přepínač
+  zápisu neexistuje. Jedinou výjimkou je **raw kanál instalátoru**
+  (`block-raw`): dostane ho jen služba `installd` a ovladač i na něm pustí
+  zápis jen do GPT a do oddílů instalátoru (`MagnumOpus`, `MagnumOpus
+  EFI`), nikdy do cizího oddílu **[ověřeno v QEMU]** (`--only instalace`).
+  Podrobně: [Instalace](instalace.md#ochrana-cizích-oddílů).
 - GPT se ověřuje celá: podpis, CRC hlavičky i tabulky, poloha hlavičky,
   rozsah použitelné oblasti. Oddíl nesmí zasahovat do MBR, hlaviček ani
   tabulek GPT, i kdyby hlavička (s platným CRC, např. od chybného

@@ -253,6 +253,8 @@ fn main(startup: Startup) -> i64 {
         }
         // Nativni ovladac displeje: po padu obnova obrazu firmwaru.
         display_native::supervise(&mut sup);
+        // Test instalace ze zive flashky (jen se souborem odpovedi v initfs).
+        install::test_hook();
         // Bezny beh: init je supervisor a nekonci.
         sup.run(&startup);
     }

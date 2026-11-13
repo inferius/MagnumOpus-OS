@@ -398,7 +398,8 @@ fn run_cli() -> Result<()> {
             // do filtru sad v QEMU nepatri.
             let only: Vec<String> = opts.test_only.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
             let usb_selected = only.iter().any(|s| s == "zive-usb");
-            let suites: Vec<String> = only.iter().filter(|s| *s != "zive-usb").cloned().collect();
+            let install_selected = only.iter().any(|s| s == "instalace");
+            let suites: Vec<String> = only.iter().filter(|s| *s != "zive-usb" && *s != "instalace").cloned().collect();
             if !opts.test_only.is_empty() || opts.test_repeat > 1 {
                 let filter = format!("suites = {}
 repeat = {}
@@ -415,7 +416,7 @@ repeat = {}
             // `--only zive-usb`: jen start z flash disku USB (`usb` je sada
             // testu userspace).
             let power_only = opts.test_only == "napajeni";
-            let usb_only = usb_selected && suites.is_empty();
+            let usb_only = (usb_selected || install_selected) && suites.is_empty();
             let release_only = opts.test_only == "release";
             let reboot_only = opts.test_only == "opakovany-start";
             if !power_only && !usb_only && !release_only && !reboot_only && opts.test_only != "zaznam-padu" {
@@ -451,6 +452,16 @@ repeat = {}
                 opts.test = false;
                 let extra = std::mem::take(&mut opts.extra_initfs);
                 let r = usb::test_run(&mut opts);
+                opts.extra_initfs = extra;
+                opts.test = true;
+                r?;
+            }
+            // Instalator: zive USB -> prazdny disk -> start z nej; vedle
+            // Windows (`--only instalace` jen tyto behy).
+            if opts.test_only.is_empty() || install_selected {
+                opts.test = false;
+                let extra = std::mem::take(&mut opts.extra_initfs);
+                let r = usb::install_test::run(&mut opts);
                 opts.extra_initfs = extra;
                 opts.test = true;
                 r?;

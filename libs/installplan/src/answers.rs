@@ -35,7 +35,7 @@ pub struct Answers {
 
 /// Rozbor; chyba = popis chybejiciho nebo vadneho klice.
 pub fn parse(text: &str) -> Result<Answers, String> {
-    let mut get = |key: &str| -> Option<String> {
+    let get = |key: &str| -> Option<String> {
         text.lines().find_map(|l| {
             let l = l.split('#').next().unwrap_or("").trim();
             let (k, v) = l.split_once('=')?;

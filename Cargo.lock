@@ -3418,6 +3418,8 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "accountproto",
+ "accounts",
  "bytes",
  "diskguard",
  "dns",
@@ -3428,6 +3430,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "initfs",
+ "installplan",
  "netproto",
  "pulldown-cmark",
  "rcgen",

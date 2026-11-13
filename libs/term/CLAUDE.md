@@ -8,6 +8,7 @@ Chytrý terminál (milník 6b), `no_std` + `alloc`. Moduly: `proto` (nativní pr
 - Okno ani termd interpret neobsahují; termd jen směruje zprávy.
 - Prostřednictvím `perm` dostane program jen cesty povolené manifestem (capability, ne identita).
 - Protokol je nativní a typovaný; escape sekvence jen v adaptéru `vt`.
+- Dotaz na text (`ServerMsg::Ask`, odpověď `ClientMsg::Text`, `Host::ask`): `secret = true` okno maskuje a do výpisu bloku jde jen `***` (heslo v průvodci `install`).
 
 ## Testy
 

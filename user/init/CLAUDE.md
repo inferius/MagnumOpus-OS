@@ -13,6 +13,8 @@ První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`,
 - init drží kořenová práva a z nich vytváří užší pro služby (job s limity podle manifestu); služba nedostane víc, než potřebuje.
 - Služba s restartem se po pádu spustí znovu s odkladem 100 ms, 200 ms, ... (max 5 s); víc než 5 restartů za 60 s = vzdá to. Klienti se k nové instanci připojují přes lístky (`libs/svcclient`).
 - Po pádu `compd` se spustí záložní konzole; po pádu `termd` zůstanou relace (`shsess`).
+- Instalátor (`src/install.rs`): `installd` se spouští až na první `OpenInstaller` a jen jednou dostane raw kanály disků (`Devices.raw`). Při startu se čte `/system/config/system.toml` (pásmo pro timed, rozložení klávesnice pro inputd); chybějící soubor = výchozí. Soubor `install-answers` v initfs spustí test instalace (jen obraz testu, nikdy instalovaný initfs).
+- Uživatelská čísla služeb: ACCOUNTD 902, LOGD 903 - nové číslo nesmí kolidovat.
 - Pořadí startu je závislostní: `fsd` čeká na disk od `devmgr`, `netd` na síťovou kartu atd. Nové pořadí = upravit `docs/cs/init.md`.
 
 ## Testy

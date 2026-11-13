@@ -1,11 +1,14 @@
 //! Minimalni a bezpecny zapis do FAT32: vytvoreni a prepsani souboru
-//! v jedne slozce v korenu svazku (logy a zaznamy padu na flashce, ktere
-//! Windows precte bez dalsich nastroju).
+//! (logy a zaznamy padu na flashce, ktere Windows precte bez dalsich
+//! nastroju; ESP pri instalaci), cteni souboru, formatovani (`format`).
 //!
 //! Co umi a co ne:
 //! - jen FAT32 se sektorem 512 B (oddil `MO-LOGY` vytvari xtask),
 //! - jmena 8.3 velkymi pismeny (bez dlouhych jmen),
-//! - slozka v korenu: najde ji, nebo vytvori,
+//! - slozky (i vnorene, `ensure_dir`): najde je, nebo vytvori,
+//! - data cte a zapisuje po souvislych bezich clusteru a FAT po celych
+//!   sektorech (60 MiB initfs pri instalaci = stovky operaci, ne desitky
+//!   tisic),
 //! - soubor v ni: vytvori, nebo prepise (stary retez clusteru uvolni),
 //! - nikdy nemaze ani nemeni nic mimo svou slozku a soubory, ktere zapisuje;
 //!   cizi soubory zustanou netknute,
@@ -83,7 +86,14 @@ pub struct Volume<D: Device> {
     fsinfo: u64,
     /// Kde hledat volny cluster.
     hint: u32,
+    /// Posledni prectany sektor prvni FAT (cislo sektoru v FAT, obsah):
+    /// cteni retezu a hledani volnych clusteru pak nectou sektor FAT pro
+    /// kazdy cluster zvlast (128 polozek na sektor).
+    fat_cache: Option<(u64, [u8; SECTOR])>,
 }
+
+/// Nejvic bajtu v jednom cteni nebo zapisu souvisleho behu clusteru.
+const RUN_BYTES: usize = 256 * 1024;
 
 /// Jmeno 8.3 do 11 bajtu adresare (`LOG.TXT` -> `LOG     TXT`).
 pub fn short_name(name: &str) -> Result<[u8; 11]> {
@@ -164,6 +174,7 @@ impl<D: Device> Volume<D> {
             root,
             fsinfo,
             hint: 2,
+            fat_cache: None,
         })
     }
 
@@ -181,9 +192,48 @@ impl<D: Device> Volume<D> {
 
     fn fat_get(&mut self, c: u32) -> Result<u32> {
         let off = c as u64 * 4;
+        let sec = off / SECTOR as u64;
+        let o = (off % SECTOR as u64) as usize;
+        if let Some((n, s)) = &self.fat_cache
+            && *n == sec
+        {
+            return Ok(u32_at(s, o) & 0x0FFF_FFFF);
+        }
         let mut s = [0u8; SECTOR];
-        self.dev.read(self.fat_start + off / SECTOR as u64, &mut s)?;
-        Ok(u32_at(&s, (off % SECTOR as u64) as usize) & 0x0FFF_FFFF)
+        self.dev.read(self.fat_start + sec, &mut s)?;
+        let v = u32_at(&s, o) & 0x0FFF_FFFF;
+        self.fat_cache = Some((sec, s));
+        Ok(v)
+    }
+
+    /// Zapise vic polozek FAT najednou: kazdy dotceny sektor se v kazde
+    /// kopii FAT precte a zapise jednou (`items` serazene podle clusteru
+    /// nejsou nutne, souvisle useky jsou ale nejrychlejsi).
+    fn fat_set_many(&mut self, items: &[(u32, u32)]) -> Result<()> {
+        let mut i = 0;
+        while i < items.len() {
+            let sec = items[i].0 as u64 * 4 / SECTOR as u64;
+            let mut j = i;
+            while j < items.len() && items[j].0 as u64 * 4 / SECTOR as u64 == sec {
+                j += 1;
+            }
+            for f in 0..self.fats as u64 {
+                let lba = self.fat_start + f * self.fat_size + sec;
+                let mut s = [0u8; SECTOR];
+                self.dev.read(lba, &mut s)?;
+                for &(c, v) in &items[i..j] {
+                    let o = (c as u64 * 4 % SECTOR as u64) as usize;
+                    let new = (u32_at(&s, o) & 0xF000_0000) | (v & 0x0FFF_FFFF);
+                    s[o..o + 4].copy_from_slice(&new.to_le_bytes());
+                }
+                self.dev.write(lba, &s)?;
+                if f == 0 {
+                    self.fat_cache = Some((sec, s));
+                }
+            }
+            i = j;
+        }
+        Ok(())
     }
 
     /// Zapise polozku FAT do vsech kopii (horni 4 bity zachova).
@@ -198,6 +248,9 @@ impl<D: Device> Volume<D> {
             let new = (old & 0xF000_0000) | (v & 0x0FFF_FFFF);
             s[o..o + 4].copy_from_slice(&new.to_le_bytes());
             self.dev.write(lba, &s)?;
+            if f == 0 {
+                self.fat_cache = Some((off / SECTOR as u64, s));
+            }
         }
         Ok(())
     }
@@ -249,18 +302,28 @@ impl<D: Device> Volume<D> {
 
     /// Spoji clustery do retezce (posledni = konec).
     fn link(&mut self, cs: &[u32]) -> Result<()> {
-        for (i, &c) in cs.iter().enumerate() {
-            let next = cs.get(i + 1).copied().unwrap_or(EOC);
-            self.fat_set(c, next)?;
-        }
-        Ok(())
+        let items: Vec<(u32, u32)> =
+            cs.iter().enumerate().map(|(i, &c)| (c, cs.get(i + 1).copied().unwrap_or(EOC))).collect();
+        self.fat_set_many(&items)
     }
 
     fn free_chain(&mut self, cs: &[u32]) -> Result<()> {
+        let items: Vec<(u32, u32)> = cs.iter().map(|&c| (c, 0)).collect();
+        self.fat_set_many(&items)
+    }
+
+    /// Souvisle behy clusteru (prvni cluster, pocet), kazdy nejvys
+    /// [`RUN_BYTES`].
+    fn runs(&self, cs: &[u32]) -> Vec<(u32, usize)> {
+        let max = (RUN_BYTES / self.cluster_bytes()).max(1);
+        let mut out: Vec<(u32, usize)> = Vec::new();
         for &c in cs {
-            self.fat_set(c, 0)?;
+            match out.last_mut() {
+                Some((first, n)) if *first + *n as u32 == c && *n < max => *n += 1,
+                _ => out.push((c, 1)),
+            }
         }
-        Ok(())
+        out
     }
 
     fn read_cluster(&mut self, c: u32) -> Result<Vec<u8>> {
@@ -390,10 +453,12 @@ impl<D: Device> Volume<D> {
         let first = Self::first_cluster(&e);
         let mut out = Vec::with_capacity(size);
         if size > 0 {
-            for c in self.chain(first)? {
-                let b = self.read_cluster(c)?;
-                let n = (size - out.len()).min(b.len());
-                out.extend_from_slice(&b[..n]);
+            let chain = self.chain(first)?;
+            for (c, n) in self.runs(&chain) {
+                let mut b = vec![0u8; n * self.cluster_bytes()];
+                self.dev.read(self.cluster_lba(c), &mut b)?;
+                let take = (size - out.len()).min(b.len());
+                out.extend_from_slice(&b[..take]);
                 if out.len() == size {
                     break;
                 }
@@ -422,10 +487,19 @@ impl<D: Device> Volume<D> {
         // polozka - preruseni nenecha soubor s cizimi daty).
         let n = data.len().div_ceil(self.cluster_bytes());
         let cs = if n > 0 { self.find_free(n)? } else { Vec::new() };
-        for (i, &c) in cs.iter().enumerate() {
-            let at = i * self.cluster_bytes();
-            let end = (at + self.cluster_bytes()).min(data.len());
-            self.write_cluster(c, &data[at..end])?;
+        let mut at = 0;
+        for (c, n) in self.runs(&cs) {
+            let len = n * self.cluster_bytes();
+            let end = (at + len).min(data.len());
+            if end - at == len {
+                self.dev.write(self.cluster_lba(c), &data[at..end])?;
+            } else {
+                // Posledni beh: doplnit nulami na cele clustery.
+                let mut b = vec![0u8; len];
+                b[..end - at].copy_from_slice(&data[at..end]);
+                self.dev.write(self.cluster_lba(c), &b)?;
+            }
+            at = end;
         }
         self.link(&cs)?;
         let first = cs.first().copied().unwrap_or(0);

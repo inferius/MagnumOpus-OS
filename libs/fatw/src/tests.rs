@@ -120,3 +120,46 @@ fn format_nested_and_read_back() {
     let mut small = Mem(vec![0u8; 16 << 20]);
     assert_eq!(super::format::format(&mut small, (16 << 20) / 512, b"X          ", 0, 1).err(), Some(Error::NotFat32));
 }
+
+/// Zarizeni s pocitadlem operaci (velky soubor nesmi cist a zapisovat
+/// FAT po jednom clusteru).
+struct Counted(Mem, usize);
+
+impl Device for Counted {
+    fn read(&mut self, lba: u64, buf: &mut [u8]) -> Result<()> {
+        self.1 += 1;
+        self.0.read(lba, buf)
+    }
+    fn write(&mut self, lba: u64, data: &[u8]) -> Result<()> {
+        self.1 += 1;
+        self.0.write(lba, data)
+    }
+    fn flush(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn big_file_in_runs_and_overwrite() {
+    let mut dev = Mem(vec![0u8; 128 << 20]);
+    super::format::format(&mut dev, (128 << 20) / 512, b"MAGNUMOPUS ", 0, 7).unwrap();
+    let t = Stamp::default();
+    let mut v = Volume::open(Counted(dev, 0)).unwrap();
+    // 3 MiB + kus: retez pres nekolik sektoru FAT a vic behu.
+    let big: Vec<u8> = (0..3 * 1024 * 1024 + 1234u32).map(|i| (i * 7 % 251) as u8).collect();
+    v.write_file("os", "initfs.img", b"stary", t).unwrap();
+    v.dev.1 = 0;
+    v.write_file("os", "initfs.img", &big, t).unwrap();
+    let writes = v.dev.1;
+    // Po clusterech by to bylo pres 3000 operaci.
+    assert!(writes < 200, "zapis 3 MiB: {writes} operaci");
+    v.dev.1 = 0;
+    assert_eq!(v.read_file("os/initfs.img").unwrap(), Some(big.clone()));
+    assert!(v.dev.1 < 100, "cteni 3 MiB: {} operaci", v.dev.1);
+    let mut img = v.into_device().0.0;
+    assert_eq!(read(&mut img, "os/initfs.img"), big);
+    // fatfs po nas zapise dalsi soubor (FAT a volne misto sedi).
+    let fs = fatfs::FileSystem::new(Cursor::new(&mut img[..]), fatfs::FsOptions::new()).unwrap();
+    let mut f = fs.root_dir().create_file("DALSI.TXT").unwrap();
+    f.write_all(&[5u8; 100_000]).unwrap();
+}

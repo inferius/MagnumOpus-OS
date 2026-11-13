@@ -15,6 +15,7 @@
 
 pub mod boot;
 pub mod hostdisk;
+pub mod install_test;
 mod image;
 pub mod platform;
 
@@ -76,13 +77,26 @@ pub fn split_args(args: Vec<OsString>) -> Result<(UsbArgs, Vec<OsString>)> {
 
 /// Soubory ESP: zavadec, jadro, initfs a kratky navod pro uzivatele
 /// (videt ve Windows po zasunuti flashky).
-fn esp_files<'a>(opts: &Options, a: &'a Artifacts, readme: &'a Path) -> Vec<(&'static str, &'a Path)> {
+fn esp_files<'a>(opts: &Options, a: &'a Artifacts, readme: &'a Path, install: &'a Path) -> Vec<(&'static str, &'a Path)> {
     vec![
         (opts.arch.boot_file, a.loader.as_path()),
         ("os/kernel.elf", a.kernel.as_path()),
         ("os/initfs.img", a.initfs.as_path()),
+        ("os/instfs.img", install),
         ("CTI-MNE.txt", readme),
     ]
+}
+
+/// Initfs pro instalaci na disk (`installd` ho kopiruje): stejny jako
+/// zivy, ale bez vyvojoveho profilu (`accounts-dev`) - nainstalovany
+/// system nesmi mit ucet bez hesla s automatickym prihlasenim.
+fn install_initfs(live: &Path, out: &Path) -> Result<()> {
+    let data = std::fs::read(live)?;
+    let fs = initfs::Initfs::parse(&data).map_err(|e| format!("initfs: {e:?}"))?;
+    let files: Vec<(&str, &[u8])> =
+        fs.files().filter(|f| f.name != DEV_PROFILE.0 && f.name != INSTALL_ANSWERS).map(|f| (f.name, f.data)).collect();
+    std::fs::write(out, initfs::build(&files))?;
+    Ok(())
 }
 
 const README: &str = "MagnumOpus - zive USB\r\n\
@@ -99,8 +113,11 @@ Secure Boot off). Guide: docs/en/live-usb.md in the repository.\r\n";
 pub fn create_image(opts: &Options, artifacts: &Artifacts, path: &Path, size_mib: u64) -> Result<PathBuf> {
     let readme = target_dir().join("usb-readme.txt");
     std::fs::write(&readme, README)?;
-    let files = esp_files(opts, artifacts, &readme);
+    let install = target_dir().join(format!("initfs-install-{}.img", std::process::id()));
+    install_initfs(&artifacts.initfs, &install)?;
+    let files = esp_files(opts, artifacts, &readme, &install);
     let layout = image::create(path, size_mib, &files)?;
+    let _ = std::fs::remove_file(&install);
     println!(
         "xtask: obraz USB {} ({} MiB, datovy oddil {} MiB od {} MiB)",
         path.display(),
@@ -116,6 +133,9 @@ pub fn create_image(opts: &Options, artifacts: &Artifacts, path: &Path, size_mib
 /// i release profilu; disk pro VMware (`xtask vmware`) je tentyz obraz.
 /// Obraz pro uzivatele (`xtask image`) ne.
 pub const DEV_PROFILE: (&str, &[u8]) = ("accounts-dev", b"1");
+/// Soubor odpovedi pro test instalace (init podle nej nainstaluje bez
+/// dotazu); do instalovaneho initfs nepatri.
+pub const INSTALL_ANSWERS: &str = "install-answers";
 
 /// Varovani pri tvorbe obrazu.
 pub const WARNING: &str = "xtask: POZOR: zive USB = vyvojovy profil: ucet `vyvojar` BEZ HESLA s automatickym prihlasenim; \

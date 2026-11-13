@@ -59,11 +59,14 @@ fn command(arch: &Arch, image: &Path, vars: &Path, serial: Option<&Path>, headle
         .arg(crate::qemu::pflash_arg(&code, true))
         .arg("-drive")
         .arg(crate::qemu::pflash_arg(vars, false))
-        .args(["-device", "qemu-xhci,id=xhci"])
-        .arg("-drive")
-        .arg(format!("if=none,id=usbstick,format=raw,file={}", image.display()))
-        .args(["-device", "usb-storage,bus=xhci.0,drive=usbstick,removable=on,bootindex=0"])
-        .args(["-device", "usb-kbd,bus=xhci.0"])
+        .args(["-device", "qemu-xhci,id=xhci"]);
+    // Prazdna cesta = bez flashky (start z nainstalovaneho disku).
+    if !image.as_os_str().is_empty() {
+        cmd.arg("-drive")
+            .arg(format!("if=none,id=usbstick,format=raw,file={}", image.display()))
+            .args(["-device", "usb-storage,bus=xhci.0,drive=usbstick,removable=on,bootindex=0"]);
+    }
+    cmd.args(["-device", "usb-kbd,bus=xhci.0"])
         .args(["-device", "usb-tablet,bus=xhci.0"])
         .args(["-netdev", "user,id=net0"])
         .args(["-device", "e1000e,netdev=net0,romfile="])
@@ -165,7 +168,7 @@ const KEY_L: &str = r#"{"execute":"send-key","arguments":{"keys":[{"type":"qcode
 
 /// Spusti stroj a ceka, az `missing(log)` bude prazdne. `keys` = posilat
 /// klavesu L pres QMP (nabidka zavadece). Vraci cestu logu.
-fn boot_until(
+pub(super) fn boot_until(
     arch: &Arch,
     image: &Path,
     extra: &[String],
@@ -198,6 +201,11 @@ fn boot_until(
             // Chvile na posledni zapisy.
             std::thread::sleep(Duration::from_secs(3));
             break Ok(());
+        }
+        // Znacka 'CHYBA: ...' = beh uz neuspeje, necekat na limit.
+        if let Some(f) = m.iter().find(|s| s.starts_with("CHYBA: ")) {
+            std::thread::sleep(Duration::from_secs(1));
+            break Err(String::from(*f));
         }
         if let Some(status) = child.try_wait()? {
             break Err(format!("QEMU skoncilo ({status}); v logu chybi: {}", m.join("; ")));

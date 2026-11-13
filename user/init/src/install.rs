@@ -83,3 +83,38 @@ pub fn apply_settings(devices: &crate::system::Devices) {
     }
     println!("init: nastaveni systemu: pasmo {}, klavesnice {}", s.zone, s.keyboards.join(", "));
 }
+
+/// Test instalace (`cargo xtask test`, soubor `install-answers` v initfs
+/// zive flashky): instalace bez dotazu podle odpovedi, stejne jako
+/// `install --odpovedi`. Na obrazu pro uzivatele soubor neni.
+pub fn test_hook() {
+    use installplan::proto::{Reply, Request};
+    let Some(answers) = STARTUP_INITFS.get().and_then(|f| f.find("install-answers")) else { return };
+    let text = String::from_utf8_lossy(answers).into_owned();
+    let run = || -> core::result::Result<String, String> {
+        let ans = installplan::answers::parse(&text)?;
+        let ch = open().map_err(|e| format!("installd: {e}"))?;
+        let call = |req: &Request| -> core::result::Result<Reply, String> {
+            ch.write(&req.encode(), Vec::new()).map_err(|e| format!("{e}"))?;
+            loop {
+                let m = ch.read(Some(time::deadline_after(Duration::from_secs(900)))).map_err(|e| format!("{e}"))?;
+                match Reply::decode(&m.data).map_err(|e| format!("{e}"))? {
+                    Reply::Progress { step, text } => println!("init: test instalace: krok {}: {text}", step + 1),
+                    Reply::Failed(e, t) => return Err(format!("{t} ({e})")),
+                    r => return Ok(r),
+                }
+            }
+        };
+        let Reply::Disks(list) = call(&Request::Disks)? else { return Err(String::from("disky")) };
+        let d = list.iter().find(|d| d.model == ans.disk).ok_or_else(|| format!("disk '{}' nenalezen", ans.disk))?;
+        let req = Request::Install { disk: d.index, mode: ans.mode, confirm: ans.confirm, settings: ans.settings, account: ans.account };
+        match call(&req)? {
+            Reply::Done(s) => Ok(s),
+            _ => Err(String::from("neplatna odpoved")),
+        }
+    };
+    match run() {
+        Ok(s) => println!("init: test instalace: HOTOVO; {}", s.lines().collect::<Vec<_>>().join(" ")),
+        Err(e) => println!("init: test instalace selhala: {e}"),
+    }
+}

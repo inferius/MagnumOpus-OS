@@ -16,6 +16,7 @@ extern crate alloc;
 
 mod arch;
 mod logger;
+mod nvram;
 mod pci_id;
 mod splash;
 
@@ -118,6 +119,8 @@ fn main() -> Status {
     let (initfs_phys, initfs_len) = load_initfs();
     let (pstore_phys, pstore_len) = alloc_pstore();
     let mut boot_flags = ask_boot_mode();
+    // Po instalaci: polozka MagnumOpus v nabidce firmwaru (jen jednou).
+    nvram::register_once();
     if verbose_file() {
         boot_flags |= boot_info::boot_flags::VERBOSE;
     }

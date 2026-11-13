@@ -11,7 +11,7 @@
 - **Tasks:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Session and safety:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Help:** [`help`](#help), [`explain`](#explain)
-- **System:** [`audio`](#audio), [`loglevel`](#loglevel), [`report`](#report), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **System:** [`audio`](#audio), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Files
 
@@ -1771,6 +1771,35 @@ report
 **Errors:** `ACCESS_DENIED`
 
 **Related:** [`loglevel`](#loglevel)
+
+
+### `install`
+
+installs the system from the live USB onto a disk (a step-by-step wizard; with --odpovedi without questions)
+
+A step-by-step installation wizard like the graphical installer: language and keyboard, computer check, where to install, preview of disk changes, account, security, summary and progress. It never overwrites foreign partitions; erasing a whole disk requires typing the disk name. With `--odpovedi <file>` it runs without questions.
+
+```shell
+install [--odpovedi hodnota]
+```
+
+Full name `system-install` · input: nothing · output: nothing
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `--odpovedi` | text |  | answers file (installation without questions) |
+
+Starts the wizard.
+
+```shell
+install
+```
+
+**Needs:** the live USB (installer)
+
+**Errors:** `SH_REJECTED`, `SH_USER`, `NOT_SUPPORTED`
+
+**Related:** [`report`](#report)
 
 
 ### `shutdown`

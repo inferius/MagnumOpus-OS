@@ -22,15 +22,15 @@ use libos::{Error, Result, println};
 use crate::disks::{Disk, FsPart, Part};
 
 /// Soubory systemu z ESP zive flashky: (cesta na flashce, cesta na cili).
-/// Instaluje se `initfs-install.img` (bez vyvojoveho autoprihlaseni).
+/// Instaluje se `os/instfs.img` (jmeno 8.3 kvuli fatw) (bez vyvojoveho autoprihlaseni).
 fn files() -> [(&'static str, &'static str); 3] {
     let boot = if cfg!(target_arch = "aarch64") { "EFI/BOOT/BOOTAA64.EFI" } else { "EFI/BOOT/BOOTX64.EFI" };
-    [(boot, boot), ("os/kernel.elf", "os/kernel.elf"), ("os/initfs-install.img", "os/initfs.img")]
+    [(boot, boot), ("os/kernel.elf", "os/kernel.elf"), ("os/instfs.img", "os/initfs.img")]
 }
 
-/// Volby zavadece na cilove ESP (`os/boot.toml`, cte loader): vychozi
+/// Volby zavadece na cilove ESP (`os/boot.cfg`, jmeno 8.3, obsah ve stylu TOML; cte loader): vychozi
 /// system a zda ma loader pri prvnim startu zapsat polozku do NVRAM.
-fn boot_toml(default_magnum: bool) -> String {
+fn boot_cfg(default_magnum: bool) -> String {
     format!(
         "# Zavadec MagnumOpus (zapsal instalator)\nnvram = \"zapsat\"\nvychozi = \"{}\"\n",
         if default_magnum { "magnumopus" } else { "jiny" }
@@ -80,7 +80,7 @@ pub fn install(cx: &mut Ctx, plan: &Plan, settings: &Settings, account: &Account
         let (dir, name) = to.rsplit_once('/').unwrap_or(("", to));
         vol.write_file(dir, name, data, fatw::Stamp::default()).map_err(fat_err)?;
     }
-    vol.write_file("os", "boot.toml", boot_toml(settings.default_magnum).as_bytes(), fatw::Stamp::default())
+    vol.write_file("os", "boot.cfg", boot_cfg(settings.default_magnum).as_bytes(), fatw::Stamp::default())
         .map_err(fat_err)?;
 
     let data_part = || Part { disk: cx.target, first: plan.data.0, sectors: plan.data.1 - plan.data.0 + 1 };
