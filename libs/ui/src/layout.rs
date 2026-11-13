@@ -22,6 +22,7 @@ pub enum ElemKind<M> {
     List { count: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
     ListItem { text: String, index: usize, selected: bool, list: usize, agent: bool },
     Progress { value: u32 },
+    Table(Box<crate::node::TableSpec<M>>),
     Group,
     Scroll { content_h: u32 },
 }
@@ -48,7 +49,7 @@ impl<M> Element<M> {
         !self.disabled
             && matches!(
                 self.kind,
-                ElemKind::Button { .. } | ElemKind::TextInput { .. } | ElemKind::Checkbox { .. } | ElemKind::List { .. }
+                ElemKind::Button { .. } | ElemKind::TextInput { .. } | ElemKind::Checkbox { .. } | ElemKind::List { .. } | ElemKind::Table(_)
             )
     }
 }
@@ -66,10 +67,11 @@ fn kind_tag<M>(k: &Kind<M>) -> usize {
         Kind::Row(_) => 7,
         Kind::Scroll(_) => 8,
         Kind::Spacer => 9,
+        Kind::Table(_) => 10,
     }
 }
 
-const TAGS: usize = 10;
+const TAGS: usize = 11;
 
 /// Znacky odvozenych klicu (aby se nepotkaly s vlastnimi).
 const OWN: u64 = 1;
@@ -120,6 +122,8 @@ fn measure<M>(n: &Node<M>, t: &Look) -> (u32, u32) {
         Kind::Checkbox { text, .. } => (th.size.icon_m + sp[3] + t.width(text, t.body()), ctl.min(th.size.hit_min)),
         Kind::List { items, .. } => (th.size.hit_min * 4, items.len() as u32 * t.row_h() + 2 * sp[2]),
         Kind::Progress { .. } => (th.size.hit_min * 4, sp[3]),
+        // Tabulka: osm radku a zahlavi (pevna vyska `height`, jinak roste).
+        Kind::Table(tb) => (th.size.hit_min * 6, (8 + tb.header as u32) * t.row_h() + 2),
         Kind::Column(ch) => ch.iter().fold((0, 0), |(w, h), c| {
             let (cw, chh) = measure(c, t);
             (w.max(cw), h + chh + if h > 0 { t.gap() } else { 0 })
@@ -196,6 +200,9 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
         }
         Kind::Progress { value } => {
             push(out, ElemKind::Progress { value }, r);
+        }
+        Kind::Table(t) => {
+            push(out, ElemKind::Table(t), r);
         }
         Kind::Spacer => {}
         Kind::Column(children) => {

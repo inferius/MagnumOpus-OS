@@ -160,6 +160,7 @@ impl<M: Clone> Ui<M> {
                         c.round_fill(Rect::new(r.x, r.y, w.max(r.h), r.h), r.h / 2, fill);
                     }
                 }
+                ElemKind::Table(_) => self.draw_table(c, i, st),
                 ElemKind::Group => {}
                 ElemKind::Scroll { .. } => {
                     // Obsah je vlastni vrstva; tady jen ram.

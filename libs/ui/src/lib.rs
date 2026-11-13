@@ -20,6 +20,8 @@ mod field;
 pub mod layout;
 pub mod look;
 pub mod node;
+pub mod scrollbar;
+mod table;
 pub mod text;
 
 #[cfg(feature = "os")]
@@ -57,9 +59,9 @@ pub const SCROLL_BASE: u32 = 1000;
 /// Id uzlu pristupnosti okna; prvky maji stabilni id od 2 (podle klice).
 pub const WINDOW_NODE: u32 = 1;
 
-/// Nejvyssi id prvku (vrstvy obsahu se vejdou do u32, uzly chyb maji
-/// nejvyssi bit).
-const ID_MAX: u32 = (u32::MAX - SCROLL_BASE) / 2 - 1;
+/// Nejvyssi id prvku: nad nim jsou virtualni uzly tabulek (bit 30) a uzly
+/// chyb (bit 31); vrstvy obsahu `SCROLL_BASE + 2n` se vejdou do u32.
+const ID_MAX: u32 = 0x3FFF_FFFF;
 
 pub fn scroll_layers(id: u32) -> (u32, u32) {
     let g = SCROLL_BASE + 2 * id;
@@ -165,6 +167,10 @@ pub struct Ui<M> {
     pub(crate) drag_field: Option<Key>,
     /// Pole, ktere pozadalo o vlozeni ze schranky (`Ui::paste`).
     pub(crate) paste_target: Option<Key>,
+    /// Stav tabulek (posun, kurzor, kotva, sirky sloupcu) podle klice.
+    pub(crate) tables: BTreeMap<Key, table::TableState>,
+    /// Rozpracovany stisk v tabulce (radek, zahlavi, posuvnik).
+    pub(crate) table_press: Option<table::Press>,
     /// Posun obsahu posouvanych oblasti podle klice prvku.
     pub(crate) scroll: BTreeMap<Key, i32>,
     /// Ukazatel (souradnice okna).
@@ -213,6 +219,8 @@ impl<M: Clone> Ui<M> {
             last_click: None,
             drag_field: None,
             paste_target: None,
+            tables: BTreeMap::new(),
+            table_press: None,
             scroll: BTreeMap::new(),
             pointer: (-1, -1),
             mods: 0,
@@ -266,6 +274,7 @@ impl<M: Clone> Ui<M> {
         self.key_pressed = find(kk);
         // Textova pole prevezmou hodnotu aplikace (kurzor a historie zustanou).
         self.sync_fields();
+        self.sync_tables();
         // Posun nejvys do konce obsahu.
         let areas: Vec<(Key, i32)> = self.scroll_areas().iter().map(|a| (self.elems[a.index].key, (a.content_h as i32 - a.rect.h as i32).max(0))).collect();
         self.scroll.retain(|k, _| areas.iter().any(|(j, _)| j == k));
@@ -378,12 +387,17 @@ impl<M: Clone> Ui<M> {
                 // Agent i pro ctecku obrazovky (ne jen barvou).
                 ElemKind::ListItem { text, agent, .. } => (Role::ListItem, if *agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), ACTIVATE),
                 ElemKind::Progress { value } => (Role::Progress, none(), alloc::format!("{value}"), 0),
+                ElemKind::Table(t) => (Role::Table, t.columns.first().map_or_else(none, |c| c.title.clone()), alloc::format!("{} řádků", t.count), FOCUS | SCROLL),
                 ElemKind::Group => (Role::Group, none(), none(), 0),
                 ElemKind::Scroll { .. } => (Role::ScrollArea, none(), none(), SCROLL),
             };
             let layer = if e.space == 0 { ROOT_LAYER } else { scroll_layers(self.elem_ids[e.space - 1]).1 };
             let id = self.elem_ids[i];
             out.push(A11yNode { id, parent, role, name, value, state: self.state(i).a11y_bits(), layer, bounds: e.rect, actions });
+            // Tabulka: zahlavi a viditelne radky.
+            if matches!(e.kind, ElemKind::Table(_)) {
+                self.table_a11y(i, id, layer, &mut out);
+            }
             // Text chyby jako podrizeny uzel pole (ctecka ho precte s polem).
             if let Some(err) = &e.error {
                 out.push(A11yNode { id: error_node(id), parent: id, role: Role::Label, name: err.clone(), value: none(), state: 0, layer, bounds: e.rect, actions: 0 });

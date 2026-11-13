@@ -1317,6 +1317,7 @@ Input (keys, text, mouse, accessibility actions) becomes `Msg` messages.
 | `password_input` | like `text_input` | like `text_input` | `password-input` without a value |
 | `checkbox` | click | space, Enter | `checkbox`, `toggle` |
 | `list` | click an item | up and down arrows | `list` and `list-item` |
+| `table` | selection, sorting, dragging, scrollbar | see [Table and list](#table-and-list-virtualization) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (value in percent) |
 | `column`, `row`, `spacer` | - | - | `group` |
 | `scroll` | wheel | - | `scroll-area`, `scroll` |
@@ -1482,6 +1483,60 @@ The focused window gets `Changed` with the formats on the clipboard (when
 the content changes and when it gains focus) so it can enable "Paste".
 Applications that draw themselves call `Window::copy_text`,
 `Window::request_paste` and `Window::clipboard_event`.
+
+### Table and list (virtualization)
+
+`table(columns, count, id, row)` is a table and also a single-column list
+(`.header(false)`: disk selection, keyboard layouts in the installer). It
+reads data **lazily**: `id(i)` (stable row id, cheap) and `row(i)` (`Cells`
+with cell text and an icon) are called for visible rows only. Ten thousand
+files cost the same as twenty. The application can share data through
+`Rc` so `view` does not copy it.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Table virtualization">
+<rect class="box" x="20" y="20" width="200" height="190" rx="8"/><text class="t" x="120" y="45" text-anchor="middle">app data</text>
+<text class="m" x="40" y="75">0 ... 9 999</text><text class="m" x="40" y="100">id(i), row(i)</text><text class="m" x="40" y="125">read lazily</text>
+<rect class="acc" x="300" y="70" width="200" height="90" rx="8"/><text class="t" x="400" y="95" text-anchor="middle">visible rows</text>
+<text class="m" x="400" y="120" text-anchor="middle">first..last</text><text class="m" x="400" y="140" text-anchor="middle">by scroll offset</text>
+<rect class="box" x="560" y="20" width="180" height="190" rx="8"/><text class="t" x="650" y="45" text-anchor="middle">output</text>
+<text class="m" x="580" y="80">drawing</text><text class="m" x="580" y="105">row nodes</text><text class="m" x="580" y="130">selection = ids</text>
+<path class="ln" d="M220 115 L298 115"/><path class="ln" d="M500 115 L558 115"/>
+</svg>
+<figcaption>The table reads the content of visible rows only; selection and cursor are kept by id, so they survive sorting and data changes.</figcaption>
+</figure>
+
+| Control | What it does |
+|---|---|
+| click, Ctrl+click, Shift+click | select a row, toggle, range from the anchor (Ctrl+Shift adds the range) |
+| arrows, PgUp, PgDn, Home, End | move the cursor with selection; Shift = range, Ctrl = cursor only |
+| space, Ctrl+space, Ctrl+A | select the cursor row, toggle it, select all |
+| typing | jump to the row whose first cell starts with the typed text (at most 1 s between letters) |
+| double click, Enter | `on_activate` (open) |
+| right button | selects the row if it was not selected and sends `on_context` (context menu) |
+| header click | `on_sort(column, ascending)`, again reversed; the header arrow follows `.sorted` |
+| drag a header edge | column width (library state by key, at least `size.hit_min`) |
+| drag selected rows | after 6 px `on_drag(ids)`; target and drop are up to the application (the drag protocol between applications is a next step) |
+| wheel | smooth scrolling: target at once, movement per frame (`Ui::tick`); at the edge the wheel goes to the area below |
+| scrollbar | drag the thumb, click the track for a page |
+
+- **The application owns the selection** (`.selection(ids)`); the table
+  sends the whole new selection (`on_selection`). Cursor and anchor live in
+  the library by id, so they survive sorting and data changes.
+  `.multi_select(false)` = at most one row.
+- **Accessibility:** a `table` node with the value "N řádků", `column-header`
+  with "vzestupně / sestupně" and `row` nodes for visible rows only
+  (state `selected`, `focused`); the `activate` action selects a row or
+  sorts by a header. The tree stays small even for large lists.
+- **Look after `.tbl` in the design:** header `caption` with the
+  `body_strong` weight in `ink_muted`, a `border` line under each row,
+  selection `accent_soft`, hover `surface_3`, numbers
+  (`col(..).numeric()`) right aligned, the cursor as a focus ring in the
+  active window.
+- **The scrollbar** `ui::scrollbar::Scrollbar` (overlay, width
+  `size.scrollbar`, thumb at least `hit_min / 2`) does not depend on the
+  element tree: the terminal uses its geometry, hit test, dragging and
+  drawing too.
 
 The `ui::client` runtime (feature `os`) keeps the window: double buffers
 in VMOs, layers, the whole accessibility tree after every change,

@@ -84,6 +84,9 @@ impl<M: Clone> Ui<M> {
     /// Udalost s casem zaznamu (ns): dvojklik a trojklik v textovem poli.
     pub fn event_at(&mut self, ev: InputEvent, mods_now: u16, time: Option<u64>) -> Response<M> {
         self.mods = mods_now;
+        if let Some(r) = self.table_event(&ev, time) {
+            return r;
+        }
         let mut r = Response::default();
         match ev {
             InputEvent::PointerMove { x, y } => {
@@ -184,6 +187,7 @@ impl<M: Clone> Ui<M> {
             InputEvent::Focus(false) => {
                 self.pressed = None;
                 self.drag_field = None;
+                self.table_press = None;
                 self.key_pressed = None;
                 self.hover = None;
                 self.active = false;
@@ -288,6 +292,7 @@ impl<M: Clone> Ui<M> {
             ElemKind::ListItem { text, .. } => ("radek", text.as_str()),
             ElemKind::TextInput { .. } => ("textove pole", ""),
             ElemKind::List { .. } => ("seznam", ""),
+            ElemKind::Table(_) => ("tabulka", ""),
             _ => ("jiny", ""),
         };
         alloc::format!("{i} {k} '{t}'")
@@ -297,6 +302,7 @@ impl<M: Clone> Ui<M> {
     pub fn a11y_action(&mut self, node: u32, action: u32, value: &str) -> Response<M> {
         let mut r = Response::default();
         let Some(i) = self.elem_ids.iter().position(|&id| id == node) else {
+            self.table_a11y_action(node, action, &mut r);
             return r;
         };
         if action & actions::FOCUS != 0 && self.elems[i].focusable() {

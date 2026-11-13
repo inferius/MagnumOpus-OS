@@ -769,7 +769,12 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
                 *dirty |= changed || resp.redraw;
             }
         }
-        Event::Frame => {}
+        // Snimek: krok plynuleho rolovani tabulek.
+        Event::Frame => {
+            if ui.tick() {
+                *dirty = true;
+            }
+        }
     }
     Ok(true)
 }

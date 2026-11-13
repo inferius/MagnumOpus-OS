@@ -92,6 +92,8 @@ pub enum Kind<M> {
     /// `agents[i]` = radek patri agentovi AI (stitek a pruh barvy `ai`).
     List { items: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>>, agents: Vec<bool> },
     Progress { value: u32 },
+    /// Tabulka / seznam s virtualizaci (viz [`table`]).
+    Table(Box<TableSpec<M>>),
     Column(Vec<Node<M>>),
     Row(Vec<Node<M>>),
     /// Posouvany obsah: posun dela kompozitor (vlastni vrstva s orezem).
@@ -323,6 +325,191 @@ impl<M> Node<M> {
     pub fn on_select(mut self, f: impl Fn(usize) -> M + 'static) -> Self {
         if let Kind::List { on_select, .. } = &mut self.kind {
             *on_select = Some(Box::new(f));
+        }
+        self
+    }
+}
+
+/// Sloupec tabulky.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Col {
+    pub title: String,
+    /// Sirka v px; 0 = zbytek mista (vic takovych si ho rozdeli).
+    pub width: u32,
+    /// Cislo: zarovnani vpravo.
+    pub numeric: bool,
+    /// Klik na zahlavi radi (zprava `on_sort`).
+    pub sortable: bool,
+}
+
+/// Sloupec `title` sirky `width` (0 = zbytek mista).
+pub fn col(title: &str, width: u32) -> Col {
+    Col { title: title.into(), width, numeric: false, sortable: false }
+}
+
+impl Col {
+    pub fn numeric(mut self) -> Self {
+        self.numeric = true;
+        self
+    }
+
+    pub fn sortable(mut self) -> Self {
+        self.sortable = true;
+        self
+    }
+}
+
+/// Obsah jednoho radku tabulky (vytvari se jen pro viditelne radky).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Cells {
+    pub cells: Vec<String>,
+    /// Ikona pred prvni bunkou (jmeno z `gfx::icon`, napr. "folder").
+    pub icon: Option<&'static str>,
+}
+
+impl Cells {
+    pub fn new(cells: impl IntoIterator<Item = String>) -> Self {
+        Self { cells: cells.into_iter().collect(), icon: None }
+    }
+
+    pub fn icon(mut self, name: &'static str) -> Self {
+        self.icon = Some(name);
+        self
+    }
+}
+
+/// Popis tabulky: data se ctou line pres `id` a `row` jen pro viditelne
+/// radky, takze tisice polozek nestoji nic navic. Vyber drzi aplikace
+/// (`selection`, zprava `on_selection` s novym vyberem).
+pub struct TableSpec<M> {
+    pub columns: Vec<Col>,
+    pub count: usize,
+    /// Stabilni id radku `i` (napr. cislo souboru, index v datech aplikace):
+    /// podle nej se drzi vyber a kurzor pri razeni a zmene dat. Ma byt
+    /// levne (vola se i pro rozsah pri Shift+klik).
+    pub id: Box<dyn Fn(usize) -> u64>,
+    /// Obsah radku `i`.
+    pub row: Box<dyn Fn(usize) -> Cells>,
+    pub selection: Vec<u64>,
+    /// Vyber vic radku (Ctrl, Shift, Ctrl+A); jinak nejvys jeden.
+    pub multi: bool,
+    /// Zobrazit zahlavi sloupcu.
+    pub header: bool,
+    /// Razeni: sloupec a vzestupne.
+    pub sort: Option<(usize, bool)>,
+    pub on_selection: Option<Box<dyn Fn(Vec<u64>) -> M>>,
+    /// Dvojklik nebo Enter na radku.
+    pub on_activate: Option<Box<dyn Fn(u64) -> M>>,
+    /// Klik na zahlavi: sloupec a vzestupne.
+    pub on_sort: Option<Box<dyn Fn(usize, bool) -> M>>,
+    /// Zacatek tazeni vybranych radku (id); cil a pusteni resi aplikace.
+    pub on_drag: Option<Box<dyn Fn(Vec<u64>) -> M>>,
+    /// Prave tlacitko na radku (kontextova nabidka).
+    pub on_context: Option<Box<dyn Fn(u64) -> M>>,
+}
+
+/// Tabulka s `count` radky. Jednosloupcovy seznam bez zahlavi (vyber
+/// disku, rozlozeni klavesnice): `table(vec![col("", 0)], n, id, row)
+/// .header(false)`.
+///
+/// ```ignore
+/// let files = Rc::clone(&self.files);
+/// table(vec![col("Název", 0).sortable(), col("Velikost", 100).numeric().sortable()],
+///       self.files.len(),
+///       { let f = files.clone(); move |i| f[i].inode },
+///       move |i| Cells::new([files[i].name.clone(), files[i].size_text()]).icon("file"))
+///     .selection(self.selected.clone()).multi_select(true)
+///     .on_selection(Msg::Select).on_activate(Msg::Open).on_sort(Msg::Sort)
+/// ```
+pub fn table<M>(columns: Vec<Col>, count: usize, id: impl Fn(usize) -> u64 + 'static, row: impl Fn(usize) -> Cells + 'static) -> Node<M> {
+    let mut n = node(Kind::Table(Box::new(TableSpec {
+        columns,
+        count,
+        id: Box::new(id),
+        row: Box::new(row),
+        selection: Vec::new(),
+        multi: false,
+        header: true,
+        sort: None,
+        on_selection: None,
+        on_activate: None,
+        on_sort: None,
+        on_drag: None,
+        on_context: None,
+    })));
+    n.grow = true;
+    n
+}
+
+impl<M> Node<M> {
+    fn spec(&mut self) -> Option<&mut TableSpec<M>> {
+        match &mut self.kind {
+            Kind::Table(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// Vybrane radky (id).
+    pub fn selection(mut self, ids: Vec<u64>) -> Self {
+        if let Some(t) = self.spec() {
+            t.selection = ids;
+        }
+        self
+    }
+
+    pub fn multi_select(mut self, m: bool) -> Self {
+        if let Some(t) = self.spec() {
+            t.multi = m;
+        }
+        self
+    }
+
+    pub fn header(mut self, h: bool) -> Self {
+        if let Some(t) = self.spec() {
+            t.header = h;
+        }
+        self
+    }
+
+    /// Ukazatel razeni v zahlavi.
+    pub fn sorted(mut self, col: usize, ascending: bool) -> Self {
+        if let Some(t) = self.spec() {
+            t.sort = Some((col, ascending));
+        }
+        self
+    }
+
+    pub fn on_selection(mut self, f: impl Fn(Vec<u64>) -> M + 'static) -> Self {
+        if let Some(t) = self.spec() {
+            t.on_selection = Some(Box::new(f));
+        }
+        self
+    }
+
+    pub fn on_activate(mut self, f: impl Fn(u64) -> M + 'static) -> Self {
+        if let Some(t) = self.spec() {
+            t.on_activate = Some(Box::new(f));
+        }
+        self
+    }
+
+    pub fn on_sort(mut self, f: impl Fn(usize, bool) -> M + 'static) -> Self {
+        if let Some(t) = self.spec() {
+            t.on_sort = Some(Box::new(f));
+        }
+        self
+    }
+
+    pub fn on_drag(mut self, f: impl Fn(Vec<u64>) -> M + 'static) -> Self {
+        if let Some(t) = self.spec() {
+            t.on_drag = Some(Box::new(f));
+        }
+        self
+    }
+
+    pub fn on_context(mut self, f: impl Fn(u64) -> M + 'static) -> Self {
+        if let Some(t) = self.spec() {
+            t.on_context = Some(Box::new(f));
         }
         self
     }

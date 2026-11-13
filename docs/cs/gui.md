@@ -1267,6 +1267,7 @@ převede na zprávy `Msg`.
 | `password_input` | jako `text_input` | jako `text_input` | `password-input` bez hodnoty |
 | `checkbox` | klik | mezerník, Enter | `checkbox`, `toggle` |
 | `list` | klik na položku | šipky nahoru a dolů | `list` a `list-item` |
+| `table` | výběr, řazení, tažení, posuvník | viz [Tabulka a seznam](#tabulka-a-seznam-virtualizace) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (hodnota v procentech) |
 | `column`, `row`, `spacer` | - | - | `group` |
 | `scroll` | kolečko | - | `scroll-area`, `scroll` |
@@ -1428,6 +1429,57 @@ Okno s fokusem dostane `Changed` s formáty ve schránce (při změně obsahu
 a při získání fokusu), aby mohlo povolit položku „Vložit“. Aplikace, které
 kreslí samy, volají `Window::copy_text`, `Window::request_paste`
 a `Window::clipboard_event`.
+
+### Tabulka a seznam (virtualizace)
+
+`table(sloupce, počet, id, řádek)` je tabulka i jednosloupcový seznam
+(`.header(false)`: výběr disku, rozložení klávesnice v instalátoru).
+Data čte **líně**: `id(i)` (stabilní id řádku, levné) a `row(i)`
+(`Cells` s textem buněk a ikonou) se volají jen pro viditelné řádky. Deset
+tisíc souborů tak stojí stejně jako dvacet. Data může aplikace sdílet přes
+`Rc`, ať je `view` nekopíruje.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Virtualizace tabulky">
+<rect class="box" x="20" y="20" width="200" height="190" rx="8"/><text class="t" x="120" y="45" text-anchor="middle">data aplikace</text>
+<text class="m" x="40" y="75">0 ... 9 999</text><text class="m" x="40" y="100">id(i), row(i)</text><text class="m" x="40" y="125">čte se líně</text>
+<rect class="acc" x="300" y="70" width="200" height="90" rx="8"/><text class="t" x="400" y="95" text-anchor="middle">viditelné řádky</text>
+<text class="m" x="400" y="120" text-anchor="middle">first..last</text><text class="m" x="400" y="140" text-anchor="middle">podle posunu</text>
+<rect class="box" x="560" y="20" width="180" height="190" rx="8"/><text class="t" x="650" y="45" text-anchor="middle">výstup</text>
+<text class="m" x="580" y="80">kreslení</text><text class="m" x="580" y="105">uzly row</text><text class="m" x="580" y="130">výběr = id</text>
+<path class="ln" d="M220 115 L298 115"/><path class="ln" d="M500 115 L558 115"/>
+</svg>
+<figcaption>Tabulka čte obsah jen viditelných řádků; výběr a kurzor drží podle id, takže přežijí řazení i změnu dat.</figcaption>
+</figure>
+
+| Ovládání | Co dělá |
+|---|---|
+| klik, Ctrl+klik, Shift+klik | vybere řádek, přepne, rozsah od kotvy (Ctrl+Shift přidá rozsah) |
+| šipky, PgUp, PgDn, Home, End | posun kurzoru s výběrem; Shift = rozsah, Ctrl = jen kurzor |
+| mezerník, Ctrl+mezerník, Ctrl+A | vybere řádek s kurzorem, přepne ho, vybere vše |
+| psaní | skok na řádek, jehož první buňka začíná napsaným textem (mezi písmeny nejvýš 1 s) |
+| dvojklik, Enter | `on_activate` (otevřít) |
+| pravé tlačítko | vybere řádek, pokud nebyl vybraný, a pošle `on_context` (kontextová nabídka) |
+| klik na záhlaví | `on_sort(sloupec, vzestupně)`, znovu opačně; šipka v záhlaví podle `.sorted` |
+| tah za okraj záhlaví | šířka sloupce (stav knihovny podle klíče, nejméně `size.hit_min`) |
+| tah vybraných řádků | po 6 px `on_drag(id)`; cíl a puštění řeší aplikace (protokol tažení mezi aplikacemi je další krok) |
+| kolečko | plynulé rolování: cíl hned, posun po snímcích (`Ui::tick`); na kraji kolečko dostane oblast pod tabulkou |
+| posuvník | tažení jezdce, klik do dráhy o stránku |
+
+- **Výběr drží aplikace** (`.selection(ids)`), tabulka pošle nový celý výběr
+  (`on_selection`). Kurzor a kotva jsou v knihovně podle id, takže přežijí
+  řazení i změnu dat. `.multi_select(false)` = nejvýš jeden řádek.
+- **Přístupnost:** uzel `table` s hodnotou „N řádků“, `column-header`
+  s hodnotou „vzestupně / sestupně“ a uzly `row` jen pro viditelné řádky
+  (stav `selected`, `focused`); akce `activate` na řádku vybere, na
+  záhlaví seřadí. Strom tak zůstane malý i u velkých seznamů.
+- **Vzhled podle `.tbl` v návrhu:** záhlaví `caption` s vahou
+  `body_strong` v `ink_muted`, čára `border` pod řádkem, výběr
+  `accent_soft`, najetí `surface_3`, čísla (`col(..).numeric()`) vpravo,
+  kurzor jako rámeček fokusu v aktivním okně.
+- **Posuvník** `ui::scrollbar::Scrollbar` (překryvný, šířka
+  `size.scrollbar`, jezdec nejméně `hit_min / 2`) nezávisí na stromu
+  prvků: geometrie, zásah, tažení a kreslení použije i terminál.
 
 Běhové prostředí `ui::client` (vlastnost `os`) drží okno: dvojité buffery
 ve VMO, vrstvy, celý strom přístupnosti po každé změně, `COMMIT`

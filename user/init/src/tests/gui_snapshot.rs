@@ -40,7 +40,15 @@ pub fn diag_snapshot(_: &Startup) -> TestResult {
         time::sleep(Duration::from_millis(200));
     };
     let path = format!("{}/{name}", crate::logd::LOG_DIR);
-    let head = fs.read(&path, 0, 54).map_err(|e| fail("cteni obrazku", e))?;
+    // Soubor je ve vypisu driv, nez ho logd dopise: pockat na celou
+    // hlavicku (soubeh v plne sade).
+    let head = loop {
+        let h = fs.read(&path, 0, 54).map_err(|e| fail("cteni obrazku", e))?;
+        if h.len() == 54 || time::now() > end {
+            break h;
+        }
+        time::sleep(Duration::from_millis(100));
+    };
     check!(head.len() == 54 && head.starts_with(b"BM"), "obrazek je BMP");
     // Id snimku: snimek-<boot>-<id>-<revize>.bmp (id muze obsahovat '-').
     let mid = name.trim_start_matches("snimek-").trim_end_matches(".bmp");
