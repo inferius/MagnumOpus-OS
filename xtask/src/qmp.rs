@@ -1,10 +1,13 @@
 //! Vkladani vstupu do QEMU pres QMP (QEMU Machine Protocol) pro test vstupu.
 //!
-//! Test v hostovanem systemu (`user/init/src/tests/input.rs`) vypise do
-//! seriove linky znacku [`MARKER`]. Vlakno xtasku sleduje log seriove linky,
-//! a jakmile znacku uvidi, pripoji se na QMP a posle `input-send-event`:
-//! klavesy, pohyb a tlacitka mysi, kolecko a Ctrl+Alt+Delete. Udalosti tak
-//! projdou cele: QEMU -> virtio-input -> ovladac -> inputd -> test.
+//! Testy v hostovanem systemu (vstup, PS/2, USB, GUI) vypisuji do seriove
+//! linky znacky. Vlakno xtasku sleduje log seriove linky a skript vstupu je
+//! rozdeleny na useky podle zacatku testu ([`STARTS`]): kazdy usek se spusti,
+//! az se objevi jeho znacka, a usek, jehoz test nebezi (`--only`, jiny
+//! stroj), se preskoci - testy tak nezavisi na poradi a vyberu sad.
+//! Posila `input-send-event` (klavesy, mys, kolecko, Ctrl+Alt+Delete),
+//! pripojeni USB a `screendump`. Udalosti projdou cele: QEMU -> virtio-input
+//! -> ovladac -> inputd -> test.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
@@ -61,14 +64,68 @@ fn wait_marker(log: &Path, marker: &str, start: Instant) -> bool {
 pub fn spawn_injector(log: PathBuf, port: Arc<AtomicU16>, ps2: bool) {
     std::thread::spawn(move || {
         let start = Instant::now();
-        if !wait_marker(&log, MARKER, start) {
-            return;
-        }
-        match inject(port.load(Ordering::Relaxed), &log, start, ps2) {
-            Ok(()) => println!("xtask: QMP: udalosti vstupu poslany"),
+        let segs = segments(ps2);
+        // Pripojit az na zacatku prvniho useku (QEMU uz bezi).
+        let Some(first) = next_segment(&log, &segs, 0, start) else { return };
+        match inject(port.load(Ordering::Relaxed), &log, start, &segs, first) {
+            Ok(n) => println!("xtask: QMP: udalosti vstupu poslany ({n} useku)"),
             Err(e) => eprintln!("xtask: QMP: vkladani vstupu selhalo: {e}"),
         }
     });
+}
+
+/// Zacatky testu, ktere vstup z QEMU potrebuji: podle nich se skript deli
+/// na useky (kazdy test zvlast, aby sel spustit i sam).
+const STARTS: [&str; 9] = [
+    MARKER,
+    MARKER_PS2,
+    usb::KEYS,
+    gui::DIALOG,
+    gui::SECURE,
+    gui::CLICK,
+    gui::SNAPSHOT,
+    gui::PALETTE_SWITCH,
+    gui::SHOT[0],
+];
+
+/// Konec testovaciho behu userspace (dal uz zadny usek neprijde).
+const END: [&str; 2] = ["init: vsechny testy userspace prosly", "testu userspace selhalo"];
+
+/// Skript rozdeleny na useky: (znacka zacatku, kroky vcetne cekani na ni).
+fn segments(ps2: bool) -> Vec<(&'static str, Vec<Step>)> {
+    let mut out: Vec<(&'static str, Vec<Step>)> = Vec::new();
+    for step in script(ps2) {
+        let start = match &step {
+            Step::WaitFor(m) | Step::ClickAt(m) if STARTS.contains(m) => Some(*m),
+            _ => None,
+        };
+        match (start, out.last_mut()) {
+            (Some(m), _) => out.push((m, vec![step])),
+            (None, Some(last)) => last.1.push(step),
+            // Kroky pred prvni znackou nejsou (skript zacina cekanim).
+            (None, None) => {}
+        }
+    }
+    out
+}
+
+/// Pocka na zacatek nektereho useku od `from`; vrati jeho index (nejdriv
+/// zacinajici z tech, jejichz znacka v logu je). `None` = beh testu skoncil
+/// nebo vyprsel limit.
+fn next_segment(log: &Path, segs: &[(&'static str, Vec<Step>)], from: usize, start: Instant) -> Option<usize> {
+    loop {
+        if start.elapsed() > WAIT_MAX {
+            return None;
+        }
+        let text = std::fs::read(log).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+        if let Some(j) = (from..segs.len()).find(|&j| text.contains(segs[j].0)) {
+            return Some(j);
+        }
+        if END.iter().any(|e| text.contains(e)) {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }
 
 /// Klavesa (qcode QEMU).
@@ -92,6 +149,7 @@ fn rel(axis: &str, value: i32) -> String {
 
 /// Krok skriptu: udalosti jednoho prikazu `input-send-event` (= jeden
 /// snimek), nebo pauza.
+#[derive(Clone)]
 enum Step {
     /// Udalosti pro virtio (konzole `video0`).
     Send(Vec<String>),
@@ -116,6 +174,7 @@ enum Step {
 /// vypise, az udalosti mysi dostane (zadne pevne cekani).
 fn script(ps2: bool) -> Vec<Step> {
     let mut s: Vec<Step> = Vec::new();
+    s.push(Step::WaitFor(MARKER));
     for (k, d) in [
         ("a", true),
         ("a", false),
@@ -205,8 +264,9 @@ mod gui {
     pub const SNAPSHOT: &str = "init: test gui: diagnosticky snimek ceka na Print Screen";
     pub const PALETTE_SWITCH: &str = "init: test gui: paleta prepne na Ukazku";
     pub const PALETTE_ACTION: &str = "init: test gui: paleta pricte v Ukazce";
-    pub const SHOT: [&str; 3] = ["init: test gui: snimek light", "init: test gui: snimek dark", "init: test gui: snimek contrast"];
-    pub const SHOT_NAMES: [&str; 3] = ["light", "dark", "contrast"];
+    pub const SHOT: [&str; 4] =
+        ["init: test gui: snimek light", "init: test gui: snimek dark", "init: test gui: snimek contrast", "init: test gui: snimek terminal"];
+    pub const SHOT_NAMES: [&str; 4] = ["light", "dark", "contrast", "terminal"];
 }
 
 fn ps2_steps(s: &mut Vec<Step>) {
@@ -351,7 +411,9 @@ fn reply(reader: &mut impl BufRead) -> Result<(), String> {
     }
 }
 
-fn inject(port: u16, log: &Path, start: Instant, ps2: bool) -> Result<(), String> {
+/// Projde useky od `first` (dalsi vzdy az po objeveni jeho znacky, useky
+/// bez znacky preskoci); vrati pocet provedenych useku.
+fn inject(port: u16, log: &Path, start: Instant, segs: &[(&'static str, Vec<Step>)], first: usize) -> Result<usize, String> {
     let stream = TcpStream::connect(("127.0.0.1", port)).map_err(|e| e.to_string())?;
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
@@ -371,45 +433,52 @@ fn inject(port: u16, log: &Path, start: Instant, ps2: bool) -> Result<(), String
         reply(reader)
     };
     send(r#"{"execute":"qmp_capabilities"}"#.into(), &mut reader)?;
-    for step in script(ps2) {
-        let (events, device) = match step {
-            Step::Send(e) => (e, r#""device":"video0","#),
-            Step::SendPs2(e) => (e, ""),
-            Step::SendUsb(e) => (e, r#""device":"video1","#),
-            Step::Qmp(cmd) => {
-                send(cmd, &mut reader)?;
-                continue;
-            }
-            Step::WaitFor(marker) => {
-                if !wait_marker(log, marker, start) {
-                    return Err(format!("znacka '{marker}' se neobjevila"));
-                }
-                continue;
-            }
-            Step::ClickAt(marker) => {
-                if !wait_marker(log, marker, start) {
-                    return Err(format!("znacka '{marker}' se neobjevila"));
-                }
-                let (x, y) = marker_point(log, marker).ok_or_else(|| format!("poloha za znackou '{marker}'"))?;
-                for events in [
-                    vec![rel("x", -30000), rel("y", -30000)],
-                    vec![rel("x", x), rel("y", y), btn("left", true)],
-                    vec![btn("left", false)],
-                ] {
-                    let cmd = format!(r#"{{"execute":"input-send-event","arguments":{{"device":"video0","events":[{}]}}}}"#, events.join(","));
+    let mut done = 0;
+    let mut next = Some(first);
+    while let Some(i) = next {
+        done += 1;
+        for step in &segs[i].1 {
+            let step = step.clone();
+            let (events, device) = match step {
+                Step::Send(e) => (e, r#""device":"video0","#),
+                Step::SendPs2(e) => (e, ""),
+                Step::SendUsb(e) => (e, r#""device":"video1","#),
+                Step::Qmp(cmd) => {
                     send(cmd, &mut reader)?;
+                    continue;
                 }
-                continue;
-            }
-        };
-        let cmd = format!(
-            r#"{{"execute":"input-send-event","arguments":{{{}"events":[{}]}}}}"#,
-            device,
-            events.join(",")
-        );
-        send(cmd, &mut reader)?;
+                Step::WaitFor(marker) => {
+                    if !wait_marker(log, marker, start) {
+                        return Err(format!("znacka '{marker}' se neobjevila"));
+                    }
+                    continue;
+                }
+                Step::ClickAt(marker) => {
+                    if !wait_marker(log, marker, start) {
+                        return Err(format!("znacka '{marker}' se neobjevila"));
+                    }
+                    let (x, y) = marker_point(log, marker).ok_or_else(|| format!("poloha za znackou '{marker}'"))?;
+                    for events in [
+                        vec![rel("x", -30000), rel("y", -30000)],
+                        vec![rel("x", x), rel("y", y), btn("left", true)],
+                        vec![btn("left", false)],
+                    ] {
+                        let cmd = format!(r#"{{"execute":"input-send-event","arguments":{{"device":"video0","events":[{}]}}}}"#, events.join(","));
+                        send(cmd, &mut reader)?;
+                    }
+                    continue;
+                }
+            };
+            let cmd = format!(
+                r#"{{"execute":"input-send-event","arguments":{{{}"events":[{}]}}}}"#,
+                device,
+                events.join(",")
+            );
+            send(cmd, &mut reader)?;
+        }
+        next = next_segment(log, segs, i + 1, start);
     }
-    Ok(())
+    Ok(done)
 }
 
 /// Dve cisla "x y" za znackou v logu.
