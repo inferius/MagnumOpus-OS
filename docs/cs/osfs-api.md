@@ -77,6 +77,16 @@ Zdroj: protokol a klient `libs/osfs-proto`, server `tools/osfs/src/api.rs`
   i data před rokem 1970; `Time::to_filetime()` pro Win32), `tree_*`, `dataset` (číslo datasetu,
   1 = kořenový), `link_target`, `truncated`. Kořen vnořeného datasetu má
   `kind = Dataset` (pro uživatele složka).
+- **Dostupnost hodnot** (`known`, `withheld`; bity `osfs_proto::avail` jsou
+  stejné jako `fsproto::avail`, viz
+  [Dostupnost hodnot](souborovy-system.md#dostupnost-hodnot-známé-skryté-nedostupné))
+  **[implementováno]**: bit v `known` = hodnota platí, ve `withheld` =
+  existuje, ale volající ji nesmí vidět (pole 0), ani jeden = nedostupná.
+  Nese bity `SIZE`, `MTIME`, `CTIME`, `BTIME`, `TREE`. `osfs` nemá
+  uživatele, takže `withheld` je dnes vždy 0; souhrny podstromu jsou
+  u souboru nedostupné (ne nuly), u hranice vnořeného datasetu i velikost
+  a časy. Zpráva s překryvem masek nebo neznámým bitem je poškozená
+  (`CORRUPTED`). Kvůli maskám má protokol verzi 2 (`VERSION`).
   `windows_name` popisuje jen samotné jméno: položka ve skrytém adresáři
   je z Windows nedosažitelná, i když její vlastní jméno je platné.
 - **Smazání snapshotu** API záměrně nenabízí: snapshoty chrání proti
@@ -105,7 +115,11 @@ if Client::is_osfs(root) {
     for e in c.list_all("", &PathArg::from_windows_full("Q:\\Fotky"))? {
         let size = if e.kind == osfs_proto::Kind::Dir { e.tree_bytes } else { e.size };
         let note = if e.hidden == Hidden::Visible { "" } else { " (ve Windows skryté)" };
-        println!("{} {size} B{note}", e.name);
+        if e.known & osfs_proto::avail::SIZE != 0 {
+            println!("{} {size} B{note}", e.name);
+        } else {
+            println!("{} - B{note}", e.name);
+        }
     }
 
     // Stará verze souboru ze snapshotu.

@@ -30,7 +30,7 @@ use crate::recover::Rec;
 use crate::{DirEntry, FsClient, Reader, Stat, Writer, decode_list};
 
 /// Verze protokolu, kterou tento klient mluvi.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// Kody operaci v2.
 pub mod op {
@@ -145,7 +145,7 @@ pub struct Opened {
 }
 
 impl FsClient {
-    /// Verze protokolu sluzby (2 = umi tento modul).
+    /// Verze protokolu sluzby (`VERSION` = umi tento modul).
     pub fn hello(&self) -> Result<u32> {
         let body = self.call(Self::req(op::HELLO))?;
         Reader::new(&body).u32()

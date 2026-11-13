@@ -121,6 +121,25 @@ fn dir_sizes(_: &Startup) -> TestResult {
         (76_000, 3, 1),
         "souhrn podstromu"
     );
+    // Masky dostupnosti po drate: adresar vse zname, soubor bez souhrnu,
+    // prazdna slozka zname nuly (ne skryte).
+    use fsproto::avail;
+    check_eq!((st.known, st.hidden), (avail::ALL, 0), "masky adresare");
+    let fst = f.stat("/velikosti/a/f0").map_err(|e| fail("stat souboru", e))?;
+    check_eq!((fst.known, fst.hidden), (avail::ALL & !avail::TREE, 0), "masky souboru");
+    f.create("/velikosti/prazdna", kind::DIR).map_err(|e| fail("mkdir prazdna", e))?;
+    let list = f.list_stat("/velikosti").map_err(|e| fail("list_stat", e))?;
+    let e = list
+        .iter()
+        .find(|e| e.name == "prazdna")
+        .ok_or_else(|| fail("prazdna ve vypisu", Error::NotFound))?;
+    // Polozka vypisu nese jen bity svych poli.
+    let entry_bits = avail::SIZE | avail::MTIME | avail::RIGHTS | avail::TREE;
+    check_eq!(
+        (e.tree_files, e.tree_dirs, e.known, e.hidden),
+        (0, 0, entry_bits, 0),
+        "masky prazdne slozky"
+    );
     Ok(())
 }
 
@@ -296,7 +315,7 @@ fn big_directory(_: &Startup) -> TestResult {
 /// obsah, nove otevreni dostane novy.
 fn v2_two_sessions(_: &Startup) -> TestResult {
     let f = fs()?;
-    check_eq!(f.hello().map_err(|e| fail("hello", e))?, 2, "verze protokolu");
+    check_eq!(f.hello().map_err(|e| fail("hello", e))?, fsproto::v2::VERSION, "verze protokolu");
     let a = f.connect().map_err(|e| fail("connect A", e))?;
     let b = f.connect().map_err(|e| fail("connect B", e))?;
     a.save_if("/v2-report.txt", None, b"puvodni").map_err(|e| fail("prvni ulozeni", e))?;

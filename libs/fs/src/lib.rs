@@ -49,7 +49,7 @@ mod tests;
 
 pub use abi::{Error, Result};
 pub use device::{BlockDevice, Durability, MemDevice};
-pub use fs::{AsideBegun, DedupReport, ScrubStatus, ConflictKind, MergeConflict, MergeReport, BranchInfo, CommitInfo, id_hex, FileVersion, RestoreMode, Undone, Change, ChangeKind, CheckReport, DatasetInfo, Handle, JournalPage, Revision, TrashEntry, View, access, share, DefragReport, DirEntry, Fs, FsInfo, Kind, MountOptions, Permissions, SetTimes, SnapshotInfo, Stat, ds_flags};
+pub use fs::{AsideBegun, DedupReport, ScrubStatus, ConflictKind, MergeConflict, MergeReport, BranchInfo, CommitInfo, id_hex, FileVersion, RestoreMode, Undone, Change, ChangeKind, CheckReport, DatasetInfo, Handle, JournalPage, Revision, TrashEntry, View, access, share, DefragReport, DirEntry, Fs, FsInfo, Kind, MountOptions, Permissions, SetTimes, SnapshotInfo, Stat, avail, ds_flags};
 pub use records::{AutoRule, CommitId, JournalEntry, Settings, jattr, jop, snapkind};
 pub use perm::{Acl, EVERYONE, Grant, Principal, SYSTEM, acl_flags, grant, rights};
 pub use hash::Algo;

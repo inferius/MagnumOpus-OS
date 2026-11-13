@@ -1299,7 +1299,7 @@ větší požadavky rozdělí.
 | op | Název | Parametry | Výsledek |
 |---|---|---|---|
 | 1 | `INFO` | - | jméno svazku, velikost bloku, bloky, volné, odložené, generace, algoritmus, návrat, přehráno |
-| 2 | `STAT` | cesta | `Stat` (oid, druh, velikost, mtime, ctime, btime, souhrny podstromu); čas = sekundy i64 + nanosekundy u32 |
+| 2 | `STAT` | cesta | `Stat` (oid, druh, velikost, mtime, ctime, btime, vlastník, práva, souhrny podstromu, masky `known` a `hidden` u16); čas = sekundy i64 + nanosekundy u32 |
 | 3 | `LIST` | cesta | počet u32 + (druh u8, oid u64, jméno) - seřazené podle jména; druh 1 soubor, 2 adresář, 3 symbolický odkaz; `BUFFER_TOO_SMALL`, když se výpis do zprávy nevejde |
 | 4 | `READ` | cesta, offset u64, délka u32 | data (kratší na konci souboru) |
 | 5 | `WRITE` | cesta, offset u64, data | - |
@@ -1320,7 +1320,7 @@ větší požadavky rozdělí.
 | 20 | `CHECK` | scrub u8 | generace u64, celkem problémů u64, nezkontrolované změny v paměti u8, počet u32 + popisy (kolik se vejde); jen s `debug` |
 | 21 | `LIST_PAGE` | cesta, kurzor (jméno poslední položky předchozí stránky, prázdný = od začátku), nejvýš u32 | další u8 (1 = něco zbylo) + stránka jako `LIST` (kolik se vejde do 60 KiB) |
 | 22 | `SNAP_LIST_PAGE` | snapshot, cesta, kurzor, nejvýš u32 | jako `LIST_PAGE` |
-| 87 | `LIST_STAT_PAGE` | cesta, kurzor, nejvýš u32 | další u8 + počet u32 + (jméno, druh u8, oid u64, velikost u64, mtime, práva u8) - kolik se vejde do 60 KiB; práva `LIST` a `TRAVERSE` k adresáři |
+| 87 | `LIST_STAT_PAGE` | cesta, kurzor, nejvýš u32 | další u8 + počet u32 + (jméno, druh u8, oid u64, velikost u64, mtime, práva u8, souhrny podstromu, masky `known` a `hidden` u16) - kolik se vejde do 60 KiB; práva `LIST` a `TRAVERSE` k adresáři |
 | 100 | `SIMULATE_POWER_LOSS` | - | přehrané operace u64; jen s `debug`, jinak `ACCESS_DENIED` |
 
 `FsClient::list` a `snapshot_list` čtou po stránkách - tím je vyřešený
@@ -1346,6 +1346,44 @@ datasetu), velikost a mtime jako `STAT` položky. Protože metadata jsou
 `STAT` položek, operace vyžaduje kromě `LIST` i `TRAVERSE` k adresáři (bez
 něj by `STAT` položek nešel; jinak `ACCESS_DENIED`). Funguje pro relace v1
 i v2 (stejná obsluha).
+
+#### Dostupnost hodnot: známé, skryté, nedostupné
+
+`Stat` i `StatEntry` končí dvěma maskami u16 se stejnými bity
+(`fsproto::avail`) **[implementováno]**. Testy na hostiteli:
+`cargo test -p fsproto` (kodek), `cargo test -p fs --features std avail`.
+
+| bit | konstanta | pole |
+|---|---|---|
+| 0 | `SIZE` | velikost (u adresáře `tree_bytes`) |
+| 1 | `MTIME` | `mtime` |
+| 2 | `CTIME` | `ctime` |
+| 3 | `BTIME` | `btime` |
+| 4 | `OWNER` | `owner` |
+| 5 | `TREE` | `tree_files`, `tree_dirs` |
+| 6 | `RIGHTS` | `rights` |
+
+- **`known`** = hodnota platí. Prázdná složka s právem `MANAGE` je známé
+  0 B / 0 souborů / 0 složek.
+- **`hidden`** = hodnota existuje, ale volající ji nesmí vidět; pole je 0.
+  Souhrny podstromu adresáře bez práva `MANAGE` jsou `SIZE | TREE`
+  v `hidden` (dřív jen nuly, nešly odlišit od prázdné složky).
+- **Ani jeden bit** = nedostupná: FS ji nevede, nebo k druhu objektu
+  nepatří. `TREE` u souboru a odkazu; u hranice vnořeného datasetu v klonu
+  velikost, časy, vlastník i souhrny (`known` je jen `RIGHTS`).
+- Kodek odmítne zprávu s `known & hidden != 0` nebo s neznámým bitem
+  (`INVALID_ARGS`).
+- `StatEntry` nese jen bity svých polí (`SIZE`, `MTIME`, `RIGHTS`, `TREE`);
+  ostatní bity fsd vynuluje.
+
+Na drátě je to +4 B na konci `Stat` (`Stat::SIZE`) i každé položky
+`LIST_STAT_PAGE` (`StatEntry::FIXED`). Protokol má kvůli tomu verzi 3
+(`HELLO`); starší tvar zprávy se nepřečte.
+
+> **Změna proti verzi 2 protokolu:** masky `known` a `hidden`. **Proč:**
+> nula znamenala „nesmíš vidět“, „prázdné“ i „FS to nevede“ a klient
+> (tabulky v shellu) to nerozlišil; teď ukáže skrytou a nedostupnou hodnotu
+> jinak než nulu.
 
 Příklad zprávy `READ "/a.txt", offset 0, 100 B`:
 
@@ -1379,7 +1417,7 @@ match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
 
 | op | Název | Parametry | Výsledek |
 |---|---|---|---|
-| 30 | `HELLO` | - | verze u32 (2), max_io u32 |
+| 30 | `HELLO` | - | verze u32 (3), max_io u32 |
 | 31 | `CONNECT` | - | nový kanál relace (handle ve zprávě) |
 | 32 | `OPEN` | cesta, přístup u8, sdílení u8, příznaky u8 (`CREATE` 1, `EXCL` 2, `TRUNCATE` 4, `DIR` 8) | handle u64, `Stat`, `Revision` |
 | 33 | `CLOSE` | handle | - |

@@ -105,6 +105,23 @@ impl Kind {
     }
 }
 
+/// Dostupnost hodnot ve `Stat` (masky `known` a `hidden`). Bity jsou
+/// stejne jako `fsproto::avail` (fsd je predava beze zmeny). Bit v `known`
+/// = hodnota plati; v `hidden` = existuje, ale volajici ji nesmi videt
+/// (pole je 0); ani jeden = FS ji nevede nebo k druhu nepatri.
+pub mod avail {
+    /// Velikost (u adresare `tree_bytes`).
+    pub const SIZE: u16 = 1 << 0;
+    pub const MTIME: u16 = 1 << 1;
+    pub const CTIME: u16 = 1 << 2;
+    pub const BTIME: u16 = 1 << 3;
+    pub const OWNER: u16 = 1 << 4;
+    /// Pocty v podstromu (`tree_files`, `tree_dirs`).
+    pub const TREE: u16 = 1 << 5;
+    pub const RIGHTS: u16 = 1 << 6;
+    pub const ALL: u16 = SIZE | MTIME | CTIME | BTIME | OWNER | TREE | RIGHTS;
+}
+
 /// Metadata objektu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Stat {
@@ -129,6 +146,10 @@ pub struct Stat {
     pub owner: u64,
     /// Ucinna prava volajiciho (`rights::*`; system = vsechna).
     pub rights: u8,
+    /// Platne hodnoty (`avail::*`).
+    pub known: u16,
+    /// Hodnoty skryte pro nedostatek prav (`avail::*`, pole jsou 0).
+    pub hidden: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -531,6 +552,9 @@ impl<D: BlockDevice> Fs<D> {
 
     fn stat_oid(&mut self, root: &Child, oid: u64) -> Result<Stat> {
         let i = self.inode(root, oid)?;
+        // FS vede casy, vlastnika i prava u vseho; souhrny podstromu jen
+        // u adresare (u souboru `TREE` nedava smysl).
+        let known = if i.kind == KIND_DIR { avail::ALL } else { avail::ALL & !avail::TREE };
         Ok(Stat {
             oid,
             kind: Kind::from_raw(i.kind),
@@ -545,6 +569,8 @@ impl<D: BlockDevice> Fs<D> {
             dataset: self.cur_ds,
             owner: i.owner,
             rights: crate::perm::rights::ALL,
+            known,
+            hidden: 0,
         })
     }
 
@@ -579,8 +605,9 @@ impl<D: BlockDevice> Fs<D> {
     /// by prozradily velikost cizich souboru).
     ///
     /// Hranice vnoreneho datasetu v klonu (viz `dataset.rs`): `Kind::Dataset`,
-    /// `oid` = cislo vnoreneho datasetu, `dataset` = klon, `rights = 0`,
-    /// nulove casy a souhrny.
+    /// `oid` = cislo vnoreneho datasetu, `dataset` = klon, `rights = 0`;
+    /// velikost, casy, vlastnik a souhrny jsou nedostupne (`known` jen
+    /// `RIGHTS`).
     pub fn stat(&mut self, path: &str) -> Result<Stat> {
         match self.stat_inner(path) {
             Err(Error::NotSupported) => self.boundary_stat(path)?.ok_or(Error::NotSupported),
@@ -614,6 +641,8 @@ impl<D: BlockDevice> Fs<D> {
             dataset: self.cur_ds,
             owner: 0,
             rights: 0,
+            known: avail::RIGHTS,
+            hidden: 0,
         }))
     }
 
@@ -631,12 +660,19 @@ impl<D: BlockDevice> Fs<D> {
         Ok(st)
     }
 
-    /// Bez prava `MANAGE` (vlastnik ho ma) souhrny podstromu nevidi.
+    /// Bez prava `MANAGE` (vlastnik ho ma) souhrny podstromu nevidi: pole
+    /// jsou 0 a u adresare oznacena jako skryta (`hidden`), aby je klient
+    /// nezamenil s prazdnou slozkou.
     pub(super) fn limit_stat(&self, st: &mut Stat) {
         if st.rights & crate::perm::rights::MANAGE == 0 {
             st.tree_bytes = 0;
             st.tree_files = 0;
             st.tree_dirs = 0;
+            if st.kind == Kind::Dir {
+                let tree = avail::SIZE | avail::TREE;
+                st.hidden |= st.known & tree;
+                st.known &= !tree;
+            }
         }
     }
 
