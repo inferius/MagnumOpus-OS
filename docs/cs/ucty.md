@@ -223,14 +223,16 @@ připojený klíč). Nad ním `accountd` mluví CTAP2
 
 ### Automatické přihlášení (jen vývoj)
 
-`cargo xtask run` přidá do initfs soubor `accounts-dev` a accountd pak
-založí (pokud chybí) účet `vyvojar` (první volné číslo, příznak vývojový
-účet)
-a hned ho přihlásí. **Dvojí pojistka:** kód automatického přihlášení je
-v accountd jen v ladicím buildu (`cfg(debug_assertions)`) a soubor přidá
-jen `xtask run` - `xtask image` (obraz pro uživatele) ani `--release` ho
-nemají. Vývojový účet nemá heslo, nemá roli správy a ve výpisu účtů je
-označený.
+`cargo xtask run`, `cargo xtask usb` a `cargo xtask vmware` (živé USB
+a disk VM z něj jsou vývojový profil,
+rozhodnutí uživatele 2026-11-13) přidají do initfs soubor `accounts-dev`
+a accountd pak založí (pokud chybí) účet `vyvojar` (první volné číslo,
+příznak vývojový účet) a hned ho přihlásí, v ladicím i release buildu.
+**Pojistka:** soubor přidávají jen tyto příkazy; obraz pro uživatele
+(`xtask image`) ani testy (`xtask test`, kromě ověření živého USB) ho
+nemají. Test `zive-usb` ověří obojí: flashka nastartuje do
+terminálu a obraz bez souboru skončí na přihlašovací obrazovce. Vývojový
+účet nemá heslo, nemá roli správy a ve výpisu účtů je označený.
 
 ### Ochrany
 

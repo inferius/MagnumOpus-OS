@@ -111,8 +111,28 @@ pub fn create_image(opts: &Options, artifacts: &Artifacts, path: &Path, size_mib
     Ok(path.to_path_buf())
 }
 
+/// Zive USB je vyvojovy profil (rozhodnuti uzivatele 2026-11-13): obraz
+/// ma vyvojove automaticke prihlaseni (`accounts-dev` v initfs) v ladicim
+/// i release profilu; disk pro VMware (`xtask vmware`) je tentyz obraz.
+/// Obraz pro uzivatele (`xtask image`) ne.
+pub const DEV_PROFILE: (&str, &[u8]) = ("accounts-dev", b"1");
+
+/// Varovani pri tvorbe obrazu.
+pub const WARNING: &str = "xtask: POZOR: zive USB = vyvojovy profil: ucet `vyvojar` BEZ HESLA s automatickym prihlasenim; \
+datovy oddil na flashce NENI sifrovany (kdo ma flashku, precte ho). Na zkouseni HW a VMware, ne pro osobni data.";
+
+pub fn with_dev_profile(opts: &mut Options) {
+    if !opts.extra_initfs.iter().any(|(n, _)| n == DEV_PROFILE.0) {
+        opts.extra_initfs.push((String::from(DEV_PROFILE.0), DEV_PROFILE.1.to_vec()));
+    }
+}
+
+fn without_dev_profile(opts: &mut Options) {
+    opts.extra_initfs.retain(|(n, _)| n != DEV_PROFILE.0);
+}
+
 /// Prikaz `cargo xtask usb`.
-pub fn command(opts: &Options, u: &UsbArgs) -> Result<()> {
+pub fn command(opts: &mut Options, u: &UsbArgs) -> Result<()> {
     if u.list {
         print_disks()?;
         if u.write.is_none() && !u.run && !u.test {
@@ -125,6 +145,8 @@ pub fn command(opts: &Options, u: &UsbArgs) -> Result<()> {
         let disks = platform::list()?;
         hostdisk::check(&disks, id, size << 20).map_err(|e| format!("zapis na disk {id}: {e}"))?;
     }
+    with_dev_profile(opts);
+    println!("{WARNING}");
     let artifacts = crate::build(opts)?;
     let profile = if opts.release { "release" } else { "debug" };
     let path = u
@@ -145,16 +167,25 @@ pub fn command(opts: &Options, u: &UsbArgs) -> Result<()> {
 }
 
 /// Obraz USB pro `cargo xtask test`: maly, smaze se po testu.
-pub fn test_run(opts: &Options) -> Result<()> {
+pub fn test_run(opts: &mut Options) -> Result<()> {
+    with_dev_profile(opts);
     let artifacts = crate::build(opts)?;
     let path = boot::test_image_path(opts.arch);
     create_image(opts, &artifacts, &path, TEST_MIB)?;
-    // Start do GUI (s kopii logu na FAT), pak na novem obrazu rezim
-    // "vytahni logy".
+    // Start do plochy s terminalem (s kopii logu na FAT), pak na novem
+    // obrazu rezim "vytahni logy".
     let r = boot::test(opts.arch, &path).and_then(|()| {
         create_image(opts, &artifacts, &path, TEST_MIB)?;
         boot::test_rescue(opts.arch, &path)
     });
+    let _ = std::fs::remove_file(&path);
+    without_dev_profile(opts);
+    r?;
+    // Obraz bez vyvojoveho profilu (jako obraz pro uzivatele): zadne
+    // automaticke prihlaseni, start konci na prihlasovaci obrazovce.
+    let artifacts = crate::build(opts)?;
+    create_image(opts, &artifacts, &path, TEST_MIB)?;
+    let r = boot::test_user_image(opts.arch, &path);
     let _ = std::fs::remove_file(&path);
     r
 }

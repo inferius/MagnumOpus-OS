@@ -63,7 +63,8 @@ pub struct Account {
     pub pin: Option<PinRec>,
     pub keys: Vec<KeyRec>,
     pub next_key_id: u32,
-    /// Sul pro hmac-secret bezpecnostnich klicu.
+    /// Sul pro hmac-secret bezpecnostnich klicu (nuly = jeste zadny klic;
+    /// vznikne s prvnim klicem).
     pub key_salt: [u8; 32],
     /// Neuspesne pokusy po sobe (vsechny metody) a cas posledniho.
     pub failures: u32,
