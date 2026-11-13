@@ -1,0 +1,10 @@
+[package]
+name = "fileops"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Operace se soubory pro spravce souboru: kopirovani a presun jako uloha, denik pro obnovu, protokol files-copy"
+
+[dependencies]
+abi = { workspace = true }
+wire = { path = "../wire" }
