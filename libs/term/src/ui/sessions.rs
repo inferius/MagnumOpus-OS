@@ -18,6 +18,12 @@ use crate::proto::ClientMsg;
 /// Cislo bloku uvodni napovedy a vyssi: nejsou bloky relace.
 pub(super) const LOCAL_BLOCKS: u64 = u64::MAX - 1_000_000;
 
+/// Pripojeni k relaci `id`: existujici relace s prehranim od konce
+/// (`AttachRecent`), nova (`0`) obycejne.
+pub(super) fn attach(id: u64) -> ClientMsg {
+    if id == 0 { ClientMsg::Attach { session: 0 } } else { ClientMsg::AttachRecent { session: id } }
+}
+
 /// Relace sluzby: cislo, pocet bloku, slozka.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionInfo {
@@ -64,7 +70,7 @@ impl App {
         // Uvodni napovedu dostane i nova relace.
         self.welcomed = false;
         self.session = id;
-        self.out.push(ClientMsg::Attach { session: id });
+        self.out.push(attach(id));
         self.out.push(ClientMsg::Sessions);
     }
 

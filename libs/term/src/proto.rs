@@ -64,6 +64,11 @@ pub enum ClientMsg {
     /// Ctrl+Z: bezici radek relace na pozadi (bezi dal jako uloha, relace
     /// prijima dalsi radky).
     Background { session: u64 },
+    /// Pripojit k existujici relaci a prehrat nejdriv posledni bloky
+    /// (viditelna cast), pak `Attached` a starsi bloky po davkach od
+    /// nejnovejsich. Jen pro okno, ktere starsi bloky vlozi pred novejsi
+    /// podle cisla bloku; `Attach` prehraje vse v poradi pred `Attached`.
+    AttachRecent { session: u64 },
 }
 
 /// Sluzba -> terminal.
@@ -490,6 +495,10 @@ impl ClientMsg {
                 w.u64(*prompt);
                 w.str(text);
             }
+            ClientMsg::AttachRecent { session } => {
+                w.u8(15);
+                w.u64(*session);
+            }
         }
         w.0
     }
@@ -511,6 +520,7 @@ impl ClientMsg {
             12 => ClientMsg::TaskAction { session: r.u64()?, task: r.u64()?, action: r.u8()? },
             13 => ClientMsg::Background { session: r.u64()? },
             14 => ClientMsg::Text { prompt: r.u64()?, text: r.str()? },
+            15 => ClientMsg::AttachRecent { session: r.u64()? },
             _ => return Err(DecodeError),
         };
         r.done()?;

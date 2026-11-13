@@ -232,7 +232,7 @@ impl App {
     /// Prvni zpravy po pripojeni (nova relace, nebo `session`).
     pub fn start(&mut self, session: u64) {
         self.out.push(ClientMsg::Hello { version: VERSION, cols: self.cols as u16, rows: self.rows as u16 });
-        self.out.push(ClientMsg::Attach { session });
+        self.out.push(sessions::attach(session));
     }
 
     /// Zpravy k odeslani sluzbe.

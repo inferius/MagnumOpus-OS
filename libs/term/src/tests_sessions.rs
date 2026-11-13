@@ -57,7 +57,7 @@ fn switch_detaches_and_attaches_other_session() {
     a.switch_session(2);
     assert_eq!(
         a.take_out(),
-        vec![ClientMsg::Detach { session: 1 }, ClientMsg::Attach { session: 2 }, ClientMsg::Sessions]
+        vec![ClientMsg::Detach { session: 1 }, ClientMsg::AttachRecent { session: 2 }, ClientMsg::Sessions]
     );
     assert!(a.blocks.is_empty(), "bloky predchozi relace okno zapomene");
     // Stejna relace = nic; nova relace = Attach 0.
@@ -77,8 +77,14 @@ fn service_replays_visible_blocks_first() {
         svc.handle(ClientMsg::Run { session: id, line: format!("echo {i}") }, &mut link, &mut f, &mut env);
     }
     svc.handle(ClientMsg::Detach { session: id }, &mut link, &mut f, &mut env);
+    // Obycejny Attach (vt, testovaci klienti): vse v poradi pred Attached.
+    let mut l1 = TestLink::default();
+    svc.handle(ClientMsg::Attach { session: id }, &mut l1, &mut f, &mut env);
+    let at = l1.sent.iter().position(|m| matches!(m, ServerMsg::Attached { .. })).expect("Attached");
+    assert!(!l1.sent[at..].iter().any(|m| matches!(m, ServerMsg::BlockStart { .. })));
+    svc.handle(ClientMsg::Detach { session: id }, &mut l1, &mut f, &mut env);
     let mut l2 = TestLink::default();
-    svc.handle(ClientMsg::Attach { session: id }, &mut l2, &mut f, &mut env);
+    svc.handle(ClientMsg::AttachRecent { session: id }, &mut l2, &mut f, &mut env);
     let attached = l2.sent.iter().position(|m| matches!(m, ServerMsg::Attached { .. })).expect("Attached");
     let before = l2.sent[..attached].iter().filter(|m| matches!(m, ServerMsg::BlockStart { .. })).count();
     let after: Vec<u64> = l2.sent[attached..]

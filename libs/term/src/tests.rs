@@ -91,6 +91,7 @@ fn protocol_roundtrip() {
         ClientMsg::Choose { prompt: 1, index: 2 },
         ClientMsg::Format { session: 1, line: "ls".into(), style: 1, seq: 3 },
         ClientMsg::Sessions,
+        ClientMsg::AttachRecent { session: 4 },
     ];
     for m in cm {
         assert_eq!(ClientMsg::decode(&m.encode()).unwrap(), m);

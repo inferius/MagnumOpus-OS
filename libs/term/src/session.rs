@@ -873,7 +873,8 @@ impl Service {
     fn handle_one(&mut self, msg: ClientMsg, link: &mut dyn Link, fs: &mut dyn Fs, env: &mut dyn Env) {
         match msg {
             ClientMsg::Hello { .. } => link.send(&ServerMsg::Welcome { version: VERSION }),
-            ClientMsg::Attach { session } => {
+            ClientMsg::Attach { session } | ClientMsg::AttachRecent { session } => {
+                let recent = matches!(msg, ClientMsg::AttachRecent { .. });
                 let first = self.fixed.is_some_and(|f| f == session) && self.sessions.is_empty();
                 let id = if session == 0 || first { self.new_session() } else { session };
                 let Some(i) = self.session_index(id) else {
@@ -882,12 +883,13 @@ impl Service {
                 };
                 let s = &mut self.sessions[i];
                 s.attached = true;
-                // Prehrat bloky (i ty, ktere dobehly bez okna): nejdriv
-                // posledni (viditelna cast), po `Attached` starsi po davkach
-                // od nejnovejsich; okno je vlozi pred novejsi podle cisla
-                // bloku (`ui::sessions`), takze se nezasekne ani u dlouhe
-                // historie.
-                let split = s.blocks.len().saturating_sub(REPLAY_VISIBLE);
+                // Prehrat bloky (i ty, ktere dobehly bez okna). `Attach`:
+                // vse v poradi pred `Attached`. `AttachRecent` (okno GUI):
+                // nejdriv posledni (viditelna cast), po `Attached` starsi po
+                // davkach od nejnovejsich; okno je vlozi pred novejsi podle
+                // cisla bloku (`ui::sessions`), takze se nezasekne ani
+                // u dlouhe historie.
+                let split = if recent { s.blocks.len().saturating_sub(REPLAY_VISIBLE) } else { 0 };
                 s.blocks[split..].iter().for_each(|b| replay_block(link, id, b));
                 // Seznam uloh (jen s prehledem uloh) pred `Attached`.
                 if self.board.available() {

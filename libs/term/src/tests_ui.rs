@@ -398,7 +398,8 @@ fn welcome_shows_once_for_a_new_session_and_reconnect_keeps_session() {
     assert!(!a.connected);
     a.start(a.session);
     let out = a.take_out();
-    assert!(out.iter().any(|m| matches!(m, ClientMsg::Attach { session: 3 })), "{out:?}");
+    // Existujici relace: prehrani od konce (okno umi vkladat starsi bloky).
+    assert!(out.iter().any(|m| matches!(m, ClientMsg::AttachRecent { session: 3 })), "{out:?}");
     a.on_msg(ServerMsg::Welcome { version: 1 });
     a.on_msg(ServerMsg::Attached { session: 3, cwd: "/".into(), blocks: 0 });
     assert_eq!(a.blocks.len(), 1);
