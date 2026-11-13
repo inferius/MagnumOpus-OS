@@ -21,7 +21,7 @@ fn text_input(a: &Args, cmd: &str, input: Value) -> R<String> {
         Value::Bytes(b) => String::from_utf8(b).map_err(|_| {
             Flow::Err(ShError::new(code::FORMAT, alloc::format!("{cmd}: data nejsou text v UTF-8")).at(a.span))
         }),
-        other => Err(a.err(code::TYPE, alloc::format!("{cmd} ceka text, dostal {}", other.type_name()))),
+        other => Err(a.err(code::TYPE, alloc::format!("{cmd} čeká text, dostal {}", other.type_name()))),
     }
 }
 
@@ -42,7 +42,7 @@ pub(super) fn call(_it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, i
         }
         "split" => {
             let s = text_input(&a, "split", input)?;
-            let sep = str_arg(&a, 0, "oddelovac")?;
+            let sep = str_arg(&a, 0, "oddělovač")?;
             if sep.is_empty() {
                 return Ok(Value::List(s.chars().map(|c| Value::Str(c.into())).collect()));
             }
@@ -50,7 +50,7 @@ pub(super) fn call(_it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, i
         }
         "join" => {
             let sep = match a.pos(0) {
-                Some(_) => str_arg(&a, 0, "oddelovac")?,
+                Some(_) => str_arg(&a, 0, "oddělovač")?,
                 None => String::new(),
             };
             let items = super::list_input(&a, "join", input)?;
@@ -86,14 +86,14 @@ pub(super) fn call(_it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, i
         "replace" => {
             let s = text_input(&a, name, input)?;
             let from = str_arg(&a, 0, "co")?;
-            let to = str_arg(&a, 1, "cim")?;
+            let to = str_arg(&a, 1, "čím")?;
             if from.is_empty() {
-                return Err(a.err(code::ARGS, "replace: prazdny hledany text"));
+                return Err(a.err(code::ARGS, "replace: prázdný hledaný text"));
             }
             Ok(Value::Str(s.replace(from.as_str(), &to)))
         }
         "from" => {
-            let f = str_arg(&a, 0, "format")?;
+            let f = str_arg(&a, 0, "formát")?;
             match f.as_str() {
                 "json" => {
                     let s = text_input(&a, "from json", input)?;
@@ -105,12 +105,12 @@ pub(super) fn call(_it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, i
                     Ok(Value::List(s.lines().map(|l| Value::Str(l.into())).collect()))
                 }
                 other => Err(Flow::Err(
-                    ShError::new(code::ARGS, alloc::format!("neznamy format '{other}'")).at(a.span).hint("formaty: json, text, lines"),
+                    ShError::new(code::ARGS, alloc::format!("neznámý formát '{other}'")).at(a.span).hint("formáty: json, text, lines"),
                 )),
             }
         }
         "to" => {
-            let f = str_arg(&a, 0, "format")?;
+            let f = str_arg(&a, 0, "formát")?;
             match f.as_str() {
                 "json" => crate::json::to_json(&input, true).map(Value::Str).map_err(|e| Flow::Err(e.at(a.span))),
                 "text" => match input {
@@ -120,11 +120,11 @@ pub(super) fn call(_it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, i
                     other => Ok(Value::Str(crate::table::render(&other))),
                 },
                 other => Err(Flow::Err(
-                    ShError::new(code::ARGS, alloc::format!("neznamy format '{other}'")).at(a.span).hint("formaty: json, text"),
+                    ShError::new(code::ARGS, alloc::format!("neznámý formát '{other}'")).at(a.span).hint("formáty: json, text"),
                 )),
             }
         }
         "describe" => Ok(Value::str(input.type_name())),
-        _ => Err(a.err(code::UNKNOWN, "neznamy prikaz")),
+        _ => Err(a.err(code::UNKNOWN, "neznámý příkaz")),
     }
 }

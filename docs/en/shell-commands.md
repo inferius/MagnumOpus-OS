@@ -86,17 +86,18 @@ big.pdf
 
 changes the working folder (no argument: home)
 
-Changes the session's working folder. Relative paths in later commands are resolved from it; the terminal prompt shows it right away. Without an argument it goes to the home folder, `..` is the parent folder.
+Changes the session's working folder. Relative paths in later commands are resolved from it; the terminal prompt shows it right away. Without an argument it goes to the home folder (`~`), `..` is the parent folder. The session remembers recent folders: `cd -` goes back to the previous one, `cd -2` two back, `cd +` forward again and `cd --history` lists them. In the terminal window Alt+Left and Alt+Right do the same when the line is empty.
 
 ```shell
-cd [path]
+cd [path] [--history]
 ```
 
-Full name `dir-change` · input: nothing · output: nothing
+Full name `dir-change` · input: nothing · output: any value
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `[path]` | path | domovská složka | target folder (default: home folder) |
+| `[path]` | path | domovská složka | target folder (default: home folder); `-`, `-N` back, `+` forward |
+| `--history` | switch |  | recent folders of the session (number for `cd -N`) |
 
 Goes to the docs folder and prints it.
 
@@ -108,7 +109,30 @@ cd docs; pwd
 /home/docs
 ```
 
-**Errors:** `NOT_FOUND`, `SH_TYPE`
+Back to the previous folder.
+
+```shell
+cd docs; cd /tmp; cd -; pwd
+```
+
+```text
+/home/docs
+```
+
+Recent folders of the session, newest first.
+
+```shell
+cd docs; cd /tmp; cd --history | select path
+```
+
+```text
+path
+----------
+/home/docs
+/home
+```
+
+**Errors:** `NOT_FOUND`, `SH_TYPE`, `SH_ARGS`
 
 **Related:** [`pwd`](#pwd), [`ls`](#ls)
 
@@ -1504,7 +1528,7 @@ history | where ok == false | select line
 
 runs a script (checks its manifest needs)
 
-Runs a script from a file. The script header (`needs`) says what the script needs; the shell checks it and asks before running.
+Runs a script from a file with the `.mos` extension (MagnumOpus Shell). The script header (`lang 1`, `needs`) says what the script needs; the shell checks it and asks before running. `run` refuses other files (logs, text).
 
 ```shell
 run path
@@ -1514,12 +1538,12 @@ Full name `script-run` · input: nothing · output: any value
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `path` | path |  | script file |
+| `path` | path |  | script file (.mos) |
 
 Saves and runs a script.
 
 ```shell
-echo "echo ze skriptu" | save /tmp/s.sh; run /tmp/s.sh
+echo "echo ze skriptu" | save /tmp/s.mos; run /tmp/s.mos
 ```
 
 ```text

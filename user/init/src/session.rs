@@ -151,6 +151,11 @@ pub fn connect(session: u64) -> Result<FsClient> {
     u.fs.connect()
 }
 
+/// Jmeno uzivatele relace (domov `/home/<jmeno>`).
+pub fn user_name(session: u64) -> Option<alloc::string::String> {
+    SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.name.clone())
+}
+
 /// Kanal self relace (nastaveni uctu v relaci); vezme si ho jednou.
 pub fn take_self(session: u64) -> Option<Channel> {
     SESSIONS.lock().iter_mut().find(|u| u.id == session)?.own.take()

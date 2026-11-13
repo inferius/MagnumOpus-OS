@@ -99,3 +99,35 @@ fn help_shows_sections_and_markdown_has_anchors() {
         }
     }
 }
+
+/// Kazdy prikaz, ktery napoveda zminuje (prvni slovo prikladu a casti
+/// roury, prikazy v prehledu `help`), existuje.
+#[test]
+fn help_mentions_only_existing_commands() {
+    let known = |w: &str| {
+        BUILTINS.iter().any(|b| b.name == w || b.full == w)
+            || ["let", "if", "for", "fn", "try", "bg", "async", "await", "return", "while"].contains(&w)
+    };
+    let mut bad = Vec::new();
+    for d in doc::all() {
+        for e in d.examples {
+            for stage in e.code.split(['|', ';']) {
+                let w = stage.trim().split_whitespace().next().unwrap_or("");
+                // Hodnota na zacatku roury (text, seznam, cislo) neni prikaz.
+                let value = w.is_empty() || w.starts_with(['"', '[', '(', '$', '\'']) || w.starts_with(|c: char| c.is_ascii_digit());
+                if !value && !known(w) {
+                    bad.push(format!("{}: priklad `{}` zminuje neznamy prikaz {w}", d.name, e.code));
+                }
+            }
+        }
+    }
+    let overview = crate::eval::builtins::help_overview();
+    for l in overview.lines().filter(|l| l.starts_with("  ")) {
+        let w = l.trim().split_whitespace().next().unwrap_or("");
+        if !known(w) {
+            bad.push(format!("help: neznamy prikaz {w}"));
+        }
+    }
+    assert!(!overview.contains("fmt --style"), "help radi neexistujici fmt");
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}

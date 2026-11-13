@@ -94,3 +94,75 @@ fn path_completion_in_pipeline_absolute_home_and_quotes() {
     assert_eq!(ctx_complete("open mo", &[]), vec!["\"moje dokumenty/"]);
     assert_eq!(ctx_complete("open \"moje dokumenty/", &[]), vec!["\"moje dokumenty/a.txt\""]);
 }
+
+#[test]
+fn bare_file_names_with_dash_dot_and_digits_are_one_word() {
+    use super::host::run_lines;
+    for line in [
+        "open boot-000001.log",
+        "open snimek-000001-2026-11-08.bmp",
+        "cp boot-000001.log /tmp/x-1.2.log",
+        "ls docs-2.0",
+        "cd 2026-11-13",
+        "run skript-1.mos",
+    ] {
+        let p = crate::parse(line, &crate::Options { style: None, sigs: &crate::sig::Builtins, vars: Vec::new(), script: false });
+        assert!(p.is_ok(), "{line}: {:?}", p.err());
+    }
+    let _ = run_lines;
+}
+
+#[test]
+fn run_of_non_script_says_so() {
+    use super::host::{TestHost, interp};
+    let mut h = TestHost::new();
+    h.fs.put("/home/boot-000001.log", b"[    0.000000] cpu0 I sysinfo: stroj\n");
+    let mut it = interp();
+    let o = it.run_line(&mut h, "run boot-000001.log");
+    let e = o.result.unwrap_err();
+    assert_eq!(e.code, crate::error::code::ARGS);
+    assert!(e.message.contains("není skript shellu") && e.message.contains(".mos"), "{}", e.message);
+}
+
+/// Rada u preklepu nikdy nenabidne nicivy prikaz bez skoro shody.
+#[test]
+fn typo_hint_never_offers_destructive_commands() {
+    let near = |n: &str| crate::eval::call::nearest(n, crate::sig::BUILTINS.iter().map(|b| b.name), |_| 0);
+    assert_eq!(near("fmt"), None, "fmt -> rm by svadelo k mazani");
+    assert_eq!(near("rn"), Some("rm"), "skoro shoda se stejnym zacatkem");
+    assert_eq!(near("lss"), Some("ls"));
+    assert_eq!(near("histroy"), Some("history"));
+    assert_ne!(near("kil"), None);
+    assert_eq!(near("xill"), None, "kill jen se stejnym zacatkem");
+    // Pri stejne vzdalenosti vyhraje casteji pouzivany.
+    let n = crate::eval::call::nearest("ech", ["echo", "each"].into_iter(), |c| if c == "each" { 5 } else { 0 });
+    assert_eq!(n, Some("each"));
+    // Hlaska bez rady odkaze na help.
+    let e = super::host::fails("fmt x");
+    assert!(e.hint.unwrap_or_default().contains("help"));
+}
+
+/// `cd -` / `cd -N` zpet, `cd +` vpred, `cd --history` posledni slozky.
+#[test]
+fn cd_back_forward_and_history() {
+    use super::host::run_lines;
+    let pwd = |lines: &[&str]| {
+        let (h, it, o) = run_lines(lines);
+        o.result.unwrap();
+        let _ = h;
+        it.cwd
+    };
+    assert_eq!(pwd(&["cd docs", "cd /tmp", "cd -"]), "/home/docs");
+    assert_eq!(pwd(&["cd docs", "cd /tmp", "cd -2"]), "/home");
+    assert_eq!(pwd(&["cd docs", "cd /tmp", "cd -", "cd +"]), "/tmp");
+    assert_eq!(pwd(&["cd docs", "cd /tmp", "cd -2", "cd +"]), "/home/docs");
+    let (h, _, o) = run_lines(&["cd docs", "cd /tmp", "cd --history"]);
+    o.result.unwrap();
+    let paths: Vec<String> = match h.out.last() {
+        Some(crate::value::Value::List(rows)) => rows.iter().map(|r| r.field("path").unwrap().to_text()).collect(),
+        o => panic!("{o:?}"),
+    };
+    assert_eq!(paths, vec!["/home/docs", "/home"]);
+    let e = super::host::fails("cd -");
+    assert!(e.message.contains("není kam jít zpět"), "{}", e.message);
+}

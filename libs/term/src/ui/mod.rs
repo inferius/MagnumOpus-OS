@@ -50,6 +50,10 @@ pub enum Key {
     ScrollPageDown,
     /// Kolecko mysi: kroky, kladne nahoru.
     Wheel(i32),
+    /// Alt+sipka vlevo / vpravo: pri prazdnem radku zpet / vpred
+    /// v historii slozek (`cd -`, `cd +`).
+    AltLeft,
+    AltRight,
     /// Ctrl + pismeno (malym).
     Ctrl(char),
 }
@@ -620,6 +624,9 @@ impl App {
             }
         }
         match k {
+            Key::AltLeft | Key::AltRight if self.editor.text.is_empty() => {
+                self.run(String::from(if k == Key::AltLeft { "cd -" } else { "cd +" }));
+            }
             Key::Char(c) => {
                 let mut b = [0u8; 4];
                 self.editor.insert(c.encode_utf8(&mut b));
@@ -1044,7 +1051,12 @@ impl App {
                 other => {
                     let text = crate::vt::item_at(other, Some(t), self.now);
                     // Dlouhe radky (uvitani, hlaseni) zalomit do sirky okna.
+                    // Styl nastaveny na zacatku viceradkoveho textu (barva
+                    // chyby) plati i na dalsich radcich a jejich zalomeni.
+                    let mut carry = String::new();
                     for line in draw::lines_of(&text) {
+                        let line = alloc::format!("{carry}{line}");
+                        carry = draw::active_sgr(&line);
                         for part in draw::wrap(&line, self.cols.saturating_sub(2)) {
                             out.push(Line::new().text(None, &alloc::format!("  {part}")));
                         }
@@ -1157,8 +1169,10 @@ impl App {
                     info.push_str(&alloc::format!(" · {rate}"));
                 }
             }
-            if let Some(eta) = tr.eta(total) {
-                info.push_str(&alloc::format!(" · zbývá {}", progress::human_eta(eta)));
+            if let Some(now) = self.now
+                && let Some(eta) = tr.eta_text(now, total)
+            {
+                info.push_str(&alloc::format!(" · zbývá {eta}"));
             }
         }
         l.push(Some(Style::fg(t.ui.muted)), &info);

@@ -142,7 +142,7 @@ impl<'a> Parser<'a> {
             self.stack_base = here;
         }
         if self.depth > MAX_DEPTH || self.stack_base.saturating_sub(here) > PARSE_STACK {
-            return Err(ShError::new(code::DEPTH, "prilis hluboke vnoreni").at(self.here()));
+            return Err(ShError::new(code::DEPTH, "příliš hluboké vnoření").at(self.here()));
         }
         Ok(())
     }
@@ -180,7 +180,7 @@ impl<'a> Parser<'a> {
         let (t, span) = self.next()?;
         match t {
             Tok::Punct(q) if q == p => Ok(span),
-            other => Err(self.err(alloc::format!("cekam '{p}', ale je tu {}", describe(&other)), span)),
+            other => Err(self.err(alloc::format!("čekám '{p}', ale je tu {}", describe(&other)), span)),
         }
     }
 
@@ -192,7 +192,7 @@ impl<'a> Parser<'a> {
         let (t, span) = self.next()?;
         match t {
             Tok::Ident(s) if !is_keyword(&s) => Ok((s, span)),
-            other => Err(self.err(alloc::format!("cekam jmeno, ale je tu {}", describe(&other)), span)),
+            other => Err(self.err(alloc::format!("čekám jméno, ale je tu {}", describe(&other)), span)),
         }
     }
 
@@ -245,12 +245,12 @@ impl<'a> Parser<'a> {
             let (t, vspan) = self.next()?;
             let ver = match t {
                 Tok::Num(crate::ast::Num::Int(v)) if v > 0 => v as u32,
-                _ => return Err(self.err("za 'lang' patri cislo verze (lang 1)", vspan)),
+                _ => return Err(self.err("za 'lang' patří číslo verze (lang 1)", vspan)),
             };
             if ver > LANG_LATEST {
                 return Err(ShError::new(
                     code::LANG,
-                    alloc::format!("verze jazyka {ver} neni podporovana (nejnovejsi je {LANG_LATEST})"),
+                    alloc::format!("verze jazyka {ver} není podporovaná (nejnovější je {LANG_LATEST})"),
                 )
                 .at(span.to(vspan)));
             }
@@ -260,7 +260,7 @@ impl<'a> Parser<'a> {
                 let style = match s.as_str() {
                     "b" => Style::B,
                     "c" => Style::C,
-                    _ => return Err(self.err("zapis je 'b' nebo 'c' (lang 1 c)", sspan)),
+                    _ => return Err(self.err("zápis je 'b' nebo 'c' (lang 1 c)", sspan)),
                 };
                 if opts.style.is_none() {
                     self.style = style;
@@ -270,7 +270,7 @@ impl<'a> Parser<'a> {
         } else if opts.script {
             self.warnings.push(Warning {
                 message: alloc::format!(
-                    "skript nema hlavicku 'lang'; pouzivam nejnovejsi verzi {LANG_LATEST} (doplnte 'lang {LANG_LATEST}' na zacatek)"
+                    "skript nemá hlavičku 'lang'; používám nejnovější verzi {LANG_LATEST} (doplňte 'lang {LANG_LATEST}' na začátek)"
                 ),
                 span: Span::new(0, 0),
             });
@@ -317,7 +317,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 _ => {
-                    return Err(self.err(alloc::format!("neznamy narok '{key}' (read, write, net)"), kspan));
+                    return Err(self.err(alloc::format!("neznámý nárok '{key}' (read, write, net)"), kspan));
                 }
             }
             self.lx.skip_space();
@@ -339,9 +339,9 @@ impl<'a> Parser<'a> {
             match t {
                 Tok::Str(parts) => match parts.as_slice() {
                     [crate::lex::RawPart::Text(s)] => out.push(s.clone()),
-                    _ => return Err(self.err("v needs patri jen pevne cesty (bez {vyrazu})", span)),
+                    _ => return Err(self.err("v needs patří jen pevné cesty (bez {výrazu})", span)),
                 },
-                other => return Err(self.err(alloc::format!("cekam cestu v uvozovkach, je tu {}", describe(&other)), span)),
+                other => return Err(self.err(alloc::format!("čekám cestu v uvozovkách, je tu {}", describe(&other)), span)),
             }
             self.lx.skip_space_nl();
             if !self.eat_punct(",")? {
@@ -371,7 +371,7 @@ impl<'a> Parser<'a> {
                     if top {
                         return Ok(block);
                     }
-                    return Err(self.err("chybi '}'", self.here()));
+                    return Err(self.err("chybí '}'", self.here()));
                 }
                 Some('\n' | ';') => {
                     self.lx.bump();
@@ -406,11 +406,11 @@ impl<'a> Parser<'a> {
             Some('}') if !top => Ok(()),
             Some(c) => {
                 let hint = match c {
-                    ')' => "chybi '(' k teto zavorce",
-                    '}' => "chybi '{' k teto zavorce",
-                    _ => "prikazy oddelte novym radkem nebo ';'",
+                    ')' => "chybí '(' k této závorce",
+                    '}' => "chybí '{' k této závorce",
+                    _ => "příkazy oddělte novým řádkem nebo ';'",
                 };
-                Err(self.err(alloc::format!("neocekavane '{c}' za koncem prikazu"), self.here()).hint(hint))
+                Err(self.err(alloc::format!("neočekávané '{c}' za koncem příkazu"), self.here()).hint(hint))
             }
         }
     }
@@ -489,7 +489,7 @@ impl<'a> Parser<'a> {
                     return Ok(Stmt::Continue { span: Span::new(start, self.lx.pos) });
                 }
                 "lang" | "needs" => {
-                    return Err(self.err(alloc::format!("'{w}' patri jen na zacatek skriptu"), self.here()));
+                    return Err(self.err(alloc::format!("'{w}' patří jen na začátek skriptu"), self.here()));
                 }
                 _ if !is_keyword(&w) => {
                     // Prirazeni `x = ...`
@@ -500,9 +500,9 @@ impl<'a> Parser<'a> {
                     let known_cmd = self.sigs.get(&w).is_some();
                     if r.starts_with('=') && !r.starts_with("==") && !r.starts_with("=>") && (self.is_var(&w) || !known_cmd) {
                         if !self.is_var(&w) {
-                            return Err(ShError::new(code::UNKNOWN, alloc::format!("promenna '{w}' neexistuje"))
+                            return Err(ShError::new(code::UNKNOWN, alloc::format!("proměnná '{w}' neexistuje"))
                                 .at(Span::new(start, start + w.len()))
-                                .hint(alloc::format!("novou promennou zavedte: let {w} = ...")));
+                                .hint(alloc::format!("novou proměnnou zaveďte: let {w} = ...")));
                         }
                         self.next()?;
                         self.lx.skip_space_nl();
@@ -521,7 +521,7 @@ impl<'a> Parser<'a> {
         self.next()?;
         let (name, nspan) = self.expect_ident()?;
         if self.sigs.get(&name.replace('_', "-")).is_some() {
-            return Err(self.err(alloc::format!("'{name}' je vestaveny prikaz, zvolte jine jmeno"), nspan));
+            return Err(self.err(alloc::format!("'{name}' je vestavěný příkaz, zvolte jiné jméno"), nspan));
         }
         self.expect_punct("(")?;
         let mut params = Vec::new();
@@ -558,10 +558,10 @@ impl<'a> Parser<'a> {
 pub(crate) fn describe(t: &Tok) -> String {
     match t {
         Tok::Ident(s) => alloc::format!("'{s}'"),
-        Tok::Num(_) | Tok::Unit(..) => "cislo".into(),
-        Tok::Str(_) => "retezec".into(),
+        Tok::Num(_) | Tok::Unit(..) => "číslo".into(),
+        Tok::Str(_) => "řetězec".into(),
         Tok::Punct(p) => alloc::format!("'{p}'"),
-        Tok::Newline => "konec radku".into(),
+        Tok::Newline => "konec řádku".into(),
         Tok::Eof => "konec vstupu".into(),
     }
 }

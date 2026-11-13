@@ -100,10 +100,16 @@ impl Terminals {
     /// Novy klient (okno) relace `session`.
     pub fn client_for(&mut self, name: &'static str, session: Option<u64>) -> Result<Channel> {
         let (ours, theirs) = Channel::create()?;
+        // Domov prihlaseneho uzivatele (`~`, `cd` bez argumentu); bez
+        // prihlaseni koren.
+        let mut store = Registry::default();
+        if let Some(name) = session.and_then(crate::session::user_name) {
+            store.home = alloc::format!("/home/{name}");
+        }
         self.clients.push(Client {
             name,
             conn: ours,
-            store: Registry::default(),
+            store,
             reg: None,
             termd: None,
             starts: Vec::new(),

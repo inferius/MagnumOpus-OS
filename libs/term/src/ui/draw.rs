@@ -175,6 +175,30 @@ fn carriage(line: &str) -> String {
     cells.into_iter().collect()
 }
 
+/// Styl (posledni SGR) aktivni na konci textu: prazdne, kdyz posledni
+/// SGR styl zrusil (`ESC[0m`). Pro prenos stylu na dalsi radek.
+pub fn active_sgr(s: &str) -> String {
+    let mut cur = String::new();
+    let mut it = s.char_indices().peekable();
+    while let Some((i, c)) = it.next() {
+        if c != '\x1b' || it.peek().map(|p| p.1) != Some('[') {
+            continue;
+        }
+        let mut end = i;
+        for (j, d) in it.by_ref() {
+            end = j + d.len_utf8();
+            if ('@'..='~').contains(&d) && d != '[' {
+                break;
+            }
+        }
+        let seq = &s[i..end];
+        if seq.ends_with('m') {
+            cur = if seq == "\x1b[0m" || seq == "\x1b[m" { String::new() } else { String::from(seq) };
+        }
+    }
+    cur
+}
+
 /// Odsazeni pokracovani zalomeneho radku: u radku tabulky (sloupce
 /// oddelene aspon dvema mezerami) pod posledni bunku, jinak pod zacatek
 /// textu. Nejvys polovina sirky (jinak by na popis nezbylo misto).
