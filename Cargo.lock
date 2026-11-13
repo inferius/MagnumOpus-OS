@@ -1499,6 +1499,13 @@ name = "inputproto"
 version = "0.1.0"
 
 [[package]]
+name = "installplan"
+version = "0.1.0"
+dependencies = [
+ "diskguard",
+]
+
+[[package]]
 name = "intel-display"
 version = "0.1.0"
 dependencies = [

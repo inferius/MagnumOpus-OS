@@ -91,3 +91,32 @@ fn many_files_extend_directory() {
 fn rejects_non_fat32() {
     assert_eq!(Volume::open(Mem(vec![0u8; 1 << 20])).err(), Some(Error::NotFat32));
 }
+
+#[test]
+fn format_nested_and_read_back() {
+    let mut dev = Mem(vec![0u8; 128 << 20]);
+    super::format::format(&mut dev, (128 << 20) / 512, b"MAGNUMOPUS ", 2048, 0x1234_5678).unwrap();
+    // fatfs nas FAT32 precte a zapise do nej.
+    {
+        let fs = fatfs::FileSystem::new(Cursor::new(&mut dev.0[..]), fatfs::FsOptions::new()).unwrap();
+        assert_eq!(fs.fat_type(), fatfs::FatType::Fat32);
+        let mut f = fs.root_dir().create_file("ZFATFS.TXT").unwrap();
+        f.write_all(b"od fatfs").unwrap();
+    }
+    let t = Stamp::default();
+    let mut v = Volume::open(dev).unwrap();
+    let kernel: Vec<u8> = (0..300_000u32).map(|i| (i % 253) as u8).collect();
+    v.write_file("EFI/BOOT", "BOOTX64.EFI", b"zavadec", t).unwrap();
+    v.write_file("os", "kernel.elf", &kernel, t).unwrap();
+    assert_eq!(v.read_file("EFI/BOOT/BOOTX64.EFI").unwrap().as_deref(), Some(&b"zavadec"[..]));
+    assert_eq!(v.read_file("os/kernel.elf").unwrap(), Some(kernel.clone()));
+    assert_eq!(v.read_file("ZFATFS.TXT").unwrap().as_deref(), Some(&b"od fatfs"[..]));
+    assert_eq!(v.read_file("os/chybi.txt").unwrap(), None);
+    assert_eq!(v.read_file("nic/x.txt").unwrap(), None);
+    let mut img = v.into_device().0;
+    assert_eq!(read(&mut img, "EFI/BOOT/BOOTX64.EFI"), b"zavadec");
+    assert_eq!(read(&mut img, "os/kernel.elf"), kernel);
+    // Prilis maly oddil pro FAT32.
+    let mut small = Mem(vec![0u8; 16 << 20]);
+    assert_eq!(super::format::format(&mut small, (16 << 20) / 512, b"X          ", 0, 1).err(), Some(Error::NotFat32));
+}

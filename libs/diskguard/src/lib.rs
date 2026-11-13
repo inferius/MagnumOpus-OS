@@ -26,6 +26,7 @@ extern crate alloc;
 
 pub mod crc32;
 pub mod gpt;
+pub mod install;
 
 /// Sektor protokolu klienta (`blockproto`). Disky mohou mit vetsi logicky
 /// sektor (4 KiB); knihovna pracuje v sektorech disku, prepocet na 512 B

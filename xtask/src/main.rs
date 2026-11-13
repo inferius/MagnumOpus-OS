@@ -622,6 +622,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "fatw",
             "--package",
+            "installplan",
+            "--package",
             "agentproto",
             "--package",
             "agentsh",

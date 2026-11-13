@@ -338,11 +338,19 @@ impl<D: Device> Volume<D> {
         (u16_at(e, 20) as u32) << 16 | u16_at(e, 26) as u32
     }
 
-    /// Slozka `dir` v korenu: najde ji, nebo vytvori. Vraci jeji cluster.
+    /// Slozka `dir` (cesta od korene, napr. `EFI/BOOT`): najde ji, nebo
+    /// vytvori (i nadrazene). Vraci jeji cluster.
     pub fn ensure_dir(&mut self, dir: &str, t: Stamp) -> Result<u32> {
+        let mut parent = self.root;
+        for part in dir.split('/').filter(|p| !p.is_empty()) {
+            parent = self.ensure_child_dir(parent, part, t)?;
+        }
+        Ok(parent)
+    }
+
+    fn ensure_child_dir(&mut self, parent: u32, dir: &str, t: Stamp) -> Result<u32> {
         let name = short_name(dir)?;
-        let root = self.root;
-        if let Some((_, _, e)) = self.find_entry(root, &name)? {
+        if let Some((_, _, e)) = self.find_entry(parent, &name)? {
             if e[11] & ATTR_DIR == 0 {
                 return Err(Error::Corrupted);
             }
@@ -350,19 +358,54 @@ impl<D: Device> Volume<D> {
         }
         let c = self.find_free(1)?[0];
         // Obsah: "." a ".." (rodic koren = 0).
+        let up = if parent == self.root { 0 } else { parent };
         let mut b = vec![0u8; 64];
         b[..32].copy_from_slice(&Self::entry(b".          ", ATTR_DIR, c, 0, t));
-        b[32..].copy_from_slice(&Self::entry(b"..         ", ATTR_DIR, 0, 0, t));
+        b[32..].copy_from_slice(&Self::entry(b"..         ", ATTR_DIR, up, 0, t));
         self.write_cluster(c, &b)?;
         self.fat_set(c, EOC)?;
-        let (sc, si) = self.free_slot(root)?;
+        let (sc, si) = self.free_slot(parent)?;
         self.put_entry(sc, si, &Self::entry(&name, ATTR_DIR, c, 0, t))?;
         self.invalidate_fsinfo()?;
         self.dev.flush()?;
         Ok(c)
     }
 
-    /// Vytvori nebo prepise soubor `name` ve slozce `dir` (v korenu).
+    /// Precte soubor `path` (napr. `os/kernel.elf`); `None` = neni.
+    pub fn read_file(&mut self, path: &str) -> Result<Option<Vec<u8>>> {
+        let mut parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+        let Some(file) = parts.pop() else { return Ok(None) };
+        let mut dir = self.root;
+        for p in parts {
+            match self.find_entry(dir, &short_name(p)?)? {
+                Some((_, _, e)) if e[11] & ATTR_DIR != 0 => dir = Self::first_cluster(&e),
+                _ => return Ok(None),
+            }
+        }
+        let Some((_, _, e)) = self.find_entry(dir, &short_name(file)?)? else { return Ok(None) };
+        if e[11] & ATTR_DIR != 0 {
+            return Ok(None);
+        }
+        let size = u32_at(&e, 28) as usize;
+        let first = Self::first_cluster(&e);
+        let mut out = Vec::with_capacity(size);
+        if size > 0 {
+            for c in self.chain(first)? {
+                let b = self.read_cluster(c)?;
+                let n = (size - out.len()).min(b.len());
+                out.extend_from_slice(&b[..n]);
+                if out.len() == size {
+                    break;
+                }
+            }
+        }
+        if out.len() != size {
+            return Err(Error::Corrupted);
+        }
+        Ok(Some(out))
+    }
+
+    /// Vytvori nebo prepise soubor `name` ve slozce `dir` (cesta od korene).
     pub fn write_file(&mut self, dir: &str, name: &str, data: &[u8], t: Stamp) -> Result<()> {
         if data.len() > u32::MAX as usize {
             return Err(Error::Full);
@@ -420,6 +463,8 @@ impl<D: Device> Volume<D> {
         self.dev.write(self.fsinfo, &s)
     }
 }
+
+pub mod format;
 
 #[cfg(test)]
 mod tests;

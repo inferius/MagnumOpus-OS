@@ -14,6 +14,7 @@ members = [
     "libs/crashrec",
     "libs/qr",
     "libs/fatw",
+    "libs/installplan",
     "libs/cbuild",
     "libs/cstd",
     "libs/conf",
@@ -142,6 +143,7 @@ boot-info = { path = "libs/boot-info" }
 crashrec = { path = "libs/crashrec" }
 qr = { path = "libs/qr" }
 fatw = { path = "libs/fatw" }
+installplan = { path = "libs/installplan" }
 conf = { path = "libs/conf" }
 elf = { path = "libs/elf" }
 initfs = { path = "libs/initfs" }
