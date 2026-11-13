@@ -887,8 +887,13 @@ impl App {
         self.draw_tasks(&mut bottom);
         // Editor.
         bottom.push(self.draw_editor());
-        // Napoveda klaves.
-        bottom.push(Line::new().text(Some(Style::fg(t.ui.muted)), self.hints()).fill(t.ui.select));
+        // Napoveda klaves (okno GUI ji kresli jako stitky).
+        bottom.push(
+            Line::new()
+                .text(Some(Style::fg(t.ui.muted)), self.hints())
+                .fill(t.ui.select)
+                .role(draw::Role::Hints(draw::hint_chips(self.hints()))),
+        );
 
         let status = {
             let running = self.blocks.iter().filter(|b| b.ok.is_none()).count();
@@ -907,7 +912,7 @@ impl App {
             if !self.connected {
                 l.push(Some(Style::fg(t.ui.warn)), "· nepřipojeno ");
             }
-            l.fill(t.ui.select)
+            l.fill(t.ui.select).role(draw::Role::Status)
         };
 
         let area = self.rows.saturating_sub(bottom.len() + 1);
@@ -1003,7 +1008,7 @@ impl App {
         if let Some(e) = &h.error {
             l.push(Some(Style::fg(t.ui.err)), &alloc::format!("   {}", e.message));
         }
-        l
+        l.role(draw::Role::Input { prefix: 2, cwd: self.cwd_short() })
     }
 
     fn cwd_short(&self) -> String {
@@ -1018,18 +1023,28 @@ impl App {
             Some(true) => t.ui.ok,
             Some(false) => t.ui.err,
         };
+        let mark = match b.ok {
+            None => draw::Mark::Run,
+            Some(true) => draw::Mark::Ok,
+            Some(false) => draw::Mark::Err,
+        };
+        let body = |error: bool, table_head: bool| draw::Role::Body { mark, error, table_head };
         let mut out = Vec::new();
         if !b.line.is_empty() {
             let mut l = Line::new();
             l.push(Some(Style { bold: true, ..Style::fg(mark_color) }), if focused { "> " } else { "| " });
             let h = shlang::highlight::highlight(&b.line, None);
             let mut at = 0;
+            // Prikaz tucne (navrh: hlavicka bloku).
+            let plain = Some(Style { bold: true, ..Style::fg(t.ui.fg) });
             for s in &h.spans {
-                l.push(None, &b.line[at..s.start]);
-                l.push(Some(t.syntax(s.class)), &b.line[s.start..s.end]);
+                l.push(plain, &b.line[at..s.start]);
+                l.push(Some(Style { bold: true, ..t.syntax(s.class) }), &b.line[s.start..s.end]);
                 at = s.end;
             }
-            l.push(None, &b.line[at..]);
+            l.push(plain, &b.line[at..]);
+            // Od tohoto useku cas a vysledek (okno GUI je kresli vpravo).
+            let meta = l.parts_len();
             match b.ok {
                 None => l.push(Some(Style::fg(t.ui.accent)), &alloc::format!("  {}", self.spinner())),
                 Some(ok) if b.duration > 0 || !ok => l.push(
@@ -1042,24 +1057,27 @@ impl App {
                 ),
                 _ => {}
             }
-            out.push(l);
+            out.push(l.role(draw::Role::Head { mark, meta }));
         }
         if b.collapsed {
-            out.push(Line::new().text(Some(Style::fg(t.ui.muted)), &alloc::format!("  ({} položek, mezera rozbalí)", b.items.len())));
+            out.push(Line::new().text(Some(Style::fg(t.ui.muted)), &alloc::format!("  ({} položek, mezera rozbalí)", b.items.len())).role(body(false, false)));
             return out;
         }
         for (ii, it) in b.items.iter().enumerate() {
             match it {
                 Item::Value(_) if b.table_item == Some(ii) => {
                     if let Some(t) = &b.table {
-                        out.extend(self.draw_table(t, focused));
+                        for (k, l) in self.draw_table(t, focused).into_iter().enumerate() {
+                            out.push(l.role(body(false, k == 0)));
+                        }
                     }
                 }
                 Item::Progress { done, total, label } => {
                     let track = b.tracks.iter().find(|(k, _)| *k == ii).map(|(_, tr)| tr);
-                    out.push(self.draw_progress(*done, *total, label, track, b.ok.is_none()));
+                    out.push(self.draw_progress(*done, *total, label, track, b.ok.is_none()).role(body(false, false)));
                 }
                 other => {
+                    let error = matches!(other, Item::Error { .. });
                     let text = crate::vt::item_at(other, Some(t), self.now);
                     // Dlouhe radky (uvitani, hlaseni) zalomit do sirky okna.
                     // Styl nastaveny na zacatku viceradkoveho textu (barva
@@ -1069,7 +1087,7 @@ impl App {
                         let line = alloc::format!("{carry}{line}");
                         carry = draw::active_sgr(&line);
                         for part in draw::wrap(&line, self.cols.saturating_sub(2)) {
-                            out.push(Line::new().text(None, &alloc::format!("  {part}")));
+                            out.push(Line::new().text(None, &alloc::format!("  {part}")).role(body(error, false)));
                         }
                     }
                 }
@@ -1088,7 +1106,7 @@ impl App {
             if !self.queued.is_empty() {
                 l.push(Some(Style::fg(t.ui.muted)), &alloc::format!(" · ve frontě {}", self.queued.len()));
             }
-            out.push(l);
+            out.push(l.role(body(false, false)));
         }
         out
     }
@@ -1193,16 +1211,23 @@ impl App {
     /// Snimek jako text s ANSI pro [`crate::screen::Screen`] (smaze a kresli
     /// od leveho horniho rohu).
     pub fn frame(&self) -> String {
+        self.frame_lines().0
+    }
+
+    /// Snimek jako text (pro obrazovku) i radky s rolemi (okno GUI podle
+    /// nich dokresli prvky navrhu); radek `i` = radek obrazovky `i`.
+    pub fn frame_lines(&self) -> (String, Vec<Line>) {
         let mut s = String::from("\x1b[2J\x1b[H");
-        let lines = self.draw();
-        let n = lines.len().min(self.rows);
-        for (i, l) in lines.iter().take(n).enumerate() {
+        let mut lines = self.draw();
+        lines.truncate(self.rows);
+        let n = lines.len();
+        for (i, l) in lines.iter().enumerate() {
             s.push_str(&l.ansi(self.cols));
             if i + 1 < n {
                 s.push('\n');
             }
         }
-        s
+        (s, lines)
     }
 }
 

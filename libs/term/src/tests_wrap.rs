@@ -48,3 +48,38 @@ fn alt_arrows_navigate_folder_history() {
     a.key(Key::AltLeft);
     assert!(!a.take_out().iter().any(|m| matches!(m, ClientMsg::Run { .. })));
 }
+
+/// Role radku pro okno GUI: hlavicka bloku s casem, telo, chyba, zahlavi
+/// tabulky, radek vstupu s pilulkou, napoveda jako stitky.
+#[test]
+fn lines_carry_roles_for_gui() {
+    use crate::ui::draw::{Mark, Role};
+    use shlang::value::Value;
+    let mut a = App::new(crate::theme::Theme::dark(), 80, 30);
+    a.on_msg(ServerMsg::Attached { session: 7, cwd: "/home/eva".into(), blocks: 0 });
+    a.on_msg(ServerMsg::BlockStart { session: 7, block: 1, line: "ls".into() });
+    let row = |n: &str| Value::record(&[("name", Value::str(n)), ("size", Value::Size(5))]);
+    a.on_msg(ServerMsg::Item { session: 7, block: 1, item: Item::Value(Value::List(vec![row("a"), row("b")])) });
+    a.on_msg(ServerMsg::BlockEnd { session: 7, block: 1, ok: true, duration: 3_000_000 });
+    a.on_msg(ServerMsg::BlockStart { session: 7, block: 2, line: "open x".into() });
+    a.on_msg(ServerMsg::Item { session: 7, block: 2, item: Item::Error { code: "NOT_FOUND".into(), message: "x".into(), report: "chyba\n  dal".into() } });
+    a.on_msg(ServerMsg::BlockEnd { session: 7, block: 2, ok: false, duration: 1_000_000 });
+    let (_, lines) = a.frame_lines();
+    let roles: Vec<&Role> = lines.iter().map(|l| &l.role).collect();
+    assert!(roles.iter().any(|r| matches!(r, Role::Head { mark: Mark::Ok, .. })));
+    assert!(roles.iter().any(|r| matches!(r, Role::Head { mark: Mark::Err, .. })));
+    assert!(roles.iter().any(|r| matches!(r, Role::Body { table_head: true, .. })));
+    assert_eq!(roles.iter().filter(|r| matches!(r, Role::Body { error: true, .. })).count(), 2, "dva radky hlaseni");
+    assert!(roles.iter().any(|r| matches!(r, Role::Input { prefix: 2, cwd } if cwd == "~")));
+    let hints = roles.iter().find_map(|r| match r {
+        Role::Hints(h) => Some(h.clone()),
+        _ => None,
+    });
+    let hints = hints.expect("napoveda klaves");
+    assert_eq!(hints[0], ("Tab".into(), "doplnit".into()));
+    assert!(hints.iter().any(|(k, l)| k == "\u{2191}" && l == "historie"));
+    // Cas bloku je samostatny usek (okno ho kresli vpravo).
+    let head = lines.iter().find(|l| matches!(l.role, Role::Head { mark: Mark::Ok, .. })).unwrap();
+    let Role::Head { meta, .. } = head.role else { unreachable!() };
+    assert!(head.part_text(meta).contains("ms"), "{:?}", head.part_text(meta));
+}

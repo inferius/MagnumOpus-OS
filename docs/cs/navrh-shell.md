@@ -924,6 +924,23 @@ okno ──Run/Interrupt/Background──▶ hlavní vlákno shsess ──▶ vl
   řádku v popředí, v pořadí.
 - Bez vláken v prostředí (testy) běží řádek jako dřív v hlavním vlákně.
 
+### Vzhled okna podle návrhu (design/terminal.html)
+
+Okno `gui-term` kreslí text mřížkou znaků (stejný snímek jako konzole)
+a podle rolí řádků (`term::ui::draw::Role`) nad ní dokreslí prvky návrhu
+(`user/gui-term/src/rows.rs`). Snímek pro porovnání: `target/shots/terminal.png`
+(test vzhledu `look_shots`).
+
+| Prvek návrhu | Stav |
+|---|---|
+| levý pruh bloku podle stavu (běží, hotovo, chyba), příkaz tučně, čas a výsledek vpravo písmem UI | **[implementováno]** |
+| rámeček chyby (danger-soft, okraj danger) | **[implementováno]** |
+| řádek vstupu: linka nad ním, pilulka se složkou | **[implementováno]** (bez ikony složky) |
+| nápověda kláves jako štítky | **[implementováno]** |
+| linka pod záhlavím tabulky | **[implementováno]** (typ sloupce pod jménem zatím ne) |
+| doplňování jako nabídka nad řádkem, myš, výběr textu a schránka | **[navrženo]** (krok 4, komponenty 6c) |
+| panel úloh vpravo, náhled změn s tlačítky, karty relací a přepínač B/C v titulku, akce bloku, animace | **[navrženo]** (krok 5) |
+
 ### Ukazatel činnosti a průběh
 
 Příkazy činnost nekreslí samy znaky: hlásí ji strukturovaně (běžící blok,

@@ -979,6 +979,23 @@ window ──Run/Interrupt/Background──▶ shsess main thread ──▶ line
 - Without threads in the environment (tests) a line runs in the main thread
   as before.
 
+### Window look by the design (design/terminal.html)
+
+The `gui-term` window draws text with a character grid (the same frame as
+the console) and, by the line roles (`term::ui::draw::Role`), draws the
+design elements over it (`user/gui-term/src/rows.rs`). Screenshot for
+comparison: `target/shots/terminal.png` (look test `look_shots`).
+
+| Design element | Status |
+|---|---|
+| block left bar by state (running, done, error), bold command, time and result on the right in the UI font | **[implemented]** |
+| error box (danger-soft, danger border) | **[implemented]** |
+| input row: a line above it, a folder pill | **[implemented]** (no folder icon) |
+| key hints as chips | **[implemented]** |
+| a line under the table header | **[implemented]** (no column type under the name yet) |
+| completion as a menu above the line, mouse, text selection and clipboard | **[designed]** (step 4, 6c components) |
+| task panel on the right, change preview with buttons, session tabs and B/C switch in the title, block actions, animation | **[designed]** (step 5) |
+
 ### Activity indicator and progress
 
 Commands do not draw activity with characters themselves: they report it

@@ -7,11 +7,43 @@ use alloc::vec::Vec;
 use crate::render::RESET;
 use crate::theme::{Rgb, Style};
 
+/// Stav bloku pro levy pruh (okno GUI ho kresli barvou stavu).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mark {
+    #[default]
+    Run,
+    Ok,
+    Err,
+}
+
+/// Co radek znamena: okno GUI podle toho dokresli prvky navrhu (pruh
+/// bloku, cas vpravo, pilulka slozky, stitky klaves, ramecek chyby).
+/// Text radku je vzdy uplny (konzole a cizi terminal role nepotrebuji).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum Role {
+    #[default]
+    Plain,
+    /// Stavovy radek nahore.
+    Status,
+    /// Hlavicka bloku: prvni usek je znacka (`| `), od useku `meta` cas
+    /// a vysledek (okno je kresli vpravo pismem UI).
+    Head { mark: Mark, meta: usize },
+    /// Radek obsahu bloku; `error` = hlaseni chyby, `table_head` = zahlavi
+    /// tabulky.
+    Body { mark: Mark, error: bool, table_head: bool },
+    /// Radek vstupu: prvnich `prefix` useku je slozka a oddelovac (okno je
+    /// nahradi pilulkou s textem `cwd`).
+    Input { prefix: usize, cwd: String },
+    /// Napoveda klaves: (klavesa, popis).
+    Hints(Vec<(String, String)>),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Line {
     parts: Vec<(Option<Style>, Option<Rgb>, String)>,
     /// Pozadi celeho radku (doplni se do sirky).
     fill: Option<Rgb>,
+    pub role: Role,
 }
 
 fn esc(style: Option<Style>, bg: Option<Rgb>) -> String {
@@ -60,6 +92,35 @@ impl Line {
     }
 
     /// Viditelna sirka (escape sekvence uvnitr useku se nepocitaji).
+    pub fn role(mut self, r: Role) -> Self {
+        self.role = r;
+        self
+    }
+
+    /// Pocet useku (pro role, ktere se odkazuji na useky).
+    pub fn parts_len(&self) -> usize {
+        self.parts.len()
+    }
+
+    /// Sloupce, ktere useky zabiraji: (od, do) pro kazdy usek.
+    pub fn part_cols(&self) -> Vec<(usize, usize)> {
+        let mut at = 0;
+        self.parts
+            .iter()
+            .map(|(_, _, t)| {
+                let w = take_visible(t, usize::MAX).1;
+                let r = (at, at + w);
+                at += w;
+                r
+            })
+            .collect()
+    }
+
+    /// Text useku bez stylu (okno kresli nektere useky samo).
+    pub fn part_text(&self, i: usize) -> String {
+        self.parts.get(i).map(|(_, _, t)| String::from(t)).unwrap_or_default()
+    }
+
     pub fn width(&self) -> usize {
         self.parts.iter().map(|(_, _, t)| take_visible(t, usize::MAX).1).sum()
     }
@@ -353,4 +414,23 @@ pub fn clip(s: &str, cols: usize) -> String {
     }
     out.push_str(RESET);
     out
+}
+
+/// Napoveda klaves ("Tab doplnit · Esc zavrit") jako stitky: (klavesa,
+/// popis). Klavesa je prvni slovo, "sipka nahoru" a "sipky" jako sipky.
+pub fn hint_chips(text: &str) -> Vec<(String, String)> {
+    text.split(" \u{b7} ")
+        .map(|item| {
+            let item = item.trim();
+            for (prefix, key) in [("šipka nahoru ", "\u{2191}"), ("šipky ", "\u{2191}\u{2193}"), ("kolečko", "kolečko")] {
+                if let Some(rest) = item.strip_prefix(prefix) {
+                    return (String::from(key), String::from(rest.trim()));
+                }
+            }
+            match item.split_once(' ') {
+                Some((k, l)) => (String::from(k), String::from(l)),
+                None => (String::from(item), String::new()),
+            }
+        })
+        .collect()
 }
