@@ -21,5 +21,5 @@ UEFI loader (`no_std`, `no_main`). Z ESP načte `\os\kernel.elf` a `\os\initfs.i
 
 ## Pasti
 
-- Debug loader mimo QEMU/UEFI nejde; chyby před logem jádra se hledají přes sériový výstup loaderu (`logger.rs`).
+- Výpis loaderu jde do konzole firmwaru, ale od chvíle, kdy je na obrazovce startovní obraz, jen na sériovou linku (`logger.rs`); při ladění sleduj sériový log.
 - Splash běží před načtením jádra: neprodlužuj start zbytečnou prací.
