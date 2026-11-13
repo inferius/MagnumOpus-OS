@@ -55,19 +55,25 @@ cargo xtask usb --release
 ```
 
 This creates `target/usb-x86_64-release.img` (1 GiB). For aarch64 use
-`--arch aarch64`, a different size `--size <MiB>` (at least 258 MiB), a
-different path `--out <file>`. A debug build (without `--release`) is
-larger and slower but has more precise stack traces.
+`--arch aarch64`, a different size `--size <MiB>`, a different path
+`--out <file>`. A debug build (without `--release`) is larger and slower
+but has more precise stack traces.
+
+The ESP size is computed from the files that go on it (loader, kernel, live
+and install initfs): their sum + 25 % + 16 MiB reserve, rounded to 8 MiB, at
+least 64 MiB. A debug aarch64 build thus gets an ESP of about 180 MiB. The
+image needs at least ESP + 130 MiB (logs 64 MiB, data 64 MiB, GPT); xtask
+enlarges a smaller `--size` and says so.
 
 Image contents:
 
 <figure class="diagram">
 <svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Layout of the live USB image">
 <rect class="box" x="10" y="30" width="70" height="80" rx="4"/><text class="t b" x="45" y="62" text-anchor="middle">GPT</text><text class="m" x="45" y="80" text-anchor="middle">MBR,</text><text class="m" x="45" y="95" text-anchor="middle">table</text>
-<rect class="acc" x="80" y="30" width="230" height="80" rx="4"/><text class="t b" x="195" y="55" text-anchor="middle">ESP (FAT32), 128 MiB</text><text class="mono m" x="195" y="74" text-anchor="middle">EFI/BOOT/BOOTX64.EFI</text><text class="mono m" x="195" y="89" text-anchor="middle">os/kernel.elf, os/initfs.img</text><text class="mono m" x="195" y="104" text-anchor="middle">CTI-MNE.txt</text>
+<rect class="acc" x="80" y="30" width="230" height="80" rx="4"/><text class="t b" x="195" y="55" text-anchor="middle">ESP (FAT32), sized by files</text><text class="mono m" x="195" y="74" text-anchor="middle">EFI/BOOT/BOOTX64.EFI</text><text class="mono m" x="195" y="89" text-anchor="middle">os/kernel.elf, os/initfs.img</text><text class="mono m" x="195" y="104" text-anchor="middle">CTI-MNE.txt</text>
 <rect class="warn" x="310" y="30" width="110" height="80" rx="4"/><text class="t b" x="365" y="55" text-anchor="middle">MO-LOGY</text><text class="m" x="365" y="74" text-anchor="middle">FAT32, 64 MiB</text><text class="m" x="365" y="91" text-anchor="middle">logs for Windows</text><rect class="ok" x="420" y="30" width="270" height="80" rx="4"/><text class="t b" x="555" y="55" text-anchor="middle">data partition "MagnumOpus"</text><text class="m" x="555" y="74" text-anchor="middle">type C123ADA0-...-C2CE6B2B3581</text><text class="m" x="555" y="91" text-anchor="middle">our FS (fsd), to the end of the image</text>
 <rect class="box" x="690" y="30" width="60" height="80" rx="4"/><text class="t b" x="720" y="62" text-anchor="middle">GPT</text><text class="m" x="720" y="80" text-anchor="middle">backup</text>
-<text class="m" x="10" y="20">0</text><text class="m" x="80" y="20">1 MiB</text><text class="m" x="310" y="20">129 MiB</text><text class="m" x="420" y="20">193 MiB</text><text class="m" x="690" y="20">end of image</text>
+<text class="m" x="10" y="20">0</text><text class="m" x="80" y="20">1 MiB</text><text class="m" x="310" y="20">1 MiB + ESP</text><text class="m" x="420" y="20">+ 64 MiB</text><text class="m" x="690" y="20">end of image</text>
 <text class="m" x="10" y="140">The firmware finds the loader on the ESP; the loader loads the kernel and initfs (files through UEFI).</text>
 <text class="m" x="10" y="160">After boot the usb-storage driver exposes the stick; diskguard allows reads and writes only to the data partition.</text>
 <text class="m" x="10" y="180">Init finds the file system there and starts fsd. The system does not change the ESP while running.</text>

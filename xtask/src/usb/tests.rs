@@ -109,7 +109,11 @@ fn image_layout_has_esp_and_our_partition() {
     let f = dir.join("kernel");
     std::fs::write(&f, b"kernel").unwrap();
     let img = dir.join("usb.img");
-    let layout = super::image::create(&img, super::image::MIN_MIB, &[("os/kernel.elf", &f)]).unwrap();
+    let files: [(&str, &std::path::Path); 1] = [("os/kernel.elf", &f)];
+    let min = super::image::min_mib(super::image::esp_mib(&files).unwrap());
+    assert!(super::image::create(&img, min - 1, &files).is_err());
+    let layout = super::image::create(&img, min, &files).unwrap();
+    assert_eq!(super::image::logy_range(&img).unwrap().0, (1 + layout.esp_mib) << 20);
     // Cteni po sektorech ze souboru (obraz se nenacita cely do pameti).
     let mut file = std::fs::File::open(&img).unwrap();
     let mut read = |at: u64, buf: &mut [u8]| {

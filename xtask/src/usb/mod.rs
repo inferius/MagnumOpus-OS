@@ -116,12 +116,19 @@ pub fn create_image(opts: &Options, artifacts: &Artifacts, path: &Path, size_mib
     let install = target_dir().join(format!("initfs-install-{}.img", std::process::id()));
     install_initfs(&artifacts.initfs, &install)?;
     let files = esp_files(opts, artifacts, &readme, &install);
-    let layout = image::create(path, size_mib, &files)?;
+    // ESP podle skutecne velikosti souboru; maly obraz (test) se zvetsi.
+    let need = image::min_mib(image::esp_mib(&files)?);
+    if size_mib < need {
+        println!("xtask: obraz USB zvetsen z {size_mib} na {need} MiB (soubory na ESP)");
+    }
+    let layout = image::create(path, size_mib.max(need), &files);
     let _ = std::fs::remove_file(&install);
+    let layout = layout?;
     println!(
-        "xtask: obraz USB {} ({} MiB, datovy oddil {} MiB od {} MiB)",
+        "xtask: obraz USB {} ({} MiB, ESP {} MiB, datovy oddil {} MiB od {} MiB)",
         path.display(),
         layout.size >> 20,
+        layout.esp_mib,
         layout.data.1 >> 20,
         layout.data.0 >> 20
     );
