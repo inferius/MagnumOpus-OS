@@ -519,10 +519,10 @@ fn edu_available(opts: &Options) -> bool {
 /// ochrana cizich disku), driverkit se simulaci a ovladace z manifestu
 /// (`found`; s `--driver` jen ten jeden).
 /// `cargo xtask test --update-shots`: znovu vytvori referencni snimky
-/// vzhledu `libs/ui/tests/shots/` (jen vyslovne, nikdy automaticky).
+/// vzhledu `libs/ui/tests/shots/` a `libs/comp/tests/shots/` (jen vyslovne, nikdy automaticky).
 fn update_shots() -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let status = Command::new(cargo).current_dir(workspace_root()).env("UPDATE_SHOTS", "1").args(["test", "--quiet", "--package", "ui", "shot_"]).status()?;
+    let status = Command::new(cargo).current_dir(workspace_root()).env("UPDATE_SHOTS", "1").args(["test", "--quiet", "--package", "ui", "--package", "comp", "shot_"]).status()?;
     if !status.success() {
         return Err("snimky vzhledu se nepodarilo vytvorit".into());
     }

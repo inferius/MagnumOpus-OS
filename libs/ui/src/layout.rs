@@ -16,7 +16,7 @@ use crate::node::{Key, Kind, Node};
 /// Prvek po rozvrzeni.
 pub enum ElemKind<M> {
     Label { text: String, heading: bool, warn: bool },
-    Button { text: String, on_click: Option<M> },
+    Button { text: String, on_click: Option<M>, icon: Option<&'static str> },
     TextInput { value: String, placeholder: String, secure: bool, multiline: bool, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<crate::node::KeyMapFn> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     List { count: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
@@ -144,7 +144,9 @@ fn measure<M>(n: &Node<M>, t: &Look) -> (u32, u32) {
                 (t.width(text, s), s.line)
             }
         }
-        Kind::Button { text, .. } => ((t.width(text, t.button()) + 2 * sp[5]).max(th.size.hit_min * 2), ctl),
+        // Jen ikona: ctverec `control_h`; jinak text (a ikona) s okraji.
+        Kind::Button { text, icon, .. } if text.is_empty() && icon.is_some() => (ctl, ctl),
+        Kind::Button { text, icon, .. } => ((t.width(text, t.button()) + 2 * sp[5] + icon.map_or(0, |_| th.size.icon_m + sp[2])).max(th.size.hit_min * 2), ctl),
         Kind::TextInput { multiline, rows, .. } => {
             let h = if *multiline { rows * t.body().line + 2 * sp[2] } else { ctl };
             // Text chyby pod polem.
@@ -222,8 +224,8 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
         Kind::Label { text, heading, warn } => {
             push(out, ElemKind::Label { text, heading, warn }, r);
         }
-        Kind::Button { text, on_click } => {
-            push(out, ElemKind::Button { text, on_click }, r);
+        Kind::Button { text, on_click, icon } => {
+            push(out, ElemKind::Button { text, on_click, icon }, r);
         }
         Kind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, key_map, .. } => {
             push(out, ElemKind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, key_map }, r);

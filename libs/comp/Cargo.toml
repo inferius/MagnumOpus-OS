@@ -11,6 +11,8 @@ clipproto = { path = "../clipproto" }
 inputproto = { path = "../inputproto" }
 gfx = { path = "../gfx" }
 theme = { path = "../theme" }
+# Systemove pohledy (paleta, spoustec) nad knihovnou komponent (bez os).
+ui = { path = "../ui" }
 
 [dev-dependencies]
 # Testy kresli skutecnym Interem (snimky pro porovnani s prototypem).

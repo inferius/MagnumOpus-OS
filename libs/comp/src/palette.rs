@@ -18,7 +18,7 @@ use alloc::vec::Vec;
 
 use gfx::Canvas;
 use guiproto::Rect;
-use inputproto::code::{KEY_BACKSPACE, KEY_DOWN, KEY_ENTER, KEY_ESC, KEY_K, KEY_KPENTER, KEY_TAB, KEY_UP};
+use inputproto::code::{KEY_DOWN, KEY_ENTER, KEY_ESC, KEY_K, KEY_KPENTER, KEY_TAB, KEY_UP};
 use inputproto::mods;
 
 use crate::Comp;
@@ -81,6 +81,10 @@ pub struct Palette {
     /// Vybrana polozka (index mezi spustitelnymi radky).
     pub sel: usize,
     pub scope: Scope,
+    /// Spoustec (varianta D, design/spoustec.html): vlevo nad listou,
+    /// prazdny dotaz = sekce Bezi, Aplikace, System; psani = stejne
+    /// vysledky jako paleta.
+    pub launcher: bool,
 }
 
 /// Zadost palety, kterou vyridi sluzba (init): vypnout, restartovat.
@@ -166,10 +170,22 @@ impl Comp {
         if let Some(r) = self.palette_visual() {
             self.damage(r);
         }
+        let open = p.is_some();
         self.palette = p;
+        // Pohled nad knihovnou ui: sestavit znovu, zavrenim zahodit.
+        if open {
+            self.sys_rebuild();
+        } else {
+            self.sysui = None;
+        }
         if let Some(r) = self.palette_visual() {
             self.damage(r);
         }
+    }
+
+    /// Popis polozky pro pohled (`sysui.rs`).
+    pub(crate) fn palette_item_view(&self, it: &Item) -> (String, &'static str, String, Option<String>) {
+        self.item_view(it)
     }
 
     /// Popis polozky: text, ikona, vpravo (zkratka / skupina), duvod zakazu.
@@ -287,7 +303,13 @@ impl Comp {
             v.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
             v.into_iter().map(|x| x.3).collect()
         };
-        if q.is_empty() {
+        if q.is_empty() && p.launcher {
+            let running: Vec<Item> = apps.iter().filter(|i| matches!(i, Item::App(id, _) if !self.app_windows(id).is_empty())).cloned().collect();
+            let rest: Vec<Item> = apps.iter().filter(|i| !running.contains(i)).cloned().collect();
+            sections.push((Row::Header(String::from("Běží"), "window", false), running));
+            sections.push((Row::Header(String::from("Aplikace"), "apps", false), rest));
+            sections.push((sys_head.clone(), system.clone()));
+        } else if q.is_empty() {
             match scope {
                 Scope::All => {
                     let all: Vec<Item> = app_items.iter().chain(&windows).chain(&apps).chain(&system).cloned().collect();
@@ -367,7 +389,17 @@ impl Comp {
         let t = &self.style.theme;
         let w = t.size.dialog_w.max(520).min(self.w.saturating_sub(2 * t.space[5]));
         let rows = self.palette_rows().len().clamp(1, ROWS) as u32;
-        let h = self.palette_input_h() + rows * self.palette_row_h() + 3 * t.space[3];
+        // Okraje pohledu knihovny ui (pad) a mezery mezi polem a seznamem.
+        let h = self.palette_input_h() + rows * self.palette_row_h() + 3 * t.space[3] + 2 * t.space[5];
+        if self.palette.as_ref().is_some_and(|p| p.launcher) {
+            // Spoustec: vlevo nad listou (u tlacitka mrizky), sirka podle
+            // tokenu `size.launcher_w`; pata (ucet, napajeni) navic.
+            let w = t.size.launcher_w.min(self.w.saturating_sub(2 * t.space[3]));
+            let h = h + self.palette_row_h() + t.space[3];
+            let bottom = self.panel_rect().y - t.space[3] as i32;
+            let h = h.min((bottom - t.space[3] as i32).max(1) as u32);
+            return Some(Rect::new(self.panel_rect().x, bottom - h as i32, w, h));
+        }
         Some(Rect::new((self.w as i32 - w as i32) / 2, (self.h / 8) as i32, w, h))
     }
 
@@ -390,6 +422,12 @@ impl Comp {
     /// Klavesa pri otevrene palete (vse ji konci, aplikaci nejde nic).
     pub(crate) fn palette_key(&mut self, code: u16, press: bool, time: u64) {
         if !press {
+            return;
+        }
+        // Otevrena nabidka v pohledu (napajeni): klavesy patri ji.
+        if self.sys_popup_open() {
+            let m = if self.palette_ctrl { mods::CTRL } else { 0 };
+            self.sys_event(guiproto::window::InputEvent::Key { code, action: 1, ch: None }, m, time);
             return;
         }
         let n = self.palette_items().len();
@@ -420,11 +458,12 @@ impl Comp {
             }
             KEY_DOWN if n > 0 => p2.sel = (p.sel + 1).min(n - 1),
             KEY_UP => p2.sel = p.sel.saturating_sub(1),
-            KEY_BACKSPACE => {
-                p2.query.pop();
-                p2.sel = 0;
+            // Editace pole hledani (Backspace, sipky, Ctrl+Z...) v pohledu.
+            _ => {
+                let m = if self.palette_ctrl { mods::CTRL } else { 0 };
+                self.sys_event(guiproto::window::InputEvent::Key { code, action: 1, ch: None }, m, time);
+                return;
             }
-            _ => return,
         }
         self.set_palette(Some(p2));
     }
@@ -434,10 +473,9 @@ impl Comp {
         if ch.is_control() {
             return;
         }
-        if let Some(mut p) = self.palette.clone() {
-            p.query.push(ch);
-            p.sel = 0;
-            self.set_palette(Some(p));
+        if self.palette.is_some() {
+            let t = self.input_now;
+            self.sys_event(guiproto::window::InputEvent::Text(ch), 0, t);
         }
     }
 
@@ -446,6 +484,17 @@ impl Comp {
         let inside = self.palette_rect().is_some_and(|r| r.contains(x, y));
         if !inside {
             return self.set_palette(None);
+        }
+        // Klik do pole hledani, do paty nebo do otevrene nabidky: pohled ui.
+        if let Some(r) = self.palette_rect()
+            && (y < r.y + (self.style.theme.space[3] + self.palette_input_h()) as i32 || self.palette_row_at(y).is_none() || self.sys_popup_open())
+        {
+            let pad = self.style.theme.space[3] as i32;
+            let (lx, ly) = (x - r.x - pad, y - r.y - pad);
+            for pressed in [true, false] {
+                self.sys_event(guiproto::window::InputEvent::Button { code: inputproto::code::BTN_LEFT, pressed, x: lx, y: ly }, 0, time);
+            }
+            return;
         }
         if let Some(i) = self.palette_row_at(y)
             && let Some(Row::Item(it)) = self.palette_rows().get(i).cloned()
@@ -460,7 +509,7 @@ impl Comp {
     }
 
     /// Provede polozku a paletu zavre; zakazana akce se nespusti.
-    fn palette_run(&mut self, it: Item, time: u64) {
+    pub(crate) fn palette_run(&mut self, it: Item, time: u64) {
         if self.item_view(&it).3.is_some() {
             return;
         }
@@ -523,83 +572,9 @@ impl Comp {
         self.style.draw_shadow(c, &pop, r, t.radius.card, Rect::default());
         let fw = if t.mode == theme::Mode::Contrast { 2 } else { 1 };
         c.round_fill_bordered(r, t.radius.card, col.surface, col.border_strong, fw);
-        let pad = t.space[3] as i32;
-        // Pole hledani s rozsahem.
-        let input = Rect::new(r.x + pad, r.y + pad, r.w - 2 * pad as u32, t.size.control_h);
-        c.round_fill_bordered(input, t.radius.control, col.surface_2, col.focus, 2);
-        let is = t.size.icon_m;
-        self.style.icons.draw(c, "search", input.x + t.space[3] as i32, input.y + (input.h - is) as i32 / 2, is, t.icon_stroke, col.ink_muted);
-        let bs = t.text.body;
-        let cs = t.text.caption;
-        let scope = match (p.scope, p.query.starts_with('>')) {
-            (_, true) | (Scope::App, _) => "Tato aplikace",
-            (Scope::System, _) => "Systém",
-            (Scope::All, _) => "Vše",
-        };
-        let sw = self.style.width(scope, cs) as i32;
-        let face = self.style.face(cs);
-        let base = input.y + face.baseline_in(cs.size, input.h);
-        face.draw(c, input.right() as i32 - sw - t.space[3] as i32, base, scope, cs.size, col.ink_muted);
-        let tx = input.x + (t.space[3] * 2 + is) as i32;
-        let (text, ink) = if p.query.is_empty() { (String::from("Hledat příkazy, okna a aplikace... (Tab: rozsah, > akce)"), col.ink_faint) } else { (p.query.clone(), col.ink) };
-        let face = self.style.face(bs);
-        let base = input.y + face.baseline_in(bs.size, input.h);
-        let end = face.draw(c, tx, base, &text, bs.size, ink);
-        if !p.query.is_empty() {
-            c.fill(Rect::new(end + 1, input.y + t.space[2] as i32, 2, input.h - 2 * t.space[2]), col.accent);
-        }
-        // Radky.
-        let rows = self.palette_rows();
-        let mut y = r.y + pad + self.palette_input_h() as i32;
-        let rh = self.palette_row_h();
-        if rows.is_empty() {
-            let face = self.style.face(bs);
-            let base = y + face.baseline_in(bs.size, rh);
-            face.draw(c, input.x + t.space[3] as i32, base, "Nic nenalezeno", bs.size, col.ink_muted);
-        }
-        let mut k = 0;
-        for row in rows {
-            let rr = Rect::new(input.x, y, input.w, rh);
-            match row {
-                Row::Header(title, icon, system) => {
-                    let si = t.size.icon_s;
-                    let ink = if system { col.trust_ink } else { col.ink_muted };
-                    self.style.icons.draw(c, icon, rr.x + t.space[2] as i32, rr.y + (rh - si) as i32 / 2, si, t.icon_stroke, ink);
-                    let hs = t.text.small;
-                    let face = self.style.face(hs);
-                    let base = rr.y + face.baseline_in(hs.size, rh);
-                    face.draw(c, rr.x + (t.space[2] * 2 + si) as i32, base, &title, hs.size, ink);
-                }
-                Row::More(n) => {
-                    let face = self.style.face(cs);
-                    let base = rr.y + face.baseline_in(cs.size, rh);
-                    face.draw(c, rr.x + (t.space[3] * 2 + is) as i32, base, &format!("další... ({n})"), cs.size, col.ink_faint);
-                }
-                Row::Item(it) => {
-                    if k == p.sel {
-                        c.round_fill(rr, t.radius.control, col.accent_soft);
-                    }
-                    k += 1;
-                    let (label, icon, right, dis) = self.item_view(&it);
-                    let ink = if dis.is_some() { col.ink_faint } else { col.ink };
-                    self.style.icons.draw(c, icon, rr.x + t.space[3] as i32, rr.y + (rh - is) as i32 / 2, is, t.icon_stroke, ink);
-                    let label = match &dis {
-                        Some(why) => format!("{label} - {why}"),
-                        None => label,
-                    };
-                    let face = self.style.face(bs);
-                    let base = rr.y + face.baseline_in(bs.size, rh);
-                    face.draw(c, rr.x + (t.space[3] * 2 + is) as i32, base, &label, bs.size, ink);
-                    if !right.is_empty() {
-                        let gw = self.style.width(&right, cs) as i32;
-                        let face = self.style.face(cs);
-                        let base = rr.y + face.baseline_in(cs.size, rh);
-                        face.draw(c, rr.right() as i32 - gw - t.space[3] as i32, base, &right, cs.size, col.ink_muted);
-                    }
-                }
-            }
-            y += rh as i32;
-        }
+        // Obsah (pole hledani a seznam se sekcemi) kresli knihovna ui.
+        let _ = p;
+        self.draw_sysui(c, r);
     }
 }
 

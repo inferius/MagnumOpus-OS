@@ -96,7 +96,7 @@ impl<M: Clone> Ui<M> {
                     }
                     c.set_clip(old);
                 }
-                ElemKind::Button { text, .. } => {
+                ElemKind::Button { text, icon, .. } => {
                     let bg = if (pressed || hover) && !dim { col.surface_3 } else { col.surface };
                     // Nedostupne: stejne tlacitko s kryti `opacity.disabled`.
                     let k = if dim { th.opacity.disabled } else { 255 };
@@ -109,7 +109,16 @@ impl<M: Clone> Ui<M> {
                     let tw = f.width(text, s.size) as i32;
                     let fg = fade(col.ink, col.surface, k);
                     let b = r.y + f.baseline_in(s.size, r.h);
-                    f.draw(c, r.x + (r.w as i32 - tw) / 2, b, text, s.size, fg);
+                    // Ikona pred textem (bez textu na stred).
+                    let is = th.size.icon_m;
+                    let gap = if text.is_empty() { 0 } else { sp[2] as i32 };
+                    let total = tw + icon.map_or(0, |_| is as i32 + gap);
+                    let x0 = r.x + (r.w as i32 - total) / 2;
+                    if let Some(n) = icon {
+                        self.icons.draw(c, n, x0, r.y + (r.h as i32 - is as i32) / 2, is, th.icon_stroke, fg);
+                    }
+                    let f = self.look.face(s);
+                    f.draw(c, x0 + total - tw, b, text, s.size, fg);
                 }
                 ElemKind::TextInput { .. } => self.draw_field(c, i, st),
                 ElemKind::Checkbox { text, checked, .. } => {

@@ -512,7 +512,11 @@ a po 300 snímcích průměr a maximum (`compd: snimek cele obrazovky ...`).
 | Kde | Celá obrazovka | Poznámka |
 |---|---|---|
 | hostitel, 800x600 (test `look_snapshots`) | 3,5 ms, první 11 ms | první s výpočtem plochy, stínů a rozmazání |
+| hostitel, 1280x800 (test `bench_frame`, revize 9472b51) | debug 4,8 ms, release 4,0 ms | plocha 0,1 ms, horní vrstva (lišta, stíny, kurzor) ~2 ms; comp, gfx a ui mají i v debug opt-level 2 |
 | QEMU na Windows (emulace CPU), 1280x800 | 0,5-1,8 s | emulace bez akcelerace je ~100x pomalejší; běžné snímky jsou jen poškozené oblasti |
+| QEMU na Windows s `--accel whpx`, 1280x800 (revize 9472b51) | 29-175 ms | sady `vstup,gui` projdou; rozdíl proti hostiteli dělá virtualizace, ne kód |
+
+Měření na hostiteli: `cargo test -p comp [--release] bench_frame -- --ignored --nocapture`.
 
 Kompozitor se proto při připojení displeje nejdřív ukáže jen barvou
 pozadí a celý snímek složí v dalším taktu (start nečeká na skládání).
@@ -655,6 +659,38 @@ cestou jako volání `actions` (ověření argumentů, potvrzení u `confirm`).
 Sekce, rozsah a pravidla viz [Pravidla palety příkazů](#pravidla-palety-příkazů).
 **[implementováno]** Zamknutí a celá obrazovka přibudou, až budou
 v systému. **[navrženo]**
+
+### Paleta a spouštěč nad knihovnou komponent
+
+Paletu příkazů a spouštěč kreslí kompozitor knihovnou `libs/ui` (jádro
+bez OS; modul `libs/comp/src/sysui.rs`). Pole hledání je tedy totéž
+textové pole jako v aplikacích (výběr, Ctrl+Z, diakritika, schránka)
+a seznam je tabulka s nadpisy sekcí (`Cells::header`). Data dává dál
+katalog palety (`palette.rs`: sekce, řazení, nedávné, četnost, rozsahy);
+šipky, Enter, Esc a Tab řídí katalog, editaci pole a kliky knihovna.
+
+**Spouštěč** (varianta D z [návrhu spouštěče](../../design/spoustec.html),
+zvoleno 12. 11. 2026) je tatáž paleta jinde a jinak prázdná: otevře ho
+tlačítko mřížky v liště nebo samotná klávesa Super (stisk a puštění bez
+jiné klávesy, jen místní fyzická klávesnice). Leží vlevo nad lištou,
+šířka token `size.launcher_w` (300). Prázdný dotaz ukáže sekce Běží
+(spuštěné aplikace, vpravo počet oken), Aplikace a Systém; skupina Nedávné
+je připravená, zatím nemá zdroj. Psaní dá stejné výsledky a řazení jako
+paleta (Ctrl+K). Pata: stav přihlášení a tlačítko napájení s nabídkou
+Zamknout, Odhlásit (zatím zakázané s důvodem), Restartovat a Vypnout
+(systémové potvrzení).
+
+- **Rozpočet:** otevření se vejde do jednoho snímku; test
+  `palette_open_budget` měří otevření a zavření se složením snímku (na
+  hostiteli v debug kolem 13 ms, revize `9a6720f`).
+- **Robustnost:** popisky z manifestů a menu aplikací se před předáním
+  pohledu oříznou na 120 znaků, počet řádků omezuje katalog
+  (`palette::ROWS`), žádné `unwrap` na datech zvenku.
+- **Bezpečnost:** pohled dostává třídu zdroje vstupu jako aplikace; Super
+  a zkratky palety jen z místní fyzické klávesnice.
+- **Snímkové testy** palety a spouštěče ve světlém, tmavém a vysokém
+  kontrastu (`libs/comp/tests/shots/`, test `shot_palette_and_launcher`),
+  přepis `cargo xtask test --update-shots` jako u komponent.
 
 ### Spouštění aplikací z lišty
 

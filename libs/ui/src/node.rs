@@ -83,7 +83,9 @@ impl From<usize> for Key {
 pub enum Kind<M> {
     /// `warn` = vyrazne oznaceni (napr. uloha agenta AI).
     Label { text: String, heading: bool, warn: bool },
-    Button { text: String, on_click: Option<M> },
+    /// `icon` = ikona (jmeno z `gfx::icon`); bez textu jen ikona (jmeno
+    /// pro ctecku z `Node::tooltip`).
+    Button { text: String, on_click: Option<M>, icon: Option<&'static str> },
     /// `secure` = heslo: kresli se teckami, hodnota se nedava do stromu
     /// pristupnosti ani do trasovani, kompozitor pole zakryje ve snimku.
     /// `multiline` = viceradkove pole (`text_area`) s `rows` radky.
@@ -261,7 +263,7 @@ pub fn label<M>(text: &str) -> Node<M> {
 }
 
 pub fn button<M>(text: &str) -> Node<M> {
-    node(Kind::Button { text: text.into(), on_click: None })
+    node(Kind::Button { text: text.into(), on_click: None, icon: None })
 }
 
 pub fn text_input<M>(value: &str) -> Node<M> {
@@ -428,6 +430,14 @@ impl<M> Node<M> {
 
     pub fn skip_tab(mut self, s: bool) -> Self {
         self.skip_tab = s;
+        self
+    }
+
+    /// Ikona tlacitka (pred textem, bez textu sama).
+    pub fn icon(mut self, name: &'static str) -> Self {
+        if let Kind::Button { icon, .. } = &mut self.kind {
+            *icon = Some(name);
+        }
         self
     }
 
@@ -646,11 +656,18 @@ pub struct Cells {
     pub cells: Vec<String>,
     /// Ikona pred prvni bunkou (jmeno z `gfx::icon`, napr. "folder").
     pub icon: Option<&'static str>,
+    /// Nadpis sekce (`.sec` v navrhu): nejde vybrat, klavesy ho preskoci.
+    pub header: bool,
 }
 
 impl Cells {
     pub fn new(cells: impl IntoIterator<Item = String>) -> Self {
-        Self { cells: cells.into_iter().collect(), icon: None }
+        Self { cells: cells.into_iter().collect(), icon: None, header: false }
+    }
+
+    /// Nadpis sekce (Bezi, Aplikace, System) v seznamu.
+    pub fn header(text: &str) -> Self {
+        Self { cells: alloc::vec![String::from(text)], icon: None, header: true }
     }
 
     pub fn icon(mut self, name: &'static str) -> Self {

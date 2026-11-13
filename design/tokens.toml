@@ -140,6 +140,8 @@ side_panel = 280
 # a touchpad / dotyk (design/tablet.html).
 hit_min_fine = 32
 hit_min_touch = 44
+# Spoustec (varianta D, design/spoustec.html): sirka seznamu.
+launcher_w = 300
 
 [radius]
 xs = 6

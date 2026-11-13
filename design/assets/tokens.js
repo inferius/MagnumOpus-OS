@@ -118,7 +118,8 @@ window.MO_TOKENS = {
   "switch_knob": 18,
   "side_panel": 280,
   "hit_min_fine": 32,
-  "hit_min_touch": 44
+  "hit_min_touch": 44,
+  "launcher_w": 300
  },
  "radius": {
   "xs": 6,

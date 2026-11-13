@@ -208,8 +208,32 @@ impl<M: Clone> Ui<M> {
         (a..=b).map(|k| (t.id)(k)).collect()
     }
 
+    /// Je radek `k` nadpis sekce?
+    fn is_header(&self, i: usize, k: usize) -> bool {
+        self.spec(i).is_some_and(|t| k < t.count && (t.row)(k).header)
+    }
+
+    /// Nejblizsi vybiratelny radek od `k` smerem `dir` (nadpisy preskoci);
+    /// kdyz tam zadny neni, opacnym smerem.
+    fn selectable(&self, i: usize, k: usize, dir: i32) -> Option<usize> {
+        let n = self.spec(i)?.count as i64;
+        for d in [dir as i64, -dir as i64] {
+            let mut j = k as i64;
+            while (0..n).contains(&j) {
+                if !self.is_header(i, j as usize) {
+                    return Some(j as usize);
+                }
+                j += d;
+            }
+        }
+        None
+    }
+
     /// Vyber radku `k` podle modifikatoru (`ctrl` prepne, `shift` rozsah).
     fn select_row(&mut self, i: usize, k: usize, ctrl: bool, shift: bool, r: &mut Response<M>) {
+        if self.is_header(i, k) {
+            return;
+        }
         let Some(t) = self.spec(i) else { return };
         let id = (t.id)(k);
         let multi = t.multi;
@@ -304,6 +328,9 @@ impl<M: Clone> Ui<M> {
                     return Some(r);
                 }
                 let Some(k) = self.row_at(i, sy) else { return Some(r) };
+                if self.is_header(i, k) {
+                    return Some(r);
+                }
                 let t = self.spec(i)?;
                 let id = (t.id)(k);
                 let (ctrl, shift) = (self.mods & mods::CTRL != 0, self.mods & mods::SHIFT != 0);
@@ -456,6 +483,9 @@ impl<M: Clone> Ui<M> {
             KEY_END => Some(n - 1),
             _ => None,
         };
+        // Nadpisy sekci se preskoci (smer podle klavesy).
+        let dir = if matches!(code, KEY_UP | KEY_PAGEUP | KEY_END) { -1 } else { 1 };
+        let to = to.and_then(|k| self.selectable(i, k, dir));
         if let Some(k) = to {
             if ctrl && multi {
                 // Jen kurzor (vyber zustane), mezernikem pak prepnout.
@@ -615,6 +645,16 @@ impl<M: Clone> Ui<M> {
             let (id, cells) = ((spec.id)(k), (spec.row)(k));
             let y = g.body.y + k as i32 * rh - ts.scroll;
             let rr = Rect::new(g.body.x, y, g.body.w, g.rh);
+            // Nadpis sekce (`.sec`): caption s vahou body_strong, velka
+            // pismena, ink_muted; bez cary a bez vyberu.
+            if cells.header {
+                let hs = theme::TextStyle { weight: th.text.body_strong.weight, ..th.text.caption };
+                let text: String = cells.cells.first().map_or(String::new(), |t| t.to_uppercase());
+                let f = self.look.face(hs);
+                let base = y + f.baseline_in(hs.size, g.rh);
+                f.draw_ellipsized(c, rr.x + sp[3] as i32, base, &text, hs.size, col.ink_muted, rr.w.saturating_sub(2 * sp[3]));
+                continue;
+            }
             if selection.contains(&id) {
                 c.fill(rr, col.accent_soft);
             } else if hover_row == Some(k) {
@@ -701,7 +741,7 @@ impl<M: Clone> Ui<M> {
             out.push(A11yNode {
                 id: virt_id(id, 2, rid),
                 parent: id,
-                role: Role::Row,
+                role: if cells.header { Role::Label } else { Role::Row },
                 name: cells.cells.join(", "),
                 value: String::new(),
                 state,

@@ -40,6 +40,7 @@ pub mod tooltip;
 pub mod winsize;
 pub mod services;
 pub mod style;
+mod sysui;
 
 #[cfg(test)]
 mod tests;
@@ -126,6 +127,8 @@ pub struct Comp {
     pub(crate) frame: frame::FrameState,
     pub(crate) input: input::InputState,
     pub(crate) dialogs: dialog::Dialogs,
+    /// Pohled palety nad knihovnou `ui` (`sysui.rs`).
+    pub(crate) sysui: Option<sysui::SysUi>,
     /// Schranka (`clipboard.rs`).
     pub(crate) clipboard: clipboard::Clipboard,
     /// Generace kontextu oken (`winsize.rs`), roste s kazdou zmenou obrazovky.
@@ -207,6 +210,7 @@ impl Comp {
             input: input::InputState::new(w, h),
             dialogs: dialog::Dialogs::default(),
             clipboard: clipboard::Clipboard::default(),
+            sysui: None,
             ctx_generation: 1,
             greeter: greeter::Greeter::default(),
             services: services::Services::default(),

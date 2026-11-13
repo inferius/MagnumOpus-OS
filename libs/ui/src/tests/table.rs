@@ -341,3 +341,39 @@ fn drop_rows_on_row() {
     f.ev(InputEvent::Button { code: BTN_LEFT, pressed: false, x, y: y2 }, 0, None);
     assert!(!f.msgs.iter().any(|m| matches!(m, M::Drop(..))), "{:?}", f.msgs);
 }
+
+/// Nadpisy sekci v seznamu: nejdou vybrat mysi ani klavesami, sipky je
+/// preskoci, ve stromu pristupnosti jsou jako popisek.
+#[test]
+fn section_headers_are_skipped() {
+    #[derive(Clone, Debug, PartialEq)]
+    struct S(Vec<u64>);
+    let rows = ["Běží", "Terminál", "Aplikace", "Soubory", "Editor"];
+    let view = |sel: Vec<u64>| -> Node<S> {
+        column([table(vec![col("", 0)], rows.len(), |i| i as u64, move |i| if i == 0 || i == 2 { Cells::header(rows[i]) } else { Cells::new([String::from(rows[i])]) })
+            .header(false)
+            .selection(sel)
+            .on_selection(S)
+            .height(250)])
+    };
+    let mut u: Ui<S> = Ui::new(crate::Look::ui_fonts(), 300, 300);
+    u.rebuild("s".into(), view(vec![]));
+    let n = u.a11y();
+    assert!(n.iter().any(|x| x.role == Role::Label && x.name == "Běží"));
+    // Klik na nadpis nic.
+    let h = n.iter().find(|x| x.name == "Aplikace").unwrap().bounds;
+    let r = u.event(InputEvent::Button { code: BTN_LEFT, pressed: true, x: h.x + 5, y: h.y + 5 }, 0);
+    assert!(r.msgs.is_empty());
+    // Dolu z nicehoz: prvni vybiratelny (Terminal), dalsi dolu preskoci nadpis.
+    let mut sel = vec![];
+    for want in [1u64, 3, 4, 4] {
+        let r = u.event(InputEvent::Key { code: KEY_DOWN, action: 1, ch: None }, 0);
+        if let Some(S(s)) = r.msgs.into_iter().last() {
+            sel = s;
+        }
+        u.rebuild("s".into(), view(sel.clone()));
+        assert_eq!(sel, vec![want]);
+    }
+    let r = u.event(InputEvent::Key { code: KEY_HOME, action: 1, ch: None }, 0);
+    assert_eq!(r.msgs, vec![S(vec![1])]);
+}
