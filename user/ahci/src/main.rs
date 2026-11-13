@@ -60,6 +60,8 @@ struct Info {
     cache_without_flush: bool,
     /// Nejvic 512B bloku popisu useku v jednom TRIM (0 = TRIM neumi).
     trim_blocks: u16,
+    /// Model disku (IDENTIFY, pro instalator).
+    model: alloc::string::String,
 }
 
 struct Ahci {
@@ -290,10 +292,15 @@ fn probe(hba: &Hba, port: &mut Port) -> Option<Info> {
         flush,
         cache_without_flush: cache_enabled && flush.is_none(),
         trim_blocks,
+        model: alloc::string::String::from(model),
     })
 }
 
 impl Disks for Ahci {
+    fn model(&self, d: usize) -> alloc::string::String {
+        self.disks[d].info.model.clone()
+    }
+
     fn count(&self) -> usize {
         self.disks.len()
     }

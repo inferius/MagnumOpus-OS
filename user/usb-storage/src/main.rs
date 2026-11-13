@@ -49,6 +49,8 @@ const MAX_LUNS: u8 = 16;
 /// Jeden pouzitelny LUN.
 struct Lun {
     lun: u8,
+    /// Vyrobce a vyrobek z INQUIRY (pro instalator).
+    model: alloc::string::String,
     sectors: u64,
     sector_size: usize,
     read_only: bool,
@@ -187,6 +189,7 @@ impl Storage {
         );
         Ok(Some(Lun {
             lun,
+            model: alloc::format!("{} {}", inq.vendor, inq.product),
             sectors: last + 1,
             sector_size,
             read_only,
@@ -284,6 +287,10 @@ impl Storage {
 }
 
 impl Disks for Storage {
+    fn model(&self, d: usize) -> alloc::string::String {
+        self.luns[d].model.clone()
+    }
+
     fn count(&self) -> usize {
         self.luns.len()
     }

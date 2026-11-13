@@ -117,6 +117,9 @@ pub enum Kind {
     /// Oddil pro logy (FAT32 `MO-LOGY`, typ basic data) na disku s nasim
     /// oddilem - zive USB ([`log_partition`]).
     LogPartition { index: u32 },
+    /// Cely disk pro instalator ("raw" kanal): zapis jen do struktur GPT
+    /// a nasich oddilu ([`install::raw_write_allowed`]).
+    Installer,
 }
 
 impl Kind {
@@ -132,6 +135,7 @@ impl Kind {
             Kind::Unknown => "cizi nebo prazdny disk (bez tabulky oddilu)",
             Kind::Unreadable => "disk nejde precist",
             Kind::LogPartition { .. } => "oddil pro logy (FAT32 MO-LOGY)",
+            Kind::Installer => "cely disk pro instalator",
         }
     }
 

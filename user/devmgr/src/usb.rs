@@ -132,6 +132,7 @@ fn start_storage(fs: &Initfs, iface: Handle, parent: &Channel) -> Result<Process
         match &msg.data[..] {
             b"block" => parent.write(b"block", msg.handles)?,
             b"block-logy" => parent.write(b"block-logy", msg.handles)?,
+            d if d.starts_with(b"block-raw") => parent.write(d, msg.handles)?,
             b"done" => break,
             other => println!("devmgr: usb-storage: neznama zprava {:?}", other),
         }
