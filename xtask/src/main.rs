@@ -406,7 +406,9 @@ fn run_cli() -> Result<()> {
             let only: Vec<String> = opts.test_only.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
             let usb_selected = only.iter().any(|s| s == "zive-usb");
             let install_selected = only.iter().any(|s| s == "instalace");
-            let suites: Vec<String> = only.iter().filter(|s| *s != "zive-usb" && *s != "instalace").cloned().collect();
+            let install_gui_selected = only.iter().any(|s| s == "instalace-gui");
+            let suites: Vec<String> =
+                only.iter().filter(|s| !["zive-usb", "instalace", "instalace-gui"].contains(&s.as_str())).cloned().collect();
             if !opts.test_only.is_empty() || opts.test_repeat > 1 {
                 let filter = format!("suites = {}
 repeat = {}
@@ -423,7 +425,7 @@ repeat = {}
             // `--only zive-usb`: jen start z flash disku USB (`usb` je sada
             // testu userspace).
             let power_only = opts.test_only == "napajeni";
-            let usb_only = (usb_selected || install_selected) && suites.is_empty();
+            let usb_only = (usb_selected || install_selected || install_gui_selected) && suites.is_empty();
             let release_only = opts.test_only == "release";
             let reboot_only = opts.test_only == "opakovany-start";
             if !power_only && !usb_only && !release_only && !reboot_only && opts.test_only != "zaznam-padu" {
@@ -469,6 +471,16 @@ repeat = {}
                 opts.test = false;
                 let extra = std::mem::take(&mut opts.extra_initfs);
                 let r = usb::install_test::run(&mut opts);
+                opts.extra_initfs = extra;
+                opts.test = true;
+                r?;
+            }
+            // Graficky instalator: stejna instalace pres okno se snimky
+            // kroku (`--only instalace-gui` jen tento beh).
+            if opts.test_only.is_empty() || install_gui_selected {
+                opts.test = false;
+                let extra = std::mem::take(&mut opts.extra_initfs);
+                let r = usb::install_test::run_gui(&mut opts);
                 opts.extra_initfs = extra;
                 opts.test = true;
                 r?;
@@ -804,6 +816,7 @@ const USER_PROGRAMS: &[&str] = &[
     "gui-tasks",
     "gui-files",
     "files-copy",
+    "gui-install",
     "netd",
     "fwd",
     "netprobe",
@@ -837,6 +850,7 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("gui-tasks.manifest.toml", "user/gui-tasks/gui-tasks.manifest.toml"),
     ("gui-files.manifest.toml", "user/gui-files/gui-files.manifest.toml"),
     ("files-copy.manifest.toml", "user/files-copy/files-copy.manifest.toml"),
+    ("gui-install.manifest.toml", "user/gui-install/gui-install.manifest.toml"),
     ("agentd.manifest.toml", "user/agentd/agentd.manifest.toml"),
 ];
 

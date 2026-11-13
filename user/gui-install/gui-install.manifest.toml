@@ -1,0 +1,10 @@
+# Graficky instalator (design/instalace.html): pruvodce nad sluzbou
+# installd. V liste a spousteci jen na zivem USB.
+[app]
+id = "org.magnumopus.install"
+name = "Nainstalovat MagnumOpus"
+# Systemova aplikace: odznak duvery "Systém" (kresli kompozitor).
+system = true
+
+[limits]
+memory = "64M"

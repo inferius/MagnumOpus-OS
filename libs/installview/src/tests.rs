@@ -199,6 +199,18 @@ fn whole_flow_to_installed() {
 }
 
 #[test]
+fn default_keyboard_from_settings() {
+    // installd posila us pred cz (poradi keymap); vychozi je cz.
+    let out: Outbox = Rc::default();
+    let o = out.clone();
+    let mut m = Installer::new(move |b| o.borrow_mut().push(b));
+    let kb = |n: &str| KeyboardEntry { name: n.into(), description: n.into(), rows: vec![] };
+    m.reply(&Reply::Keyboards(vec![kb("us"), kb("cz")]).encode());
+    assert_eq!(m.chosen, vec![1]);
+    assert_eq!(m.settings().keyboards, vec!["cz"]);
+}
+
+#[test]
 fn keyboard_main_and_remove() {
     let mut r = rig();
     r.m.update(Msg::KbCursor(vec![1]));

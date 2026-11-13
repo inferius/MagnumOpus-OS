@@ -134,8 +134,10 @@ pub struct Installer {
     /// Krok autopilota prisel, kdyz se cekalo na installd: provede se po
     /// odpovedi.
     auto_pending: bool,
-    /// Zprava pro log (znacka kroku testovaciho behu), vybira ji binarka.
+    /// Zpravy pro log (znacky kroku testovaciho behu); s [`Installer::on_log`]
+    /// jdou rovnou do vystupu programu.
     pub log: Vec<String>,
+    sink: Option<Box<dyn FnMut(&str)>>,
 }
 
 impl Installer {
@@ -165,10 +167,23 @@ impl Installer {
             auto: None,
             auto_pending: false,
             log: Vec::new(),
+            sink: None,
         };
         s.request(Wait::Keyboards, Request::Keyboards);
         s.request(Wait::Disks, Request::Disks);
         s
+    }
+
+    /// Zpravy pro log posilat rovnou do `f` (vystup programu).
+    pub fn on_log(&mut self, f: impl FnMut(&str) + 'static) {
+        self.sink = Some(Box::new(f));
+    }
+
+    fn note(&mut self, line: String) {
+        match &mut self.sink {
+            Some(f) => f(&line),
+            None => self.log.push(line),
+        }
     }
 
     fn request(&mut self, w: Wait, r: Request) {
@@ -315,7 +330,7 @@ impl Installer {
     /// Znacka kroku do logu (testovaci beh: snimek obrazovky).
     fn mark(&mut self) {
         if self.auto.is_some() {
-            self.log.push(format!("gui-install: krok {} {}", self.step + 1, STEPS[self.step]));
+            self.note(format!("gui-install: krok {} {}", self.step + 1, STEPS[self.step]));
         }
     }
 
@@ -325,7 +340,23 @@ impl Installer {
             self.auto_step();
             return true;
         }
-        let Ok(r) = Reply::decode(data) else { return false };
+        let Ok(r) = Reply::decode(data) else {
+            if self.auto.is_some() {
+                self.note(format!("gui-install: neplatna zprava installd ({} B)", data.len()));
+            }
+            return false;
+        };
+        if self.auto.is_some() {
+            let kind = match &r {
+                Reply::Failed(..) => "chyba",
+                Reply::Disks(_) => "disky",
+                Reply::Keyboards(_) => "rozlozeni",
+                Reply::Preview { .. } => "nahled",
+                Reply::Progress { .. } => "prubeh",
+                Reply::Done(_) => "hotovo",
+            };
+            self.note(format!("gui-install: odpoved installd: {kind}"));
+        }
         if let Reply::Progress { step, text } = r {
             self.progress = Some((step, text));
             return true;
@@ -342,8 +373,11 @@ impl Installer {
             (Some(Wait::Keyboards), Reply::Keyboards(k)) => {
                 self.keyboards = k;
                 if !self.keyboards.is_empty() && self.chosen.is_empty() {
-                    self.chosen.push(0);
-                    self.kb_cursor = Some(0);
+                    // Vychozi rozlozeni systemu (installplan), jinak prvni.
+                    let def = Settings::default().keyboards;
+                    let i = self.keyboards.iter().position(|e| def.contains(&e.name)).unwrap_or(0);
+                    self.chosen.push(i);
+                    self.kb_cursor = Some(i);
                 }
             }
             (Some(Wait::Disks), Reply::Disks(d)) => {
@@ -366,12 +400,12 @@ impl Installer {
             && self.auto.is_some()
         {
             let line = format!("gui-install: HOTOVO; {}", s.lines().collect::<Vec<_>>().join(" "));
-            self.log.push(line);
+            self.note(line);
         } else if let Some(Outcome::Failed(t)) = &self.outcome
             && self.auto.is_some()
         {
             let line = format!("gui-install: instalace selhala: {t}");
-            self.log.push(line);
+            self.note(line);
         }
         self.pump();
         if self.auto_pending && !self.busy() {
@@ -440,7 +474,7 @@ impl Installer {
         }
         if !self.can_next() {
             let why = if self.error.is_empty() { String::from("krok nejde dokoncit") } else { self.error.clone() };
-            self.log.push(format!("gui-install: autopilot stoji v kroku {}: {why}", self.step + 1));
+            self.note(format!("gui-install: autopilot stoji v kroku {}: {why}", self.step + 1));
             return;
         }
         self.next();

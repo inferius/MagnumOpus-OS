@@ -45,6 +45,19 @@ pub static LAUNCHER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
 /// Aplikace plochy, ktere lze spustit z listy (programy v initfs).
 pub const DESKTOP_APPS: &[&str] = &["gui-term", "gui-demo", "gui-tasks", "gui-komponenty", "gui-files"];
 
+/// Graficky instalator: jen na zivem USB (v liste a po prihlaseni se sam
+/// otevre jako ostatni aplikace plochy).
+pub const INSTALLER_APP: &str = "gui-install";
+
+/// Aplikace plochy pro tento start: na zivem USB navic instalator.
+pub fn desktop_apps() -> Vec<&'static str> {
+    let mut v = DESKTOP_APPS.to_vec();
+    if crate::system::devices().is_some_and(|d| d.stick.is_some()) {
+        v.push(INSTALLER_APP);
+    }
+    v
+}
+
 /// Jmeno kompozitoru v registru supervisoru.
 pub const NAME: &str = "compd";
 /// Zavislosti kompozitoru: o restartu `inputd` se jen dozvi (fokus zustava).
@@ -542,6 +555,9 @@ pub fn launch_app(gui: &mut Gui, startup: &Startup, sup: &mut Supervisor, progra
         "gui-tasks" => vec![StartHandle::user(crate::tasks::client_view_all("uzivatel")?.into_handle())],
         // Spravce souboru: relace FS uzivatele, kanal k files-copy, domov.
         "gui-files" => crate::files::window_handles(session)?,
+        // Instalator: kanal k installd (spusti ho init, jen zive USB);
+        // v testu GUI instalace navic soubor odpovedi (autopilot).
+        INSTALLER_APP => crate::install::app_handles()?,
         _ => Vec::new(),
     };
     gui.launch_for_session(startup, program, sup, extra, session)
@@ -551,7 +567,7 @@ pub fn launch_app(gui: &mut Gui, startup: &Startup, sup: &mut Supervisor, progra
 fn connect_launcher(gui: &Gui, startup: &Startup) {
     let mut list = String::from(control::APPS);
     let fs = Initfs::open(startup).ok();
-    for p in DESKTOP_APPS {
+    for p in desktop_apps() {
         if let Ok(info) = recipe(startup, p) {
             // `[window] instances = "multi"`: vic oken (vychozi single).
             let text = fs.as_ref().and_then(|f| f.find(&format!("{p}.manifest.toml"))).and_then(|t| core::str::from_utf8(t).ok()).unwrap_or("");
@@ -597,7 +613,7 @@ pub fn launch_requests(startup: &Startup, sup: &mut Supervisor) {
             continue;
         }
         let Some(id) = text.strip_prefix("launch ") else { continue };
-        let Some(program) = DESKTOP_APPS.iter().find(|p| recipe(startup, p).is_ok_and(|i| i.id == id)) else {
+        let Some(program) = desktop_apps().into_iter().find(|p| recipe(startup, p).is_ok_and(|i| i.id == id)) else {
             println!("init: kompozitor chce spustit neznamou aplikaci {id}");
             continue;
         };

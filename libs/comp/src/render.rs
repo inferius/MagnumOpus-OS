@@ -83,6 +83,8 @@ pub fn app_icon(id: &str) -> &'static str {
         "folder"
     } else if id.contains("settings") || id.contains("nastaveni") {
         "settings"
+    } else if id.contains("install") {
+        "download"
     } else {
         "window"
     }

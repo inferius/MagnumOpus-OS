@@ -25,7 +25,9 @@ pub(crate) fn view(s: &Installer, cx: &Context) -> Node<Msg> {
         // Uzke okno: misto seznamu kroku jen "Krok N z 8".
         column([label(&format!("Krok {} z {}: {}", s.step + 1, STEPS.len(), STEPS[s.step])).heading().key("krok"), pane])
     } else {
-        row([steps(s).width(220), pane])
+        // Radek deti svisle stredi podle prirozene vysky: seznam kroku
+        // i obsah dostanou vysku okna (rozvrzeni ji orizne na plochu).
+        row([steps(s).width(220).height(cx.h), pane.height(cx.h)])
     }
 }
 
@@ -49,7 +51,13 @@ fn footer(s: &Installer) -> Node<Msg> {
 }
 
 fn body(s: &Installer) -> Node<Msg> {
-    let title = label(STEPS[s.step]).heading().key("nadpis");
+    // Po instalaci misto nadpisu kroku vysledek.
+    let heading = match (&s.outcome, s.step) {
+        (Some(Outcome::Done(_)), step::PROGRESS) => "Nainstalováno",
+        (Some(Outcome::Failed(_)), step::PROGRESS) => "Instalace selhala",
+        _ => STEPS[s.step],
+    };
+    let title = label(heading).heading().key("nadpis");
     let mut c = vec![title];
     match s.step {
         step::KEYBOARD => keyboard(s, &mut c),
@@ -253,13 +261,11 @@ fn summary(s: &Installer, c: &mut Vec<Node<Msg>>) {
 fn run(s: &Installer, c: &mut Vec<Node<Msg>>) {
     match &s.outcome {
         Some(Outcome::Done(summary)) => {
-            c.push(label("Nainstalováno").heading().key("hotovo"));
             for (i, l) in summary.lines().enumerate() {
                 c.push(label(l).key(4000 + i as u64));
             }
         }
         Some(Outcome::Failed(t)) => {
-            c.push(label("Instalace selhala").heading().key("selhala"));
             c.push(label(t).warn().key("duvod"));
         }
         None => {}
