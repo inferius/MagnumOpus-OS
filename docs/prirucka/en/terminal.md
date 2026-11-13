@@ -48,6 +48,11 @@ ls ~/Dokumenty -r | where size > 100MB | sort size -d
 |---|---|
 | `Tab` | completes a command, a path or a column name |
 | `↑` `↓` | previous and next command |
-| `Ctrl+C` | stops a running command |
+| `Ctrl+C` | copies the selected text; without a selection stops a running command |
+| `Ctrl+V` | pastes text from the clipboard into the line (runs nothing) |
 | `Ctrl+L` | collapses old output blocks |
 | `Ctrl+T` | task panel |
+
+With the mouse: drag to select text, double click for a word, triple
+click for a whole line. A click into the command line moves the cursor.
+The "Copy output" button in a block header copies the whole command output.

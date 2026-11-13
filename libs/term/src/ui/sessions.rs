@@ -92,6 +92,21 @@ impl App {
         }
     }
 
+    /// Akce bloku z okna GUI: vystup bloku `id` jako prosty text (bez
+    /// barev; tabulka cela, ne jen viditelna cast) pro schranku. `None` =
+    /// blok neni.
+    pub fn block_text(&self, id: u64) -> Option<String> {
+        let b = self.blocks.iter().find(|b| b.id == id)?;
+        let mut out = String::new();
+        for it in &b.items {
+            out.push_str(&crate::vt::item_at(it, None, self.now));
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        Some(out)
+    }
+
     /// Akce bloku z okna GUI: spustit prikaz bloku `id` znovu (jako by ho
     /// uzivatel napsal; bezi-li prikaz, zaradi se do fronty).
     pub fn rerun_block(&mut self, id: u64) {

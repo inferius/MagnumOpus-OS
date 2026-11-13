@@ -25,7 +25,8 @@ Windows).
 |---|---|
 | `Tab` | doplnit |
 | `↑` `↓` | historie příkazů |
-| `Ctrl+C` | zastavit příkaz |
+| `Ctrl+C` | kopírovat výběr, bez výběru zastavit příkaz |
+| `Ctrl+V` | vložit |
 | `Ctrl+L` | sbalit staré bloky |
 | `Ctrl+T` | panel úloh |
 

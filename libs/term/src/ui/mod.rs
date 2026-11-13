@@ -9,6 +9,8 @@
 
 pub mod draw;
 pub mod editor;
+mod pointer;
+pub use pointer::PASTE_MAX;
 pub mod preview;
 pub mod progress;
 pub mod sessions;
@@ -966,6 +968,8 @@ impl App {
         };
         for (p, c) in text.char_indices() {
             let mut b = [0u8; 4];
+            // Konec radku z vlozeneho textu: znak zalomeni (radek je jeden).
+            let c = if c == '\n' { '\u{21B5}' } else { c };
             let s = c.encode_utf8(&mut b);
             if p == cursor && self.focus == Focus::Editor && self.prompt.is_none() {
                 l.push_bg(Some(Style::fg(t.ui.bg)), t.ui.fg, s);

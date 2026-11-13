@@ -28,6 +28,8 @@ mod suggest;
 pub mod complete;
 mod table;
 pub mod text;
+/// Prodleva dvoj- a trojkliku (pole, tabulka, mrizka terminalu).
+pub use field::MULTI_CLICK;
 
 #[cfg(feature = "os")]
 pub mod client;

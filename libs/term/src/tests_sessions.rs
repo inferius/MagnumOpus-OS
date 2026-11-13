@@ -126,3 +126,21 @@ fn block_actions_fold_and_run_again() {
     a.rerun_block(99);
     assert!(a.take_out().is_empty());
 }
+
+#[test]
+fn block_text_is_plain_output() {
+    use shlang::value::Value;
+    let mut a = App::new(Theme::dark(), 40, 30);
+    a.on_msg(ServerMsg::Attached { session: 1, cwd: "/".into(), blocks: 1 });
+    start(&mut a, 5, "ls");
+    let row = |n: &str, s: i64| Value::record(&[("name", Value::str(n)), ("size", Value::Size(s))]);
+    // Tabulka cela (vic radku, nez je videt), bez barev (escape sekvenci).
+    let rows: Vec<Value> = (0..50).map(|i| row(&alloc::format!("soubor{i}"), i)).collect();
+    a.on_msg(ServerMsg::Item { session: 1, block: 5, item: crate::proto::Item::Value(Value::List(rows)) });
+    a.on_msg(ServerMsg::Item { session: 1, block: 5, item: crate::proto::Item::Note("hotovo".into()) });
+    let t = a.block_text(5).unwrap();
+    assert!(t.contains("soubor0") && t.contains("soubor49"), "{t}");
+    assert!(t.contains("hotovo\n"), "{t}");
+    assert!(!t.contains('\u{1b}'), "{t}");
+    assert_eq!(a.block_text(99), None);
+}
