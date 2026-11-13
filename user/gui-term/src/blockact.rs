@@ -1,7 +1,7 @@
 //! Akce bloku (`design/terminal.html`, `.blk-act`): u bloku pod
-//! ukazatelem se v hlavicce ukazou tlacitka Sbalit / Rozbalit a Spustit
-//! znovu (cas bloku se posune vlevo). Kopirovat prijde se schrankou
-//! (`clipproto`, 6c), porovnani s predchozim behem je navrzene zvlast.
+//! ukazatelem se v hlavicce ukazou tlacitka Sbalit / Rozbalit, Kopirovat
+//! vystup (schranka) a Spustit znovu (cas bloku se posune vlevo);
+//! porovnani s predchozim behem je navrzene zvlast.
 //! V pristupnosti jsou akce u vsech viditelnych bloku.
 
 use alloc::vec::Vec;
@@ -15,8 +15,12 @@ use crate::rows::Grid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Act {
     Fold,
+    Copy,
     Again,
 }
+
+/// Poradi tlacitek v hlavicce bloku.
+const ACTS: [Act; 3] = [Act::Fold, Act::Copy, Act::Again];
 
 /// Tlacitko akce: plocha, blok a akce.
 pub struct Button {
@@ -35,7 +39,7 @@ pub fn block_of(r: &Role) -> Option<u64> {
 
 /// Sirka tlacitek akci (o tolik se posune cas bloku).
 pub fn width(look: &Look, g: &Grid) -> u32 {
-    2 * g.ch + look.t.space[1]
+    ACTS.len() as u32 * g.ch + (ACTS.len() as u32 - 1) * look.t.space[1]
 }
 
 /// Tlacitka v hlavickach bloku, pro ktere `pick` vrati `true`.
@@ -49,8 +53,9 @@ pub fn layout(look: &Look, lines: &[Line], g: &Grid, pick: impl Fn(u64) -> bool)
         }
         let y = g.y + (row as u32 * g.ch) as i32;
         let x = g.x + (g.cols as u32 * g.cw) as i32 - width(look, g) as i32;
-        out.push(Button { rect: Rect::new(x, y, g.ch, g.ch), block, act: Act::Fold });
-        out.push(Button { rect: Rect::new(x + g.ch as i32 + gap, y, g.ch, g.ch), block, act: Act::Again });
+        for (k, act) in ACTS.into_iter().enumerate() {
+            out.push(Button { rect: Rect::new(x + k as i32 * (g.ch as i32 + gap), y, g.ch, g.ch), block, act });
+        }
     }
     out
 }
@@ -65,6 +70,7 @@ pub fn paint(c: &mut Canvas<'_>, look: &mut Look, buttons: &[Button], collapsed:
         let icon = match b.act {
             Act::Fold if collapsed.contains(&b.block) => "right",
             Act::Fold => "down",
+            Act::Copy => "copy",
             Act::Again => "refresh",
         };
         let is = t.size.icon_s.min(r.h.saturating_sub(4));

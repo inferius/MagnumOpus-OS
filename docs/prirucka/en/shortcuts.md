@@ -25,7 +25,8 @@ with the Windows logo).
 |---|---|
 | `Tab` | complete |
 | `↑` `↓` | command history |
-| `Ctrl+C` | stop a command |
+| `Ctrl+C` | copy the selection, without one stop a command |
+| `Ctrl+V` | paste |
 | `Ctrl+L` | collapse old blocks |
 | `Ctrl+T` | task panel |
 

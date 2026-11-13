@@ -31,6 +31,7 @@ pub mod perm;
 pub mod proto;
 pub mod render;
 pub mod screen;
+pub mod select;
 pub mod session;
 pub mod taskboard;
 pub mod tasks;
@@ -49,7 +50,11 @@ mod tests_eta;
 #[cfg(test)]
 mod tests_line;
 #[cfg(test)]
+mod tests_pointer;
+#[cfg(test)]
 mod tests_preview;
+#[cfg(test)]
+mod tests_select;
 #[cfg(test)]
 mod tests_render;
 #[cfg(test)]

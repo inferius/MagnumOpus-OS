@@ -76,12 +76,13 @@ pub fn spawn_injector(log: PathBuf, port: Arc<AtomicU16>, ps2: bool) {
 
 /// Zacatky testu, ktere vstup z QEMU potrebuji: podle nich se skript deli
 /// na useky (kazdy test zvlast, aby sel spustit i sam).
-const STARTS: [&str; 9] = [
+const STARTS: [&str; 10] = [
     MARKER,
     MARKER_PS2,
     usb::KEYS,
     gui::DIALOG,
     gui::SECURE,
+    gui::TERM_DRAG,
     gui::CLICK,
     gui::SNAPSHOT,
     gui::PALETTE_SWITCH,
@@ -96,7 +97,7 @@ fn segments(ps2: bool) -> Vec<(&'static str, Vec<Step>)> {
     let mut out: Vec<(&'static str, Vec<Step>)> = Vec::new();
     for step in script(ps2) {
         let start = match &step {
-            Step::WaitFor(m) | Step::ClickAt(m) if STARTS.contains(m) => Some(*m),
+            Step::WaitFor(m) | Step::ClickAt(m) | Step::DragAt(m) if STARTS.contains(m) => Some(*m),
             _ => None,
         };
         match (start, out.last_mut()) {
@@ -165,6 +166,9 @@ enum Step {
     /// Klik levym tlacitkem na polohu z logu (za znackou "x y"): ukazatel
     /// do rohu, pak pohyb a stisk v jednom snimku, pusteni zvlast.
     ClickAt(&'static str),
+    /// Tah levym tlacitkem z "x0 y0" na "x1 y1" (za znackou): ukazatel do
+    /// rohu, pohyb a stisk, pohyb, pusteni.
+    DragAt(&'static str),
 }
 
 /// Posloupnost kroku. Test v `input.rs` ocekava presne tyto udalosti.
@@ -225,6 +229,16 @@ fn gui_steps(s: &mut Vec<Step>) {
     s.push(Step::WaitFor(gui::SECURE_ENTER));
     s.push(Step::Send(vec![key("ret", true)]));
     s.push(Step::Send(vec![key("ret", false)]));
+    // Terminal (test `select_copy_paste`): tah mysi vybere radek, pak
+    // Ctrl+C a Ctrl+V (mys a klavesnice si nedrzi poradi: klavesy az po
+    // druhe znacce, kdy test vidi vyber).
+    s.push(Step::DragAt(gui::TERM_DRAG));
+    s.push(Step::WaitFor(gui::TERM_KEYS));
+    for k in ["c", "v"] {
+        for (q, d) in [("ctrl", true), (k, true), (k, false), ("ctrl", false)] {
+            s.push(Step::Send(vec![key(q, d)]));
+        }
+    }
     // Spravce uloh: fyzicky klik na zaskrtavaci pole (test `task_manager`).
     s.push(Step::ClickAt(gui::CLICK));
     // Diagnosticky snimek (test `diag_snapshot`): Print Screen.
@@ -261,6 +275,9 @@ mod gui {
     pub const SECURE: &str = "init: test gui: cekam na zkratku z QEMU";
     pub const SECURE_ENTER: &str = "init: test gui: bezpecna obrazovka ceka na Enter";
     pub const CLICK: &str = "init: test gui: klik mysi na ";
+    /// `user/init/src/tests/gui_term.rs`.
+    pub const TERM_DRAG: &str = "init: test gui: terminal tah mysi ";
+    pub const TERM_KEYS: &str = "init: test gui: terminal ceka na Ctrl+C a Ctrl+V";
     pub const SNAPSHOT: &str = "init: test gui: diagnosticky snimek ceka na Print Screen";
     pub const PALETTE_SWITCH: &str = "init: test gui: paleta prepne na Ukazku";
     pub const PALETTE_ACTION: &str = "init: test gui: paleta pricte v Ukazce";
@@ -458,6 +475,23 @@ fn inject(port: u16, log: &Path, start: Instant, segs: &[(&'static str, Vec<Step
                     }
                     continue;
                 }
+                Step::DragAt(marker) => {
+                    if !wait_marker(log, marker, start) {
+                        return Err(format!("znacka '{marker}' se neobjevila"));
+                    }
+                    let p = marker_numbers(log, marker).filter(|v| v.len() >= 4).ok_or_else(|| format!("poloha za znackou '{marker}'"))?;
+                    for events in [
+                        vec![rel("x", -30000), rel("y", -30000)],
+                        vec![rel("x", p[0]), rel("y", p[1]), btn("left", true)],
+                        vec![rel("x", (p[2] - p[0]) / 2), rel("y", (p[3] - p[1]) / 2)],
+                        vec![rel("x", p[2] - p[0] - (p[2] - p[0]) / 2), rel("y", p[3] - p[1] - (p[3] - p[1]) / 2)],
+                        vec![btn("left", false)],
+                    ] {
+                        let cmd = format!(r#"{{"execute":"input-send-event","arguments":{{"device":"video0","events":[{}]}}}}"#, events.join(","));
+                        send(cmd, &mut reader)?;
+                    }
+                    continue;
+                }
                 Step::ClickAt(marker) => {
                     if !wait_marker(log, marker, start) {
                         return Err(format!("znacka '{marker}' se neobjevila"));
@@ -488,11 +522,16 @@ fn inject(port: u16, log: &Path, start: Instant, segs: &[(&'static str, Vec<Step
 
 /// Dve cisla "x y" za znackou v logu.
 fn marker_point(log: &Path, marker: &str) -> Option<(i32, i32)> {
+    let v = marker_numbers(log, marker)?;
+    Some((*v.first()?, *v.get(1)?))
+}
+
+/// Cisla oddelena mezerami za znackou v logu (do konce radku).
+fn marker_numbers(log: &Path, marker: &str) -> Option<Vec<i32>> {
     let b = std::fs::read(log).ok()?;
     let text = String::from_utf8_lossy(&b);
     let rest = &text[text.find(marker)? + marker.len()..];
-    let mut it = rest.lines().next()?.split_whitespace().map(|v| v.parse::<i32>());
-    Some((it.next()?.ok()?, it.next()?.ok()?))
+    rest.lines().next()?.split_whitespace().map(|v| v.parse::<i32>().ok()).collect()
 }
 
 /// Posle jeden prikaz QMP (napr. `system_powerdown`) a pocka na odpoved.

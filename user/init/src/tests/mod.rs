@@ -30,6 +30,7 @@ mod gui_gpu;
 mod gui_recovery;
 mod gui_palette;
 mod gui_snapshot;
+mod gui_term;
 mod input;
 mod input_recovery;
 mod ipc;

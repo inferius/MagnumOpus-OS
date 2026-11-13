@@ -26,6 +26,8 @@ pub mod scrollbar;
 pub mod spatial;
 mod table;
 pub mod text;
+/// Prodleva dvoj- a trojkliku (pole, tabulka, mrizka terminalu).
+pub use field::MULTI_CLICK;
 
 #[cfg(feature = "os")]
 pub mod client;

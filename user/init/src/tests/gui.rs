@@ -32,6 +32,7 @@ pub const TESTS: &[Test] = &[
     ("compd: systemovy dialog prijme jen fyzicky vstup (QMP)", dialog_physical_only),
     ("compd: bezpecna obrazovka po Ctrl+Alt+Del (QMP)", secure_screen),
     ("compd: okno terminalu s vlastnim titulkem", terminal_window),
+    ("compd: terminal: tah mysi, Ctrl+C a Ctrl+V pres schranku (QMP)", super::gui_term::select_copy_paste),
     ("compd: spravce uloh a ikona uloh v panelu", task_manager),
     ("compd: diagnosticky snimek po Print Screen (QMP)", super::gui_snapshot::diag_snapshot),
     ("compd: paleta prikazu z klavesnice: okno a akce aplikace (QMP)", super::gui_palette::palette_keys),

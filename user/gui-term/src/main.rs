@@ -37,7 +37,8 @@ use gfx::{Canvas, Rect};
 use guiproto::a11y::{Node, Role, actions};
 use guiproto::action::Value;
 use guiproto::window::{ClientMsg, InputEvent, InputRecord, Mode, RegionKind};
-use inputproto::code::BTN_LEFT;
+use inputproto::code::{BTN_LEFT, KEY_C, KEY_V};
+use inputproto::mods;
 use libos::{Channel, Error, Handle, Signals, Startup, println, time};
 use term::proto::ServerMsg;
 use term::screen::Screen;
@@ -142,11 +143,10 @@ const TICK: Duration = Duration::from_millis(150);
 const ANIM: Duration = Duration::from_millis(60);
 
 /// Vychozi velikost okna: s panelem uloh (1040 = terminal ~760 + panel
-/// 280). Kompozitor ji orizne na obrazovku; omezeni na 85 % sirky
-/// obrazovky potrebuje od kompozitoru zmenu velikosti po otevreni (zatim
-/// neni).
+/// 280), nejvys 85 % sirky pracovni plochy (`Window::request_size`).
 const WIN_W: u32 = 1040;
 const WIN_H: u32 = 520;
+const MAX_W_PERMILLE: u16 = 850;
 
 /// Id uzlu pristupnosti prvniho tlacitka vyzvy (dalsi po jedne).
 const BUTTON_NODE: u32 = 100;
@@ -180,6 +180,8 @@ struct Term {
     more: bool,
     /// Blok pod ukazatelem (akce bloku v hlavicce).
     hover: Option<u64>,
+    /// Vyber textu mysi.
+    select: term::select::Selector,
 }
 
 /// Mrizka v okne `w` x `h`; s panelem uloh je o jeho sirku uzsi.
@@ -218,6 +220,7 @@ impl Term {
             fade: motion::Fade::default(),
             more: false,
             hover: None,
+            select: term::select::Selector::new(Some(ui::text::word_at), ui::MULTI_CLICK),
         };
         t.app.welcome = true;
         t.conn.start();
@@ -279,6 +282,53 @@ impl Term {
         changed
     }
 
+    /// Bunka mrizky pod bodem okna (`None` = mimo mrizku); sloupec za
+    /// pravym okrajem se omezi na posledni.
+    fn cell_at(&self, x: i32, y: i32) -> Option<term::select::Pos> {
+        let g = self.look.grid(self.screen.cols);
+        if x < g.x || y < g.y {
+            return None;
+        }
+        let row = ((y - g.y) as u32 / g.ch.max(1)) as usize;
+        let col = (((x - g.x) as u32 / g.cw.max(1)) as usize).min(self.screen.cols.saturating_sub(1));
+        (row < self.screen.rows).then_some((row, col))
+    }
+
+    /// Kopirovat vyber do schranky a vyber zrusit (`false` = neni vyber).
+    fn copy_selection(&mut self) -> bool {
+        if self.select.sel.is_none() {
+            return false;
+        }
+        let text = self.select.text(&self.screen);
+        self.select.clear();
+        if let Err(e) = self.win.copy_text(text) {
+            println!("gui-term: schranka: {e}");
+        }
+        true
+    }
+
+    /// Klavesy schranky (jako Windows Terminal): Ctrl+C pri vyberu
+    /// a Ctrl+Shift+C kopiruji, Ctrl+V a Ctrl+Shift+V vlozi. `None` =
+    /// klavesa neni pro schranku.
+    fn clip_key(&mut self, r: &InputRecord) -> Option<bool> {
+        let InputEvent::Key { code, action: 1 | 2, .. } = r.event else { return None };
+        let ctrl = r.mods & mods::CTRL != 0;
+        let shift = r.mods & mods::SHIFT != 0;
+        if !ctrl || r.mods & mods::ALT != 0 {
+            return None;
+        }
+        match code {
+            KEY_C if shift || self.select.sel.is_some() => Some(self.copy_selection()),
+            KEY_V => {
+                if let Err(e) = self.win.request_paste() {
+                    println!("gui-term: schranka: {e}");
+                }
+                Some(false)
+            }
+            _ => None,
+        }
+    }
+
     fn resize(&mut self) {
         let (c, r) = grid(&self.look, self.win.w, self.win.h, self.panel());
         self.screen = Screen::new(c, r);
@@ -290,6 +340,13 @@ impl Term {
         match act {
             blockact::Act::Fold => self.app.toggle_block(block),
             blockact::Act::Again => self.app.rerun_block(block),
+            blockact::Act::Copy => {
+                if let Some(text) = self.app.block_text(block)
+                    && let Err(e) = self.win.copy_text(text)
+                {
+                    println!("gui-term: schranka: {e}");
+                }
+            }
         }
         self.send_out();
     }
@@ -336,22 +393,30 @@ impl Term {
         let mut tab = Node::new(3, 2, Role::Button, &self.status());
         tab.bounds = self.look.tab();
         tab.actions = actions::ACTIVATE;
-        let mut t = Node::new(4, 1, Role::Terminal, "Výstup");
-        let th = self.look.title_h();
-        t.bounds = Rect::new(0, th as i32, self.win.w, self.win.h.saturating_sub(th));
+        // Vyber textu: ctecka ho precte ve jmenu (zacatek).
+        let name = match self.select.sel.is_some() {
+            true => {
+                let sel: String = self.select.text(&self.screen).chars().take(60).collect();
+                alloc::format!("Výstup, vybráno: {sel}")
+            }
+            false => String::from("Výstup"),
+        };
+        let mut t = Node::new(4, 1, Role::Terminal, &name);
+        // Plocha = mrizka (radek `k` hodnoty lezi na `y + k * vyska`).
+        let g = self.look.grid(self.screen.cols);
+        t.bounds = Rect::new(g.x, g.y, self.screen.cols as u32 * g.cw, self.screen.rows as u32 * g.ch);
+        // Vsechny radky mrizky (i prazdne), at radek hodnoty = radek mrizky.
         let mut v = String::new();
         for y in 0..self.screen.rows {
-            let l = self.screen.line(y);
-            if !l.is_empty() {
-                v.push_str(&l);
-                v.push('\n');
-            }
+            v.push_str(&self.screen.line(y));
+            v.push('\n');
         }
         t.value = v;
         t.state = guiproto::a11y::state::FOCUSED;
         t.actions = actions::SET_VALUE;
         let mut nodes = vec![win, bar, tab, t];
-        // Akce bloku u vsech viditelnych hlavicek (Sbalit, Spustit znovu).
+        // Akce bloku u vsech viditelnych hlavicek (Sbalit, Kopirovat,
+        // Spustit znovu).
         let g = self.look.grid(self.screen.cols);
         for (k, b) in blockact::layout(&self.look, &self.lines, &g, |_| true).iter().enumerate() {
             let Some(blk) = self.app.blocks.iter().find(|x| x.id == b.block) else { continue };
@@ -359,6 +424,7 @@ impl Term {
                 blockact::Act::Fold if blk.collapsed => alloc::format!("Rozbalit blok {}", blk.line),
                 blockact::Act::Fold => alloc::format!("Sbalit blok {}", blk.line),
                 blockact::Act::Again => alloc::format!("Spustit znovu {}", blk.line),
+                blockact::Act::Copy => alloc::format!("Kopírovat výstup {}", blk.line),
             };
             let mut n = Node::new(ACT_NODE + k as u32, 4, Role::Button, &name);
             n.bounds = b.rect;
@@ -434,6 +500,7 @@ impl Term {
         self.screen.set_ink((ink.0, ink.1, ink.2));
         let (frame, lines) = self.app.frame_lines();
         self.screen.write(&frame);
+        self.select.follow(&self.screen);
         if self.conn.conn.is_none() {
             self.screen.write("\r\n\x1b[31mTerminál nemá službu termd (spusťte ho přes init).\x1b[39m");
         } else if let Some(why) = &self.conn.gave_up {
@@ -449,6 +516,7 @@ impl Term {
         let tab_list = self.tabs();
         let collapsed: Vec<u64> = self.app.blocks.iter().filter(|b| b.collapsed).map(|b| b.id).collect();
         let hover = self.hover;
+        let sel = self.select.spans(&self.screen);
         let look = &mut self.look;
         let c_on = self.app.notation_c;
         let tasks = &self.app.tasks;
@@ -456,7 +524,7 @@ impl Term {
         self.fade.update(&lines, t_now);
         let veils = self.fade.veils(&lines, t_now, &look.t.motion);
         self.win.draw(|c: &mut Canvas<'_>| {
-            paint(c, look, screen, &label, &lines, &veils, &tab_list, (hover, &collapsed));
+            paint(c, look, screen, &label, &lines, &veils, &tab_list, (hover, &collapsed, &sel));
             if show_panel {
                 let area = panel::area(look, c.w, c.h);
                 panel::paint(c, look, tasks, area);
@@ -488,17 +556,26 @@ impl Term {
     fn event(&mut self, ev: Event) -> Option<bool> {
         Some(match ev {
             // Ukazatel nad blokem: akce bloku v hlavicce.
-            Event::Input(InputRecord { event: InputEvent::PointerMove { y, .. }, .. }) => {
+            Event::Input(InputRecord { event: InputEvent::PointerMove { x, y }, .. }) => {
+                let dragged = match self.cell_at(x, y) {
+                    Some(at) => self.select.drag(&self.screen, at),
+                    None => false,
+                };
                 let g = self.look.grid(self.screen.cols);
                 let row = if y >= g.y { ((y - g.y) as u32 / g.ch.max(1)) as usize } else { usize::MAX };
                 let hb = self.lines.get(row).and_then(|l| blockact::block_of(&l.role));
                 let changed = hb != self.hover;
                 self.hover = hb;
-                changed
+                changed || dragged
+            }
+            Event::Input(InputRecord { event: InputEvent::Button { code: BTN_LEFT, pressed: false, .. }, .. }) => {
+                let had = self.select.sel.is_some();
+                self.select.release();
+                had != self.select.sel.is_some()
             }
             Event::Input(InputRecord { event: InputEvent::PointerLeave, .. }) => self.hover.take().is_some(),
             // Klik na tlacitko vyzvy (prvky navrhu nad mrizkou).
-            Event::Input(InputRecord { event: InputEvent::Button { code: BTN_LEFT, pressed: true, x, y }, .. }) => {
+            Event::Input(InputRecord { event: InputEvent::Button { code: BTN_LEFT, pressed: true, x, y }, mods: pm, time: pt, .. }) => {
                 // Zrusit ulohu v panelu.
                 if self.panel() {
                     let area = panel::area(&self.look, self.win.w, self.win.h);
@@ -536,26 +613,56 @@ impl Term {
                 }
                 let g = self.look.grid(self.screen.cols);
                 let hit = rows::buttons(&mut self.look, &self.lines, &g).into_iter().find(|(b, ..)| b.rect.contains(x, y));
-                match hit {
-                    Some((b, ..)) => {
-                        self.app.prompt_pick(b.index);
+                if let Some((b, ..)) = hit {
+                    self.app.prompt_pick(b.index);
+                    return Some(true);
+                }
+                // Radek vstupu: kurzor na znak; jinde vyber textu.
+                let Some(at) = self.cell_at(x, y) else { return Some(self.select.clear()) };
+                if matches!(self.lines.get(at.0).map(|l| &l.role), Some(term::ui::draw::Role::Input { .. })) && pm & mods::SHIFT == 0 {
+                    self.select.clear();
+                    self.app.click_input(at.1);
+                    self.send_out();
+                    return Some(true);
+                }
+                self.select.press(&self.screen, at, pt, pm & mods::SHIFT != 0);
+                true
+            }
+            Event::Clipboard(m) => match self.win.clipboard_event(m) {
+                Ok(Some(text)) => {
+                    self.select.clear();
+                    self.app.paste(&text);
+                    self.send_out();
+                    true
+                }
+                Ok(None) => false,
+                Err(e) => {
+                    println!("gui-term: schranka: {e}");
+                    false
+                }
+            },
+            Event::Input(r) => {
+                if let Some(redraw) = self.clip_key(&r) {
+                    return Some(redraw);
+                }
+                match keys::key(&r) {
+                    // termd nejde spustit (pamet): Enter to zkusi znovu (rucne).
+                    Some(term::ui::Key::Enter) if self.conn.gave_up.is_some() && self.termd.is_none() => {
+                        self.conn.start();
+                        true
+                    }
+                    Some(k) => {
+                        // Psani vyber zrusi (kolecko ne: posun obsahu ho
+                        // posune nebo zrusi samo).
+                        if !matches!(k, term::ui::Key::Wheel(_)) {
+                            self.select.clear();
+                        }
+                        self.app.key(k);
                         true
                     }
                     None => false,
                 }
             }
-            Event::Input(r) => match keys::key(&r) {
-                // termd nejde spustit (pamet): Enter to zkusi znovu (rucne).
-                Some(term::ui::Key::Enter) if self.conn.gave_up.is_some() && self.termd.is_none() => {
-                    self.conn.start();
-                    true
-                }
-                Some(k) => {
-                    self.app.key(k);
-                    true
-                }
-                None => false,
-            },
             Event::Resized { .. } => {
                 self.resize();
                 let _ = self.regions();
@@ -646,13 +753,19 @@ fn main(startup: Startup) -> i64 {
     if conn.is_none() {
         println!("gui-term: chybi kanal pripojeni k termd");
     }
-    let win = match Window::open(link, Mode::CustomTitle, WIN_W, WIN_H, "Terminál") {
+    let mut win = match Window::open(link, Mode::CustomTitle, WIN_W, WIN_H, "Terminál") {
         Ok(w) => w,
         Err(e) => {
             println!("gui-term: okno nelze otevrit: {e}");
             return 2;
         }
     };
+    // Vychozi velikost nejvys 85 % sirky pracovni plochy (na male obrazovce
+    // se okno vejde cele); pred prvnim vykreslenim, okno se ukaze rovnou
+    // ve spravne velikosti.
+    if let Err(e) = win.request_size(WIN_W, WIN_H, MAX_W_PERMILLE, 0) {
+        println!("gui-term: velikost okna: {e}");
+    }
     let mut t = Term::new(win, conn);
     if let Err(e) = t.regions().and_then(|_| t.render()) {
         println!("gui-term: prvni vykresleni selhalo: {e}");
@@ -735,7 +848,7 @@ fn px((r, g, b): (u8, u8, u8)) -> u32 {
 /// Okno terminalu: titulek s kartou relace (odznak a tlacitka okna kresli
 /// system pres nej) a mrizka bunek pismem JetBrains Mono.
 #[allow(clippy::too_many_arguments)]
-fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, lines: &[term::ui::draw::Line], veils: &[u32], tabs: &[tabs::Tab], hover: (Option<u64>, &[u64])) {
+fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, lines: &[term::ui::draw::Line], veils: &[u32], tabs: &[tabs::Tab], hover: Marks<'_>) {
     let t = look.t.clone();
     let col = &t.color;
     let (w, h) = (c.w, c.h);
@@ -775,9 +888,14 @@ fn paint_status_tab(c: &mut Canvas<'_>, look: &mut Look, label: &str) {
     f.draw_ellipsized(c, x, base, label, strong.size, col.ink, tw);
 }
 
-/// Mrizka bunek s prvky navrhu, prolnutim novych bloku a kurzorem.
+/// Znacky mrizky: blok pod ukazatelem, sbalene bloky a vyber textu
+/// (radek, sloupce `[od, do)`).
+type Marks<'a> = (Option<u64>, &'a [u64], &'a [(usize, usize, usize)]);
+
+/// Mrizka bunek s prvky navrhu, prolnutim novych bloku, vyberem
+/// a kurzorem.
 #[allow(clippy::too_many_arguments)]
-fn paint_grid(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, lines: &[term::ui::draw::Line], veils: &[u32], cw: u32, ch: u32, pad: i32, th: u32, w: u32, (hover, collapsed): (Option<u64>, &[u64])) {
+fn paint_grid(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, lines: &[term::ui::draw::Line], veils: &[u32], cw: u32, ch: u32, pad: i32, th: u32, w: u32, (hover, collapsed, sel): Marks<'_>) {
     let t = look.t.clone();
     let col = &t.color;
     let ms = t.text.mono;
@@ -795,6 +913,10 @@ fn paint_grid(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, lines: &[ter
             let (ox, oy) = (pad + (colm as u32 * cw) as i32, th as i32 + pad + (row as u32 * ch) as i32);
             if let Some(b) = cell.bg {
                 c.fill(Rect::new(ox, oy, cw, ch), px(b));
+            }
+            // Vyber textu (jako vyber v textovych polich: `accent_soft`).
+            if sel.iter().any(|&(r, a, b)| r == row && colm >= a && colm < b) {
+                c.fill(Rect::new(ox, oy, cw, ch), col.accent_soft);
             }
             if cell.ch == ' ' {
                 continue;
