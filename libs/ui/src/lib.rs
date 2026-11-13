@@ -25,7 +25,7 @@ pub mod client;
 #[cfg(test)]
 mod tests;
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -39,21 +39,62 @@ pub use node::*;
 use layout::{ElemKind, Element};
 pub use look::Look;
 
-/// Id vrstev, ktere knihovna pouziva: koren okna a pro posouvany obsah
-/// s indexem prvku `i` skupina `SCROLL_BASE + 2i` a obsah `+ 1`.
+/// Id uzlu s textem chyby prvku s id `id` (mimo rozsah id prvku).
+pub fn error_node(id: u32) -> u32 {
+    id | 0x8000_0000
+}
+
+/// Id vrstev, ktere knihovna pouziva: koren okna a pro posouvanou oblast
+/// se stabilnim id `n` (stejne jako id jejiho uzlu pristupnosti) skupina
+/// `SCROLL_BASE + 2n` a obsah `+ 1`.
 pub const ROOT_LAYER: u32 = 1;
 pub const SCROLL_BASE: u32 = 1000;
 
-/// Id uzlu pristupnosti: okno 1, prvek s indexem `i` je `i + 2`.
+/// Id uzlu pristupnosti okna; prvky maji stabilni id od 2 (podle klice).
 pub const WINDOW_NODE: u32 = 1;
 
-pub fn node_id(index: usize) -> u32 {
-    index as u32 + 2
+/// Nejvyssi id prvku (vrstvy obsahu se vejdou do u32, uzly chyb maji
+/// nejvyssi bit).
+const ID_MAX: u32 = (u32::MAX - SCROLL_BASE) / 2 - 1;
+
+pub fn scroll_layers(id: u32) -> (u32, u32) {
+    let g = SCROLL_BASE + 2 * id;
+    (g, g + 1)
 }
 
-pub fn scroll_layers(index: usize) -> (u32, u32) {
-    let g = SCROLL_BASE + 2 * index as u32;
-    (g, g + 1)
+/// Jednotny stav prvku: pocita ho jadro, komponenta podle nej jen kresli
+/// (a strom pristupnosti ho hlasi).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct State {
+    /// Ukazatel nad prvkem (ne u nedostupneho).
+    pub hover: bool,
+    /// Stisknuto: tlacitko mysi s ukazatelem nad prvkem (odjeti stav
+    /// zrusi, navrat obnovi) nebo drzeny Enter / mezernik.
+    pub pressed: bool,
+    /// Prvek ma fokus okna.
+    pub focused: bool,
+    /// Ramecek fokusu je videt (fokus a okno je aktivni).
+    pub focus_visible: bool,
+    pub disabled: bool,
+    /// Neplatna hodnota (`Node::error`).
+    pub error: bool,
+    pub selected: bool,
+    pub checked: bool,
+}
+
+impl State {
+    /// Bity stavu pro strom pristupnosti.
+    pub fn a11y_bits(self) -> u32 {
+        use a11y::state::*;
+        let b = |c: bool, v: u32| if c { v } else { 0 };
+        b(self.focused, FOCUSED)
+            | b(self.checked, CHECKED)
+            | b(self.disabled, DISABLED)
+            | b(self.selected, SELECTED)
+            | b(self.hover, HOVER)
+            | b(self.pressed, PRESSED)
+            | b(self.error, INVALID)
+    }
 }
 
 /// Aplikace nad knihovnou.
@@ -93,29 +134,40 @@ pub struct Ui<M> {
     pub w: u32,
     pub h: u32,
     pub(crate) elems: Vec<Element<M>>,
+    /// Index prvku podle klice (po poslednim rozvrzeni).
+    pub(crate) by_key: BTreeMap<Key, usize>,
+    /// Stabilni id prvku podle klice (uzel pristupnosti, vrstvy oblasti).
+    ids: BTreeMap<Key, u32>,
+    used_ids: BTreeSet<u32>,
+    next_id: u32,
+    /// Id prvku podle indexu (po poslednim rozvrzeni).
+    pub(crate) elem_ids: Vec<u32>,
+    /// Stav podle indexu prvku plati jen pro aktualni rozvrzeni;
+    /// `rebuild` ho prevede pres klice.
     pub(crate) focus: Option<usize>,
     pub(crate) hover: Option<usize>,
     pub(crate) pressed: Option<usize>,
-    /// Kurzor v textovem poli (index znaku) podle indexu prvku.
-    pub(crate) cursor: BTreeMap<usize, usize>,
-    /// Posun obsahu posouvanych oblasti podle indexu prvku.
-    pub(crate) scroll: BTreeMap<usize, i32>,
+    /// Kurzor v textovem poli (index znaku) podle klice prvku.
+    pub(crate) cursor: BTreeMap<Key, usize>,
+    /// Posun obsahu posouvanych oblasti podle klice prvku.
+    pub(crate) scroll: BTreeMap<Key, i32>,
     /// Ukazatel (souradnice okna).
     pub(crate) pointer: (i32, i32),
     pub(crate) mods: u16,
     pub title: String,
     /// Okno ma fokus systemu: jen tehdy se kresli ramecek fokusu prvku.
     pub(crate) active: bool,
-    /// Misto stisknuteho prvku (prostor, obdelnik) pro parovani s pustenim.
-    pub(crate) pressed_rect: Option<(usize, Rect)>,
     /// Prvek s drzenou klavesou Enter / mezernik (akce az pri pusteni).
     pub(crate) key_pressed: Option<usize>,
 }
 
-/// Posouvana oblast: index prvku, obdelnik v okne, vyska obsahu, posun.
+/// Posouvana oblast: index prvku (prostor `index + 1` pro `Ui::draw`),
+/// stabilni id (vrstvy, `scroll_layers`), obdelnik v okne, vyska obsahu,
+/// posun.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScrollArea {
     pub index: usize,
+    pub id: u32,
     pub rect: Rect,
     pub content_h: u32,
     pub offset: i32,
@@ -129,6 +181,11 @@ impl<M: Clone> Ui<M> {
             w,
             h,
             elems: Vec::new(),
+            by_key: BTreeMap::new(),
+            ids: BTreeMap::new(),
+            used_ids: BTreeSet::new(),
+            next_id: 2,
+            elem_ids: Vec::new(),
             focus: None,
             hover: None,
             pressed: None,
@@ -138,7 +195,6 @@ impl<M: Clone> Ui<M> {
             mods: 0,
             title: String::new(),
             active: true,
-            pressed_rect: None,
             key_pressed: None,
         }
     }
@@ -149,39 +205,108 @@ impl<M: Clone> Ui<M> {
     }
 
     /// Znovu rozvrhne rozhrani podle `view` (po kazde zmene stavu aplikace).
+    /// Stav prvku (fokus, stisk, kurzor, posun) se prenese podle klicu.
     pub fn rebuild(&mut self, title: String, view: Node<M>) {
+        let key_of = |o: Option<usize>| o.and_then(|i| self.elems.get(i)).map(|e| e.key);
+        let (fk, pk, kk) = (key_of(self.focus), key_of(self.pressed), key_of(self.key_pressed));
         let p = self.look.pad();
         let area = Rect::new(p as i32, p as i32, self.w.saturating_sub(2 * p), self.h.saturating_sub(2 * p));
         self.elems = layout::layout(view, area, &self.look);
         self.title = title;
-        let n = self.elems.len();
-        let ok = |i: &usize| *i < n;
-        if !self.focus.as_ref().is_some_and(ok) || !self.focus.is_some_and(|i| self.elems[i].focusable()) {
-            self.focus = self.elems.iter().position(|e| e.focusable());
-        }
-        self.hover = self.hover.filter(ok);
-        self.pressed = self.pressed.filter(ok);
-        // Kurzor nejvys na konec hodnoty.
-        let lens: Vec<(usize, usize)> = self
-            .elems
-            .iter()
-            .enumerate()
-            .filter_map(|(i, e)| match &e.kind {
-                ElemKind::TextInput { value, .. } => Some((i, value.chars().count())),
-                _ => None,
-            })
-            .collect();
-        self.cursor.retain(|i, _| lens.iter().any(|(j, _)| j == i));
-        for (i, l) in lens {
-            let c = self.cursor.entry(i).or_insert(l);
-            *c = (*c).min(l);
+        self.by_key = self.elems.iter().enumerate().map(|(i, e)| (e.key, i)).collect();
+        self.assign_ids();
+        let find = |k: Option<Key>| k.and_then(|k| self.by_key.get(&k).copied());
+        let focus = find(fk).filter(|&i| self.elems[i].focusable());
+        self.focus = focus.or_else(|| self.elems.iter().position(|e| e.focusable()));
+        self.pressed = find(pk);
+        self.key_pressed = find(kk);
+        // Kurzor nejvys na konec hodnoty; stav zmizelych prvku pryc.
+        let (by_key, elems) = (&self.by_key, &self.elems);
+        self.cursor.retain(|k, c| match by_key.get(k).map(|&i| &elems[i].kind) {
+            Some(ElemKind::TextInput { value, .. }) => {
+                *c = (*c).min(value.chars().count());
+                true
+            }
+            _ => false,
+        });
+        for e in &self.elems {
+            if let ElemKind::TextInput { value, .. } = &e.kind {
+                self.cursor.entry(e.key).or_insert(value.chars().count());
+            }
         }
         // Posun nejvys do konce obsahu.
-        let areas: Vec<(usize, i32)> = self.scroll_areas().iter().map(|a| (a.index, (a.content_h as i32 - a.rect.h as i32).max(0))).collect();
-        self.scroll.retain(|i, _| areas.iter().any(|(j, _)| j == i));
-        for (i, max) in areas {
-            let s = self.scroll.entry(i).or_insert(0);
+        let areas: Vec<(Key, i32)> = self.scroll_areas().iter().map(|a| (self.elems[a.index].key, (a.content_h as i32 - a.rect.h as i32).max(0))).collect();
+        self.scroll.retain(|k, _| areas.iter().any(|(j, _)| j == k));
+        for (k, max) in areas {
+            let s = self.scroll.entry(k).or_insert(0);
             *s = (*s).clamp(0, max);
+        }
+        // Najeti podle ukazatele (prvky se mohly posunout).
+        self.hover = if self.pointer.0 >= 0 { self.hit(self.pointer.0, self.pointer.1) } else { None };
+    }
+
+    /// Stabilni id prvku podle klicu: prvek, ktery zustal, si id necha;
+    /// novy dostane dalsi volne. Uvolnene id se znovu pouzije az po obehu
+    /// citace, aby akce pristupnosti poslana na stary uzel netrefila jiny
+    /// prvek.
+    fn assign_ids(&mut self) {
+        let (by_key, used) = (&self.by_key, &mut self.used_ids);
+        self.ids.retain(|k, id| {
+            let keep = by_key.contains_key(k);
+            if !keep {
+                used.remove(id);
+            }
+            keep
+        });
+        self.elem_ids.clear();
+        for i in 0..self.elems.len() {
+            let k = self.elems[i].key;
+            let id = match self.ids.get(&k) {
+                Some(&id) => id,
+                None => {
+                    let mut id = self.next_id;
+                    while self.used_ids.contains(&id) {
+                        id = if id >= ID_MAX { 2 } else { id + 1 };
+                    }
+                    self.next_id = if id >= ID_MAX { 2 } else { id + 1 };
+                    self.used_ids.insert(id);
+                    self.ids.insert(k, id);
+                    id
+                }
+            };
+            self.elem_ids.push(id);
+        }
+    }
+
+    /// Id uzlu pristupnosti prvku `i`.
+    pub fn node_id(&self, i: usize) -> u32 {
+        self.elem_ids[i]
+    }
+
+    /// Index prvku s klicem `k` (po poslednim rozvrzeni).
+    pub fn index_of(&self, k: Key) -> Option<usize> {
+        self.by_key.get(&k).copied()
+    }
+
+    /// Jednotny stav prvku `i`.
+    pub fn state(&self, i: usize) -> State {
+        let e = &self.elems[i];
+        let dis = e.disabled;
+        let focused = self.focus == Some(i);
+        let (selected, checked) = match &e.kind {
+            ElemKind::ListItem { selected, .. } => (*selected, false),
+            ElemKind::Checkbox { checked, .. } => (false, *checked),
+            _ => (false, false),
+        };
+        State {
+            hover: self.hover == Some(i) && !dis,
+            pressed: !dis && ((self.pressed == Some(i) && self.hover == Some(i)) || self.key_pressed == Some(i)),
+            focused,
+            focus_visible: focused && self.active && !dis,
+            disabled: dis,
+            error: e.error.is_some(),
+            selected,
+            checked,
         }
     }
 
@@ -193,70 +318,44 @@ impl<M: Clone> Ui<M> {
             .filter_map(|(i, e)| match e.kind {
                 ElemKind::Scroll { content_h } if e.space == 0 => Some(ScrollArea {
                     index: i,
+                    id: self.elem_ids[i],
                     rect: e.rect,
                     content_h: content_h.max(e.rect.h),
-                    offset: self.scroll.get(&i).copied().unwrap_or(0),
+                    offset: self.scroll.get(&e.key).copied().unwrap_or(0),
                 }),
                 _ => None,
             })
             .collect()
     }
 
-    /// Strom pristupnosti okna.
+    /// Strom pristupnosti okna. Id uzlu jsou stabilni (podle klicu).
     pub fn a11y(&self) -> Vec<A11yNode> {
+        use a11y::actions::*;
         let mut out = alloc::vec![A11yNode::new(WINDOW_NODE, 0, Role::Window, &self.title)];
         for (i, e) in self.elems.iter().enumerate() {
-            let parent = if e.parent == 0 { WINDOW_NODE } else { node_id(e.parent - 1) };
-            let (role, name, value, mut state, actions) = match &e.kind {
-                ElemKind::Label { text, .. } => (Role::Label, if e.agent { alloc::format!("agent: {text}") } else { text.clone() }, String::new(), 0, 0),
-                ElemKind::Button { text, .. } => (Role::Button, text.clone(), String::new(), 0, a11y::actions::ACTIVATE | a11y::actions::FOCUS),
-                ElemKind::TextInput { value, placeholder, .. } => {
-                    (Role::TextInput, placeholder.clone(), value.clone(), 0, a11y::actions::SET_VALUE | a11y::actions::FOCUS)
-                }
-                ElemKind::Checkbox { text, checked, .. } => (
-                    Role::Checkbox,
-                    text.clone(),
-                    String::new(),
-                    if *checked { a11y::state::CHECKED } else { 0 },
-                    a11y::actions::TOGGLE | a11y::actions::ACTIVATE,
-                ),
-                ElemKind::List { .. } => (Role::List, String::new(), String::new(), 0, a11y::actions::FOCUS),
-                ElemKind::ListItem { text, selected, agent, .. } => (
-                    Role::ListItem,
-                    // Agent i pro ctecku obrazovky (ne jen barvou).
-                    if *agent { alloc::format!("agent: {text}") } else { text.clone() },
-                    String::new(),
-                    if *selected { a11y::state::SELECTED } else { 0 },
-                    a11y::actions::ACTIVATE,
-                ),
-                ElemKind::Progress { value } => (Role::Progress, String::new(), alloc::format!("{value}"), 0, 0),
-                ElemKind::Group => (Role::Group, String::new(), String::new(), 0, 0),
-                ElemKind::Scroll { .. } => (Role::Group, String::new(), String::new(), 0, a11y::actions::SCROLL),
+            let parent = if e.parent == 0 { WINDOW_NODE } else { self.elem_ids[e.parent - 1] };
+            let none = String::new;
+            let (role, name, value, actions) = match &e.kind {
+                ElemKind::Label { text, .. } => (Role::Label, if e.agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), 0),
+                ElemKind::Button { text, .. } => (Role::Button, text.clone(), none(), ACTIVATE | FOCUS),
+                // Heslo: hodnota se nikdy neposila (ani jeji delka).
+                ElemKind::TextInput { placeholder, secure: true, .. } => (Role::PasswordInput, placeholder.clone(), none(), SET_VALUE | FOCUS),
+                ElemKind::TextInput { value, placeholder, .. } => (Role::TextInput, placeholder.clone(), value.clone(), SET_VALUE | FOCUS),
+                ElemKind::Checkbox { text, .. } => (Role::Checkbox, text.clone(), none(), TOGGLE | ACTIVATE),
+                ElemKind::List { .. } => (Role::List, none(), none(), FOCUS),
+                // Agent i pro ctecku obrazovky (ne jen barvou).
+                ElemKind::ListItem { text, agent, .. } => (Role::ListItem, if *agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), ACTIVATE),
+                ElemKind::Progress { value } => (Role::Progress, none(), alloc::format!("{value}"), 0),
+                ElemKind::Group => (Role::Group, none(), none(), 0),
+                ElemKind::Scroll { .. } => (Role::ScrollArea, none(), none(), SCROLL),
             };
-            if self.focus == Some(i) {
-                state |= a11y::state::FOCUSED;
+            let layer = if e.space == 0 { ROOT_LAYER } else { scroll_layers(self.elem_ids[e.space - 1]).1 };
+            let id = self.elem_ids[i];
+            out.push(A11yNode { id, parent, role, name, value, state: self.state(i).a11y_bits(), layer, bounds: e.rect, actions });
+            // Text chyby jako podrizeny uzel pole (ctecka ho precte s polem).
+            if let Some(err) = &e.error {
+                out.push(A11yNode { id: error_node(id), parent: id, role: Role::Label, name: err.clone(), value: none(), state: 0, layer, bounds: e.rect, actions: 0 });
             }
-            if e.disabled {
-                state |= a11y::state::DISABLED;
-            }
-            if self.hover == Some(i) {
-                state |= a11y::state::HOVER;
-            }
-            if self.pressed == Some(i) {
-                state |= a11y::state::PRESSED;
-            }
-            let layer = if e.space == 0 { ROOT_LAYER } else { scroll_layers(e.space - 1).1 };
-            out.push(A11yNode {
-                id: node_id(i),
-                parent,
-                role,
-                name,
-                value,
-                state,
-                layer,
-                bounds: e.rect,
-                actions,
-            });
         }
         out
     }

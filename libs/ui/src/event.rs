@@ -13,16 +13,16 @@ use inputproto::code::*;
 use inputproto::mods;
 
 use crate::layout::ElemKind;
-use crate::{Ui, node_id};
+use crate::Ui;
 
 /// Vysledek udalosti.
 pub struct Response<M> {
     pub msgs: Vec<M>,
     /// Je treba prekreslit (fokus, najeti, kurzor).
     pub redraw: bool,
-    /// Zmeneny posun posouvanych oblasti (index prvku, posun): jen
+    /// Zmeneny posun posouvanych oblasti (id oblasti, posun): jen
     /// vlastnost vrstvy v kompozitoru, bez prekresleni.
-    pub scrolls: Vec<(usize, i32)>,
+    pub scrolls: Vec<(u32, i32)>,
     /// Kroky trasovani vstupu (klient je vypise s id udalosti).
     pub trace: Vec<String>,
 }
@@ -77,6 +77,7 @@ impl<M: Clone> Ui<M> {
                 }
             }
             InputEvent::PointerLeave => {
+                self.pointer = (-1, -1);
                 if self.hover.take().is_some() {
                     r.redraw = true;
                 }
@@ -88,7 +89,7 @@ impl<M: Clone> Ui<M> {
                 r.trace.push(alloc::format!("{act} na {x},{y}: prvek {}", self.describe(h)));
                 if pressed {
                     self.pressed = h;
-                    self.pressed_rect = h.map(|i| (self.elems[i].space, self.elems[i].rect));
+                    self.hover = h;
                     if let Some(i) = h
                         && !self.elems[i].disabled
                     {
@@ -102,13 +103,11 @@ impl<M: Clone> Ui<M> {
                     }
                     r.redraw = true;
                 } else {
-                    // Stisk a pusteni se paruji podle mista prvku: mezi nimi se
-                    // rozhrani muze znovu rozvrhnout (data ze sluzby) a indexy
-                    // prvku se posunou; klik se nesmi ztratit.
+                    // Stisk a pusteni se paruji podle klice prvku: mezi nimi
+                    // se rozhrani muze znovu rozvrhnout (data ze sluzby),
+                    // `rebuild` stisk prevede na novy index; klik se neztrati.
                     let p = self.pressed.take();
-                    let at = self.pressed_rect.take();
-                    let same = h.is_some_and(|i| at == Some((self.elems[i].space, self.elems[i].rect)));
-                    if p.is_some() && (p == h || same)
+                    if p.is_some() && p == h
                         && let Some(i) = h
                         && !self.elems[i].disabled
                     {
@@ -125,8 +124,8 @@ impl<M: Clone> Ui<M> {
                     let max = (a.content_h as i32 - a.rect.h as i32).max(0);
                     let new = (a.offset - dy * WHEEL_STEP).clamp(0, max);
                     if new != a.offset {
-                        self.scroll.insert(a.index, new);
-                        r.scrolls.push((a.index, new));
+                        self.scroll.insert(self.elems[a.index].key, new);
+                        r.scrolls.push((a.id, new));
                     }
                 }
             }
@@ -171,13 +170,33 @@ impl<M: Clone> Ui<M> {
 
     /// Klik do textoveho pole: kurzor na nejblizsi znak.
     fn click_text(&mut self, i: usize, x: i32) {
-        if let ElemKind::TextInput { value, .. } = &self.elems[i].kind {
-            let b = self.look.body();
-            let pos = self.look.face_ref(b).positions(value, b.size);
+        if let ElemKind::TextInput { value, secure, .. } = &self.elems[i].kind {
+            let pos = self.text_positions(value, *secure);
             let lx = x - self.elems[i].rect.x - self.look.theme.space[4] as i32;
             let best = (0..pos.len()).min_by_key(|&k| (pos[k] - lx).abs()).unwrap_or(0);
-            self.cursor.insert(i, best);
+            self.cursor.insert(self.elems[i].key, best);
         }
+    }
+
+    /// Polohy mezi znaky pole od zacatku textu (heslo: tecky se stalym
+    /// krokem, sirka pismen by prozradila znaky).
+    pub(crate) fn text_positions(&self, value: &str, secure: bool) -> Vec<i32> {
+        let b = self.look.body();
+        if secure {
+            let step = self.dot_step() as i32;
+            (0..=value.chars().count() as i32).map(|k| k * step).collect()
+        } else {
+            self.look.face_ref(b).positions(value, b.size)
+        }
+    }
+
+    /// Prumer tecky hesla a krok mezi teckami.
+    pub(crate) fn dot_size(&self) -> u32 {
+        (self.look.body().line * 3 / 10).max(4)
+    }
+
+    pub(crate) fn dot_step(&self) -> u32 {
+        self.dot_size() * 7 / 4
     }
 
     /// Aktivace prvku (klik, Enter, akce pristupnosti).
@@ -208,7 +227,7 @@ impl<M: Clone> Ui<M> {
     fn key(&mut self, code: u16, r: &mut Response<M>) {
         if code == KEY_TAB {
             let n = self.elems.len();
-            let order: Vec<usize> = (0..n).filter(|&i| self.elems[i].focusable()).collect();
+            let order: Vec<usize> = (0..n).filter(|&i| self.elems[i].focusable() && !self.elems[i].skip_tab).collect();
             if order.is_empty() {
                 return;
             }
@@ -247,7 +266,8 @@ impl<M: Clone> Ui<M> {
             }
             ElemKind::TextInput { value, on_change, on_submit, .. } => {
                 let len = value.chars().count();
-                let cur = self.cursor.get(&f).copied().unwrap_or(len).min(len);
+                let key = self.elems[f].key;
+                let cur = self.cursor.get(&key).copied().unwrap_or(len).min(len);
                 let mut chars: Vec<char> = value.chars().collect();
                 let mut changed = false;
                 let newcur = match code {
@@ -276,7 +296,7 @@ impl<M: Clone> Ui<M> {
                 if changed && let Some(f2) = on_change {
                     r.msgs.push(f2(chars.into_iter().collect::<String>()));
                 }
-                self.cursor.insert(f, newcur);
+                self.cursor.insert(key, newcur);
                 r.redraw = true;
             }
             _ => {}
@@ -286,11 +306,12 @@ impl<M: Clone> Ui<M> {
     fn insert(&mut self, ch: char, r: &mut Response<M>) {
         let Some(f) = self.focus else { return };
         if let ElemKind::TextInput { value, on_change: Some(cb), .. } = &self.elems[f].kind {
+            let key = self.elems[f].key;
             let mut chars: Vec<char> = value.chars().collect();
-            let cur = self.cursor.get(&f).copied().unwrap_or(chars.len()).min(chars.len());
+            let cur = self.cursor.get(&key).copied().unwrap_or(chars.len()).min(chars.len());
             chars.insert(cur, ch);
             r.msgs.push(cb(chars.into_iter().collect()));
-            self.cursor.insert(f, cur + 1);
+            self.cursor.insert(key, cur + 1);
             r.redraw = true;
         }
     }
@@ -313,7 +334,7 @@ impl<M: Clone> Ui<M> {
     /// Akce pristupnosti na uzlu (ctecka obrazovky, test, agent).
     pub fn a11y_action(&mut self, node: u32, action: u32, value: &str) -> Response<M> {
         let mut r = Response::default();
-        let Some(i) = (0..self.elems.len()).find(|&i| node_id(i) == node) else {
+        let Some(i) = self.elem_ids.iter().position(|&id| id == node) else {
             return r;
         };
         if action & actions::FOCUS != 0 && self.elems[i].focusable() {
@@ -327,7 +348,7 @@ impl<M: Clone> Ui<M> {
             && let ElemKind::TextInput { on_change: Some(f), .. } = &self.elems[i].kind
         {
             r.msgs.push(f(value.into()));
-            self.cursor.insert(i, value.chars().count());
+            self.cursor.insert(self.elems[i].key, value.chars().count());
         }
         r
     }

@@ -13,12 +13,80 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+/// Stabilni klic prvku: podle nej knihovna drzi stav prvku (fokus, kurzor,
+/// vyber, posun, stisk) mezi prerozvrzenimi a dava stabilni id uzlum
+/// pristupnosti a vrstvam. Bez `Node::key` se klic odvodi z klice rodice,
+/// druhu prvku a poradi mezi sourozenci stejneho druhu - staci, dokud se
+/// sourozenci stejneho druhu nevkladaji pred sebe. Radky dat (seznam
+/// souboru, uloh) maji mit klic z dat (id, cesta).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Key(pub u64);
+
+impl Key {
+    /// Klic korene okna.
+    pub const ROOT: Key = Key(0xcbf2_9ce4_8422_2325);
+
+    /// Odvozeny klic (FNV-1a pres 8 bajtu `v`): deterministicky na vsech
+    /// architekturach.
+    pub const fn mix(self, v: u64) -> Key {
+        let mut h = self.0;
+        let mut i = 0;
+        while i < 8 {
+            h ^= (v >> (i * 8)) & 0xFF;
+            h = h.wrapping_mul(0x0100_0000_01b3);
+            i += 1;
+        }
+        Key(h)
+    }
+
+    pub fn from_bytes(b: &[u8]) -> Key {
+        let mut h = Key::ROOT.0;
+        for &x in b {
+            h ^= x as u64;
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+        Key(h)
+    }
+}
+
+impl From<&str> for Key {
+    fn from(s: &str) -> Key {
+        Key::from_bytes(s.as_bytes())
+    }
+}
+
+impl From<&String> for Key {
+    fn from(s: &String) -> Key {
+        Key::from_bytes(s.as_bytes())
+    }
+}
+
+impl From<u64> for Key {
+    fn from(v: u64) -> Key {
+        Key::ROOT.mix(0x6964).mix(v)
+    }
+}
+
+impl From<u32> for Key {
+    fn from(v: u32) -> Key {
+        Key::from(v as u64)
+    }
+}
+
+impl From<usize> for Key {
+    fn from(v: usize) -> Key {
+        Key::from(v as u64)
+    }
+}
+
 /// Druh prvku.
 pub enum Kind<M> {
     /// `warn` = vyrazne oznaceni (napr. uloha agenta AI).
     Label { text: String, heading: bool, warn: bool },
     Button { text: String, on_click: Option<M> },
-    TextInput { value: String, placeholder: String, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
+    /// `secure` = heslo: kresli se teckami, hodnota se nedava do stromu
+    /// pristupnosti ani do trasovani, kompozitor pole zakryje ve snimku.
+    TextInput { value: String, placeholder: String, secure: bool, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     /// `agents[i]` = radek patri agentovi AI (stitek a pruh barvy `ai`).
     List { items: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>>, agents: Vec<bool> },
@@ -43,6 +111,13 @@ pub struct Node<M> {
     /// Patri agentovi AI: stitek a prubeh v barve `ai` (vyhrazena jen pro
     /// agenta, vzdy s ikonou a slovem "agent").
     pub agent: bool,
+    /// Vlastni klic (jinak odvozeny, viz [`Key`]).
+    pub key: Option<Key>,
+    /// Chyba (neplatna hodnota): stav `error`, text pro ctecku obrazovky.
+    pub error: Option<String>,
+    /// Fokus jen klikem, ne klavesou Tab (napr. pomocne tlacitko, ktere
+    /// ma i klavesovou zkratku).
+    pub skip_tab: bool,
 }
 
 fn node<M>(kind: Kind<M>) -> Node<M> {
@@ -53,6 +128,9 @@ fn node<M>(kind: Kind<M>) -> Node<M> {
         width: 0,
         disabled: false,
         agent: false,
+        key: None,
+        error: None,
+        skip_tab: false,
     }
 }
 
@@ -68,9 +146,19 @@ pub fn text_input<M>(value: &str) -> Node<M> {
     node(Kind::TextInput {
         value: value.into(),
         placeholder: String::new(),
+        secure: false,
         on_change: None,
         on_submit: None,
     })
+}
+
+/// Pole s heslem (viz `Kind::TextInput::secure`).
+pub fn password_input<M>(value: &str) -> Node<M> {
+    let mut n = text_input(value);
+    if let Kind::TextInput { secure, .. } = &mut n.kind {
+        *secure = true;
+    }
+    n
 }
 
 pub fn checkbox<M>(text: &str, checked: bool) -> Node<M> {
@@ -109,6 +197,23 @@ pub fn spacer<M>() -> Node<M> {
 }
 
 impl<M> Node<M> {
+    /// Stabilni klic (viz [`Key`]); staci jedinecny mezi sourozenci.
+    pub fn key(mut self, k: impl Into<Key>) -> Self {
+        self.key = Some(k.into());
+        self
+    }
+
+    /// Chyba s textem (prazdny text = bez chyby).
+    pub fn error(mut self, msg: &str) -> Self {
+        self.error = (!msg.is_empty()).then(|| msg.into());
+        self
+    }
+
+    pub fn skip_tab(mut self, s: bool) -> Self {
+        self.skip_tab = s;
+        self
+    }
+
     pub fn grow(mut self) -> Self {
         self.grow = true;
         self

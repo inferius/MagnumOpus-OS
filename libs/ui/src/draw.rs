@@ -58,13 +58,10 @@ impl<M: Clone> Ui<M> {
                 continue;
             }
             let r = e.rect;
-            // Ramecek fokusu jen v aktivnim okne (prvek si fokus pamatuje).
-            let focused = self.focus == Some(i) && self.active;
-            let hover = self.hover == Some(i);
-            // Stisknuto jen s ukazatelem nad prvkem (odjeti stav zrusi,
-            // navrat obnovi) nebo drzenou klavesou Enter/mezernik.
-            let pressed = (self.pressed == Some(i) && self.hover == Some(i)) || self.key_pressed == Some(i);
-            let dim = e.disabled;
+            // Jednotny stav (`Ui::state`): ramecek fokusu jen v aktivnim
+            // okne, stisknuto jen s ukazatelem nad prvkem.
+            let st = self.state(i);
+            let (focused, hover, pressed, dim) = (st.focus_visible, st.hover, st.pressed, st.disabled);
             match &e.kind {
                 ElemKind::Label { text, heading, warn } => {
                     let s = if *heading { self.look.heading() } else { self.look.body() };
@@ -102,9 +99,16 @@ impl<M: Clone> Ui<M> {
                     let b = r.y + f.baseline_in(s.size, r.h);
                     f.draw(c, r.x + (r.w as i32 - tw) / 2, b, text, s.size, fg);
                 }
-                ElemKind::TextInput { value, placeholder, .. } => {
+                ElemKind::TextInput { value, placeholder, secure, .. } => {
                     let rad = th.radius.control;
-                    c.round_fill_bordered(r, rad, col.surface, if focused { col.accent } else { col.border_strong }, 1);
+                    let edge = if st.error {
+                        col.danger
+                    } else if focused {
+                        col.accent
+                    } else {
+                        col.border_strong
+                    };
+                    c.round_fill_bordered(r, rad, col.surface, edge, if st.error { 2 } else { 1 });
                     if focused {
                         focus_ring(c, r, rad, ring, ring_off, col.focus);
                     }
@@ -112,13 +116,22 @@ impl<M: Clone> Ui<M> {
                     let inset = sp[4] as i32;
                     let old = c.clip();
                     c.set_clip(old.intersect(&Rect::new(r.x + inset / 2, r.y, r.w.saturating_sub(sp[4]), r.h)));
-                    let (txt, fg) = if value.is_empty() { (placeholder.as_str(), col.ink_muted) } else { (value.as_str(), col.ink) };
-                    let f = self.look.face(s);
-                    let b = r.y + f.baseline_in(s.size, r.h);
-                    f.draw(c, r.x + inset, b, txt, s.size, fg);
+                    let pos = self.text_positions(value, *secure);
+                    if *secure && !value.is_empty() {
+                        // Heslo: tecky (stejny krok pro kazdy znak).
+                        let d = self.dot_size();
+                        let y = r.y + (r.h as i32 - d as i32) / 2;
+                        for &px in &pos[..pos.len() - 1] {
+                            c.round_fill(Rect::new(r.x + inset + px + (self.dot_step() - d) as i32 / 2, y, d, d), d / 2, col.ink);
+                        }
+                    } else {
+                        let (txt, fg) = if value.is_empty() { (placeholder.as_str(), col.ink_muted) } else { (value.as_str(), col.ink) };
+                        let f = self.look.face(s);
+                        let b = r.y + f.baseline_in(s.size, r.h);
+                        f.draw(c, r.x + inset, b, txt, s.size, fg);
+                    }
                     if focused {
-                        let pos = self.look.face_ref(s).positions(value, s.size);
-                        let ci = self.cursor.get(&i).copied().unwrap_or(0).min(pos.len() - 1);
+                        let ci = self.cursor.get(&e.key).copied().unwrap_or(0).min(pos.len() - 1);
                         let cx = r.x + inset + pos[ci];
                         let ch = s.line;
                         c.fill(Rect::new(cx, r.y + (r.h as i32 - ch as i32) / 2, 2, ch), col.accent);

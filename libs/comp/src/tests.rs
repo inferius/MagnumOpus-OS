@@ -708,6 +708,30 @@ fn inspect_tree_absolute_and_act() {
     assert!(matches!(&t.out()[0], Out::Inspect(1, InspectReply::Windows(w)) if w.len() == 1 && w[0].focused));
 }
 
+/// Pole s heslem v aplikaci (role `PasswordInput`): diagnosticky snimek
+/// ho zakryje stejne jako pole prihlaseni; okraj okna pole orizne,
+/// minimalizovane okno se nezakryva.
+#[test]
+fn app_password_field_is_secure() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    let mut n = Node::new(2, 0, Role::PasswordInput, "Heslo");
+    n.layer = 1;
+    n.bounds = Rect::new(10, 20, 50, 30);
+    let mut far = Node::new(3, 0, Role::PasswordInput, "Mimo");
+    far.layer = 1;
+    far.bounds = Rect::new(-500, -500, 10, 10);
+    let other = Node::new(4, 0, Role::TextInput, "Jmeno");
+    t.msg(a, ClientMsg::A11yUpdate { window: 1, nodes: vec![Node::new(1, 0, Role::Window, "Okno"), n, far, other] });
+    t.commit(a, 2, 0, 0, 0);
+    let r = t.rect_of(a);
+    assert_eq!(t.c.secure_fields(), vec![Rect::new(r.x + 10, r.y + 20, 50, 30)]);
+    let g = t.c.clients[&a].windows[&1];
+    t.c.windows.get_mut(&g).unwrap().minimized = true;
+    assert!(t.c.secure_fields().is_empty());
+}
+
 #[test]
 fn bad_client_messages_are_errors() {
     let mut t = T::new();
