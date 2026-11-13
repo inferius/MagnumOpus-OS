@@ -137,8 +137,16 @@ pub fn create(path: &Path, size_mib: u64, esp_files: &[(&str, &Path)]) -> Result
 const LOGY_README: &str = "MagnumOpus - logy a zaznamy padu\r\n\r\n\
 System sem kopiruje logy (slozka MAGNUMOS). Soubor REPORT.TXT posilejte vyvojari.\r\n";
 
+/// FS na oddilu souboru (`offset`, `len` v bajtech) - kontrola obrazu po
+/// instalaci (test instalatoru).
+pub(crate) fn open_fs(file: &File, offset: u64, len: u64) -> Result<Fs<PartDevice<'_>>> {
+    let dev = PartDevice { file, offset, blocks: len / fs::BLOCK_SIZE as u64 };
+    let opts = fs::MountOptions { read_only: true, ..fs::MountOptions::default() };
+    Fs::mount_with(dev, opts).map_err(|e| fs_err("pripojeni", e))
+}
+
 /// Blokove zarizeni FS nad casti souboru (oddil v obrazu).
-struct PartDevice<'a> {
+pub(crate) struct PartDevice<'a> {
     file: &'a File,
     offset: u64,
     blocks: u64,

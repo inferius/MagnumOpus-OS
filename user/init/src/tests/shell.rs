@@ -195,9 +195,26 @@ fn session(s: &Startup) -> TestResult {
     w.ok(id, "range 0 30000 | to json | save /shell-test/velky.json")?;
     let (items, ok) = w.run(id, "open /shell-test/velky.json")?;
     crate::check!(ok, "open velkeho souboru");
-    let summary = items.iter().any(|i| matches!(i, Item::Value(v) if v.field("size").is_some() && v.field("preview").is_some()));
+    // Velky soubor je hodnota "soubor" (obsah se necte): souhrn s druhem.
+    let summary = items.iter().any(|i| matches!(i, Item::Value(v) if v.field("size").is_some() && v.field("data").is_some()));
     crate::check!(summary, alloc::format!("souhrn binarnich dat: {items:?}"));
     crate::check_eq!(w.value(id, "1 + 1")?, Value::Int(2), "relace odpovida i po velkem vystupu");
+    // Radek ve vlakne na pozadi (`&`): blok ohlasi start na pozadi i konec,
+    // relace mezitim prijme dalsi radek.
+    let (items, ok) = w.run(id, "sleep 300ms; echo pozadi > /shell-test/pozadi.dat &")?;
+    let notes: Vec<String> = items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Note(n) => Some(n.clone()),
+            _ => None,
+        })
+        .collect();
+    crate::check!(ok, alloc::format!("uloha na pozadi: {items:?}"));
+    crate::check!(
+        notes.iter().any(|n| n.contains("na pozadí")) && notes.iter().any(|n| n.contains("hotovo")),
+        alloc::format!("ohlaseni ulohy na pozadi: {notes:?}")
+    );
+    crate::check_eq!(w.value(id, "open /shell-test/pozadi.dat | from text")?, Value::str("pozadi"), "vysledek ulohy na pozadi");
     // Doplnovani cesty za rourou (absolutni cesta, pak obsah slozky).
     for (line, want) in [
         ("ls | select name | to json | save /shell-te", "/shell-test/"),
@@ -326,6 +343,16 @@ v.error.code")?,
             ServerMsg::Attached { .. } => break,
             _ => {}
         }
+    }
+    // Radek bezi ve vlakne: kdyz pri pripojeni jeste nedobehl, prehraje
+    // se jeho zacatek a vystup prijde zive po `Attached`.
+    if !replayed {
+        replayed = w
+            .reply(|m| match m {
+                ServerMsg::Item { item: Item::Value(Value::Str(t)), .. } if t == "bez okna" => Some(()),
+                _ => None,
+            })
+            .is_ok();
     }
     if !replayed {
         return Err("blok spusteny bez okna se neprehral".into());

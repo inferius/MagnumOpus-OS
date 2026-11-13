@@ -1399,7 +1399,10 @@ highlighting, completion, output blocks, tables, progress, prompts) on top
 of the session service `termd`. The window does not get a channel to it
 directly: init gives it a connect channel and starts termd on `connect`;
 after a termd crash the window reconnects to the same session (see
-[Init: Terminal](init.md#terminal)).
+[Init: Terminal](init.md#terminal)). When init cannot start termd and
+retrying would not help (`NO_MEMORY`, `NO_RESOURCES` after the restart
+limit), the window and the fallback console stop trying, show the error
+and try again only on Enter **[verified in QEMU]**.
 
 ## Task manager
 

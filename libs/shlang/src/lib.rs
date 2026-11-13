@@ -20,6 +20,7 @@ pub mod doc;
 pub mod error;
 pub mod eval;
 pub mod explain;
+pub mod filekind;
 pub mod fmt;
 pub mod highlight;
 pub mod history;

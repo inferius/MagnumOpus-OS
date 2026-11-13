@@ -77,6 +77,10 @@ pub struct Devices {
     /// Index disku zive flashky v `blocks` (disk, za kterym ovladac nahlasil
     /// oddil MO-LOGY). Zive USB pouziva FS jen z ni, ne z internich disku.
     pub stick: Option<usize>,
+    /// Raw kanaly disku pro instalator (cely disk, zapis jen do GPT
+    /// a nasich oddilu - kontroluje ovladac) a model disku. Preda je jen
+    /// instalatoru (`installd`).
+    pub raw: spin::Mutex<Vec<(Channel, String)>>,
 }
 
 /// Kanal k ovladaci z manifestu.
@@ -204,6 +208,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
     let drivers = spin::Mutex::new(Vec::new());
     let logy = spin::Mutex::new(None);
     let mut stick = None;
+    let raw = spin::Mutex::new(Vec::new());
     loop {
         // Spravce muze mlcet dlouho: PS/2 (az 5 s) a pruchod USB (az 10 s).
         let msg = control.read(Some(time::deadline_after(DEVMGR_TIMEOUT)))?;
@@ -226,6 +231,12 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
                     // Ovladac hlasi oddil logu hned za hlavnim pohledem
                     // tehoz disku: posledni pridany disk je flashka.
                     stick = blocks.len().checked_sub(1);
+                }
+            }
+            d if d.starts_with(b"block-raw") => {
+                if let Some(h) = msg.handles.into_iter().next() {
+                    let model = core::str::from_utf8(&d[9..]).unwrap_or("").trim();
+                    raw.lock().push((Channel::from_handle(h), String::from(model)));
                 }
             }
             b"input" => inputs.extend(msg.handles.into_iter().map(Channel::from_handle)),
@@ -262,6 +273,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
         fs: None,
         logy,
         stick,
+        raw,
     })
 }
 

@@ -1,8 +1,9 @@
 # Live USB: trying the system on a real computer
 
 MagnumOpus can run from a USB stick on a real computer without
-installation. The system boots from the stick into the GUI; it stores
-its data (and later logs and crash records) on the
+installation. The system boots from the stick straight into the desktop
+with a terminal (a development profile with automatic sign-in, see the
+warning below); it stores its data (and later logs and crash records) on the
 **stick's data partition**. It sees the computer's disks, but **read-only**
 (see [Disks](disks.md#risk-and-foreign-disk-protection)).
 
@@ -147,18 +148,21 @@ sudo dd if=target/usb-x86_64-release.img of=/dev/sdb bs=4M conv=fsync status=pro
    F10 or Esc; on a Mac Option). Pick the stick marked **UEFI**.
 3. If nothing happens: turn off **Secure Boot** in the firmware (and CSM /
    Legacy if only legacy USB boot is enabled).
-4. The system boots into the GUI. USB keyboard and mouse
+4. The system boots into the desktop with a terminal. USB keyboard and mouse
    work right away (PS/2 too on x86). The network works on Intel (e1000e,
    igc) and Realtek (r8169) cards - see [Network cards](network-cards.md).
 
-⚠️ **Temporary limitation** **[implemented]**: with [user accounts](accounts.md)
-the desktop with the terminal starts only after a sign-in. The stick image
-has neither the development auto-login nor an account, so the boot ends on
-the **sign-in screen without an account** and you cannot get to the
-terminal (nor the `report` command) yet. Logs and crash records are still
-saved and can be pulled with the "pull logs" mode. A fix (a development
-profile for the stick, or a first-account wizard) **[designed]**, awaiting
-a decision.
+⚠️ **Live USB = development profile** **[implemented]**: the stick image
+(`cargo xtask usb` and `cargo xtask usb --release`) contains the
+`accounts-dev` file, so the [account](accounts.md#automatic-sign-in-development-only)
+service creates the `vyvojar` account **without a password** and signs it
+in right away; the boot ends in the desktop with a terminal. **The data
+partition on the stick is not encrypted:** whoever has the stick can read
+it. The stick is for trying hardware and VMware, not for personal data.
+`xtask usb` and `xtask vmware` (the VM disk is the same image) print this
+as a warning. The image for users (`cargo xtask image`) has no automatic
+sign-in; without an account the sign-in screen says that accounts are
+created in the installer (`design/instalace.html`, **[designed]**).
 
 Verified in QEMU (`cargo xtask usb --run` with a window, `cargo xtask usb
 --test` without one; both use a machine as close to a real PC as possible:
@@ -205,8 +209,7 @@ the record in RAM is gone. A computer with a native graphics driver
 (Intel, virtio-gpu) may no longer show the firmware image; the record is
 then stored only in RAM and on the serial line.
 
-**Developer bundle.** Type `report` in the terminal (for now only after a
-sign-in, see the limitation above). It prints the path
+**Developer bundle.** Type `report` in the terminal. It prints the path
 and a preview of the contents:
 
 ```text
@@ -298,5 +301,7 @@ crash handler.
 - `cargo xtask test` also runs the USB boot after the main run;
   `--only zive-usb` runs only that. FS tests on the stick:
   `cargo xtask test --data-disk usb --only "souborovy system,data FS"`.
+- Installing from the stick to an internal disk: [Installation](installation.md)
+  (`--only instalace`).
 - Sources: `xtask/src/usb/` (image, listing and writing disks, boot in
   QEMU), `user/usb-storage/`, `libs/usbproto/src/storage.rs`.

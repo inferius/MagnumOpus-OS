@@ -53,12 +53,17 @@ pub enum ClientMsg {
     Sessions,
     /// Odpoved na vyzvu s volbami (`index` do `Prompt::choices`).
     Choose { prompt: u64, index: u32 },
+    /// Odpoved na dotaz na text (`ServerMsg::Ask`).
+    Text { prompt: u64, text: String },
     /// Vyznamove zvyrazneni rozepsaneho radku (okno ho posila pri psani;
     /// `seq` = poradi, okno zahodi starsi odpovedi).
     Highlight { session: u64, line: String, seq: u32 },
     /// Akce nad ulohou z panelu uloh (`action`: 0 zrusit, 1 pozastavit,
     /// 2 pokracovat).
     TaskAction { session: u64, task: u64, action: u8 },
+    /// Ctrl+Z: bezici radek relace na pozadi (bezi dal jako uloha, relace
+    /// prijima dalsi radky).
+    Background { session: u64 },
 }
 
 /// Sluzba -> terminal.
@@ -71,6 +76,9 @@ pub enum ServerMsg {
     BlockEnd { session: u64, block: u64, ok: bool, duration: i64 },
     /// Vyzva: `choices` prazdne = ano/ne (`Answer`), jinak vyber (`Choose`).
     Prompt { prompt: u64, question: String, detail: Item, choices: Vec<String> },
+    /// Dotaz na text (odpoved `Text`); `secret` = okno ho nezobrazi (heslo),
+    /// `default` = predvyplneny text.
+    Ask { prompt: u64, question: String, secret: bool, default: String },
     /// Zmena polozky bloku na miste (pruh prubehu, stav): `index` = poradi
     /// polozky v bloku.
     ItemUpdate { session: u64, block: u64, index: u32, item: Item },
@@ -181,6 +189,8 @@ const V_LIST: u8 = 10;
 const V_RECORD: u8 = 11;
 const V_ERROR: u8 = 12;
 const V_TABLE: u8 = 13;
+/// Soubor nacitany podle potreby (cesta, velikost, druh).
+const V_FILE: u8 = 14;
 
 /// Je seznam tabulka (vsechny radky jsou zaznamy se stejnymi sloupci)?
 fn table_cols(items: &[Value]) -> Option<Vec<String>> {
@@ -228,6 +238,12 @@ pub fn put_value(w: &mut W, v: &Value) {
         Value::Bytes(b) => {
             w.u8(V_BYTES);
             w.bytes(b);
+        }
+        Value::File(f) => {
+            w.u8(V_FILE);
+            w.str(&f.path);
+            w.u64(f.size);
+            w.str(&f.kind);
         }
         Value::List(items) => {
             if let Some(cols) = table_cols(items) {
@@ -289,6 +305,7 @@ pub fn get_value(r: &mut R, depth: usize) -> Result<Value, DecodeError> {
         V_TIME => Value::Time(r.i64()?),
         V_STR => Value::Str(r.str()?),
         V_BYTES => Value::Bytes(r.bytes()?),
+        V_FILE => Value::File(shlang::value::FileRef { path: r.str()?, size: r.u64()?, kind: r.str()? }),
         V_LIST => {
             let n = r.u32()? as usize;
             if n > MAX_ITEMS {
@@ -464,6 +481,15 @@ impl ClientMsg {
                 w.u64(*task);
                 w.u8(*action);
             }
+            ClientMsg::Background { session } => {
+                w.u8(13);
+                w.u64(*session);
+            }
+            ClientMsg::Text { prompt, text } => {
+                w.u8(14);
+                w.u64(*prompt);
+                w.str(text);
+            }
         }
         w.0
     }
@@ -483,6 +509,8 @@ impl ClientMsg {
             10 => ClientMsg::Highlight { session: r.u64()?, line: r.str()?, seq: r.u32()? },
             11 => ClientMsg::Choose { prompt: r.u64()?, index: r.u32()? },
             12 => ClientMsg::TaskAction { session: r.u64()?, task: r.u64()?, action: r.u8()? },
+            13 => ClientMsg::Background { session: r.u64()? },
+            14 => ClientMsg::Text { prompt: r.u64()?, text: r.str()? },
             _ => return Err(DecodeError),
         };
         r.done()?;
@@ -522,6 +550,13 @@ impl ServerMsg {
                 w.u64(*block);
                 w.u8(*ok as u8);
                 w.i64(*duration);
+            }
+            ServerMsg::Ask { prompt, question, secret, default } => {
+                w.u8(15);
+                w.u64(*prompt);
+                w.str(question);
+                w.u8(*secret as u8);
+                w.str(default);
             }
             ServerMsg::Prompt { prompt, question, detail, choices } => {
                 w.u8(6);
@@ -623,6 +658,7 @@ impl ServerMsg {
                 ServerMsg::Prompt { prompt, question, detail, choices }
             }
             14 => ServerMsg::Cwd { session: r.u64()?, cwd: r.str()? },
+            15 => ServerMsg::Ask { prompt: r.u64()?, question: r.str()?, secret: r.u8()? != 0, default: r.str()? },
             13 => match taskproto::Reply::decode(&r.bytes()?) {
                 Ok(taskproto::Reply::Snapshot { tasks, .. }) => ServerMsg::Tasks { tasks },
                 _ => return Err(DecodeError),

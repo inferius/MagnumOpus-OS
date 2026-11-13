@@ -59,6 +59,8 @@ struct Termd {
     image: Option<&'static [u8]>,
     broker: Broker,
     sessions: Vec<Sess>,
+    /// Domov uzivatele okna (z registru; "/" bez prihlaseni).
+    home: String,
 }
 
 fn mirror(msg: &ServerMsg) {
@@ -127,7 +129,7 @@ impl Termd {
             }
         }
         let (_proc, chan) = libos::spawn("shsess", image, Vec::new())?;
-        let init = SessMsg::Init { session, tag: tag.into(), home: String::from("/") };
+        let init = SessMsg::Init { session, tag: tag.into(), home: self.home.clone() };
         chan.write(&init.encode(), handles)?;
         // Zvuk je volitelny: kdyz sluzba neodpovi, relace bezi bez nej.
         if let Some(a) = &self.audio {
@@ -182,7 +184,9 @@ impl Termd {
             return;
         }
         let Ok(m) = reg.read(Some(time::deadline_after(Duration::from_secs(2)))) else { return };
-        let Ok(RegMsg::Parked { sessions }) = RegMsg::decode(&m.data) else { return };
+        let Ok(RegMsg::Parked { sessions, home }) = RegMsg::decode(&m.data) else { return };
+        // Domov uzivatele okna pro nove relace.
+        self.home = home;
         for ((id, tag), h) in sessions.into_iter().zip(m.handles) {
             let chan = Channel::from_handle(h);
             let Ok((keep, give)) = Channel::create() else { continue };
@@ -257,6 +261,7 @@ fn main(mut startup: Startup) -> i64 {
         image,
         broker: Broker::new(nonce),
         sessions: Vec::new(),
+        home: String::from("/"),
     };
     t.claim();
     println!(

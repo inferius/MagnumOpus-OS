@@ -123,8 +123,12 @@ the interactive terminal `term::ui`; the shell runs in the session service
 After 1 s a running command shows "running 12 s · Ctrl+C to interrupt"
 below it and Ctrl+C interrupts it. What you type meanwhile waits visibly in
 a queue ("queued: ...", Esc clears the queue, the up arrow brings the last
-line back for editing) and runs after it. **[implemented]** Moving a running
-command to the background (Ctrl+Z, `fg`, `bg`) **[designed]**.
+line back for editing) and runs after it. Ctrl+Z moves a running command
+to the background and the prompt comes back at once; `command &` starts it
+there right away. `jobs` lists background jobs, `fg N` brings a job back to
+the foreground, `kill N` ends it, and the end of a job is announced by a
+line in its block. **[implemented]** Details in the shell design
+([Lines in threads](shell-design.md#lines-in-threads-ctrlz-and-background)).
 
 ```text
 gui-term ──connect──▶ init (supervisor) ──starts──▶ termd ──▶ shsess (session)

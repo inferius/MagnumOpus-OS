@@ -394,10 +394,16 @@ fn run_cli() -> Result<()> {
             if opts.net_online {
                 opts.extra_initfs.push((String::from("net-online"), b"1".to_vec()));
             }
+            // `zive-usb` jde kombinovat se sadami (`--only zive-usb,ucty`):
+            // do filtru sad v QEMU nepatri.
+            let only: Vec<String> = opts.test_only.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+            let usb_selected = only.iter().any(|s| s == "zive-usb");
+            let install_selected = only.iter().any(|s| s == "instalace");
+            let suites: Vec<String> = only.iter().filter(|s| *s != "zive-usb" && *s != "instalace").cloned().collect();
             if !opts.test_only.is_empty() || opts.test_repeat > 1 {
                 let filter = format!("suites = {}
 repeat = {}
-", opts.test_only, opts.test_repeat);
+", suites.join(","), opts.test_repeat);
                 opts.extra_initfs.push((String::from("test-filter"), filter.into_bytes()));
             }
             opts.extra_initfs
@@ -410,7 +416,7 @@ repeat = {}
             // `--only zive-usb`: jen start z flash disku USB (`usb` je sada
             // testu userspace).
             let power_only = opts.test_only == "napajeni";
-            let usb_only = opts.test_only == "zive-usb";
+            let usb_only = (usb_selected || install_selected) && suites.is_empty();
             let release_only = opts.test_only == "release";
             let reboot_only = opts.test_only == "opakovany-start";
             if !power_only && !usb_only && !release_only && !reboot_only && opts.test_only != "zaznam-padu" {
@@ -439,11 +445,23 @@ repeat = {}
                 crashtest::run(&mut opts)?;
             }
             // Zive USB: obraz s beznym jadrem (ne testovacim) nastartuje
-            // z flash disku USB az do GUI s prihlasovaci obrazovkou.
-            if opts.test_only.is_empty() || usb_only {
+            // z flash disku USB az do plochy s terminalem (vyvojovy profil);
+            // obraz bez `accounts-dev` (jako obraz pro uzivatele) jen do
+            // prihlasovaci obrazovky.
+            if opts.test_only.is_empty() || usb_selected {
                 opts.test = false;
                 let extra = std::mem::take(&mut opts.extra_initfs);
-                let r = usb::test_run(&opts);
+                let r = usb::test_run(&mut opts);
+                opts.extra_initfs = extra;
+                opts.test = true;
+                r?;
+            }
+            // Instalator: zive USB -> prazdny disk -> start z nej; vedle
+            // Windows (`--only instalace` jen tyto behy).
+            if opts.test_only.is_empty() || install_selected {
+                opts.test = false;
+                let extra = std::mem::take(&mut opts.extra_initfs);
+                let r = usb::install_test::run(&mut opts);
                 opts.extra_initfs = extra;
                 opts.test = true;
                 r?;
@@ -451,8 +469,8 @@ repeat = {}
             Ok(())
         }
         Some("check") => check_kernel(opts.arch, &opts),
-        Some("usb") => usb::command(&opts, usb_args.as_ref().unwrap()),
-        Some("vmware") => vmware::command(&opts, vmware_dir),
+        Some("usb") => usb::command(&mut opts, usb_args.as_ref().unwrap()),
+        Some("vmware") => vmware::command(&mut opts, vmware_dir),
         Some("symbolize") => {
             let file = symbolize_file.ok_or("symbolize ocekava soubor (zaznam padu, balicek, log)")?;
             let a = opts.arch;
@@ -615,6 +633,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "fatw",
             "--package",
+            "installplan",
+            "--package",
             "agentproto",
             "--package",
             "agentsh",
@@ -729,6 +749,7 @@ const USER_PROGRAMS: &[&str] = &[
     "usb-storage",
     "logd",
     "logrescue",
+    "installd",
     "fsd",
     "timed",
     "termd",

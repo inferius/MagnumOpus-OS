@@ -28,16 +28,20 @@ pub struct Connector {
     retry_at: Option<u64>,
     delay: Duration,
     who: &'static str,
+    /// Init termd spustit nemuze a opakovani nepomuze (nedostatek pameti,
+    /// limit restartu): okno ukaze tuto chybu a nezkousi to dokola.
+    pub gave_up: Option<alloc::string::String>,
 }
 
 impl Connector {
     pub fn new(conn: Option<Channel>, who: &'static str) -> Self {
-        Self { conn, pending: None, retry_at: None, delay: RETRY, who }
+        Self { conn, pending: None, retry_at: None, delay: RETRY, who, gave_up: None }
     }
 
     /// Posle `connect` (zastarale odpovedi drivejsich pokusu zahodi:
     /// jejich termd init pri dalsim `connect` ukonci).
     pub fn start(&mut self) {
+        self.gave_up = None;
         let Some(c) = &self.conn else { return };
         while c.try_read().is_ok() {}
         match c.write(b"connect", Vec::new()) {
@@ -99,7 +103,16 @@ impl Connector {
                     }
                     Ok(m) if m.data.starts_with(b"err CANCELED") => continue,
                     Ok(m) => {
-                        println!("{}: termd nejde spustit: {}", self.who, alloc::string::String::from_utf8_lossy(&m.data));
+                        let why = alloc::string::String::from_utf8_lossy(&m.data).into_owned();
+                        println!("{}: termd nejde spustit: {why}", self.who);
+                        // Nedostatek pameti nebo limit restartu: dokola to
+                        // nezkouset (zhorsilo by to stav systemu).
+                        if why.contains("NO_MEMORY") || why.contains("NO_RESOURCES") {
+                            self.pending = None;
+                            self.retry_at = None;
+                            self.gave_up = Some(why);
+                            return None;
+                        }
                         self.fail();
                         return None;
                     }

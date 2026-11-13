@@ -112,6 +112,8 @@ pub struct Identity {
     pub max_bytes: u64,
     /// Nejvyssi cislo jmenneho prostoru (NN).
     pub max_nsid: u32,
+    /// Model radice (pro instalator).
+    pub model: alloc::string::String,
 }
 
 /// Jmenny prostor (disk) z IDENTIFY NAMESPACE.
@@ -441,6 +443,7 @@ impl Controller {
             dsm: oncs & (1 << 2) != 0,
             max_bytes,
             max_nsid: nn,
+            model: alloc::string::String::from(model),
         })
     }
 

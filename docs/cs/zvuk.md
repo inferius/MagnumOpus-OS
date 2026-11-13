@@ -25,7 +25,7 @@ frekvence s antialiasingovým filtrem, mix, tón, WAV).
 <path class="ln" d="M160 48 L188 48" marker-end="url(#au1)"/><path class="ln" d="M160 128 L188 128" marker-end="url(#au1)"/>
 <rect class="acc" x="360" y="20" width="170" height="136" rx="6"/><text class="t b" x="445" y="45" text-anchor="middle">audiod</text><text class="m" x="445" y="64" text-anchor="middle">převod formátu</text><text class="m" x="445" y="80" text-anchor="middle">převod frekvence</text><text class="m" x="445" y="96" text-anchor="middle">mix, hlasitost</text><text class="m" x="445" y="112" text-anchor="middle">2 periody před DMA</text>
 <path class="ln" d="M330 88 L358 88" marker-end="url(#au1)"/>
-<rect class="ok" x="560" y="20" width="190" height="70" rx="6"/><text class="t b" x="655" y="45" text-anchor="middle">DMA buffer</text><text class="m" x="655" y="64" text-anchor="middle">4 periody po 5,33 ms</text><text class="m" x="655" y="80" text-anchor="middle">s16 stereo 48 kHz</text>
+<rect class="ok" x="560" y="20" width="190" height="70" rx="6"/><text class="t b" x="655" y="45" text-anchor="middle">DMA buffer</text><text class="m" x="655" y="64" text-anchor="middle">16 period po 5,33 ms</text><text class="m" x="655" y="80" text-anchor="middle">s16 stereo 48 kHz</text>
 <path class="ln" d="M530 55 L558 55" marker-end="url(#au1)"/>
 <rect class="box" x="560" y="110" width="190" height="56" rx="6"/><text class="t b" x="655" y="133" text-anchor="middle">hda (ovladač)</text><text class="m" x="655" y="152" text-anchor="middle">BDL, CORB/RIRB, MSI</text>
 <path class="ln" d="M655 166 L655 198" marker-end="url(#au1)"/>
@@ -253,20 +253,26 @@ zastaví a nahlásí.
 ### Takt a rozpočet latence
 
 Služba čeká na kanály klientů a na událost periody od ovladače. Po
-každé periodě přečte pozici DMA a namíchá data tak, aby byla dvě
-periody před ní. Za namíchanými daty vždy vynuluje jednu periodu:
+každé periodě přečte pozici DMA a namíchá data tak, aby byla o předstih
+(zpočátku dvě periody) před ní. Za namíchanými daty vždy vynuluje jednu periodu:
 když služba nestihne, zazní ticho (a počítá se `device_underruns`), ne
 stará data z minulého kola.
 
 | část (48 kHz, perioda 256 snímků = 5,33 ms) | doba |
 |---|---|
-| mix před pozicí DMA (2 periody) | 5,3-10,7 ms |
+| mix před pozicí DMA (předstih 2 periody, adaptivně až 12) | 5,3-10,7 ms (až 64 ms) |
 | FIFO řadiče a kodeku | < 0,5 ms |
 | buffer klienta (min. 5 ms, test 50 ms, shell 100 ms) | podle klienta |
 | **od zápisu klienta s 10 ms bufferem po reproduktor** | **asi 11-21 ms** |
 
-DMA buffer má 4 periody (21,3 ms): dvě s daty, jedna s tichem
-a jedna rezerva, kterou zařízení právě čte. Služba se probouzí 187krát
+**Adaptivní předstih:** když služba nestihne (pozice DMA předběhne
+namíchaná data), předstih se zvětší o periodu, nejvýš na 12 period
+(64 ms); po 10 s bez podtečení se zase o periodu zmenší. Na rychlém
+stroji tak latence zůstane 11-21 ms, na zatíženém (QEMU na vytíženém
+hostiteli, který hostovi na desítky ms sebere procesor) se zvětší
+místo opakovaných mezer ve zvuku. DMA buffer má proto 16 period
+(85 ms): předstih, jedna perioda ticha a rezerva, kterou zařízení
+právě čte. Služba se probouzí 187krát
 za sekundu; mix jedné periody pro dva streamy je desítky mikrosekund.
 Když 2 s nehraje žádný stream, služba DMA zastaví (zařízení nehraje
 ticho do nekonečna) a při dalším `START` buffer vynuluje a spustí znovu.
@@ -337,8 +343,13 @@ slově a float 32, libovolná frekvence a počet kanálů.
   backend wav nahrávat neumí). Dva kodeky na jedné lince QEMU nemodeluje
   správně (každý kodek si z DMA bere vlastní data, na skutečném hardwaru
   se stream vysílá všem), proto dva řadiče. Test `ton 1 kHz do WAV` přehraje 1,5 s tónu 1 kHz (mono 44,1 kHz, tedy přes převod
-  frekvence); po konci QEMU xtask v souboru hledá okna 50 ms s čistým
-  tónem 1 kHz a vyžaduje aspoň 500 ms.
+  frekvence). Že zazněl celý, ověří test v QEMU počítadlem audiod (všech
+  66 150 snímků). Soubor WAV je doplňková kontrola celé cesty: po konci
+  QEMU xtask hledá okna 50 ms s čistým tónem 1 kHz a vyžaduje aspoň
+  500 ms. Když tón chybí a audiod během něj hlásil podtečení zařízení
+  (hostitel hostovi bral procesor), je to varování s vysvětlením; bez
+  podtečení je to chyba cesty k výstupu. xtask navíc vypíše časovou osu
+  souboru po 100 ms (`.` ticho, `t` tón, `?` jiný zvuk).
 
 Se zvukem interaktivně: `cargo xtask run --audio dsound` (Windows),
 `--audio pa` nebo `alsa` (Linux), `coreaudio` (macOS).

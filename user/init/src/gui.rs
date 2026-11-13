@@ -57,6 +57,11 @@ pub static FBDISPLAY: spin::Mutex<Option<Process>> = spin::Mutex::new(None);
 static SPLASH_HANDOFF: spin::Mutex<Option<u32>> = spin::Mutex::new(None);
 
 const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Prvni start kompozitoru (nacteni, prevzeti displeje, prvni snimek).
+/// Ladici build pod TCG kresli prvni snimek prihlasovaci obrazovky s uctem
+/// ~6 s; 10 s nestacilo (test instalace). Na HW je start pod 1 s, delsi
+/// limit jen oddali zalozni konzoli, kdyz kompozitor visi.
+const START_TIMEOUT: Duration = Duration::from_secs(30);
 /// Odpoved na `connect` (relace okna; kompozitor odpovida hned).
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -314,7 +319,7 @@ pub fn start(startup: &Startup) -> Result<Gui> {
         generation: 1,
         restart: false,
     })?;
-    let end = time::deadline_after(REPLY_TIMEOUT);
+    let end = time::deadline_after(START_TIMEOUT);
     let ready = started.ready.ok_or(Error::BadState)?;
     loop {
         libos::wait_one(&ready, libos::Signals::READABLE | libos::Signals::PEER_CLOSED, Some(end))?;

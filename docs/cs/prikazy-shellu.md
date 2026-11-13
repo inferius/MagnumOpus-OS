@@ -8,10 +8,10 @@
 - **Text a výstup:** [`echo`](#echo), [`log`](#log), [`lines`](#lines), [`split`](#split), [`join`](#join), [`trim`](#trim), [`upper`](#upper), [`lower`](#lower), [`contains`](#contains), [`starts-with`](#starts-with), [`ends-with`](#ends-with), [`replace`](#replace)
 - **Seznamy a tabulky:** [`where`](#where), [`each`](#each), [`select`](#select), [`sort`](#sort), [`first`](#first), [`last`](#last), [`count`](#count), [`sum`](#sum), [`group`](#group), [`reverse`](#reverse), [`range`](#range)
 - **Převody a čas:** [`from`](#from), [`to`](#to), [`describe`](#describe), [`now`](#now), [`sleep`](#sleep)
-- **Úlohy:** [`tasks`](#tasks), [`jobs`](#jobs), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
+- **Úlohy:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Relace a bezpečnost:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Nápověda:** [`help`](#help), [`explain`](#explain)
-- **Systém:** [`audio`](#audio), [`loglevel`](#loglevel), [`report`](#report), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **Systém:** [`audio`](#audio), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Soubory
 
@@ -86,17 +86,18 @@ big.pdf
 
 změní pracovní složku (bez argumentu na domovskou)
 
-Změní pracovní složku relace. Relativní cesty v dalších příkazech se počítají od ní; výzva terminálu ji hned ukáže. Bez argumentu přejde do domovské složky, `..` je nadřazená složka.
+Změní pracovní složku relace. Relativní cesty v dalších příkazech se počítají od ní; výzva terminálu ji hned ukáže. Bez argumentu přejde do domovské složky (`~`), `..` je nadřazená složka. Relace si pamatuje poslední složky: `cd -` vrátí do předchozí, `cd -2` o dvě zpět, `cd +` zase vpřed a `cd --history` je vypíše. V okně terminálu totéž dělají Alt+šipka vlevo a vpravo, když je řádek prázdný.
 
 ```shell
-cd [path]
+cd [path] [--history]
 ```
 
-Plné jméno `dir-change` · vstup: nic · výstup: nic
+Plné jméno `dir-change` · vstup: nic · výstup: libovolná hodnota
 
 | Argument | Typ | Výchozí | Popis |
 |---|---|---|---|
-| `[path]` | cesta | domovská složka | cílová složka |
+| `[path]` | cesta | domovská složka | cílová složka; `-`, `-N` zpět, `+` vpřed |
+| `--history` | přepínač |  | poslední složky relace (číslo pro `cd -N`) |
 
 Přejde do složky docs a vypíše ji.
 
@@ -108,7 +109,30 @@ cd docs; pwd
 /home/docs
 ```
 
-**Chyby:** `NOT_FOUND`, `SH_TYPE`
+Návrat do předchozí složky.
+
+```shell
+cd docs; cd /tmp; cd -; pwd
+```
+
+```text
+/home/docs
+```
+
+Poslední složky relace, nejnovější první.
+
+```shell
+cd docs; cd /tmp; cd --history | select path
+```
+
+```text
+path
+----------
+/home/docs
+/home
+```
+
+**Chyby:** `NOT_FOUND`, `SH_TYPE`, `SH_ARGS`
 
 **Souvisí:** [`pwd`](#pwd), [`ls`](#ls)
 
@@ -142,7 +166,7 @@ pwd
 
 přečte soubor jako bajty
 
-Přečte soubor jako bajty. Text z nich udělá až `from text` (žádný skrytý převod), tabulku z JSON `from json`. Velký soubor terminál neukazuje celý: vypíše souhrn (druh podle obsahu, např. obrázek BMP 1920×1080, velikost a pár řádků hexa), roura dostane celá data.
+Přečte soubor jako bajty. Text z nich udělá až `from text` (žádný skrytý převod), tabulku z JSON `from json`. Soubor nad 64 KiB `open` nenačte celý: vrátí odkaz na soubor (cesta, velikost, druh podle začátku obsahu, např. obrázek BMP 1920×1080) a obsah přečtou až příkazy, které ho potřebují (`from text`, `lines`, `save`...). Terminál takový soubor ukáže jako souhrn; pole `size`, `kind` a `path` jdou číst přímo (`(open obr.bmp).size`).
 
 ```shell
 open path
@@ -1322,7 +1346,7 @@ tasks log 12 -n 50
 
 úlohy na pozadí
 
-Úlohy této relace spuštěné na pozadí (`bg`, `async`) se stavem.
+Úlohy této relace na pozadí se stavem. Příkaz na pozadí spustí `&` na konci řádku (`cp velky.img /zaloha &`), běžící příkaz tam přesune Ctrl+Z. Úloha běží dál, relace přijímá další příkazy; konec úlohy se ohlásí řádkem v jejím bloku. `fg N` ji vrátí do popředí, `kill N` ukončí. Co úloha na pozadí změní v proměnných a ve složce, se do relace nepromítne.
 
 ```shell
 jobs
@@ -1340,7 +1364,34 @@ jobs | count
 0
 ```
 
-**Souvisí:** [`tasks`](#tasks), [`wait`](#wait), [`kill`](#kill)
+**Souvisí:** [`fg`](#fg), [`kill`](#kill), [`tasks`](#tasks)
+
+
+### `fg`
+
+vrátí úlohu z pozadí do popředí (Ctrl+C ji přeruší, Ctrl+Z vrátí zpět)
+
+Vrátí úlohu z pozadí (Ctrl+Z nebo `&`) do popředí: terminál na ni čeká jako na běžný příkaz, Ctrl+C ji přeruší a Ctrl+Z ji vrátí zpět na pozadí. Bez čísla vezme poslední úlohu. Funguje v terminálu, ve skriptu ne.
+
+```shell
+fg [id]
+```
+
+Plné jméno `job-foreground` · vstup: nic · výstup: nic
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[id]` | číslo | poslední | číslo úlohy z `jobs` |
+
+Úloha 1 zpět do popředí.
+
+```shell
+fg 1
+```
+
+**Chyby:** `SH_ARGS`
+
+**Souvisí:** [`jobs`](#jobs), [`kill`](#kill)
 
 
 ### `wait`
@@ -1374,7 +1425,7 @@ wait 2
 
 ukončí úlohu
 
-Ukončí úlohu na pozadí podle čísla z `jobs`.
+Ukončí úlohu na pozadí podle čísla z `jobs` (příkaz spuštěný s `&` nebo přesunutý Ctrl+Z).
 
 ```shell
 kill id
@@ -1504,7 +1555,7 @@ history | where ok == false | select line
 
 spustí skript (kontroluje jeho manifest needs)
 
-Spustí skript ze souboru. Hlavička skriptu (`needs`) říká, co skript potřebuje; shell to ověří a zeptá se před spuštěním.
+Spustí skript ze souboru s příponou `.mos` (MagnumOpus Shell). Hlavička skriptu (`lang 1`, `needs`) říká, co skript potřebuje; shell to ověří a zeptá se před spuštěním. Jiný soubor (log, text) `run` odmítne.
 
 ```shell
 run path
@@ -1514,12 +1565,12 @@ Plné jméno `script-run` · vstup: nic · výstup: libovolná hodnota
 
 | Argument | Typ | Výchozí | Popis |
 |---|---|---|---|
-| `path` | cesta |  | soubor skriptu |
+| `path` | cesta |  | soubor skriptu (.mos) |
 
 Uloží a spustí skript.
 
 ```shell
-echo "echo ze skriptu" | save /tmp/s.sh; run /tmp/s.sh
+echo "echo ze skriptu" | save /tmp/s.mos; run /tmp/s.mos
 ```
 
 ```text
@@ -1720,6 +1771,35 @@ report
 **Chyby:** `ACCESS_DENIED`
 
 **Souvisí:** [`loglevel`](#loglevel)
+
+
+### `install`
+
+nainstaluje systém ze živého USB na disk (průvodce v krocích; s --odpovedi bez dotazů)
+
+Průvodce instalací v krocích jako grafický instalátor: jazyk a klávesnice, kontrola počítače, kam instalovat, náhled změn disku, účet, zabezpečení, souhrn a průběh. Cizí oddíly nikdy nepřepíše; smazání celého disku chce opsat název disku. S `--odpovedi <soubor>` proběhne bez dotazů.
+
+```shell
+install [--odpovedi hodnota]
+```
+
+Plné jméno `system-install` · vstup: nic · výstup: nic
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `--odpovedi` | text |  | soubor odpovědí (instalace bez dotazů) |
+
+Spustí průvodce.
+
+```shell
+install
+```
+
+**Potřebuje:** živé USB (instalátor)
+
+**Chyby:** `SH_REJECTED`, `SH_USER`, `NOT_SUPPORTED`
+
+**Souvisí:** [`report`](#report)
 
 
 ### `shutdown`

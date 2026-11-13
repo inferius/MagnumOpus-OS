@@ -263,6 +263,6 @@ fn bg_job_clone_is_discarded_in_same_idle() {
     svc.handle(ClientMsg::Run { session: 1, line: "bg { echo prezil > /home/bg.txt }".into() }, &mut link, &mut f, &mut env);
     svc.idle(&mut link, &mut f, &mut env);
     assert!(!svc.sessions.iter().any(|s| s.interp.has_flush()), "klon ulohy ceka na dalsi volnou chvili");
-    let mut tf: &mut dyn shlang::host::Fs = &mut f;
+    let tf: &mut dyn shlang::host::Fs = &mut f;
     assert_eq!(tf.read("/home/bg.txt").unwrap(), b"prezil".to_vec());
 }

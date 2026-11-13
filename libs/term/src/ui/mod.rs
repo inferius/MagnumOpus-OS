@@ -50,6 +50,10 @@ pub enum Key {
     ScrollPageDown,
     /// Kolecko mysi: kroky, kladne nahoru.
     Wheel(i32),
+    /// Alt+sipka vlevo / vpravo: pri prazdnem radku zpet / vpred
+    /// v historii slozek (`cd -`, `cd +`).
+    AltLeft,
+    AltRight,
     /// Ctrl + pismeno (malym).
     Ctrl(char),
 }
@@ -96,6 +100,8 @@ pub struct PromptUi {
     /// Prazdne = ano/ne.
     pub choices: Vec<String>,
     pub sel: usize,
+    /// Dotaz na text: (skryty, napsany text). `None` = volba.
+    pub input: Option<(bool, String)>,
 }
 
 pub struct App {
@@ -341,7 +347,17 @@ impl App {
                 self.block_ended(block);
             }
             ServerMsg::Prompt { prompt, question, detail, choices } => {
-                self.prompt = Some(PromptUi { id: prompt, question, detail, choices, sel: 0 });
+                self.prompt = Some(PromptUi { id: prompt, question, detail, choices, sel: 0, input: None });
+            }
+            ServerMsg::Ask { prompt, question, secret, default } => {
+                self.prompt = Some(PromptUi {
+                    id: prompt,
+                    question,
+                    detail: Item::Note(String::new()),
+                    choices: Vec::new(),
+                    sel: 0,
+                    input: Some((secret, default)),
+                });
             }
             // Sedy navrh argumentu (automaticky pozadavek, ne Tab).
             ServerMsg::Completions { seq, start, items } if seq & HINT_SEQ != 0 => {
@@ -544,6 +560,9 @@ impl App {
     }
 
     fn key_prompt(&mut self, k: Key) {
+        if self.prompt.as_ref().is_some_and(|p| p.input.is_some()) {
+            return self.key_ask(k);
+        }
         let Some(p) = self.prompt.as_mut() else { return };
         let n = if p.choices.is_empty() { 2 } else { p.choices.len() };
         let answer = match k {
@@ -573,6 +592,28 @@ impl App {
             self.out.push(ClientMsg::Interrupt { session: self.session });
         } else {
             self.out.push(ClientMsg::Choose { prompt: p.id, index: a as u32 });
+        }
+    }
+
+    /// Psani odpovedi na dotaz na text.
+    fn key_ask(&mut self, k: Key) {
+        let Some(p) = self.prompt.as_mut() else { return };
+        let Some((_, text)) = p.input.as_mut() else { return };
+        match k {
+            Key::Char(c) => text.push(c),
+            Key::Backspace => {
+                text.pop();
+            }
+            Key::Enter => {
+                let p = self.prompt.take().unwrap();
+                let text = p.input.map(|(_, t)| t).unwrap_or_default();
+                self.out.push(ClientMsg::Text { prompt: p.id, text });
+            }
+            Key::Esc | Key::Ctrl('c') => {
+                self.prompt = None;
+                self.out.push(ClientMsg::Interrupt { session: self.session });
+            }
+            _ => {}
         }
     }
 
@@ -620,6 +661,9 @@ impl App {
             }
         }
         match k {
+            Key::AltLeft | Key::AltRight if self.editor.text.is_empty() => {
+                self.run(String::from(if k == Key::AltLeft { "cd -" } else { "cd +" }));
+            }
             Key::Char(c) => {
                 let mut b = [0u8; 4];
                 self.editor.insert(c.encode_utf8(&mut b));
@@ -651,6 +695,17 @@ impl App {
                     self.out.push(ClientMsg::Interrupt { session: self.session });
                 } else {
                     self.editor.clear();
+                }
+            }
+            // Ctrl+Z: radek v poprede na pozadi (bezi dal jako uloha),
+            // vyzva se vrati a fronta radku pokracuje.
+            Key::Ctrl('z') if self.fg_busy() => {
+                self.out.push(ClientMsg::Background { session: self.session });
+                self.fg = None;
+                self.notice = Some(tasks::Notice::new("příkaz běží na pozadí (jobs, fg)", false, self.tick));
+                if !self.queued.is_empty() {
+                    let next = self.queued.remove(0);
+                    self.run(next);
                 }
             }
             Key::Ctrl('l') => {
@@ -794,6 +849,9 @@ impl App {
     /// Text napovedy klaves podle stavu.
     pub fn hints(&self) -> &'static str {
         if let Some(p) = &self.prompt {
+            if p.input.is_some() {
+                return "pište odpověď · Enter potvrdit · Esc zrušit";
+            }
             return if p.choices.is_empty() { "a ano · n ne · šipky výběr · Enter potvrdit" } else { "1-9 volba · šipky výběr · Enter potvrdit · Esc zrušit" };
         }
         if self.tasks_open() {
@@ -813,7 +871,13 @@ impl App {
         let t = &self.theme;
         let mut bottom: Vec<Line> = Vec::new();
         // Vyzva.
-        if let Some(p) = &self.prompt {
+        if let Some(p) = &self.prompt
+            && let Some((secret, text)) = &p.input
+        {
+            bottom.push(Line::new().text(Some(Style { bold: true, ..Style::fg(t.ui.fg) }), &p.question));
+            let shown: String = if *secret { text.chars().map(|_| '*').collect() } else { text.clone() };
+            bottom.push(Line::new().text(Some(Style::fg(t.ui.fg)), &alloc::format!("> {shown}_")));
+        } else if let Some(p) = &self.prompt {
             bottom.push(Line::new().text(Some(Style { bold: true, ..Style::fg(t.ui.fg) }), &p.question));
             let mut l = Line::new();
             let opts: Vec<String> = if p.choices.is_empty() {
@@ -869,8 +933,13 @@ impl App {
         self.draw_tasks(&mut bottom);
         // Editor.
         bottom.push(self.draw_editor());
-        // Napoveda klaves.
-        bottom.push(Line::new().text(Some(Style::fg(t.ui.muted)), self.hints()).fill(t.ui.select));
+        // Napoveda klaves (okno GUI ji kresli jako stitky).
+        bottom.push(
+            Line::new()
+                .text(Some(Style::fg(t.ui.muted)), self.hints())
+                .fill(t.ui.select)
+                .role(draw::Role::Hints(draw::hint_chips(self.hints()))),
+        );
 
         let status = {
             let running = self.blocks.iter().filter(|b| b.ok.is_none()).count();
@@ -889,7 +958,7 @@ impl App {
             if !self.connected {
                 l.push(Some(Style::fg(t.ui.warn)), "· nepřipojeno ");
             }
-            l.fill(t.ui.select)
+            l.fill(t.ui.select).role(draw::Role::Status)
         };
 
         let area = self.rows.saturating_sub(bottom.len() + 1);
@@ -985,7 +1054,7 @@ impl App {
         if let Some(e) = &h.error {
             l.push(Some(Style::fg(t.ui.err)), &alloc::format!("   {}", e.message));
         }
-        l
+        l.role(draw::Role::Input { prefix: 2, cwd: self.cwd_short() })
     }
 
     fn cwd_short(&self) -> String {
@@ -1000,18 +1069,28 @@ impl App {
             Some(true) => t.ui.ok,
             Some(false) => t.ui.err,
         };
+        let mark = match b.ok {
+            None => draw::Mark::Run,
+            Some(true) => draw::Mark::Ok,
+            Some(false) => draw::Mark::Err,
+        };
+        let body = |error: bool, table_head: bool| draw::Role::Body { mark, error, table_head };
         let mut out = Vec::new();
         if !b.line.is_empty() {
             let mut l = Line::new();
             l.push(Some(Style { bold: true, ..Style::fg(mark_color) }), if focused { "> " } else { "| " });
             let h = shlang::highlight::highlight(&b.line, None);
             let mut at = 0;
+            // Prikaz tucne (navrh: hlavicka bloku).
+            let plain = Some(Style { bold: true, ..Style::fg(t.ui.fg) });
             for s in &h.spans {
-                l.push(None, &b.line[at..s.start]);
-                l.push(Some(t.syntax(s.class)), &b.line[s.start..s.end]);
+                l.push(plain, &b.line[at..s.start]);
+                l.push(Some(Style { bold: true, ..t.syntax(s.class) }), &b.line[s.start..s.end]);
                 at = s.end;
             }
-            l.push(None, &b.line[at..]);
+            l.push(plain, &b.line[at..]);
+            // Od tohoto useku cas a vysledek (okno GUI je kresli vpravo).
+            let meta = l.parts_len();
             match b.ok {
                 None => l.push(Some(Style::fg(t.ui.accent)), &alloc::format!("  {}", self.spinner())),
                 Some(ok) if b.duration > 0 || !ok => l.push(
@@ -1024,29 +1103,37 @@ impl App {
                 ),
                 _ => {}
             }
-            out.push(l);
+            out.push(l.role(draw::Role::Head { mark, meta }));
         }
         if b.collapsed {
-            out.push(Line::new().text(Some(Style::fg(t.ui.muted)), &alloc::format!("  ({} položek, mezera rozbalí)", b.items.len())));
+            out.push(Line::new().text(Some(Style::fg(t.ui.muted)), &alloc::format!("  ({} položek, mezera rozbalí)", b.items.len())).role(body(false, false)));
             return out;
         }
         for (ii, it) in b.items.iter().enumerate() {
             match it {
                 Item::Value(_) if b.table_item == Some(ii) => {
                     if let Some(t) = &b.table {
-                        out.extend(self.draw_table(t, focused));
+                        for (k, l) in self.draw_table(t, focused).into_iter().enumerate() {
+                            out.push(l.role(body(false, k == 0)));
+                        }
                     }
                 }
                 Item::Progress { done, total, label } => {
                     let track = b.tracks.iter().find(|(k, _)| *k == ii).map(|(_, tr)| tr);
-                    out.push(self.draw_progress(*done, *total, label, track, b.ok.is_none()));
+                    out.push(self.draw_progress(*done, *total, label, track, b.ok.is_none()).role(body(false, false)));
                 }
                 other => {
+                    let error = matches!(other, Item::Error { .. });
                     let text = crate::vt::item_at(other, Some(t), self.now);
                     // Dlouhe radky (uvitani, hlaseni) zalomit do sirky okna.
+                    // Styl nastaveny na zacatku viceradkoveho textu (barva
+                    // chyby) plati i na dalsich radcich a jejich zalomeni.
+                    let mut carry = String::new();
                     for line in draw::lines_of(&text) {
+                        let line = alloc::format!("{carry}{line}");
+                        carry = draw::active_sgr(&line);
                         for part in draw::wrap(&line, self.cols.saturating_sub(2)) {
-                            out.push(Line::new().text(None, &alloc::format!("  {part}")));
+                            out.push(Line::new().text(None, &alloc::format!("  {part}")).role(body(error, false)));
                         }
                     }
                 }
@@ -1061,11 +1148,11 @@ impl App {
             let secs = (n - s) / 1_000_000_000;
             let mut l = Line::new();
             l.push(Some(Style::fg(t.ui.accent)), &alloc::format!("  {} ", self.spinner()));
-            l.push(Some(Style::fg(t.ui.muted)), &alloc::format!("běží {} · Ctrl+C přerušit", progress::human_eta(secs * 1_000_000_000)));
+            l.push(Some(Style::fg(t.ui.muted)), &alloc::format!("běží {} · Ctrl+C přerušit · Ctrl+Z na pozadí", progress::human_eta(secs * 1_000_000_000)));
             if !self.queued.is_empty() {
                 l.push(Some(Style::fg(t.ui.muted)), &alloc::format!(" · ve frontě {}", self.queued.len()));
             }
-            out.push(l);
+            out.push(l.role(body(false, false)));
         }
         out
     }
@@ -1157,8 +1244,10 @@ impl App {
                     info.push_str(&alloc::format!(" · {rate}"));
                 }
             }
-            if let Some(eta) = tr.eta(total) {
-                info.push_str(&alloc::format!(" · zbývá {}", progress::human_eta(eta)));
+            if let Some(now) = self.now
+                && let Some(eta) = tr.eta_text(now, total)
+            {
+                info.push_str(&alloc::format!(" · zbývá {eta}"));
             }
         }
         l.push(Some(Style::fg(t.ui.muted)), &info);
@@ -1168,16 +1257,23 @@ impl App {
     /// Snimek jako text s ANSI pro [`crate::screen::Screen`] (smaze a kresli
     /// od leveho horniho rohu).
     pub fn frame(&self) -> String {
+        self.frame_lines().0
+    }
+
+    /// Snimek jako text (pro obrazovku) i radky s rolemi (okno GUI podle
+    /// nich dokresli prvky navrhu); radek `i` = radek obrazovky `i`.
+    pub fn frame_lines(&self) -> (String, Vec<Line>) {
         let mut s = String::from("\x1b[2J\x1b[H");
-        let lines = self.draw();
-        let n = lines.len().min(self.rows);
-        for (i, l) in lines.iter().take(n).enumerate() {
+        let mut lines = self.draw();
+        lines.truncate(self.rows);
+        let n = lines.len();
+        for (i, l) in lines.iter().enumerate() {
             s.push_str(&l.ansi(self.cols));
             if i + 1 < n {
                 s.push('\n');
             }
         }
-        s
+        (s, lines)
     }
 }
 

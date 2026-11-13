@@ -26,12 +26,19 @@ pub const DOCS: &[Doc] = &[
     Doc {
         name: "cd",
         short_en: "changes the working folder (no argument: home)",
-        long_cs: "Změní pracovní složku relace. Relativní cesty v dalších příkazech se počítají od ní; výzva terminálu ji hned ukáže. Bez argumentu přejde do domovské složky, `..` je nadřazená složka.",
-        long_en: "Changes the session's working folder. Relative paths in later commands are resolved from it; the terminal prompt shows it right away. Without an argument it goes to the home folder, `..` is the parent folder.",
-        args: &[Arg { name: "path", default: "domovská složka", cs: "cílová složka", en: "target folder (default: home folder)" }],
-        examples: &[Ex { code: "cd docs; pwd", cs: "Přejde do složky docs a vypíše ji.", en: "Goes to the docs folder and prints it.", check: Out("/home/docs") }],
+        long_cs: "Změní pracovní složku relace. Relativní cesty v dalších příkazech se počítají od ní; výzva terminálu ji hned ukáže. Bez argumentu přejde do domovské složky (`~`), `..` je nadřazená složka. Relace si pamatuje poslední složky: `cd -` vrátí do předchozí, `cd -2` o dvě zpět, `cd +` zase vpřed a `cd --history` je vypíše. V okně terminálu totéž dělají Alt+šipka vlevo a vpravo, když je řádek prázdný.",
+        long_en: "Changes the session's working folder. Relative paths in later commands are resolved from it; the terminal prompt shows it right away. Without an argument it goes to the home folder (`~`), `..` is the parent folder. The session remembers recent folders: `cd -` goes back to the previous one, `cd -2` two back, `cd +` forward again and `cd --history` lists them. In the terminal window Alt+Left and Alt+Right do the same when the line is empty.",
+        args: &[
+            Arg { name: "path", default: "domovská složka", cs: "cílová složka; `-`, `-N` zpět, `+` vpřed", en: "target folder (default: home folder); `-`, `-N` back, `+` forward" },
+            Arg { name: "history", default: "", cs: "poslední složky relace (číslo pro `cd -N`)", en: "recent folders of the session (number for `cd -N`)" },
+        ],
+        examples: &[
+            Ex { code: "cd docs; pwd", cs: "Přejde do složky docs a vypíše ji.", en: "Goes to the docs folder and prints it.", check: Out("/home/docs") },
+            Ex { code: "cd docs; cd /tmp; cd -; pwd", cs: "Návrat do předchozí složky.", en: "Back to the previous folder.", check: Out("/home/docs") },
+            Ex { code: "cd docs; cd /tmp; cd --history | select path", cs: "Poslední složky relace, nejnovější první.", en: "Recent folders of the session, newest first.", check: Out("path\n----------\n/home/docs\n/home") },
+        ],
         related: &["pwd", "ls"],
-        errors: &["NOT_FOUND", "SH_TYPE"],
+        errors: &["NOT_FOUND", "SH_TYPE", "SH_ARGS"],
         needs_cs: "",
         needs_en: "",
     },
@@ -50,8 +57,8 @@ pub const DOCS: &[Doc] = &[
     Doc {
         name: "open",
         short_en: "reads a file as bytes",
-        long_cs: "Přečte soubor jako bajty. Text z nich udělá až `from text` (žádný skrytý převod), tabulku z JSON `from json`. Velký soubor terminál neukazuje celý: vypíše souhrn (druh podle obsahu, např. obrázek BMP 1920×1080, velikost a pár řádků hexa), roura dostane celá data.",
-        long_en: "Reads a file as bytes. `from text` turns them into text (no hidden conversion), `from json` into values. The terminal does not show a large file whole: it prints a summary (the kind by content, e.g. a BMP image 1920×1080, the size and a few hex lines); the pipeline gets all the data.",
+        long_cs: "Přečte soubor jako bajty. Text z nich udělá až `from text` (žádný skrytý převod), tabulku z JSON `from json`. Soubor nad 64 KiB `open` nenačte celý: vrátí odkaz na soubor (cesta, velikost, druh podle začátku obsahu, např. obrázek BMP 1920×1080) a obsah přečtou až příkazy, které ho potřebují (`from text`, `lines`, `save`...). Terminál takový soubor ukáže jako souhrn; pole `size`, `kind` a `path` jdou číst přímo (`(open obr.bmp).size`).",
+        long_en: "Reads a file as bytes. `from text` turns them into text (no hidden conversion), `from json` into values. `open` does not read a file over 64 KiB whole: it returns a reference to the file (path, size, kind by the start of the content, e.g. a BMP image 1920×1080) and the content is read only by commands that need it (`from text`, `lines`, `save`...). The terminal shows such a file as a summary; the fields `size`, `kind` and `path` can be read directly (`(open img.bmp).size`).",
         args: &[Arg { name: "path", default: "", cs: "soubor ke čtení", en: "file to read" }],
         examples: &[
             Ex { code: "open a.txt | from text", cs: "Obsah souboru jako text.", en: "The file content as text.", check: Out("alfa") },

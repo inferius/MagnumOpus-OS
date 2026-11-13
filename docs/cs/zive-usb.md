@@ -1,7 +1,8 @@
 # Živé USB: zkoušení na skutečném počítači
 
 MagnumOpus jde spustit z flashky na skutečném počítači bez instalace.
-Systém z flashky nastartuje do GUI; svá data (a později logy
+Systém z flashky nastartuje rovnou do plochy s terminálem (vývojový
+profil s automatickým přihlášením, viz varování níže); svá data (a později logy
 a záznamy pádů) ukládá na **datový oddíl flashky**. Disky počítače vidí,
 ale **jen pro čtení** (viz [Disky](disky.md#riziko-a-ochrana-cizích-disků)).
 
@@ -140,17 +141,21 @@ v písmenu zničí jiný disk. Na macOS je disk `/dev/rdiskN` (`diskutil list`,
    nebo Esc; na Macu Option). Vyberte flashku s označením **UEFI**.
 3. Když se nic nestane: ve firmwaru vypněte **Secure Boot** (a CSM /
    Legacy, je-li zapnutý jen legacy start z USB).
-4. Systém nastartuje do GUI. Klávesnice a myš USB fungují hned (i PS/2
-   na x86). Síť funguje na kartách Intel (e1000e, igc) a Realtek (r8169)
+4. Systém nastartuje do plochy s terminálem. Klávesnice a myš USB fungují
+   hned (i PS/2 na x86). Síť funguje na kartách Intel (e1000e, igc) a Realtek (r8169)
    – viz [Síťové karty](sitove-karty.md).
 
-⚠️ **Dočasné omezení** **[implementováno]**: s [uživatelskými účty](ucty.md)
-se plocha s terminálem spouští až po přihlášení. Obraz flashky nemá
-vývojové automatické přihlášení ani účet, takže start skončí na
-**přihlašovací obrazovce bez účtu** a do terminálu (ani k příkazu
-`report`) se zatím nedostanete. Logy a záznamy pádů se ukládají dál a jde
-je vytáhnout režimem „vytáhni logy“. Řešení (vývojový profil flashky,
-nebo průvodce prvním účtem) **[navrženo]**, čeká na rozhodnutí.
+⚠️ **Živé USB = vývojový profil** **[implementováno]**: obraz flashky
+(`cargo xtask usb` i `cargo xtask usb --release`) má soubor `accounts-dev`,
+takže služba [účtů](ucty.md#automatické-přihlášení-jen-vývoj) založí účet
+`vyvojar` **bez hesla** a hned ho přihlásí; start skončí v ploše
+s terminálem. **Datový oddíl na flashce není šifrovaný:** kdo má flashku,
+přečte ho. Flashka slouží ke zkoušení hardwaru a VMware, ne pro osobní
+data. `xtask usb` a `xtask vmware` (disk VM je tentýž obraz) to vypíší
+jako varování. Obraz pro uživatele (`cargo xtask image`) automatické
+přihlášení nemá; bez účtu ukáže přihlašovací obrazovka zprávu „účet se
+zakládá v instalátoru“ (instalátor, `design/instalace.html`,
+**[navrženo]**).
 
 Ověřené v QEMU (`cargo xtask usb --run` s oknem, `cargo xtask usb --test`
 bez okna; obojí stroj co nejbližší skutečnému PC: flashka na řadiči xHCI,
@@ -193,8 +198,7 @@ záznam v RAM zmizí. Počítač s nativním ovladačem grafiky (Intel, virtio-g
 už obraz firmwaru nemusí ukazovat; záznam se pak uloží jen do RAM a na
 sériovou linku.
 
-**Balíček pro vývojáře.** V terminálu (zatím jen po přihlášení, viz
-omezení výše) napište `report`. Vypíše cestu
+**Balíček pro vývojáře.** V terminálu napište `report`. Vypíše cestu
 a náhled obsahu:
 
 ```text
@@ -280,5 +284,7 @@ není: jádro by muselo volat běhové služby UEFI z obsluhy pádu.
 - `cargo xtask test` spouští po hlavním běhu i start z USB;
   `--only zive-usb` jen tento běh. Testy FS nad flashkou:
   `cargo xtask test --data-disk usb --only "souborovy system,data FS"`.
+- Instalace z flashky na interní disk: [Instalace](instalace.md)
+  (`--only instalace`).
 - Zdrojáky: `xtask/src/usb/` (obraz, výpis a zápis disků, start v QEMU),
   `user/usb-storage/`, `libs/usbproto/src/storage.rs`.

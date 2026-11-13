@@ -38,8 +38,16 @@ impl Args {
     }
 }
 
-/// Nejpodobnejsi jmeno (pro radu "myslel jste ...").
-fn nearest<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+/// Prikazy, ktere neco nevratne meni nebo ukoncuji: jako oprava preklepu
+/// jen pri skoro shode (jinak by rada "myslel jste 'rm'?" u `fmt` svadela
+/// k mazani).
+const DANGEROUS: &[&str] = &["rm", "mv", "kill", "cancel", "shutdown", "reboot", "exit", "save"];
+
+/// Nejpodobnejsi jmeno (pro radu "myslel jste ..."). Krátka jmena (do 3
+/// znaku) a nicive prikazy jen se vzdalenosti 1 (nicive navic se stejnym
+/// zacatkem); pri stejne vzdalenosti vyhraje casteji pouzivany (`uses`).
+/// Nic dobreho = `None` (rada pak odkaze na `help`).
+pub(crate) fn nearest<'a>(name: &str, candidates: impl Iterator<Item = &'a str>, uses: impl Fn(&str) -> usize) -> Option<&'a str> {
     fn dist(a: &str, b: &str) -> usize {
         let a: Vec<char> = a.chars().collect();
         let b: Vec<char> = b.chars().collect();
@@ -54,13 +62,32 @@ fn nearest<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<
         }
         prev[b.len()]
     }
-    candidates.map(|c| (dist(name, c), c)).filter(|(d, _)| *d <= 2).min_by_key(|(d, _)| *d).map(|(_, c)| c)
+    let short = name.chars().count() <= 3;
+    candidates
+        .map(|c| (dist(name, c), c))
+        .filter(|(d, c)| {
+            if DANGEROUS.contains(c) {
+                *d == 1 && name.chars().next() == c.chars().next()
+            } else if short {
+                *d == 1
+            } else {
+                *d <= 2
+            }
+        })
+        .min_by_key(|(d, c)| (*d, usize::MAX - uses(c)))
+        .map(|(_, c)| c)
 }
 
 impl Interp {
     pub(crate) fn call(&mut self, host: &mut dyn Host, name: &str, args: &[Arg], input: Value, span: Span) -> R<Value> {
         if let Some(sig) = builtin(name) {
             let a = self.eval_args(host, Some(sig), args, span, false)?;
+            // Soubor nacteny podle potreby: obsah az ted, kdyz ho prikaz
+            // na vstupu potrebuje (`describe` jen typ).
+            let input = match input {
+                Value::File(f) if sig.name != "describe" => Value::Bytes(self.fs_read(host, &f.path)?),
+                other => other,
+            };
             return super::builtins::call(self, host, sig.name, a, input);
         }
         if let Some(f) = self.fns.get(name).cloned() {
@@ -70,7 +97,7 @@ impl Interp {
         if let Some(Value::Closure(c)) = self.var(name).cloned() {
             let a = self.eval_args(host, None, args, span, false)?;
             if !a.named.is_empty() {
-                return Err(a.err(code::ARGS, "closure nema pojmenovane argumenty"));
+                return Err(a.err(code::ARGS, "closure nemá pojmenované argumenty"));
             }
             let mut pos = a.pos;
             if !matches!(input, Value::Nothing) {
@@ -93,9 +120,9 @@ impl Interp {
             targets.extend(self.exec_datasets(host, &trees));
             needs.aside = self.draft.exec_map(host.fs(), &targets).map_err(|e| {
                 Flow::Err(
-                    ShError::sys(e, alloc::format!("program '{name}' nejde spustit nanecisto"))
+                    ShError::sys(e, alloc::format!("program '{name}' nejde spustit nanečisto"))
                         .at(span)
-                        .hint("FS tu neumi klon bokem; spustte program mimo preview"),
+                        .hint("FS tu neumí klon bokem; spusťte program mimo preview"),
                 )
             })?;
             return self.exec_result(host.exec(name, &flat, input, &needs), name, span);
@@ -107,7 +134,7 @@ impl Interp {
         if guarded {
             let datasets = self.exec_datasets(host, &trees);
             if !self.undo.before_external(host.fs(), &self.line, &datasets, &trees) {
-                host.note("varovani: FS nema pohledy, zmeny programu nepujde vratit");
+                host.note("varování: FS nemá pohledy, změny programu nepůjde vrátit");
             }
         }
         let r = host.exec(name, &flat, input, &needs);
@@ -145,14 +172,16 @@ impl Interp {
         match r {
             Some(r) => r.map_err(|e| Flow::Err(e.at(span))),
             None => {
-                let mut e = ShError::new(code::UNKNOWN, alloc::format!("neznamy prikaz '{name}'")).at(span);
+                let mut e = ShError::new(code::UNKNOWN, alloc::format!("neznámý příkaz '{name}'")).at(span);
                 let mut names: Vec<&str> = self.sigs.names();
                 let fns: Vec<String> = self.fns.keys().cloned().collect();
                 names.extend(fns.iter().map(|s| s.as_str()));
-                if let Some(n) = nearest(name, names.into_iter()) {
+                // Cetnost pouziti z historie relace (prvni slovo radku).
+                let uses = |c: &str| self.history.entries.iter().filter(|e| e.line.split_whitespace().next() == Some(c)).count();
+                if let Some(n) = nearest(name, names.into_iter(), uses) {
                     e = e.hint(alloc::format!("myslel jste '{n}'?"));
                 } else {
-                    e = e.hint("seznam prikazu: help");
+                    e = e.hint("seznam příkazů: help");
                 }
                 Err(Flow::Err(e))
             }
@@ -180,7 +209,7 @@ impl Interp {
                         && let Expr::Block(..) = x
                     {
                         let c = ClosureVal { params: Vec::new(), body: x.clone(), captured: Vec::new() };
-                        out.pos.push(Value::Closure(alloc::rc::Rc::new(c)));
+                        out.pos.push(Value::Closure(alloc::sync::Arc::new(c)));
                         continue;
                     }
                     let v = self.eval(host, x)?;
@@ -203,7 +232,7 @@ impl Interp {
         if args.len() != c.params.len() {
             return Err(Flow::Err(ShError::new(
                 code::ARGS,
-                alloc::format!("closure ceka {} argumentu, dostala {}", c.params.len(), args.len()),
+                alloc::format!("closure čeká {} argumentů, dostala {}", c.params.len(), args.len()),
             )));
         }
         self.enter_call()?;
@@ -232,7 +261,7 @@ impl Interp {
             Value::Closure(c) => self.call_closure(host, c, args),
             other => Err(Flow::Err(ShError::new(
                 code::TYPE,
-                alloc::format!("cekam closure (napr. x => x * 2), dostal jsem {}", other.type_name()),
+                alloc::format!("čekám closure (např. x => x * 2), dostal jsem {}", other.type_name()),
             ))),
         }
     }
@@ -255,17 +284,17 @@ impl Interp {
                 frame.insert(p.clone(), v);
             } else {
                 return Err(Flow::Err(
-                    ShError::new(code::ARGS, alloc::format!("funkce {name}: chybi argument '{p}'")).at(a.span),
+                    ShError::new(code::ARGS, alloc::format!("funkce {name}: chybí argument '{p}'")).at(a.span),
                 ));
             }
         }
         if pos.next().is_some() {
-            return Err(Flow::Err(ShError::new(code::ARGS, alloc::format!("funkce {name}: prilis mnoho argumentu")).at(a.span)));
+            return Err(Flow::Err(ShError::new(code::ARGS, alloc::format!("funkce {name}: příliš mnoho argumentů")).at(a.span)));
         }
         for (n, _) in &a.named {
             if !f.params.contains(n) {
                 return Err(Flow::Err(
-                    ShError::new(code::ARGS, alloc::format!("funkce {name} nema parametr '{n}'")).at(a.span),
+                    ShError::new(code::ARGS, alloc::format!("funkce {name} nemá parametr '{n}'")).at(a.span),
                 ));
             }
         }
@@ -287,7 +316,7 @@ impl Interp {
     fn enter_call(&mut self) -> R<()> {
         if self.frames.len() > self.max_depth {
             return Err(Flow::Err(
-                ShError::new(code::DEPTH, alloc::format!("prilis hluboka rekurze (vic nez {})", self.max_depth)),
+                ShError::new(code::DEPTH, alloc::format!("příliš hluboká rekurze (víc než {})", self.max_depth)),
             ));
         }
         Ok(())

@@ -785,6 +785,23 @@ impl<D: BlockDevice> Store<D> {
                 }
             }
         }
+        // Bloky pro uzly a kopie: pri chybe se vsechny vrati alokatoru.
+        let mut allocated: Vec<(u64, u64)> = Vec::new();
+        let r = self.write_nodes(root_id, &order, &mut allocated);
+        if r.is_err() {
+            for (s, l) in allocated {
+                self.space.free(s, l, self.txg, true);
+            }
+        }
+        r
+    }
+
+    /// Zapise uzly `order` (potomci pred rodici). Atomicke vuci stavu
+    /// v pameti: uzly zustanou v `dirty`, dokud neni zapsano vse - chyba
+    /// zapisu (napr. `NO_MEMORY` pri posilani pozadavku ovladaci) tak
+    /// nenecha strom ukazovat na uzly, ktere uz v pameti nejsou, a commit
+    /// jde zopakovat. `allocated` = useky od alokatoru (k vraceni pri chybe).
+    fn write_nodes(&mut self, root_id: u64, order: &[u64], allocated: &mut Vec<(u64, u64)>) -> Result<BlockPtr> {
         // Kazdy uzel = NODE_BLOCKS souvislych bloku; useky od alokatoru se
         // pouziji po celych uzlech, zbytek se hned vrati.
         let mut starts = Vec::with_capacity(order.len());
@@ -797,6 +814,7 @@ impl<D: BlockDevice> Store<D> {
             if usable < l {
                 self.space.free(s + usable, l - usable, self.txg, true);
             }
+            allocated.push((s, usable));
             starts.extend((0..usable / NODE_BLOCKS).map(|k| s + k * NODE_BLOCKS));
         }
         // Druhe kopie: od konce disku (daleko od prvnich, pri vic AG v jine
@@ -812,20 +830,32 @@ impl<D: BlockDevice> Store<D> {
             if usable < l {
                 self.space.free(s + usable, l - usable, self.txg, true);
             }
+            allocated.push((s, usable));
             copies.extend((0..usable / NODE_BLOCKS).map(|k| s + k * NODE_BLOCKS));
         }
         let mut ptrs: BTreeMap<u64, BlockPtr> = BTreeMap::new();
         let mut out: Vec<(u64, Vec<u8>)> = Vec::with_capacity(order.len() * 2);
+        // Vnitrni uzly s potomky v pameti: kopie s odkazy na zapsane bloky
+        // (puvodni zustava v `dirty` do uspesneho zapisu).
+        let mut relinked: BTreeMap<u64, Node> = BTreeMap::new();
         for (i, (&id, &block)) in order.iter().zip(&starts).enumerate() {
-            let mut node = self.dirty.remove(&id).unwrap();
-            if let Body::Internal(children) = &mut node.body {
-                for (_, c) in children.iter_mut() {
-                    if let Child::Mem(cid) = c {
-                        *c = Child::Disk(ptrs[cid]);
+            let node = &self.dirty[&id];
+            let has_mem = matches!(&node.body, Body::Internal(ch) if ch.iter().any(|(_, c)| matches!(c, Child::Mem(_))));
+            let data = if has_mem {
+                let mut n = node.clone();
+                if let Body::Internal(children) = &mut n.body {
+                    for (_, c) in children.iter_mut() {
+                        if let Child::Mem(cid) = c {
+                            *c = Child::Disk(ptrs[cid]);
+                        }
                     }
                 }
-            }
-            let data = node.encode();
+                let d = n.encode();
+                relinked.insert(id, n);
+                d
+            } else {
+                node.encode()
+            };
             let copy = copies.get(i).copied().unwrap_or(0);
             let ptr = BlockPtr {
                 block,
@@ -836,15 +866,20 @@ impl<D: BlockDevice> Store<D> {
                 ..BlockPtr::default()
             };
             ptrs.insert(id, ptr);
-            if self.cache.len() < CACHE_LIMIT {
-                self.cache.insert(block, node);
-            }
             if copy != 0 {
                 out.push((copy, data.clone()));
             }
             out.push((block, data));
         }
         write_runs(&mut self.dev, &mut out)?;
+        // Zapsano: uzly z `dirty` do mezipameti (s odkazy na bloky).
+        for (&id, &block) in order.iter().zip(&starts) {
+            let stored = self.dirty.remove(&id).unwrap();
+            let node = relinked.remove(&id).unwrap_or(stored);
+            if self.cache.len() < CACHE_LIMIT {
+                self.cache.insert(block, node);
+            }
+        }
         Ok(ptrs[&root_id])
     }
 

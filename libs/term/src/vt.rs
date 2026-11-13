@@ -119,6 +119,10 @@ pub fn message(m: &ServerMsg, theme: Option<&Theme>) -> String {
             };
             paint(&mut out, theme, |t| Style { bold: true, ..Style::fg(t.ui.fg) }, &alloc::format!("{question} {opts} "));
         }
+        ServerMsg::Ask { question, secret, default, .. } => {
+            let d = if default.is_empty() || *secret { String::new() } else { alloc::format!(" [{default}]") };
+            paint(&mut out, theme, |t| Style { bold: true, ..Style::fg(t.ui.fg) }, &alloc::format!("{question}{d}: "));
+        }
         ServerMsg::Completions { items, .. } => {
             for (t, _, h) in items {
                 out.push_str(t);

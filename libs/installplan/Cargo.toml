@@ -1,0 +1,11 @@
+[package]
+name = "installplan"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Instalator: kroky, volby disku, plan oddilu, nahled zmen, system.toml"
+
+[dependencies]
+diskguard = { path = "../diskguard" }
+abi = { workspace = true }
+wire = { path = "../wire" }

@@ -55,6 +55,8 @@ struct MainLink<'a> {
 
 /// Kanal k initu pro `shutdown`/`reboot` (zprava `SessMsg::Power` od termd).
 static POWER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
+/// Kanal k instalatoru (`install`), ziskany od initu pri prvnim pouziti.
+static INSTALLER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
 
 /// Relace zvukove sluzby (zprava `SessMsg::Audio` od termd: kanal a listek);
 /// `SysEnv` si ji vezme pri prvnim prikazu `audio`.
@@ -323,6 +325,43 @@ impl Env for SysEnv {
         }
     }
 
+    /// `install`: kanal k instalatoru (od initu, jednou), pozadavek,
+    /// zpravy prubehu, konecna odpoved.
+    fn installer_send(&mut self, req: &[u8]) -> Result<(), Error> {
+        let mut inst = INSTALLER.lock();
+        if inst.is_none() {
+            let guard = POWER.lock();
+            let chan = guard.as_ref().ok_or(Error::NotSupported)?;
+            chan.write(&powerproto::Request::OpenInstaller.encode(), Vec::new())?;
+            let m = chan.read(Some(time::deadline_after(Duration::from_secs(30))))?;
+            match powerproto::Reply::decode(&m.data)? {
+                powerproto::Reply::Ok => {}
+                powerproto::Reply::Failed(e) => return Err(e),
+                _ => return Err(Error::Corrupted),
+            }
+            let h = m.handles.into_iter().next().ok_or(Error::Corrupted)?;
+            *inst = Some(Channel::from_handle(h));
+        }
+        inst.as_ref().unwrap().write(req, Vec::new())
+    }
+
+    fn installer_recv(&mut self, wait_ms: u64) -> Result<Option<term::session::InstallerMsg>, Error> {
+        use term::session::InstallerMsg;
+        let inst = INSTALLER.lock();
+        let ch = inst.as_ref().ok_or(Error::BadState)?;
+        // Instalace trva minuty: kratka cekani, prubeh chodi prubezne.
+        let m = match ch.read(Some(time::deadline_after(Duration::from_millis(wait_ms)))) {
+            Ok(m) => m,
+            Err(Error::TimedOut) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        Ok(Some(if matches!(installplan::proto::Reply::decode(&m.data), Ok(installplan::proto::Reply::Progress { .. })) {
+            InstallerMsg::Progress(m.data)
+        } else {
+            InstallerMsg::Done(m.data)
+        }))
+    }
+
     /// `report`: balicek pro vyvojare sestavi sluzba logu (pres init).
     fn report(&mut self) -> Result<String, Error> {
         let guard = POWER.lock();
@@ -362,6 +401,9 @@ fn main(startup: Startup) -> i64 {
     let mut svc = Service::single(&home, session);
     svc.stack_budget = STACK_BUDGET;
     svc.task_stack = TASK_STACK_BUDGET;
+    // Radky ve vlaknech: okno obsluhovane i behem prikazu (Ctrl+C, Ctrl+Z,
+    // fronta radku, `&` na pozadi).
+    svc.line_threads = true;
     let notify = Event::create().ok().map(|e| Arc::new(EventNotify(e)));
     let spawner = fsd.as_ref().and_then(|f| f.client.connect().ok());
     let mut env = SysEnv {

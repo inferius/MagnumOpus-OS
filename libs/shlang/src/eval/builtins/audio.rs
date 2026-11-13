@@ -36,7 +36,7 @@ const HEADER_READ: usize = 64 << 10;
 fn host_audio(host: &mut dyn Host, a: &Args, req: AudioReq) -> R<Value> {
     match host.audio(req) {
         Some(r) => r.map_err(|e| Flow::Err(e.at(a.span))),
-        None => Err(a.err(abi::Error::NotSupported.name(), "zvuk tu neni (zadna zvukova sluzba)")),
+        None => Err(a.err(abi::Error::NotSupported.name(), "zvuk tu není (žádná zvuková služba)")),
     }
 }
 
@@ -47,19 +47,19 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, a: Args) -> R<Value> {
         "play" => play(it, host, &a),
         "volume" => match int_arg(&a, 1, "hlasitost")? {
             Some(v) if (0..=100).contains(&v) => host_audio(host, &a, AudioReq::Volume(Some(v as u8))),
-            Some(_) => Err(a.err(code::ARGS, "hlasitost musi byt 0-100")),
+            Some(_) => Err(a.err(code::ARGS, "hlasitost musí být 0-100")),
             None => host_audio(host, &a, AudioReq::Volume(None)),
         },
         "mute" => host_audio(host, &a, AudioReq::Mute(true)),
         "unmute" => host_audio(host, &a, AudioReq::Mute(false)),
         "status" => host_audio(host, &a, AudioReq::Status),
         "devices" => host_audio(host, &a, AudioReq::Devices),
-        "device" => match int_arg(&a, 1, "zarizeni")? {
+        "device" => match int_arg(&a, 1, "zařízení")? {
             Some(i) if (0..=255).contains(&i) => host_audio(host, &a, AudioReq::Select(i as u8)),
-            _ => Err(a.err(code::ARGS, "audio device ceka cislo zarizeni (audio devices je vypise)")),
+            _ => Err(a.err(code::ARGS, "audio device čeká číslo zařízení (audio devices je vypíše)")),
         },
         other => Err(Flow::Err(
-            ShError::new(code::ARGS, alloc::format!("audio: neznama akce '{other}'"))
+            ShError::new(code::ARGS, alloc::format!("audio: neznámá akce '{other}'"))
                 .at(a.span)
                 .hint("akce: tone, play, volume, mute, unmute, status, devices, device"),
         )),
@@ -72,7 +72,7 @@ fn stream(host: &mut dyn Host, a: &Args, f: Format, mut next: impl FnMut(&mut dy
     loop {
         if host.interrupted() {
             let _ = host.audio(AudioReq::Abort);
-            return Err(Flow::Err(ShError::new(code::INTERRUPTED, "preruseno (Ctrl-C)")));
+            return Err(Flow::Err(ShError::new(code::INTERRUPTED, "přerušeno (Ctrl-C)")));
         }
         let chunk = match next(host) {
             Ok(Some(c)) => c,
@@ -93,19 +93,19 @@ fn stream(host: &mut dyn Host, a: &Args, f: Format, mut next: impl FnMut(&mut dy
 fn tone(host: &mut dyn Host, a: &Args) -> R<Value> {
     let freq = int_arg(a, 1, "frekvence")?.unwrap_or(440);
     if !(20..=20_000).contains(&freq) {
-        return Err(a.err(code::ARGS, "frekvence tonu musi byt 20-20000 Hz"));
+        return Err(a.err(code::ARGS, "frekvence tónu musí být 20-20000 Hz"));
     }
     let ms = match a.named("duration") {
         Some(Value::Duration(ns)) => ns / 1_000_000,
-        Some(_) => return Err(a.err(code::TYPE, "--duration ceka dobu, napr. 2s")),
+        Some(_) => return Err(a.err(code::TYPE, "--duration čeká dobu, např. 2s")),
         None => 1_000,
     };
     if !(1..=MAX_TONE_MS).contains(&ms) {
-        return Err(a.err(code::ARGS, "delka tonu musi byt 1 ms - 1 h"));
+        return Err(a.err(code::ARGS, "délka tónu musí být 1 ms - 1 h"));
     }
     let level = match a.named("level") {
         Some(Value::Int(l)) if (0..=100).contains(l) => *l as u8,
-        Some(_) => return Err(a.err(code::ARGS, "--level ceka 0-100")),
+        Some(_) => return Err(a.err(code::ARGS, "--level čeká 0-100")),
         None => 50,
     };
     let f = Format::new(48_000, 1, Sample::S16);
@@ -129,16 +129,16 @@ fn tone(host: &mut dyn Host, a: &Args) -> R<Value> {
 
 fn play(it: &mut Interp, host: &mut dyn Host, a: &Args) -> R<Value> {
     let Some(v) = a.pos(1) else {
-        return Err(a.err(code::ARGS, "audio play: chybi soubor WAV"));
+        return Err(a.err(code::ARGS, "audio play: chybí soubor WAV"));
     };
-    let p = it.paths(v)?.into_iter().next().ok_or_else(|| a.err(code::ARGS, "audio play: chybi soubor WAV"))?;
+    let p = it.paths(v)?.into_iter().next().ok_or_else(|| a.err(code::ARGS, "audio play: chybí soubor WAV"))?;
     let size = it.fs_stat(host, &p)?.size;
     let head = it.fs_read_range(host, &p, 0, HEADER_READ)?;
     let h = wav::parse_header(&head, size).map_err(|e| {
         let why = match e {
-            wav::WavError::NotRiff => "neni to soubor WAV (RIFF)",
-            wav::WavError::Missing => "WAV bez casti fmt nebo data",
-            wav::WavError::Unsupported => "nepodporovany format WAV (umim PCM 8/16/32 bitu, 24 bitu ve 32 a float 32)",
+            wav::WavError::NotRiff => "není to soubor WAV (RIFF)",
+            wav::WavError::Missing => "WAV bez části fmt nebo data",
+            wav::WavError::Unsupported => "nepodporovaný formát WAV (umím PCM 8/16/32 bitů, 24 bitů ve 32 a float 32)",
         };
         a.err(code::TYPE, why)
     })?;

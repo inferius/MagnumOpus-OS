@@ -307,7 +307,7 @@ pub trait Host {
     /// chyba `TIMED_OUT` (ulohy bezi dal). Termin v minulosti = jen
     /// vyzvednout hotove bez cekani.
     fn task_wait(&mut self, _ids: &[u64], _any: bool, _deadline: Option<i64>) -> Result<Vec<TaskDone>, ShError> {
-        Err(ShError::sys(abi::Error::NotSupported, "ulohy"))
+        Err(ShError::sys(abi::Error::NotSupported, "úlohy"))
     }
     /// Zrusi ulohu. Kdyz uz dobehla, vrati jeji vysledek (a undo).
     fn task_cancel(&mut self, _id: u64) -> Option<TaskDone> {
@@ -326,6 +326,17 @@ pub trait Host {
     /// vrati `Ok` tesne pred vypnutim); `NOT_SUPPORTED` = hostitel napajeni
     /// nema (testy, relace bez prava).
     fn power(&mut self, _reboot: bool) -> Result<(), abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
+    /// Dotaz na text (`secret` = heslo, okno ho nezobrazi); `None` =
+    /// hostitel dotazy neumi nebo uzivatel zrusil.
+    fn ask(&mut self, _question: &str, _secret: bool, _default: &str) -> Option<String> {
+        None
+    }
+    /// Instalator: posle pozadavek (`installplan::proto`), zpravy prubehu
+    /// preda `progress`, vrati konecnou odpoved. `NOT_SUPPORTED` = hostitel
+    /// instalator nema.
+    fn installer(&mut self, _req: &[u8], _progress: &mut dyn FnMut(&[u8])) -> Result<Vec<u8>, abi::Error> {
         Err(abi::Error::NotSupported)
     }
     /// Balicek pro vyvojare (`report`): text s cestou a nahledem obsahu.

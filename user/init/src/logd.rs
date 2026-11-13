@@ -21,7 +21,7 @@ use libos::{Channel, Error, Process, Result, Rights, Startup, println, time};
 use crate::system::{Devices, grant_traverse};
 
 /// Servisni ucet logd.
-pub const LOGD_USER: u64 = 902;
+pub const LOGD_USER: u64 = 903;
 pub const LOG_DIR: &str = "/system/log";
 pub const CRASH_DIR: &str = "/system/pady";
 

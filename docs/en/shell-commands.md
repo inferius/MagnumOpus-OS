@@ -8,10 +8,10 @@
 - **Text and output:** [`echo`](#echo), [`log`](#log), [`lines`](#lines), [`split`](#split), [`join`](#join), [`trim`](#trim), [`upper`](#upper), [`lower`](#lower), [`contains`](#contains), [`starts-with`](#starts-with), [`ends-with`](#ends-with), [`replace`](#replace)
 - **Lists and tables:** [`where`](#where), [`each`](#each), [`select`](#select), [`sort`](#sort), [`first`](#first), [`last`](#last), [`count`](#count), [`sum`](#sum), [`group`](#group), [`reverse`](#reverse), [`range`](#range)
 - **Conversions and time:** [`from`](#from), [`to`](#to), [`describe`](#describe), [`now`](#now), [`sleep`](#sleep)
-- **Tasks:** [`tasks`](#tasks), [`jobs`](#jobs), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
+- **Tasks:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Session and safety:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Help:** [`help`](#help), [`explain`](#explain)
-- **System:** [`audio`](#audio), [`loglevel`](#loglevel), [`report`](#report), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **System:** [`audio`](#audio), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Files
 
@@ -86,17 +86,18 @@ big.pdf
 
 changes the working folder (no argument: home)
 
-Changes the session's working folder. Relative paths in later commands are resolved from it; the terminal prompt shows it right away. Without an argument it goes to the home folder, `..` is the parent folder.
+Changes the session's working folder. Relative paths in later commands are resolved from it; the terminal prompt shows it right away. Without an argument it goes to the home folder (`~`), `..` is the parent folder. The session remembers recent folders: `cd -` goes back to the previous one, `cd -2` two back, `cd +` forward again and `cd --history` lists them. In the terminal window Alt+Left and Alt+Right do the same when the line is empty.
 
 ```shell
-cd [path]
+cd [path] [--history]
 ```
 
-Full name `dir-change` · input: nothing · output: nothing
+Full name `dir-change` · input: nothing · output: any value
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `[path]` | path | domovská složka | target folder (default: home folder) |
+| `[path]` | path | domovská složka | target folder (default: home folder); `-`, `-N` back, `+` forward |
+| `--history` | switch |  | recent folders of the session (number for `cd -N`) |
 
 Goes to the docs folder and prints it.
 
@@ -108,7 +109,30 @@ cd docs; pwd
 /home/docs
 ```
 
-**Errors:** `NOT_FOUND`, `SH_TYPE`
+Back to the previous folder.
+
+```shell
+cd docs; cd /tmp; cd -; pwd
+```
+
+```text
+/home/docs
+```
+
+Recent folders of the session, newest first.
+
+```shell
+cd docs; cd /tmp; cd --history | select path
+```
+
+```text
+path
+----------
+/home/docs
+/home
+```
+
+**Errors:** `NOT_FOUND`, `SH_TYPE`, `SH_ARGS`
 
 **Related:** [`pwd`](#pwd), [`ls`](#ls)
 
@@ -142,7 +166,7 @@ pwd
 
 reads a file as bytes
 
-Reads a file as bytes. `from text` turns them into text (no hidden conversion), `from json` into values. The terminal does not show a large file whole: it prints a summary (the kind by content, e.g. a BMP image 1920×1080, the size and a few hex lines); the pipeline gets all the data.
+Reads a file as bytes. `from text` turns them into text (no hidden conversion), `from json` into values. `open` does not read a file over 64 KiB whole: it returns a reference to the file (path, size, kind by the start of the content, e.g. a BMP image 1920×1080) and the content is read only by commands that need it (`from text`, `lines`, `save`...). The terminal shows such a file as a summary; the fields `size`, `kind` and `path` can be read directly (`(open img.bmp).size`).
 
 ```shell
 open path
@@ -1322,7 +1346,7 @@ tasks log 12 -n 50
 
 background jobs
 
-This session's background jobs (`bg`, `async`) with their state.
+This session's background jobs with their state. `&` at the end of a line starts a command in the background (`cp big.img /backup &`), Ctrl+Z moves a running command there. The job keeps running and the session takes further commands; the end of the job is announced by a line in its block. `fg N` brings it back to the foreground, `kill N` ends it. What a background job changes in variables and the folder does not show up in the session.
 
 ```shell
 jobs
@@ -1340,7 +1364,34 @@ jobs | count
 0
 ```
 
-**Related:** [`tasks`](#tasks), [`wait`](#wait), [`kill`](#kill)
+**Related:** [`fg`](#fg), [`kill`](#kill), [`tasks`](#tasks)
+
+
+### `fg`
+
+brings a job from the background to the foreground (Ctrl+C interrupts it, Ctrl+Z sends it back)
+
+Brings a job from the background (Ctrl+Z or `&`) to the foreground: the terminal waits for it like for a normal command, Ctrl+C interrupts it and Ctrl+Z sends it back. Without a number it takes the last job. Works in the terminal, not in a script.
+
+```shell
+fg [id]
+```
+
+Full name `job-foreground` · input: nothing · output: nothing
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `[id]` | number | poslední | job number from `jobs` (default: the last one) |
+
+Job 1 back to the foreground.
+
+```shell
+fg 1
+```
+
+**Errors:** `SH_ARGS`
+
+**Related:** [`jobs`](#jobs), [`kill`](#kill)
 
 
 ### `wait`
@@ -1504,7 +1555,7 @@ history | where ok == false | select line
 
 runs a script (checks its manifest needs)
 
-Runs a script from a file. The script header (`needs`) says what the script needs; the shell checks it and asks before running.
+Runs a script from a file with the `.mos` extension (MagnumOpus Shell). The script header (`lang 1`, `needs`) says what the script needs; the shell checks it and asks before running. `run` refuses other files (logs, text).
 
 ```shell
 run path
@@ -1514,12 +1565,12 @@ Full name `script-run` · input: nothing · output: any value
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `path` | path |  | script file |
+| `path` | path |  | script file (.mos) |
 
 Saves and runs a script.
 
 ```shell
-echo "echo ze skriptu" | save /tmp/s.sh; run /tmp/s.sh
+echo "echo ze skriptu" | save /tmp/s.mos; run /tmp/s.mos
 ```
 
 ```text
@@ -1720,6 +1771,35 @@ report
 **Errors:** `ACCESS_DENIED`
 
 **Related:** [`loglevel`](#loglevel)
+
+
+### `install`
+
+installs the system from the live USB onto a disk (a step-by-step wizard; with --odpovedi without questions)
+
+A step-by-step installation wizard like the graphical installer: language and keyboard, computer check, where to install, preview of disk changes, account, security, summary and progress. It never overwrites foreign partitions; erasing a whole disk requires typing the disk name. With `--odpovedi <file>` it runs without questions.
+
+```shell
+install [--odpovedi hodnota]
+```
+
+Full name `system-install` · input: nothing · output: nothing
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `--odpovedi` | text |  | answers file (installation without questions) |
+
+Starts the wizard.
+
+```shell
+install
+```
+
+**Needs:** the live USB (installer)
+
+**Errors:** `SH_REJECTED`, `SH_USER`, `NOT_SUPPORTED`
+
+**Related:** [`report`](#report)
 
 
 ### `shutdown`

@@ -160,6 +160,11 @@ impl Console {
 
     fn redraw(&mut self) {
         self.screen.write(&self.app.frame());
+        if let Some(why) = &self.conn.gave_up {
+            // Opakovani by nepomohlo (pamet, limit restartu): chyba a volba.
+            let text = alloc::format!("\r\n\x1b[31mSlužbu termd nejde spustit ({why}). Enter to zkusí znovu.\x1b[39m");
+            self.screen.write(&text);
+        }
         if let Some(d) = self.display.as_mut() {
             d.show(&self.screen);
         }
@@ -322,6 +327,12 @@ fn main(mut startup: Startup) -> i64 {
                     Ok(m) => {
                         for r in inputproto::event::decode(&m.data).unwrap_or_default() {
                             if let Some(k) = keys::key(&r) {
+                                // termd nejde spustit: Enter to zkusi znovu (rucne).
+                                if k == term::ui::Key::Enter && c.conn.gave_up.is_some() && c.termd.is_none() {
+                                    c.conn.start();
+                                    c.dirty = true;
+                                    continue;
+                                }
                                 c.app.key(k);
                                 c.dirty = true;
                             }

@@ -5,7 +5,7 @@
 //! prevody: jedina vyjimka je cele cislo -> desetinne v aritmetice.
 
 use alloc::boxed::Box;
-use alloc::rc::Rc;
+use alloc::sync::Arc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
@@ -22,6 +22,14 @@ pub struct ClosureVal {
     pub params: Vec<String>,
     pub body: Expr,
     pub captured: Vec<(String, Value)>,
+}
+
+/// Odkaz na soubor (cesta absolutni, druh podle zacatku obsahu).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileRef {
+    pub path: String,
+    pub size: u64,
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -41,9 +49,12 @@ pub enum Value {
     Time(i64),
     Str(String),
     Bytes(Vec<u8>),
+    /// Soubor nacteny az podle potreby (`open` velkeho souboru): obsah
+    /// prectou prikazy, ktere bajty nebo text potrebuji.
+    File(FileRef),
     List(Vec<Value>),
     Record(Record),
-    Closure(Rc<ClosureVal>),
+    Closure(Arc<ClosureVal>),
     Error(Box<ShError>),
 }
 
@@ -60,6 +71,7 @@ impl Value {
             Value::Time(_) => "time",
             Value::Str(_) => "text",
             Value::Bytes(_) => "bytes",
+            Value::File(_) => "file",
             Value::List(_) => "list",
             Value::Record(_) => "record",
             Value::Closure(_) => "closure",
@@ -76,6 +88,12 @@ impl Value {
         match self {
             Value::Record(r) => r.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()),
             Value::Error(e) => error_field(e, name),
+            Value::File(f) => match name {
+                "path" => Some(Value::str(&f.path)),
+                "size" => Some(Value::Size(f.size as i64)),
+                "kind" => Some(Value::str(&f.kind)),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -186,6 +204,7 @@ impl fmt::Display for Value {
             Value::Duration(d) => f.write_str(&human_duration(*d)),
             Value::Time(t) => f.write_str(&format_time(*t)),
             Value::Str(s) => f.write_str(s),
+            Value::File(r) => write!(f, "<soubor {}: {}, {}>", r.path, r.kind, human_size(r.size as i64)),
             Value::Bytes(b) => match core::str::from_utf8(b) {
                 Ok(s) if b.len() <= 64 => write!(f, "<{} B: {s:?}>", b.len()),
                 _ => write!(f, "<{} B>", b.len()),

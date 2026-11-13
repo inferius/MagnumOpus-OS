@@ -220,22 +220,23 @@ fn progress_bar_updates_in_place_with_rate_and_eta() {
     let mut a = app();
     a.tick(Some(1_000_000_000));
     a.on_msg(ServerMsg::BlockStart { session: 7, block: 2, line: "cp -r a b".into() });
-    a.on_msg(ServerMsg::Item { session: 7, block: 2, item: Item::Progress { done: 0, total: 100, label: "soubory".into() } });
-    for (k, done) in [(2, 20u64), (3, 40)] {
+    a.on_msg(ServerMsg::Item { session: 7, block: 2, item: Item::Progress { done: 0, total: 1000, label: "soubory".into() } });
+    for (k, done) in [(2, 20u64), (3, 40), (4, 60)] {
         a.tick(Some(k * 1_000_000_000));
         a.on_msg(ServerMsg::ItemUpdate {
             session: 7,
             block: 2,
             index: 0,
-            item: Item::Progress { done, total: 100, label: "soubory".into() },
+            item: Item::Progress { done, total: 1000, label: "soubory".into() },
         });
     }
     assert_eq!(a.blocks[0].items.len(), 1, "jeden pruh, zmeneny na miste");
     let p = plain(&a);
-    assert!(p.contains("40 %"), "{p}");
-    assert!(p.contains("40 / 100 soubory"), "{p}");
+    assert!(p.contains("6 %"), "{p}");
+    assert!(p.contains("60 / 1000 soubory"), "{p}");
     assert!(p.contains("20 pol./s"), "{p}");
-    assert!(p.contains("zbývá 3 s"), "{p}");
+    // 940 zbyva pri 20/s = 47 s, zaokrouhleno po 5 s.
+    assert!(p.contains("zbývá 45 s"), "{p}");
     // Ctrl-C pri bezicim prikazu = preruseni.
     a.key(Key::Ctrl('c'));
     assert!(a.take_out().iter().any(|m| matches!(m, ClientMsg::Interrupt { session: 7 })));
@@ -353,7 +354,7 @@ fn snapshot() {
             file("IMG_4012.jpg", "file", "jpg", 8_400_000, day / 2),
             file("IMG_4013.jpg", "file", "jpg", 12_100_000, day / 3),
             file("zaloha.tar.zst", "file", "zst", 1_200_000_000, 900 * day),
-            file("oprav.sh", "file", "sh", 2_000, 10 * day),
+            file("oprav.mos", "file", "sh", 2_000, 10 * day),
         ])),
     });
     a.on_msg(ServerMsg::BlockEnd { session: 1, block: 1, ok: true, duration: 41_000_000 });

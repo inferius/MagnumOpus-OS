@@ -1454,6 +1454,7 @@ dependencies = [
  "fsproto",
  "guiproto",
  "inputproto",
+ "installplan",
  "libos",
  "manifest",
  "netproto",
@@ -1497,6 +1498,31 @@ dependencies = [
 [[package]]
 name = "inputproto"
 version = "0.1.0"
+
+[[package]]
+name = "installd"
+version = "0.1.0"
+dependencies = [
+ "accountproto",
+ "accounts",
+ "blockproto",
+ "diskguard",
+ "fatw",
+ "fs",
+ "installplan",
+ "keymap",
+ "libos",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "installplan"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "diskguard",
+ "wire",
+]
 
 [[package]]
 name = "intel-display"
@@ -2422,6 +2448,7 @@ dependencies = [
  "abi",
  "audiomix",
  "audioproto",
+ "installplan",
 ]
 
 [[package]]
@@ -2439,6 +2466,7 @@ dependencies = [
  "audiomix",
  "audioproto",
  "fsproto",
+ "installplan",
  "libos",
  "powerproto",
  "shlang",
@@ -2655,6 +2683,7 @@ name = "term"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "installplan",
  "noto-sans-mono-bitmap",
  "shlang",
  "spin 0.12.3",
@@ -3390,6 +3419,8 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "accountproto",
+ "accounts",
  "bytes",
  "diskguard",
  "dns",
@@ -3400,6 +3431,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "initfs",
+ "installplan",
  "netproto",
  "pulldown-cmark",
  "rcgen",

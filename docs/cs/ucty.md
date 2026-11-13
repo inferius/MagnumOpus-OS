@@ -223,14 +223,20 @@ připojený klíč). Nad ním `accountd` mluví CTAP2
 
 ### Automatické přihlášení (jen vývoj)
 
-`cargo xtask run` přidá do initfs soubor `accounts-dev` a accountd pak
-založí (pokud chybí) účet `vyvojar` (první volné číslo, příznak vývojový
-účet)
-a hned ho přihlásí. **Dvojí pojistka:** kód automatického přihlášení je
-v accountd jen v ladicím buildu (`cfg(debug_assertions)`) a soubor přidá
-jen `xtask run` - `xtask image` (obraz pro uživatele) ani `--release` ho
-nemají. Vývojový účet nemá heslo, nemá roli správy a ve výpisu účtů je
-označený.
+`cargo xtask run`, `cargo xtask usb` a `cargo xtask vmware` (živé USB
+a disk VM z něj jsou vývojový profil,
+rozhodnutí uživatele 2026-11-13) přidají do initfs soubor `accounts-dev`
+a accountd pak založí (pokud chybí) účet `vyvojar` (první volné číslo,
+příznak vývojový účet) a hned ho přihlásí, v ladicím i release buildu.
+**Pojistka:** soubor přidávají jen tyto příkazy; obraz pro uživatele
+(`xtask image`) ani testy (`xtask test`, kromě ověření živého USB) ho
+nemají. **Proč jen soubor a ne i podmínka na ladicí build** (dřív
+`cfg(debug_assertions)`): kdo může změnit initfs na ESP, může tam stejně
+nahradit i samotný accountd, takže druhá pojistka bezpečnost reálně
+nezvyšovala, jen rozbila `xtask run --release` (běžný způsob spuštění).
+Se Secure Bootem bude pojistkou podpis obrazu **[navrženo]**. Test `zive-usb` ověří obojí: flashka nastartuje do
+terminálu a obraz bez souboru skončí na přihlašovací obrazovce. Vývojový
+účet nemá heslo, nemá roli správy a ve výpisu účtů je označený.
 
 ### Ochrany
 
@@ -371,8 +377,19 @@ vstup ignoruje.
   umělý vstup, výběr účtu a metody, zpomalení, zamčení a odemčení jen
   stejným účtem, okna pod obrazovkou se nekreslí, odhlášení); snímky
   `target/comp-greeter.png` a `target/comp-greeter-zamceno.png`.
-- ⚠️ První start bez účtu: obrazovka nemá koho nabídnout; založení
-  prvního účtu (kanál `setup`) patří instalátoru **[navrženo]**.
+- **Bez účtu** **[implementováno]**: když na počítači není žádný účet
+  (obraz pro uživatele před instalací), obrazovka neukáže formulář, ale
+  zprávu „Na tomto počítači zatím není žádný účet. Účet se zakládá
+  v instalátoru.“ a tlačítka **Vypnout** a **Restartovat** (potvrdí je
+  systémový dialog). Avatar se kreslí jen z účtu (iniciála jeho jména),
+  nikdy z nadpisu. Dokud seznam účtů nepřijde, je vidět jen pozadí.
+- **První účet zakládá instalátor** (`design/instalace.html`, kanál
+  `setup`) **[navrženo]**, ne přihlašovací obrazovka (rozhodnutí
+  uživatele 2026-11-13).
+- **Čipy metod** ukazuje obrazovka jen u účtu s víc metodami (heslo
+  a PIN, klíč, obnovovací klíč); s jedinou metodou by byly matoucí.
+- Testy: `cargo test -p comp bez_uctu_zprava_a_vypnuti_misto_formulare`,
+  `cip_metody_jen_pri_vic_metodach`; snímek `target/comp-greeter-bez-uctu.png`.
 - Více současných relací (rychlé přepnutí uživatele) protokol umí (číslo
   relace); obrazovka přepnutí přijde s plochou.
 - Pád accountd: relace běží dál (drží je init). Supervisor accountd

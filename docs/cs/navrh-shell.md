@@ -882,6 +882,65 @@ v běžném běhu rozdělí supervisor spolu s GUI 6c.
 | kreslení do framebufferu | hotovo: `user/console`, framebuffer od jádra (`kind::FRAMEBUFFER`, `FB_CONTROL`); test v QEMU napíše `echo ahoj` a ověří obrazovku; spouštění konzole mimo testy patří do supervisoru |
 | spouštění programů s vlastní relací fsd | mapování oprávnění hotové (`term::perm`, i z klonů pro `preview`); zatím žádný program s rozhraním pro shell |
 
+### Velké soubory: hodnota „soubor“
+
+`open` souboru nad 64 KiB ho nečte celý: vrátí hodnotu typu `file` (cesta,
+velikost, druh podle prvních 512 B, např. „obrázek BMP 1920×1080“). Obsah
+načte až příkaz, který na vstupu potřebuje bajty nebo text (`from text`,
+`lines`, `save`, `count`...); `describe`, zobrazení v terminálu a uložení do
+proměnné obsah nečtou. Pole `size`, `kind` a `path` jdou číst přímo.
+**[implementováno]** Proudové zpracování (roura, která čte velký text po
+částech a skončí dřív, např. `lines | first 10`) **[navrženo]**.
+
+### Řádky ve vláknech: Ctrl+Z a pozadí
+
+Řádek relace běží ve vlastním vlákně procesu relace (`shsess`) nad
+interpretem relace a vlastním spojením na fsd (stejná identita; koncept
+a pohledy undo jsou objekty FS, ne spojení). Hlavní vlákno mezitím obsluhuje
+okno: Ctrl+C, Ctrl+Z, výzvy, další řádky (fronta) a služby prostředí (zvuk,
+agent, přehled úloh), které řádek ve vlákně nevolá sám. Kód:
+`libs/term/src/fg.rs` (vlákno řádku) a `libs/term/src/session/line.rs`
+(obsluha relací). **[implementováno]**
+
+```text
+okno ──Run/Interrupt/Background──▶ hlavní vlákno shsess ──▶ vlákno řádku
+  ▲                                   │  schránka zpráv, výzvy,   (interpret
+  └──────── bloky, výzvy ─────────────┘  požadavky na prostředí    relace)
+```
+
+- **Ctrl+Z** (zpráva `Background`): řádek běží dál jako úloha na pozadí
+  a relace pokračuje kopií stavu ze začátku řádku (proměnné, funkce, složka,
+  historie). Co úloha změní v proměnných a ve složce, se do relace
+  nepromítne (jako subshell). Undo předchozích řádků zůstane úloze; relace
+  po Ctrl+Z začíná s prázdným undo.
+- **`příkaz &`**: rovnou na pozadí (úloha dostane kopii stavu, relace se
+  nemění).
+- **`jobs`, `fg N`, `kill N`**: řízení úloh relace; `fg` úlohu vrátí do
+  popředí (Ctrl+C ji přeruší, Ctrl+Z vrátí zpět). `bg N` jen ohlásí, že
+  úloha už běží (zastavená úloha zatím není).
+- Konec úlohy na pozadí ohlásí řádek v jejím bloku: „[1] hotovo: …“,
+  „[1] přerušeno: …“ nebo „[1] skončilo chybou: …“.
+- Řádek napsaný během běhu jde do fronty (v okně viditelně) a spustí se po
+  řádku v popředí, v pořadí.
+- Bez vláken v prostředí (testy) běží řádek jako dřív v hlavním vlákně.
+
+### Vzhled okna podle návrhu (design/terminal.html)
+
+Okno `gui-term` kreslí text mřížkou znaků (stejný snímek jako konzole)
+a podle rolí řádků (`term::ui::draw::Role`) nad ní dokreslí prvky návrhu
+(`user/gui-term/src/rows.rs`). Snímek pro porovnání: `target/shots/terminal.png`
+(test vzhledu `look_shots`).
+
+| Prvek návrhu | Stav |
+|---|---|
+| levý pruh bloku podle stavu (běží, hotovo, chyba), příkaz tučně, čas a výsledek vpravo písmem UI | **[implementováno]** |
+| rámeček chyby (danger-soft, okraj danger) | **[implementováno]** |
+| řádek vstupu: linka nad ním, pilulka se složkou | **[implementováno]** (bez ikony složky) |
+| nápověda kláves jako štítky | **[implementováno]** |
+| linka pod záhlavím tabulky | **[implementováno]** (typ sloupce pod jménem zatím ne) |
+| doplňování jako nabídka nad řádkem, myš, výběr textu a schránka | **[navrženo]** (krok 4, komponenty 6c) |
+| panel úloh vpravo, náhled změn s tlačítky, karty relací a přepínač B/C v titulku, akce bloku, animace | **[navrženo]** (krok 5) |
+
 ### Ukazatel činnosti a průběh
 
 Příkazy činnost nekreslí samy znaky: hlásí ji strukturovaně (běžící blok,

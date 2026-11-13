@@ -41,9 +41,9 @@ fn task_id(v: &Value, span: Span) -> R<u64> {
     match v.field("task") {
         Some(Value::Int(i)) if i > 0 => Ok(i as u64),
         _ => Err(Flow::Err(
-            ShError::new(code::TYPE, alloc::format!("cekam ulohu (async), dostal jsem {}", v.type_name()))
+            ShError::new(code::TYPE, alloc::format!("čekám úlohu (async), dostal jsem {}", v.type_name()))
                 .at(span)
-                .hint("ulohu vytvori: let u = async { ... }"),
+                .hint("úlohu vytvoří: let u = async { ... }"),
         )),
     }
 }
@@ -166,7 +166,7 @@ impl Interp {
         let running: Vec<u64> =
             ids.iter().copied().filter(|i| matches!(self.tasks.get(i), Some(TaskSlot::Running))).collect();
         if let Some(bad) = ids.iter().find(|i| !self.tasks.contains_key(i)) {
-            return Err(Flow::Err(ShError::new(code::ARGS, alloc::format!("uloha {bad} neexistuje")).at(span)));
+            return Err(Flow::Err(ShError::new(code::ARGS, alloc::format!("úloha {bad} neexistuje")).at(span)));
         }
         if running.is_empty() || (any && !done.is_empty()) {
             return Ok(done);
@@ -198,7 +198,7 @@ impl Interp {
                 Value::List(items) => items.iter().map(|v| task_id(v, span)).collect::<R<_>>()?,
                 other => {
                     return Err(Flow::Err(
-                        ShError::new(code::TYPE, alloc::format!("await all/any ceka seznam uloh, ne {}", other.type_name()))
+                        ShError::new(code::TYPE, alloc::format!("await all/any čeká seznam úloh, ne {}", other.type_name()))
                             .at(span)
                             .hint("await all [a, b]"),
                     ));
@@ -221,12 +221,12 @@ impl Interp {
         let done = self.wait_tasks(host, &ids, kind == AwaitKind::Any, deadline, span)?;
         let result = |s: &Self, id: u64| match s.tasks.get(&id) {
             Some(TaskSlot::Done(r)) => r.clone(),
-            _ => Err(ShError::new(code::INTERRUPTED, alloc::format!("uloha {id} nedobehla"))),
+            _ => Err(ShError::new(code::INTERRUPTED, alloc::format!("úloha {id} nedoběhla"))),
         };
         match kind {
             AwaitKind::One => result(self, ids[0]).map_err(|e| Flow::Err(e.at(span))),
             AwaitKind::Any => {
-                let first = *done.first().ok_or_else(|| Flow::Err(ShError::new(code::ARGS, "await any: prazdny seznam").at(span)))?;
+                let first = *done.first().ok_or_else(|| Flow::Err(ShError::new(code::ARGS, "await any: prázdný seznam").at(span)))?;
                 result(self, first).map_err(|e| Flow::Err(e.at(span)))
             }
             AwaitKind::All => {
@@ -273,7 +273,7 @@ impl Interp {
             None => {
                 self.tasks.insert(
                     id,
-                    TaskSlot::Done(Err(ShError::new(code::INTERRUPTED, alloc::format!("uloha {id} byla zrusena")))),
+                    TaskSlot::Done(Err(ShError::new(code::INTERRUPTED, alloc::format!("úloha {id} byla zrušena")))),
                 );
             }
         }
@@ -307,7 +307,7 @@ impl Interp {
             }
         }
         if cancelled > 0 {
-            host.note(&alloc::format!("{cancelled} nedokoncenych uloh zruseno (konec bloku)"));
+            host.note(&alloc::format!("{cancelled} nedokončených úloh zrušeno (konec bloku)"));
         }
         if self.task_scopes.is_empty() {
             self.task_scopes.push(Vec::new());
@@ -426,7 +426,7 @@ impl Interp {
         // Zrusena (i po dobehnuti tela) nebo chybna uloha: koncept zahodit
         // (nic se nezmeni).
         let r = match r {
-            Ok(_) if host.interrupted() => Err(ShError::new(code::INTERRUPTED, "uloha byla zrusena")),
+            Ok(_) if host.interrupted() => Err(ShError::new(code::INTERRUPTED, "úloha byla zrušena")),
             r => r,
         };
         if r.is_err() {

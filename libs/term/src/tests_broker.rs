@@ -22,7 +22,7 @@ fn control_messages_roundtrip() {
         RegMsg::Park { session: 3, tag: "x-3".into() },
         RegMsg::Unpark { session: 3 },
         RegMsg::Claim,
-        RegMsg::Parked { sessions: vec![(1, "a".into()), (2, "b".into())] },
+        RegMsg::Parked { sessions: vec![(1, "a".into()), (2, "b".into())], home: "/home/eva".into() },
     ] {
         assert_eq!(RegMsg::decode(&m.encode()), Ok(m));
     }
@@ -45,7 +45,7 @@ fn registry_keeps_spare_ends_until_claimed() {
     r.handle(RegMsg::Park { session: 9, tag: "t-9".into() }, vec![]);
     r.handle(RegMsg::Unpark { session: 2 }, vec![]);
     let (reply, hs) = r.handle(RegMsg::Claim, vec![]).unwrap();
-    assert_eq!(reply, RegMsg::Parked { sessions: vec![(1, "t-1".into())] });
+    assert_eq!(reply, RegMsg::Parked { sessions: vec![(1, "t-1".into())], home: "/".into() });
     assert_eq!(hs, vec!["h1b"]);
     assert!(r.is_empty(), "vydane konce registr uz nedrzi");
 }
