@@ -19,6 +19,7 @@
 extern crate alloc;
 
 mod blockact;
+mod compl;
 #[path = "../../console/src/connect.rs"]
 mod connect;
 mod keys;
@@ -182,6 +183,11 @@ struct Term {
     hover: Option<u64>,
     /// Vyber textu mysi.
     select: term::select::Selector,
+    /// Nabidka doplnovani (seznam navrhu ve vrstve popoveru).
+    compl: Option<compl::Compl>,
+    /// Poloha obsahu okna na obrazovce (`WINDOW_PLACE`; prazdna =
+    /// nezname, seznam navrhu jen v okne).
+    place: Rect,
 }
 
 /// Mrizka v okne `w` x `h`; s panelem uloh je o jeho sirku uzsi.
@@ -209,6 +215,8 @@ impl Term {
         app.glyphs = term::activity::Glyphs::Drawn;
         // Pred slozku ve vyzve okno kresli ikonu (rows.rs).
         app.icon_room = true;
+        // Nabidku doplnovani kresli okno (seznam navrhu, compl.rs).
+        app.float_menu = true;
         let mut t = Self {
             win,
             look,
@@ -221,6 +229,8 @@ impl Term {
             more: false,
             hover: None,
             select: term::select::Selector::new(Some(ui::text::word_at), ui::MULTI_CLICK),
+            compl: None,
+            place: Rect::default(),
         };
         t.app.welcome = true;
         t.conn.start();
@@ -329,6 +339,46 @@ impl Term {
         }
     }
 
+    /// Seznam navrhu podle nabidky `App`: kotva = bunka zacatku
+    /// doplnovaneho slova v radku vstupu posledniho snimku, plocha =
+    /// pracovni plocha (presah pres okraj okna), bez znalosti polohy okno.
+    fn sync_compl(&mut self) {
+        let g = self.look.grid(self.screen.cols);
+        let row = self.lines.iter().position(|l| matches!(l.role, term::ui::draw::Role::Input { .. }));
+        let col = self.app.menu_col().unwrap_or(0).min(self.screen.cols.saturating_sub(1));
+        let anchor = match row {
+            Some(r) => Rect::new(g.x + (col as u32 * g.cw) as i32, g.y + (r as u32 * g.ch) as i32, g.cw, g.ch),
+            None => Rect::new(g.x, g.y + (self.screen.rows as u32 * g.ch) as i32, g.cw, g.ch),
+        };
+        let win = Rect::new(0, 0, self.win.w, self.win.h);
+        let area = match &self.win.context {
+            Some(c) if self.place.w > 0 && c.work_area.w > 0 => Rect::new(c.work_area.x - self.place.x, c.work_area.y - self.place.y, c.work_area.w, c.work_area.h),
+            _ => win,
+        };
+        let min_hit = self.win.context.as_ref().map_or(0, |c| c.ext.min_hit as u32);
+        compl::Compl::sync(&mut self.compl, &self.app, anchor, area, &self.look.t, min_hit);
+    }
+
+    /// Vstup pro otevreny seznam navrhu: `Err(redraw)` = spotrebovany,
+    /// `Ok(redraw)` = jde dal (zmena najeti nebo zavreni stiskem mimo).
+    fn compl_input(&mut self, r: &InputRecord) -> Result<bool, bool> {
+        self.sync_compl();
+        let Some(c) = self.compl.as_mut() else { return Ok(false) };
+        let res = match r.event {
+            InputEvent::Key { .. } => match c.key(r, &mut self.app) {
+                Some(d) => Err(d),
+                None => Ok(false),
+            },
+            InputEvent::PointerMove { .. } | InputEvent::Button { .. } | InputEvent::Scroll { .. } | InputEvent::PointerLeave => {
+                let (consumed, changed) = c.pointer(&r.event, &mut self.app);
+                if consumed { Err(true) } else { Ok(changed) }
+            }
+            _ => Ok(false),
+        };
+        self.send_out();
+        res
+    }
+
     fn resize(&mut self) {
         let (c, r) = grid(&self.look, self.win.w, self.win.h, self.panel());
         self.screen = Screen::new(c, r);
@@ -412,9 +462,14 @@ impl Term {
             v.push('\n');
         }
         t.value = v;
-        t.state = guiproto::a11y::state::FOCUSED;
+        // Radek vstupu ma doplnovani (combobox); otevreny seznam EXPANDED.
+        use guiproto::a11y::state::{AUTOCOMPLETE, EXPANDED, FOCUSED};
+        t.state = FOCUSED | AUTOCOMPLETE | if self.compl.is_some() { EXPANDED } else { 0 };
         t.actions = actions::SET_VALUE;
         let mut nodes = vec![win, bar, tab, t];
+        if let Some(c) = &self.compl {
+            nodes.extend(c.a11y(4));
+        }
         // Akce bloku u vsech viditelnych hlavicek (Sbalit, Kopirovat,
         // Spustit znovu).
         let g = self.look.grid(self.screen.cols);
@@ -532,6 +587,20 @@ impl Term {
             paint_notation(c, look, c_on);
         })?;
         self.lines = lines;
+        // Seznam navrhu ve vrstve popoveru (muze presahovat okno).
+        self.sync_compl();
+        match self.compl.as_ref().map(|c| c.comp.rect()).filter(|r| !r.is_empty()) {
+            Some(r) => {
+                let comp = &self.compl.as_ref().unwrap().comp;
+                let look = &mut self.look;
+                self.win.draw_popover(r, |c| {
+                    c.fill(c.bounds(), 0);
+                    let mut p = ui::complete::Paint { theme: &look.t, fonts: &mut look.ui, mono: Some(&mut look.mono), icons: &mut look.icons };
+                    comp.draw(c, (r.x, r.y), &mut p);
+                })?;
+            }
+            None => self.win.hide_popover()?,
+        }
         let nodes = self.a11y();
         self.win.set_a11y(&nodes)?;
         self.win.commit_redrawn(false)
@@ -554,7 +623,15 @@ impl Term {
 
     /// Udalost okna; `Some(true)` = prekreslit, `None` = konec aplikace.
     fn event(&mut self, ev: Event) -> Option<bool> {
-        Some(match ev {
+        // Otevreny seznam navrhu dostane vstup prvni.
+        let mut pre = false;
+        if let Event::Input(r) = &ev {
+            match self.compl_input(r) {
+                Err(redraw) => return Some(redraw),
+                Ok(changed) => pre = changed,
+            }
+        }
+        let redraw = match ev {
             // Ukazatel nad blokem: akce bloku v hlavicce.
             Event::Input(InputRecord { event: InputEvent::PointerMove { x, y }, .. }) => {
                 let dragged = match self.cell_at(x, y) {
@@ -676,6 +753,13 @@ impl Term {
                 self.app.theme = self.look.term_theme();
                 true
             }
+            // Polozka seznamu navrhu (ACTIVATE doplni, FOCUS vybere).
+            Event::A11yAction { node, action, .. } if node > compl::LIST_NODE && self.compl.is_some() => {
+                self.sync_compl();
+                let r = self.compl.as_mut().and_then(|c| c.a11y_action(node, action, &mut self.app)).unwrap_or(false);
+                self.send_out();
+                r
+            }
             Event::A11yAction { node, action, .. } if action & actions::ACTIVATE != 0 && node >= ACT_NODE => {
                 let g = self.look.grid(self.screen.cols);
                 let b = blockact::layout(&self.look, &self.lines, &g, |_| true).into_iter().nth((node - ACT_NODE) as usize);
@@ -736,8 +820,13 @@ impl Term {
                 let _ = self.win.action_result(call, Err("neznama akce".into()));
                 false
             }
+            Event::Place(r) => {
+                self.place = r;
+                self.compl.is_some()
+            }
             _ => false,
-        })
+        };
+        Some(pre || redraw)
     }
 }
 

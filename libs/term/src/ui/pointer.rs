@@ -41,11 +41,18 @@ impl App {
         if self.prompt.is_some() {
             return;
         }
-        let start = if self.icon_room { 2 } else { 0 } + self.cwd_short().chars().count() + 3;
-        let k = col.saturating_sub(start);
+        let k = col.saturating_sub(self.input_col(0));
         let text = &self.editor.text;
         self.editor.cursor = text.char_indices().nth(k).map_or(text.len(), |(p, _)| p);
         self.focus = Focus::Editor;
         self.menu = None;
+    }
+
+    /// Sloupec radku vstupu, na kterem lezi bajt `at` textu editoru (za
+    /// vyzvou: ikona, kratka slozka, `" > "`; konec radku = jedna bunka).
+    pub fn input_col(&self, at: usize) -> usize {
+        let start = if self.icon_room { 2 } else { 0 } + self.cwd_short().chars().count() + 3;
+        let at = at.min(self.editor.text.len());
+        start + self.editor.text.get(..at).map_or(0, |s| s.chars().count())
     }
 }

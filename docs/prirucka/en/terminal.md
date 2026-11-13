@@ -53,6 +53,10 @@ ls ~/Dokumenty -r | where size > 100MB | sort size -d
 | `Ctrl+L` | collapses old output blocks |
 | `Ctrl+T` | task panel |
 
+When there are several options, Tab opens a suggestion list above the
+line. Typing narrows it, arrows choose, Enter or Tab completes the item,
+Esc closes the list. You can also click an item.
+
 With the mouse: drag to select text, double click for a word, triple
 click for a whole line. A click into the command line moves the cursor.
 The "Copy output" button in a block header copies the whole command output.

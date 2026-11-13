@@ -742,7 +742,12 @@ history, for an argument from completion by the argument type (`cd` only
 directories, paths, table fields) - the window requests it itself
 (`Complete` with the `seq` flag 0x8000_0000). Tab: a single match is
 completed at once, several matches open a menu that typing narrows (arrows
-/Tab choose, Enter confirms, Esc closes). The output scrolls with the wheel
+/Tab choose, Enter confirms, Esc closes). In the GUI window the menu is the
+shared suggestion list (`ui::complete`, look `#compl`) in the popover layer
+above the input line, at the start of the completed word. The line keeps
+focus: arrows, PgUp/PgDn and Home/End change the selection, Enter or Tab
+completes, Esc or a click outside closes, a click on an item completes it.
+The output scrolls with the wheel
 and Shift+PgUp/PgDn (plain PgUp is the table); when not at the bottom a
 "N lines below" bar shows it, a new block or typing returns to the bottom.
 `help` is an overview by groups (name and description), details in
@@ -1058,7 +1063,7 @@ comparison: `target/shots/terminal.png` (look test `look_shots`).
 | text selection with the mouse (like Windows Terminal): a drag selects characters, a double click a word (`ui::text::word_at`), a triple click lines, Shift+click extends; color `accent_soft`. The selection keeps screen cells; with new output it moves with the text, and when the text of the selected rows changes it is cleared (`libs/term/src/select.rs`). Typing clears it | **[verified in QEMU]** (a mouse drag with physical input, test `gui_term.rs`; double and triple click host tests `tests_select.rs`) |
 | clipboard: Ctrl+C with a selection and Ctrl+Shift+C copy (the selection then disappears), without a selection Ctrl+C interrupts the command; Ctrl+V and Ctrl+Shift+V paste at the input line cursor. Pasting runs nothing: the last line break is dropped, inner ones stay (the line shows them as ↵, Enter runs everything as one script), a tab = a space, control characters are dropped, at most 64 Ki characters | **[verified in QEMU]** (Ctrl+C and Ctrl+V from a physical keyboard, test `gui_term.rs`; the clipboard needs a physical gesture) |
 | a click into the input line moves the cursor to the character under the pointer | **[implemented]** (host test) |
-| completion as a menu above the line (a combobox that does not take focus, mouse) | **[designed]** (waits for the "suggestion list" component in `libs/ui` from 6c) |
+| completion as a menu above the line: the suggestion list `ui::complete::Completion` in the popover layer (may extend past the window into the work area), anchor = the cell where the word starts, header by item kind ("Cesty", "Příkazy", ...), an icon and a kind per item. The input line keeps focus (combobox); in accessibility it has the `AUTOCOMPLETE` state, `EXPANDED` while the list is open, the list is a `ListBox` with `ListOption` items (ACTIVATE completes). Items and the selection live in `term::ui` (`App::menu`, `float_menu` turns off the text lines of the menu) | **[verified in QEMU]** (Tab and an arrow from the physical keyboard, the list above the line, completion through accessibility: test `gui_term.rs`; a mouse click only in the component test) |
 | notation switch B / C in the title (state `App::notation_c`; a click, Ctrl+F and accessibility convert the line being typed) | **[verified in QEMU]** |
 | a new block fades in (`motion.base`, curve `ease_enter`); blocks replayed after connecting do not. The grid does not do the 6 px shift from the design (the fade is also the substitute for "Reduce motion") | **[implemented]** |
 | task panel on the right (width `size.side_panel`): task cards with state, progress bar and a Cancel button, a list in accessibility. It shows by itself only on a screen wider than 1280 px and in a window at least 900 px wide, otherwise Ctrl-T shows the tasks. Default window 1040 px, at most 85 % of the work area width (`Window::request_size` before the first draw) | **[implemented]** (QEMU tests have a 1280 px screen, the panel was verified once with a lowered limit) |

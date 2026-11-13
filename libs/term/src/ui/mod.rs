@@ -9,6 +9,7 @@
 
 pub mod draw;
 pub mod editor;
+pub mod menu;
 mod pointer;
 pub use pointer::PASTE_MAX;
 pub mod preview;
@@ -128,6 +129,9 @@ pub struct App {
     /// Okno GUI kresli pred slozku ve vyzve ikonu: radek vstupu pro ni
     /// nechava dve bunky (pilulka podle `design/terminal.html`).
     pub icon_room: bool,
+    /// Nabidku doplnovani kresli okno samo (seznam navrhu ve vrstve
+    /// popoveru, [`menu`]): snimek pro ni nema radky.
+    pub float_menu: bool,
     /// Zvoleny zapis jazyka: `false` = B (prikazovy), `true` = C
     /// (vyrazovy). Ctrl+F a prepinac v titulku okna ho meni a rozepsany
     /// radek prevedou.
@@ -197,6 +201,7 @@ impl App {
             now: None,
             glyphs: crate::activity::Glyphs::Text,
             icon_room: false,
+            float_menu: false,
             notation_c: false,
             tick: 0,
             scroll: 0,
@@ -831,20 +836,19 @@ impl App {
         // Vyzva.
         self.draw_prompt(&mut bottom);
         // Nabidka doplnovani.
-        if let Some(m) = &self.menu {
+        if let Some(m) = self.menu.as_ref().filter(|_| !self.float_menu) {
             // Okno kolem vyberu (dlouhy seznam se posouva se sipkami).
             let first = m.sel.saturating_sub(5);
             let w = m.items.iter().map(|(t, _, _)| t.chars().count()).max().unwrap_or(0).min(40);
             for (i, (text, kind, help)) in m.items.iter().enumerate().skip(first).take(6) {
                 let mut l = Line::new();
                 // Typ polozky: znacka a popis (slozka, soubor, prikaz...).
-                let (mark, what, col) = match *kind {
-                    k if k == shlang::complete::CandKind::Dir as u8 => ("\u{25B8} ", "složka", t.ui.accent),
-                    k if k == shlang::complete::CandKind::File as u8 => ("\u{2022} ", "soubor", t.ui.fg),
-                    k if k == shlang::complete::CandKind::Command as u8 => ("  ", "příkaz", t.syntax(shlang::highlight::Class::Command).fg),
-                    k if k == shlang::complete::CandKind::Flag as u8 => ("  ", "přepínač", t.ui.fg),
-                    k if k == shlang::complete::CandKind::Var as u8 => ("  ", "proměnná", t.ui.fg),
-                    _ => ("  ", "sloupec", t.ui.fg),
+                let what = menu::kind_info(*kind).1;
+                let (mark, col) = match *kind {
+                    k if k == shlang::complete::CandKind::Dir as u8 => ("\u{25B8} ", t.ui.accent),
+                    k if k == shlang::complete::CandKind::File as u8 => ("\u{2022} ", t.ui.fg),
+                    k if k == shlang::complete::CandKind::Command as u8 => ("  ", t.syntax(shlang::highlight::Class::Command).fg),
+                    _ => ("  ", t.ui.fg),
                 };
                 l.push(Some(Style::fg(t.ui.muted)), &alloc::format!("  {mark}"));
                 l.push(Some(Style::fg(col)), &alloc::format!("{text:<w$}"));
