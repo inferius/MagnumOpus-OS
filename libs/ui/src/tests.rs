@@ -98,8 +98,10 @@ impl H {
         self.apply(r)
     }
 
+    /// Stisk a pusteni klavesy.
     fn key(&mut self, code: u16) {
         self.ev(InputEvent::Key { code, action: 1, ch: None });
+        self.ev(InputEvent::Key { code, action: 0, ch: None });
     }
 
     fn node(&self, role: Role, name: &str) -> guiproto::a11y::Node {
@@ -297,4 +299,22 @@ fn click_survives_relayout_between_press_and_release() {
     ui.rebuild("t".into(), view(5));
     let r = ui.event(InputEvent::Button { code: BTN_LEFT, pressed: false, x, y }, 0);
     assert_eq!(r.msgs.len(), 1, "klik po prerozvrzeni");
+}
+
+#[test]
+fn enter_and_space_activate_on_release() {
+    let mut h = H::new();
+    // Fokus na prvnim tlacitku (Pridat): stisk Enter sam nic.
+    h.ev(InputEvent::Key { code: KEY_ENTER, action: 1, ch: None });
+    assert_eq!(h.app.count, 0, "akce az pri pusteni");
+    h.ev(InputEvent::Key { code: KEY_ENTER, action: 0, ch: None });
+    assert_eq!(h.app.count, 1);
+    // Mys: stisk na tlacitku, odjeti mimo, pusteni = nic.
+    let b = h.node(Role::Button, "Přidat").bounds;
+    let (x, y) = (b.x + 3, b.y + 3);
+    h.ev(InputEvent::PointerMove { x, y });
+    h.ev(InputEvent::Button { code: inputproto::code::BTN_LEFT, pressed: true, x, y });
+    h.ev(InputEvent::PointerMove { x: x + 300, y: y + 300 });
+    h.ev(InputEvent::Button { code: inputproto::code::BTN_LEFT, pressed: false, x: x + 300, y: y + 300 });
+    assert_eq!(h.app.count, 1, "pusteni mimo tlacitko akci zrusi");
 }

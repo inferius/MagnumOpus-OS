@@ -28,7 +28,13 @@ use crate::Comp;
 pub const MAX_MENU_DELAY: u64 = 400_000_000;
 /// Volby nabidky u tlacitka maximalizace.
 pub const MAX_MENU: [&str; 4] = ["Maximalizovat", "Celá obrazovka", "Připnout vlevo", "Připnout vpravo"];
-pub const EXIT_LABEL: &str = "Opustit celou obrazovku";
+pub const EXIT_LABEL: &str = "Ukončit celou obrazovku";
+/// Zona u horniho okraje, ktera vysune odznak a tlacitko navratu.
+pub const EDGE_ZONE: i32 = 24;
+/// Jak dlouho zustane vysunute po odjeti ukazatele.
+pub const EXIT_SHOW: u64 = 2_500_000_000;
+/// Drzeni Esc, ktere vzdy ukonci celou obrazovku.
+pub const ESC_HOLD: u64 = 1_000_000_000;
 
 /// Ulozeny stav okna pred celou obrazovkou: rezim, obdelnik, maximalizace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +139,32 @@ impl Comp {
         Some(Rect::new(b.right() as i32 + t.space[3] as i32, b.y, bw, b.h))
     }
 
+    /// Esc stisknut (cas) / pusten: drzeni [`ESC_HOLD`] ukonci celou
+    /// obrazovku okna s fokusem. Klavesa jde dal i aplikaci.
+    pub(crate) fn fs_esc(&mut self, down: bool, now: u64) {
+        let fs = self.focus.is_some_and(|g| self.is_fullscreen(g));
+        self.esc_since = match (down, fs) {
+            (true, true) => self.esc_since.or(Some(now)),
+            _ => None,
+        };
+    }
+
+    /// Budik drzeneho Esc.
+    pub(crate) fn fs_esc_due(&self) -> Option<u64> {
+        self.esc_since.map(|t| t + ESC_HOLD)
+    }
+
+    pub(crate) fn fs_esc_timer(&mut self, now: u64) {
+        if let Some(t) = self.esc_since
+            && now >= t + ESC_HOLD
+        {
+            self.esc_since = None;
+            if let Some(g) = self.focus.filter(|&g| self.is_fullscreen(g)) {
+                self.toggle_fullscreen(g, now);
+            }
+        }
+    }
+
     /// Nabidka u tlacitka maximalizace: obdelnik a radky.
     pub(crate) fn max_menu_rect(&self) -> Option<Rect> {
         let g = self.max_menu?;
@@ -147,7 +179,7 @@ impl Comp {
         Some(Rect::new(x, b.bottom() as i32 + t.space[2] as i32, mw, h))
     }
 
-    fn max_menu_row(&self, y: i32) -> Option<usize> {
+    pub(crate) fn max_menu_row(&self, y: i32) -> Option<usize> {
         let r = self.max_menu_rect()?;
         let t = &self.style.theme;
         let i = (y - r.y - t.space[2] as i32).div_euclid(t.size.control_h as i32);

@@ -1262,15 +1262,59 @@ fn bar_icons_open_flyouts() {
 
 #[test]
 fn tasks_icon_tooltip() {
+    use crate::input::SysKey;
+    use crate::tooltip::{DELAY, REOPEN, Tip};
     let mut t = T::new();
     t.c.tasks = (20, 1);
     t.frame();
-    let r = t.c.bar_layout().tasks.expect("ikona uloh");
+    let bar = t.c.bar_layout();
+    let r = bar.tasks.expect("ikona uloh");
     t.move_to(r.x + 4, r.y + 4);
-    assert!(t.c.tasks_tip_visible(), "popisek po najeti");
-    assert_eq!(t.c.tasks_tip(), "Úlohy: 20 běží, z toho agent AI 1");
+    assert_eq!(t.c.tooltip_shown(), None, "bublina az po prodleve");
+    t.now += DELAY + 1;
+    t.c.timers(t.now);
+    assert_eq!(t.c.tooltip_shown(), Some(Tip::Bar(SysKey::Tasks)));
+    assert_eq!(t.c.tip_text(Tip::Bar(SysKey::Tasks)), "Úlohy: 20 běží, z toho agent AI 1");
+    // Zmena poctu: bublina ukazuje nove cislo (stejny zdroj jako ikona).
+    t.c.set_tasks(19, 1);
+    assert_eq!(t.c.tip_text(Tip::Bar(SysKey::Tasks)), "Úlohy: 19 běží, z toho agent AI 1");
+    // Presun na zvonek tesne po predchozi: hned, bez prodlevy.
+    t.now += REOPEN / 2;
+    t.move_to(bar.bell.x + 4, bar.bell.y + 4);
+    assert_eq!(t.c.tooltip_shown(), Some(Tip::Bar(SysKey::BarIcon(2))), "hned po predchozi");
+    // Odjeti mimo listu: zmizi; klik ji skryje.
     t.move_to(5, 5);
-    assert!(!t.c.tasks_tip_visible());
+    assert_eq!(t.c.tooltip_shown(), None);
+    // Klik na ikonu uloh: Spravce uloh (spusteni / aktivace), zadny panel.
+    t.click(r.x + 4, r.y + 4);
+    assert_eq!(t.c.take_launch_requests(), vec![alloc::string::String::from(crate::render::TASKS_APP)]);
+    assert_eq!(t.c.flyout, None);
+}
+
+#[test]
+fn title_double_click_maximizes_and_esc_hold_leaves_fullscreen() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let g = t.c.clients[&a].windows[&1];
+    let tb = t.c.windows[&g].title_bar().unwrap();
+    let (x, y) = (tb.x + tb.w as i32 / 2, tb.y + 10);
+    t.click(x, y);
+    assert!(t.c.windows[&g].restore.is_none(), "jeden klik nic");
+    t.now += 100_000_000;
+    t.click(x, y);
+    assert!(t.c.windows[&g].restore.is_some(), "dvojklik maximalizuje");
+    // Cela obrazovka: drzeny Esc 1 s ukonci.
+    t.c.toggle_fullscreen(g, t.now);
+    let r = Record::new(Event::Key { code: inputproto::code::KEY_ESC, scancode: 1, action: Action::Press, ch: None }, 0, 0, t.now);
+    t.c.input(&[r], t.now);
+    t.now += crate::fullscreen::ESC_HOLD / 2;
+    t.c.timers(t.now);
+    assert!(t.c.is_fullscreen(g), "kratky stisk nestaci");
+    t.now += crate::fullscreen::ESC_HOLD;
+    t.c.timers(t.now);
+    assert!(!t.c.is_fullscreen(g), "Esc drzeny 1 s ukonci celou obrazovku");
 }
 
 #[test]
@@ -1660,6 +1704,7 @@ fn multiple_windows_per_app_and_user_launch_focus() {
     let r = t.c.bar_layout().apps.iter().find(|(g, _)| *g == ga).unwrap().1;
     t.move_to(r.x + 4, r.y + 4);
     t.input(Event::Button { button: inputproto::Button::Middle, action: Action::Press }, false);
+    t.input(Event::Button { button: inputproto::Button::Middle, action: Action::Release }, false);
     assert_eq!(t.c.take_launch_requests(), vec![alloc::string::String::from("org.term")]);
     // Druha instance (spustil ji uzivatel) dostane fokus i pres jine okno.
     let gother = t.c.clients[&o].windows[&1];
@@ -1702,6 +1747,7 @@ fn multiple_windows_per_app_and_user_launch_focus() {
     let ro = t.c.bar_layout().apps.iter().find(|(g, _)| *g == gother).unwrap().1;
     t.move_to(ro.x + 4, ro.y + 4);
     t.input(Event::Button { button: inputproto::Button::Middle, action: Action::Press }, false);
+    t.input(Event::Button { button: inputproto::Button::Middle, action: Action::Release }, false);
     assert!(t.c.take_launch_requests().is_empty(), "single: prostredni klik nic");
 }
 
@@ -1732,4 +1778,39 @@ fn settle_answers_even_while_app_redraws_continuously() {
         }
     }
     panic!("Settle neodpovedel, i kdyz vse pred dotazem uz bylo zobrazene");
+}
+
+#[test]
+fn system_controls_act_on_release_over_same_element() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let g = t.c.clients[&a].windows[&1];
+    let b = t.c.windows[&g].buttons()[2];
+    let (bx, by) = (b.x + b.w as i32 / 2, b.y + b.h as i32 / 2);
+    // Stisk na minimalizaci, odjeti mimo, pusteni: nic.
+    t.move_to(bx, by);
+    left(&mut t, true);
+    assert!(!t.c.windows[&g].minimized, "stisk sam nic nedela");
+    assert!(t.c.sys_pressed(crate::input::SysKey::WinButton(g, 2)), "stav stisknuto");
+    t.move_to(bx + 200, by + 200);
+    assert!(!t.c.sys_pressed(crate::input::SysKey::WinButton(g, 2)), "mimo prvek: neni stisknuto");
+    left(&mut t, false);
+    assert!(!t.c.windows[&g].minimized, "pusteni mimo prvek akci zrusi");
+    // Navrat nad prvek s drzenym tlacitkem: stav se obnovi, pusteni = akce.
+    t.move_to(bx, by);
+    left(&mut t, true);
+    t.move_to(bx + 200, by);
+    t.move_to(bx, by);
+    assert!(t.c.sys_pressed(crate::input::SysKey::WinButton(g, 2)), "navrat obnovi stisknuto");
+    left(&mut t, false);
+    assert!(t.c.windows[&g].minimized, "stisk a pusteni na prvku = akce");
+    // Spoustec v liste: totez.
+    let l = t.c.bar_layout().launcher;
+    t.move_to(l.x + 4, l.y + 4);
+    left(&mut t, true);
+    assert_eq!(t.c.flyout, None, "panel az pri pusteni");
+    left(&mut t, false);
+    assert_eq!(t.c.flyout, Some(crate::flyout::Flyout::Apps));
 }

@@ -534,8 +534,11 @@ the screen size and the `FULLSCREEN` flag and needs to support nothing.
   rectangle and maximization are saved and restored on return. The bar is
   hidden (its panels close).
 - **Leave:** the same shortcut, the palette item "Opustit celou
-  obrazovku", or the **Opustit celou obrazovku** button next to the trust
-  badge that appears when the pointer reaches the top edge.
+  obrazovku", **Esc held for 1 s** (the key still reaches the app), or the
+  **Ukončit celou obrazovku** button next to the trust badge: it slides in
+  when the pointer is within 24 px of the top edge and hides 2.5 s after it
+  leaves (okna.html). **[implemented]** (test
+  `title_double_click_maximizes_and_esc_hold_leaves_fullscreen`)
 - **Security:** the trust badge at the top edge on hover; the secure
   shortcut and system dialogs always work (drawn above everything).
 - **Do not disturb:** turned on automatically in fullscreen (approved by
@@ -544,6 +547,30 @@ the screen size and the `FULLSCREEN` flag and needs to support nothing.
   **[implemented]** There is no notification system yet: silently queuing
   notifications and showing them on return, the exceptions (calls,
   battery, security) and a config key in Settings **[designed]**.
+
+### Controls: act on release, tooltips, double click
+
+- **Act on release** over the same element for every system control (bar,
+  launcher, panels, window buttons, palette, maximize menu, system dialog
+  buttons) and in `libs/ui`: a press only shows the pressed state (an
+  `accent_soft` background in the bar), dragging away with the button held
+  cancels the action and the state, coming back restores it. One place in
+  the compositor (`Comp::sys_key_at`). Exceptions: dragging the title and
+  edges (starts on press), window content (the app handles it), closing a
+  panel by clicking outside. Keyboard: Enter and Space on a button and a
+  checkbox act on release. **[implemented]** (tests
+  `system_controls_act_on_release_over_same_element`, `enter_and_space_activate_on_release`)
+- **Tooltips** on all bar items (bubliny-panely.html): after 500 ms,
+  immediately within 300 ms of the previous one, hidden on leave or click;
+  the window / app text, "spustit", network and sound state, Oznámení, the
+  task count, the date at the clock. System material without an arrow, at
+  most 280 px. A 100 ms hide delay and tooltips on keyboard focus
+  **[designed]**. **[implemented]** (test `tasks_icon_tooltip`)
+- **Tasks icon:** a click starts or activates the Task manager (the count
+  is in the tooltip); a count change also redraws the tooltip (it used to
+  keep the old number).
+- **Double click on the title** (within 400 ms and 4 px) maximizes /
+  restores.
 
 ### Several windows of one app and focus of new windows
 

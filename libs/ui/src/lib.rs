@@ -108,6 +108,8 @@ pub struct Ui<M> {
     pub(crate) active: bool,
     /// Misto stisknuteho prvku (prostor, obdelnik) pro parovani s pustenim.
     pub(crate) pressed_rect: Option<(usize, Rect)>,
+    /// Prvek s drzenou klavesou Enter / mezernik (akce az pri pusteni).
+    pub(crate) key_pressed: Option<usize>,
 }
 
 /// Posouvana oblast: index prvku, obdelnik v okne, vyska obsahu, posun.
@@ -137,6 +139,7 @@ impl<M: Clone> Ui<M> {
             title: String::new(),
             active: true,
             pressed_rect: None,
+            key_pressed: None,
         }
     }
 

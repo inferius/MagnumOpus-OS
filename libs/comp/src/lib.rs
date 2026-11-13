@@ -35,6 +35,7 @@ pub mod input;
 pub mod output;
 pub mod render;
 pub mod scene;
+pub mod tooltip;
 pub mod services;
 pub mod style;
 
@@ -164,6 +165,12 @@ pub struct Comp {
     pub(crate) expect_focus: Vec<(alloc::string::String, u64)>,
     /// Aplikace s vice okny (`multi` z manifestu).
     pub(crate) multi: Vec<alloc::string::String>,
+    /// Od kdy je drzeny Esc pri cele obrazovce (`fullscreen.rs`).
+    pub(crate) esc_since: Option<u64>,
+    /// Bublina listy: prvek pod ukazatelem (od kdy), zobrazena, kdy zmizela.
+    pub(crate) tip_hover: Option<(tooltip::Tip, u64)>,
+    pub(crate) tip_shown: Option<tooltip::Tip>,
+    pub(crate) tip_hidden_at: u64,
     /// Drzeny Ctrl pri otevrene palete (Ctrl+Enter).
     pub(crate) palette_ctrl: bool,
 }
@@ -216,6 +223,10 @@ impl Comp {
             expect_focus: Vec::new(),
             multi: Vec::new(),
             palette_ctrl: false,
+            esc_since: None,
+            tip_hover: None,
+            tip_shown: None,
+            tip_hidden_at: 0,
         };
         c.damage_all();
         c
@@ -302,7 +313,13 @@ impl Comp {
     /// Pocet bezicich uloh pro ikonu v panelu (od sluzby uloh).
     pub fn set_tasks(&mut self, running: u32, agent: u32) {
         if self.tasks != (running, agent) {
+            // Bublina a panel nad listou ukazuji totez cislo: prekreslit je
+            // pred i po zmene (jinak by zustalo stare cislo).
+            let old = [self.tip_rect(), self.flyout_rect()];
             self.tasks = (running, agent);
+            for r in old.into_iter().chain([self.tip_rect(), self.flyout_rect()]).flatten() {
+                self.damage(r);
+            }
             self.damage_panel();
         }
     }

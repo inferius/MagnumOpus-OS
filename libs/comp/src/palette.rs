@@ -380,7 +380,7 @@ impl Comp {
     }
 
     /// Radek palety na vysce `y` (obrazovka): index v `palette_rows`.
-    fn palette_row_at(&self, y: i32) -> Option<usize> {
+    pub(crate) fn palette_row_at(&self, y: i32) -> Option<usize> {
         let r = self.palette_rect()?;
         let top = r.y + (self.style.theme.space[3] + self.palette_input_h()) as i32;
         let i = (y - top).div_euclid(self.palette_row_h() as i32);

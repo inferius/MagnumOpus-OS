@@ -130,10 +130,27 @@ impl<M: Clone> Ui<M> {
                     }
                 }
             }
+            // Enter / mezernik na tlacitku a zaskrtavacim poli: stisk = jen
+            // stav "stisknuto", akce az pri pusteni (jako mys).
+            InputEvent::Key { code, action, .. } if action != 0 && (code == KEY_ENTER || code == KEY_KPENTER || code == KEY_SPACE) && self.activates_on_release() => {
+                if action == 1 {
+                    self.key_pressed = self.focus;
+                    r.redraw = true;
+                }
+            }
+            InputEvent::Key { code, action: 0, .. } if code == KEY_ENTER || code == KEY_KPENTER || code == KEY_SPACE => {
+                if let Some(i) = self.key_pressed.take()
+                    && self.focus == Some(i)
+                {
+                    self.activate(i, &mut r);
+                }
+                r.redraw = true;
+            }
             InputEvent::Key { code, action, .. } if action != 0 => self.key(code, &mut r),
             InputEvent::Text(ch) => self.insert(ch, &mut r),
             InputEvent::Focus(false) => {
                 self.pressed = None;
+                self.key_pressed = None;
                 self.hover = None;
                 self.active = false;
                 r.redraw = true;
@@ -145,6 +162,11 @@ impl<M: Clone> Ui<M> {
             _ => {}
         }
         r
+    }
+
+    /// Ma prvek s fokusem akci az pri pusteni klavesy (tlacitko, pole)?
+    fn activates_on_release(&self) -> bool {
+        self.focus.is_some_and(|f| matches!(self.elems[f].kind, ElemKind::Button { .. } | ElemKind::Checkbox { .. }))
     }
 
     /// Klik do textoveho pole: kurzor na nejblizsi znak.

@@ -440,9 +440,7 @@ impl Comp {
         v.extend(self.palette_visual());
         // Nabidka u maximalizace i se stinem.
         v.extend(self.max_menu_rect().map(|r| Rect::new(r.x - 24, r.y - 24, r.w + 48, r.h + 48)));
-        if self.tasks_tip_visible() {
-            v.extend(self.tasks_tip_rect());
-        }
+        v.extend(self.tip_rect());
         v
     }
 
@@ -502,6 +500,7 @@ impl Comp {
             hover: self.input.hover,
             launchable: &self.launchable,
             dnd: self.do_not_disturb(),
+            pressed: self.input.sys_press.map(|(k, ..)| k).filter(|&k| self.sys_pressed(k)),
         };
         draw_bar(canvas, &mut self.style, bar, &info);
         if !dialog_active {
@@ -878,6 +877,8 @@ struct BarInfo<'a> {
     launchable: &'a [(String, String)],
     /// Nerusit (zvonek preskrtnuty).
     dnd: bool,
+    /// Drzeny prvek listy (stav "stisknuto", akce az pri pusteni).
+    pressed: Option<crate::input::SysKey>,
 }
 
 fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
@@ -903,8 +904,16 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
     // Spoustec.
     let il = t.size.icon_l;
     let l = bar.launcher;
-    if info.hover == Some(Hover::Launcher) {
-        c.round_fill(l, ctl, col.surface_3);
+    // Pozadi tlacitka listy: stisknuto (accent_soft) / najeti (surface_3).
+    let state_bg = |c: &mut Canvas<'_>, r: Rect, k: crate::input::SysKey, hover: bool| {
+        if info.pressed == Some(k) {
+            c.round_fill(r, ctl, col.accent_soft);
+        } else if hover {
+            c.round_fill(r, ctl, col.surface_3);
+        }
+    };
+    if info.pressed == Some(crate::input::SysKey::Launcher) || info.hover == Some(Hover::Launcher) {
+        state_bg(c, l, crate::input::SysKey::Launcher, info.hover == Some(Hover::Launcher));
     }
     st.icons.draw(c, "apps", l.x + (l.w - il) as i32 / 2, l.y + (l.h - il) as i32 / 2, il, t.icon_stroke, col.ink);
     // Okna.
@@ -913,8 +922,8 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
         let group = bar.groups.get(k).map_or(&[][..], |v| v.as_slice());
         let active = info.focus == Some(*g) && !w.minimized;
         let attention = group.iter().any(|x| info.windows.get(x).is_some_and(|w| w.attention));
-        if info.hover == Some(Hover::BarApp(*g)) {
-            c.round_fill(*r, ctl, col.surface_3);
+        {
+            state_bg(c, *r, crate::input::SysKey::BarApp(k), info.hover == Some(Hover::BarApp(*g)));
         }
         let icon = info.clients.get(&w.client).map(|cl| app_icon(&cl.info.id)).unwrap_or("window");
         st.icons.draw(c, icon, r.x + (r.w - il) as i32 / 2, r.y + (r.h - il) as i32 / 2, il, t.icon_stroke, col.ink);
@@ -940,8 +949,8 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
     // Nespustene aplikace: ikona vedlejsi barvou, bez znacky.
     for (i, r) in &bar.launch {
         let Some((id, _)) = info.launchable.get(*i) else { continue };
-        if info.hover == Some(Hover::BarLaunch(*i)) {
-            c.round_fill(*r, ctl, col.surface_3);
+        {
+            state_bg(c, *r, crate::input::SysKey::BarLaunch(*i), info.hover == Some(Hover::BarLaunch(*i)));
         }
         st.icons.draw(c, app_icon(id), r.x + (r.w - il) as i32 / 2, r.y + (r.h - il) as i32 / 2, il, t.icon_stroke, col.ink_muted);
     }
@@ -952,8 +961,8 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
     // Ulohy: ikona, pocet, stitek agenta.
     if let Some(r) = bar.tasks {
         let (run, agent) = info.tasks;
-        if info.hover == Some(Hover::Tasks) {
-            c.round_fill(r, ctl, col.surface_3);
+        {
+            state_bg(c, r, crate::input::SysKey::Tasks, info.hover == Some(Hover::Tasks));
         }
         let im = t.size.icon_m;
         let mut x = r.x + t.space[4] as i32;
@@ -992,8 +1001,9 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
         (bar.volume, "volume", info.status.volume.is_some_and(|(v, m)| m || v == 0)),
         (Some(bar.bell), if info.dnd { "bell-off" } else { "bell" }, false),
     ];
-    for (r, name, off) in icons {
+    for (k, (r, name, off)) in icons.into_iter().enumerate() {
         let Some(r) = r else { continue };
+        state_bg(c, r, crate::input::SysKey::BarIcon(k as u8), false);
         let ink = if off { col.ink_faint } else { col.ink };
         let (x, y) = (r.x + (r.w - im) as i32 / 2, r.y + (r.h - im) as i32 / 2);
         st.icons.draw(c, name, x, y, im, t.icon_stroke, ink);
