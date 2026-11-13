@@ -280,7 +280,7 @@ fn write(out: &mut String, v: &Value, pretty: bool, lvl: usize) -> Result<(), Sh
             esc(out, &e.message);
             out.push('}');
         }
-        Value::Bytes(_) | Value::Closure(_) => {
+        Value::Bytes(_) | Value::File(_) | Value::Closure(_) => {
             return Err(ShError::new(code::TYPE, alloc::format!("hodnotu typu {} nejde zapsat do JSON", v.type_name()))
                 .hint("bajty nejdřív převeďte: from text / from json"));
         }

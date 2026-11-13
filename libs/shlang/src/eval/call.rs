@@ -82,6 +82,12 @@ impl Interp {
     pub(crate) fn call(&mut self, host: &mut dyn Host, name: &str, args: &[Arg], input: Value, span: Span) -> R<Value> {
         if let Some(sig) = builtin(name) {
             let a = self.eval_args(host, Some(sig), args, span, false)?;
+            // Soubor nacteny podle potreby: obsah az ted, kdyz ho prikaz
+            // na vstupu potrebuje (`describe` jen typ).
+            let input = match input {
+                Value::File(f) if sig.name != "describe" => Value::Bytes(self.fs_read(host, &f.path)?),
+                other => other,
+            };
             return super::builtins::call(self, host, sig.name, a, input);
         }
         if let Some(f) = self.fns.get(name).cloned() {

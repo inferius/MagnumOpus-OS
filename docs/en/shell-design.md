@@ -934,6 +934,17 @@ together with GUI 6c.
 | drawing into the framebuffer | done: `user/console`, framebuffer from the kernel (`kind::FRAMEBUFFER`, `FB_CONTROL`); the QEMU test types `echo ahoj` and checks the screen; starting the console outside tests belongs in the supervisor |
 | starting programs with their own fsd session | permission mapping done (`term::perm`, also from clones for `preview`); no program with a shell interface yet |
 
+### Large files: the "file" value
+
+`open` of a file over 64 KiB does not read it whole: it returns a value of
+type `file` (path, size, kind by the first 512 B, e.g. "obrázek BMP
+1920×1080"). The content is read only by a command that needs bytes or text
+on its input (`from text`, `lines`, `save`, `count`...); `describe`, display
+in the terminal and storing in a variable do not read it. The fields
+`size`, `kind` and `path` can be read directly. **[implemented]** Streaming
+(a pipeline that reads a large text in parts and stops early, e.g.
+`lines | first 10`) **[designed]**.
+
 ### Lines in threads: Ctrl+Z and background
 
 A session line runs in its own thread of the session process (`shsess`)

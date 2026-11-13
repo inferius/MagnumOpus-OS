@@ -882,6 +882,16 @@ v běžném běhu rozdělí supervisor spolu s GUI 6c.
 | kreslení do framebufferu | hotovo: `user/console`, framebuffer od jádra (`kind::FRAMEBUFFER`, `FB_CONTROL`); test v QEMU napíše `echo ahoj` a ověří obrazovku; spouštění konzole mimo testy patří do supervisoru |
 | spouštění programů s vlastní relací fsd | mapování oprávnění hotové (`term::perm`, i z klonů pro `preview`); zatím žádný program s rozhraním pro shell |
 
+### Velké soubory: hodnota „soubor“
+
+`open` souboru nad 64 KiB ho nečte celý: vrátí hodnotu typu `file` (cesta,
+velikost, druh podle prvních 512 B, např. „obrázek BMP 1920×1080“). Obsah
+načte až příkaz, který na vstupu potřebuje bajty nebo text (`from text`,
+`lines`, `save`, `count`...); `describe`, zobrazení v terminálu a uložení do
+proměnné obsah nečtou. Pole `size`, `kind` a `path` jdou číst přímo.
+**[implementováno]** Proudové zpracování (roura, která čte velký text po
+částech a skončí dřív, např. `lines | first 10`) **[navrženo]**.
+
 ### Řádky ve vláknech: Ctrl+Z a pozadí
 
 Řádek relace běží ve vlastním vlákně procesu relace (`shsess`) nad
