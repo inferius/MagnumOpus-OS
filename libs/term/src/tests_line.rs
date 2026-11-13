@@ -240,5 +240,5 @@ fn text_question_from_line_in_thread() {
     assert!(!wait_end(&mut r, b));
     let n = notes(&r, b);
     assert!(n.contains("Časové pásmo -> Europe/Berlin"), "{n}");
-    assert!(n.contains("[1/7] rozlozeni"), "{n}");
+    assert!(n.contains("[1/8] rozlozeni"), "{n}");
 }

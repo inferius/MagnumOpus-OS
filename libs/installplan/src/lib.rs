@@ -387,7 +387,8 @@ pub fn preview_text(p: &Plan) -> String {
 }
 
 /// Krok průběhu instalace (texty pro hlášení průběhu).
-pub const PROGRESS: [&str; 7] = [
+pub const PROGRESS: [&str; 8] = [
+    "Čtu systém ze živého USB",
     "Zapisuji tabulku oddílů",
     "Formátuji oddíl EFI",
     "Kopíruji zavaděč a systém",
