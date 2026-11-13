@@ -6,7 +6,7 @@
 //! | oblast        | od      | velikost             | obsah                              |
 //! |---------------|---------|----------------------|------------------------------------|
 //! | MBR + GPT     | 0       | 34 sektoru           | ochranny MBR, hlavicka, tabulka    |
-//! | ESP           | 1 MiB   | [`ESP_MIB`] MiB      | FAT32: EFI/BOOT/BOOT*.EFI, os/...   |
+//! | ESP           | 1 MiB   | [`esp_mib`] MiB      | FAT32: EFI/BOOT/BOOT*.EFI, os/...   |
 //! | MO-LOGY       | za ESP  | [`LOGY_MIB`] MiB     | FAT32 pro logy (cte ho Windows)    |
 //! | data          | za logy | do konce obrazu      | nas FS (oddil "MagnumOpus")        |
 //! | zalozni GPT   | konec   | 33 sektoru           | tabulka a hlavicka                 |
@@ -28,39 +28,77 @@ const SECTOR: u64 = 512;
 const MIB: u64 = 1024 * 1024;
 /// Zacatek ESP (zarovnani 1 MiB, obvykle pro flash).
 const ESP_START: u64 = MIB;
-/// Velikost ESP. Ladici initfs ma ~35 MiB, rezerva na budouci soubory
-/// (zalozni zavadec, aktualizace).
-pub const ESP_MIB: u64 = 128;
+/// Nejmensi ESP (FAT32 s clustery po 512 B ma i tak dost clusteru).
+const ESP_MIN_MIB: u64 = 64;
 /// Oddil pro logy (FAT32 `MO-LOGY`, typ basic data): system do nej kopiruje
 /// logy, zaznamy padu a balicek pro vyvojare (`user/logd/src/fatlog.rs`).
 pub const LOGY_MIB: u64 = 64;
-/// Nejmensi obraz: ESP + logy + 64 MiB dat + GPT.
-pub const MIN_MIB: u64 = ESP_MIB + LOGY_MIB + 64 + 2;
+/// Datovy oddil aspon (bez nej obraz nema smysl).
+const DATA_MIN_MIB: u64 = 64;
 /// Jmenovka datoveho FS.
 pub const DATA_LABEL: &str = "MagnumOpus";
 
-/// Oddil MO-LOGY v obrazu (bajty: od, delka).
-pub fn logy_range() -> (u64, u64) {
-    (ESP_START + ESP_MIB * MIB, LOGY_MIB * MIB)
+/// Velikost ESP podle souboru: soucet + 25 % (FAT, adresare, zaokrouhleni
+/// na clustery) + 16 MiB na budouci soubory (zalozni zavadec), na cele
+/// 8 MiB, aspon [`ESP_MIN_MIB`]. Pevne cislo nestacilo: ladici initfs
+/// aarch64 ma ~60 MB a na ESP jsou dva (zivy a instalacni).
+pub fn esp_mib(files: &[(&str, &Path)]) -> Result<u64> {
+    let mut sum = 0u64;
+    for (_, src) in files {
+        sum += std::fs::metadata(src).map_err(|e| format!("{}: {e}", src.display()))?.len();
+    }
+    let need = sum + sum / 4 + 16 * MIB;
+    Ok((need.div_ceil(8 * MIB) * 8).max(ESP_MIN_MIB))
+}
+
+/// Nejmensi obraz pro ESP `esp_mib`: ESP + logy + data + GPT.
+pub fn min_mib(esp_mib: u64) -> u64 {
+    1 + esp_mib + LOGY_MIB + DATA_MIN_MIB + 1
 }
 
 /// Udaje o vytvorenem obrazu.
 pub struct Layout {
     pub size: u64,
+    /// ESP v MiB.
+    pub esp_mib: u64,
     /// Datovy oddil v bajtech (od, delka).
     pub data: (u64, u64),
 }
 
+/// Oddil MO-LOGY v obrazu (bajty: od, delka) podle GPT obrazu.
+pub fn logy_range(path: &Path) -> Result<(u64, u64)> {
+    let t = read_gpt(path)?;
+    let e = t
+        .entries()
+        .find(|e| !e.is_empty() && e.type_guid == diskguard::BASIC_DATA_TYPE && e.name_is(diskguard::LOG_LABEL))
+        .ok_or_else(|| format!("{}: oddil {} chybi", path.display(), diskguard::LOG_LABEL))?;
+    Ok((e.first * SECTOR, (e.last - e.first + 1) * SECTOR))
+}
+
+/// GPT souboru s obrazem (sektor 512 B).
+pub fn read_gpt(path: &Path) -> Result<gpt::Table> {
+    use std::io::Read;
+    let mut f = File::open(path)?;
+    let sectors = f.metadata()?.len() / SECTOR;
+    let mut read = |lba: u64, buf: &mut [u8]| f.seek(SeekFrom::Start(lba * SECTOR)).is_ok() && f.read_exact(buf).is_ok();
+    match gpt::read_table(sectors, SECTOR as usize, &mut read) {
+        gpt::Read::Table(t) => Ok(t),
+        _ => Err(format!("{}: GPT neni platna", path.display()).into()),
+    }
+}
+
 /// Vytvori obraz `path` o `size_mib` MiB. `esp_files` = (cesta v ESP,
-/// zdrojovy soubor).
+/// zdrojovy soubor); ESP ma velikost podle nich ([`esp_mib`]).
 pub fn create(path: &Path, size_mib: u64, esp_files: &[(&str, &Path)]) -> Result<Layout> {
-    if size_mib < MIN_MIB {
-        return Err(format!("obraz USB musi mit aspon {MIN_MIB} MiB").into());
+    let esp_mib = esp_mib(esp_files)?;
+    let min = min_mib(esp_mib);
+    if size_mib < min {
+        return Err(format!("obraz USB musi mit aspon {min} MiB (ESP {esp_mib} MiB podle souboru)").into());
     }
     let size = size_mib * MIB;
     let sectors = size / SECTOR;
     let esp_first = ESP_START / SECTOR;
-    let esp_last = esp_first + ESP_MIB * MIB / SECTOR - 1;
+    let esp_last = esp_first + esp_mib * MIB / SECTOR - 1;
     let logy_first = esp_last + 1;
     let logy_last = logy_first + LOGY_MIB * MIB / SECTOR - 1;
     let data_first = logy_last + 1;
@@ -75,8 +113,8 @@ pub fn create(path: &Path, size_mib: u64, esp_files: &[(&str, &Path)]) -> Result
     let mut file = OpenOptions::new().read(true).write(true).create(true).truncate(true).open(path)?;
     file.set_len(size)?;
 
-    // ESP: FAT32 v pameti (128 MiB), pak do souboru.
-    let mut esp = vec![0u8; (ESP_MIB * MIB) as usize];
+    // ESP: FAT32 v pameti, pak do souboru.
+    let mut esp = vec![0u8; (esp_mib * MIB) as usize];
     crate::image::write_fat_partition(&mut esp, esp_files, *b"MAGNUMOPUS ")?;
     file.seek(SeekFrom::Start(ESP_START))?;
     file.write_all(&esp)?;
@@ -131,7 +169,7 @@ pub fn create(path: &Path, size_mib: u64, esp_files: &[(&str, &Path)]) -> Result
     file.seek(SeekFrom::Start(size - ends.tail.len() as u64))?;
     file.write_all(&ends.tail)?;
     file.sync_all()?;
-    Ok(Layout { size, data })
+    Ok(Layout { size, esp_mib, data })
 }
 
 const LOGY_README: &str = "MagnumOpus - logy a zaznamy padu\r\n\r\n\

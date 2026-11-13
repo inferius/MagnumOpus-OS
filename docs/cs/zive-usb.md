@@ -50,19 +50,25 @@ cargo xtask usb --release
 ```
 
 Vznikne `target/usb-x86_64-release.img` (1 GiB). Pro aarch64
-`--arch aarch64`, jinou velikost `--size <MiB>` (nejméně 258 MiB), jinou
-cestu `--out <soubor>`. Ladicí build (bez `--release`) je větší a pomalejší,
-ale má přesnější výpisy zásobníku.
+`--arch aarch64`, jinou velikost `--size <MiB>`, jinou cestu `--out <soubor>`.
+Ladicí build (bez `--release`) je větší a pomalejší, ale má přesnější výpisy
+zásobníku.
+
+Velikost ESP se počítá ze souborů, které na ni patří (zavaděč, jádro, živý
+a instalační initfs): jejich součet + 25 % + 16 MiB rezervy, zaokrouhleno na
+8 MiB, aspoň 64 MiB. Ladicí build aarch64 má tak ESP kolem 180 MiB. Obraz musí
+mít aspoň ESP + 130 MiB (logy 64 MiB, data 64 MiB, GPT); menší `--size` xtask
+zvětší a vypíše to.
 
 Obsah obrazu:
 
 <figure class="diagram">
 <svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Rozložení obrazu živého USB">
 <rect class="box" x="10" y="30" width="70" height="80" rx="4"/><text class="t b" x="45" y="62" text-anchor="middle">GPT</text><text class="m" x="45" y="80" text-anchor="middle">MBR,</text><text class="m" x="45" y="95" text-anchor="middle">tabulka</text>
-<rect class="acc" x="80" y="30" width="230" height="80" rx="4"/><text class="t b" x="195" y="55" text-anchor="middle">ESP (FAT32), 128 MiB</text><text class="mono m" x="195" y="74" text-anchor="middle">EFI/BOOT/BOOTX64.EFI</text><text class="mono m" x="195" y="89" text-anchor="middle">os/kernel.elf, os/initfs.img</text><text class="mono m" x="195" y="104" text-anchor="middle">CTI-MNE.txt</text>
+<rect class="acc" x="80" y="30" width="230" height="80" rx="4"/><text class="t b" x="195" y="55" text-anchor="middle">ESP (FAT32), podle souborů</text><text class="mono m" x="195" y="74" text-anchor="middle">EFI/BOOT/BOOTX64.EFI</text><text class="mono m" x="195" y="89" text-anchor="middle">os/kernel.elf, os/initfs.img</text><text class="mono m" x="195" y="104" text-anchor="middle">CTI-MNE.txt</text>
 <rect class="warn" x="310" y="30" width="110" height="80" rx="4"/><text class="t b" x="365" y="55" text-anchor="middle">MO-LOGY</text><text class="m" x="365" y="74" text-anchor="middle">FAT32, 64 MiB</text><text class="m" x="365" y="91" text-anchor="middle">logy pro Windows</text><rect class="ok" x="420" y="30" width="270" height="80" rx="4"/><text class="t b" x="555" y="55" text-anchor="middle">datový oddíl „MagnumOpus“</text><text class="m" x="555" y="74" text-anchor="middle">typ C123ADA0-...-C2CE6B2B3581</text><text class="m" x="555" y="91" text-anchor="middle">náš FS (fsd), do konce obrazu</text>
 <rect class="box" x="690" y="30" width="60" height="80" rx="4"/><text class="t b" x="720" y="62" text-anchor="middle">GPT</text><text class="m" x="720" y="80" text-anchor="middle">záloha</text>
-<text class="m" x="10" y="20">0</text><text class="m" x="80" y="20">1 MiB</text><text class="m" x="310" y="20">129 MiB</text><text class="m" x="420" y="20">193 MiB</text><text class="m" x="690" y="20">konec obrazu</text>
+<text class="m" x="10" y="20">0</text><text class="m" x="80" y="20">1 MiB</text><text class="m" x="310" y="20">1 MiB + ESP</text><text class="m" x="420" y="20">+ 64 MiB</text><text class="m" x="690" y="20">konec obrazu</text>
 <text class="m" x="10" y="140">Firmware najde zavaděč na ESP, zavaděč načte jádro a initfs (soubory přes UEFI).</text>
 <text class="m" x="10" y="160">Po startu ovladač usb-storage zpřístupní flashku; diskguard pustí ke čtení i zápisu jen datový oddíl.</text>
 <text class="m" x="10" y="180">Init na něm najde souborový systém a spustí fsd. ESP systém za běhu nemění.</text>

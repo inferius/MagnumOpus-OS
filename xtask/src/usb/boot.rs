@@ -233,7 +233,7 @@ pub(super) fn boot_until(
 /// Oddil MO-LOGY z obrazu (do pameti).
 fn read_logy(image: &Path) -> Result<Vec<u8>> {
     use std::io::{Read, Seek, SeekFrom};
-    let (at, len) = super::image::logy_range();
+    let (at, len) = super::image::logy_range(image)?;
     let mut f = std::fs::File::open(image)?;
     f.seek(SeekFrom::Start(at))?;
     let mut buf = vec![0u8; len as usize];

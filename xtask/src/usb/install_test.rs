@@ -14,7 +14,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use diskguard::gpt::{self, NewPartition, Read as GptRead, Table};
+use diskguard::gpt::{self, NewPartition, Table};
 use diskguard::install::OUR_ESP_LABEL;
 use diskguard::{ESP_TYPE, OUR_TYPE};
 
@@ -53,12 +53,7 @@ fn read_at(f: &mut File, at: u64, buf: &mut [u8]) -> bool {
 }
 
 fn table(path: &Path) -> Result<Table> {
-    let mut f = File::open(path)?;
-    let sectors = f.metadata()?.len() / 512;
-    match gpt::read_table(sectors, 512, &mut |lba, buf| read_at(&mut f, lba * 512, buf)) {
-        GptRead::Table(t) => Ok(t),
-        _ => Err(format!("{}: GPT neni platna", path.display()).into()),
-    }
+    super::image::read_gpt(path)
 }
 
 /// Spusti oba scenare.
