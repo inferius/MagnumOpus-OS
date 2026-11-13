@@ -75,6 +75,7 @@ Ryzen 7 5800X)". Numbers without conditions are not compared.
 - the owning page is current, summaries only link,
 - new claims have a test, new numbers have conditions,
 - the cs and en versions say the same,
+- the folder's `CLAUDE.md` (agent journal) matches the change: update it when the folder's invariants or key files change,
 - `cargo xtask docs` passes. Besides links and anchors it checks the status
   marks (an unknown mark is an error) and prints warnings: a measurement
   without a build revision, cs and en versions with a different number of
