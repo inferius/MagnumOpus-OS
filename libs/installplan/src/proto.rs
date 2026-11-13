@@ -9,7 +9,8 @@ use alloc::vec::Vec;
 pub use abi::{Error, Result};
 use wire::{Reader, Writer};
 
-use crate::{Choice, Mode};
+use crate::map::{Seg, SegKind};
+use crate::{Choice, Line, Mode};
 
 /// Disk v seznamu.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,8 +60,9 @@ pub enum Reply {
     Disks(Vec<DiskEntry>),
     Keyboards(Vec<KeyboardEntry>),
     /// Nahled: text, potrebne potvrzeni (`Some(model)` = opsat nazev),
-    /// na disku zustane jiny system.
-    Preview { text: String, type_name: Option<String>, other_os: bool },
+    /// na disku zustane jiny system; pro GUI radky zmen a mapa disku
+    /// teď a po instalaci (graf oddilu).
+    Preview { text: String, type_name: Option<String>, other_os: bool, lines: Vec<Line>, before: Vec<Seg>, after: Vec<Seg> },
     /// Krok `step` (index do `PROGRESS`) a popis.
     Progress { step: u32, text: String },
     /// Hotovo: souhrn (co delat dal).
@@ -85,6 +87,23 @@ const MAX: usize = 256;
 
 fn mode_from(r: &mut Reader) -> Result<Mode> {
     Mode::from_key(&r.str()?).ok_or(Error::InvalidArgs)
+}
+
+fn put_segs(w: &mut Writer, segs: &[Seg]) {
+    w.u32(segs.len() as u32);
+    for s in segs {
+        w.u8(s.kind.code()).u64(s.bytes).str(&s.label).u8(s.new as u8);
+    }
+}
+
+fn get_segs(r: &mut Reader) -> Result<Vec<Seg>> {
+    let n = count(r)?;
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        let kind = SegKind::from_code(r.u8()?).ok_or(Error::InvalidArgs)?;
+        out.push(Seg { kind, bytes: r.u64()?, label: r.str()?, new: r.u8()? == 1 });
+    }
+    Ok(out)
 }
 
 fn count(r: &mut Reader) -> Result<usize> {
@@ -166,9 +185,20 @@ impl Reply {
                     }
                 }
             }
-            Reply::Preview { text, type_name, other_os } => {
+            Reply::Preview { text, type_name, other_os, lines, before, after } => {
                 w = Writer::op(op::R_PREVIEW);
                 w.str(text).str(type_name.as_deref().unwrap_or("")).u8(type_name.is_some() as u8).u8(*other_os as u8);
+                w.u32(lines.len() as u32);
+                for l in lines {
+                    let k = match l {
+                        Line::Keep(_) => 0,
+                        Line::New(_) => 1,
+                        Line::Erase(_) => 2,
+                    };
+                    w.u8(k).str(l.body());
+                }
+                put_segs(&mut w, before);
+                put_segs(&mut w, after);
             }
             Reply::Progress { step, text } => {
                 w = Writer::op(op::R_PROGRESS);
@@ -227,7 +257,22 @@ impl Reply {
                 let text = r.str()?;
                 let name = r.str()?;
                 let has = flag(&mut r)?;
-                Reply::Preview { text, type_name: has.then_some(name), other_os: flag(&mut r)? }
+                let other_os = flag(&mut r)?;
+                let n = count(&mut r)?;
+                let mut lines = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let k = r.u8()?;
+                    let t = r.str()?;
+                    lines.push(match k {
+                        0 => Line::Keep(t),
+                        1 => Line::New(t),
+                        2 => Line::Erase(t),
+                        _ => return Err(Error::InvalidArgs),
+                    });
+                }
+                let before = get_segs(&mut r)?;
+                let after = get_segs(&mut r)?;
+                Reply::Preview { text, type_name: has.then_some(name), other_os, lines, before, after }
             }
             op::R_PROGRESS => Reply::Progress { step: r.u32()?, text: r.str()? },
             op::R_DONE => Reply::Done(r.str()?),

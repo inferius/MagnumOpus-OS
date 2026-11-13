@@ -28,6 +28,7 @@ use blockproto::BlockClient;
 use disks::Disk;
 use installplan::config::Settings;
 use installplan::proto::{DiskEntry, KeyboardEntry, Reply, Request};
+use installplan::map::{self, Seg};
 use installplan::{Mode, choices, plan, preview_text};
 use libos::{Channel, Error, Signals, Startup, println};
 
@@ -156,7 +157,12 @@ impl Service {
         Reply::Disks(out)
     }
 
+    /// Plan, disk a mapa disku teď a po instalaci (graf v GUI).
     fn plan_for(&self, disk: u32, mode: Mode) -> Result<(installplan::Plan, &Disk), Reply> {
+        self.plan_map(disk, mode).map(|(p, d, _)| (p, d))
+    }
+
+    fn plan_map(&self, disk: u32, mode: Mode) -> Result<(installplan::Plan, &Disk, [Vec<Seg>; 2]), Reply> {
         let d = self.disks.get(disk as usize).ok_or_else(|| fail(Error::NotFound, "disk neexistuje"))?;
         if d.sector_size != 512 {
             return Err(fail(Error::NotSupported, "disky se sektorem 4 KiB instalátor zatím nepodporuje"));
@@ -169,18 +175,22 @@ impl Service {
             *x = diskguard::install::guid_from(*x);
         }
         let p = plan(&info, t.as_ref(), mode, g).map_err(|e| fail(Error::InvalidArgs, e))?;
-        Ok((p, d))
+        let segs = [map::now(&info, t.as_ref()), map::after(&info, t.as_ref(), &p)];
+        Ok((p, d, segs))
     }
 
     fn preview(&self, disk: u32, mode: Mode) -> Reply {
-        match self.plan_for(disk, mode) {
-            Ok((p, _)) => Reply::Preview {
+        match self.plan_map(disk, mode) {
+            Ok((p, _, [before, after])) => Reply::Preview {
                 text: preview_text(&p),
                 type_name: match &p.confirm {
                     installplan::Confirm::TypeName(n) => Some(n.clone()),
                     installplan::Confirm::Agree => None,
                 },
                 other_os: p.other_os,
+                lines: p.preview.clone(),
+                before,
+                after,
             },
             Err(r) => r,
         }

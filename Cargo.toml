@@ -49,6 +49,7 @@ members = [
     "libs/fileops",
     "libs/filesview",
     "libs/openwith",
+    "libs/installview",
     "libs/gfx",
     "libs/bootsplash",
     "libs/font",

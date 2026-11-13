@@ -91,6 +91,35 @@ fn next_to_windows() {
 }
 
 #[test]
+fn disk_map_before_after() {
+    use map::SegKind::*;
+    let d = disk(128 * GIB);
+    let t = windows_table(&d, 60 * GIB);
+    let kinds = |s: &[map::Seg]| s.iter().map(|s| s.kind).collect::<Vec<_>>();
+    let now = map::now(&d, Some(&t));
+    assert_eq!(kinds(&now), vec![Efi, Other, Free]);
+    assert!(now[1].label.starts_with("Basic data partition"));
+    // Soucet useku = pouzitelna cast disku (mezery pod 1 MiB vynechane).
+    let total: u64 = now.iter().map(|s| s.bytes).sum();
+    assert!(total <= d.bytes() && total > d.bytes() - (2 << 20));
+    let p = plan(&d, Some(&t), Mode::FreeSpace, [[1; 16], [2; 16], [3; 16]]).unwrap();
+    let after = map::after(&d, Some(&t), &p);
+    assert_eq!(kinds(&after), vec![Efi, Other, OurEfi, Ours]);
+    assert_eq!(after.iter().map(|s| s.new).collect::<Vec<_>>(), vec![false, false, true, true]);
+    let p = plan(&d, Some(&t), Mode::WholeDisk, [[1; 16]; 3]).unwrap();
+    assert_eq!(kinds(&map::after(&d, Some(&t), &p)), vec![OurEfi, Ours]);
+    // Prazdny disk: jen volne misto.
+    assert_eq!(kinds(&map::now(&d, None)), vec![Free]);
+    // Preinstalace: data zustanou (ne nova), EFI se prepise.
+    let first = plan(&d, None, Mode::WholeDisk, [[1; 16], [2; 16], [3; 16]]).unwrap();
+    let t = table_of(&d, &new_parts(first.esp, first.data, &[[2; 16], [3; 16]]));
+    let p = plan(&d, Some(&t), Mode::Reinstall, [[0; 16]; 3]).unwrap();
+    let after = map::after(&d, Some(&t), &p);
+    assert_eq!(kinds(&after), vec![OurEfi, Ours]);
+    assert_eq!(after.iter().map(|s| s.new).collect::<Vec<_>>(), vec![true, false]);
+}
+
+#[test]
 fn windows_disk_full() {
     let d = disk(64 * GIB);
     let t = windows_table(&d, 60 * GIB);
@@ -184,8 +213,15 @@ fn proto_roundtrip() {
             choices: choices(&d, None),
         }]),
         Reply::Keyboards(vec![KeyboardEntry { name: String::from("cz"), description: String::from("Česká"), rows: vec![String::from("qwertz")] }]),
-        Reply::Preview { text: String::from("x"), type_name: Some(String::from("disk")), other_os: true },
-        Reply::Preview { text: String::from("x"), type_name: None, other_os: false },
+        Reply::Preview {
+            text: String::from("x"),
+            type_name: Some(String::from("disk")),
+            other_os: true,
+            lines: vec![Line::Keep(String::from("a")), Line::New(String::from("b")), Line::Erase(String::from("c"))],
+            before: map::now(&d, None),
+            after: map::after(&d, None, &plan(&d, None, Mode::WholeDisk, [[1; 16], [2; 16], [3; 16]]).unwrap()),
+        },
+        Reply::Preview { text: String::from("x"), type_name: None, other_os: false, lines: vec![], before: vec![], after: vec![] },
         Reply::Progress { step: 3, text: String::from("FS") },
         Reply::Done(String::from("hotovo")),
     ];

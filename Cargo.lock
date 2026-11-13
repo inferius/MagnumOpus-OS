@@ -1593,6 +1593,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "installview"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "installplan",
+ "ui",
+]
+
+[[package]]
 name = "intel-display"
 version = "0.1.0"
 dependencies = [
