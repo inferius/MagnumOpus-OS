@@ -252,6 +252,12 @@ impl<M: Clone> Ui<M> {
         if self.activate_control(i, r) {
             return;
         }
+        // Tlacitko jen s nabidkou (bez `on_click`): klik ji otevre.
+        if matches!(self.elems[i].kind, ElemKind::Button { on_click: None, .. }) && self.elems[i].menu.is_some() {
+            self.open_context(i, None);
+            r.redraw = true;
+            return;
+        }
         let d = self.describe(Some(i));
         match &self.elems[i].kind {
             ElemKind::Button { on_click: Some(m), .. } => {

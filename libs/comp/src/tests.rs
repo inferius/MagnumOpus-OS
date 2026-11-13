@@ -20,6 +20,7 @@ use crate::*;
 mod clipboard;
 mod gpu;
 mod greeter;
+mod launcher;
 mod popover;
 mod secure;
 mod winsize;

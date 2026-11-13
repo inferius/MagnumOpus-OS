@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 
 use gfx::{Canvas, Image, Rect};
 use guiproto::window::InputEvent;
-use ui::{Cells, Node, Ui, col, column, table, text_input};
+use ui::{Cells, Node, Ui, button, col, column, label, menu_item, menu_separator, row, spacer, table, text_input};
 
 use crate::Comp;
 use crate::palette::Row;
@@ -26,6 +26,10 @@ pub(crate) enum SysMsg {
     Query(String),
     /// Vybrany radek (index v `palette_rows`).
     Pick(u64),
+    /// Pata spoustece: napajeni a ucet.
+    Lock,
+    Reboot,
+    Shutdown,
 }
 
 /// Otevreny systemovy pohled.
@@ -67,12 +71,18 @@ impl Comp {
     }
 
     /// Pohled palety: pole hledani a seznam se sekcemi.
-    fn sys_view(&self) -> Node<SysMsg> {
+    fn sys_view(&self, h: u32) -> Node<SysMsg> {
         let Some(p) = &self.palette else { return column([]) };
         let rows = self.sys_rows();
         // Vybrana polozka (index mezi spustitelnymi) -> index radku.
         let sel_row = rows.iter().enumerate().filter(|(_, r)| !r.header).nth(p.sel).map(|(i, _)| i as u64);
         let n = rows.len();
+        // Tabulka vyplni misto mezi polem a patou (pohled ma okraj `pad`).
+        // Stejne tokeny jako `ui::Look` (pad = space[5], gap = space[3]).
+        let t = &self.style.theme;
+        let (ctl, gap, pad) = (t.size.control_h, t.space[3], t.space[5]);
+        let foot = if p.launcher { ctl + gap } else { 0 };
+        let table_h = h.saturating_sub(2 * pad + ctl + gap + foot).max(ctl);
         let data = alloc::rc::Rc::new(rows);
         let d2 = alloc::rc::Rc::clone(&data);
         column([
@@ -86,7 +96,27 @@ impl Comp {
             .selection(sel_row.into_iter().collect())
             .on_selection(|ids: Vec<u64>| SysMsg::Pick(ids.first().copied().unwrap_or(0)))
             .key("radky")
-            .grow(),
+            .height(table_h),
+            self.launcher_footer(p.launcher),
+        ])
+    }
+
+    /// Pata spoustece (varianta D): ucet a napajeni s nabidkou. V palete
+    /// nic (stejne akce jsou v sekci System).
+    fn launcher_footer(&self, launcher: bool) -> Node<SysMsg> {
+        if !launcher {
+            return column([]);
+        }
+        let session = self.has_active_session();
+        let lock = menu_item("Zamknout", SysMsg::Lock);
+        let lock = if session { lock } else { lock.disabled("nikdo není přihlášený") };
+        row([
+            label(if session { "Přihlášený uživatel" } else { "Bez přihlášení" }),
+            spacer(),
+            button("")
+                .tooltip("Napájení")
+                .context_menu(alloc::vec![lock, menu_item("Odhlásit", SysMsg::Lock).disabled("zatím není"), menu_separator(), menu_item("Restartovat", SysMsg::Reboot), menu_item("Vypnout", SysMsg::Shutdown)])
+                .key("napajeni"),
         ])
     }
 
@@ -99,7 +129,7 @@ impl Comp {
         let pad = self.style.theme.space[3];
         let (w, h) = (r.w.saturating_sub(2 * pad).max(1), r.h.saturating_sub(2 * pad).max(1));
         let mode = self.style.mode();
-        let view = self.sys_view();
+        let view = self.sys_view(h);
         let s = self.sysui.get_or_insert_with(|| SysUi { ui: Ui::new(ui::Look::ui_fonts(), w, h) });
         if (s.ui.w, s.ui.h) != (w, h) {
             s.ui.resize(w, h);
@@ -128,6 +158,16 @@ impl Comp {
                         self.set_palette(Some(p));
                     }
                 }
+                SysMsg::Lock => {
+                    self.set_palette(None);
+                    self.lock_session();
+                    return true;
+                }
+                SysMsg::Reboot | SysMsg::Shutdown => {
+                    self.set_palette(None);
+                    self.confirm_power(matches!(m, SysMsg::Reboot));
+                    return true;
+                }
                 SysMsg::Pick(row) => {
                     // Radek -> polozka katalogu (nadpis nic).
                     if let Some(Row::Item(it)) = self.palette_rows().get(row as usize).cloned() {
@@ -144,6 +184,11 @@ impl Comp {
             }
         }
         true
+    }
+
+    /// Je v pohledu otevrena nabidka (vse jde do ni)?
+    pub(crate) fn sys_popup_open(&self) -> bool {
+        self.sysui.as_ref().is_some_and(|s| s.ui.popup_open())
     }
 
     /// Nakresli pohled palety do karty `r` (ramecek a stin kresli volajici).

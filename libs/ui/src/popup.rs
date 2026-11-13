@@ -610,6 +610,11 @@ impl<M: Clone> Ui<M> {
         shown
     }
 
+    /// Je otevrena nabidka (vyber, kontextova)?
+    pub fn popup_open(&self) -> bool {
+        self.popup.is_some()
+    }
+
     /// Kdy klient ma probudit `Ui::timer` (bublina), `None` = nic neceka.
     pub fn next_deadline(&self) -> Option<u64> {
         match (self.tip, self.tip_shown) {

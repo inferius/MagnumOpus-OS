@@ -389,11 +389,13 @@ impl Comp {
         let t = &self.style.theme;
         let w = t.size.dialog_w.max(520).min(self.w.saturating_sub(2 * t.space[5]));
         let rows = self.palette_rows().len().clamp(1, ROWS) as u32;
-        let h = self.palette_input_h() + rows * self.palette_row_h() + 3 * t.space[3];
+        // Okraje pohledu knihovny ui (pad) a mezery mezi polem a seznamem.
+        let h = self.palette_input_h() + rows * self.palette_row_h() + 3 * t.space[3] + 2 * t.space[5];
         if self.palette.as_ref().is_some_and(|p| p.launcher) {
             // Spoustec: vlevo nad listou (u tlacitka mrizky), sirka podle
-            // tokenu `size.launcher_w`.
+            // tokenu `size.launcher_w`; pata (ucet, napajeni) navic.
             let w = t.size.launcher_w.min(self.w.saturating_sub(2 * t.space[3]));
+            let h = h + self.palette_row_h() + t.space[3];
             let bottom = self.panel_rect().y - t.space[3] as i32;
             let h = h.min((bottom - t.space[3] as i32).max(1) as u32);
             return Some(Rect::new(self.panel_rect().x, bottom - h as i32, w, h));
@@ -420,6 +422,12 @@ impl Comp {
     /// Klavesa pri otevrene palete (vse ji konci, aplikaci nejde nic).
     pub(crate) fn palette_key(&mut self, code: u16, press: bool, time: u64) {
         if !press {
+            return;
+        }
+        // Otevrena nabidka v pohledu (napajeni): klavesy patri ji.
+        if self.sys_popup_open() {
+            let m = if self.palette_ctrl { mods::CTRL } else { 0 };
+            self.sys_event(guiproto::window::InputEvent::Key { code, action: 1, ch: None }, m, time);
             return;
         }
         let n = self.palette_items().len();
@@ -477,9 +485,9 @@ impl Comp {
         if !inside {
             return self.set_palette(None);
         }
-        // Klik do pole hledani: kurzor, vyber (pohled ui).
+        // Klik do pole hledani, do paty nebo do otevrene nabidky: pohled ui.
         if let Some(r) = self.palette_rect()
-            && y < r.y + (self.style.theme.space[3] + self.palette_input_h()) as i32
+            && (y < r.y + (self.style.theme.space[3] + self.palette_input_h()) as i32 || self.palette_row_at(y).is_none() || self.sys_popup_open())
         {
             let pad = self.style.theme.space[3] as i32;
             let (lx, ly) = (x - r.x - pad, y - r.y - pad);
