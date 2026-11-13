@@ -194,3 +194,15 @@ fn proto_roundtrip() {
     }
     assert!(Request::decode(&[9, 0, 0, 0]).is_err());
 }
+
+#[test]
+fn answers_file() {
+    let t = "disk = \"QEMU NVMe Ctrl\"\nzpusob = \"cely-disk\" # komentar\npotvrzeni = \"QEMU NVMe Ctrl\"\njmeno = \"jan\"\nheslo = \"dlouhe heslo\"\nklavesnice = [\"cz\", \"us\"]\n";
+    let a = super::answers::parse(t).unwrap();
+    assert_eq!(a.mode, Mode::WholeDisk);
+    assert_eq!(a.account.name, "jan");
+    assert_eq!(a.account.pin, "");
+    assert_eq!(Settings::parse(&a.settings).keyboards, vec![String::from("cz"), String::from("us")]);
+    assert!(super::answers::parse("disk = 1\n").is_err());
+    assert!(super::answers::parse("disk = 1\nzpusob = nic\n").is_err());
+}

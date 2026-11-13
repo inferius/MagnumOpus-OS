@@ -328,6 +328,17 @@ pub trait Host {
     fn power(&mut self, _reboot: bool) -> Result<(), abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Dotaz na text (`secret` = heslo, okno ho nezobrazi); `None` =
+    /// hostitel dotazy neumi nebo uzivatel zrusil.
+    fn ask(&mut self, _question: &str, _secret: bool, _default: &str) -> Option<String> {
+        None
+    }
+    /// Instalator: posle pozadavek (`installplan::proto`), zpravy prubehu
+    /// preda `progress`, vrati konecnou odpoved. `NOT_SUPPORTED` = hostitel
+    /// instalator nema.
+    fn installer(&mut self, _req: &[u8], _progress: &mut dyn FnMut(&[u8])) -> Result<Vec<u8>, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Balicek pro vyvojare (`report`): text s cestou a nahledem obsahu.
     /// `NOT_SUPPORTED` = hostitel sluzbu logu nema.
     fn report(&mut self) -> Result<String, abi::Error> {

@@ -53,6 +53,8 @@ pub enum ClientMsg {
     Sessions,
     /// Odpoved na vyzvu s volbami (`index` do `Prompt::choices`).
     Choose { prompt: u64, index: u32 },
+    /// Odpoved na dotaz na text (`ServerMsg::Ask`).
+    Text { prompt: u64, text: String },
     /// Vyznamove zvyrazneni rozepsaneho radku (okno ho posila pri psani;
     /// `seq` = poradi, okno zahodi starsi odpovedi).
     Highlight { session: u64, line: String, seq: u32 },
@@ -74,6 +76,9 @@ pub enum ServerMsg {
     BlockEnd { session: u64, block: u64, ok: bool, duration: i64 },
     /// Vyzva: `choices` prazdne = ano/ne (`Answer`), jinak vyber (`Choose`).
     Prompt { prompt: u64, question: String, detail: Item, choices: Vec<String> },
+    /// Dotaz na text (odpoved `Text`); `secret` = okno ho nezobrazi (heslo),
+    /// `default` = predvyplneny text.
+    Ask { prompt: u64, question: String, secret: bool, default: String },
     /// Zmena polozky bloku na miste (pruh prubehu, stav): `index` = poradi
     /// polozky v bloku.
     ItemUpdate { session: u64, block: u64, index: u32, item: Item },
@@ -471,6 +476,11 @@ impl ClientMsg {
                 w.u8(13);
                 w.u64(*session);
             }
+            ClientMsg::Text { prompt, text } => {
+                w.u8(14);
+                w.u64(*prompt);
+                w.str(text);
+            }
         }
         w.0
     }
@@ -491,6 +501,7 @@ impl ClientMsg {
             11 => ClientMsg::Choose { prompt: r.u64()?, index: r.u32()? },
             12 => ClientMsg::TaskAction { session: r.u64()?, task: r.u64()?, action: r.u8()? },
             13 => ClientMsg::Background { session: r.u64()? },
+            14 => ClientMsg::Text { prompt: r.u64()?, text: r.str()? },
             _ => return Err(DecodeError),
         };
         r.done()?;
@@ -530,6 +541,13 @@ impl ServerMsg {
                 w.u64(*block);
                 w.u8(*ok as u8);
                 w.i64(*duration);
+            }
+            ServerMsg::Ask { prompt, question, secret, default } => {
+                w.u8(15);
+                w.u64(*prompt);
+                w.str(question);
+                w.u8(*secret as u8);
+                w.str(default);
             }
             ServerMsg::Prompt { prompt, question, detail, choices } => {
                 w.u8(6);
@@ -631,6 +649,7 @@ impl ServerMsg {
                 ServerMsg::Prompt { prompt, question, detail, choices }
             }
             14 => ServerMsg::Cwd { session: r.u64()?, cwd: r.str()? },
+            15 => ServerMsg::Ask { prompt: r.u64()?, question: r.str()?, secret: r.u8()? != 0, default: r.str()? },
             13 => match taskproto::Reply::decode(&r.bytes()?) {
                 Ok(taskproto::Reply::Snapshot { tasks, .. }) => ServerMsg::Tasks { tasks },
                 _ => return Err(DecodeError),

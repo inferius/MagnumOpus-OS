@@ -84,6 +84,11 @@ pub trait Env {
     fn power(&mut self, _reboot: bool) -> Result<(), abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Instalator (prikaz `install`): pozadavek, zpravy prubehu do
+    /// `progress`, konecna odpoved; vychozi = relace instalator nema.
+    fn installer(&mut self, _req: &[u8], _progress: &mut dyn FnMut(&[u8])) -> Result<Vec<u8>, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Balicek pro vyvojare (prikaz `report`); vychozi = relace sluzbu
     /// logu nema.
     fn report(&mut self) -> Result<String, abi::Error> {
@@ -438,6 +443,34 @@ impl Host for SessionHost<'_> {
         self.interrupt
     }
 
+    fn ask(&mut self, question: &str, secret: bool, default: &str) -> Option<String> {
+        if !*self.attached {
+            return None;
+        }
+        let id = *self.next_prompt;
+        *self.next_prompt += 1;
+        self.link.send(&ServerMsg::Ask { prompt: id, question: question.into(), secret, default: default.into() });
+        loop {
+            match self.link.wait() {
+                Some(ClientMsg::Text { prompt, text }) if prompt == id => {
+                    // Heslo do vypisu bloku nepatri.
+                    let shown = if secret { String::from("***") } else { text.clone() };
+                    self.block.items.push(Item::Note(alloc::format!("{question} -> {shown}")));
+                    return Some(text);
+                }
+                Some(m @ (ClientMsg::Interrupt { .. } | ClientMsg::Detach { .. })) => {
+                    self.incoming(m);
+                    return None;
+                }
+                Some(other) => self.deferred.push(other),
+                None => {
+                    *self.attached = false;
+                    return None;
+                }
+            }
+        }
+    }
+
     fn confirm(&mut self, question: &str, detail: &Value) -> bool {
         if !*self.attached {
             self.push(Item::Note(alloc::format!("{question} - okno neni pripojene, odmitnuto")));
@@ -471,6 +504,10 @@ impl Host for SessionHost<'_> {
 
     fn report(&mut self) -> Result<String, abi::Error> {
         self.env.report()
+    }
+
+    fn installer(&mut self, req: &[u8], progress: &mut dyn FnMut(&[u8])) -> Result<Vec<u8>, abi::Error> {
+        self.env.installer(req, progress)
     }
 
     fn log_level(&mut self, target: &str, level: &str) -> Result<String, abi::Error> {
@@ -849,7 +886,7 @@ impl Service {
                     self.board.action(&mut EnvLink(env), task, a);
                 }
             }
-            ClientMsg::Choose { .. } => {}
+            ClientMsg::Choose { .. } | ClientMsg::Text { .. } => {}
             ClientMsg::Complete { session, line, cursor, seq } => {
                 let Some(i) = self.session_index(session) else {
                     link.send(&ServerMsg::Fail { message: alloc::format!("relace {session} neexistuje") });

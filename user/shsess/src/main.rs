@@ -55,6 +55,8 @@ struct MainLink<'a> {
 
 /// Kanal k initu pro `shutdown`/`reboot` (zprava `SessMsg::Power` od termd).
 static POWER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
+/// Kanal k instalatoru (`install`), ziskany od initu pri prvnim pouziti.
+static INSTALLER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
 
 /// Relace zvukove sluzby (zprava `SessMsg::Audio` od termd: kanal a listek);
 /// `SysEnv` si ji vezme pri prvnim prikazu `audio`.
@@ -320,6 +322,36 @@ impl Env for SysEnv {
             powerproto::Reply::Text(t) => Ok(t),
             powerproto::Reply::Failed(e) => Err(e),
             _ => Err(Error::Corrupted),
+        }
+    }
+
+    /// `install`: kanal k instalatoru (od initu, jednou), pozadavek,
+    /// zpravy prubehu, konecna odpoved.
+    fn installer(&mut self, req: &[u8], progress: &mut dyn FnMut(&[u8])) -> Result<Vec<u8>, Error> {
+        let mut inst = INSTALLER.lock();
+        if inst.is_none() {
+            let guard = POWER.lock();
+            let chan = guard.as_ref().ok_or(Error::NotSupported)?;
+            chan.write(&powerproto::Request::OpenInstaller.encode(), Vec::new())?;
+            let m = chan.read(Some(time::deadline_after(Duration::from_secs(30))))?;
+            match powerproto::Reply::decode(&m.data)? {
+                powerproto::Reply::Ok => {}
+                powerproto::Reply::Failed(e) => return Err(e),
+                _ => return Err(Error::Corrupted),
+            }
+            let h = m.handles.into_iter().next().ok_or(Error::Corrupted)?;
+            *inst = Some(Channel::from_handle(h));
+        }
+        let ch = inst.as_ref().unwrap();
+        ch.write(req, Vec::new())?;
+        loop {
+            // Instalace trva minuty: bez terminu, prubeh chodi prubezne.
+            let m = ch.read(None)?;
+            if matches!(installplan::proto::Reply::decode(&m.data), Ok(installplan::proto::Reply::Progress { .. })) {
+                progress(&m.data);
+                continue;
+            }
+            return Ok(m.data);
         }
     }
 
