@@ -778,6 +778,7 @@ pub fn input_id() -> u64 {
 fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: Event, dirty: &mut bool) -> Result<bool> {
     match ev {
         Event::Input(r) => {
+            ui.set_input_class(r.class);
             let resp = ui.event_at(r.event, r.mods, Some(r.time));
             // Schranka: Ctrl+C nabidne text, Ctrl+V si ho vyzada (data
             // prijdou jako `Event::Clipboard`).

@@ -353,6 +353,12 @@ impl<M: Clone> Ui<M> {
         if action & actions::SET_VALUE != 0 && self.slider_set(i, value, &mut r) {
             return r;
         }
+        // Heslo nenastavi zadna akce pristupnosti (agent, automat): jen
+        // mistni fyzicka klavesnice.
+        if action & actions::SET_VALUE != 0 && self.field_kind(i).is_some_and(|k| k.1) {
+            r.trace.push(String::from("nastaveni hesla akci pristupnosti odmitnuto"));
+            return r;
+        }
         if action & actions::SET_VALUE != 0
             && let ElemKind::TextInput { on_change: Some(f), .. } = &self.elems[i].kind
         {

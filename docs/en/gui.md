@@ -1644,6 +1644,26 @@ files cost the same as twenty. The application can share data through
   to `App::external_from(index, data)`; `run_with` with one channel still
   calls `App::external`.
 
+### Input source class
+
+Every input record carries a source class (`InputRecord::class`, flags
+`inputproto::event::flags::SYNTHETIC` and `REMOTE`):
+
+| Class | From | Allowed |
+|---|---|---|
+| local physical | keyboard, mouse, paired remote | everything |
+| remote | phone as a remote, remote desktop | applications yes; system dialogs, login, the secure shortcut, system shortcuts and clipboard no |
+| synthetic | automation, agent, test | like remote |
+
+- The compositor passes the class with every event to applications and
+  performs trusted actions only on local physical input (previously "not
+  synthetic").
+- The `ui` library: a password (and PIN) field accepts typing, deleting
+  and pasting only from local physical input (paste by the class of the
+  Ctrl+V gesture); the accessibility action `set-value` does not set a
+  password. Ordinary fields type from any source. The client passes the
+  class via `Ui::set_input_class`.
+
 ### Component gallery and snapshot tests
 
 **The gallery** `gui-komponenty` (a desktop app in the launcher, no

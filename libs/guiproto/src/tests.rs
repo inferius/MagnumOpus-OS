@@ -171,6 +171,7 @@ fn server_messages_roundtrip() {
                     mods: 1,
                     synthetic: false,
                     time: 10,
+                    class: 0,
                 },
                 InputRecord {
                     event: InputEvent::Button {
@@ -182,12 +183,14 @@ fn server_messages_roundtrip() {
                     mods: 0,
                     synthetic: true,
                     time: 11,
+                    class: 2,
                 },
                 InputRecord {
                     event: InputEvent::PointerLeave,
                     mods: 0,
                     synthetic: false,
                     time: 12,
+                    class: 0,
                 },
             ],
         },

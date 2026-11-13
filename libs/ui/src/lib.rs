@@ -233,6 +233,10 @@ pub struct Ui<M> {
     pub(crate) overlay: bool,
     /// Posun bubliny pri kresleni do vrstvy popoveru (jeji pocatek).
     pub(crate) tip_shift: (i32, i32),
+    /// Trida zdroje zpracovavane udalosti (`guiproto::window::input_class`).
+    pub(crate) input_class: u8,
+    /// Trida zdroje gesta, ktere pozadalo o vlozeni.
+    pub(crate) paste_class: u8,
     /// Posun obsahu posouvanych oblasti podle klice prvku.
     pub(crate) scroll: BTreeMap<Key, i32>,
     /// Ukazatel (souradnice okna).
@@ -291,6 +295,8 @@ impl<M: Clone> Ui<M> {
             now: 0,
             overlay: false,
             tip_shift: (0, 0),
+            input_class: 0,
+            paste_class: 0,
             scroll: BTreeMap::new(),
             pointer: (-1, -1),
             mods: 0,
@@ -334,6 +340,17 @@ impl<M: Clone> Ui<M> {
         c.min_hit = e.min_hit as u32;
         self.look.min_hit = c.min_hit;
         c.text_scale = e.text_scale as u32;
+    }
+
+    /// Trida zdroje nasledujicich udalosti (klient podle `InputRecord`):
+    /// pole s heslem prijmou jen mistni fyzicky vstup.
+    pub fn set_input_class(&mut self, class: u8) {
+        self.input_class = class;
+    }
+
+    /// Je zpracovavany vstup z mistniho fyzickeho zarizeni?
+    pub(crate) fn local_input(&self) -> bool {
+        self.input_class == guiproto::window::input_class::LOCAL
     }
 
     /// Poloha obsahu okna na obrazovce (`WINDOW_PLACE`).

@@ -91,6 +91,8 @@ pub struct InputState {
     pub px: i32,
     pub py: i32,
     pub(crate) drag: Option<Drag>,
+    /// Trida zdroje prave zpracovavaneho zaznamu (`input_class::*`).
+    pub(crate) class: u8,
     pointer_window: Option<u32>,
     press_target: Option<u32>,
     /// Pocet zdroju umeleho vstupu (ukazuje se v panelu).
@@ -116,6 +118,7 @@ impl InputState {
             px: w as i32 / 2,
             py: h as i32 / 2,
             drag: None,
+            class: 0,
             pointer_window: None,
             press_target: None,
             cursor: Cursor::Arrow,
@@ -156,6 +159,9 @@ impl Comp {
                     mods,
                     synthetic,
                     time,
+                    // Trida zdroje zpracovavaneho zaznamu (udalosti od
+                    // systemu jako fokus jsou mistni).
+                    class: if synthetic { self.input.class } else { guiproto::window::input_class::LOCAL },
                 }],
             },
         );
@@ -280,7 +286,14 @@ impl Comp {
             }
             return;
         }
-        let syn = r.is_synthetic();
+        // Duveryhodne akce (dialogy, prihlaseni, bezpecna zkratka, zkratky
+        // systemu) jen z mistniho fyzickeho vstupu: vzdaleny jako umely.
+        let syn = r.class() != inputproto::event::InputClass::Local;
+        self.input.class = match r.class() {
+            inputproto::event::InputClass::Local => guiproto::window::input_class::LOCAL,
+            inputproto::event::InputClass::Remote => guiproto::window::input_class::REMOTE,
+            inputproto::event::InputClass::Synthetic => guiproto::window::input_class::SYNTHETIC,
+        };
         let mods = r.mods;
         match r.event {
             Event::Motion { dx, dy } => {

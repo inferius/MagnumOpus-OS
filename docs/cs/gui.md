@@ -1581,6 +1581,24 @@ tisíc souborů tak stojí stejně jako dvacet. Data může aplikace sdílet př
   `App::external_from(index, data)`; `run_with` s jedním kanálem dál
   volá `App::external`.
 
+### Třída zdroje vstupu
+
+Každý záznam vstupu nese třídu zdroje (`InputRecord::class`, příznaky
+`inputproto::event::flags::SYNTHETIC` a `REMOTE`):
+
+| Třída | Odkud | Co smí |
+|---|---|---|
+| místní fyzický | klávesnice, myš, spárovaný ovladač | vše |
+| vzdálený | telefon jako ovladač, vzdálená plocha | aplikace ano; systémové dialogy, přihlášení, bezpečná zkratka, zkratky systému a schránka ne |
+| syntetický | automatizace, agent, test | jako vzdálený |
+
+- Kompozitor posílá aplikacím třídu u každé události a důvěryhodné akce
+  dělá jen z místního fyzického vstupu (dřív „ne syntetický“).
+- Knihovna `ui`: pole s heslem (i PIN) přijme psaní, mazání a vložení jen
+  z místního fyzického vstupu (vložení podle třídy gesta Ctrl+V); akce
+  přístupnosti `set-value` heslo nenastaví. Běžná pole píší z každého
+  zdroje. Klient předá třídu přes `Ui::set_input_class`.
+
 ### Galerie komponent a snímkové testy
 
 **Galerie** `gui-komponenty` (aplikace plochy ve spouštěči, bez akcí

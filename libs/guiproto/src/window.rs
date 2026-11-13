@@ -438,8 +438,19 @@ pub enum InputEvent {
 pub struct InputRecord {
     pub event: InputEvent,
     pub mods: u16,
+    /// Ne z mistniho fyzickeho zarizeni (`class != Local`).
     pub synthetic: bool,
     pub time: u64,
+    /// Trida zdroje: 0 mistni fyzicky, 1 umely, 2 vzdaleny
+    /// (`inputproto::event::InputClass`).
+    pub class: u8,
+}
+
+/// Kody tridy zdroje v `InputRecord::class`.
+pub mod input_class {
+    pub const LOCAL: u8 = 0;
+    pub const SYNTHETIC: u8 = 1;
+    pub const REMOTE: u8 = 2;
 }
 
 impl InputRecord {
@@ -455,12 +466,18 @@ impl InputRecord {
             InputEvent::Scroll { dx, dy } => (6, dx as u32, dy as u32, 0),
             InputEvent::Focus(f) => (7, f as u32, 0, 0),
         };
-        w.u8(k).u8(self.synthetic as u8).u16(self.mods).u64(self.time).u32(a).u32(b).u32(c);
+        // Trida ve stejnem bajtu jako driv priznak umeleho vstupu.
+        let class = if self.class != input_class::LOCAL { self.class } else { self.synthetic as u8 };
+        w.u8(k).u8(class).u16(self.mods).u64(self.time).u32(a).u32(b).u32(c);
     }
 
     fn decode(r: &mut Reader<'_>) -> Result<Self> {
         let k = r.u8()?;
-        let synthetic = r.u8()? != 0;
+        let class = r.u8()?;
+        if class > input_class::REMOTE {
+            return Err(Error::InvalidArgs);
+        }
+        let synthetic = class != input_class::LOCAL;
         let mods = r.u16()?;
         let time = r.u64()?;
         let (a, b, c) = (r.u32()?, r.u32()?, r.u32()?);
@@ -489,6 +506,7 @@ impl InputRecord {
             mods,
             synthetic,
             time,
+            class,
         })
     }
 }
