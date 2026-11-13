@@ -646,11 +646,18 @@ pub struct Cells {
     pub cells: Vec<String>,
     /// Ikona pred prvni bunkou (jmeno z `gfx::icon`, napr. "folder").
     pub icon: Option<&'static str>,
+    /// Nadpis sekce (`.sec` v navrhu): nejde vybrat, klavesy ho preskoci.
+    pub header: bool,
 }
 
 impl Cells {
     pub fn new(cells: impl IntoIterator<Item = String>) -> Self {
-        Self { cells: cells.into_iter().collect(), icon: None }
+        Self { cells: cells.into_iter().collect(), icon: None, header: false }
+    }
+
+    /// Nadpis sekce (Bezi, Aplikace, System) v seznamu.
+    pub fn header(text: &str) -> Self {
+        Self { cells: alloc::vec![String::from(text)], icon: None, header: true }
     }
 
     pub fn icon(mut self, name: &'static str) -> Self {
