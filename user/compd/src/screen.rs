@@ -177,13 +177,7 @@ impl Service {
         };
         let now = libos::time::now();
         // Snimek na GPU ma pevnou velikost: zrusit, po pripojeni vytvorit znovu.
-        let had_gpu = match self.gpu.take() {
-            Some(g) => {
-                g.destroy();
-                true
-            }
-            None => false,
-        };
+        let venus = self.gpu.take().map(|g| g.destroy());
         let comp = match self.comp.take() {
             Some(mut c) => {
                 c.resize(w, h, now);
@@ -223,8 +217,14 @@ impl Service {
         }
         self.peers.frame = Some((screen.map.addr(), w, h));
         self.screen = Some(screen);
-        if had_gpu && let Err(e) = self.set_backend("gpu") {
-            println!("compd: GPU backend po zmene velikosti nejde ({e}), skladani na CPU");
+        // Stejny render uzel (spojeni Venus), novy skladac pro novou velikost.
+        match venus {
+            Some(Some(v)) => match crate::gpu::GpuBackend::with(v, w, h) {
+                Ok(g) => self.gpu = Some(g),
+                Err(e) => println!("compd: GPU backend po zmene velikosti nejde ({e:?}), skladani na CPU"),
+            },
+            Some(None) => println!("compd: spojeni s GPU po zmene velikosti nejde pouzit, skladani na CPU"),
+            None => {}
         }
         Ok(())
     }

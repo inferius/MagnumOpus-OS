@@ -12,6 +12,7 @@ Kompozitor (milník 6c) jako služba. Logika je v knihovně `libs/comp` (host te
 - Obsahu bufferů aplikací se nevěří (kontroly rozměrů, čtení omezené na VMO).
 - Pád `compd` nesmí ztratit okna: stav se obnoví ze snímku (`docs/cs/gui.md#obnova-po-pádu-kompozitoru`); init spustí záložní konzoli.
 - Aplikace ani kompozitor nesahají na HW displeje; jde to přes ovladač displeje (protokol `guiproto::display`).
+- Render uzel (3D) kompozitor sám neotevírá: dostane ho s příkazem `backend gpu` (init přes `gpud`). Při změně velikosti obrazovky znovu použije stejné spojení Venus (`GpuBackend::with`).
 - Vzhled jen z tokenů (`libs/theme`).
 
 ## Testy

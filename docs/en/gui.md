@@ -1254,8 +1254,8 @@ the whole image into its VMO and says which rectangles changed.
 | `PRESENTED` | driver -> compd | seq, time (ns) |
 | `SYNC` | compd -> driver | token (u64) - marker after a compositor restart |
 | `SYNCED` | driver -> compd | token; everything before it belongs to the previous instance ([Recovery](#recovery-after-a-compositor-crash)) |
-| `OPEN_RENDER` | display owner -> driver | - |
-| `RENDER` | driver -> owner | + render node channel handle ([Venus](venus.md#render-node-gpuproto)) |
+| `OPEN_PROVIDER` | init -> driver (once, then `BAD_STATE`) | - |
+| `PROVIDER` | driver -> init | + handle of the render node provider channel for gpud ([render.md](render.md)) |
 
 The driver copies the damaged rectangles into its DMA buffers (with an
 IOMMU the only memory the device may access), sends

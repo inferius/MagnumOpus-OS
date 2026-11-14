@@ -212,7 +212,8 @@ pub fn run(v: &mut Venus, instance_pd: VkPhysicalDevice) -> Result<String, Error
         cmd::decode_queue_submit_reply,
     )?;
     check(r.ret)?;
-    v.wait_fence(device, fence, Duration::from_secs(20))?;
+    // Plot fronty (osa 1) jako plot jadra, bez dotazovani vkGetFenceStatus.
+    v.wait_queue(1, Duration::from_secs(20))?;
 
     // Pixely zpet z blobu.
     let mut px = alloc::vec![0u8; size as usize];
@@ -224,22 +225,6 @@ pub fn run(v: &mut Venus, instance_pd: VkPhysicalDevice) -> Result<String, Error
     let first = [px[0], px[1], px[2], px[3]];
     let map_info = blob.map_info;
     let ms = (time::now() - started) / 1_000_000;
-    // Pokus kroku 4: zobrazit buffer na vystupu 0 bez kopie (SET_SCANOUT_BLOB,
-    // blob musi byt podlozeny dmabuf), pak vratit puvodni obraz. Ve WSL
-    // zarizeni prikaz prijme, ale displej GTK pod Xvfb dmabuf nevykresli
-    // (eglMakeCurrent failed); vysledek se jen zapise, test na nem nestoji.
-    let scanout = match v.scanout_blob(Some(&blob), W, H, 2, W * 4) {
-        Ok(()) => {
-            time::sleep(Duration::from_millis(500));
-            match v.scanout_blob(None, W, H, 2, W * 4) {
-                Ok(()) => String::from("ok"),
-                Err(e) => format!("zobrazeno, vraceni {e:?}"),
-            }
-        }
-        Err(e) => format!("{e:?}"),
-    };
-    libos::println!("vk-probe: pokus SET_SCANOUT_BLOB: {scanout}");
-
     // Uklid (bloby pred uvolnenim pameti).
     v.destroy_blob(blob)?;
     v.send(|e| {
@@ -257,7 +242,7 @@ pub fn run(v: &mut Venus, instance_pd: VkPhysicalDevice) -> Result<String, Error
         return Err(Error::Vk(vk::VK_ERROR_UNKNOWN));
     }
     Ok(format!(
-        "ok {W}x{H} {:02x}{:02x}{:02x}{:02x} map_info={map_info} {ms} ms, scanout={scanout}",
+        "ok {W}x{H} {:02x}{:02x}{:02x}{:02x} map_info={map_info} {ms} ms",
         first[0], first[1], first[2], first[3]
     ))
 }

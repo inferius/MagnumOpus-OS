@@ -33,7 +33,10 @@ switch `fsd` to debug mode (power-loss simulation for the FS tests).
 2. `devmgr`: finds devices and starts drivers. It reports disks (`block`)
    and input devices (`input`), and then `done` once the USB devices
    present at boot are ready too; while waiting long for a disk driver it
-   sends `busy` (init waits at most 30 s for each message),
+   sends `busy` (init waits at most 30 s for each message). When the
+   display has render nodes (virtio-gpu with 3D), init asks it for the
+   provider (`OPEN_PROVIDER`) and starts the render service `gpud`
+   ([render.md](render.md)),
 3. `fsd` on the disk with the file system; init prepares the root
    certificate store `/system/config/certs` (see
    [TLS and HTTP](tls-http.md#root-certificate-store)),

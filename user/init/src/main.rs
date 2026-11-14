@@ -35,6 +35,7 @@ mod libd;
 mod logd;
 mod ntp;
 mod power;
+mod render;
 mod rescue;
 mod revocation;
 mod session;
@@ -254,6 +255,15 @@ fn main(startup: Startup) -> i64 {
                 }
             }
             *gui::DISPLAY.lock() = devices.displays.pop();
+            // Sluzba render: poskytovatele render uzlu si init vyzada od
+            // displeje driv, nez displej dostane kompozitor.
+            if let Some(d) = gui::DISPLAY.lock().as_ref() {
+                match render::setup(&startup, d) {
+                    Ok(Some(p)) => sup.watch(render::NAME, &p, Some(render::RESTART)),
+                    Ok(None) => println!("init: displej nema render uzly, sluzba render (gpud) nebezi"),
+                    Err(e) => println!("init: sluzbu render (gpud) nelze spustit: {e}"),
+                }
+            }
             system::DEVICES.call_once(|| devices);
         }
         Err(e) => println!("init: spravce zarizeni nelze spustit: {e}"),

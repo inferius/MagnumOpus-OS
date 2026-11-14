@@ -1204,8 +1204,8 @@ celý obraz do své VMO a říká, které obdélníky se změnily.
 | `PRESENTED` | ovladač -> compd | seq, čas (ns) |
 | `SYNC` | compd -> ovladač | token (u64) - značka po restartu kompozitoru |
 | `SYNCED` | ovladač -> compd | token; vše před ní patří předchozí instanci ([Obnova](#obnova-po-pádu-kompozitoru)) |
-| `OPEN_RENDER` | vlastník displeje -> ovladač | - |
-| `RENDER` | ovladač -> vlastník | + handle kanálu render uzlu ([Venus](venus.md#render-uzel-gpuproto)) |
+| `OPEN_PROVIDER` | init -> ovladač (jednou, pak `BAD_STATE`) | - |
+| `PROVIDER` | ovladač -> init | + handle kanálu poskytovatele render uzlů pro gpud ([render.md](render.md)) |
 
 Ovladač zkopíruje poškozené obdélníky do svých bufferů DMA (s IOMMU jediná
 paměť, kam smí zařízení zapisovat a číst), pošle `TRANSFER_TO_HOST_2D`

@@ -10,7 +10,7 @@
 //!   `cargo xtask venus-gen` z `xml/vk.xml` a XML Venusu podle `subset.txt`),
 //! - [`capset`] - capset Venusu (verze protokolu od rendereru),
 //! - `client` (vlastnost `os`) - spojeni pres render uzel ovladace GPU
-//!   (`gpuproto`): kontext, blob pro odpovedi, volani s cekanim na plot.
+//!   (`renderproto`): kontext, blob pro odpovedi, volani s cekanim na plot jadra.
 
 #![cfg_attr(not(test), no_std)]
 

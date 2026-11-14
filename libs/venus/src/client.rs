@@ -1,16 +1,20 @@
-//! Spojeni s rendererem Venus pres render uzel ovladace GPU (`gpuproto`).
+//! Spojeni s rendererem Venus pres render uzel ovladace GPU (`renderproto`).
 //!
 //! Prubeh [`Venus::connect`]:
-//! 1. `INFO` - zarizeni musi mit capset Venus (4),
-//! 2. `GET_CAPSET` - stejny format proudu ([`capset::WIRE_FORMAT_VERSION`]),
+//! 1. `INFO` - zarizeni musi mit uAPI (capset) Venus (4),
+//! 2. `QUERY CAPSET` - stejny format proudu ([`capset::WIRE_FORMAT_VERSION`]),
 //! 3. `CREATE_CONTEXT` s capsetem Venus,
-//! 4. `CREATE_BLOB` - sdilena pamet pro odpovedi (`blob_id` 0,
+//! 4. `CREATE_BUFFER` - sdilena pamet pro odpovedi (`driver_id` 0,
 //!    `MAPPABLE`); ovladac ji namapuje do BARu a posle VMO,
 //! 5. `vkSetReplyCommandStreamMESA` - renderer bude odpovedi psat sem.
 //!
-//! [`Venus::call`] posle proud `vkSeekReplyCommandStreamMESA(0)` + prikazy
-//! s plotem na ose 0 (osa CPU: plot se splni az po zpracovani proudu)
-//! a po odpovedi ovladace precte odpovedi ze sdilene pameti.
+//! Dokonceni hlasi plot jadra spojeni (`libos::Fence`, casova osa
+//! spojeni): [`Venus::call`] posle proud `vkSeekReplyCommandStreamMESA(0)`
+//! + prikazy na fronte 0 (osa CPU: plot se splni az po zpracovani proudu)
+//! s dalsi hodnotou plotu, pocka na ni s terminem a precte odpovedi ze
+//! sdilene pameti. [`Venus::wait_queue`] pocka na praci fronty Vulkanu
+//! svazane s osou `ring_idx` (`VkDeviceQueueTimelineInfoMESA`) - bez
+//! dotazovani `vkGetFenceStatus`.
 //!
 //! Sdilenou pamet ovladac posila jako fyzickou VMO s typem cache podle
 //! `map_info` zarizeni (QEMU hlasi `CACHED`); po zniceni blobu nebo konci
@@ -19,13 +23,14 @@
 use alloc::vec::Vec;
 use core::time::Duration;
 
-use gpuproto::{Reply, Request};
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
+use libos::fence::Fence;
 use libos::{Channel, Handle, Mapping, Vmo, time};
+use renderproto::{Reply, Request};
 
 use crate::capset::VenusCapset;
 use crate::cs::{self, CsError, Decoder, Encoder};
-use crate::vk::{self, VkCommandStreamDescriptionMESA, VkDevice, VkFence, VkResult, cmd};
+use crate::vk::{self, VkCommandStreamDescriptionMESA, VkResult, cmd};
 
 /// Capset Venusu ve virtio-gpu.
 pub const CAPSET_VENUS: u32 = 4;
@@ -90,40 +95,44 @@ pub struct Venus {
     _reply_vmo: Vmo,
     next_id: u64,
     broken: bool,
+    /// Plot spojeni: kazdy prikaz s cekanim dostane dalsi hodnotu.
+    fence: Fence,
+    fence_value: u64,
 }
 
 impl Venus {
     /// Pripoji se k render uzlu `ch` a pripravi kontext Venus.
     pub fn connect(ch: Channel) -> Result<Self> {
         let (info, _) = request(&ch, &Request::Info)?;
-        let Reply::Info { capsets, shm_size } = info else {
+        let Reply::Info { uapis, shm_size, .. } = info else {
             return Err(Error::Os(libos::Error::Corrupted));
         };
-        if !capsets.iter().any(|c| c.id == CAPSET_VENUS) {
+        if !uapis.iter().any(|c| c.id == CAPSET_VENUS) {
             return Err(Error::Os(libos::Error::NotSupported));
         }
         if shm_size < REPLY_SIZE {
             return Err(Error::NoSharedMemory);
         }
-        let (data, _) = request(&ch, &Request::GetCapset { id: CAPSET_VENUS, version: 0 })?;
-        let Reply::Capset(data) = data else {
+        let (data, _) =
+            request(&ch, &Request::Query { key: renderproto::query::CAPSET, a: CAPSET_VENUS, b: 0 })?;
+        let Reply::Query(data) = data else {
             return Err(Error::Os(libos::Error::Corrupted));
         };
         let capset = VenusCapset::parse(&data).ok_or(Error::Incompatible)?;
         if !capset.compatible() {
             return Err(Error::Incompatible);
         }
-        expect(request(&ch, &Request::CreateContext { capset: CAPSET_VENUS })?.0, |r| matches!(r, Reply::Context))?;
+        expect(request(&ch, &Request::CreateContext { uapi: CAPSET_VENUS })?.0, |r| matches!(r, Reply::Context))?;
         let (blob, mut handles) = request(
             &ch,
-            &Request::CreateBlob {
-                mem: gpuproto::mem::HOST3D,
-                flags: gpuproto::flags::MAPPABLE,
-                blob_id: 0,
+            &Request::CreateBuffer {
+                mem: renderproto::mem::HOST3D,
+                flags: renderproto::flags::MAPPABLE,
+                driver_id: 0,
                 size: REPLY_SIZE,
             },
         )?;
-        let Reply::Blob { resource, size, .. } = blob else {
+        let Reply::Buffer { buffer: resource, size, .. } = blob else {
             return Err(Error::Os(libos::Error::Corrupted));
         };
         if handles.len() != 1 || size < REPLY_SIZE {
@@ -131,7 +140,19 @@ impl Venus {
         }
         let vmo = Vmo::from_handle(handles.remove(0));
         let reply = Mapping::new(&vmo, 0, REPLY_SIZE, MAP_READ)?;
-        let mut v = Self { ch, capset, shm_size, reply_resource: resource, reply, _reply_vmo: vmo, next_id: 1, broken: false };
+        let fence = Fence::create(0)?;
+        let mut v = Self {
+            ch,
+            capset,
+            shm_size,
+            reply_resource: resource,
+            reply,
+            _reply_vmo: vmo,
+            next_id: 1,
+            broken: false,
+            fence,
+            fence_value: 0,
+        };
         let mut e = Encoder::new();
         let stream = VkCommandStreamDescriptionMESA { resource_id: resource, offset: 0, size: REPLY_SIZE };
         cmd::set_reply_command_stream_mesa(&mut e, 0, &stream);
@@ -151,19 +172,56 @@ impl Venus {
         self.reply_resource
     }
 
-    /// Posle proud prikazu; s `fence` pocka, az ho renderer zpracuje.
-    pub fn submit(&mut self, stream: Vec<u8>, fence: bool) -> Result<()> {
-        if stream.len() > gpuproto::MAX_SUBMIT {
+    /// Posle proud prikazu na frontu 0 (osa CPU); s `wait` pocka, az ho
+    /// renderer zpracuje.
+    pub fn submit(&mut self, stream: Vec<u8>, wait: bool) -> Result<()> {
+        if stream.len() > renderproto::MAX_SUBMIT {
             return Err(Error::Os(libos::Error::InvalidArgs));
         }
+        self.submit_on(0, stream, wait)
+    }
+
+    /// Pocka, az fronta Vulkanu svazana s osou `ring_idx`
+    /// (`VkDeviceQueueTimelineInfoMESA`) dokonci vsechnu praci odeslanou
+    /// predtim. Nahrazuje dotazovani `vkGetFenceStatus`: ovladac posune
+    /// plot jadra, az renderer splni plot fronty.
+    pub fn wait_queue(&mut self, ring_idx: u8, timeout: Duration) -> Result<()> {
+        self.submit_on_with(ring_idx as u32, Vec::new(), Some(timeout))
+    }
+
+    fn submit_on(&mut self, queue: u32, stream: Vec<u8>, wait: bool) -> Result<()> {
+        self.submit_on_with(queue, stream, wait.then_some(TIMEOUT))
+    }
+
+    /// `SUBMIT` na frontu `queue`; s `timeout` s dalsi hodnotou plotu
+    /// spojeni a cekanim na ni. Chyba plotu (zarizeni, `HANG_TIMEOUT`
+    /// ovladace) nebo vyprseni = spojeni rozjete.
+    fn submit_on_with(&mut self, queue: u32, stream: Vec<u8>, timeout: Option<Duration>) -> Result<()> {
         if self.broken {
             return Err(Error::Broken);
         }
-        let r = request(&self.ch, &Request::Submit { ring_idx: 0, fence, data: stream });
+        let Some(timeout) = timeout else {
+            let r = request(&self.ch, &Request::Submit { queue, wait: Vec::new(), signal: Vec::new(), data: stream });
+            return expect(r?.0, |r| matches!(r, Reply::Submitted));
+        };
+        let value = self.fence_value + 1;
+        let handle = self.fence.handle().duplicate(None)?;
+        let req = Request::Submit { queue, wait: Vec::new(), signal: alloc::vec![value], data: stream };
+        let r = request_with(&self.ch, &req, alloc::vec![handle]);
         if matches!(r, Err(Error::Os(libos::Error::TimedOut))) {
             self.broken = true;
         }
-        expect(r?.0, |r| matches!(r, Reply::Submitted))
+        expect(r?.0, |r| matches!(r, Reply::Submitted))?;
+        self.fence_value = value;
+        match self.fence.wait(value, Some(time::deadline_after(timeout))) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // Dalsi odpovedi by nepatrily k pozadavkum (plot po chybe uz
+                // zustava v chybe): spojeni nepouzivat.
+                self.broken = true;
+                Err(Error::Os(e))
+            }
+        }
     }
 
     /// Zakoduje prikazy (`encode`, s priznakem [`crate::REPLY`]), pocka na
@@ -198,9 +256,14 @@ impl Venus {
     pub fn create_blob(&mut self, blob_id: u64, size: u64) -> Result<Blob> {
         let (r, mut handles) = request(
             &self.ch,
-            &Request::CreateBlob { mem: gpuproto::mem::HOST3D, flags: gpuproto::flags::MAPPABLE, blob_id, size },
+            &Request::CreateBuffer {
+                mem: renderproto::mem::HOST3D,
+                flags: renderproto::flags::MAPPABLE,
+                driver_id: blob_id,
+                size,
+            },
         )?;
-        let Reply::Blob { resource, size, map_info } = r else {
+        let Reply::Buffer { buffer: resource, size, map_info } = r else {
             return Err(Error::Os(libos::Error::Corrupted));
         };
         if handles.len() != 1 {
@@ -211,36 +274,12 @@ impl Venus {
         Ok(Blob { resource, size, map_info, map, _vmo: vmo })
     }
 
-    /// Pokus kroku 4: vystup 0 zobrazi blob (`format` virtio-gpu, napr.
-    /// `B8G8R8X8_UNORM` = 2); `None` vrati puvodni obraz. Blob musi byt
-    /// podlozeny dmabuf.
-    pub fn scanout_blob(&mut self, blob: Option<&Blob>, w: u32, h: u32, format: u32, stride: u32) -> Result<()> {
-        let resource = blob.map_or(0, |b| b.resource);
-        let (r, _) = request(&self.ch, &Request::ScanoutBlob { resource, w, h, format, stride })?;
-        expect(r, |r| matches!(r, Reply::Done { .. }))
-    }
-
     /// Znici blob (ovladac odvola jeho mapovani).
     pub fn destroy_blob(&mut self, b: Blob) -> Result<()> {
         let resource = b.resource;
         drop(b);
-        let (r, _) = request(&self.ch, &Request::DestroyBlob { resource })?;
+        let (r, _) = request(&self.ch, &Request::Destroy { buffer: resource })?;
         expect(r, |r| matches!(r, Reply::Done { .. }))
-    }
-
-    /// Pocka na plot (`vkGetFenceStatus` po kratkych pauzach; renderer
-    /// blokujici cekani nepovoluje, jen `vkWaitForFences` s casem).
-    pub fn wait_fence(&mut self, device: VkDevice, fence: VkFence, timeout: Duration) -> Result<()> {
-        let deadline = time::deadline_after(timeout);
-        loop {
-            let r = self.call(|e| cmd::get_fence_status(e, crate::REPLY, device, fence), cmd::decode_get_fence_status_reply)?;
-            match r.ret {
-                vk::VK_SUCCESS => return Ok(()),
-                vk::VK_NOT_READY if time::now() < deadline => time::sleep(Duration::from_millis(1)),
-                vk::VK_NOT_READY => return Err(Error::Vk(vk::VK_TIMEOUT)),
-                e => return Err(Error::Vk(e)),
-            }
-        }
     }
 
     /// Prikazy bez odpovedi (napr. vkDestroy*); pocka na zpracovani.
@@ -257,7 +296,11 @@ pub fn check(r: VkResult) -> Result<()> {
 }
 
 fn request(ch: &Channel, r: &Request) -> Result<(Reply, Vec<Handle>)> {
-    ch.write(&r.encode(), Vec::new())?;
+    request_with(ch, r, Vec::new())
+}
+
+fn request_with(ch: &Channel, r: &Request, handles: Vec<Handle>) -> Result<(Reply, Vec<Handle>)> {
+    ch.write(&r.encode(), handles)?;
     let m = ch.read(Some(time::deadline_after(TIMEOUT)))?;
     let reply = Reply::decode(&m.data)?;
     if let Reply::Error { code, .. } = reply {

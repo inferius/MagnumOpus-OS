@@ -32,7 +32,9 @@ výpadku proudu pro testy FS).
 2. `devmgr`: najde zařízení a spustí ovladače. Hlásí disky (`block`)
    a vstupní zařízení (`input`) a pak `done`, až jsou hotová i zařízení
    USB při startu; při dlouhém čekání na ovladač disku posílá `busy`
-   (init čeká na každou zprávu nejvýš 30 s),
+   (init čeká na každou zprávu nejvýš 30 s). Když displej umí render uzly
+   (virtio-gpu s 3D), init si od něj vyžádá poskytovatele
+   (`OPEN_PROVIDER`) a spustí službu render `gpud` ([render.md](render.md)),
 3. `fsd` nad diskem se souborovým systémem; init připraví úložiště
    kořenových certifikátů `/system/config/certs` (viz
    [TLS a HTTP](tls-http.md#úložiště-kořenových-certifikátů)),

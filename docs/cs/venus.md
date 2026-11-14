@@ -16,10 +16,10 @@ Další kroky viz [Plán](#plán).
 <defs><marker id="v1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
 <rect class="box" x="20" y="20" width="230" height="64" rx="6"/><text class="t b" x="135" y="44" text-anchor="middle">vk-probe (aplikace)</text><text class="m" x="135" y="64" text-anchor="middle">vkCreateInstance, vkEnumerate...</text>
 <rect class="acc" x="20" y="110" width="230" height="110" rx="6"/><text class="t b" x="135" y="134" text-anchor="middle">libs/venus</text><text class="m" x="135" y="154" text-anchor="middle">vk: typy a příkazy (generované)</text><text class="m" x="135" y="172" text-anchor="middle">cs: kódování proudu</text><text class="m" x="135" y="190" text-anchor="middle">client: kontext, blob odpovědí,</text><text class="m" x="135" y="206" text-anchor="middle">volání s plotem</text>
-<rect class="box" x="20" y="250" width="230" height="64" rx="6"/><text class="t b" x="135" y="274" text-anchor="middle">init / kompozitor</text><text class="m" x="135" y="294" text-anchor="middle">OPEN_RENDER na displeji</text>
+<rect class="box" x="20" y="250" width="230" height="64" rx="6"/><text class="t b" x="135" y="274" text-anchor="middle">init / kompozitor</text><text class="m" x="135" y="294" text-anchor="middle">render uzel od gpud</text>
 <path class="ln" d="M135 84 L135 108" marker-end="url(#v1)"/>
 <path class="ln dash" d="M135 250 L135 222" marker-end="url(#v1)"/><text class="m" x="142" y="241">kanál render uzlu</text>
-<rect class="acc" x="300" y="110" width="210" height="140" rx="6"/><text class="t b" x="405" y="134" text-anchor="middle">user/virtio-gpu</text><text class="m" x="405" y="154" text-anchor="middle">render uzel (gpuproto)</text><text class="m" x="405" y="172" text-anchor="middle">CTX_CREATE s capsetem 4</text><text class="m" x="405" y="190" text-anchor="middle">RESOURCE_CREATE_BLOB</text><text class="m" x="405" y="208" text-anchor="middle">RESOURCE_MAP_BLOB</text><text class="m" x="405" y="226" text-anchor="middle">SUBMIT_3D s plotem</text>
+<rect class="acc" x="300" y="110" width="210" height="140" rx="6"/><text class="t b" x="405" y="134" text-anchor="middle">user/virtio-gpu</text><text class="m" x="405" y="154" text-anchor="middle">render uzel (renderproto)</text><text class="m" x="405" y="172" text-anchor="middle">CTX_CREATE s capsetem 4</text><text class="m" x="405" y="190" text-anchor="middle">RESOURCE_CREATE_BLOB</text><text class="m" x="405" y="208" text-anchor="middle">RESOURCE_MAP_BLOB</text><text class="m" x="405" y="226" text-anchor="middle">SUBMIT_3D s plotem</text>
 <path class="ln" d="M250 160 L298 160" marker-end="url(#v1)"/><text class="m" x="256" y="152">SUBMIT</text>
 <path class="ln dash" d="M298 200 L252 200" marker-end="url(#v1)"/><text class="m" x="256" y="216">VMO blobu</text>
 <rect class="box" x="560" y="110" width="200" height="140" rx="6"/><text class="t b" x="660" y="134" text-anchor="middle">QEMU virtio-gpu</text><text class="m" x="660" y="154" text-anchor="middle">venus=on, blob=on</text><text class="m" x="660" y="172" text-anchor="middle">hostmem=256M: BAR se</text><text class="m" x="660" y="190" text-anchor="middle">sdílenou pamětí</text><text class="m" x="660" y="208" text-anchor="middle">(capability typ 8, id 1)</text>
@@ -44,8 +44,8 @@ Test `vulkan` v initu (před sadou `gui`, dokud displej drží init):
 1. `INFO` na displeji: má ovladač schopnost `VENUS`? Když ne, test se
    **přeskočí** - výchozí `cargo xtask test` na Windows QEMU (bez Venusu)
    projde na x86_64 i `--arch aarch64` beze změny.
-2. `OPEN_RENDER` vrátí kanál render uzlu, init spustí `vk-probe` s tímto
-   kanálem.
+2. init si od služby **gpud** vyžádá render uzel ([render.md](render.md))
+   a spustí `vk-probe` s tímto kanálem.
 3. `vk-probe` přes `libs/venus` vytvoří instanci, vyjmenuje fyzická
    zařízení, přečte jejich vlastnosti a pošle řádek
    `ok <počet>|<jméno>|<typ>|<api>|<vendor:device>` (první test).
@@ -54,7 +54,7 @@ Test `vulkan` v initu (před sadou `gui`, dokud displej drží init):
    zařízení, buffer v paměti `HOST_VISIBLE | HOST_COHERENT`, command
    buffer (bariéra, `vkCmdClearColorImage`, bariéra,
    `vkCmdCopyImageToBuffer`, bariéra pro hosta), `vkQueueSubmit` s plotem,
-   čekání `vkGetFenceStatus`. Pixely se čtou přímo z bloba namapovaného
+   čekání přes plot jádra na frontě 1 (`Venus::wait_queue`). Pixely se čtou přímo z bloba namapovaného
    z `VkDeviceMemory` bufferu; všech 4096 musí mít vyplněnou barvu.
 
 Výpis z běhu ve WSL (lavapipe):
@@ -167,31 +167,29 @@ Zatím neumí (chyba při generování, ne tiché špatné kódování): unie ve
 výstupu, řetězec pNext ve výstupu, vícerozměrná pole, ukazatele ve
 výstupních strukturách.
 
-## Render uzel (`gpuproto`)
+## Render uzel (`renderproto`)
 
-Jeden kanál = jeden klient = nejvýš jeden kontext. Otevře ho vlastník
-displeje (`guiproto::display` `OPEN_RENDER`) a předá dál.
+Kanál render uzlu teď otevírá služba **gpud** a protokol je společná třída
+render (`renderproto`). Tabulka zpráv, ploty v `SUBMIT` a termín zaseknutí
+jsou v [render.md](render.md). Pro Venus platí:
 
-| Op | Pole | Odpověď |
-|---|---|---|
-| `INFO` | - | capsety (id, verze, velikost), velikost sdílené paměti |
-| `GET_CAPSET` | id, verze | obsah capsetu |
-| `CREATE_CONTEXT` | capset | `CONTEXT` |
-| `CREATE_BLOB` | paměť (`HOST3D`), příznaky (`MAPPABLE`...), blob_id, velikost | `BLOB` (resource, velikost, `map_info`) + VMO, když `MAPPABLE` |
-| `DESTROY_BLOB` | resource | `DONE` |
-| `SUBMIT` | ring_idx (zatím jen 0), plot, proud (nejvýš 60 KiB, násobek 4) | `SUBMITTED` (s plotem až po zpracování) |
-| `SCANOUT_BLOB` | resource (0 = vrátit původní obraz), w, h, formát, krok řádku | `DONE`; pokus kroku 4, jen vlastní blob klienta |
+- uAPI = capset Venusu (4), obsah capsetu přes `QUERY CAPSET`,
+- buffer = blob `HOST3D`, id ovladače = id `VkDeviceMemory` (0 = nová sdílená
+  paměť pro odpovědi),
+- fronta `SUBMIT` = `ring_idx`: 0 je osa CPU (plot po zpracování proudu),
+  1..63 fronty Vulkanu svázané `VkDeviceQueueTimelineInfoMESA`.
 
 Zavření kanálu: ovladač odvolá okna sdílené paměti (`VMO_REVOKE`),
-odmapuje a uvolní bloby a zničí kontext.
+odmapuje a uvolní bloby, nedokončeným příkazům nastaví výstupní ploty na
+`FENCE_FAILED` a zničí kontext.
 
 **Asynchronní fronta.** Ovladač má 32 slotů (každý 72 KiB DMA paměti
 pro příkaz a odpověď, dvojice deskriptorů). Synchronní příkazy (displej,
-bloby, kontexty) čekají jen na svůj slot. `SUBMIT` s plotem se jen
-odešle; odpověď `SUBMITTED` pošle hlavní smyčka, až zařízení slot vrátí
-(přerušení je ve `wait_many` spolu s kanály). Pomalý renderer jednoho
+bloby, kontexty) čekají jen na svůj slot. `SUBMIT` se ploty se jen
+odešle; ploty posune hlavní smyčka, až zařízení slot vrátí (přerušení je
+ve `wait_many` spolu s kanály a portem plotů). Pomalý renderer jednoho
 klienta tak neblokuje displej ani jiné klienty. Dva sloty jsou vždy
-volné pro synchronní příkazy; klient smí mít nejvýš 4 nedokončené
+volné pro synchronní příkazy; klient smí mít nejvýš 16 nedokončených
 `SUBMIT` (pak `SHOULD_WAIT`).
 
 ## Rizika
@@ -207,9 +205,11 @@ Vyřešená rizika z kroku 1:
 - **Synchronní čekání.** Viz asynchronní fronta výše; klient čeká 40 s
   a po vypršení spojení označí za rozjeté (`Error::Broken`).
 
-⚠️ Zbývá: jiný `ring_idx` než 0 ovladač odmítne - plot na ose, kterou
-klient nesvázal s frontou, by se nesplnil a slot by zůstal obsazený.
-Čekání na GPU proto zatím přes `vkGetFenceStatus`.
+- **Fronty Vulkanu** (krok 6a-3) **[ověřeno v QEMU]** (WSL): `ring_idx`
+  1..63 funguje přes ploty jádra (`Venus::wait_queue`), dotazování
+  `vkGetFenceStatus` zmizelo. Plot na ose, kterou klient nesvázal s frontou,
+  se nesplní; ovladač ho po `HANG_TIMEOUT` (10 s) ukončí chybou
+  ([render.md](render.md#submit-a-ploty)).
 
 Bez KVM nebo s TCG (aarch64 ve WSL) Venus netestujeme; `vk.xml` má
 3,3 MB (v gitu komprimovaný na zlomek).
@@ -233,7 +233,7 @@ rovnou zobrazí, bez kopie přes procesor. virtio-gpu na to má
 `SET_SCANOUT_BLOB`; u virgl/Venus musí být blob podložený dmabuf
 a displej QEMU ho importuje přes EGL.
 
-Pokus (`vk-probe`, buffer z kroku 3 na výstupu 0 po dobu 0,5 s):
+Pokus (kroky 4 až 6a-2; `vk-probe`, buffer z kroku 3 na výstupu 0 po dobu 0,5 s). V kroku 6a-3 byl odstraněn: zobrazení patří vlastníkovi displeje (compd), ne render klientovi, a přijde s třídou displej v2 ([render.md](render.md#co-se-změnilo-proti-gpuproto)).
 
 | Část | Výsledek ve WSL |
 |---|---|

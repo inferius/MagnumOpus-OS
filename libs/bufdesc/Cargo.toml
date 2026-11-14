@@ -1,0 +1,9 @@
+[package]
+name = "bufdesc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Popis sdileneho bufferu nad VMO (format, modifikator, roviny) s overenim proti velikosti"
+
+[dependencies]
+wire = { path = "../wire" }

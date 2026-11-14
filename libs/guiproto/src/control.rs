@@ -73,8 +73,9 @@ pub const STATUS: &str = "status";
 /// `tasks <bezi> <z toho agent>`: pocet uloh pro ikonu v panelu (do
 /// pripojeni kompozitoru k taskd ho posila init nebo test).
 pub const TASKS: &str = "tasks";
-/// `backend gpu|cpu`: skladani na GPU (Venus, render uzel ovladace)
-/// nebo na CPU (vychozi). Bez Venusu `backend gpu` = `NOT_SUPPORTED`.
+/// `backend gpu|cpu`: skladani na GPU (Venus) nebo na CPU (vychozi).
+/// `backend gpu` nese v handlech kanal render uzlu (od `gpud`, otevre ho
+/// init); bez nej nebo bez Venusu = `NOT_SUPPORTED`.
 pub const BACKEND: &str = "backend";
 /// `mode <w> <h> [obnova mHz]`: zmena rezimu displeje (`SET_MODE`).
 pub const MODE: &str = "mode";

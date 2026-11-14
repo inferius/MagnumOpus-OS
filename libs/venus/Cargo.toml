@@ -7,8 +7,8 @@ description = "Vlastni klient Venus: serializace Vulkanu pro virtio-gpu (generov
 
 [features]
 # Klient nad kanalem render uzlu (jen v systemu, ne na hostiteli).
-os = ["dep:libos", "dep:gpuproto"]
+os = ["dep:libos", "dep:renderproto"]
 
 [dependencies]
-gpuproto = { path = "../gpuproto", optional = true }
+renderproto = { path = "../renderproto", optional = true }
 libos = { path = "../libos", optional = true }
