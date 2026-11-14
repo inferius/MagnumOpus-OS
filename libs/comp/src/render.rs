@@ -26,6 +26,7 @@ use guiproto::window::{LayerKind, Mode};
 use theme::TextStyle;
 
 use crate::Comp;
+use crate::prof::Part;
 use crate::scene::{Client, Layer, Window};
 use crate::style::Style;
 
@@ -406,20 +407,37 @@ impl Comp {
         let hover = self.input.hover;
         let popover = self.popover_pass(hidden);
         if rects.iter().any(|r| !r.intersect(&self.panel_visual()).is_empty()) {
+            let t0 = self.prof.start();
             self.ensure_bar_blur(now);
+            self.prof.add(Part::BarBlur, t0);
         }
+        // Telo okna je nepruhledne (vypln `surface` pod obsahem), takze
+        // jadro okna bez rohu zakryje vse pod nim: plocha a nizsi okna se
+        // tam nekresli.
+        let opaque = self.style.theme.color.surface >> 24 == 255 && !self.prof.no_cull;
         for r in rects {
-            canvas.set_clip(*r);
-            self.desktop(canvas);
-            for (gid, kids) in &trees {
+            let (free, parts) = self.visible_parts(*r, &trees, opaque);
+            let t0 = self.prof.start();
+            for f in &free {
+                canvas.set_clip(*f);
+                self.desktop(canvas);
+            }
+            self.prof.add(Part::Desktop, t0);
+            for ((gid, kids), pieces) in trees.iter().zip(&parts) {
                 let w = &self.windows[gid];
-                if w.visual().intersect(r).is_empty() {
-                    continue;
-                }
                 let cl = &self.clients[&w.client];
                 let focused = self.focus == Some(*gid);
-                draw_window(canvas, &mut self.style, w, cl, kids, focused, now, hover.and_then(|h| button_of(h, *gid)));
+                for piece in pieces {
+                    canvas.set_clip(*piece);
+                    let t0 = self.prof.start();
+                    draw_window_shadow(canvas, &mut self.style, w, focused);
+                    self.prof.add(Part::Shadow, t0);
+                    let t0 = self.prof.start();
+                    draw_window_unshadowed(canvas, &mut self.style, w, cl, kids, focused, now, hover.and_then(|h| button_of(h, *gid)));
+                    self.prof.add(Part::Window, t0);
+                }
             }
+            canvas.set_clip(*r);
             // Popover okna s fokusem: nad vsemi okny, okno ho neorezava.
             if let Some((g, kids, rects)) = &popover {
                 let w = &self.windows[g];
@@ -434,14 +452,38 @@ impl Comp {
             }
             // Vse nad okny pres mezibuffer (stejne jako GPU backend: jedno
             // prolnuti kazdeho pixelu); jen tam, kde vrstva neco kresli.
+            let t0 = self.prof.start();
             for t in self.top_regions(dialog_active) {
                 let part = r.intersect(&t);
                 if !part.is_empty() {
                     self.top_via_scratch(canvas, part, &bar, dialog_active);
                 }
             }
+            self.prof.add(Part::Top, t0);
         }
         canvas.reset_clip();
+    }
+
+    /// Viditelne casti poskozeneho obdelniku `r`: (plocha, casti kazdeho
+    /// okna z `trees` ve stejnem poradi). Okno dostane, co z jeho
+    /// `visual()` nezakryji jadra oken nad nim; plocha zbytek. S `opaque`
+    /// = false (pruhledny povrch motivu) nic nezakryva.
+    pub(crate) fn visible_parts(&self, r: Rect, trees: &[(u32, Kids)], opaque: bool) -> (Vec<Rect>, Vec<Vec<Rect>>) {
+        let mut free = alloc::vec![r];
+        let mut parts = alloc::vec![Vec::new(); trees.len()];
+        for (i, (gid, _)) in trees.iter().enumerate().rev() {
+            let w = &self.windows[gid];
+            let vis = w.visual();
+            parts[i] = free.iter().map(|f| f.intersect(&vis)).filter(|f| !f.is_empty()).collect();
+            if opaque {
+                for k in window_core(w) {
+                    if !k.is_empty() {
+                        free = free.iter().flat_map(|f| subtract(*f, k)).collect();
+                    }
+                }
+            }
+        }
+        (free, parts)
     }
 
     /// Popovery okna s fokusem: (okno, deti, obdelniky na obrazovce).
@@ -643,8 +685,14 @@ pub(crate) fn draw_window_shadow(c: &mut Canvas<'_>, st: &mut Style, w: &Window,
 
 #[allow(clippy::too_many_arguments)]
 fn draw_window(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client, kids: &Kids, focused: bool, now: u64, hover: Option<usize>) {
-    let clip = c.clip();
     draw_window_shadow(c, st, w, focused);
+    draw_window_unshadowed(c, st, w, cl, kids, focused, now, hover);
+}
+
+/// Okno bez stinu: telo a obsah, rohy zaoblene pres ulozene pozadi.
+#[allow(clippy::too_many_arguments)]
+fn draw_window_unshadowed(c: &mut Canvas<'_>, st: &mut Style, w: &Window, cl: &Client, kids: &Kids, focused: bool, now: u64, hover: Option<usize>) {
+    let clip = c.clip();
     let o = w.outer();
     let rad = w.radius();
     let under = if rad > 0 { c.save_corners(o, rad) } else { Vec::new() };
@@ -947,7 +995,12 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
     if vis.intersect(&area).is_empty() {
         return;
     }
-    st.draw_shadow(c, &shadow, p, t.radius.window, Rect::default());
+    // Pod telem listy stin nekreslit, kdyz ho prekryje nepruhledne
+    // rozmazane pozadi (plocha a okna jsou nepruhledne): mimo zaoblene
+    // radky je pokryti tvaru 255.
+    let rad = t.radius.window.min(p.w / 2).min(p.h / 2);
+    let skip = if info.blur.is_some() { Rect::new(p.x, p.y + rad as i32, p.w, p.h.saturating_sub(2 * rad)) } else { Rect::default() };
+    st.draw_shadow(c, &shadow, p, t.radius.window, skip);
     if let Some(b) = info.blur {
         c.round_image(b, p, t.radius.window);
     }
@@ -1160,6 +1213,30 @@ fn draw_cursor(c: &mut Canvas<'_>, x: i32, y: i32) {
 }
 
 /// Pasy okna bez rohovych ctvercu (GPU backend kresli obsah jen do nich).
+/// `r` bez `k` jako nejvys ctyri obdelniky (pruh nad, pod, vlevo, vpravo).
+pub(crate) fn subtract(r: Rect, k: Rect) -> Vec<Rect> {
+    let i = r.intersect(&k);
+    if i.is_empty() {
+        return alloc::vec![r];
+    }
+    let mut out = Vec::with_capacity(4);
+    let (rb, ib) = (r.bottom() as i32, i.bottom() as i32);
+    let (rr, ir) = (r.right() as i32, i.right() as i32);
+    if i.y > r.y {
+        out.push(Rect::new(r.x, r.y, r.w, (i.y - r.y) as u32));
+    }
+    if ib < rb {
+        out.push(Rect::new(r.x, ib, r.w, (rb - ib) as u32));
+    }
+    if i.x > r.x {
+        out.push(Rect::new(r.x, i.y, (i.x - r.x) as u32, i.h));
+    }
+    if ir < rr {
+        out.push(Rect::new(ir, i.y, (rr - ir) as u32, i.h));
+    }
+    out
+}
+
 pub(crate) fn window_core(w: &Window) -> [Rect; 3] {
     core_rects(w.outer(), w.radius())
 }

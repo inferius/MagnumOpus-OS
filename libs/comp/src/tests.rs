@@ -19,6 +19,7 @@ use crate::*;
 
 mod bench;
 mod clipboard;
+mod cull;
 mod gpu;
 mod greeter;
 mod launcher;

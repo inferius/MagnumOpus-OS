@@ -375,6 +375,7 @@ impl Service {
             return;
         }
         let (w, h) = (sc.w, sc.h);
+        let before = c.prof.parts;
         let composed = match self.gpu.as_mut() {
             Some(g) => match g.tick(c, now, sc.pixels()) {
                 Ok(r) => r,
@@ -401,13 +402,15 @@ impl Service {
             let full = px >= w as u64 * h as u64;
             let st = &mut self.frame_stats;
             if full {
-                println!("compd: snimek cele obrazovky {w}x{h}: {} us ({})", took / 1000, if self.gpu.is_some() { "gpu" } else { "cpu" });
+                let parts = c.prof.split_off(&before);
+                println!("compd: snimek cele obrazovky {w}x{h}: {} us ({}; {parts})", took / 1000, if self.gpu.is_some() { "gpu" } else { "cpu" });
             } else {
                 st.0 += 1;
                 st.1 += took;
                 st.2 = st.2.max(took);
                 if st.0 >= 300 {
-                    println!("compd: 300 snimku: prumer {} us, nejvic {} us", st.1 / st.0 / 1000, st.2 / 1000);
+                    let parts = c.prof.take(st.0);
+                    println!("compd: 300 snimku: prumer {} us, nejvic {} us ({parts})", st.1 / st.0 / 1000, st.2 / 1000);
                     *st = (0, 0, 0);
                 }
             }

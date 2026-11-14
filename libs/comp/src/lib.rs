@@ -29,6 +29,7 @@ pub mod fullscreen;
 pub mod launch;
 pub mod menu;
 pub mod palette;
+pub mod prof;
 pub mod frame;
 pub mod gpu;
 pub mod greeter;
@@ -115,6 +116,8 @@ pub struct Comp {
     pub(crate) bar_blur: Option<Vec<u32>>,
     pub(crate) bar_blur_dirty: bool,
     pub(crate) blur_scratch: Vec<u32>,
+    /// Mereni skladani po castech (hodiny dodava sluzba).
+    pub prof: prof::Prof,
     pub(crate) clients: BTreeMap<ClientId, scene::Client>,
     pub(crate) windows: BTreeMap<u32, scene::Window>,
     /// Poradi oken zdola nahoru (globalni id).
@@ -198,6 +201,7 @@ impl Comp {
             bar_blur: None,
             bar_blur_dirty: true,
             blur_scratch: Vec::new(),
+            prof: prof::Prof::default(),
             clients: BTreeMap::new(),
             windows: BTreeMap::new(),
             z: Vec::new(),
