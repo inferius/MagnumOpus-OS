@@ -186,6 +186,17 @@ impl ObjectCore {
         None
     }
 
+    /// Pocet registraci cekajicich vlaken (pro testy: po skonceni cekani
+    /// nesmi zadna zustat).
+    pub fn thread_observers(&self) -> usize {
+        self.inner
+            .lock()
+            .observers
+            .iter()
+            .filter(|o| matches!(o.waiter, Waiter::Thread { .. }))
+            .count()
+    }
+
     fn remove_observer(&self, thread: &Thread, seq: u64) {
         self.inner.lock().observers.retain(|o| match &o.waiter {
             Waiter::Thread { thread: t, seq: s } => !(core::ptr::eq(&**t, thread) && *s == seq),
