@@ -496,11 +496,11 @@ s capability); liší se pravidla.
 
 | # | Otázka | Rozhodnutí |
 |---|---|---|
-| 1 | protokol terminálu | **vlastní nativní protokol** (typované záznamy, tabulky, odkazy, obrázky, průběh, výzvy); VT100/pty jen jako adaptér pro převzaté programy |
-| 2 | jazyk shellu | **nový jazyk s typy, dva zápisy jednoho jazyka** (příkazový a výrazový blízký Rustu, [návrh](navrh-shell.md)): bez implicitního dělení slov, chyba jako hodnota (kód + popis), která se bez ošetření šíří sama a skript zastaví; **skript nese manifest oprávnění**; POSIX `sh` zvlášť pro převzaté skripty |
-| 3 | co posílá aplikace kompozitoru | **strom vrstev + strom přístupnosti** (obsah kreslí aplikace do bufferů, posun, průhlednost, animace a scroll dělá kompozitor; struktura okna - role, texty, stav - je součást protokolu) |
-| 4 | dekorace oken | **kreslí systém**; vlastní vzhled jde, ale s pravidly níže |
-| 5 | API akcí aplikací | **v základu GUI** (6c): aplikace v manifestu deklaruje akce s typovanými parametry a potřebnými oprávněními; volá je shell, průzkumník, asistent i agent |
+| 1 | protokol terminálu | [ověřeno v QEMU] |
+| 2 | jazyk shellu | [ověřeno v QEMU] |
+| 3 | co posílá aplikace kompozitoru | [ověřeno v QEMU] |
+| 4 | dekorace oken | [ověřeno v QEMU] |
+| 5 | API akcí aplikací | [ověřeno v QEMU] |
 | 6 | pořadí | **6a vstup -> 6b terminál -> 6c GUI -> 6d AI**; primitiva pro AI přicházejí průběžně s FS v3 a terminálem |
 
 ### Vstup: dva proudy a umělý vstup
@@ -829,14 +829,15 @@ stojí na předchozím:
 
 | # | Krok | Proč | Stav |
 |---|---|---|---|
-| 1 | Rust std fáze 2: procesy, roury, síť ([Rust std](rust-std.md)) | aplikace v Rustu bez úprav, ověření na hotových crates | rozpracováno |
-| 2 | C knihovna `cstd` a vrstva POSIX: `malloc`, `pthread`, soubory, sockety, čas, `stdio`, matematika | bez ní nic v C/C++ | [navrženo] |
-| 3 | Správa paměti: `mmap`, rezervace adresního prostoru na pevné adresy, stránky na požádání, CoW, W^X s oprávněním „smí JIT“ | Wine, prohlížeče, .NET | [navrženo] |
-| 4 | Dynamické linkování: zavádění sdílených knihoven (ELF `ET_DYN`) | Wine a většina C/C++ projektů | [navrženo] |
-| 5 | Doručení výjimek (SEH, signály) a pozastavení vlákna se čtením a zápisem kontextu | Wine, ladicí nástroje | [navrženo] |
+| 1 | Rust std fáze 2: procesy, roury, síť ([Rust std](rust-std.md)) | aplikace v Rustu bez úprav, ověření na hotových crates | [ověřeno v QEMU] |
+| 2 | C knihovna `cstd` a vrstva POSIX: `malloc`, `pthread`, soubory, sockety, čas, `stdio`, matematika | bez ní nic v C/C++ | [ověřeno v QEMU] |
+| 3 | Správa paměti: `mmap`, rezervace adresního prostoru na pevné adresy, stránky na požádání, CoW, W^X s oprávněním „smí JIT“ | Wine, prohlížeče, .NET | [ověřeno v QEMU] |
+| 4 | Dynamické linkování: zavádění sdílených knihoven (ELF `ET_DYN`) | Wine a většina C/C++ projektů | [ověřeno v QEMU] |
+| 5 | Doručení výjimek (SEH, signály) a pozastavení vlákna se čtením a zápisem kontextu | Wine, ladicí nástroje | [ověřeno v QEMU] |
 | 6 | SDL2/3 nad kompozitorem a `audiod` | jeden port otevře hry a multimediální aplikace | [navrženo] |
-| 6a | Grafické a video základy v jádře: objekt plotu, sdílený buffer, DMA po kusech s mapováním do IOMMU, třída render ([Grafika NVIDIA a AMD](gpu-amd-nvidia.md#vlivy-na-základy), body 1, 2, 4, 8) | ploty a buffery bez kopie pro video (FFmpeg), kompozitor, Vulkan a ovladače GPU; `dma-fence` z Linuxu je GPL, potřebujeme vlastní | [navrženo] |
+| 6a | Grafické a video základy v jádře: objekt plotu, sdílený buffer, DMA po kusech s mapováním do IOMMU, třída render ([Grafika NVIDIA a AMD](gpu-amd-nvidia.md#vlivy-na-základy), body 1, 2, 4, 8) | ploty a buffery bez kopie pro video (FFmpeg), kompozitor, Vulkan a ovladače GPU; `dma-fence` z Linuxu je GPL, potřebujeme vlastní | [ověřeno v QEMU] |
 | 7 | FFmpeg jako izolovaný proces (LGPL), pak přehrávač | multimédia | [navrženo] |
+| 7a | Běhové prostředí C++: libc++, libc++abi, libunwind, výjimky C++ (LLVM, Apache-2.0 s výjimkou LLVM) nad `cstd` a výjimkami | Wine, prohlížeče (Ladybird, SpiderMonkey v Servo), LLVM a rustc v systému | [navrženo] |
 | 8 | Windows vrstva (Wine/Proton nad naším spodním patrem, viz výše) | aplikace a hry pro Windows | [navrženo] |
 | 9 | Vulkan na skutečném HW: Intel nativně, NVIDIA vlastním ovladačem pro GSP ([návrh](gpu-amd-nvidia.md)), AMD přes LinuxKPI | DXVK/VKD3D a hry na železe (v QEMU zatím Venus) | [navrženo] |
 

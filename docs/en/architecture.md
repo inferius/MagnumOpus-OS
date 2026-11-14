@@ -525,11 +525,11 @@ with a capability); the rules differ.
 
 | # | Question | Decision |
 |---|---|---|
-| 1 | terminal protocol | **our own native protocol** (typed records, tables, links, images, progress, prompts); VT100/pty only as an adapter for ported programs |
-| 2 | shell language | **a new typed language, two notations of one language** (command and expression close to Rust, [design](shell-design.md)): no implicit word splitting, errors as values (code + description) that propagate by themselves when unhandled and stop the script; **a script carries a permission manifest**; POSIX `sh` separately for ported scripts |
-| 3 | what an application sends to the compositor | **a layer tree + an accessibility tree** (the application draws content into buffers, the compositor does scrolling, transparency, animations; the window structure - roles, texts, state - is part of the protocol) |
-| 4 | window decorations | **drawn by the system**; a custom look is possible, with the rules below |
-| 5 | application action API | **in the GUI foundation** (6c): an application declares actions with typed parameters and required permissions in its manifest; the shell, file manager, assistant and agents call them |
+| 1 | terminal protocol | [verified in QEMU] |
+| 2 | shell language | [verified in QEMU] |
+| 3 | what an application sends to the compositor | [verified in QEMU] |
+| 4 | window decorations | [verified in QEMU] |
+| 5 | application action API | [verified in QEMU] |
 | 6 | order | **6a input -> 6b terminal -> 6c GUI -> 6d AI**; AI primitives arrive along the way with FS v3 and the terminal |
 
 ### Input: two streams and synthetic input
@@ -877,14 +877,15 @@ on the previous one:
 
 | # | Step | Why | Status |
 |---|---|---|---|
-| 1 | Rust std phase 2: processes, pipes, network ([Rust std](rust-std.md)) | Rust applications unchanged, verified on existing crates | in progress |
-| 2 | C library `cstd` and a POSIX layer: `malloc`, `pthread`, files, sockets, time, `stdio`, math | nothing in C/C++ without it | [designed] |
-| 3 | Memory management: `mmap`, reserving address space at fixed addresses, demand paging, CoW, W^X with a "may JIT" permission | Wine, browsers, .NET | [designed] |
-| 4 | Dynamic linking: loading shared libraries (ELF `ET_DYN`) | Wine and most C/C++ projects | [designed] |
-| 5 | Exception delivery (SEH, signals) and suspending a thread with reading and writing its context | Wine, debuggers | [designed] |
+| 1 | Rust std phase 2: processes, pipes, network ([Rust std](rust-std.md)) | Rust applications unchanged, verified on existing crates | [verified in QEMU] |
+| 2 | C library `cstd` and a POSIX layer: `malloc`, `pthread`, files, sockets, time, `stdio`, math | nothing in C/C++ without it | [verified in QEMU] |
+| 3 | Memory management: `mmap`, reserving address space at fixed addresses, demand paging, CoW, W^X with a "may JIT" permission | Wine, browsers, .NET | [verified in QEMU] |
+| 4 | Dynamic linking: loading shared libraries (ELF `ET_DYN`) | Wine and most C/C++ projects | [verified in QEMU] |
+| 5 | Exception delivery (SEH, signals) and suspending a thread with reading and writing its context | Wine, debuggers | [verified in QEMU] |
 | 6 | SDL2/3 on top of the compositor and `audiod` | one port opens games and multimedia apps | [designed] |
-| 6a | Graphics and video foundations in the kernel: fence object, shared buffer, scatter-gather DMA mapped into the IOMMU, render class ([NVIDIA and AMD graphics](gpu-amd-nvidia.md#impact-on-the-foundations), points 1, 2, 4, 8) | fences and copy-free buffers for video (FFmpeg), the compositor, Vulkan and GPU drivers; Linux's `dma-fence` is GPL, we need our own | [designed] |
+| 6a | Graphics and video foundations in the kernel: fence object, shared buffer, scatter-gather DMA mapped into the IOMMU, render class ([NVIDIA and AMD graphics](gpu-amd-nvidia.md#impact-on-the-foundations), points 1, 2, 4, 8) | fences and copy-free buffers for video (FFmpeg), the compositor, Vulkan and GPU drivers; Linux's `dma-fence` is GPL, we need our own | [verified in QEMU] |
 | 7 | FFmpeg as an isolated process (LGPL), then a player | multimedia | [designed] |
+| 7a | C++ runtime: libc++, libc++abi, libunwind, C++ exceptions (LLVM, Apache-2.0 with LLVM exception) on top of `cstd` and exceptions | Wine, browsers (Ladybird, SpiderMonkey in Servo), LLVM and rustc on the system | [designed] |
 | 8 | Windows layer (Wine/Proton on our lower tier, see above) | Windows applications and games | [designed] |
 | 9 | Vulkan on real hardware: Intel natively, NVIDIA with our own GSP driver ([design](gpu-amd-nvidia.md)), AMD through LinuxKPI | DXVK/VKD3D and games on hardware (Venus in QEMU for now) | [designed] |
 
