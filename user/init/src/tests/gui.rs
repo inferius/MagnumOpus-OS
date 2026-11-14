@@ -39,6 +39,7 @@ pub const TESTS: &[Test] = &[
     ("compd: vzhled podle navrhu, snimky obrazovky (QMP)", look_shots),
     ("files-copy: uloha s konfliktem prezije restart procesu", super::gui_files::copier_resume),
     ("compd: spravce souboru: kopie jako uloha, konflikt, kos, 10 000 polozek, snimek (QMP)", super::gui_files::files_window),
+    ("compd: video NV12 a I420 s ploty ziskani a uvolneni", super::gui_video::nv12_with_fences),
     ("compd: skladani na GPU (Venus) dava stejne pixely jako CPU", super::gui_gpu::gpu_backend),
     // Posledni: kompozitor sady se ukonci.
     ("compd: pad kompozitoru uprostred prace, okno se vrati", super::gui_recovery::crash_mid_work),

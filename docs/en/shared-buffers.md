@@ -11,7 +11,8 @@ object. The 6a decision is in
 |---|---|---|
 | `libs/bufdesc` | description (fourcc, modifier, planes, width, height, placement, cache), validation against the VMO, 72 B encoding | **[implemented]** host tests (`cargo test -p bufdesc`) |
 | `renderproto` `IMPORT_BUFFER` | description + VMO for a GPU driver | **[implemented]** in the protocol; Venus `NOT_SUPPORTED` ([render.md](render.md)) |
-| window protocol | `BufferCreate` with a description (NV12, I420, BGRA), commit with an acquire fence, return with a release fence | **[designed]** step 6a-4 |
+| window protocol | `BUFFER_CREATE_DESC` (NV12, I420, BGRA), `SYNC_POINTS` with acquire and release fences, YUV conversion in the compositor (`libs/yuv`, SIMD) | **[verified in QEMU]** step 6a-4 x86_64 and aarch64 ([gui.md](gui.md#buffers-with-a-description-and-explicit-synchronisation-video)) |
+| YUV conversion on the GPU | `spirv::yuv` shader in `vkcomp`, bit-exact with `libs/yuv` | **[verified in QEMU]** WSL (vk-probe); the compositor does not use it yet **[designed]** |
 
 ## Description
 

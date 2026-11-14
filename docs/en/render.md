@@ -21,7 +21,7 @@ item 8).
 | Venus | `SUBMIT` on a queue = `ring_idx`; completion only through kernel fences; waiting for a Vulkan queue (`Venus::wait_queue`) instead of polling `vkGetFenceStatus` | **[verified in QEMU]** WSL (`cargo xtask test --qemu-wsl --gpu venus`) |
 | hang deadline | `HANG_TIMEOUT` 10 s: output fences `FENCE_FAILED`, log `hang` | **[implemented]** (no test: the renderer in QEMU does not hang) |
 | gpud | a supervised service; the driver hands out the provider once (`OPEN_PROVIDER`), init keeps the end, gpud a duplicate | **[verified in QEMU]** (Venus in WSL) |
-| `IMPORT_BUFFER` for Venus | a client buffer (VMO with the `DMA` right + `bufdesc`) as a `GUEST` blob over `DMA_MAP` | **[designed]** step 6a-4 (video into compd without a copy) and NVK; `NOT_SUPPORTED` today |
+| `IMPORT_BUFFER` for Venus | a client buffer (VMO with the `DMA` right + `bufdesc`) as a `GUEST` blob over `DMA_MAP` | **[designed]** with NVK or a real GPU (video in 6a-4 goes to the compositor through the window protocol, not through the GPU); `NOT_SUPPORTED` today |
 | application permissions | manifest `[gpu] render = true`, per-client quotas, connection through tickets from launchd | **[designed]** (today only init opens render nodes: compositor, tests) |
 | recovery of gpud clients | after a gpud crash clients reconnect through tickets (`libs/svcclient`) | **[designed]**; today the supervisor restarts gpud and init is its only client |
 
@@ -94,7 +94,7 @@ client; unfinished commands end with `FENCE_FAILED`.
 | `QUERY` | key, a, b | data | `CAPSET` (a = id, b = version): capset contents |
 | `CREATE_CONTEXT` | uAPI | `CONTEXT` | context with the capset |
 | `CREATE_BUFFER` | memory, flags (`MAPPABLE`...), driver id, size | `BUFFER` (id, size, `map_info`) + VMO with `MAPPABLE` | `HOST3D` blob, driver id = `VkDeviceMemory` |
-| `IMPORT_BUFFER` | `bufdesc` + VMO in the handles | `BUFFER` | `NOT_SUPPORTED` (step 6a-4 and NVK) |
+| `IMPORT_BUFFER` | `bufdesc` + VMO in the handles | `BUFFER` | `NOT_SUPPORTED` (comes with NVK) |
 | `DESTROY` | buffer | `DONE` | revoke the window, destroy the blob |
 | `BIND` | driver data (`VM_BIND`) | `DONE` | nothing (virtio-gpu has no GPU address space) |
 | `SUBMIT` | queue, values of fences to wait for and to signal, data (at most 60 KiB, multiple of 4) | `SUBMITTED` at once | queue = `ring_idx` (0 = CPU timeline, 1..63 = Vulkan queues) |

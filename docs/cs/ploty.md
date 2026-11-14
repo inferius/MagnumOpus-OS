@@ -13,7 +13,7 @@ kódy chyb v [chyby.md](chyby.md).
 |---|---|---|
 | 6a-1 | objekt plotu: časová osa `u64`, trvalá chyba, opuštění po zániku posledního producenta, `FENCE_WAIT` (jedna / všechny položky, termín), registrace do portu, `SIGNALED` pro `OBJECT_WAIT_*`; obálky `libos::Fence`, `libos::fence::{wait_any, wait_all}` | **[ověřeno v QEMU]** x86_64 i aarch64 (sada jádra `objekty`, testy `plot: ...`; sada userspace `ploty`) |
 | 6a-3 | ploty ve zprávách `renderproto` (Venus: plot virtio -> plot jádra, `ring_idx > 0`) | **[navrženo]** |
-| 6a-4 | ploty získání a uvolnění v okenním protokolu (video bez kopie) | **[navrženo]** |
+| 6a-4 | ploty získání a uvolnění v okenním protokolu (`SYNC_POINTS`, [gui.md](gui.md#buffery-s-popisem-a-explicitní-synchronizace-video)) | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `gui`, test `compd: video NV12 a I420 ...`) |
 | LinuxKPI | `dma_fence`, `sync_file`, `drm_syncobj` převzatého C jako tento objekt | **[navrženo]** |
 
 ## Model

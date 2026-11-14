@@ -3,6 +3,10 @@
 //! Snimek 96x64: pozadi (kopie), vrstva s pruhlednosti, zvetsena vrstva
 //! (nejblizsi soused) a vrstva castecne mimo snimek s orezem. Vsechny
 //! pixely snimku z GPU musi byt stejne jako `gfx::Canvas::draw_image`.
+//!
+//! Krok 6a-4: prevod YUV na GPU (`Compositor::convert_yuv`, shader
+//! `spirv::yuv`) pro NV12 a I420 s lichymi rozmery musi dat bit po bitu
+//! stejne pixely jako `libs/yuv` na CPU.
 
 use alloc::format;
 use alloc::string::String;
@@ -116,5 +120,51 @@ fn test(c: &mut Compositor) -> Result<String, Error> {
         );
         return Err(Error::Vk(venus::vk::VK_ERROR_UNKNOWN));
     }
-    Ok(format!("{FW}x{FH} {n} dispatchu, shoda s gfx, {us} us"))
+    let yuv = yuv_check(c, &mut rng)?;
+    Ok(format!("{FW}x{FH} {n} dispatchu, shoda s gfx, {us} us, {yuv}"))
+}
+
+/// Prevod YUV na GPU proti `libs/yuv` (NV12 a I420, liche rozmery).
+fn yuv_check(c: &mut Compositor, rng: &mut Rng) -> Result<String, Error> {
+    for (nv12, w, h) in [(true, 50u32, 30u32), (false, 33, 17)] {
+        let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+        // Kroky schvalne vetsi nez radek (vypln mezi radky).
+        let y_pitch = w + 3;
+        let (u_pitch, v_pitch) = if nv12 { (cw * 2 + 1, 0) } else { (cw + 2, cw + 5) };
+        let y_off = 0;
+        let u_off = y_pitch * h + 7;
+        let v_off = u_off + u_pitch * ch + 1;
+        let total = if nv12 { u_off + u_pitch * ch } else { v_off + v_pitch * ch };
+        let data: Vec<u8> = (0..total).map(|_| rng.next() as u8).collect();
+        let d = |o: u32| &data[o as usize..];
+        let mut expect = alloc::vec![0u32; (w * h) as usize];
+        let r = if nv12 {
+            yuv::nv12_to_bgra(d(y_off), y_pitch as usize, d(u_off), u_pitch as usize, w as usize, h as usize, &mut expect, w as usize)
+        } else {
+            yuv::i420_to_bgra(d(y_off), y_pitch as usize, d(u_off), u_pitch as usize, d(v_off), v_pitch as usize, w as usize, h as usize, &mut expect, w as usize)
+        };
+        r.map_err(|_| Error::Os(libos::Error::InvalidArgs))?;
+        let s = c.create_surface(w, h)?;
+        let push = spirv::yuv::Push { w, h, y_off, y_pitch, u_off, u_pitch, v_off, v_pitch, nv12: nv12 as u32, dst_stride: w };
+        let conv = c.convert_yuv(s, &data, push);
+        let mut got = alloc::vec![0u8; (w * h * 4) as usize];
+        if let Some(sf) = c.surface(s) {
+            sf.map().read_bytes(0, &mut got);
+        }
+        c.destroy_surface(s)?;
+        conv?;
+        let got: Vec<u32> = got.chunks(4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+        if let Some(i) = (0..expect.len()).find(|&i| got[i] != expect[i]) {
+            libos::println!(
+                "vk-probe: yuv {}: pixel [{},{}] gpu {:#010x} cpu {:#010x}",
+                if nv12 { "NV12" } else { "I420" },
+                i as u32 % w,
+                i as u32 / w,
+                got[i],
+                expect[i]
+            );
+            return Err(Error::Vk(venus::vk::VK_ERROR_UNKNOWN));
+        }
+    }
+    Ok(String::from("yuv NV12+I420 shoda s libs/yuv"))
 }

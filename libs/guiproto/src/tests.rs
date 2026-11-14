@@ -84,6 +84,9 @@ fn client_messages_roundtrip() {
             stride: 256,
         },
         ClientMsg::BufferDestroy { buffer: 3 },
+        ClientMsg::BufferCreateDesc { buffer: 5, desc: bufdesc::BufDesc::linear(bufdesc::format::NV12, 64, 32, 16).unwrap() },
+        ClientMsg::SyncPoints { window: 1, acquire: Some(7), release: None },
+        ClientMsg::SyncPoints { window: 1, acquire: None, release: Some(u64::MAX) },
         ClientMsg::LayerCreate {
             layer: 4,
             window: 1,
@@ -707,4 +710,16 @@ fn a11y_roles_roundtrip() {
     }
     assert_eq!(Role::from_u16(31), Role::Unknown(31));
     assert_eq!(Role::Unknown(31).to_u16(), 31);
+}
+
+#[test]
+fn sync_points_reject_inconsistent_encoding() {
+    use crate::window::ClientMsg;
+    // Chybejici bod s nenulovou hodnotou a neznamy znak pritomnosti.
+    let mut b = ClientMsg::SyncPoints { window: 1, acquire: None, release: None }.encode();
+    b[8 + 1] = 5;
+    assert!(ClientMsg::decode(&b).is_err());
+    let mut b = ClientMsg::SyncPoints { window: 1, acquire: None, release: None }.encode();
+    b[8] = 2;
+    assert!(ClientMsg::decode(&b).is_err());
 }

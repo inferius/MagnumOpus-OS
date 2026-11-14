@@ -8,4 +8,5 @@ description = "Protokol GUI: okna, vrstvy, pristupnost, snimky, displej, akce, d
 [dependencies]
 abi = { workspace = true }
 wire = { path = "../wire" }
+bufdesc = { path = "../bufdesc" }
 conf = { workspace = true }

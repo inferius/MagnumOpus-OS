@@ -130,6 +130,43 @@ alpha**. A buffer has a width, height and row step (stride) **in pixels**.
   therefore alternates between two buffers and never waits for the
   compositor.
 
+### Buffers with a description and explicit synchronisation (video)
+
+**[verified in QEMU]** step 6a-4 (test `compd: video NV12 a I420 s ploty
+ziskani a uvolneni`, x86_64 and aarch64):
+
+- **`BUFFER_CREATE_DESC`** carries a `bufdesc` description
+  ([shared-buffers.md](shared-buffers.md)) and a VMO handle. The compositor
+  takes `ARGB8888` and `XRGB8888` (BGRA, first plane at offset 0) and YUV
+  4:2:0 `NV12` and `YU12` (I420), always with the `LINEAR` modifier; other
+  formats are `NOT_SUPPORTED`.
+- **Validation:** the description is validated (`validate`) and the VMO is
+  mapped read-only exactly at the needed size. A smaller VMO fails to map
+  and the client gets `ERROR`.
+- **YUV:** the compositor keeps its own BGRA shadow buffer (compositor
+  memory). It converts the frame into it at the commit that attached or
+  damaged the buffer (`libs/yuv`: SIMD, BT.709 limited range). The YUV
+  source is not read after that.
+- **`SYNC_POINTS`** applies to the window's next `COMMIT`. The message
+  handles are an acquire fence (the `WAIT` right) and a release fence (the
+  `SIGNAL` right), each with a value ([fences.md](fences.md)).
+  - **Acquire:** the compositor holds the commit (and all further client
+    messages) until the fence reaches the value. Meanwhile it shows the
+    window's previous state and other windows keep running. The deadline
+    is 10 s, the same as for the render class. When the fence ends with an
+    error, is abandoned or the deadline passes, the commit is applied
+    anyway (the worst case is an unfinished frame of the client's own
+    window) and the client gets `ERROR` (`COMMIT`, the fence code).
+  - **Release:** the compositor advances the fence once it stops reading
+    the buffers attached by that commit: YUV right after conversion, BGRA
+    after `RELEASED`.
+- **GPU conversion:** `vkcomp` can convert YUV with the `spirv::yuv`
+  shader (bit-exact with the CPU, vk-probe test in WSL). The compositor
+  does not use it yet, not even when composing on the GPU. With Venus the
+  YUV data would be copied into a host blob anyway; the real gain comes
+  with importing the buffer to the GPU (`IMPORT_BUFFER`,
+  [render.md](render.md)) **[designed]**.
+
 ## Layer tree
 
 A window is a tree of **layers**. Applications draw the layer contents,
@@ -1204,6 +1241,8 @@ Application -> compositor:
 | 16 | `SYNC_GROUP` | number of participants |
 | 17 | `PONG` | serial |
 | 18 | `ACTION_RESULT` | call, result |
+| 22 | `BUFFER_CREATE_DESC` | buffer, `bufdesc` description (72 B) + VMO handle |
+| 23 | `SYNC_POINTS` | window, acquire fence (flag, value), release fence (flag, value) + fence handles |
 
 Compositor -> application:
 

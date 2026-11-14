@@ -4,7 +4,7 @@ Kompozitor (milník 6c) jako služba. Logika je v knihovně `libs/comp` (host te
 
 ## Klíčové soubory
 
-- `src/main.rs` - smyčka; `screen.rs` (displej, režimy), `gpu.rs` (GPU backend přes `libs/vkcomp`), `peers.rs` (klienti), `login.rs` (přihlášení), `snapshot.rs` (obnova po pádu), `splash.rs`, `status.rs`.
+- `src/main.rs` - smyčka; `screen.rs` (displej, režimy), `gpu.rs` (GPU backend přes `libs/vkcomp`), `peers.rs` (klienti), `video.rs` (buffery s popisem `bufdesc`, převod YUV, ploty commitu), `login.rs` (přihlášení), `snapshot.rs` (obnova po pádu), `splash.rs`, `status.rs`.
 
 ## Invarianty
 
@@ -14,6 +14,7 @@ Kompozitor (milník 6c) jako služba. Logika je v knihovně `libs/comp` (host te
 - Aplikace ani kompozitor nesahají na HW displeje; jde to přes ovladač displeje (protokol `guiproto::display`).
 - Render uzel (3D) kompozitor sám neotevírá: dostane ho s příkazem `backend gpu` (init přes `gpud`). Při změně velikosti obrazovky znovu použije stejné spojení Venus (`GpuBackend::with`).
 - Vzhled jen z tokenů (`libs/theme`).
+- Plot získání (`SYNC_POINTS`): commit s nesplněným plotem se podrží i se všemi dalšími zprávami klienta (kanál se nečte, ve `wait_many` jen `PEER_CLOSED`), nejdéle `video::ACQUIRE_TIMEOUT`; chyba nebo termín = commit se použije a klient dostane `ERROR`. Plot uvolnění: YUV hned po převodu, BGRA až po `RELEASED`. Popis `bufdesc` se vždy ověří a VMO se mapuje přesně v potřebné velikosti.
 
 ## Testy
 

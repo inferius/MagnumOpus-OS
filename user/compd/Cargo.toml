@@ -27,3 +27,5 @@ venus = { path = "../../libs/venus", features = ["os"] }
 vkcomp = { path = "../../libs/vkcomp", features = ["os"] }
 accountproto = { path = "../../libs/accountproto" }
 wire = { path = "../../libs/wire" }
+bufdesc = { path = "../../libs/bufdesc" }
+yuv = { path = "../../libs/yuv" }

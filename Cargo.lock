@@ -565,6 +565,7 @@ dependencies = [
  "accountproto",
  "audioproto",
  "bootsplash",
+ "bufdesc",
  "comp",
  "font",
  "gfx",
@@ -576,6 +577,7 @@ dependencies = [
  "venus",
  "vkcomp",
  "wire",
+ "yuv",
 ]
 
 [[package]]
@@ -1349,6 +1351,7 @@ name = "guiproto"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "bufdesc",
  "conf",
  "wire",
 ]
@@ -1587,6 +1590,7 @@ dependencies = [
  "audioproto",
  "blockproto",
  "bootsplash",
+ "bufdesc",
  "conf",
  "fileops",
  "fsproto",
@@ -1606,6 +1610,7 @@ dependencies = [
  "term",
  "theme",
  "wire",
+ "yuv",
  "zeroize",
 ]
 
@@ -2803,6 +2808,7 @@ name = "spirv"
 version = "0.1.0"
 dependencies = [
  "gfx",
+ "yuv",
 ]
 
 [[package]]
@@ -3437,8 +3443,10 @@ dependencies = [
  "gfx",
  "guiproto",
  "libos",
+ "spirv",
  "venus",
  "vkcomp",
+ "yuv",
 ]
 
 [[package]]
@@ -3758,6 +3766,10 @@ checksum = "e17bb3549cc1321ae1296b9cdc2698e2b6cb1992adfa19a8c72e5b7a738f44cd"
 dependencies = [
  "time",
 ]
+
+[[package]]
+name = "yuv"
+version = "0.1.0"
 
 [[package]]
 name = "zerocopy"

@@ -10,7 +10,8 @@ v [gpu-amd-nvidia.md](gpu-amd-nvidia.md#vlivy-na-základy), bod 2.
 |---|---|---|
 | `libs/bufdesc` | popis (fourcc, modifikátor, roviny, šířka, výška, umístění, cache), ověření proti VMO, kódování 72 B | **[implementováno]** host testy (`cargo test -p bufdesc`) |
 | `renderproto` `IMPORT_BUFFER` | popis + VMO pro ovladač GPU | **[implementováno]** v protokolu; Venus `NOT_SUPPORTED` ([render.md](render.md)) |
-| okenní protokol | `BufferCreate` s popisem (NV12, I420, BGRA), commit s plotem získání, vrácení s plotem uvolnění | **[navrženo]** krok 6a-4 |
+| okenní protokol | `BUFFER_CREATE_DESC` (NV12, I420, BGRA), `SYNC_POINTS` s plotem získání a uvolnění, převod YUV v kompozitoru (`libs/yuv`, SIMD) | **[ověřeno v QEMU]** krok 6a-4 x86_64 i aarch64 ([gui.md](gui.md#buffery-s-popisem-a-explicitní-synchronizace-video)) |
+| převod YUV na GPU | shader `spirv::yuv` ve `vkcomp`, bit po bitu jako `libs/yuv` | **[ověřeno v QEMU]** WSL (vk-probe); kompozitor ho zatím nepoužívá **[navrženo]** |
 
 ## Popis
 

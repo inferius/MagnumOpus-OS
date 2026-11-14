@@ -22,6 +22,8 @@ fsproto = { path = "../../libs/fsproto" }
 inputproto = { path = "../../libs/inputproto" }
 guiproto = { path = "../../libs/guiproto" }
 renderproto = { path = "../../libs/renderproto" }
+bufdesc = { path = "../../libs/bufdesc" }
+yuv = { path = "../../libs/yuv" }
 netproto = { path = "../../libs/netproto", features = ["client"] }
 manifest = { path = "../../libs/manifest" }
 conf = { workspace = true }
