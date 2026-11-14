@@ -12,7 +12,7 @@ z fsd. Rozložení adresního prostoru a ochrany (SMAP, NX) popisuje
 | Část | Co | Stav |
 |---|---|---|
 | 1 | stránky na požádání, nulová stránka, výpadek v jádře, commit a strop, piny | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy jádra `pamet`, sada `pamet` v initu) |
-| 2 | rezervace (`VM_RESERVE`), částečné `VM_UNMAP`, `VM_PROTECT`, `VM_QUERY`, guard | **[navrženo]** |
+| 2 | rezervace (`VM_RESERVE`), částečné `VM_UNMAP` a decommit, `VM_PROTECT`, `VM_QUERY`, ochranné oblasti | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy `mm_regions`, sada `pamet`) |
 | 3 | `VMO_CLONE` (copy-on-write) a sdílený kód programů | **[navrženo]** |
 | 4 | `VMO_SEAL`, W^X s oprávněním „smí JIT“, audit | **[navrženo]** |
 | 5 | API v libos (podklad `mmap` v `cstd`), guard pod zásobníky | **[navrženo]** |
@@ -64,6 +64,31 @@ fyzické rámce si vezme až při prvním zápisu:
 </svg>
 <figcaption>Výpadek stránky: čtení dostane nulovou stránku, zápis vlastní rámec.</figcaption>
 </figure>
+
+## Oblasti: rezervace, části, práva
+
+Adresní prostor se skládá z **oblastí**: mapování objektu paměti nebo
+**rezervace** (adresy zabrané bez paměti). Operace na rozsahu uvnitř
+oblasti ji nejdřív rozdělí na hranicích; každý kus má vlastní záznam
+v rozpočtu jádra jobu.
+
+| Operace | Co dělá | Pro koho |
+|---|---|---|
+| `VM_RESERVE` | zabere adresy bez paměti; stojí jen záznam (ne tabulky stránek) | Wine (`VirtualAlloc(MEM_RESERVE)`), velké arény, zásobníky |
+| `VM_MAP` + `MAP_IN_RESERVATION` | namapuje objekt jen dovnitř rezervace (s `MAP_FIXED`) | `MEM_COMMIT` |
+| `VM_UNMAP` | zruší i část oblasti; `UNMAP_DECOMMIT` = mapování zpět na rezervaci | `munmap`, `MEM_DECOMMIT`, `MEM_RELEASE` |
+| `VM_PROTECT` | práva v rozsahu, 0 = žádný přístup; nikdy W+X, nikdy nad práva při `VM_MAP` | `mprotect`, `VirtualProtect` |
+| `VM_QUERY` | oblast nebo volné místo na adrese | `VirtualQuery`, výpis paměti |
+
+- **Ochranná oblast** (`RESERVE_GUARD`): přístup do ní ukončí proces
+  s hláškou „přístup do ochranné oblasti (přetečení zásobníku?)“.
+  Doručení výjimky programu (Windows `PAGE_GUARD`, SEH) přijde s krokem 5
+  pořadí převzetí. Ochrana pod zásobníky v libos je část 5.
+- **Přidat spuštění** (`VM_PROTECT` s X nad původní práva) dnes nejde;
+  přijde s oprávněním „smí JIT“ (část 4).
+- **Rezervace bez tabulek stránek:** tabulky se strhávají jen
+  za mapování (odhad podle délky při `VM_MAP`), takže rezervace desítek GiB
+  stojí stovky bajtů.
 
 ## Nulová stránka
 

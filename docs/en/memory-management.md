@@ -13,7 +13,7 @@ in [kernel.md](kernel.md#memory), syscalls in [syscalls.md](syscalls.md).
 | Part | What | Status |
 |---|---|---|
 | 1 | demand paging, zero page, faults in the kernel, commit and ceiling, pins | **[verified in QEMU]** x86_64 and aarch64 (kernel self-tests `pamet`, the `pamet` suite in init) |
-| 2 | reservations (`VM_RESERVE`), partial `VM_UNMAP`, `VM_PROTECT`, `VM_QUERY`, guard | **[designed]** |
+| 2 | reservations (`VM_RESERVE`), partial `VM_UNMAP` and decommit, `VM_PROTECT`, `VM_QUERY`, guard regions | **[verified in QEMU]** x86_64 and aarch64 (self-tests `mm_regions`, suite `pamet`) |
 | 3 | `VMO_CLONE` (copy-on-write) and shared program code | **[designed]** |
 | 4 | `VMO_SEAL`, W^X with a "may JIT" permission, audit | **[designed]** |
 | 5 | libos API (basis of `mmap` in `cstd`), guards below stacks | **[designed]** |
@@ -67,6 +67,31 @@ takes physical frames only on the first write:
 </svg>
 <figcaption>A page fault: a read gets the zero page, a write its own frame.</figcaption>
 </figure>
+
+## Regions: reservations, parts, rights
+
+The address space consists of **regions**: a mapping of a memory object or
+a **reservation** (addresses taken without memory). An operation on a range
+inside a region first splits it at the boundaries; each piece has its own
+record in the job's kernel budget.
+
+| Operation | What it does | For whom |
+|---|---|---|
+| `VM_RESERVE` | takes addresses without memory; costs only a record (no page tables) | Wine (`VirtualAlloc(MEM_RESERVE)`), large arenas, stacks |
+| `VM_MAP` + `MAP_IN_RESERVATION` | maps an object only into a reservation (with `MAP_FIXED`) | `MEM_COMMIT` |
+| `VM_UNMAP` | removes also a part of a region; `UNMAP_DECOMMIT` = mapping back to a reservation | `munmap`, `MEM_DECOMMIT`, `MEM_RELEASE` |
+| `VM_PROTECT` | rights in a range, 0 = no access; never W+X, never above the rights at `VM_MAP` | `mprotect`, `VirtualProtect` |
+| `VM_QUERY` | the region or free range at an address | `VirtualQuery`, memory listings |
+
+- **A guard region** (`RESERVE_GUARD`): an access ends the process with
+  the message "access to a guard region (stack overflow?)". Delivering the
+  exception to the program (Windows `PAGE_GUARD`, SEH) comes with step 5 of
+  the adoption order. Guards below libos stacks are part 5.
+- **Adding execute** (`VM_PROTECT` with X above the original rights) is not
+  possible today; it comes with the "may JIT" permission (part 4).
+- **Reservations without page tables:** page tables are charged only for
+  mappings (an estimate by length at `VM_MAP`), so reserving tens of GiB
+  costs hundreds of bytes.
 
 ## The zero page
 

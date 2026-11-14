@@ -1,6 +1,9 @@
 //! Adresni prostor procesu: vlastni spodni polovina, sdilene jadro.
 //!
-//! Spodni polovina obsahuje jen mapovani objektu pameti ([`MemoryObject`]).
+//! Spodni polovina se sklada z oblasti: mapovani objektu pameti
+//! ([`MemoryObject`]) a rezervaci (adresy zabrane bez pameti, pristup =
+//! vypadek). Operace s oblastmi (rezervace, castecne odmapovani, zmena
+//! prav, dotaz) jsou v `regions.rs`.
 //! Jadro do pameti procesu nikdy nepristupuje pres adresy userspace: pro
 //! kopirovani dat (argumenty syscallu) prelozi adresu podle seznamu
 //! mapovani na fyzickou stranku objektu a kopiruje pres primou mapu. Diky
@@ -24,7 +27,9 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE, USER_ALLOC_BASE, USER_MAX, USER_MIN};
+use abi::vm::{
+    MAP_EXECUTE, MAP_FIXED, MAP_IN_RESERVATION, MAP_READ, MAP_WRITE, USER_ALLOC_BASE, USER_MAX, USER_MIN,
+};
 
 use super::{PhysAddr, VirtAddr, new_address_space, tlb};
 use crate::arch::paging::{MapFlags, PAGE_SIZE, PageSize, PageTable, PageTableOps};
@@ -34,18 +39,52 @@ use crate::object::vmo::MemoryObject;
 use crate::sync::SpinLock;
 
 mod fault;
+mod regions;
 pub use fault::Access;
 
+/// Prava stranky (`MAP_READ | MAP_WRITE | MAP_EXECUTE`).
+const PROT: u32 = MAP_READ | MAP_WRITE | MAP_EXECUTE;
+
+/// Oblast adresniho prostoru: mapovani objektu pameti nebo rezervace.
 struct Mapping {
     len: u64,
-    vmo: Arc<MemoryObject>,
+    /// `None` = rezervace (adresy zabrane bez pameti, pristup = vypadek).
+    vmo: Option<Arc<MemoryObject>>,
     vmo_offset: u64,
+    /// Aktualni prava (`PROT`); u rezervace 0.
     flags: u32,
-    _charge: Charge,
+    /// Nejvyssi prava, na ktera smi `VM_PROTECT` vratit (prava pri `VM_MAP`,
+    /// ta overila prava handlu objektu).
+    max_flags: u32,
+    /// Rezervace jako ochranna oblast (pristup se hlasi jako preteceni).
+    guard: bool,
+    /// Mapovani vzniklo uvnitr rezervace (`MAP_IN_RESERVATION`).
+    in_reservation: bool,
+    charge: Charge,
 }
 
-/// Pamet jadra za zaznam mapovani (uzel stromu + data).
+impl Mapping {
+    fn reservation(len: u64, guard: bool, charge: Charge) -> Self {
+        Self {
+            len,
+            vmo: None,
+            vmo_offset: 0,
+            flags: 0,
+            max_flags: 0,
+            guard,
+            in_reservation: false,
+            charge,
+        }
+    }
+}
+
+/// Pamet jadra za zaznam oblasti (uzel stromu + data).
 const MAPPING_COST: u64 = 128;
+
+/// Strzeni za oblast: zaznam, u mapovani i odhad tabulek stranek.
+fn region_cost(len: u64, mapped: bool) -> u64 {
+    MAPPING_COST + if mapped { page_table_cost(len) } else { 0 }
+}
 
 /// Horni odhad tabulek stranek pro mapovani delky `len`: jedna tabulka na
 /// kazdych zacatych 2 MiB (+1 za nezarovnany zacatek) a tri vyssi urovne.
@@ -185,8 +224,11 @@ impl AddressSpace {
         unsafe { table.destroy() };
         let mut parked = Vec::new();
         for (_, m) in mappings {
-            if park(&m.vmo) && !parked.iter().any(|p| Arc::ptr_eq(p, &m.vmo)) {
-                parked.push(m.vmo.clone());
+            if let Some(vmo) = &m.vmo
+                && park(vmo)
+                && !parked.iter().any(|p| Arc::ptr_eq(p, vmo))
+            {
+                parked.push(vmo.clone());
             }
             // `m` (Arc na objekt a strzeni mapovani) se uvolni tady.
         }
@@ -205,6 +247,9 @@ impl AddressSpace {
 
     /// Namapuje `len` bajtu objektu `vmo` od `vmo_offset`. S `MAP_FIXED` presne
     /// na `addr`, jinak na volne misto (`addr` je napoveda, 0 = kdekoli).
+    /// S `MAP_IN_RESERVATION` (jen s `MAP_FIXED`) musi rozsah lezet cely
+    /// v rezervacich a mapovani je nahradi; bez nej se rezervace bere jako
+    /// obsazene misto.
     pub fn map(
         &self,
         vmo: Arc<MemoryObject>,
@@ -213,8 +258,12 @@ impl AddressSpace {
         flags: u32,
         addr: u64,
     ) -> Result<u64, Error> {
-        let known = MAP_READ | MAP_WRITE | MAP_EXECUTE | MAP_FIXED;
+        let known = PROT | MAP_FIXED | MAP_IN_RESERVATION;
         if flags & !known != 0 || flags & MAP_READ == 0 {
+            return Err(Error::InvalidArgs);
+        }
+        let in_reservation = flags & MAP_IN_RESERVATION != 0;
+        if in_reservation && flags & MAP_FIXED == 0 {
             return Err(Error::InvalidArgs);
         }
         // W^X: stranka nesmi byt zaroven zapisovatelna a spustitelna.
@@ -235,7 +284,7 @@ impl AddressSpace {
             return Err(Error::NoMemory);
         }
         let charge = match &self.job {
-            Some(j) => j.charge(Pool::Kernel, MAPPING_COST + page_table_cost(len))?,
+            Some(j) => j.charge(Pool::Kernel, region_cost(len, true))?,
             None => Charge::none(),
         };
         let mut inner = self.inner.lock();
@@ -248,7 +297,14 @@ impl AddressSpace {
             if !page_aligned(addr) || addr < USER_MIN || end > USER_MAX {
                 return Err(Error::InvalidArgs);
             }
-            if inner.overlaps(addr, len) {
+            if in_reservation {
+                // Cely rozsah v rezervacich; rozdelit je na hranicich.
+                if !inner.all_reserved(addr, end) {
+                    return Err(Error::BadState);
+                }
+                inner.split(addr, &self.job)?;
+                inner.split(end, &self.job)?;
+            } else if inner.overlaps(addr, len) {
                 return Err(Error::BadState);
             }
             addr
@@ -284,53 +340,27 @@ impl AddressSpace {
                 return Err(Error::NoMemory);
             }
         }
+        if in_reservation {
+            // Rezervace v rozsahu nahradi mapovani (jejich strzeni se vrati).
+            let pieces: Vec<u64> = inner.mappings.range(start..start + len).map(|(&s, _)| s).collect();
+            for s in pieces {
+                inner.mappings.remove(&s);
+            }
+        }
         inner.mappings.insert(
             start,
             Mapping {
                 len,
-                vmo,
+                vmo: Some(vmo),
                 vmo_offset,
-                flags,
-                _charge: charge,
+                flags: flags & PROT,
+                max_flags: flags & PROT,
+                guard: false,
+                in_reservation,
+                charge,
             },
         );
         Ok(start)
-    }
-
-    /// Zrusi mapovani. Rozsah musi presne pokryvat cela mapovani
-    /// (castecne odmapovani zatim neni podporovane).
-    pub fn unmap(&self, addr: u64, len: u64) -> Result<(), Error> {
-        if len == 0 || !page_aligned(addr) || !page_aligned(len) {
-            return Err(Error::InvalidArgs);
-        }
-        let end = addr.checked_add(len).ok_or(Error::InvalidArgs)?;
-        let mut inner = self.inner.lock();
-        // Overit, ze rozsah tvori souvislou radu celych mapovani.
-        let mut pos = addr;
-        let starts: Vec<u64> = inner.mappings.range(addr..end).map(|(&s, _)| s).collect();
-        for &s in &starts {
-            if s != pos {
-                return Err(Error::NotFound);
-            }
-            pos += inner.mappings[&s].len;
-        }
-        if pos != end || inner.mapping_at(addr).is_some_and(|(s, _)| s != addr) {
-            return Err(Error::NotFound);
-        }
-        let mut removed = Vec::new();
-        for s in starts {
-            let m = inner.mappings.remove(&s).unwrap();
-            let table = inner.table.as_mut().expect("adresni prostor je zruseny");
-            for off in (0..m.len).step_by(PAGE_SIZE as usize) {
-                table.unmap_4k(VirtAddr::new(s + off));
-            }
-            removed.push(m);
-        }
-        drop(inner);
-        // Stranky (v `removed`) se smi uvolnit az kdyz je zadne CPU nema v TLB.
-        tlb::shootdown();
-        drop(removed);
-        Ok(())
     }
 
     /// Zrusi vsechna mapovani objektu `vmo` (odvolani objektu). Vraci jejich
@@ -340,7 +370,7 @@ impl AddressSpace {
         let starts: Vec<u64> = inner
             .mappings
             .iter()
-            .filter(|(_, m)| Arc::ptr_eq(&m.vmo, vmo))
+            .filter(|(_, m)| m.vmo.as_ref().is_some_and(|v| Arc::ptr_eq(v, vmo)))
             .map(|(&s, _)| s)
             .collect();
         let mut removed = Vec::new();
@@ -374,7 +404,7 @@ impl AddressSpace {
         };
         let mut any = false;
         for (&start, m) in mappings.iter() {
-            if !core::ptr::eq(Arc::as_ptr(&m.vmo), vmo) {
+            if !m.vmo.as_ref().is_some_and(|v| core::ptr::eq(Arc::as_ptr(v), vmo)) {
                 continue;
             }
             let lo = offset.max(m.vmo_offset);
@@ -403,13 +433,14 @@ impl AddressSpace {
             let mut pos = addr & !(PAGE_SIZE - 1);
             while pos < end {
                 let (start, m) = inner.mapping_at(pos).ok_or(Error::BadAddress)?;
-                if m.flags & MAP_WRITE == 0 || m.vmo.is_physical() {
+                let vmo = m.vmo.as_ref().ok_or(Error::BadAddress)?;
+                if m.flags & MAP_WRITE == 0 || vmo.is_physical() {
                     return Err(Error::BadAddress);
                 }
                 let off = m.vmo_offset + (pos - start);
-                if m.vmo.commit_page(off)?.1 {
+                if vmo.commit_page(off)?.1 {
                     fresh.try_reserve(1).map_err(|_| Error::NoMemory)?;
-                    fresh.push((m.vmo.clone(), off));
+                    fresh.push((vmo.clone(), off));
                 }
                 pos += PAGE_SIZE;
             }
@@ -450,7 +481,12 @@ impl AddressSpace {
             let (start, m) = inner.mapping_at(pos).ok_or(Error::BadAddress)?;
             // Registry zarizeni nejsou v prime mape: jako buffer syscallu
             // je nelze pouzit.
-            if (write && m.flags & MAP_WRITE == 0) || m.vmo.is_physical() {
+            // Rezervace a mapovani bez prava cteni (`VM_PROTECT` na 0) take ne.
+            let Some(vmo) = &m.vmo else {
+                return Err(Error::BadAddress);
+            };
+            let need = if write { MAP_WRITE } else { MAP_READ };
+            if m.flags & need == 0 || vmo.is_physical() {
                 return Err(Error::BadAddress);
             }
             pos = start + m.len;
@@ -461,7 +497,8 @@ impl AddressSpace {
             let (start, m) = inner.mapping_at(pos).expect("overeno vyse");
             let in_page = (pos % PAGE_SIZE) as usize;
             let n = (PAGE_SIZE as usize - in_page).min(len - done);
-            let page: PhysAddr = match m.vmo.page(m.vmo_offset + (pos - start)) {
+            let vmo = m.vmo.as_ref().expect("overeno vyse");
+            let page: PhysAddr = match vmo.page(m.vmo_offset + (pos - start)) {
                 Some(page) => page,
                 // Jen pro cteni (`f` do nulove stranky nepise).
                 None if !write => super::zero_frame(),
@@ -501,7 +538,7 @@ impl AddressSpace {
         })
     }
 
-    /// Pocet mapovani (pro testy a ladeni).
+    /// Pocet oblasti (mapovani a rezervaci; pro testy a ladeni).
     pub fn mapping_count(&self) -> usize {
         self.inner.lock().mappings.len()
     }

@@ -248,6 +248,25 @@ pub fn vm_unmap(process: u32, addr: u64, len: u64) -> Result<()> {
     call(nr::VM_UNMAP, [process as u64, addr, len, 0, 0, 0]).map(|_| ())
 }
 
+/// `VM_UNMAP` s priznaky (`abi::vm::UNMAP_DECOMMIT`).
+pub fn vm_unmap_flags(process: u32, addr: u64, len: u64, flags: u32) -> Result<()> {
+    call(nr::VM_UNMAP, [process as u64, addr, len, flags as u64, 0, 0]).map(|_| ())
+}
+
+pub fn vm_reserve(process: u32, addr: u64, len: u64, flags: u32) -> Result<u64> {
+    call(nr::VM_RESERVE, [process as u64, addr, len, flags as u64, 0, 0])
+}
+
+pub fn vm_protect(process: u32, addr: u64, len: u64, prot: u32) -> Result<()> {
+    call(nr::VM_PROTECT, [process as u64, addr, len, prot as u64, 0, 0]).map(|_| ())
+}
+
+pub fn vm_query(process: u32, addr: u64) -> Result<abi::vm::RegionInfo> {
+    let mut out = [0u8; abi::vm::RegionInfo::SIZE];
+    call(nr::VM_QUERY, [process as u64, addr, out.as_mut_ptr() as u64, 0, 0, 0])?;
+    Ok(abi::vm::RegionInfo::decode(&out))
+}
+
 pub fn process_create(job: u32, name: &str) -> Result<u32> {
     call(
         nr::PROCESS_CREATE,

@@ -83,19 +83,44 @@ pub fn map(a: Args) -> Result<u64> {
     // Fyzicky objekt si pamatuje, kde je namapovany (odvolani); kdyz byl
     // mezitim odvolan, mapovani se vrati.
     if let Err(e) = vmo.register_mapper(&target) {
-        let _ = target.address_space().unmap(addr, a[3]);
+        let _ = target.address_space().unmap(addr, a[3], 0);
         return Err(e);
     }
     Ok(addr)
 }
 
-/// `VM_UNMAP(process, addr, len)`.
+/// `VM_UNMAP(process, addr, len, flags)`: i cast oblasti; `flags` =
+/// `UNMAP_DECOMMIT` (mapovani -> rezervace) nebo 0.
 pub fn unmap(a: Args) -> Result<u64> {
-    let p = current_process();
-    let target = p
+    let target = target(a[0], Rights::WRITE)?;
+    let flags = u32::try_from(a[3]).map_err(|_| Error::InvalidArgs)?;
+    target.address_space().unmap(a[1], a[2], flags)?;
+    Ok(0)
+}
+
+fn target(handle: u64, rights: Rights) -> Result<alloc::sync::Arc<Process>> {
+    current_process()
         .handles()
-        .get_as::<Process>(arg_handle(a[0])?, Rights::WRITE)?;
-    target.address_space().unmap(a[1], a[2])?;
+        .get_as::<Process>(arg_handle(handle)?, rights)
+}
+
+/// `VM_RESERVE(process, addr, len, flags) -> addr`.
+pub fn reserve(a: Args) -> Result<u64> {
+    let flags = u32::try_from(a[3]).map_err(|_| Error::InvalidArgs)?;
+    target(a[0], Rights::WRITE)?.address_space().reserve(a[1], a[2], flags)
+}
+
+/// `VM_PROTECT(process, addr, len, prot)`.
+pub fn protect(a: Args) -> Result<u64> {
+    let prot = u32::try_from(a[3]).map_err(|_| Error::InvalidArgs)?;
+    target(a[0], Rights::WRITE)?.address_space().protect(a[1], a[2], prot)?;
+    Ok(0)
+}
+
+/// `VM_QUERY(process, addr, out_ptr)`: zapise `abi::vm::RegionInfo`.
+pub fn query(a: Args) -> Result<u64> {
+    let info = target(a[0], Rights::READ)?.address_space().query(a[1])?;
+    user::write_bytes(&current_process(), a[2], &info.encode())?;
     Ok(0)
 }
 

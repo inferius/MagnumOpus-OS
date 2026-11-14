@@ -24,6 +24,7 @@ Mikrojádro (`no_std`, `no_main`): paměť, plánovač, objekty s handly a práv
 - Stránky objektů paměti vznikají na požádání (`docs/cs/sprava-pameti.md`): každý nový vznik stránky mimo výpadek v daném mapování musí volat `MemoryObject::forget_zero` (jinak někdo dál čte nulovou stránku místo dat). Jádro do paměti procesu nikdy nesahá přes adresy procesu - kopírování jde přes `copy_from_user`/`copy_to_user`, výpadek v jádře nesmí vzniknout.
 - Slib (`phys::commit`) se strhává při vytvoření objektu; výpadek bere rámec ze slibu (`alloc_committed_zeroed`), takže nikdy nedojde paměť (žádný OOM kill). Nová alokace pro programy musí jít přes `alloc_user_pages`/`user_room` (respektují slib i rezervu).
 - Připnutý rámec (`phys::pin`: DMA, `VMO_PHYS_ADDR`) se nesmí přesunout, nahradit ani vystěhovat.
+- Adresní prostor = oblasti (`Mapping`: `vmo: None` = rezervace, přístup vždy chyba). Operace na části oblasti ji nejdřív rozdělí (`Inner::split`), každý kus má vlastní strhnutí; rezervace stojí jen záznam (ne tabulky stránek). `VM_PROTECT` nikdy nad `max_flags` (práva při `VM_MAP`) a nikdy W+X; přidání X přijde až s oprávněním JIT.
 - Po `teardown` je prostor mrtvý: `map` -> `BadState`, ostatní operace nic nenajdou; `root()` vrací `None`.
 - Plánovač: vlákno, které ještě běží (`on_cpu`), nesmí být v **cizí** frontě - jiné CPU by na něj čekalo se zakázanými přerušeními a dvě CPU by se mohla zablokovat navzájem. Přesun na jiné CPU a zařazení vlákna probuzeného během usínání dělá `finish_switch`; kradení taková vlákna přeskakuje (`sched/mod.rs`, `sched/balance.rs`).
 

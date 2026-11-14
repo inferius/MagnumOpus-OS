@@ -27,6 +27,30 @@ impl Process {
         sys::vm_unmap(self.0.raw(), addr, len)
     }
 
+    /// Mapovani v rozsahu zmeni na rezervaci (pamet se vrati, adresy
+    /// zustanou zabrane); rezervace zustanou.
+    pub fn decommit(&self, addr: u64, len: u64) -> Result<()> {
+        sys::vm_unmap_flags(self.0.raw(), addr, len, abi::vm::UNMAP_DECOMMIT)
+    }
+
+    /// Zarezervuje adresy bez pameti (`abi::vm::MAP_FIXED`,
+    /// `abi::vm::RESERVE_GUARD`); mapuje se do ni s
+    /// `abi::vm::MAP_IN_RESERVATION`.
+    pub fn reserve(&self, addr: u64, len: u64, flags: u32) -> Result<u64> {
+        sys::vm_reserve(self.0.raw(), addr, len, flags)
+    }
+
+    /// Zmeni prava mapovani v rozsahu (`MAP_READ | MAP_WRITE |
+    /// MAP_EXECUTE`, 0 = zadny pristup).
+    pub fn protect(&self, addr: u64, len: u64, prot: u32) -> Result<()> {
+        sys::vm_protect(self.0.raw(), addr, len, prot)
+    }
+
+    /// Oblast (mapovani, rezervace, volne misto) na adrese `addr`.
+    pub fn query(&self, addr: u64) -> Result<abi::vm::RegionInfo> {
+        sys::vm_query(self.0.raw(), addr)
+    }
+
     /// Spusti proces prvnim vlaknem; `bootstrap` (handle) se presune do
     /// noveho procesu a dostane ho v `rdi`.
     pub fn start(&self, thread: &Thread, entry: u64, stack: u64, bootstrap: Handle) -> Result<()> {
