@@ -12,6 +12,8 @@
 
 static int failures;
 
+int posix_test(const char *dir);
+
 #define CHECK(name, cond)                                              \
     do {                                                               \
         if (cond) {                                                    \
@@ -123,6 +125,7 @@ int main(int argc, char **argv) {
     CHECK("memory", memory());
     CHECK("files", dir != NULL && files(dir));
     CHECK("errno", errors());
+    CHECK("posix", dir != NULL && posix_test(dir) == 0);
     assert(failures == 0);
     fputs("chyba na stderr\n", stderr);
     fflush(stdout);

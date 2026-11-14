@@ -47,6 +47,30 @@ pub const EHOSTUNREACH: c_int = 113;
 pub const EALREADY: c_int = 114;
 pub const EINPROGRESS: c_int = 115;
 pub const ECANCELED: c_int = 125;
+pub const ESRCH: c_int = 3;
+pub const ENXIO: c_int = 6;
+pub const E2BIG: c_int = 7;
+pub const ENOEXEC: c_int = 8;
+pub const EDEADLK: c_int = 35;
+pub const ENAMETOOLONG: c_int = 36;
+pub const ENOLCK: c_int = 37;
+pub const ELOOP: c_int = 40;
+pub const ENOTTY: c_int = 25;
+pub const EMLINK: c_int = 31;
+pub const EOVERFLOW: c_int = 75;
+pub const EILSEQ: c_int = 84;
+pub const ENOTSOCK: c_int = 88;
+pub const EDESTADDRREQ: c_int = 89;
+pub const EMSGSIZE: c_int = 90;
+pub const EPROTOTYPE: c_int = 91;
+pub const ENOPROTOOPT: c_int = 92;
+pub const EPROTONOSUPPORT: c_int = 93;
+pub const EAFNOSUPPORT: c_int = 97;
+pub const ENETDOWN: c_int = 100;
+pub const ECONNABORTED: c_int = 103;
+pub const ENOBUFS: c_int = 105;
+pub const EISCONN: c_int = 106;
+pub const ENFILE: c_int = 23;
 
 thread_local! {
     static ERRNO: Cell<c_int> = const { Cell::new(0) };
@@ -101,6 +125,62 @@ pub fn from_io(e: &io::Error) -> c_int {
     }
 }
 
+/// `errno` pro kod chyby systemu (`abi::Error` jako `i32`, viz
+/// `docs/cs/chyby.md`).
+pub fn from_os(code: i32) -> c_int {
+    match code {
+        -1 => EBADF,
+        -2 => EACCES,
+        -4 => ETIMEDOUT,
+        -5 => ENOMEM,
+        -6 => EAGAIN,
+        -3 | -7 | -15 | -16 => EINVAL,
+        -8 | -35 => ENOENT,
+        -9 => ENOTSUP,
+        -11 => EFAULT,
+        -12 => EAGAIN,
+        -13 => EPIPE,
+        -14 => ERANGE,
+        -17 => ENOSYS,
+        -18 => ECANCELED,
+        -19 => EEXIST,
+        -20 => ENOTDIR,
+        -21 => EISDIR,
+        -22 => ENOTEMPTY,
+        -23 => ENOSPC,
+        -25 => EROFS,
+        -26 | -27 => EBUSY,
+        -29 => ECONNREFUSED,
+        -30 => ECONNRESET,
+        -31 => EHOSTUNREACH,
+        -32 => EADDRINUSE,
+        -36 => EADDRNOTAVAIL,
+        _ => EIO,
+    }
+}
+
+/// Navrat funkce POSIX bez hodnoty: 0, nebo -1 s `errno`.
+pub fn ret(r: Result<(), c_int>) -> c_int {
+    match r {
+        Ok(()) => 0,
+        Err(e) => {
+            set(e);
+            -1
+        }
+    }
+}
+
+/// Navrat s hodnotou (`ssize_t`, cislo fd ...): hodnota, nebo -1 s `errno`.
+pub fn ret_val<T: TryInto<isize>>(r: Result<T, c_int>) -> isize {
+    match r {
+        Ok(v) => v.try_into().unwrap_or(isize::MAX),
+        Err(e) => {
+            set(e);
+            -1
+        }
+    }
+}
+
 /// Nastavi `errno` z chyby std a vrati -1 (bezny navrat funkci POSIX).
 pub fn fail(e: &io::Error) -> c_int {
     set(from_io(e));
@@ -134,6 +214,42 @@ pub fn message(e: c_int) -> &'static [u8] {
         ETIMEDOUT => b"Connection timed out\0",
         ECONNREFUSED => b"Connection refused\0",
         ECONNRESET => b"Connection reset by peer\0",
+        ESRCH => b"No such process\0",
+        ENXIO => b"No such device or address\0",
+        E2BIG => b"Argument list too long\0",
+        ENOEXEC => b"Exec format error\0",
+        EDEADLK => b"Resource deadlock avoided\0",
+        ENAMETOOLONG => b"File name too long\0",
+        ENOLCK => b"No locks available\0",
+        ELOOP => b"Too many levels of symbolic links\0",
+        ENOTTY => b"Inappropriate ioctl for device\0",
+        EMLINK => b"Too many links\0",
+        EOVERFLOW => b"Value too large for defined data type\0",
+        EILSEQ => b"Invalid or incomplete multibyte or wide character\0",
+        ENOTSOCK => b"Socket operation on non-socket\0",
+        EMSGSIZE => b"Message too long\0",
+        ENOPROTOOPT => b"Protocol not available\0",
+        EPROTONOSUPPORT => b"Protocol not supported\0",
+        EAFNOSUPPORT => b"Address family not supported by protocol\0",
+        ECONNABORTED => b"Software caused connection abort\0",
+        ENOBUFS => b"No buffer space available\0",
+        EISCONN => b"Transport endpoint is already connected\0",
+        ENFILE => b"Too many open files in system\0",
+        EMFILE => b"Too many open files\0",
+        EFAULT => b"Bad address\0",
+        EBUSY => b"Device or resource busy\0",
+        ECHILD => b"No child processes\0",
+        EXDEV => b"Invalid cross-device link\0",
+        EFBIG => b"File too large\0",
+        EDOM => b"Numerical argument out of domain\0",
+        EADDRINUSE => b"Address already in use\0",
+        EADDRNOTAVAIL => b"Cannot assign requested address\0",
+        ENETUNREACH => b"Network is unreachable\0",
+        ENOTCONN => b"Transport endpoint is not connected\0",
+        EHOSTUNREACH => b"No route to host\0",
+        EALREADY => b"Operation already in progress\0",
+        EINPROGRESS => b"Operation now in progress\0",
+        ECANCELED => b"Operation canceled\0",
         _ => b"Unknown error\0",
     }
 }

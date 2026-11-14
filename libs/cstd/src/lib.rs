@@ -8,6 +8,8 @@
 //!
 //! Cast 1: `errno.h`, `stdio.h` (FILE, soubory, stdin/stdout/stderr),
 //! `stdlib.h` (`exit`, `atexit`, `getenv`, `abort`), `assert`.
+//! Cast 2a: cisla fd (`sys`, tabulka v osrt), `unistd.h`, `fcntl.h`,
+//! `sys/stat.h`, `dirent.h`; `FILE` stoji nad cisly fd.
 //!
 //! Program v C: crate `#![no_main]` s `extern crate cstd;`, ktery v
 //! `build.rs` prelozi zdroje C (`cbuild`); adresare hlavicek dostane od
@@ -17,17 +19,25 @@
 //! Symboly C se exportuji jen na cili magnumopus: na hostiteli
 //! by se tloukly se systemovou libc (testy logiky bezi na hostiteli).
 
-#![allow(non_camel_case_types)]
+#![allow(non_camel_case_types, non_upper_case_globals)]
+#![cfg_attr(target_os = "magnumopus", feature(magnumopus_runtime, rustc_private))]
 
 // Symboly cstd-core (strlen, malloc, snprintf, ...) se musi prilinkovat.
 extern crate cstd_core;
 
+pub mod dirent;
 pub mod errno;
+pub mod flock;
+pub mod stat;
 pub mod stdio;
 pub mod stdlib;
+pub mod sys;
+pub mod unistd;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod fd_tests;
 
 pub use cstd_core::ctypes::{c_char, c_int, c_long, c_uint, c_ulong, size_t};
 

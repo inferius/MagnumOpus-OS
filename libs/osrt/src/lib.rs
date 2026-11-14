@@ -11,7 +11,7 @@
 //! - [`heap`] - alokator (dlmalloc nad objekty pameti),
 //! - [`tls`] - bloky TLS vlaken (nativni ELF TLS, local-exec),
 //! - [`thread`] - vlakna, [`futex`] - cekani pro `std::sync`,
-//! - [`stdio`], [`env`], [`time`], [`fs`].
+//! - [`stdio`], [`env`], [`time`], [`fs`], [`fd`] (cisla fd pro cstd).
 //!
 //! Navrh: `docs/cs/rust-std.md`.
 
@@ -20,6 +20,7 @@
 extern crate alloc;
 
 pub mod env;
+pub mod fd;
 pub mod fs;
 pub mod futex;
 pub mod heap;

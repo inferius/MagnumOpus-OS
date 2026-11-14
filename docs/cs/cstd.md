@@ -10,8 +10,11 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
 > **Stav:** část 1 **[ověřeno v QEMU]** na x86_64 i aarch64 (test
 > `ctest: stdio, soubory, errno, getenv, atexit`, sada `cstd`): `errno`,
 > `FILE` (stdin/stdout/stderr, soubory), `exit`/`atexit`, `getenv`.
-> Části 2-8 (vlákna, fd, čas, sockety, `math.h`, `mmap`, signály, `libc.so`,
-> porty) **[navrženo]**, viz [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
+> Část 2a **[ověřeno v QEMU]** na x86_64 i aarch64 (krok `posix` téhož
+> testu): čísla fd, `unistd.h`, `fcntl.h`, `sys/stat.h`, `dirent.h`, `FILE`
+> nad čísly fd. Další části (vlákna, čas, sockety, `math.h`, `mmap`,
+> signály, zámky souborů, `libc.so`, porty) **[navrženo]**, viz
+> [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
 
 ## Vrstvy
 
@@ -84,6 +87,33 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 | `string.h` | `strerror` | zbytek v `cstd-core` |
 | `assert.h` | `assert` | selhání vypíše soubor a řádek na stderr a ukončí proces |
 
+## Funkce (část 2a: čísla fd a soubory)
+
+| Hlavička | Funkce | Poznámka |
+|---|---|---|
+| `unistd.h` | `close`, `read`, `write`, `pread`, `pwrite`, `lseek`, `dup`, `dup2`, `dup3`, `pipe`, `pipe2`, `isatty`, `fsync`, `fdatasync`, `ftruncate`, `truncate`, `unlink`, `rmdir`, `getcwd`, `chdir`, `access`, `sysconf`, `getpagesize` | `fork`, `vfork`, `exec*` vrací `ENOSYS` (viz [Bez fork](#procesy-locale-wchar)) |
+| `fcntl.h` | `open`, `openat` (jen `AT_FDCWD` nebo absolutní cesta), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | hodnoty `O_*` jako Linux, `O_DIRECTORY` stejné na obou architekturách; zámky `F_*LK` zatím `ENOLCK` |
+| `sys/stat.h` | `stat`, `lstat` (= `stat`), `fstat`, `mkdir`, `chmod`, `fchmod`, `umask` | `st_mode` z druhu a účinných práv relace; `chmod` nemá účinek (práva jsou granty FS) |
+| `sys/uio.h` | `readv`, `writev` | `writev` jedním zápisem |
+| `dirent.h` | `opendir`, `fdopendir`, `readdir`, `closedir`, `rewinddir`, `dirfd` | první dvě položky `.` a `..` |
+| `stdio.h` | `fdopen`, `fileno`, `fseeko`, `ftello`, `getline`, `getdelim` | `FILE` stojí nad číslem fd |
+
+### Čísla fd
+
+- Tabulka je v `osrt` (`osrt::fd`), jedna na proces; `cstd` ji vidí přes
+  `std::os::magnumopus::runtime` (re-export crate `osrt` ve std, nestabilní
+  feature `magnumopus_runtime`, jen pro knihovny nad std).
+- Číslo ukazuje na popis otevření: soubor relace FS s pozicí, stdio procesu
+  (0, 1, 2 od startu) nebo konec roury. `dup` sdílí popis i pozici.
+- Nejvýš 4096 čísel (`EMFILE`). `FD_CLOEXEC` se ukládá (pro
+  `posix_spawn`, potomek dostává jen 0-2).
+- Roura je dvojice kanálů; čtecí konec nejde psát (`EBADF`), roura nemá
+  pozici (`ESPIPE`).
+- Na hostiteli (`cargo test -p cstd`) stejná pravidla nad `std::fs`
+  (`sys/host.rs`), aby šla logika `FILE` a fd testovat bez QEMU.
+- `std` čísla fd zatím nevidí (`AsRawFd`/`FromRawFd` pro `File` v Rustu
+  **[navrženo]**).
+
 ### Proudy a buffery
 
 - `stdout` po řádcích, `stderr` bez bufferu, soubory 4 KiB (`BUFSIZ`).
@@ -99,9 +129,11 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 
 ### Chyby
 
-Chyba `std::io::Error` se převádí na `errno` podle druhu chyby
-(`NotFound` -> `ENOENT`, `PermissionDenied` -> `EACCES`, ...; neznámý druh
-`EIO`). Neplatný režim `fopen` nebo jméno, které není UTF-8, = `EINVAL`.
+Chyba systému (`abi::Error`, [chyby.md](chyby.md)) se převádí na `errno`
+(`errno::from_os`: `NOT_FOUND` -> `ENOENT`, `ACCESS_DENIED` -> `EACCES`,
+`BAD_HANDLE` -> `EBADF`, `PEER_CLOSED` -> `EPIPE`, ...; neznámá `EIO`),
+chyba `std::io::Error` podle druhu (`errno::from_io`). Neplatný režim
+`fopen` = `EINVAL`.
 
 ## Omezení části 1
 
@@ -111,11 +143,11 @@ Chyba `std::io::Error` se převádí na `errno` podle druhu chyby
 
 ## Pokračování: úplná libc a POSIX (části 2-8)
 
-**[navrženo]**, k odsouhlasení (krok 2 v pořadí převzetí cizího softwaru,
-[architektura.md](architektura.md#bezpečnost)). Cíl: přeložit beze změn
-zdrojů zlib, sqlite, pak závislosti SDL a FFmpeg (LGPL, samostatný proces).
-Volby označené **(doporučeno)** jsou návrh; konečné rozhodnutí je
-v kapitole [Otevřené otázky](#otevřené-otázky).
+**[navrženo]**, schváleno 2026-11-14 (krok 2 v pořadí převzetí cizího
+softwaru, [architektura.md](architektura.md#bezpečnost)); část 2a hotová
+(výše). Cíl: přeložit beze změn zdrojů zlib, sqlite, pak závislosti SDL
+a FFmpeg (LGPL, samostatný proces). Rozhodnutí jsou v kapitole
+[Rozhodnutí](#rozhodnutí).
 
 ### Dva druhy procesů, jeden runtime
 
@@ -194,8 +226,9 @@ Vlastního kódu ~11 000 řádků Rustu, převzatého ~14 000 řádků. Celá mu
    (`st_mode` z druhu a účinných práv, `st_uid` z identity relace),
    `opendir`/`readdir`, `mkdir`, `unlink`, `rmdir`, `rename`, `access`,
    `getcwd`/`chdir`, `pipe` (dvojice kanálů), `isatty`.
-   `chmod`/`chown` = `EPERM` (práva jsou granty FS, ne bity), `link`/
-   `symlink` = `ENOTSUP` do FS v3, zámky `fcntl`/`flock` otázka 8.
+   `chmod` bez účinku (práva jsou granty FS, ne bity), `link`/
+   `symlink` = `ENOTSUP` do FS v3. Zámky `fcntl`/`flock` drží fsd
+   (rozhodnutí 8).
 3. **`math.h`** (otázka 3) a plovoucí čárka v `printf`/`scanf`/`strtod`.
    Hard-float je všude (x86-64-v2, NEON). `long double`: otázka 9.
 4. **Čas a signály.** `clock_gettime` (`REALTIME`, `MONOTONIC`,
@@ -282,7 +315,18 @@ sqlite, zlib a SDL `fork` nepotřebují.
   `swprintf`. Široké proudy (`fwprintf`, `fgetwc`) až když je bude
   potřebovat port.
 
-### Otevřené otázky
+### Rozhodnutí
+
+Schváleno 2026-11-14: otázky 1-7 a 9-11 podle doporučení (A), `fork`
+nebude ani omezený. **Otázka 8 = B:** skutečné zámky ve fsd už v této
+práci - nová zpráva fsproto pro zámky rozsahu bajtů (`fcntl` `F_SETLK`,
+`F_SETLKW`, `F_GETLK`) a `flock`; vlastník = proces (relace), uvolnění při
+konci procesu nebo zavření posledního fd, čekání s termínem, uváznutí
+(aspoň přímý cyklus) = `EDEADLK`. sqlite běží s výchozím unixovým VFS.
+Změna fsd a fsproto je samostatný commit s host testy `libs/fs` a testem
+dvou procesů nad jednou databází v QEMU.
+
+Původní znění otázek s variantami:
 
 1. **Obsah libc.so.** A **(doporučeno)** jeden `cdylib` `cstd + std +
    osrt` (jeden runtime, žádný nový kód; ~1,5 MB, kód sdílený přes libd).

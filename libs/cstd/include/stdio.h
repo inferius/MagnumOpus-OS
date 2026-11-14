@@ -6,6 +6,7 @@
 #define _CSTD_POSIX_STDIO_H
 
 #include_next <stdio.h>
+#include <sys/types.h>
 
 _CSTD_BEGIN
 
@@ -49,6 +50,14 @@ int setvbuf(FILE *f, char *buf, int mode, size_t size);
 void perror(const char *s);
 int remove(const char *path);
 int rename(const char *from, const char *to);
+
+/* Proudy nad cisly fd (POSIX). */
+FILE *fdopen(int fd, const char *mode);
+int fileno(FILE *f);
+int fseeko(FILE *f, off_t off, int whence);
+off_t ftello(FILE *f);
+ssize_t getline(char **line, size_t *cap, FILE *f);
+ssize_t getdelim(char **line, size_t *cap, int delim, FILE *f);
 
 _CSTD_END
 

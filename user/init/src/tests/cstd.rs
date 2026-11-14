@@ -31,7 +31,7 @@ fn ctest(s: &Startup) -> TestResult {
         vec![StartHandle::tagged(tag::FS, own.into_channel().into_handle())],
         Duration::from_secs(120),
     )?;
-    run.expect("ctest", &["args", "getenv", "format", "memory", "files", "errno"])?;
+    run.expect("ctest", &["args", "getenv", "format", "memory", "files", "errno", "posix"])?;
     check!(run.stdout.ends_with("ctest: hotovo\n"), "atexit v obracenem poradi a vyprazdneni pri konci");
     check!(run.stderr.contains("chyba na stderr\n"), "stderr");
     check!(run.stderr.contains("ctest perror: Invalid argument\n"), "perror");

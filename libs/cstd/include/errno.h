@@ -2,7 +2,7 @@
 #ifndef _ERRNO_H
 #define _ERRNO_H
 
-#include "_cstd.h"
+#include <_cstd.h>
 
 _CSTD_BEGIN
 int *__errno_location(void);
@@ -50,5 +50,29 @@ _CSTD_END
 #define EALREADY 114
 #define EINPROGRESS 115
 #define ECANCELED 125
+#define ESRCH 3
+#define ENXIO 6
+#define E2BIG 7
+#define ENOEXEC 8
+#define EDEADLK 35
+#define ENAMETOOLONG 36
+#define ENOLCK 37
+#define ELOOP 40
+#define ENOTTY 25
+#define EMLINK 31
+#define EOVERFLOW 75
+#define EILSEQ 84
+#define ENOTSOCK 88
+#define EDESTADDRREQ 89
+#define EMSGSIZE 90
+#define EPROTOTYPE 91
+#define ENOPROTOOPT 92
+#define EPROTONOSUPPORT 93
+#define EAFNOSUPPORT 97
+#define ENETDOWN 100
+#define ECONNABORTED 103
+#define ENOBUFS 105
+#define EISCONN 106
+#define ENFILE 23
 
 #endif

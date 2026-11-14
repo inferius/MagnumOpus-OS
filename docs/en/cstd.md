@@ -11,8 +11,11 @@ Compiling C (clang, flags, protections) is described in
 > **Status:** part 1 **[verified in QEMU]** on x86_64 and aarch64 (test
 > `ctest: stdio, soubory, errno, getenv, atexit`, suite `cstd`): `errno`,
 > `FILE` (stdin/stdout/stderr, files), `exit`/`atexit`, `getenv`.
-> Parts 2-8 (threads, fd, time, sockets, `math.h`, `mmap`, signals,
-> `libc.so`, ports) **[designed]**, see [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
+> Part 2a **[verified in QEMU]** on x86_64 and aarch64 (step `posix` of
+> the same test): fd numbers, `unistd.h`, `fcntl.h`, `sys/stat.h`,
+> `dirent.h`, `FILE` over fd numbers. Further parts (threads, time,
+> sockets, `math.h`, `mmap`, signals, file locks, `libc.so`, ports)
+> **[designed]**, see [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
 
 ## Layers
 
@@ -87,6 +90,34 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 | `string.h` | `strerror` | the rest is in `cstd-core` |
 | `assert.h` | `assert` | a failure prints file and line to stderr and ends the process |
 
+## Functions (part 2a: fd numbers and files)
+
+| Header | Functions | Note |
+|---|---|---|
+| `unistd.h` | `close`, `read`, `write`, `pread`, `pwrite`, `lseek`, `dup`, `dup2`, `dup3`, `pipe`, `pipe2`, `isatty`, `fsync`, `fdatasync`, `ftruncate`, `truncate`, `unlink`, `rmdir`, `getcwd`, `chdir`, `access`, `sysconf`, `getpagesize` | `fork`, `vfork`, `exec*` return `ENOSYS` (see [No fork](#processes-locale-wchar)) |
+| `fcntl.h` | `open`, `openat` (only `AT_FDCWD` or an absolute path), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | `O_*` values as Linux, `O_DIRECTORY` the same on both architectures; `F_*LK` locks `ENOLCK` for now |
+| `sys/stat.h` | `stat`, `lstat` (= `stat`), `fstat`, `mkdir`, `chmod`, `fchmod`, `umask` | `st_mode` from the kind and the session's effective rights; `chmod` has no effect (rights are FS grants) |
+| `sys/uio.h` | `readv`, `writev` | `writev` in one write |
+| `dirent.h` | `opendir`, `fdopendir`, `readdir`, `closedir`, `rewinddir`, `dirfd` | the first two entries are `.` and `..` |
+| `stdio.h` | `fdopen`, `fileno`, `fseeko`, `ftello`, `getline`, `getdelim` | `FILE` sits on an fd number |
+
+### fd numbers
+
+- The table is in `osrt` (`osrt::fd`), one per process; `cstd` sees it via
+  `std::os::magnumopus::runtime` (a re-export of the `osrt` crate in std,
+  unstable feature `magnumopus_runtime`, only for libraries over std).
+- A number points to an open description: an FS session file with a
+  position, the process stdio (0, 1, 2 from start-up) or a pipe end. `dup`
+  shares the description and the position.
+- At most 4096 numbers (`EMFILE`). `FD_CLOEXEC` is stored (for
+  `posix_spawn`, the child gets only 0-2).
+- A pipe is a channel pair; the read end cannot be written (`EBADF`), a
+  pipe has no position (`ESPIPE`).
+- On the host (`cargo test -p cstd`) the same rules over `std::fs`
+  (`sys/host.rs`), so the `FILE` and fd logic can be tested without QEMU.
+- `std` does not see fd numbers yet (`AsRawFd`/`FromRawFd` for Rust `File`
+  **[designed]**).
+
 ### Streams and buffers
 
 - `stdout` line-buffered, `stderr` unbuffered, files 4 KiB (`BUFSIZ`).
@@ -102,9 +133,11 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 
 ### Errors
 
-A `std::io::Error` is mapped to `errno` by its kind (`NotFound` ->
-`ENOENT`, `PermissionDenied` -> `EACCES`, ...; an unknown kind is `EIO`).
-An invalid `fopen` mode or a name that is not UTF-8 = `EINVAL`.
+A system error (`abi::Error`, [errors.md](errors.md)) is mapped to `errno`
+(`errno::from_os`: `NOT_FOUND` -> `ENOENT`, `ACCESS_DENIED` -> `EACCES`,
+`BAD_HANDLE` -> `EBADF`, `PEER_CLOSED` -> `EPIPE`, ...; unknown `EIO`), a
+`std::io::Error` by its kind (`errno::from_io`). An invalid `fopen` mode =
+`EINVAL`.
 
 ## Limitations of part 1
 
@@ -114,11 +147,11 @@ An invalid `fopen` mode or a name that is not UTF-8 = `EINVAL`.
 
 ## Continuation: a complete libc and POSIX (parts 2-8)
 
-**[designed]**, awaiting approval (step 2 in the order of adopting foreign
-software, [architecture.md](architecture.md#security)). Goal: build zlib,
-sqlite, then the SDL and FFmpeg dependencies (LGPL, separate process)
-without source changes. Options marked **(recommended)** are proposals; the
-final decision is in [Open questions](#open-questions).
+**[designed]**, approved 2026-11-14 (step 2 in the order of adopting
+foreign software, [architecture.md](architecture.md#security)); part 2a is
+done (above). Goal: build zlib, sqlite, then the SDL and FFmpeg
+dependencies (LGPL, separate process) without source changes. The
+decisions are in [Decisions](#decisions).
 
 ### Two kinds of process, one runtime
 
@@ -198,8 +231,9 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
    (`st_mode` from the kind and effective rights, `st_uid` from the session
    identity), `opendir`/`readdir`, `mkdir`, `unlink`, `rmdir`, `rename`,
    `access`, `getcwd`/`chdir`, `pipe` (a channel pair), `isatty`.
-   `chmod`/`chown` = `EPERM` (rights are FS grants, not bits), `link`/
-   `symlink` = `ENOTSUP` until FS v3, `fcntl`/`flock` locks question 8.
+   `chmod` without effect (rights are FS grants, not bits), `link`/
+   `symlink` = `ENOTSUP` until FS v3. `fcntl`/`flock` locks are held by
+   fsd (decision 8).
 3. **`math.h`** (question 3) and floating point in `printf`/`scanf`/
    `strtod`. Hard-float everywhere (x86-64-v2, NEON). `long double`:
    question 9.
@@ -290,7 +324,19 @@ FFmpeg, sqlite, zlib and SDL do not need `fork`.
   from tables), `swprintf`. Wide streams (`fwprintf`, `fgetwc`) only when a
   port needs them.
 
-### Open questions
+### Decisions
+
+Approved 2026-11-14: questions 1-7 and 9-11 as recommended (A), no `fork`,
+not even a limited one. **Question 8 = B:** real locks in fsd already in
+this work - a new fsproto message for byte-range locks (`fcntl`
+`F_SETLK`, `F_SETLKW`, `F_GETLK`) and `flock`; owner = process (session),
+released at process exit or when the last fd is closed, waiting with a
+deadline, deadlock (at least a direct cycle) = `EDEADLK`. sqlite runs with
+the default unix VFS. The fsd and fsproto change is a separate commit with
+`libs/fs` host tests and a test of two processes over one database in
+QEMU.
+
+The original questions with their options:
 
 1. **Contents of libc.so.** A **(recommended)** one `cdylib` `cstd + std +
    osrt` (one runtime, no new code; ~1.5 MB, code shared via libd). B

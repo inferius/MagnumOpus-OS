@@ -1,11 +1,13 @@
 # libs/cstd
 
-Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `std` - `errno`, proudy `FILE` (stdin/stdout/stderr, soubory), `exit`/`atexit`/`getenv`, `assert`. Základ (řetězce, `malloc`, `snprintf`, SSP) je v `libs/cstd-core`. Popis: `docs/cs/cstd.md`.
+Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `std` a `osrt` - `errno`, čísla fd (`unistd.h`, `fcntl.h`, `sys/stat.h`, `dirent.h`), proudy `FILE` nad fd, `exit`/`atexit`/`getenv`, `assert`. Základ (řetězce, `malloc`, `snprintf`, SSP) je v `libs/cstd-core`. Popis: `docs/cs/cstd.md`.
 
 ## Klíčové soubory
 
 - `src/errno.rs` - čísla POSIX, `errno` v TLS (`__errno_location`), převod `io::Error` -> `errno`, `strerror`.
-- `src/stdio.rs` - `FILE` (zámek, buffery: stdout po řádcích, stderr bez, soubory 4 KiB), seznam otevřených proudů, vyprázdnění při konci (`ensure_exit_hook`).
+- `src/sys/` - systémová vrstva s chybou = `errno`: `os.rs` nad `std::os::magnumopus::runtime` (= crate `osrt`, tabulka `osrt::fd`), `host.rs` náhrada nad `std::fs` jen pro host testy (stejná pravidla čísel).
+- `src/unistd.rs` (`open`, `read`, `dup`, `pipe`, `fcntl`, `fork` = `ENOSYS` ...), `src/stat.rs`, `src/dirent.rs`, `src/flock.rs` (zámky, zatím `ENOLCK`).
+- `src/stdio.rs` - `FILE` nad číslem fd (zámek, buffery: stdout po řádcích, stderr bez, soubory 4 KiB), `fdopen`/`fileno`, `getline`, seznam otevřených proudů, vyprázdnění při konci (`ensure_exit_hook`).
 - `src/stdlib.rs` - `exit`, `_Exit`, `atexit`, `getenv` (cache řetězců C), `abort`, `__cstd_assert_fail`.
 - `include/` - hlavičky POSIX; `stdio.h`, `stdlib.h`, `string.h` doplňují cstd-core přes `#include_next`.
 - `build.rs` - `links = "cstd"`: programům v C předá adresáře hlaviček (`DEP_CSTD_INCLUDE`, oddělené `;`).
@@ -16,13 +18,16 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 - Závislost na cstd-core vždy `default-features = false` (bez `service-io`; stdio je tady).
 - Vyprázdnění proudů se registruje do `at_exit` dřív než první funkce `atexit` (běží v obráceném pořadí, tedy po nich).
 - Čísla `E*` v `src/errno.rs` a `include/errno.h` musí sedět (test `errno_header_matches`).
+- Hodnoty `O_*`, `F_*`, `S_IF*` a rozložení `struct stat`/`dirent`/`flock` v `src/*.rs` a `include/` musí sedět (stejné na obou architekturách).
+- Systémová volání jdou jen přes `sys` (ne přímo `std::fs`), aby C i Rust sdílely tabulku fd v osrt.
 
 ## Testy
 
-- Host: `cargo test -p cstd` (režimy `fopen`, errno, soubory přes API C).
+- Host: `cargo test -p cstd` (režimy `fopen`, errno, soubory, pravidla čísel fd nad `sys/host.rs`).
 - QEMU: `cargo xtask test --only cstd` (program `user/ctest`, v C).
 
 ## Pasti
 
 - Program v C je crate `#![no_main]`; `main` z C volá `osrt`. Bez `extern crate cstd;` se knihovna nepřilinkuje.
 - `printf` zatím neumí plovoucí čárku (`%f` = `?`).
+- `std::os::magnumopus::runtime` potřebuje `feature(magnumopus_runtime, rustc_private)` (crate ze sysrootu); jen pod `cfg(target_os = "magnumopus")`.
