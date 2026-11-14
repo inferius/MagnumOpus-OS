@@ -4,6 +4,7 @@
 //! s popisem chyby, aby jeden neuspech nezastavil ostatni testy.
 
 mod audio;
+mod media;
 mod audio_recovery;
 mod accounts;
 mod agent;
@@ -113,6 +114,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("vstup", input::TESTS),
     ("usb", usb::TESTS),
     ("zvuk", audio::TESTS),
+    ("media", media::TESTS),
     ("historie FS", fs_hist::TESTS),
     // Pri bezne sade jeden start (pocitadlo 1); xtask boottest ji pousti
     // opakovane nad stejnym diskem.

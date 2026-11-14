@@ -2,8 +2,9 @@
 
 Design of step 7 of the order in [architecture.md](architecture.md):
 decoding audio and video with the third-party FFmpeg library in an
-**isolated process**, with a player on top. The whole page is
-**[designed]**; no code exists yet. The user's decisions (2026-11-14) are
+**isolated process**, with a player on top. The state of each part is in
+the table below; the service, the protocol and the test decoder already
+run, FFmpeg and the player do not yet. The user's decisions (2026-11-14) are
 in [Decisions](#decisions). Parts depending on C ports (F1, building
 FFmpeg and the subtitle libraries) wait until the C port mechanism from the
 SDL thread is on `main`; the service, the protocol and the player with a
@@ -14,7 +15,8 @@ test decoder do not depend on it.
 | Part | What | Status |
 |---|---|---|
 | F1 | FFmpeg built as a C port (LGPL, shared libraries over `libc.so`), test of an `ffprobe`-like program in QEMU | **[designed]** |
-| F2 | `mediad` service + `ffdec` decoder process, `mediaproto` protocol, audio into `audiod`; first with a test decoder without FFmpeg | **[designed]** |
+| F2a | `libs/mediaproto` protocol (host tests), `mediad` service, `mediatest` test decoder (NV12 frames into the pool with a fence, tone into the `audiod` ring), VMO and channel sources, `SEEK`, decoder crash and recovery | **[verified in QEMU]** x86_64 and aarch64 (suite `media`) |
+| F2b | `ffdec` process with FFmpeg instead of `mediatest` (waits for the C port mechanism) | **[designed]** |
 | F3 | video into shared buffers (`bufdesc` NV12/I420/P010) with fences, A/V sync | **[designed]** |
 | F4 | Player application over `libs/ui` (video layer, controls, libass subtitles, media session) | **[designed]** |
 | F5 | hardware-accelerated decoding (VA-API/Vulkan Video through the GPU driver) | **[designed]** |
@@ -98,35 +100,94 @@ process output (only into shared memory someone handed to it).
 - **Player** (application) opens a session at `mediad`, hands it the input
   (decision 2), allocates or receives a buffer pool (decision 3), controls
   playback and composes the video into its window.
-- **mediad** (service, trusted) holds sessions, reads input on behalf of the
-  application (from a file or stream handle, not by path), starts `ffdec`
-  through launchd with an empty namespace and passes it bytes only. It
+- **mediad** (service, trusted, under the init supervisor) holds sessions
+  (one thread per session), reads input on behalf of the application and
+  starts the decoder directly (`spawn_with`) in its own job with limits
+  (64 MiB user, 4 MiB kernel memory) **without any handles** except the
+  control channel. It checks decoder events before forwarding them (buffer
+  number within the pool, the decoder may not announce its own loss). It
   decides which codecs are allowed (decision 5).
 - **ffdec** is the only process running FFmpeg code: libavformat (demux),
   libavcodec (decoding), libswresample (sample format conversion), libswscale
   when needed. It has no capabilities except the channel to `mediad`, buffer
   VMOs and fences.
 
-### The `mediaproto` protocol [designed]
+### The `mediaproto` protocol [verified in QEMU]
 
-Messages over the application <-> `mediad` channel; `mediad` <-> `ffdec`
-uses the same protocol extended with byte delivery. Operation numbers and
-layout will live in the `libs/mediaproto` crate with host tests (like
-`audioproto`).
+Crate `libs/mediaproto` (`wire` encoding; reading an invalid message
+returns `INVALID_ARGS`, never a panic). **One client channel = one
+session**; another session = another channel (`CONNECT` on the service
+control channel held by init). `mediad` sends the decoder the same
+requests (plus `PROBE`) and forwards its events to the application.
 
-| Operation | Who | Meaning |
+Messages from the service start with a u32 tag: `0` = reply to the last
+request (status i32 + data), otherwise an event number. Events arrive at
+any time, also while waiting for a reply (the `MediaClient` client queues
+them).
+
+| Operation | Number | Parameters -> reply | Handles |
+|---|---|---|---|
+| `CONNECT` | 1 | -> new session channel | reply: channel |
+| `OPEN` | 2 | source kind u8 (`1` VMO, `2` channel), size u64 -> `Info` | read-only VMO / source channel |
+| `SELECT` | 3 | video, audio, subtitles i32 (`-1` = none) | - |
+| `POOL` | 4 | count u8 + `BufDesc` of each buffer | buffer VMOs, then the frame fence |
+| `AUDIO` | 5 | rate u32, channels u8, sample u8, capacity u32 | ring VMO, period event |
+| `PLAY` / `PAUSE` | 6 / 7 | - | - |
+| `SEEK` | 8 | time us u64, exact u8 -> actual time u64 | - |
+| `RELEASE` | 9 | buffer u8 | - |
+| `CLOSE` | 10 | end of session (the decoder exits) | - |
+| `REOPEN` | 11 | after decoder loss: a new one with the same source, pool, ring and selection -> `Info` | - |
+| `PROBE` | 50 | `mediad` -> decoder only: size u64 -> `Info` | source channel |
+
+| Event | Number | Content |
 |---|---|---|
-| `OPEN { source, flags }` | application | new session; source = file / stream handle (decision 2) |
-| `INFO -> { duration, streams[] }` | application | streams: type, codec, size, fps, channels, rate, language |
-| `SELECT { video, audio, subtitles }` | application | stream selection (-1 = none) |
-| `POOL { buffers[], fences }` | application | hands over the output buffer pool (VMO + `bufdesc`) |
-| `AUDIO { ring }` | application | hands over the `audiod` stream ring (decision 4) |
-| `PLAY` / `PAUSE` / `SEEK { time, exact }` | application | control; `SEEK` returns the actual keyframe time |
-| `FRAME { buffer, pts, duration, fence }` | `mediad` -> application | the frame is in the buffer once the fence reaches the value |
-| `RELEASE { buffer, fence }` | application | the buffer is free once compd signals the release fence |
-| `CLOCK { audio pts, monotonic time }` | `mediad` -> application | clock for A/V sync |
-| `SUBTITLE_SIZE { width, height, pixel aspect }` + `SUBTITLE { buffer, pts, duration, fence }` | application / `mediad` -> application | subtitle layer size; finished subtitle bitmap (RGBA, premultiplied alpha) |
-| `EVENT { end, error, format change }` | `mediad` -> application | including a decoder crash (the session can be recovered) |
+| `FRAME` | 100 | buffer u8, pts us u64, duration us u32, serial u64 (= frame fence value) |
+| `AUDIO_BASE` | 101 | ring position u64, pts us u64 (audio clock anchor after start and `SEEK`) |
+| `END` | 102 | end of all selected streams |
+| `ERROR` | 103 | error code i32, decoder lost u8 (the session can be recovered with `REOPEN`) |
+
+`Info` = duration us u64 and streams (kind, codec, size, fps as a
+fraction, rate, channels, language, codec available). Subtitles
+(`SUBTITLE_SIZE`, `SUBTITLE`) come with libass in F4 and are not in the
+protocol yet.
+
+**Byte source** (`mediaproto::source`, a deviation from the design): fsd
+cannot yet hand over one open file as a transferable handle (file handles
+are valid only within an fsd session). The source is therefore either a
+**read-only VMO** (small files, tests) or a **source channel** on which the
+application answers `READ_AT { offset u64, length u32 }` (at most 64 KiB)
+and `SIZE`. The decoder always reads through its source channel from
+`mediad` and never gets the VMO handle or the application channel. A
+narrow single-file handle in fsd is a separate step.
+
+**Clock** (`mediaproto::clock`, host tests): audio time = anchor pts +
+(played frames - latency * rate - anchor position) / rate; without audio
+`WallClock`. Frame choice `decide`: a frame belongs to a swap when the swap
+time falls into `[pts - duration/2, pts + duration)`; earlier = hold,
+later = drop, a deviation over 200 ms = resync by a jump.
+
+### Test decoder `mediatest` [verified in QEMU]
+
+A process with the same interface as the future `ffdec`, without FFmpeg.
+It reads the `MTM1` test format (`mediaproto::testmedia`: a header + a
+record per frame with pts, seed and keyframe flag) through the source
+channel, draws a deterministic NV12 picture (luma gradient, moving bar,
+colour from the seed) directly into the pool VMO, advances the frame fence
+and sends `FRAME`; it writes an s16 stereo tone into the `audiod` ring. The
+`crash_at` header field makes it exit on purpose at a given frame (session
+recovery test). It decodes ahead while it has free buffers; the pace is set
+by the application returning buffers (`RELEASE`) and by the audio ring.
+
+Test decoder limits: NV12 and s16 stereo only; after `SEEK` the audio
+already in the ring plays out (a producer cannot empty the ring itself -
+the new `AUDIO_BASE` anchor tells the application).
+
+Suite `media` (`user/init/src/tests/media.rs`) checks: stream description,
+frame content and order against a checksum and the fence, keyframe and
+exact seek, a source channel from the application, audio into `audiod`
+with the audio clock advancing and `END`, decoder crash (`ERROR` with
+loss, `REOPEN`, `SEEK`, a frame after recovery), invalid requests and a
+corrupted file.
 
 ### Video: buffers and fences
 
@@ -143,9 +204,9 @@ Note the dependency state:
 
 - **Kernel fences (6a-1) are on `main`** ([fences.md](fences.md)).
 - **`bufdesc`, `BUFFER_CREATE_DESC` and window sync points (6a-3, 6a-4) are
-  not on `main` yet**, only on the branches `inferius-dev/6a-3-render` and
-  `inferius-dev/6a-4-okna-video`. F3 waits for them; F1 and F2 (audio) do
-  not.
+  on `main`**; compd converts YUV on the CPU (`libs/yuv`) or in `vkcomp`.
+  `libs/ui` cannot show a layer with a foreign buffer yet: the player needs
+  a video layer widget (F4).
 - Showing YUV without CPU conversion needs a video layer in compd
   ([device-interfaces.md](device-interfaces.md), video plane [designed]);
   until then compd converts YUV -> RGB with a shader or on the CPU (cost:
@@ -293,7 +354,7 @@ CMake/autotools:
    mechanism finds it and, if missing, gives install advice (decision 7).
    On aarch64 clang as the assembler is enough (GNU `.S` syntax, NEON).
 4. **Patches**: `target-os` for our system, CPU count detection through
-   `sysconf(_SC_NPROCESSORS_ONLN)` (on the cstd-posix branch), switches
+   `sysconf(_SC_NPROCESSORS_ONLN)` (cstd), switches
    `--disable-network`, `--disable-autodetect`; FFmpeg must not reach for
    `fork` (cstd does not have it, only `posix_spawn`).
 5. **Out-of-tree and per-arch**: build into `target/cports/<arch>/ffmpeg/`,
@@ -317,11 +378,10 @@ After configure `xtask` checks `config.h` for `CONFIG_GPL 0` and
 
 ### What it builds on in the system
 
-- `libc.so` (the libc.so step on the `inferius-dev/libc-so` branch, waiting
-  for merge) and the dynamic loader `ld.so`: FFmpeg is a set of `.so` files
+- `libc.so` (merged) and the dynamic loader `ld.so`: FFmpeg is a set of `.so` files
   (`libavformat.so.61`, `libavcodec.so.61`, `libavutil.so.59`,
   `libswresample.so.5`, `libswscale.so.8`) linked against `libc.so`.
-- `cstd` with the POSIX layer (branch `inferius-dev/cstd-posix`): pthreads
+- `cstd` with the POSIX layer (merged): pthreads
   (FFmpeg decodes in threads), `clock_gettime`, `sysconf`,
   `posix_memalign` for aligned allocations.
 - W^X: neither FFmpeg nor dav1d needs a JIT; hand-written SIMD is
@@ -363,7 +423,7 @@ replace the library with their own modified version. The design:
    **first with a test decoder** (a process with the same interface as
    `ffdec` that generates a tone and test patterns without FFmpeg), so they
    do not wait for C ports.
-3. **F3 video**: `bufdesc` buffers with fences (after 6a-3/6a-4 are merged),
+3. **F3 video**: `bufdesc` buffers with fences (6a-3/6a-4 are on `main`),
    A/V sync, measuring latency and dropped frames.
 4. **F4 player**: application, video layer widget in `libs/ui`, subtitles,
    media session.

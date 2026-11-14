@@ -111,6 +111,7 @@ impl AudioClient {
             info,
             ring,
             _map: map,
+            vmo,
             event: Event::from_handle(event),
             closed: false,
             started: AtomicBool::new(false),
@@ -124,6 +125,8 @@ pub struct Stream {
     info: Opened,
     ring: Ring,
     _map: Mapping,
+    /// VMO kruhu (pro [`Stream::producer_handles`]).
+    vmo: Vmo,
     event: Event,
     closed: bool,
     /// Poslali jsme START (a od te doby ne STOP ani dohrany DRAIN)?
@@ -137,6 +140,14 @@ impl Stream {
 
     pub fn ring(&self) -> &Ring {
         &self.ring
+    }
+
+    /// Kopie handlu kruhu a udalosti periody pro jiny proces, ktery bude
+    /// data zapisovat (dekoder medii). Rizeni (start, stop, zavreni) zustava
+    /// tomuto streamu; na udalost pak ceka jen producent ([`Stream::wait`]
+    /// by mu ji nulovalo).
+    pub fn producer_handles(&self) -> Result<(Handle, Handle)> {
+        Ok((self.vmo.handle().duplicate(None)?, self.event.handle().duplicate(None)?))
     }
 
     pub fn start(&self) -> Result<()> {

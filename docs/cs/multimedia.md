@@ -2,7 +2,8 @@
 
 Návrh kroku 7 pořadí v [architektura.md](architektura.md): dekódování zvuku
 a videa převzatou knihovnou FFmpeg v **izolovaném procesu** a nad ním
-přehrávač. Celá stránka je **[navrženo]**, kód zatím neexistuje.
+přehrávač. Stav jednotlivých částí je v tabulce níže; služba, protokol
+a testovací dekodér už běží, FFmpeg a přehrávač zatím ne.
 Rozhodnutí uživatele (2026-11-14) jsou v kapitole
 [Rozhodnutí](#rozhodnutí). Části závislé na portech C (F1, sestavení
 FFmpeg a knihoven titulků) čekají, až bude na `main` mechanismus portů C
@@ -14,7 +15,8 @@ nezávisí.
 | Část | Co | Stav |
 |---|---|---|
 | F1 | sestavení FFmpeg jako port C (LGPL, sdílené knihovny nad `libc.so`), test `ffprobe`-like programu v QEMU | **[navrženo]** |
-| F2 | služba `mediad` + proces dekodéru `ffdec`, protokol `mediaproto`, zvuk do `audiod`; nejdřív s testovacím dekodérem bez FFmpeg | **[navrženo]** |
+| F2a | protokol `libs/mediaproto` (host testy), služba `mediad`, testovací dekodér `mediatest` (obraz NV12 do poolu s plotem, tón do kruhu `audiod`), zdroj VMO i kanálem, `SEEK`, pád a obnova dekodéru | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `media`) |
+| F2b | proces `ffdec` s FFmpeg místo `mediatest` (čeká na mechanismus portů C) | **[navrženo]** |
 | F3 | video do sdílených bufferů (`bufdesc` NV12/I420/P010) s ploty, A/V synchronizace | **[navrženo]** |
 | F4 | aplikace Přehrávač nad `libs/ui` (videovrstva, ovládání, titulky libass, mediální relace) | **[navrženo]** |
 | F5 | hardwarová akcelerace dekódování (VA-API/Vulkan Video přes ovladač GPU) | **[navrženo]** |
@@ -97,34 +99,92 @@ dekodéru (jen do sdílené paměti, kterou mu někdo předal).
 - **Přehrávač** (aplikace) otevře relaci u `mediad`, předá mu vstup
   (rozhodnutí 2), alokuje nebo dostane pool bufferů (rozhodnutí 3), řídí přehrávání
   a skládá video do svého okna.
-- **mediad** (služba, důvěryhodná) drží relace, čte vstup za aplikaci
-  (z handlu souboru nebo proudu, ne podle cesty), spouští `ffdec` přes
-  launchd s prázdným jmenným prostorem a předává mu jen bajty. Rozhoduje,
-  které kodeky jsou povolené (rozhodnutí 5).
+- **mediad** (služba, důvěryhodná, pod supervisorem initu) drží relace
+  (jedno vlákno na relaci), čte vstup za aplikaci a spouští dekodér
+  přímo (`spawn_with`) ve vlastním jobu s limity (64 MiB uživatelské,
+  4 MiB jaderné paměti) **bez jakýchkoli handlů** kromě řídicího kanálu.
+  Události dekodéru před přeposláním kontroluje (číslo bufferu v poolu,
+  dekodér nesmí sám ohlásit svou ztrátu). Rozhoduje, které kodeky jsou
+  povolené (rozhodnutí 5).
 - **ffdec** je jediný proces, ve kterém běží kód FFmpeg: libavformat
   (demux), libavcodec (dekódování), libswresample (převod formátu vzorků),
   podle potřeby libswscale. Nemá žádné capability kromě kanálu k `mediad`,
   VMO bufferů a plotů.
 
-### Protokol `mediaproto` [navrženo]
+### Protokol `mediaproto` [ověřeno v QEMU]
 
-Zprávy přes kanál aplikace <-> `mediad`; `mediad` <-> `ffdec` používá
-stejný protokol rozšířený o dodávání bajtů. Čísla operací a rozložení budou
-v crate `libs/mediaproto` s host testy (jako `audioproto`).
+Crate `libs/mediaproto` (kódování `wire`, čtení neplatné zprávy vrací
+`INVALID_ARGS`, nikdy paniku). **Jeden kanál klienta = jedna relace**;
+další relace = další kanál (`CONNECT` na řídicím kanálu služby, který
+drží init). `mediad` posílá dekodéru tytéž požadavky (navíc `PROBE`)
+a jeho události přeposílá aplikaci.
 
-| Operace | Kdo | Význam |
+Zprávy od služby začínají značkou u32: `0` = odpověď na poslední
+požadavek (status i32 + data), jinak číslo události. Události chodí
+kdykoli, i během čekání na odpověď (klient `MediaClient` je řadí do
+fronty).
+
+| Operace | Číslo | Parametry -> odpověď | Handly |
+|---|---|---|---|
+| `CONNECT` | 1 | -> nový kanál relace | odpověď: kanál |
+| `OPEN` | 2 | druh zdroje u8 (`1` VMO, `2` kanál), velikost u64 -> `Info` | VMO jen pro čtení / kanál zdroje |
+| `SELECT` | 3 | video, zvuk, titulky i32 (`-1` = žádný) | - |
+| `POOL` | 4 | počet u8 + `BufDesc` každého bufferu | VMO bufferů, nakonec plot snímku |
+| `AUDIO` | 5 | frekvence u32, kanály u8, vzorek u8, kapacita u32 | VMO kruhu, událost periody |
+| `PLAY` / `PAUSE` | 6 / 7 | - | - |
+| `SEEK` | 8 | čas us u64, přesně u8 -> skutečný čas u64 | - |
+| `RELEASE` | 9 | buffer u8 | - |
+| `CLOSE` | 10 | konec relace (dekodér skončí) | - |
+| `REOPEN` | 11 | po ztrátě dekodéru: nový se stejným zdrojem, poolem, kruhem a výběrem -> `Info` | - |
+| `PROBE` | 50 | jen `mediad` -> dekodér: velikost u64 -> `Info` | kanál zdroje |
+
+| Událost | Číslo | Obsah |
 |---|---|---|
-| `OPEN { zdroj, příznaky }` | aplikace | nová relace; zdroj = handle souboru / proudu (rozhodnutí 2) |
-| `INFO -> { délka, proudy[] }` | aplikace | proudy: typ, kodek, rozměr, fps, kanály, frekvence, jazyk |
-| `SELECT { video, audio, titulky }` | aplikace | výběr proudů (-1 = žádný) |
-| `POOL { buffery[], ploty }` | aplikace | předá pool výstupních bufferů (VMO + `bufdesc`) |
-| `AUDIO { kruh }` | aplikace | předá kruh proudu `audiod` (rozhodnutí 4) |
-| `PLAY` / `PAUSE` / `SEEK { čas, přesně }` | aplikace | řízení; `SEEK` vrátí skutečný čas klíčového snímku |
-| `FRAME { buffer, pts, trvání, plot }` | `mediad` -> aplikace | snímek je v bufferu, až plot dosáhne hodnoty |
-| `RELEASE { buffer, plot }` | aplikace | buffer je volný, až compd signalizuje release plot |
-| `CLOCK { pts zvuku, čas monotonní }` | `mediad` -> aplikace | hodiny pro A/V synchronizaci |
-| `SUBTITLE_SIZE { šířka, výška, poměr pixelů }` + `SUBTITLE { buffer, pts, trvání, plot }` | aplikace / `mediad` -> aplikace | rozměr vrstvy titulků; hotová bitmapa titulků (RGBA, předem vynásobená alfa) |
-| `EVENT { konec, chyba, změna formátu }` | `mediad` -> aplikace | včetně pádu dekodéru (relace jde obnovit) |
+| `FRAME` | 100 | buffer u8, pts us u64, trvání us u32, pořadí u64 (= hodnota plotu snímku) |
+| `AUDIO_BASE` | 101 | pozice v kruhu u64, pts us u64 (kotva hodin zvuku po startu a `SEEK`) |
+| `END` | 102 | konec všech vybraných proudů |
+| `ERROR` | 103 | kód chyby i32, dekodér ztracen u8 (relace jde obnovit `REOPEN`) |
+
+`Info` = délka us u64 a proudy (druh, kodek, rozměr, fps jako zlomek,
+frekvence, kanály, jazyk, kodek dostupný). Titulky (`SUBTITLE_SIZE`,
+`SUBTITLE`) přijdou s libass v F4 a zatím nejsou v protokolu.
+
+**Zdroj bajtů** (`mediaproto::source`, odchylka od návrhu): fsd zatím
+neumí předat jeden otevřený soubor jako přenositelný handle (handly
+souborů platí jen v relaci fsd). Zdroj je proto buď **VMO jen pro čtení**
+(malé soubory, testy), nebo **kanál zdroje**, na kterém aplikace odpovídá
+na `READ_AT { posun u64, délka u32 }` (nejvýš 64 KiB) a `SIZE`. Dekodér
+čte vždy přes svůj kanál zdroje od `mediad`, nikdy nedostane handle VMO
+ani kanál aplikace. Úzký handle jednoho souboru ve fsd je samostatný
+krok.
+
+**Hodiny** (`mediaproto::clock`, host testy): čas zvuku = pts kotvy +
+(přehrané rámce - latence * frekvence - pozice kotvy) / frekvence; bez
+zvuku `WallClock`. Výběr snímku `decide`: snímek patří na výměnu, když
+čas výměny padne do `[pts - trvání/2, pts + trvání)`; dřív = podržet,
+později = zahodit, odchylka nad 200 ms = srovnat skokem.
+
+### Testovací dekodér `mediatest` [ověřeno v QEMU]
+
+Proces se stejným rozhraním jako budoucí `ffdec`, bez FFmpeg. Čte
+testovací formát `MTM1` (`mediaproto::testmedia`: hlavička + záznam
+každého snímku s pts, semínkem a příznakem klíčového snímku) přes kanál
+zdroje, kreslí deterministický obraz NV12 (přechod jasu, pohyblivý pruh,
+barva podle semínka) přímo do VMO z poolu, posune plot snímku a pošle
+`FRAME`; tón s16 stereo píše do kruhu `audiod`. Pole `crash_at` v hlavičce
+ho na daném snímku schválně ukončí (test obnovy relace). Dekóduje dopředu,
+dokud má volné buffery; tempo určuje aplikace vracením bufferů
+(`RELEASE`) a kruh zvuku.
+
+Omezení testovacího dekodéru: jen NV12 a s16 stereo; po `SEEK` dohraje
+zvuk, který už je v kruhu (kruh producent sám vyprázdnit neumí - nová
+kotva `AUDIO_BASE` to aplikaci řekne).
+
+Sada `media` (`user/init/src/tests/media.rs`) ověřuje: popis proudů,
+obsah a pořadí snímků proti kontrolnímu součtu a plot, skok na klíčový
+a přesný snímek, zdroj kanálem aplikace, zvuk do `audiod` s postupem
+hodin zvuku a `END`, pád dekodéru (`ERROR` se ztrátou, `REOPEN`, `SEEK`,
+snímek po obnově), neplatné požadavky a poškozený soubor.
 
 ### Video: buffery a ploty
 
@@ -141,8 +201,9 @@ Pozor na stav závislostí:
 
 - **Ploty v jádře (6a-1) jsou na `main`** ([ploty.md](ploty.md)).
 - **`bufdesc`, `BUFFER_CREATE_DESC` a body synchronizace oken (6a-3, 6a-4)
-  zatím nejsou na `main`**, jen ve větvích `inferius-dev/6a-3-render`
-  a `inferius-dev/6a-4-okna-video`. F3 na ně čeká; F1 a F2 (zvuk) ne.
+  jsou na `main`**; compd převádí YUV na CPU (`libs/yuv`) nebo ve
+  `vkcomp`. `libs/ui` zatím neumí vrstvu s cizím bufferem: přehrávač
+  potřebuje widget videovrstvy (F4).
 - Zobrazení YUV bez převodu na CPU potřebuje videovrstvu v compd
   ([rozhrani-zarizeni.md](rozhrani-zarizeni.md), Videorovina [navrženo]);
   do té doby compd převádí YUV -> RGB shaderem nebo na CPU (cena: jedna
@@ -284,7 +345,7 @@ autotools) navrhuje vlákno SDL (`navrh-sdl.md`, jeho otázka 2 = C). FFmpeg ho
    ho najde a při chybějícím dá radu k instalaci (rozhodnutí 7). Na aarch64
    stačí clang jako assembler (GNU syntaxe `.S`, NEON), nic navíc.
 4. **Záplaty**: `target-os` pro náš systém, detekce počtu CPU přes
-   `sysconf(_SC_NPROCESSORS_ONLN)` (ve větvi cstd-posix), přepínače
+   `sysconf(_SC_NPROCESSORS_ONLN)` (cstd), přepínače
    `--disable-network`, `--disable-autodetect`; FFmpeg nesmí sáhnout po
    `fork` (cstd ho nemá, jen `posix_spawn`).
 5. **Out-of-tree a per-arch**: build do `target/cports/<arch>/ffmpeg/`,
@@ -308,11 +369,10 @@ Licenční přepínače natvrdo: `--disable-gpl --disable-nonfree
 
 ### Na čem stojí v systému
 
-- `libc.so` (krok libc.so ve větvi `inferius-dev/libc-so`, čeká na
-  sloučení) a dynamický zavaděč `ld.so`: FFmpeg je sada `.so`
+- `libc.so` (sloučeno) a dynamický zavaděč `ld.so`: FFmpeg je sada `.so`
   (`libavformat.so.61`, `libavcodec.so.61`, `libavutil.so.59`,
   `libswresample.so.5`, `libswscale.so.8`) linkovaná proti `libc.so`.
-- `cstd` s POSIX vrstvou (větev `inferius-dev/cstd-posix`): pthreads
+- `cstd` s POSIX vrstvou (sloučeno): pthreads
   (FFmpeg dekóduje ve vláknech), `clock_gettime`, `sysconf`, `mmap` pro
   zarovnané alokace (`posix_memalign` stačí).
 - W^X: FFmpeg ani dav1d nepotřebují JIT, ruční SIMD je předpřeložený.
@@ -350,7 +410,7 @@ knihovnu nahradit vlastní upravenou verzí. Návrh:
    Protokol, služba a izolace se staví **nejdřív s testovacím dekodérem**
    (proces se stejným rozhraním jako `ffdec`, generuje tón a testovací
    obrazce bez FFmpeg), takže nečekají na porty C.
-3. **F3 video**: buffery `bufdesc` s ploty (po sloučení 6a-3/6a-4),
+3. **F3 video**: buffery `bufdesc` s ploty (6a-3/6a-4 jsou na `main`),
    A/V synchronizace, měření latence a zahozených snímků.
 4. **F4 přehrávač**: aplikace, widget videovrstvy v `libs/ui`, titulky,
    mediální relace.

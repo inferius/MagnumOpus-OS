@@ -1,0 +1,10 @@
+[app]
+id = "org.magnumopus.mediad"
+name = "Služba médií"
+system = true
+
+# Limit plati i pro procesy dekoderu (joby pod jobem sluzby, kazdy
+# s vlastnim limitem 64M).
+[limits]
+memory = "512M"
+kernel_memory = "32M"

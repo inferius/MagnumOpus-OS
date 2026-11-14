@@ -1,0 +1,18 @@
+[package]
+name = "mediaproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protokol medii (aplikace <-> mediad <-> proces dekoderu), zdroj bajtu, hodiny A/V, testovaci format"
+
+[features]
+# Klient nad kanaly (MediaClient); bez nej zustanou formaty zprav, hodiny
+# a testovaci format - ty jdou testovat na hostiteli.
+default = []
+client = ["dep:libos"]
+
+[dependencies]
+abi = { workspace = true }
+wire = { path = "../wire" }
+bufdesc = { path = "../bufdesc" }
+libos = { path = "../libos", optional = true }

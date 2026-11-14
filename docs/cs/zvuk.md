@@ -132,6 +132,11 @@ vstupu vrací `NOT_SUPPORTED`.
 Klient `audioproto::conn::AudioClient` stojí na `svcclient::Conn`:
 s lístkem přežije restart služby, bez něj vrátí `SERVICE_UNAVAILABLE`.
 
+Data do kruhu smí psát i jiný proces než vlastník streamu:
+`Stream::producer_handles` vrátí kopie VMO kruhu a události periody
+(dekodér médií, [multimedia.md](multimedia.md)). Řízení (start, stop,
+zavření) zůstává vlastníkovi; na událost pak čeká jen producent.
+
 ### Protokol ovladače
 
 `audiod` pošle ovladači `OPEN_OUTPUT` (formát, perioda, počet period)

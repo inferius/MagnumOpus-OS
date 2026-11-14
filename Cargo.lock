@@ -1613,6 +1613,7 @@ dependencies = [
  "installplan",
  "libos",
  "manifest",
+ "mediaproto",
  "netproto",
  "openwith",
  "powerproto",
@@ -1942,6 +1943,36 @@ version = "0.1.0"
 dependencies = [
  "conf",
  "netproto",
+]
+
+[[package]]
+name = "mediad"
+version = "0.1.0"
+dependencies = [
+ "bufdesc",
+ "libos",
+ "mediaproto",
+]
+
+[[package]]
+name = "mediaproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "bufdesc",
+ "libos",
+ "wire",
+]
+
+[[package]]
+name = "mediatest"
+version = "0.1.0"
+dependencies = [
+ "audiomix",
+ "audioproto",
+ "bufdesc",
+ "libos",
+ "mediaproto",
 ]
 
 [[package]]

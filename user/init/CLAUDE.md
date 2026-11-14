@@ -1,6 +1,6 @@
 # user/init
 
-První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`, `inputd`, `netd`, `fwd`, `dnsd`, `ntpd`, `revocd`, `taskd`, `launchd`, `accountd`, GUI `compd`, zvuk), pak běží jako **supervisor** (`src/supervisor/`: zařízení připojená za běhu, restart spadlých služeb, registr služeb se závislostmi a lístky). V testovacím běhu (příznak `TEST_RUN` od jádra) místo supervisoru spustí testy userspace (`src/tests/`) a skončí s výsledkem. Popis: `docs/cs/init.md`, `docs/cs/obnova-sluzeb.md`.
+První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`, `inputd`, `netd`, `fwd`, `dnsd`, `ntpd`, `revocd`, `taskd`, `launchd`, `accountd`, GUI `compd`, zvuk, média `mediad`), pak běží jako **supervisor** (`src/supervisor/`: zařízení připojená za běhu, restart spadlých služeb, registr služeb se závislostmi a lístky). V testovacím běhu (příznak `TEST_RUN` od jádra) místo supervisoru spustí testy userspace (`src/tests/`) a skončí s výsledkem. Popis: `docs/cs/init.md`, `docs/cs/obnova-sluzeb.md`.
 
 ## Klíčové soubory
 
