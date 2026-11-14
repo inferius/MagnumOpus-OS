@@ -60,6 +60,16 @@ pub mod op {
     pub const WINDOW_CONTEXT: u32 = 115;
     /// Poloha obsahu okna na obrazovce (`WindowPlace`).
     pub const WINDOW_PLACE: u32 = 116;
+    /// Rozpracovany text (mrtva klavesa, pozdeji IME): `Compose`.
+    pub const COMPOSE: u32 = 117;
+}
+
+/// Priznaky segmentu rozpracovaneho textu (`ServerMsg::Compose::flags`).
+pub mod compose {
+    /// Kreslit podtrzene.
+    pub const UNDERLINE: u32 = 1 << 0;
+    /// Nejdelsi rozpracovany text (bajty UTF-8).
+    pub const MAX_TEXT: usize = 256;
 }
 
 /// Rezim okna (kdo kresli dekorace).
@@ -593,6 +603,12 @@ pub enum ServerMsg {
     /// nebo zmene velikosti, behem tahu az na konci): aplikace podle nej
     /// umisti popover do pracovni plochy.
     WindowPlace { window: u32, rect: Rect },
+    /// Rozpracovany text u kurzoru pole (jako `preedit_string` ve Waylandu
+    /// text-input-v3): `text` (prazdny = konec), kurzor v nem
+    /// `cursor_begin..cursor_end` (bajty UTF-8), `flags` segmentu
+    /// ([`compose`]). Text neni soucasti hodnoty pole; slozeny vysledek
+    /// prijde jako `Text`. Jen oknu s fokusem, nelogovat (soukromi).
+    Compose { window: u32, text: String, cursor_begin: u32, cursor_end: u32, flags: u32 },
 }
 
 /// Data obalky schranky: delka a bajty (zkracena zprava = chyba).
@@ -966,6 +982,10 @@ impl ServerMsg {
                 w = Writer::op(op::WINDOW_PLACE);
                 w.u32(*window).rect(rect);
             }
+            Compose { window, text, cursor_begin, cursor_end, flags } => {
+                w = Writer::op(op::COMPOSE);
+                w.u32(*window).str(text).u32(*cursor_begin).u32(*cursor_end).u32(*flags);
+            }
             WindowContext { window, generation, output, screen, work_area, scale, refresh_mhz, ext } => {
                 w = Writer::op(op::WINDOW_CONTEXT);
                 w.u32(*window).u32(*generation).u32(*output).rect(screen).rect(work_area).u32(*scale).u32(*refresh_mhz);
@@ -1044,6 +1064,17 @@ impl ServerMsg {
             op::THEME => Theme { mode: r.u8()? },
             op::CLIPBOARD_EVENT => Clipboard { data: clip_r(&mut r)? },
             op::WINDOW_PLACE => WindowPlace { window: r.u32()?, rect: r.rect()? },
+            op::COMPOSE => {
+                let window = r.u32()?;
+                let text = r.str()?;
+                let (cursor_begin, cursor_end, flags) = (r.u32()?, r.u32()?, r.u32()?);
+                // Kurzor na hranici znaku uvnitr textu, rozumna delka.
+                let ok = |c: u32| (c as usize) <= text.len() && text.is_char_boundary(c as usize);
+                if text.len() > compose::MAX_TEXT || !ok(cursor_begin) || !ok(cursor_end) || cursor_begin > cursor_end {
+                    return Err(crate::Error::InvalidArgs);
+                }
+                Compose { window, text, cursor_begin, cursor_end, flags }
+            }
             op::WINDOW_CONTEXT => WindowContext {
                 window: r.u32()?,
                 generation: r.u32()?,

@@ -45,6 +45,9 @@ pub mod kind {
     /// Absolutni poloha ukazatele (tablet): a = x, b = y, oboji 0..=65535
     /// (podil rozsahu osy zarizeni; kompozitor ho prevede na obrazovku).
     pub const ABSOLUTE: u16 = 12;
+    /// Rozpracovany znak (mrtva klavesa): a = cekajici znamenko Unicode,
+    /// 0 = konec (slozeno, zruseno). Jen vlastnikovi fokusu, nikdy do logu.
+    pub const COMPOSE: u16 = 13;
 }
 
 /// Priznaky zaznamu.
@@ -213,6 +216,10 @@ pub enum Event {
     /// (`trust`) nebo neodmitne (`reject`). Prijde vlastnikovi fokusu
     /// i kanalu `secure`; po rozhodnuti znovu se stavem.
     NewDevice { source: u16, state: DeviceTrust },
+    /// Rozpracovany znak mrtve klavesy (`Some(znamenko)`), `None` = konec
+    /// (slozeny znak prijde jako `Text`, zruseni bez nej). Prijde pred
+    /// `Text` tehoz stisku. Soukromy obsah: nelogovat.
+    Compose(Option<char>),
     /// Druh, ktery tato verze knihovny nezna.
     Unknown { kind: u16 },
 }
@@ -290,6 +297,7 @@ impl Record {
             Event::NewDevice { source, state } => {
                 (kind::NEW_DEVICE, source as u32, state.to_u32(), 0, 0)
             }
+            Event::Compose(c) => (kind::COMPOSE, c.map_or(0, |c| c as u32), 0, 0, 0),
             Event::Unknown { kind } => (kind, 0, 0, 0, 0),
         };
         let mut out = [0u8; Self::SIZE];
@@ -353,6 +361,7 @@ impl Record {
                 source: u16::try_from(a).ok()?,
                 state: DeviceTrust::from_u32(bb)?,
             },
+            kind::COMPOSE => Event::Compose(if a == 0 { None } else { Some(char::from_u32(a)?) }),
             other => Event::Unknown { kind: other },
         };
         Some(Self {

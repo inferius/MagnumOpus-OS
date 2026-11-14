@@ -471,3 +471,40 @@ fn caret_blink_starts_after_a11y_focus() {
     a.ui.timer(t0 + 2 * half);
     assert!(!a.ui.caret().unwrap().2, "blika");
 }
+
+/// Rozpracovany znak mrtve klavesy: v poli za kurzorem (posune kurzor),
+/// neni v hodnote ani v `on_change`, slozeny znak ho ukonci; heslo ho
+/// nikdy neukaze; ztrata fokusu ho zrusi.
+#[test]
+fn compose_preedit_in_field() {
+    let mut a = A::new();
+    a.ui.use_caret_layer(true);
+    a.click("t", 1);
+    a.key(KEY_END, 0);
+    let before = a.ui.caret().unwrap().0;
+    assert!(a.ui.compose("\u{02C7}", 2, 2, guiproto::window::compose::UNDERLINE));
+    let i = a.idx("t");
+    assert_eq!(a.ui.composing_in(i).map(|c| c.0), Some("\u{02C7}"));
+    let after = a.ui.caret().unwrap().0;
+    assert!(after.x > before.x, "kurzor za rozpracovanym znakem");
+    assert_eq!(a.text, "ahoj krásný světe", "hodnota beze zmeny");
+    // Kresleni nepada (podtrzeni pres plochu pole).
+    let (w, h) = (a.ui.w, a.ui.h);
+    let mut px = alloc::vec![0u32; (w * h) as usize];
+    let mut c = gfx::Canvas::new(&mut px, w, h, w).unwrap();
+    a.ui.draw(&mut c, 0);
+    // Konec a slozeny znak.
+    a.ui.compose("", 0, 0, 0);
+    a.ev(InputEvent::Text('č'), 0, None);
+    assert_eq!(a.text, "ahoj krásný světeč");
+    assert!(a.ui.composing.is_none());
+    // Heslo: nic.
+    a.click("p", 2);
+    assert!(!a.ui.compose("\u{00B4}", 2, 2, 1));
+    assert!(a.ui.composing.is_none());
+    // Ztrata fokusu okna zrusi rozpracovany znak.
+    a.click("t", 3);
+    a.ui.compose("\u{00B4}", 2, 2, 1);
+    a.ev(InputEvent::Focus(false), 0, None);
+    assert!(a.ui.composing.is_none());
+}

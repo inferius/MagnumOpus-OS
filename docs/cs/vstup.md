@@ -255,6 +255,10 @@ Jedna zpráva je jeden snímek a skládá se ze záznamů po 32 B:
 | 10 `DROPPED` | `Dropped { messages }` | počet zpráv, které klientovi neprošly | | | |
 | 11 `NEW_DEVICE` | `NewDevice { source, state }` | id zdroje | 0 čeká, 1 ověřena, 2 odmítnuta | | |
 | 12 `ABSOLUTE` | `Absolute { x, y }` | x 0-65535 | y 0-65535 (podíl rozsahu osy zařízení) | | |
+| 13 `COMPOSE` | `Compose(Option<char>)` | čekající znaménko mrtvé klávesy, 0 = konec | | | |
+
+Neznámý druh klient přečte jako `Unknown` a přeskočí (nový druh není
+nekompatibilní změna).
 
 - `flags`: `SYNTHETIC` (1) = událost pochází z umělého vstupu.
 - `mods`: modifikátory po události. `SHIFT` 1, `CTRL` 2, `ALT` 4,
@@ -405,6 +409,14 @@ Rozložení přepíná příkaz `layout`. Služba pak pošle `Layout(id)`.
 Znaménko + mezera napíše znaménko samotné, dvakrát stejné znaménko také.
 Nesložitelná kombinace napíše obojí (`´` + `x` = `´x`). Ctrl, Alt
 a klávesa bez znaku (Enter, šipka) rozepsanou mrtvou klávesu zruší.
+
+**Rozpracovaný znak** **[implementováno]**: když se změní čekající mrtvá
+klávesa, `inputd` pošle `Compose(Some(znaménko))` a po složení nebo
+zrušení `Compose(None)`, vždy před `Text` téhož stisku. Jde jen vlastníkovi
+fokusu (kompozitor ho předá oknu s fokusem jako `COMPOSE`, viz
+[Grafika a okna](gui.md#textová-pole-a-schránka)) a jen z místního
+fyzického vstupu. Obsah se nikdy nezapisuje do logu ani do trasování
+vstupu (může být součást hesla); trasování zná jen stisky kláves.
 
 **Caps Lock** prohodí velikost písmen (Shift pak píše malá). Na české
 horní řadě píše velká písmena (`Ě`) a se Shiftem číslice. Na znaky, které

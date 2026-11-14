@@ -1617,8 +1617,18 @@ character boundary.
   focus ring is drawn only after keyboard use; a clicked field has an
   accent border and the cursor.
 - **Dead keys** (acute, caron) are composed by `inputd` (`libs/keymap`):
-  the field gets the composed character. A pending accent is not shown in
-  the field yet. **[implemented]**
+  the field gets the composed character as `Text`. The pending character
+  comes in the compositor message
+  `COMPOSE { window, text, cursor_begin, cursor_end, flags }` (op 117,
+  like `preedit_string` in Wayland text-input-v3: the cursor in the text
+  in UTF-8 bytes, segment flag `UNDERLINE`, empty text = end; the format
+  is ready for IME too). The field draws it underlined after the cursor;
+  it is not in the value or in `on_change`; a password never shows it.
+  The message goes only to the focused window and only from local input,
+  never to the log (privacy). An older client drops the unknown message
+  (`decode` returns `NOT_SUPPORTED`, test
+  `unknown_server_op_is_not_supported_and_compose_validated`).
+  **[implemented]**
 - **Own key translation** `text_input(..).key_map(|code, modifiers|
   Some('z'))`: the field types by a layout other than the system one
   (trying the layout chosen in the installer). It ignores the system's

@@ -70,6 +70,8 @@ pub enum Event {
     Context,
     /// Obsah okna se posunul nebo zmenil velikost (obdelnik na obrazovce).
     Place(Rect),
+    /// Rozpracovany text u kurzoru (mrtva klavesa; `ServerMsg::Compose`).
+    Compose { text: String, cursor_begin: u32, cursor_end: u32, flags: u32 },
 }
 
 /// Kontext okna od kompozitoru (`WINDOW_CONTEXT`).
@@ -406,6 +408,7 @@ impl Window {
             ServerMsg::A11yAction { node, action, value, .. } => Some(Event::A11yAction { node, action, value }),
             ServerMsg::Clipboard { data } => clipproto::ServerMsg::decode(&data).ok().map(Event::Clipboard),
             ServerMsg::WindowPlace { rect, .. } => Some(Event::Place(rect)),
+            ServerMsg::Compose { text, cursor_begin, cursor_end, flags, .. } => Some(Event::Compose { text, cursor_begin, cursor_end, flags }),
             ServerMsg::WindowContext { generation, output, screen, work_area, scale, refresh_mhz, ext, .. } => {
                 self.context = Some(WinContext { output, screen, work_area, scale, refresh_mhz, generation, ext });
                 Some(Event::Context)
@@ -933,6 +936,11 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
         }
         // Poloha okna: jen pro umisteni popoveru (rozvrzeni se nemeni).
         Event::Place(r) => ui.set_window_rect(r),
+        Event::Compose { text, cursor_begin, cursor_end, flags } => {
+            if ui.compose(&text, cursor_begin, cursor_end, flags) {
+                *dirty = true;
+            }
+        }
         Event::Close => return Ok(false),
         Event::A11yAction { node, action, value } => {
             let resp = ui.a11y_action(node, action, &value);

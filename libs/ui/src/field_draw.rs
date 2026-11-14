@@ -191,6 +191,14 @@ impl<M: Clone> Ui<M> {
                 f.draw(c, x0, base, &s[a..e], style.size, fade(col.ink));
             }
         }
+        // Rozpracovany znak (mrtva klavesa) na miste kurzoru.
+        if self.composing_in(i).is_some()
+            && let Some(r) = self.caret_geom(i)
+        {
+            let x = r.x - self.compose_shift(i);
+            let y = r.bottom() as i32 - self.look.body().line as i32;
+            self.draw_compose(c, i, x, y);
+        }
         // Kurzor: v aktivnim okne podle blikani. S vlastni vrstvou kurzoru
         // (klient v OS) ho kresli vrstva, blikani pak nic neprekresluje.
         if typing && self.caret_on && !self.caret_layer
@@ -235,6 +243,10 @@ impl<M: Clone> Ui<M> {
         let y = top + li as i32 * lh - sy;
         let (la, le) = lines[li];
         let next = if cur < le { crate::text::next_boundary(s, cur) } else { cur };
+        // Rozpracovany text: kurzor za jeho cast pred kurzorem, svisly.
+        let shift = self.compose_shift(i);
+        let over = over && self.composing_in(i).is_none();
+        let cx = cx + shift;
         let r = if over && next > cur && la <= cur && !read_only {
             let xs = self.line_xs(s, la, le, secure);
             let x_of = |o: usize| xs.iter().find(|&&(p, _)| p >= o).map_or(0, |&(_, x)| x);

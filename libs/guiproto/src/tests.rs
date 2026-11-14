@@ -220,6 +220,8 @@ fn server_messages_roundtrip() {
         },
         ServerMsg::Clipboard { data: vec![104, 0, 0, 0] },
         ServerMsg::WindowPlace { window: 1, rect: Rect::new(-20, 40, 300, 200) },
+        ServerMsg::Compose { window: 1, text: "\u{02C7}".into(), cursor_begin: 2, cursor_end: 2, flags: compose::UNDERLINE },
+        ServerMsg::Compose { window: 1, text: String::new(), cursor_begin: 0, cursor_end: 0, flags: 0 },
         ServerMsg::WindowContext {
             window: 1,
             generation: 3,
@@ -246,6 +248,29 @@ fn server_messages_roundtrip() {
     ] {
         roundtrip_server(m);
     }
+}
+
+/// Starsi klient: neznamy kod zpravy kompozitoru je `NotSupported`
+/// (klient ji zahodi, `ui::client` `read_msg`), takze nova zprava jako
+/// `COMPOSE` stare aplikace nerozbije. Compose s kurzorem mimo text nebo
+/// uprostred znaku je chyba.
+#[test]
+fn unknown_server_op_is_not_supported_and_compose_validated() {
+    let mut w = wire::Writer::op(999);
+    w.u32(1).str("x");
+    assert_eq!(ServerMsg::decode(&w.finish()), Err(Error::NotSupported));
+    let bad = |b: u32, e: u32| {
+        let mut w = wire::Writer::op(op::COMPOSE);
+        w.u32(1).str("\u{02C7}a").u32(b).u32(e).u32(0);
+        ServerMsg::decode(&w.finish())
+    };
+    assert_eq!(bad(1, 1), Err(Error::InvalidArgs), "uprostred znaku");
+    assert_eq!(bad(3, 9), Err(Error::InvalidArgs), "za koncem");
+    assert_eq!(bad(3, 2), Err(Error::InvalidArgs), "obracene");
+    assert!(bad(2, 3).is_ok());
+    let mut w = wire::Writer::op(op::COMPOSE);
+    w.u32(1).str(&"a".repeat(compose::MAX_TEXT + 1)).u32(0).u32(0).u32(0);
+    assert_eq!(ServerMsg::decode(&w.finish()), Err(Error::InvalidArgs), "moc dlouhy");
 }
 
 #[test]

@@ -24,6 +24,7 @@ pub mod fieldopts;
 mod caret;
 mod groups;
 mod selection;
+mod compose;
 mod submenu;
 pub mod layout;
 pub mod look;
@@ -294,6 +295,9 @@ pub struct Ui<M> {
     pub(crate) caret_layer: bool,
     /// Seznamy s vicenasobnym vyberem: kurzor a kotva (index radku).
     pub(crate) lists: BTreeMap<Key, (Option<usize>, Option<usize>)>,
+    /// Rozpracovany text (mrtva klavesa) u kurzoru pole: klic pole,
+    /// text, kurzor v nem (bajty), priznaky segmentu (`compose.rs`).
+    pub(crate) composing: Option<(Key, String, u32, u32, u32)>,
 }
 
 /// Posouvana oblast: index prvku (prostor `index + 1` pro `Ui::draw`),
@@ -365,6 +369,7 @@ impl<M: Clone> Ui<M> {
             typed: (String::new(), 0),
             caret_layer: false,
             lists: BTreeMap::new(),
+            composing: None,
         }
     }
 

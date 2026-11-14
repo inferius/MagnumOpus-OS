@@ -122,6 +122,10 @@ impl<M: Clone> Ui<M> {
             InputEvent::Button { pressed: true, .. } => self.kbd_focus = false,
             _ => {}
         }
+        // Rozpracovany znak konci klikem, ztratou fokusu a slozenim (Text).
+        if matches!(ev, InputEvent::Button { pressed: true, .. } | InputEvent::Focus(false) | InputEvent::Text(_)) && self.composing.take().is_some() {
+            self.caret_reset();
+        }
         // Kurzor pole: po kazde cinnosti hned videt.
         if matches!(ev, InputEvent::Key { .. } | InputEvent::Text(_) | InputEvent::Button { pressed: true, .. } | InputEvent::Focus(true)) {
             self.caret_reset();

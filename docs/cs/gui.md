@@ -1550,7 +1550,15 @@ na hranici znaku.
   nebo polohu vrstvy s bufferem bez potomků, nepoškodí celé okno). Prstenec fokusu se kreslí jen
   po ovládání klávesnicí; kliknuté pole má akcentový okraj a kurzor.
 - **Mrtvé klávesy** (čárka, háček) skládá `inputd` (`libs/keymap`): pole
-  dostane už složený znak. Rozpracovaný znak pole zatím neukazuje.
+  dostane už složený znak jako `Text`. Rozpracovaný znak přijde zprávou
+  kompozitoru `COMPOSE { window, text, cursor_begin, cursor_end, flags }`
+  (op 117, jako `preedit_string` ve Waylandu text-input-v3: kurzor
+  v textu v bajtech UTF-8, příznak segmentu `UNDERLINE`, prázdný text =
+  konec; formát je připravený i pro IME). Pole ho kreslí podtržený za
+  kurzorem, není v hodnotě ani v `on_change`; heslo ho neukáže. Zpráva
+  jde jen oknu s fokusem a jen z místního vstupu, nikdy do logu
+  (soukromí). Starší klient neznámou zprávu zahodí (`decode` vrátí
+  `NOT_SUPPORTED`, test `unknown_server_op_is_not_supported_and_compose_validated`).
   **[implementováno]**
 - **Vlastní překlad kláves** `text_input(..).key_map(|kód, modifikátory|
   Some('z'))`: pole píše podle jiného rozložení než systém (zkouška
