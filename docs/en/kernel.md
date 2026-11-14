@@ -89,9 +89,11 @@ Details, design comparison and measurements: [Scheduler](scheduler.md).
 - **Switching to a process thread** activates its address space (CR3) and
   the kernel stack for entries from userspace (TSS.RSP0); kernel threads and
   exiting process threads run in the kernel address space.
-- **The kernel stack of a dead thread** (64 KiB) and its part of the job
-  budget are returned as soon as the CPU finishes the last switch away from
-  the thread (`finish_switch` after `exit`). The thread object with its
+- **The kernel stack of a dead thread** (64 KiB) is returned as soon as the
+  CPU finishes the last switch away from the thread (`finish_switch` after
+  `exit`). Its part of the job budget is returned even earlier, in `exit`
+  before the TERMINATED signal of the thread and the process: whoever sees
+  the end also sees the budget back. The thread object with its
   signals and exit code lives on while a handle or a futex queue holds it,
   and returns only its small part of the budget. A thread preempted after
   it was marked dead keeps its stack because it still has to run.
