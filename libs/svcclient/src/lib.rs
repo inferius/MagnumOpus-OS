@@ -20,7 +20,8 @@ extern crate alloc;
 mod tests;
 
 pub mod policy;
-pub mod proto;
+/// Protokol listku (crate `leaseproto`).
+pub use leaseproto as proto;
 
 #[cfg(feature = "client")]
 mod conn;

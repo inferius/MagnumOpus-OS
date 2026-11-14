@@ -24,9 +24,11 @@
 //! a spojeni s libd). Vlakno zacne na vstupu zavadece; ten nahraje knihovny
 //! a skoci na vstup programu.
 //!
-//! Ma-li volajici spojeni s libd, dostane kazdy potomek vlastni
-//! (`bootstrap::kind::LIBD`) - muze tak spoustet dalsi programy se
-//! zavadecem.
+//! Relaci s libd a listek k ni (`bootstrap::kind::LIBD`, arg 0 relace,
+//! arg 1 listek) dostane jen zavadec programu se zavadecem a staticky
+//! program s [`Options::libd`] (spoustece). Staticky program bez volby
+//! zadne spojeni nema a spawn kvuli nemu s libd ani supervisorem
+//! nemluvi.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -219,6 +221,10 @@ pub struct Options {
     /// `[app] static_tls_reserve`; `None` = vychozi 2 KiB, zavadec omezi na
     /// 64 KiB). Jen program se zavadecem.
     pub static_tls_reserve: Option<u64>,
+    /// Staticky program dostane relaci s libd a listek (smi spoustet
+    /// programy se zavadecem: shell, launchd, relace). Program se zavadecem
+    /// relaci ma vzdy (pres zavadec).
+    pub libd: bool,
 }
 
 impl Default for Options {
@@ -227,6 +233,7 @@ impl Default for Options {
             stack_size: STACK_SIZE,
             qos: None,
             static_tls_reserve: None,
+            libd: false,
         }
     }
 }
@@ -355,16 +362,21 @@ pub fn spawn_with_thread(
         // Zprava zavadece pred startovni zpravou: handle procesu a spojeni
         // s libd (knihovny). Startovni zprava a kanal zustanou programu.
         let mut d = Vec::new();
-        let h = Header { magic: bootstrap::LOADER_MAGIC, version: bootstrap::VERSION, count: 2, _reserved: 0 };
+        let (session, lease) = child_libd()?;
+        let h = Header { magic: bootstrap::LOADER_MAGIC, version: bootstrap::VERSION, count: 3, _reserved: 0 };
         d.extend_from_slice(&h.to_bytes());
         d.extend_from_slice(&Entry { kind: bootstrap::kind::SELF_PROCESS, arg: 0 }.to_bytes());
         d.extend_from_slice(&Entry { kind: bootstrap::kind::LIBD, arg: 0 }.to_bytes());
-        parent_end.write(&d, alloc::vec![process.handle().duplicate(None)?, loader_libd()?])?;
+        d.extend_from_slice(&Entry { kind: bootstrap::kind::LIBD, arg: 1 }.to_bytes());
+        parent_end.write(&d, alloc::vec![process.handle().duplicate(None)?, session, lease])?;
     }
-    // Spojeni s libd pro potomka (smi spoustet programy se zavadecem).
+    // Spoustec (staticky program s volbou): relace a listek ve startovni
+    // zprave.
     let mut handles = handles;
-    if let Some(ch) = child_libd() {
-        handles.push(StartHandle::new(bootstrap::kind::LIBD, 0, ch));
+    if opts.libd && loader.is_none() {
+        let (session, lease) = child_libd()?;
+        handles.push(StartHandle::new(bootstrap::kind::LIBD, 0, session));
+        handles.push(StartHandle::new(bootstrap::kind::LIBD, 1, lease));
     }
     let mut data = Vec::new();
     let header = Header {
@@ -458,27 +470,22 @@ impl Loader {
     }
 }
 
-/// Spojeni s libd pro potomka (`None` = volajici spojeni nema nebo libd
-/// neodpovida - potomek pak programy se zavadecem nespusti).
-fn child_libd() -> Option<Handle> {
+/// Relace s libd a listek pro potomka (`libd::child`: init primo od
+/// supervisoru, jinak `NARROW` na vlastnim listku).
+fn child_libd() -> Result<(Handle, Handle)> {
     #[cfg(feature = "libd")]
     {
-        if crate::libd::available() {
-            return crate::libd::connect().ok().map(Channel::into_handle);
-        }
-    }
-    None
-}
-
-/// Spojeni s libd pro zavadec potomka.
-fn loader_libd() -> Result<Handle> {
-    #[cfg(feature = "libd")]
-    {
-        return crate::libd::connect().map(Channel::into_handle);
+        let (s, l) = crate::libd::child()?;
+        return Ok((s.into_handle(), l.into_handle()));
     }
     #[allow(unreachable_code)]
     Err(Error::NotSupported)
 }
+
+/// Sablona zavadece `ld.so` od libd (mezipamet procesu: VMO jsou
+/// zapecetene a nemenne, platne i po restartu libd).
+#[cfg(feature = "libd")]
+static LD_TEMPLATE: crate::sync::Mutex<Option<(libdproto::Library, Vec<Vmo>)>> = crate::sync::Mutex::new(None);
 
 /// Program se zavadecem: program (sablona z initfs volajiciho, nebo kopie)
 /// a zavadec `ld.so` (sablona od libd) na nahodne baze, kod obou
@@ -486,12 +493,16 @@ fn loader_libd() -> Result<Handle> {
 fn map_with_loader(process: &Process, image: &[u8], elf: &elf::ElfFile, page: u64) -> Result<Loader> {
     #[cfg(feature = "libd")]
     {
-        let ld_name = abi::auxv::INTERP.trim_start_matches(abi::auxv::SYSTEM_LIB);
-        let (lib, vmos) = crate::libd::open(ld_name)?;
+        let mut cache = LD_TEMPLATE.lock();
+        if cache.is_none() {
+            let ld_name = abi::auxv::INTERP.trim_start_matches(abi::auxv::SYSTEM_LIB);
+            *cache = Some(crate::libd::open(ld_name)?);
+        }
+        let (lib, vmos) = cache.as_ref().ok_or(Error::NotFound)?;
         let base = random_base(process, image_span(elf, page)?)?;
         map_image(process, image, elf, page, base, true)?;
         seal_readonly(process, elf, page, base)?;
-        let ld_base = map_library(process, &lib, &vmos)?;
+        let ld_base = map_library(process, lib, vmos)?;
         // Vstup zavadece: z hlavicky ELF v jeho prvnim (sdilenem) segmentu.
         let mut hdr = [0u8; 64];
         vmos.first().ok_or(Error::Corrupted)?.read(0, &mut hdr)?;

@@ -155,15 +155,12 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
   to `mem_size` included). A template is found by name and content
   (BLAKE3). The client gets code handles `READ | MAP | EXECUTE` and data
   handles `READ | MAP`, never write.
-- **Connections:** init starts libd right after the time service (initfs
-  only) and its bootstrap channel is the first connection. `spawn` (libos)
-  creates its own connection for every child (`Connect`,
-  `bootstrap::kind::LIBD`), so **anyone** with a connection can start a
-  program with the loader, not only init. The loader gets another
-  connection in the loader message (instead of initfs) and keeps it
-  (`dlopen` in DL-4b). The libos build for Rust std has no connection yet
-  (it closes it): std applications do not start programs with the loader.
-- `spawn` also takes **`ld.so`** itself from libd (shared loader code).
+- **Sessions and leases:** see [Sessions with libd and recovery](#sessions-with-libd-and-recovery-dl-4b)
+  (DL-4b): only the loader of a program with the loader and a launcher (a
+  static program with `spawn::Options::libd`) get a libd session and a lease
+  to it.
+- `spawn` also takes **`ld.so`** itself from libd (shared loader code); the
+  process caches the template (the VMOs are immutable).
 - **Sealing** (`PROT_SEAL` in `VM_PROTECT`, like Linux `mseal`,
   [syscalls.md](syscalls.md#vm_protect)): a sealed region cannot be
   unmapped, released, have its rights changed or be mapped over, until the
@@ -174,12 +171,77 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
 - **Untrusted input:** names only `A-Z a-z 0-9 . _ + -` without a leading
   dot, at most 255 B (`libdproto::valid_name`, a decoder fuzz test); a file
   at most 256 MiB, at most 16 segments, ELF via `libs/elf` (TEXTREL, REL
-  rejected, headers in the first segment). Connections: at most 256 live
-  ones created from one connection (per process) and 4096 in total.
-- ⚠️ **libd restart:** processes started before have a connection to the
-  old instance (closed) and can no longer start a program with the loader;
-  init gets a new connection. Reconnecting through a lease (`svcclient`)
-  does not exist yet.
+  rejected, headers in the first segment). Sessions: at most 256 live ones
+  created from one session (per process, init's root without a limit) and
+  4096 in total.
+
+## Sessions with libd and recovery (DL-4b)
+
+**[verified in QEMU]** x86_64 and aarch64.
+
+- **libd is a supervisor service** (`user/init/src/libd.rs`, the
+  `LibdService` adapter, [Service recovery](service-recovery.md)): after a
+  crash the supervisor starts it again (backoff, attempt limit) and clients
+  reconnect through leases. The recipe is empty (a libd session has no
+  identity and no extra rights).
+- **Who has a session** (`bootstrap::kind::LIBD`: arg 0 session, arg 1
+  lease):
+  - the **loader** of every program with the loader (in the loader message),
+  - a **launcher**: a static program started with `spawn::Options::libd`
+    (init gives it to `launchd` and `termd`),
+  - a **program under the loader** only at its first spawn of a program
+    with the loader (`abi::loader::Interface::libd_session`: the loader
+    makes another one for it),
+  - **init** holds the root connection (libd's bootstrap channel).
+  - **A static program without the option has nothing** and its spawn talks
+    to neither libd nor init. std applications start programs through
+    `launchd` (`osrt::process`), so they do not need libd.
+- **A session and a lease for a child without waiting**
+  (`libos::libd::child`): the parent sends `Connect` on its session (libd
+  creates the child's session, no reply) and `ADOPT` on its lease (the
+  supervisor takes over a new lease with the same recipe, no reply;
+  [protocol](service-recovery.md#the-lease-protocol)). The child can use
+  both right away: a message on the lease waits in the channel until the
+  supervisor takes it over. Init gives its children a session from the
+  root and writes the lease to the supervisor directly
+  (`supervisor::queue_lease`, even inside its round).
+- **Recovery:** `PEER_CLOSED` on the session = `RECONNECT` on the lease and
+  the request repeated (`Open`, `Stats` are idempotent). This holds for
+  `spawn` and for `dlopen` in the loader (the same `libos::libd` client).
+  Ordering test: libd crashes after the spawn, **before the supervisor
+  processes `ADOPT`**, and the child still recovers its `dlopen`.
+- **A rejection without a reply shows at first use**, never as a hang:
+  - libd closes the session (more than 256 sessions from one session = per
+    process, or 4096 in total): `RECONNECT` returns `PEER_CLOSED` within
+    200 ms (the instance keeps running = a deliberate close), the lease
+    ends, `dlopen`/spawn return the reason ("libd relaci odmitla (limit
+    relaci procesu)"),
+  - the supervisor rejects `ADOPT` (more than 256 live adopted leases from
+    one lease or more than 128 per second, burst 128;
+    `leaseproto::adopt`): it closes the lease endpoint and logs
+    `init: listek libd: ADOPT odmitnut (...)`; the child gets
+    `SERVICE_UNAVAILABLE` only when it needs the lease.
+- **Measurement** (test `rezie spawnu a propustnost initu`, program
+  `user/dlspawn`; **QEMU TCG** on Windows, 4 vCPUs, debug - on real hardware
+  the times are an order of magnitude smaller, the ratios similar). Average
+  per spawn:
+
+  | | x86_64 | aarch64 |
+  |---|---|---|
+  | spawn of a program with the loader, 1 launcher × 200 | 5975 µs | 6112 µs |
+  | of which the child's session and lease (`Connect` + `ADOPT`) | 659 µs | 595 µs |
+  | the same, 4 launchers × 50 concurrently | 5473 µs | 7170 µs |
+  | static spawn (no libd) | 1952 µs | 1861 µs |
+  | round trip to libd (what DL-4a added to every spawn) | 1342 µs | 1301 µs |
+
+  The variant with `NARROW` (the parent waits for init's reply) cost
+  6911 µs per spawn, of which 1830 µs `NARROW` (26 %; 4 concurrent 35 %)
+  on x86_64 and 7639 µs, of which 1785 µs (23 %; concurrent 31 %) on
+  aarch64 - hence `ADOPT` without a reply. The remaining ~10 %
+  (`Connect` + `ADOPT`) are two channel creations and two writes in the
+  parent process; nothing waits for init or libd. The numbers vary by
+  ±20 % between runs (TCG). DL-4a (a connection
+  for every child) added one round trip to libd to every static spawn.
 
 ## dlopen and dynamic TLS (DL-4b)
 
@@ -355,6 +417,10 @@ not produce it on aarch64). They are built with clang and ld.lld with
 | QEMU `procesy`: `chybejici knihovna -> kod 127` | `dltest-missing`: `ld.so: knihovna ... nenalezena`, code 127 |
 | QEMU `procesy`: `vlakna libos s TLS knihoven, dl_iterate_phdr, r_debug, fini` | `dltest-rs` (Rust + libos as PIE, test only): 4 threads have their own fresh copy of the library TLS (through the DTV), the main thread unchanged; the loader table; `dl_iterate_phdr` (3 modules, names, TLS); `r_debug` via `DT_DEBUG` (version 1, 3 nodes); the library finalizer; `dladdr` of a library function; `dl*`: a bad name and a path outside `/system/lib` = an error, a loaded library = a handle and `dlsym`, `RTLD_NOLOAD`; `dlopen` of libraries with TLS (TLSDESC and `__tls_get_addr`, an aligned block, initial-exec in the reserve, an initializer, `dlsym` of a TLS variable) in the main thread, in a thread created before `dlopen` and after it; 4 KiB initial-exec = an error advising `static_tls_reserve` |
 | `cargo test -p dynload` (`tls_surplus_after_modules`) | the TLS surplus after the modules does not change their offsets |
+| QEMU `procesy`: `obnova po padu libd pres listky (spawn i dlopen)` | a launcher running before the libd crash starts more programs after the restart (`RECONNECT`), init starts from the new root, `dltest-rs` (`dlopen`) passes |
+| QEMU `procesy`: `pad libd pred prevzetim listku (ADOPT)` | the launcher's child loads its libraries, libd crashes before the supervisor processes `ADOPT`; the child's `dlopen` waits for the lease and passes after the restart |
+| QEMU `procesy`: `rezie spawnu a propustnost initu` | 200 spawns from one launcher and 4 × 50 concurrently without an error, numbers in the log (table above) |
+| `cargo test -p svcclient` (`adopt_*`) | `ADOPT` = op 4 without data; the limiter: burst, refill per second, live leases |
 | QEMU `procesy`: `rezerva statickeho TLS z voleb spusteni (manifest)` | `dltest-dl`: `dlopen` of a library with 4 KiB initial-exec fails with the default reserve with advice in `dlerror`, succeeds with `static_tls_reserve` 8 KiB and the TLS is right |
 | `cargo test -p dynload` (`surplus_*`, `tls_reserve_bounds`) | space in the reserve below the modules (x86_64) and above them (aarch64), alignment, exhaustion; the reserve bound |
 | `cargo test -p manifest` (`static_tls_reserve`) | `[app] static_tls_reserve`: a size, at most 64K |

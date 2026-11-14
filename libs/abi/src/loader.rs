@@ -109,4 +109,9 @@ pub struct Interface {
     pub dlerror: unsafe extern "C" fn() -> *const u8,
     /// `dladdr(adresa, &mut DlInfo)`: nenulove = adresa lezi v modulu.
     pub dladdr: unsafe extern "C" fn(addr: *const u8, info: *mut DlInfo) -> i32,
+    /// Nova relace s libd a listek k ni pro behove prostredi programu
+    /// (libos pri prvnim spawnu programu se zavadecem): zavadec udela
+    /// `NARROW` na svem listku. 0 = ok (dva handly zapsane), jinak kod
+    /// chyby `abi::Error`. (DL-4b; starsi zavadec pole nema - `size`.)
+    pub libd_session: unsafe extern "C" fn(session: *mut u32, lease: *mut u32) -> i32,
 }

@@ -24,7 +24,13 @@ pub fn start(startup: &Startup) -> Result<()> {
     let image = fs.find("launchd").ok_or(Error::NotFound)?;
     let vmo = startup.initfs.as_ref().ok_or(Error::NotFound)?;
     let handles = alloc::vec![StartHandle::new(kind::INITFS, 0, vmo.handle().duplicate(None)?)];
-    let (process, ctl) = libos::spawn::service("launchd", image, handles)?;
+    // Spoustec aplikaci: relace s libd (programy se zavadecem).
+    let opts = libos::spawn::Options {
+        qos: libos::sched::service_default("launchd"),
+        libd: true,
+        ..Default::default()
+    };
+    let (process, ctl) = libos::spawn::spawn_with(&libos::job::current()?, "launchd", image, handles, opts)?;
     *LAUNCH.lock() = Some(Launch { process, ctl });
     Ok(())
 }

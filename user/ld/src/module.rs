@@ -143,6 +143,12 @@ pub fn load_library(process: &Process, name: &str) -> Res<Module> {
     let (lib, vmos) = match libos::libd::open(name) {
         Ok(r) => r,
         Err(libos::Error::NotFound) => return Err(format!("knihovna {name} nenalezena")),
+        Err(libos::Error::ServiceUnavailable) => {
+            return Err(format!("knihovna {name}: sluzba knihoven libd nedostupna (nebezi, nebo proces nema platny listek)"));
+        }
+        Err(libos::Error::PeerClosed) => {
+            return Err(format!("knihovna {name}: libd relaci odmitla (limit relaci procesu)"));
+        }
         Err(e) => return Err(format!("knihovna {name}: {e}")),
     };
     let base = ctx(libos::spawn::random_base(process, lib.span), "misto pro knihovnu")?;

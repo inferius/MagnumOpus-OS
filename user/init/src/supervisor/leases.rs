@@ -24,6 +24,10 @@ pub(super) struct Lease {
     /// Generace, na ktere byla vydana posledni relace listku.
     issued: u64,
     pending: Option<Pending>,
+    /// Listek, ktery tento prevzal pres `ADOPT` (pocitadlo zijicich).
+    parent: Option<u64>,
+    /// Limit `ADOPT` z tohoto listku.
+    adopts: svcclient::policy::AdoptLimit,
 }
 
 /// `RECONNECT`, na ktery se jeste neodpovedelo.
@@ -36,7 +40,43 @@ struct Pending {
     grace_until: u64,
 }
 
+/// Listky vydane mimo smycku supervisoru (poskytovatel relaci libd pro
+/// deti initu: spawn bezi i uvnitr kola supervisoru, kdy je zamceny):
+/// (sluzba, generace relace, konec supervisoru). Supervisor je prevezme na
+/// zacatku kola; klient muze listek pouzit hned (zprava pocka v kanalu).
+static PENDING: spin::Mutex<Vec<(&'static str, u64, Channel)>> = spin::Mutex::new(Vec::new());
+
+/// Listek k relaci sluzby `service` vydane na instanci `issued` (prazdny
+/// recept), bez cekani na supervisor: je-li volny, prevezme ho hned,
+/// jinak na zacatku pristiho kola. Vraci konec listku pro klienta.
+pub fn queue_lease(service: &'static str, issued: u64) -> Result<Channel> {
+    let (client, server) = Channel::create()?;
+    match super::SUPERVISOR.try_lock() {
+        Some(mut sup) => {
+            let i = sup.find(service).ok_or(Error::NotFound)?;
+            sup.insert_lease(i, Vec::new(), issued, server, None)?;
+        }
+        None => PENDING.lock().push((service, issued, server)),
+    }
+    Ok(client)
+}
+
 impl Supervisor {
+    /// Prevezme listky z [`queue_lease`] (zacatek kola).
+    pub(super) fn adopt_pending(&mut self) {
+        let list = core::mem::take(&mut *PENDING.lock());
+        for (service, issued, server) in list {
+            match self.find(service) {
+                Some(i) => {
+                    if let Err(e) = self.insert_lease(i, Vec::new(), issued, server, None) {
+                        println!("init: listek {service} nelze prevzit: {e}");
+                    }
+                }
+                None => println!("init: listek nezname sluzby {service}"),
+            }
+        }
+    }
+
     /// Listek k relaci, kterou uz init vytvoril na bezici instanci sluzby
     /// `service` (start systemu). Vraci konec listku pro klienta.
     #[allow(dead_code)] // pouzije init pri predani relaci sluzeb
@@ -62,10 +102,25 @@ impl Supervisor {
     }
 
     fn add_lease(&mut self, service: usize, recipe: Vec<u8>, issued: u64) -> Result<Channel> {
+        let (client, server) = Channel::create()?;
+        self.insert_lease(service, recipe, issued, server, None)?;
+        Ok(client)
+    }
+
+    /// Odebere listek; prevzaty (`ADOPT`) vrati misto rodici.
+    fn drop_lease(&mut self, key: u64) {
+        if let Some(l) = self.leases.remove(&key)
+            && let Some(p) = l.parent.and_then(|p| self.leases.get_mut(&p))
+        {
+            p.adopts.release();
+        }
+    }
+
+    /// Zaregistruje listek s koncem supervisoru `server`.
+    fn insert_lease(&mut self, service: usize, recipe: Vec<u8>, issued: u64, server: Channel, parent: Option<u64>) -> Result<()> {
         if self.port.is_none() {
             self.port = Some(Port::create()?);
         }
-        let (client, server) = Channel::create()?;
         let key = self.next_lease;
         self.next_lease += 1;
         self.leases.insert(
@@ -76,10 +131,11 @@ impl Supervisor {
                 channel: server,
                 issued,
                 pending: None,
+                parent,
+                adopts: svcclient::policy::AdoptLimit::new(time::now()),
             },
         );
-        self.arm(key)?;
-        Ok(client)
+        self.arm(key)
     }
 
     /// Zaregistruje listek v portu (registrace je jednorazova).
@@ -89,7 +145,7 @@ impl Supervisor {
         };
         let r = port.wait_async(l.channel.handle(), key, Signals::READABLE | Signals::PEER_CLOSED);
         if r.is_err() {
-            self.leases.remove(&key);
+            self.drop_lease(key);
         }
         r
     }
@@ -132,7 +188,7 @@ impl Supervisor {
                 && self.leases.get(&key).is_some_and(|l| l.channel.try_read().is_err());
             if closed {
                 // Klient listek zavrel: recept zanikne.
-                self.leases.remove(&key);
+                self.drop_lease(key);
             } else {
                 let _ = self.arm(key);
             }
@@ -142,7 +198,7 @@ impl Supervisor {
     /// Precte a zpracuje pozadavek na listku `key`.
     fn lease_message(&mut self, key: u64) {
         let Some(l) = self.leases.get(&key) else { return };
-        let Ok(m) = l.channel.try_read() else { return };
+        let Ok(mut m) = l.channel.try_read() else { return };
         let req = match Request::decode(&m.data) {
             Ok(r) => r,
             Err(_) => {
@@ -174,7 +230,41 @@ impl Supervisor {
                 self.reply(key, op::NARROW, id, status, handles);
             }
             Request::Status { id } => self.reply(key, op::STATUS, id, Ok(()), Vec::new()),
+            // Bez odpovedi: odmitnuti = konec noveho listku se zavre (dite
+            // dostane SERVICE_UNAVAILABLE pri pouziti), duvod do logu.
+            Request::Adopt { .. } if m.handles.len() == 1 => {
+                let end = Channel::from_handle(m.handles.remove(0));
+                if let Err(e) = self.adopt(key, end) {
+                    let name = self.leases.get(&key).map_or("?", |l| self.entries[l.service].name);
+                    println!("init: listek {name}: ADOPT odmitnut ({e}): dite nedostane obnovu relace");
+                }
+            }
+            Request::Adopt { .. } => println!("init: ADOPT bez konce listku"),
         }
+    }
+
+    /// `ADOPT`: novy listek se stejnym receptem (zuzeni prazdnym zuzenim)
+    /// a generaci vydani jako listek `key`; limit zijicich a rychlosti.
+    fn adopt(&mut self, key: u64, end: Channel) -> Result<()> {
+        let now = time::now();
+        let l = self.leases.get_mut(&key).ok_or(Error::NotFound)?;
+        if !l.adopts.take(now) {
+            return Err(Error::NoResources);
+        }
+        let (i, issued) = (l.service, l.issued);
+        let parent_recipe = l.recipe.clone();
+        let recipe = self.entries[i]
+            .service
+            .as_ref()
+            .ok_or(Error::NotSupported)
+            .and_then(|s| s.narrow(&parent_recipe, &[]));
+        let r = recipe.and_then(|r| self.insert_lease(i, r, issued, end, Some(key)));
+        if r.is_err()
+            && let Some(l) = self.leases.get_mut(&key)
+        {
+            l.adopts.release();
+        }
+        r
     }
 
     /// Zuzeny recept listku `key`: nova relace a novy listek.
@@ -262,7 +352,7 @@ impl Supervisor {
                 // zanikne, aby ho neslo obejit pres NARROW nebo pozdejsi
                 // restart.
                 self.reply(key, op::RECONNECT, p.id, Err(Error::PeerClosed), Vec::new());
-                self.leases.remove(&key);
+                self.drop_lease(key);
             }
             Err(e) => self.reply(key, op::RECONNECT, p.id, Err(e), Vec::new()),
         }

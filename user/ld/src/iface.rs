@@ -274,7 +274,24 @@ pub static INTERFACE: Interface = Interface {
     dlclose: crate::dl::dlclose,
     dlerror: crate::dl::dlerror,
     dladdr,
+    libd_session,
 };
+
+/// Relace s libd a listek pro behove prostredi programu (`NARROW` na
+/// listku zavadece).
+unsafe extern "C" fn libd_session(session: *mut u32, lease: *mut u32) -> i32 {
+    match libos::libd::child() {
+        Ok((s, l)) => {
+            // SAFETY: ukazatele od volajiciho (libos).
+            unsafe {
+                session.write(s.into_handle().into_raw());
+                lease.write(l.into_handle().into_raw());
+            }
+            0
+        }
+        Err(e) => e.code(),
+    }
+}
 
 /// `struct link_map` (SVR4).
 #[repr(C)]

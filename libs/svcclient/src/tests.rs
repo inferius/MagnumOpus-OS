@@ -18,6 +18,7 @@ fn request_roundtrip() {
             narrowing: Vec::new(),
         },
         Request::Status { id: u32::MAX },
+        Request::Adopt { id: 11 },
     ] {
         assert_eq!(Request::decode(&req.encode()), Ok(req.clone()));
     }
@@ -152,4 +153,43 @@ fn retry_rules() {
             );
         }
     }
+}
+
+#[test]
+fn adopt_is_op_4_without_payload() {
+    let e = Request::Adopt { id: 3 }.encode();
+    assert_eq!(&e[..4], &op::ADOPT.to_le_bytes());
+    assert_eq!(op::ADOPT, 4);
+    // Data za id = neplatny pozadavek.
+    let mut bad = e.clone();
+    bad.push(0);
+    assert_eq!(Request::decode(&bad), Err(Error::InvalidArgs));
+}
+
+#[test]
+fn adopt_limit_burst_rate_and_live() {
+    use crate::proto::adopt::{BURST, MAX_LIVE, PER_SEC};
+    let mut l = policy::AdoptLimit::new(0);
+    // Davka projde, dalsi ve stejnem okamziku ne.
+    for _ in 0..BURST {
+        assert!(l.take(0));
+    }
+    assert!(!l.take(0));
+    // Za 1 s se doplni PER_SEC tokenu.
+    for _ in 0..PER_SEC {
+        assert!(l.take(1_000_000_000));
+    }
+    assert!(!l.take(1_000_000_000));
+    // Zijici listky: nad MAX_LIVE ne, ani s tokeny.
+    let mut l = policy::AdoptLimit::new(0);
+    let mut t = 0;
+    for _ in 0..MAX_LIVE {
+        t += 1_000_000_000;
+        assert!(l.take(t));
+    }
+    assert!(!l.take(t + 10_000_000_000));
+    l.release();
+    assert!(l.take(t + 10_000_000_000));
+    // Cas zpet (jine hodiny) nic nerozbije.
+    assert!(!l.take(0) || l.live <= MAX_LIVE);
 }

@@ -138,6 +138,7 @@ podle operace:
 | 1 | `RECONNECT` | `u32 čekat_ms` | kanál nové relace |
 | 2 | `NARROW` | `bytes zúžení` (formát služby) | kanál zúžené relace, nový lístek |
 | 3 | `STATUS` | - | - |
+| 4 | `ADOPT` | - (handle: konec supervisoru nového lístku) | **žádná** |
 
 **Odpověď:** `u32 op`, `u32 id`, `i32 stav` (0 = ok, jinak kód chyby),
 `u64 generace`, `u8 stav_služby` (0 `Running`, 1 `Restarting`, 2 `GaveUp`,
@@ -174,6 +175,26 @@ Pravidla `NARROW`:
   nepřežije: dítě dostane `SERVICE_UNAVAILABLE` a musí si říct rodiči.
   Kdyby ji knihovna obnovila přes rodičovský lístek, dítě by dostalo
   **vyšší** práva.
+
+Pravidla `ADOPT` (DL-4b, služba knihoven `libd`; obecně pro každou službu,
+jejíž adaptér umí zúžení prázdným zúžením):
+
+- klient vytvoří pár kanálů, jeden konec pošle supervisoru (`ADOPT`),
+  druhý předá dítěti spolu s relací, kterou mu dala **sama služba**
+  (`libd`: `Connect` na relaci rodiče). Rodič na nic nečeká,
+- supervisor zaregistruje nový lístek s receptem `narrow(recept, [])`
+  a generací vydání **rodičovského** lístku. Dítě může lístek použít hned:
+  požadavek počká v kanálu, než supervisor `ADOPT` zpracuje (pořadí
+  ověřuje test `pad libd pred prevzetim listku`),
+- **limit na lístek** (`leaseproto::adopt`): nejvýš 256 živých převzatých
+  lístků a 128 za sekundu (dávka 128). Překročení nebo recept, který nejde
+  zúžit, = supervisor konec zavře a zaloguje `ADOPT odmitnut`; dítě
+  dostane `SERVICE_UNAVAILABLE`, až lístek použije. Zánik převzatého
+  lístku vrátí místo rodiči,
+- `ADOPT` nemá odpověď, takže rodič chybu nevidí: služba, jejíž relace
+  pro dítě může selhat, ji musí ukázat při prvním použití (libd: relaci
+  zavře, `RECONNECT` pak do 200 ms vrátí `PEER_CLOSED` jako úmyslné
+  zavření).
 
 Lístek zanikne, když klient zavře svůj konec. Recept zmizí s ním.
 
@@ -248,6 +269,7 @@ let odpověď = conn.call(Kind::Idempotent, &požadavek, Vec::new())?;
 | `netd` | relace programů (pravidla sítě) z receptu, adresy (DHCP znovu), DNS, firewall (`fwd` a `dnsd` s `Dep::restart`) | sockety: `CONNECTION_RESET` (spojení ztraceno), naslouchající sockety je třeba otevřít znovu | vlákno sítě |
 | `compd` | okna: aplikace se připojí přes lístek (recept = identita z manifestu) a pošle znovu strom vrstev; displej z držáku konců; fokus od `inputd` | rozpracovaná transakce okna | vlákno GUI |
 | `devmgr` | ovladače a všechny služby nad nimi (viz pořadí výše) | jako u jednotlivých služeb | koordinátor obnovy (init) |
+| `libd` | relace z lístku (`RECONNECT`); šablony knihoven nová instance vytvoří znovu (mapované stránky v procesech zůstávají, VMO drží procesy) | nic (požadavky jsou idempotentní) | vlákno dynamického linkování |
 | `termd`, `taskd` | relace terminálu, seznam úloh (odběr od posledního čísla) | běžící příkaz shellu ve spadlé relaci | vlákno shellu |
 
 ## Přehled úloh
@@ -300,7 +322,8 @@ Box::new(MůjAdaptér))`, klient je vlastní testovací program služby
 
 | Část | Stav |
 |---|---|
-| protokol lístku, `svcclient::Conn`, pravidla opakování | hotovo, testy na hostiteli i v QEMU |
+| protokol lístku, `svcclient::Conn`, pravidla opakování | hotovo, testy na hostiteli i v QEMU; `ADOPT` (op 4) a jeho limity v `svcclient::policy::AdoptLimit` |
+| `libd` | hotovo: adaptér `LibdService` (`user/init/src/libd.rs`), lístky u zavaděče a spouštěčů, `ADOPT` pro děti, `queue_lease` pro děti initu. Testy `obnova po padu libd`, `pad libd pred prevzetim listku` v sadě `procesy` ([Dynamické linkování](dynamicke-linkovani.md#relace-s-libd-a-obnova-dl-4b)) |
 | registr, závislosti (`Dep::restart`, `Dep::notify`), generace, backoff, vzdání, `revive`, `status()` | hotovo, testy `obnova sluzeb` |
 | držák konců (`Kept`) | hotovo v supervisoru; používají ho adaptéry služeb |
 | `fsd` | hotovo: adaptér (`user/init/src/fsd.rs`, recept a zúžení v [souborovém systému](souborovy-system.md#obnova-po-pádu-fsd)), `FsClient` přes `Conn` (`with_lease`), trvalé handly a `REOPEN`, šetření sirotků 30 s, synchronizace disku `SYNC`; lístek má init a `fwd`. Test `obnova fsd`. Zbývá: lístky pro `dnsd`, `ntpd`, `revocd` (vlákno sítě) |

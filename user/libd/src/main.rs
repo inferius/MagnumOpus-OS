@@ -7,10 +7,11 @@
 //! Sablona se hleda podle jmena a obsahu (BLAKE3): stejna knihovna = tytez
 //! stranky.
 //!
-//! Spojeni: prvni je bootstrap kanal (init); `Connect` vytvori dalsi pro
-//! potomka. Vse od klientu je **neduveryhodne**: `libdproto` hlida
-//! zpravy a jmena (jen soubor v `/system/lib`), tady meze souboru,
-//! segmentu a poctu spojeni (na spojeni i celkem), ELF pres `libs/elf`
+//! Spojeni tvori strom: korenove je bootstrap kanal (drzi ho adapter sluzby
+//! v initu); `Connect` z kterekoli relace vytvori relaci pro dite (bez
+//! odpovedi). Vse od klientu je **neduveryhodne**: `libdproto` hlida zpravy
+//! a jmena (jen soubor v `/system/lib`), tady meze souboru, segmentu
+//! a poctu spojeni (na relaci = na proces, a celkem), ELF pres `libs/elf`
 //! (TEXTREL a REL odmitnuty).
 
 #![no_std]
@@ -40,11 +41,14 @@ struct Template {
 /// Spojeni klienta.
 struct Conn {
     ch: Channel,
-    /// Spojeni, ze ktereho vzniklo (`Connect`).
+    /// Relace, ze ktere vzniklo (`Connect`).
     parent: Option<u64>,
-    /// Ziva spojeni vytvorena z tohoto.
+    /// Zijici relace vytvorene z teto.
     children: u32,
 }
+
+/// Cislo korenoveho spojeni (bootstrap kanal od initu).
+const ROOT: u64 = 0;
 
 struct Libd {
     fs: Initfs,
@@ -128,7 +132,7 @@ impl Libd {
             loop {
                 let Some(c) = self.conns.get(&id) else { return };
                 let Ok(msg) = c.ch.try_read() else { break };
-                let (reply, handles) = self.handle(id, &msg.data, msg.handles);
+                let Some((reply, handles)) = self.handle(id, &msg.data, msg.handles) else { continue };
                 let Some(c) = self.conns.get(&id) else { return };
                 if c.ch.write(&reply.encode(), handles).is_err() {
                     break;
@@ -144,27 +148,30 @@ impl Libd {
         self.remove(id);
     }
 
-    fn handle(&mut self, id: u64, data: &[u8], mut handles: Vec<Handle>) -> (Reply, Vec<Handle>) {
-        let err = |e: Error| (Reply::Error(e.code()), Vec::new());
-        match Request::decode(data) {
+    /// Odpoved na zpravu (`None` = bez odpovedi: `Connect`).
+    fn handle(&mut self, id: u64, data: &[u8], mut handles: Vec<Handle>) -> Option<(Reply, Vec<Handle>)> {
+        let err = |e: Error| Some((Reply::Error(e.code()), Vec::new()));
+        Some(match Request::decode(data) {
             Some(Request::Open { name }) if handles.is_empty() => match self.open(&name) {
                 Ok(t) => match share(&t) {
                     Ok(h) => (Reply::Library(t.lib.clone()), h),
-                    Err(e) => err(e),
+                    Err(e) => return err(e),
                 },
-                Err(e) => err(e),
+                Err(e) => return err(e),
             },
+            // Relace pro dite, bez odpovedi: nad mez se konec zahodi (dite
+            // uvidi PEER_CLOSED a listek mu rekne, ze libd bezi dal).
             Some(Request::Connect) if handles.len() == 1 => {
-                let full = self.conns.len() as u32 >= MAX_CONNECTIONS
-                    || self.conns.get(&id).is_some_and(|c| c.children >= MAX_CHILD_CONNECTIONS);
-                if full {
-                    return err(Error::NoResources);
-                }
                 let ch = Channel::from_handle(handles.remove(0));
-                match self.add(ch, Some(id)) {
-                    Ok(_) => (Reply::Ok, Vec::new()),
-                    Err(e) => err(e),
+                let per_process = id != ROOT && self.conns.get(&id).is_some_and(|c| c.children >= MAX_CHILD_CONNECTIONS);
+                if per_process {
+                    println!("libd: relace {id}: prilis mnoho relaci pro deti ({MAX_CHILD_CONNECTIONS})");
+                } else if self.conns.len() as u32 >= MAX_CONNECTIONS {
+                    println!("libd: prilis mnoho spojeni ({MAX_CONNECTIONS})");
+                } else if let Err(e) = self.add(ch, Some(id)) {
+                    println!("libd: spojeni nejde hlidat: {e}");
                 }
+                return None;
             }
             Some(Request::Stats) if handles.is_empty() => (
                 Reply::Stats(Stats {
@@ -176,8 +183,8 @@ impl Libd {
                 Vec::new(),
             ),
             // Vadna zprava; prilozene handly se zahodi (zavrou).
-            _ => err(Error::InvalidArgs),
-        }
+            _ => return err(Error::InvalidArgs),
+        })
     }
 
     /// Sablona knihovny `name` (vytvori ji pri prvnim pouziti).

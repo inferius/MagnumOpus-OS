@@ -68,10 +68,14 @@ fn main(startup: Startup) -> i64 {
         }
         Err(e) => println!("init: sluzbu casu nelze spustit: {e}"),
     }
-    // Sluzba knihoven hned po case (jen initfs): od ted dostane kazdy
-    // spusteny proces spojeni s ni (programy se zavadecem ld.so).
+    // Sluzba knihoven hned po case (jen initfs): od ted jde spoustet
+    // programy se zavadecem ld.so; po padu ji supervisor spusti znovu
+    // a klienti se pripoji pres listky.
     match libd::start(&startup) {
-        Ok(p) => sup.watch("libd", &p, Some(libd::RESTART)),
+        Ok(p) => sup.register(
+            supervisor::Spec { name: libd::NAME, deps: &[], service: Some(alloc::boxed::Box::new(libd::LibdService)) },
+            Some(&p),
+        ),
         Err(e) => println!("init: sluzbu knihoven (libd) nelze spustit: {e}"),
     }
     // Prehled uloh hned po case: FS nepotrebuje a sluzby (fsd, okna,

@@ -842,6 +842,7 @@ const USER_PROGRAMS: &[&str] = &[
     "init",
     "libd",
     "echo",
+    "dlspawn",
     "svctest",
     "fsrtest",
     "devmgr",

@@ -11,9 +11,9 @@ description = "Knihovna pro programy v userspace: syscally, objekty, start proce
 # knihovny proto zavisi na libos s `default-features = false`.
 default = ["rt", "libd"]
 # Spojeni se sluzbou knihoven libd (spawn programu se zavadecem, ld.so).
-libd = ["dep:libdproto"]
+libd = ["dep:libdproto", "dep:leaseproto"]
 rt = ["dep:sizeclass", "dep:linked_list_allocator"]
-rustc-dep-of-std = ["dep:core", "dep:alloc", "abi/rustc-dep-of-std", "elf/rustc-dep-of-std", "initfs/rustc-dep-of-std", "tz/rustc-dep-of-std"]
+rustc-dep-of-std = ["dep:core", "dep:alloc", "abi/rustc-dep-of-std", "elf/rustc-dep-of-std", "initfs/rustc-dep-of-std", "tz/rustc-dep-of-std", "libdproto?/rustc-dep-of-std", "leaseproto?/rustc-dep-of-std"]
 
 [dependencies]
 # Preklad jako zavislost std (cil magnumopus, viz docs/cs/rust-std.md).
@@ -23,8 +23,9 @@ abi.workspace = true
 elf.workspace = true
 initfs.workspace = true
 tz.workspace = true
-# Klient sluzby knihoven libd (feature `libd`; sestaveni pro std ho nema).
+# Klient sluzby knihoven libd a obnova relace pres listek (feature `libd`).
 libdproto = { path = "../libdproto", optional = true }
+leaseproto = { path = "../leaseproto", optional = true }
 # Heap vlastniho runtime (feature `rt`).
 sizeclass = { path = "../sizeclass", optional = true }
 linked_list_allocator = { version = "0.10", default-features = false, features = ["use_spin"], optional = true }

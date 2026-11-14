@@ -151,7 +151,9 @@ pub fn startup(bootstrap: u64, init_heap: impl FnOnce(u32)) -> Startup {
             bootstrap::kind::ACPI => got.acpi = Some(handle),
             bootstrap::kind::PARAMS => got.params = Some(handle),
             #[cfg(feature = "libd")]
-            bootstrap::kind::LIBD => crate::libd::set_connection(Channel::from_handle(Handle::from_raw(handle))),
+            bootstrap::kind::LIBD if arg == 0 => crate::libd::set_connection(Channel::from_handle(Handle::from_raw(handle)), None),
+            #[cfg(feature = "libd")]
+            bootstrap::kind::LIBD => crate::libd::set_lease(Channel::from_handle(Handle::from_raw(handle))),
             // Bez klienta libd (sestaveni pro std) spojeni zavrit: nesmi se
             // dostat mezi handly programu a posunout jejich poradi.
             #[cfg(not(feature = "libd"))]

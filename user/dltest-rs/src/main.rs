@@ -52,7 +52,11 @@ const E_RESERVE: i64 = 2048;
 
 libos::entry!(main);
 
-fn main(_s: Startup) -> i64 {
+fn main(mut s: Startup) -> i64 {
+    // Cekaci rezim (test poradi obnovy libd, `user/dlspawn`).
+    if !s.handles.is_empty() {
+        return wait_then_dlopen(libos::Channel::from_handle(s.handles.remove(0)));
+    }
     let mut bad = 0;
     // SAFETY: funkce knihovny (C ABI).
     unsafe {
@@ -424,4 +428,27 @@ fn sealed() -> i64 {
         return E_SEAL;
     }
     0
+}
+
+/// Cekaci rezim: ohlasi start (knihovny uz jsou nahrane), pocka na pokyn
+/// a pak `dlopen` - libd mezitim mohla spadnout drive, nez supervisor
+/// prevzal listek zavadece (`ADOPT`). Kod 0 = `dlopen` a inicializator
+/// knihovny sedi.
+fn wait_then_dlopen(ch: libos::Channel) -> i64 {
+    if ch.write(b"start", Vec::new()).is_err() {
+        return 3;
+    }
+    if ch.read(Some(libos::time::deadline_after(core::time::Duration::from_secs(60)))).is_err() {
+        return 4;
+    }
+    match libos::loader::dlopen("libdlplug.so.1", abi::loader::rtld::NOW) {
+        Ok(lib) => match sym::<IntFn>(lib, "plug_init_get") {
+            Some(f) if f() == 42 => 0,
+            _ => 1,
+        },
+        Err(e) => {
+            libos::println!("dltest-rs: dlopen po padu libd: {e}");
+            2
+        }
+    }
 }

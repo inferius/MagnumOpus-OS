@@ -413,9 +413,9 @@ impl Terminals {
             // V jobu relace: odhlaseni ukonci termd i jeho shsess.
             Some(s) => {
                 let job = crate::session::job(s)?;
-                libos::spawn::spawn_with(&job, "termd", image, handles, libos::spawn::Options::default())?
+                libos::spawn::spawn_with(&job, "termd", image, handles, termd_opts())?
             }
-            None => libos::spawn("termd", image, handles)?,
+            None => libos::spawn::spawn_with(&libos::job::current()?, "termd", image, handles, termd_opts())?,
         };
         c.starts.push(now);
         c.termd = Some(proc);
@@ -496,4 +496,9 @@ fn command(ctl: &Channel, text: &str, handles: Vec<Handle>) -> Result<String> {
         println!("init: konzole na '{text}': {reply}");
         Err(Error::InvalidArgs)
     }
+}
+
+/// Terminal spousti prikazy: relace s libd (programy se zavadecem).
+fn termd_opts() -> libos::spawn::Options {
+    libos::spawn::Options { libd: true, ..Default::default() }
 }

@@ -36,9 +36,9 @@ fn or_fail<T>(r: Res<T>) -> T {
     r.unwrap_or_else(|e| fail(&e))
 }
 
-/// Zprava zavadece (`abi::bootstrap::LOADER_MAGIC`): handle procesu
-/// a spojeni s libd.
-fn loader_message(bootstrap: u64) -> (u32, u32) {
+/// Zprava zavadece (`abi::bootstrap::LOADER_MAGIC`): handle procesu,
+/// relace s libd a listek k ni.
+fn loader_message(bootstrap: u64) -> (u32, u32, u32) {
     let mut data = [0u8; 64];
     let mut handles = [0u32; 4];
     let (r, (dlen, hlen)) = sys::channel_read(bootstrap as u32, &mut data, &mut handles);
@@ -48,20 +48,21 @@ fn loader_message(bootstrap: u64) -> (u32, u32) {
     let Some(h) = Header::from_bytes_with(&data[..dlen], bootstrap::LOADER_MAGIC) else {
         fail("neplatna zprava zavadece");
     };
-    let (mut process, mut libd) = (None, None);
+    let (mut process, mut libd, mut lease) = (None, None, None);
     for (i, &raw) in handles[..(h.count as usize).min(hlen)].iter().enumerate() {
         let off = bootstrap::HEADER_SIZE + i * bootstrap::ENTRY_SIZE;
-        match data.get(off..dlen).and_then(Entry::from_bytes).map(|e| e.kind) {
-            Some(bootstrap::kind::SELF_PROCESS) => process = Some(raw),
-            Some(bootstrap::kind::LIBD) => libd = Some(raw),
+        match data.get(off..dlen).and_then(Entry::from_bytes).map(|e| (e.kind, e.arg)) {
+            Some((bootstrap::kind::SELF_PROCESS, _)) => process = Some(raw),
+            Some((bootstrap::kind::LIBD, 0)) => libd = Some(raw),
+            Some((bootstrap::kind::LIBD, 1)) => lease = Some(raw),
             _ => {
                 let _ = sys::handle_close(raw);
             }
         }
     }
-    match (process, libd) {
-        (Some(p), Some(l)) => (p, l),
-        _ => fail("zprava zavadece bez procesu nebo spojeni s libd"),
+    match (process, libd, lease) {
+        (Some(p), Some(s), Some(l)) => (p, s, l),
+        _ => fail("zprava zavadece bez procesu, relace s libd nebo listku"),
     }
 }
 
@@ -215,11 +216,15 @@ fn debug_hook(mods: &[Module], ldbase: u64) {
 
 /// Zavede program; vraci jeho vstupni bod (skok dela `_start`).
 pub extern "C" fn main(sp: *const u64, bootstrap: u64) -> u64 {
-    let (process_raw, libd_raw) = loader_message(bootstrap);
+    let (process_raw, libd_raw, lease_raw) = loader_message(bootstrap);
     libos::rt::set_self_process(process_raw);
     let process = Process::from_handle(Handle::from_raw(process_raw));
-    // Spojeni s libd si zavadec nechava (dlopen); program ma svoje.
-    libos::libd::set_connection(libos::Channel::from_handle(Handle::from_raw(libd_raw)));
+    // Relaci s libd a listek si zavadec nechava (dlopen, obnova po padu
+    // libd); program dostane vlastni az na pozadani (`libd_session`).
+    libos::libd::set_connection(
+        libos::Channel::from_handle(Handle::from_raw(libd_raw)),
+        Some(libos::Channel::from_handle(Handle::from_raw(lease_raw))),
+    );
     let page = libos::vm::page_size();
     // SAFETY: SP vlakna s blokem od spawn.
     let aux = unsafe { read_auxv(sp) };
