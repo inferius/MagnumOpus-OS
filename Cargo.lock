@@ -1754,6 +1754,7 @@ dependencies = [
  "abi",
  "dynload",
  "elf",
+ "libdproto",
  "libos",
 ]
 
@@ -1764,11 +1765,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
-name = "libdproto"
+name = "libd"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "blake3",
+ "elf",
+ "libdproto",
+ "libos",
 ]
+
+[[package]]
+name = "libdproto"
+version = "0.1.0"
 
 [[package]]
 name = "libm"
@@ -1783,6 +1792,7 @@ dependencies = [
  "abi",
  "elf",
  "initfs",
+ "libdproto",
  "linked_list_allocator",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",

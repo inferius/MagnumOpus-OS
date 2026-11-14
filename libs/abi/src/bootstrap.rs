@@ -84,6 +84,10 @@ pub mod kind {
     /// Objekt pameti (jen pro cteni) s blokem parametru procesu
     /// ([`crate::params`]: argumenty, prostredi, pracovni adresar).
     pub const PARAMS: u32 = 9;
+    /// Spojeni se sluzbou knihoven `libd` (`libdproto`): libos ho drzi pro
+    /// `spawn` programu se zavadecem (spojeni pro potomka vytvori pres nej);
+    /// ve zprave zavadece = spojeni, ze ktereho zavadec bere knihovny.
+    pub const LIBD: u32 = 10;
 }
 
 pub const HEADER_SIZE: usize = core::mem::size_of::<Header>();

@@ -35,6 +35,8 @@ mod handle;
 pub mod hw;
 pub mod initfs;
 pub mod job;
+#[cfg(feature = "libd")]
+pub mod libd;
 pub mod loader;
 pub mod log;
 mod mapping;

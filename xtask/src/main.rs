@@ -840,6 +840,7 @@ pub struct Artifacts {
 /// souboru v initfs).
 const USER_PROGRAMS: &[&str] = &[
     "init",
+    "libd",
     "echo",
     "svctest",
     "fsrtest",

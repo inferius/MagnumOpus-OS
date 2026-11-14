@@ -27,6 +27,8 @@ výpadku proudu pro testy FS).
 1. `timed` (služba času, jediná s právem nastavovat hodiny), hned po ní
    `acpid` (ACPI: napájení, tlačítka, čidla; jediná s právem `POWER`, viz
    [ACPI](acpi.md)) - inicializace ACPICA běží souběžně s dalšími kroky,
+   a `libd` (služba knihoven, jen initfs; init si nechá první spojení,
+   viz [Dynamické linkování](dynamicke-linkovani.md#služba-knihoven-a-pečeť-dl-4a)),
 2. `devmgr`: najde zařízení a spustí ovladače. Hlásí disky (`block`)
    a vstupní zařízení (`input`) a pak `done`, až jsou hotová i zařízení
    USB při startu; při dlouhém čekání na ovladač disku posílá `busy`

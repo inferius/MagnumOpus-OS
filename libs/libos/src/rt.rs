@@ -150,6 +150,14 @@ pub fn startup(bootstrap: u64, init_heap: impl FnOnce(u32)) -> Startup {
             bootstrap::kind::FRAMEBUFFER => got.framebuffer = Some(handle),
             bootstrap::kind::ACPI => got.acpi = Some(handle),
             bootstrap::kind::PARAMS => got.params = Some(handle),
+            #[cfg(feature = "libd")]
+            bootstrap::kind::LIBD => crate::libd::set_connection(Channel::from_handle(Handle::from_raw(handle))),
+            // Bez klienta libd (sestaveni pro std) spojeni zavrit: nesmi se
+            // dostat mezi handly programu a posunout jejich poradi.
+            #[cfg(not(feature = "libd"))]
+            bootstrap::kind::LIBD => {
+                let _ = sys::handle_close(handle);
+            }
             bootstrap::kind::ROOT_RESOURCE => got.resource = Some(handle),
             bootstrap::kind::PCI_ECAM if got.ecam_count < got.ecam.len() => {
                 got.ecam[got.ecam_count] = (handle, arg);
