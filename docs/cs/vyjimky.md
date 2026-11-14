@@ -14,6 +14,7 @@ a budoucí debugger. Syscally: [syscally.md](syscally.md).
 | 1 | pozastavení vlákna (`THREAD_SUSPEND`), čtení a zápis kontextu (`THREAD_STATE`) | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `procesy`) |
 | 2 | kanály výjimek (`EXCEPTION_CHANNEL`, `EXCEPTION_RESOLVE`), výčet vláken (`PROCESS_THREADS`), vlákno obsluhy | **[ověřeno v QEMU]** x86_64 i aarch64 |
 | 3 | doručení přímo ve vlákně (`EXCEPTION_HANDLER`), alternativní zásobník, limit vnoření | **[ověřeno v QEMU]** x86_64 i aarch64 |
+| 4 | typové API libos: `Frame` (registry, PC, SP, FPU, návrat), `alloc_alt_stack`, `signal_class` | **[ověřeno v QEMU]** x86_64 i aarch64 |
 | - | single-step a hardwarové breakpointy, doručení výjimky Windows `PAGE_GUARD` | **[navrženo]** |
 
 ## Pořadí obsluh
@@ -103,6 +104,37 @@ nevrací, končí `handler_return(rámec, RESUME | NEXT)`.
   (`handler::MAX_DEPTH`); další jde rovnou na kanály.
 - **Vstup obsluhy** musí ležet ve spustitelné paměti, tedy zapečetěné nebo
   s oprávněním JIT (W^X, [sprava-pameti.md](sprava-pameti.md)).
+
+### API pro signály a SEH
+
+`libos::exception::Frame` je typový přístup k rámci (podklad pro
+`ucontext_t` v `cstd` a `CONTEXT` ve Windows vrstvě): `report()`,
+`general()` / `set_general()` (`X64General` / `A64General`), `pc()`,
+`sp()`, `fp()` a návrat `resume()` / `next()`. `alloc_alt_stack(size)`
+alokuje a nastaví alternativní zásobník vlákna.
+
+| Druh (`abi::exception::kind`) | `signal_class` | POSIX | SEH (Wine) |
+|---|---|---|---|
+| `PAGE_FAULT`, `GENERAL` | `Segv` | `SIGSEGV` | `EXCEPTION_ACCESS_VIOLATION` (`access`: čtení / zápis / spuštění) |
+| `ALIGNMENT` | `Bus` | `SIGBUS` | `EXCEPTION_DATATYPE_MISALIGNMENT` |
+| `DIVIDE` | `Fpe` | `SIGFPE` | `EXCEPTION_INT_DIVIDE_BY_ZERO` |
+| `INVALID_OPCODE` | `Ill` | `SIGILL` | `EXCEPTION_ILLEGAL_INSTRUCTION` |
+| `BREAKPOINT` | `Trap` | `SIGTRAP` | `EXCEPTION_BREAKPOINT` |
+
+Čísla signálů určuje `cstd`, kódy `EXCEPTION_*` Windows vrstva.
+
+```rust
+extern "C" fn on_fault(f: *mut u8) -> ! {
+    let mut fr = unsafe { libos::exception::Frame::from_raw(f) };
+    if libos::exception::signal_class(fr.report().kind) == SignalClass::Trap {
+        // aarch64: PC stojí na brk
+        if cfg!(target_arch = "aarch64") { let pc = fr.pc(); fr.set_pc(pc + 4); }
+        let _ = fr.resume();
+    }
+    let _ = fr.next();
+    libos::sys::thread_exit()
+}
+```
 
 ## Pozastavení a kontext
 

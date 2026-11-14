@@ -70,6 +70,174 @@ pub unsafe fn handler_return(frame: *const u8, disposition: u32) -> Error {
     }
 }
 
+/// Obecne registry teto architektury (format ramce i `THREAD_STATE`).
+#[cfg(target_arch = "x86_64")]
+pub type General = abi::thread::X64General;
+/// Obecne registry teto architektury (format ramce i `THREAD_STATE`).
+#[cfg(target_arch = "aarch64")]
+pub type General = abi::thread::A64General;
+
+#[cfg(target_arch = "x86_64")]
+const FP_OFF: usize = abi::exception::frame::X64_FP;
+#[cfg(target_arch = "x86_64")]
+const FP_LEN: usize = abi::thread::X64_FP_SIZE;
+#[cfg(target_arch = "aarch64")]
+const FP_OFF: usize = abi::exception::frame::A64_FP;
+#[cfg(target_arch = "aarch64")]
+const FP_LEN: usize = abi::thread::A64_FP_SIZE;
+
+/// Ramec obsluhy ve vlaknu s typovym pristupem (podklad pro `ucontext_t`
+/// signalu v `cstd` a `CONTEXT` SEH ve Windows vrstve). Zmeny se projevi
+/// az navratem [`Frame::resume`] (jadro je overi jako `THREAD_STATE`).
+pub struct Frame {
+    ptr: *mut u8,
+}
+
+impl Frame {
+    /// # Safety
+    ///
+    /// `ptr` je ramec, ktery obsluha dostala od jadra (a zatim se nevratila).
+    pub unsafe fn from_raw(ptr: *mut u8) -> Self {
+        Self { ptr }
+    }
+
+    pub fn as_ptr(&self) -> *mut u8 {
+        self.ptr
+    }
+
+    fn bytes(&self, off: usize, len: usize) -> &[u8] {
+        // SAFETY: ramec od jadra ma `frame::*_SIZE` B (`from_raw`).
+        unsafe { core::slice::from_raw_parts(self.ptr.add(off), len) }
+    }
+
+    fn bytes_mut(&mut self, off: usize, len: usize) -> &mut [u8] {
+        // SAFETY: jako `bytes`; `&mut self` = jediny pristup.
+        unsafe { core::slice::from_raw_parts_mut(self.ptr.add(off), len) }
+    }
+
+    /// Zprava o vyjimce (druh, adresa, PC ...).
+    pub fn report(&self) -> Report {
+        Report::decode(self.bytes(abi::exception::frame::REPORT, Report::SIZE)).unwrap_or_default()
+    }
+
+    /// Obecne registry v okamziku vyjimky.
+    pub fn general(&self) -> General {
+        let b = self.bytes(abi::exception::frame::GENERAL, General::SIZE);
+        General::decode(b.try_into().unwrap_or(&[0; General::SIZE]))
+    }
+
+    /// Prepise obecne registry (pouziji se pri navratu).
+    pub fn set_general(&mut self, g: &General) {
+        self.bytes_mut(abi::exception::frame::GENERAL, General::SIZE).copy_from_slice(&g.encode());
+    }
+
+    /// FPU/SIMD (x86_64 obraz FXSAVE, aarch64 V0-V31 + FPCR + FPSR).
+    pub fn fp(&self) -> &[u8] {
+        self.bytes(FP_OFF, FP_LEN)
+    }
+
+    pub fn fp_mut(&mut self) -> &mut [u8] {
+        self.bytes_mut(FP_OFF, FP_LEN)
+    }
+
+    /// Adresa instrukce (x86_64 po `int3` uz za ni, aarch64 na `brk`).
+    pub fn pc(&self) -> u64 {
+        let g = self.general();
+        #[cfg(target_arch = "x86_64")]
+        return g.rip;
+        #[cfg(target_arch = "aarch64")]
+        return g.pc;
+    }
+
+    pub fn set_pc(&mut self, pc: u64) {
+        let mut g = self.general();
+        #[cfg(target_arch = "x86_64")]
+        {
+            g.rip = pc;
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            g.pc = pc;
+        }
+        self.set_general(&g);
+    }
+
+    pub fn sp(&self) -> u64 {
+        let g = self.general();
+        #[cfg(target_arch = "x86_64")]
+        return g.rsp;
+        #[cfg(target_arch = "aarch64")]
+        return g.sp;
+    }
+
+    pub fn set_sp(&mut self, sp: u64) {
+        let mut g = self.general();
+        #[cfg(target_arch = "x86_64")]
+        {
+            g.rsp = sp;
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            g.sp = sp;
+        }
+        self.set_general(&g);
+    }
+
+    /// Pokracovat s kontextem z ramce. Vraci jen chybu (neplatny kontext).
+    pub fn resume(self) -> Error {
+        // SAFETY: ramec od jadra (`from_raw`).
+        unsafe { handler_return(self.ptr, action::RESUME) }
+    }
+
+    /// Nabidnout vyjimku dalsim obsluham (kanaly, debugger, konec procesu).
+    pub fn next(self) -> Error {
+        // SAFETY: jako `resume`.
+        unsafe { handler_return(self.ptr, action::NEXT) }
+    }
+}
+
+/// Alokuje alternativni zasobnik `size` B (zaokrouhleno na stranky) a
+/// nastavi ho aktualnimu vlaknu; vraci jeho zacatek (uvolnit
+/// `vm::release` po `set_alt_stack(0, 0)`). Nutny pro obsluhu preteceni
+/// zasobniku (`SIGSEGV` s `SA_ONSTACK`, SEH `EXCEPTION_STACK_OVERFLOW`).
+pub fn alloc_alt_stack(size: u64) -> Result<u64> {
+    let size = size.next_multiple_of(crate::vm::page_size());
+    let base = crate::vm::alloc(size, abi::vm::MAP_READ | abi::vm::MAP_WRITE)?;
+    if let Err(e) = set_alt_stack(base, size) {
+        let _ = crate::vm::release(base, size);
+        return Err(e);
+    }
+    Ok(base)
+}
+
+/// Trida vyjimky podle POSIX signalu (cisla signalu si urci `cstd`; Wine
+/// mapuje na kody `EXCEPTION_*` samo podle `Report::kind` a `access`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignalClass {
+    /// Neplatny pristup do pameti (`SIGSEGV`).
+    Segv,
+    /// Nezarovnany pristup (`SIGBUS`).
+    Bus,
+    /// Aritmeticka chyba (`SIGFPE`; aarch64 deleni nulou nehlasi).
+    Fpe,
+    /// Neplatna instrukce (`SIGILL`).
+    Ill,
+    /// Breakpoint (`SIGTRAP`).
+    Trap,
+}
+
+/// Trida signalu pro druh vyjimky (`abi::exception::kind`).
+pub fn signal_class(kind: u32) -> SignalClass {
+    use abi::exception::kind as k;
+    match kind {
+        k::DIVIDE => SignalClass::Fpe,
+        k::BREAKPOINT => SignalClass::Trap,
+        k::INVALID_OPCODE => SignalClass::Ill,
+        k::ALIGNMENT => SignalClass::Bus,
+        _ => SignalClass::Segv,
+    }
+}
+
 /// Vyjimka doruzena obsluze: zprava, vlakno (kontext pres
 /// [`Thread::read_state`] / [`Thread::write_state`]) a token.
 pub struct Exception {
