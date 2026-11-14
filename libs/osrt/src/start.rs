@@ -46,7 +46,7 @@ pub fn bootstrap_channel() -> Option<&'static Channel> {
     BOOTSTRAP.get()
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(target_env = "dyn")))]
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 extern "C" fn _start() -> ! {
@@ -55,7 +55,7 @@ extern "C" fn _start() -> ! {
     core::arch::naked_asm!("xor ebp, ebp", "and rsp, -16", "call {}", "ud2", sym start_rust)
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", not(target_env = "dyn")))]
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 extern "C" fn _start() -> ! {
@@ -71,6 +71,7 @@ extern "C" fn _start() -> ! {
     )
 }
 
+#[cfg(not(target_env = "dyn"))]
 unsafe extern "C" {
     /// Vygeneruje rustc pro binarku se `std` (`lang_start`), nebo je to
     /// `main` programu v C (crate `#![no_main]` s knihovnou `cstd`).
@@ -93,6 +94,31 @@ fn c_argv() -> (i32, *const *const u8) {
     (argc, alloc::boxed::Box::leak(ptrs.into_boxed_slice()).as_ptr())
 }
 
+/// Funkce `main` programu v C (`int main(int, char **)`).
+pub type CMain = unsafe extern "C" fn(i32, *const *const u8) -> i32;
+
+/// Start programu PIE nad `libc.so` (cil `env: dyn`): `_start` z crt1.o
+/// programu (sysroot C) preda `main`, bootstrap a SP s auxv a magic od
+/// zavadece (`abi::loader::ENTRY_MAGIC`). TLS uz pripravil ld.so.
+///
+/// # Safety
+///
+/// Volat jen jednou z `_start` programu s hodnotami od zavadece.
+#[cfg(target_env = "dyn")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __libc_start(main: CMain, bootstrap: u64, sp: u64, magic: u64) -> ! {
+    // SAFETY: SP (auxv) a magic predal zavadec (`_start` je prenesl).
+    unsafe { libos::loader::init(sp, magic) };
+    let startup = libos::rt::startup(bootstrap, |_| {});
+    // SAFETY: bezi jen toto vlakno.
+    unsafe { init(startup) };
+    let (argc, argv) = c_argv();
+    // SAFETY: `main` programu; `argv` zije do konce procesu.
+    let code = unsafe { main(argc, argv) };
+    crate::exit(code)
+}
+
+#[cfg(not(target_env = "dyn"))]
 extern "C" fn start_rust(bootstrap: u64) -> ! {
     // Heap (dlmalloc) si pamet mapuje sam pri prvni alokaci; staci, ze
     // `startup` nastavi handle vlastniho procesu.

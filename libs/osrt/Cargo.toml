@@ -20,4 +20,4 @@ launchproto = { path = "../launchproto" }
 dlmalloc = { version = "0.2.10", default-features = false }
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("magnumopus"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("magnumopus"))', 'cfg(target_env, values("dyn"))'] }

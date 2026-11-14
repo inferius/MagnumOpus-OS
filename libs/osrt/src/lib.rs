@@ -19,6 +19,7 @@
 
 extern crate alloc;
 
+pub mod dl;
 pub mod env;
 pub mod exception;
 pub mod fd;
@@ -45,6 +46,9 @@ pub type Result<T> = core::result::Result<T, Error>;
 /// Ukonci proces s navratovym kodem.
 pub fn exit(code: i32) -> ! {
     run_at_exit();
+    // Pod zavadecem: finalizatory knihoven a programu (DT_FINI_ARRAY).
+    #[cfg(target_env = "dyn")]
+    libos::loader::run_fini();
     libos::sys::process_exit(i64::from(code))
 }
 

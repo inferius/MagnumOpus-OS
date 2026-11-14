@@ -49,6 +49,16 @@ fn target_json(arch: &Arch) -> PathBuf {
     workspace_root().join("third_party/rust-std/targets").join(format!("{}.json", target_name(arch)))
 }
 
+/// Cil std jako PIC pro `libc.so` a programy PIE (`env: dyn`,
+/// docs/cs/cstd.md, kapitola libc.so).
+pub fn target_name_dyn(arch: &Arch) -> String {
+    format!("{}-unknown-magnumopus-dyn", arch.name)
+}
+
+fn target_json_dyn(arch: &Arch) -> PathBuf {
+    workspace_root().join("third_party/rust-std/targets").join(format!("{}.json", target_name_dyn(arch)))
+}
+
 /// Sysroot pro aplikace se std (spolecny pro obe architektury).
 pub fn sysroot_dir() -> Result<PathBuf> {
     Ok(target_dir().join("sysroot").join(nightly()?))
@@ -184,14 +194,22 @@ pub fn build_sysroot(arch: &Arch) -> Result<PathBuf> {
 }
 
 fn build_sysroot_locked(arch: &Arch) -> Result<PathBuf> {
+    build_sysroot_target(target_name(arch), target_json(arch))
+}
+
+/// Sysroot std jako PIC (druhy cil, `env: dyn`) pro `libc.so`.
+pub fn build_sysroot_dyn_locked(arch: &Arch) -> Result<PathBuf> {
+    build_sysroot_target(target_name_dyn(arch), target_json_dyn(arch))
+}
+
+fn build_sysroot_target(target: String, json: PathBuf) -> Result<PathBuf> {
     let library = prepare_sources()?;
-    let target = target_name(arch);
     let mut cmd = Command::new(cargo());
     cmd.current_dir(&library)
         .args(["build", "--offline", "--release", "-p", "sysroot", "--no-default-features"])
         .args(["--features", "compiler-builtins-mem"])
         .arg("--target")
-        .arg(target_json(arch))
+        .arg(&json)
         .arg("-Zjson-target-spec")
         .arg("--target-dir")
         .arg(target_dir().join("std-build"))
@@ -315,4 +333,61 @@ pub fn app_rustflags_locked(arch: &Arch) -> Result<String> {
     ]
     .join("\u{1f}");
     Ok(flags)
+}
+
+/// Sestavi `libc.so` (crate `libs/cstd-so`, `cdylib` cstd + std + osrt nad
+/// sysrootem PIC); vraci cestu k souboru. Volajici drzi `lock_std`.
+pub fn build_libc_so_locked(arch: &Arch, opts: &Options) -> Result<PathBuf> {
+    let sysroot = build_sysroot_dyn_locked(arch)?;
+    let fingerprint = std::fs::read_to_string(
+        sysroot.join("lib/rustlib").join(target_name_dyn(arch)).join("lib/fingerprint"),
+    )?;
+    let flags = [
+        format!("--sysroot={}", sysroot.display()),
+        String::from("-Zunstable-options"),
+        // Pravidla sdilenych knihoven systemu (docs/cs/dynamicke-linkovani.md):
+        // SONAME, BIND_NOW, plne RELRO, zadne TEXTREL, segmenty po 64 KiB.
+        String::from("-Clink-arg=--soname=libc.so"),
+        String::from("-Clink-arg=-znow"),
+        String::from("-Clink-arg=-zrelro"),
+        String::from("-Clink-arg=-ztext"),
+        String::from("-Clink-arg=-zmax-page-size=65536"),
+        String::from("-Clink-arg=--hash-style=both"),
+        format!("--cfg=mo_sysroot=\"{fingerprint}\""),
+        String::from("--check-cfg=cfg(mo_sysroot,values(any()))"),
+    ]
+    .join("\u{1f}");
+    let dir = target_dir().join("std-dyn");
+    // Symboly definovane v C (mem*, funkce long double) rustc do cdylib
+    // neexportuje: druhy verzovaci skript je jmenuje vyslovne (presne jmeno
+    // ma v lld prednost pred `local: *` skriptu rustc).
+    std::fs::create_dir_all(&dir)?;
+    let list = std::fs::read_to_string(workspace_root().join("libs/cstd-so/export-c.txt"))?;
+    let mut ver = String::from("{\n  global:\n");
+    for name in list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        ver.push_str(&format!("    {name};\n"));
+    }
+    ver.push_str("};\n");
+    let ver_path = dir.join(format!("export-c-{}.ver", arch.name));
+    if std::fs::read_to_string(&ver_path).ok().as_deref() != Some(ver.as_str()) {
+        std::fs::write(&ver_path, &ver)?;
+    }
+    let flags = format!("{flags}\u{1f}-Clink-arg=--version-script={}", ver_path.display());
+    let mut cmd = Command::new(cargo());
+    cmd.current_dir(workspace_root())
+        .args(["build", "--package", "cstd-so"])
+        .arg("--target")
+        .arg(target_json_dyn(arch))
+        .arg("-Zjson-target-spec")
+        .arg("--target-dir")
+        .arg(&dir)
+        .env_remove("RUSTFLAGS")
+        .env("CARGO_ENCODED_RUSTFLAGS", flags);
+    if opts.release {
+        cmd.arg("--release");
+    }
+    if !cmd.status()?.success() {
+        return Err("build libc.so (cstd-so) selhal".into());
+    }
+    Ok(dir.join(target_name_dyn(arch)).join(if opts.release { "release" } else { "debug" }).join("libc.so"))
 }

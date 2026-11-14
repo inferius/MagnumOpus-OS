@@ -101,3 +101,21 @@ fn sqlite_two(s: &Startup) -> TestResult {
     ra.expect("sqltest", &["sqlite-a"])?;
     rb.expect("sqltest", &["sqlite-b"])
 }
+
+pub const DYN_TESTS: &[Test] = &[
+    ("cdyn: program PIE v C nad libc.so (vlakna, TLS, dlopen pluginu)", cdyn),
+    ("cdyn-hello: program jen z clang-dyn.cfg sysrootu C", cdyn_hello),
+];
+
+fn cdyn_hello(s: &Startup) -> TestResult {
+    let run = run_std_app(s, "cdyn-hello", &["x"], &[], Vec::new(), Duration::from_secs(30))?;
+    run.expect("cdyn-hello", &["hello 2 cdyn-hello"])
+}
+
+/// Program PIE v C nad `libc.so` (zavadec ld.so, knihovny z libd).
+fn cdyn(s: &Startup) -> TestResult {
+    let fs = fs()?;
+    fresh_dir(fs, "/std-test/cdyn", &["cdyn.txt"])?;
+    let run = run_std_app(s, "cdyn", &["test"], &["CDYN_DIR=/std-test/cdyn"], session(fs)?, Duration::from_secs(60))?;
+    run.expect("cdyn", &["args", "libc", "mem-ld", "dlopen", "plugin", "dlsym-chyba", "vlakna-tls", "soubory", "dlclose"])
+}

@@ -26,6 +26,7 @@
 extern crate cstd_core;
 
 pub mod dirent;
+pub mod dlfcn;
 pub mod errno;
 pub mod flock;
 pub mod math;

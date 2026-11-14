@@ -397,6 +397,10 @@ fn run_cli() -> Result<()> {
         Some("build") => build(&opts).map(|_| ()),
         Some("std-patch") => stdsys::save_patch().map(|p| println!("xtask: patch std ulozen do {}", p.display())),
         Some("std") => stdsys::build_sysroot(opts.arch).map(|p| println!("xtask: sysroot std {}", p.display())),
+        Some("libc-so") => {
+            let _lock = stdsys::lock_std()?;
+            stdsys::build_libc_so_locked(opts.arch, &opts).map(|p| println!("xtask: libc.so {}", p.display()))
+        }
         Some("image") => build(&opts).and_then(|a| image_for(&a, &opts)).map(|_| ()),
         Some("run") => {
             // Okno QEMU ukazuje prvni grafickou kartu (VGA, framebuffer
@@ -1061,6 +1065,14 @@ fn build(opts: &Options) -> Result<Artifacts> {
     // Sysroot C (libc.a, hlavicky, clang.cfg) a porty v C proti nemu.
     let c_sysroot = csysroot::assemble(a, &std_bin)?;
     let c_ports = cports::build(a, &c_sysroot)?;
+    // libc.so (std jako PIC) a dynamicka cast sysrootu C, program PIE cdyn.
+    let libc_so = {
+        let _lock = stdsys::lock_std()?;
+        stdsys::build_libc_so_locked(a, opts)?
+    };
+    csysroot::add_dynamic(a, &c_sysroot, &libc_so)?;
+    let mut cdyn = dynlink::build_cdyn(opts, &libc_so, &c_sysroot)?;
+    cdyn.push((String::from("cdyn-hello"), csysroot::build_with_cfg(&c_sysroot, "user/cdyn/hello.c", "cdyn-hello")?));
     // Zavadec sdilenych knihoven a testovaci moduly v C.
     let ld = dynlink::build_ld(opts)?;
     let dl_tests = dynlink::build_tests(opts)?;
@@ -1092,6 +1104,7 @@ fn build(opts: &Options) -> Result<Artifacts> {
     // segmenty; `loadable_only` je jen pro ET_EXEC).
     files.push((String::from("lib/ld.so"), std::fs::read(&ld).map_err(|e| format!("nelze cist zavadec: {e}"))?));
     files.extend(dl_tests);
+    files.extend(cdyn);
     for (name, path) in INITFS_FILES {
         let data = std::fs::read(workspace_root().join(path))
             .map_err(|e| format!("nelze cist {path}: {e}"))?;
