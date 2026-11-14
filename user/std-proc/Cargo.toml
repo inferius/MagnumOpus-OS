@@ -1,0 +1,15 @@
+[package]
+name = "std-proc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Test std::process (launchd, roury, stdio, kody)"
+
+[[bin]]
+name = "std-proc"
+test = false
+bench = false
+
+# Jen std. Sestavuje `cargo xtask build` (stdsys::STD_PROGRAMS).
+[dependencies]

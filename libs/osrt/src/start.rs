@@ -101,12 +101,14 @@ unsafe fn init(mut startup: Startup) {
     let stderr = take(&mut startup, abi::params::tag::STDERR);
     let fs = take(&mut startup, abi::params::tag::FS);
     let net = take(&mut startup, abi::params::tag::NET);
+    let launch = take(&mut startup, abi::params::tag::LAUNCH);
     // SAFETY: predano volajicim.
     unsafe {
         crate::env::init(params.unwrap_or_default());
         crate::stdio::init(stdin, stdout, stderr, flags);
         crate::fs::init(fs);
         crate::net::init(net);
+        crate::process::init(launch);
         BOOTSTRAP.set(startup.bootstrap);
     }
     // Handle vlastniho procesu pouziva runtime po celou dobu behu

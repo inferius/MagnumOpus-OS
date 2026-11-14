@@ -650,6 +650,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "manifest",
             "--package",
+            "launchproto",
+            "--package",
             "netfilter",
             "--package",
             "guiproto",
@@ -840,6 +842,7 @@ const USER_PROGRAMS: &[&str] = &[
     "termd",
     "shsess",
     "taskd",
+    "launchd",
     "console",
     "virtio-net",
     "e1000e",
@@ -896,6 +899,7 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("files-copy.manifest.toml", "user/files-copy/files-copy.manifest.toml"),
     ("gui-install.manifest.toml", "user/gui-install/gui-install.manifest.toml"),
     ("agentd.manifest.toml", "user/agentd/agentd.manifest.toml"),
+    ("std-proc.manifest.toml", "user/std-proc/std-proc.manifest.toml"),
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {

@@ -27,7 +27,7 @@ use crate::{Options, Result, target_dir, workspace_root};
 
 /// Aplikace se std, ktere se pribali do initfs (jmeno crate = jmeno
 /// souboru).
-pub const STD_PROGRAMS: &[&str] = &["hello-std", "std-net"];
+pub const STD_PROGRAMS: &[&str] = &["hello-std", "std-net", "std-proc"];
 
 /// Pripnuty nightly z `rust-toolchain.toml` (cesty std-src a sysrootu).
 fn nightly() -> Result<String> {

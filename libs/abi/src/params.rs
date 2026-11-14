@@ -52,6 +52,8 @@ pub mod tag {
     pub const FS: u32 = 0x7FFF_0003;
     /// Relace site (netproto).
     pub const NET: u32 = 0x7FFF_0004;
+    /// Kanal ke spousteci sluzbe launchd (`launchproto`).
+    pub const LAUNCH: u32 = 0x7FFF_0005;
 }
 
 /// Precteny blok (odkazuje do bufferu).

@@ -50,6 +50,7 @@ is documented in this file and in the Czech version.
 | -32 | `ADDRESS_IN_USE` | the address or port is already in use |
 | -33 | `SERVICE_RESTARTED` | the service restarted during the request; we do not know whether it carried it out |
 | -34 | `SERVICE_UNAVAILABLE` | the service is not running (the restart did not finish in time or the supervisor gave up) |
+| -35 | `NOT_MOUNTED` | the volume holding the target is not mounted |
 
 ## Details
 
@@ -436,6 +437,19 @@ the reply to `RECONNECT` on a lease.
 **What to do:** show the user that the service is not running (the task
 overview shows why) and try again later: the next call tries to recover
 again. A batch job may set a longer wait (`Conn::set_wait`).
+
+### `NOT_MOUNTED` (-35)
+
+**Meaning:** the target (typically an application installed on another
+disk) lies on a volume that is not mounted right now. It differs from
+`NOT_FOUND`: the program exists, only its disk is missing.
+
+**When:** launching a command from the registry of installed applications
+(`launchd`, `std::process::Command`) while the application's volume is
+not mounted.
+
+**What to do:** tell the user which volume to mount (the error text from
+`launchd` names it).
 
 ## Process exit codes
 

@@ -24,6 +24,8 @@ pub mod fs;
 pub mod futex;
 pub mod heap;
 pub mod net;
+pub mod pipe;
+pub mod process;
 pub mod start;
 pub mod stdio;
 pub mod thread;

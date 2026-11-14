@@ -127,3 +127,57 @@ fn targets_and_rule_roundtrip() {
         assert_eq!(parse_rule(&again).unwrap(), rule);
     }
 }
+
+#[test]
+fn commands() {
+    let m = Manifest::parse(
+        "[app]
+id = \"org.x.rg\"
+[[command]]
+name = \"rg\"
+[[command]]
+name = \"rg-tool\"
+program = \"rgt\"
+",
+    )
+    .unwrap();
+    assert_eq!(m.commands.len(), 2);
+    assert_eq!(m.commands[0].name, "rg");
+    assert_eq!(m.commands[0].program, None);
+    assert_eq!(m.commands[1].program.as_deref(), Some("rgt"));
+    assert!(Manifest::parse("[app]
+id = \"x\"
+").unwrap().commands.is_empty());
+}
+
+#[test]
+fn bad_commands() {
+    for bad in [
+        "[[command]]
+program = \"a\"
+",
+        "[[command]]
+name = \"Velke\"
+",
+        "[[command]]
+name = \"-a\"
+",
+        "[[command]]
+name = \"a b\"
+",
+        "[[command]]
+name = \"a\"
+[[command]]
+name = \"a\"
+",
+        "[[command]]
+name = \"a\"
+program = \"/bin/a\"
+",
+    ] {
+        let text = alloc::format!("[app]
+id = \"x\"
+{bad}");
+        assert!(Manifest::parse(&text).is_err(), "{bad}");
+    }
+}

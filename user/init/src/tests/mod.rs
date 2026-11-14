@@ -51,6 +51,7 @@ mod console;
 mod shell;
 mod std_app;
 mod std_net;
+mod std_proc;
 mod supervisor;
 mod tasks;
 mod time;
@@ -99,6 +100,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("firewall", firewall::TESTS),
     ("sit", net::TESTS),
     ("std sit", std_net::TESTS),
+    ("std procesy", std_proc::TESTS),
     ("TLS a HTTP", web::TESTS),
     ("sifrovane DNS", dns::TESTS),
     ("supervisor", supervisor::TESTS),

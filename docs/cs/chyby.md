@@ -50,6 +50,7 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -32 | `ADDRESS_IN_USE` | adresa nebo port už se používá |
 | -33 | `SERVICE_RESTARTED` | služba se během požadavku restartovala, nevíme, jestli ho provedla |
 | -34 | `SERVICE_UNAVAILABLE` | služba neběží (restart se nepovedl do lhůty nebo ho supervisor vzdal) |
+| -35 | `NOT_MOUNTED` | svazek s cílem není připojený |
 
 ## Podrobně
 
@@ -432,6 +433,18 @@ kanálu; odpověď `RECONNECT` na lístku.
 **Co dělat:** ukázat uživateli, že služba neběží (přehled úloh ukazuje
 důvod), a zkusit to později: další volání zkusí obnovu znovu. Dávková
 úloha si může nastavit delší čekání (`Conn::set_wait`).
+
+### `NOT_MOUNTED` (-35)
+
+**Význam:** cíl (typicky aplikace nainstalovaná na jiném disku) leží na
+svazku, který teď není připojený. Odlišuje se od `NOT_FOUND`: program
+existuje, jen jeho disk chybí.
+
+**Kdy vzniká:** spuštění příkazu z registru nainstalovaných aplikací
+(`launchd`, `std::process::Command`), když je svazek aplikace odpojený.
+
+**Co dělat:** ukázat uživateli, který svazek připojit (text chyby od
+`launchd` ho jmenuje).
 
 ## Návratové kódy procesů
 

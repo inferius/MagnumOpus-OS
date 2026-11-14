@@ -1,0 +1,16 @@
+[package]
+name = "launchproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protokol spousteci sluzby launchd (programy -> launchd) a registr prikazu"
+
+[features]
+# Preklad jako zavislost std (osrt, docs/cs/rust-std.md).
+rustc-dep-of-std = ["dep:core", "dep:alloc", "abi/rustc-dep-of-std", "wire/rustc-dep-of-std"]
+
+[dependencies]
+core = { version = "1.0.0", optional = true, package = "rustc-std-workspace-core" }
+alloc = { version = "1.0.0", optional = true, package = "rustc-std-workspace-alloc" }
+abi = { workspace = true }
+wire = { path = "../wire" }

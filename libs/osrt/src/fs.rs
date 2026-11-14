@@ -35,6 +35,12 @@ fn session() -> Result<&'static FsClient> {
     SESSION.get().ok_or(Error::NotSupported)
 }
 
+/// Nova relace FS se stejnou identitou a pripojenymi cestami (pro
+/// potomka); `None` = proces relaci nema.
+pub fn new_session() -> Option<Channel> {
+    SESSION.get()?.connect().ok().map(FsClient::into_channel)
+}
+
 /// Ma proces relaci FS?
 pub fn available() -> bool {
     SESSION.get().is_some()
