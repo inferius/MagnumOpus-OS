@@ -81,8 +81,9 @@ impl From<usize> for Key {
 
 /// Druh prvku.
 pub enum Kind<M> {
-    /// `warn` = vyrazne oznaceni (napr. uloha agenta AI).
-    Label { text: String, heading: bool, warn: bool },
+    /// `warn` = vyrazne oznaceni (napr. uloha agenta AI). `lines` = nejvys
+    /// radku pri zalamovani (0 = bez omezeni, `Node::lines`).
+    Label { text: String, heading: bool, warn: bool, lines: u32 },
     /// `icon` = ikona (jmeno z `gfx::icon`); bez textu jen ikona (jmeno
     /// pro ctecku z `Node::tooltip`).
     Button { text: String, on_click: Option<M>, icon: Option<&'static str> },
@@ -259,7 +260,7 @@ fn node<M>(kind: Kind<M>) -> Node<M> {
 }
 
 pub fn label<M>(text: &str) -> Node<M> {
-    node(Kind::Label { text: text.into(), heading: false, warn: false })
+    node(Kind::Label { text: text.into(), heading: false, warn: false, lines: 0 })
 }
 
 pub fn button<M>(text: &str) -> Node<M> {
@@ -506,6 +507,15 @@ impl<M> Node<M> {
     pub fn agent_rows(mut self, rows: Vec<bool>) -> Self {
         if let Kind::List { agents, .. } = &mut self.kind {
             *agents = rows;
+        }
+        self
+    }
+
+    /// Nejvys `n` radku stitku; delsi text konci `...` (`1` = jeden radek
+    /// bez zalamovani). Bez volani se stitek zalamuje po slovech podle sirky.
+    pub fn lines(mut self, n: u32) -> Self {
+        if let Kind::Label { lines, .. } = &mut self.kind {
+            *lines = n;
         }
         self
     }

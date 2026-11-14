@@ -1450,6 +1450,17 @@ Tab moves the focus (Shift+Tab back). A **scroll area** (`scroll`) is a
 layer of its own: the wheel changes only the layer property `scroll` and
 the compositor moves the content; the application redraws nothing.
 
+**Label wrapping** **[implemented]**: a `label` wraps at words to the
+width the layout gives it; the label height is the number of lines times the
+line height, so the elements below it move down. `\n` forces a line break.
+A word wider than the line (a path, an address) is split, preferably after a
+separator (`/`, `\`, `-`, `_`, `.`, `:`). In a `row` a wrapping label narrows so the
+other elements fit. `.lines(n)` limits the number of lines and longer text
+ends with `...`; `.lines(1)` is a single line without wrapping. A marked
+label (`.warn()`) and an agent label stay on one line (pill). Code:
+`libs/ui/src/wrap.rs` (wrapping without a font), `layout.rs` (`label_size`,
+`row_sizes`), tests `libs/ui/src/tests/wrap.rs`.
+
 ### Keys, state and accessibility of elements
 
 After every change the application returns a new tree and the library

@@ -385,8 +385,37 @@ pub const CHANNEL_MAX_QUEUED: usize = 1024;
 pub const WAIT_MANY_MAX: usize = 64;
 /// Maximalni delka jmena procesu nebo vlakna (bajty UTF-8).
 pub const NAME_MAX: usize = 64;
-/// Maximalni delka zpravy DEBUG_LOG.
+/// Maximalni delka zpravy DEBUG_LOG (delsi jadro odmitne s chybou; libos
+/// ji proto deli, `debug_log_chunks`).
 pub const DEBUG_LOG_MAX: usize = 1024;
+
+/// Kusy zpravy pro DEBUG_LOG: kazdy nejvys `max` bajtu, deleni na hranici
+/// znaku, prednostne za koncem radku. Spojene daji puvodni text (dlouha
+/// zprava se tak neztrati cela, napr. chyba testu s vypisem stromu).
+pub fn debug_log_chunks(text: &str, max: usize) -> impl Iterator<Item = &str> {
+    let mut rest = text;
+    core::iter::from_fn(move || {
+        if rest.is_empty() {
+            return None;
+        }
+        if rest.len() <= max {
+            return Some(core::mem::take(&mut rest));
+        }
+        let mut cut = max.max(1);
+        while !rest.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        if cut == 0 {
+            // `max` mensi nez prvni znak: cely znak (jinak by se necyklilo).
+            cut = rest.chars().next().map_or(rest.len(), char::len_utf8);
+        } else if let Some(nl) = rest[..cut].rfind('\n') {
+            cut = nl + 1;
+        }
+        let (head, tail) = rest.split_at(cut);
+        rest = tail;
+        Some(head)
+    })
+}
 
 /// Druh rozsahu v `RESOURCE_CREATE` (horni dva bity zacatku rozsahu):
 /// 0 = fyzicka pamet (zarovnana na stranky), [`RANGE_IO_PORTS`] = I/O porty,

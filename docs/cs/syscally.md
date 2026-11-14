@@ -46,7 +46,9 @@ a `TIMED_OUT`, které jsou běžné).
 `(ptr, len) -> 0`. Zapíše text (UTF-8, max. 1024 B, neplatné UTF-8 se
 nahradí) do logu jádra s prefixem `[jméno id]` procesu. Do vzniku služby
 logu je to jediný výstup programů. Chyby: `BAD_ADDRESS`, `INVALID_ARGS`
-(příliš dlouhý text).
+(příliš dlouhý text). Obálka `libos::sys::debug_log` (a `println!`) delší text
+rozdělí na kusy po 1024 B, přednostně za koncem řádku
+(`abi::syscall::debug_log_chunks`), takže se dlouhá zpráva neztratí celá.
 
 ### `CLOCK_MONOTONIC`
 

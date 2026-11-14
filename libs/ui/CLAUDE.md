@@ -13,11 +13,12 @@ Nativní knihovna UI (milník 6c): jedna pro všechny aplikace. Aplikace popíš
 
 ## Testy
 
-- `cargo test -p ui` (`src/tests/`: `mod.rs` zakladni prvky, `keys.rs` klice, stav, heslo, `text.rs` editor, `field.rs` textova pole a schranka, `table.rs` tabulka, `controls.rs` prepinac, volba, posuvnik, segmenty, zalozky, graf podilu, `popup.rs` vyber, nabidky, bublina, `shots.rs` snimky vzhledu proti `tests/shots/*.png` (prepis jen `cargo xtask test --update-shots`), `context.rs` kontext okna, `spatial.rs` prostorova navigace fokusu, `hover.rs` najeti mysi pres zalozky, tlacitka a radky tabulky, `suggest.rs` seznam navrhu u pole, `layout.rs` natazeni kontejneru v radku); `client/` jen s `--features os` pro cíl OS. QEMU: `cargo xtask test --only gui`.
+- `cargo test -p ui` (`src/tests/`: `mod.rs` zakladni prvky, `keys.rs` klice, stav, heslo, `text.rs` editor, `field.rs` textova pole a schranka, `table.rs` tabulka, `controls.rs` prepinac, volba, posuvnik, segmenty, zalozky, graf podilu, `popup.rs` vyber, nabidky, bublina, `shots.rs` snimky vzhledu proti `tests/shots/*.png` (prepis jen `cargo xtask test --update-shots`), `context.rs` kontext okna, `spatial.rs` prostorova navigace fokusu, `hover.rs` najeti mysi pres zalozky, tlacitka a radky tabulky, `suggest.rs` seznam navrhu u pole, `layout.rs` natazeni kontejneru v radku, `wrap.rs` zalamovani stitku); `client/` jen s `--features os` pro cíl OS. QEMU: `cargo xtask test --only gui`.
 
 ## Pasti
 
 - Najetí: prvek s částmi, které se zvýrazňují zvlášť (záložky, řádky a posuvník tabulky), musí část vracet z `Ui::hover_part`; jinak se pohyb uvnitř prvku nepřekreslí a zvýraznění zůstane na staré části (test `hover.rs`).
+- Rozvržení měří podle dostupné šířky (`layout::measure(n, t, avail)`): výška zalamovaného štítku závisí na šířce. `measure` a `place` musí šířky počítat stejně (řádek přes `row_sizes`), jinak se výška štítku a obdélník rozejdou.
 
 - Aplikace UI vykresluje do vlastního bufferu; kompozitor mu nevěří (viz `libs/comp/CLAUDE.md`), ale i klient musí ošetřit nesmyslné rozměry od kompozitoru.
 - `client/mod.rs` má ~730 řádků; při dalším růstu dělit (obnova po pádu je v `restore.rs`, schránka v `clip.rs`).

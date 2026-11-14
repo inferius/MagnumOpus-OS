@@ -70,11 +70,15 @@ fn call(n: u64, a: [u64; 6]) -> Result<u64> {
     abi::error::decode(unsafe { raw(n, a[0], a[1], a[2], a[3], a[4], a[5]) })
 }
 
+/// Zapise text do logu jadra. Delsi nez `DEBUG_LOG_MAX` jde po kusech
+/// (jadro by celou zpravu odmitlo a ztratila by se i s duvodem chyby).
 pub fn debug_log(text: &str) {
-    let _ = call(
-        nr::DEBUG_LOG,
-        [text.as_ptr() as u64, text.len() as u64, 0, 0, 0, 0],
-    );
+    for part in abi::syscall::debug_log_chunks(text, abi::syscall::DEBUG_LOG_MAX) {
+        let _ = call(
+            nr::DEBUG_LOG,
+            [part.as_ptr() as u64, part.len() as u64, 0, 0, 0, 0],
+        );
+    }
 }
 
 pub fn clock_monotonic() -> u64 {

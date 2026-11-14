@@ -48,7 +48,9 @@ Failed syscalls are logged at Debug level (except `SHOULD_WAIT` and
 `(ptr, len) -> 0`. Writes text (UTF-8, max 1024 B, invalid UTF-8 replaced)
 to the kernel log prefixed with the process `[name id]`. Until a log service
 exists this is the only program output. Errors: `BAD_ADDRESS`,
-`INVALID_ARGS` (text too long).
+`INVALID_ARGS` (text too long). The `libos::sys::debug_log` wrapper (and
+`println!`) splits longer text into 1024 B pieces, preferably after a line
+end (`abi::syscall::debug_log_chunks`), so a long message is never lost whole.
 
 ### `CLOCK_MONOTONIC`
 
