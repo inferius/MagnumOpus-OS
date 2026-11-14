@@ -68,9 +68,32 @@ restarts the agent).
   monitored, the default `AUTH` behavior when the agent is unavailable
   (fail-open / fail-closed), whether the home key is backed up, allowed
   applications. A policy change goes into the audit and the user sees it.
-- **Removing the computer from the register** is also an `ELEVATE` action
-  with confirmation. Whether the user may do it on a company computer
-  without the organization is decided by policy (open question 1).
+- **The organization's identity is its public key.** The policy, escrow
+  and subscription permission are **signed with this key**; the computer
+  accepts only a signed policy update and discards and logs an unsigned
+  one.
+- **Three enrollment paths** **[designed]**:
+  1. **In the installer:** the option "This computer belongs to an
+     organization". The organization address or a code or QR from IT is
+     entered, the computer downloads the signed policy, **shows the
+     scope** (what the organization sees and may do) and the enrollment is
+     confirmed **before the first account is created**.
+  2. **Later in Settings:** "Connect to an organization" is an
+     administration action through `ELEVATE`. The other users of the
+     computer **learn about it at their next sign-in**.
+  3. **Zero-touch:** IT builds its own installation image or USB stick with
+     the organization profile embedded (like Apple ADE or Windows
+     Autopilot, but without a manufacturer database: trust is only in the
+     organization key embedded in the image).
+- **Disconnecting** is an `ELEVATE` action with confirmation. By policy it
+  may require the **organization's signature** (open question 1).
+  Disconnecting **deletes the company key wrap and switches off the event
+  subscription**.
+- ⚠️ **Honest limitation:** whoever has physical access to the computer and
+  the administration role can **reinstall** the system and thereby remove
+  management. **Company data stays protected**: an encrypted home and
+  company storage are not gained by reinstalling, because the keys are
+  held by the organization.
 - **A personal computer** has no record: nobody issues the event
   subscription capability or the company key wrap, and the services that
   would use them do not start.
@@ -179,6 +202,16 @@ as kernel code.
   settings and on the bar.
 - The policy delimits the scope of events and the categories that may be
   monitored; what is not in the policy, the agent does not get.
+- **A computer that is not enrolled has no overhead:** with no subscriber,
+  the place that emits an event only **atomically reads a "has
+  subscriber" flag** (a few ns) and carries on. No event, copy or extra
+  service is created. **Condition for rollout:** a future test and
+  measurement verify the claim **[designed]**.
+- **An enrolled computer:** `NOTIFY` goes **asynchronously into a queue**
+  (cheap); `AUTH` is **one message round trip with the agent**, estimated
+  at **tens of µs** per monitored `exec` or `open`, plus the verdict
+  cache. The estimate will be verified by measurement (see
+  [Risks](#risks)).
 
 ## Screen and key recording
 
@@ -203,7 +236,9 @@ password fields is never recorded.
   with a **deadline** (after it the default policy applies) and a
   **verdict cache** (a repeated operation does not ask). Estimate: a cache
   hit is cheap (no communication with the agent), a missing entry costs
-  one message round trip to the agent plus its work. The concrete
+  one message round trip to the agent (on the order of tens of µs plus its
+  work); a computer that is not enrolled has no overhead except reading
+  the "has subscriber" flag (a few ns). The concrete
   deadline and impact will be **measured** at rollout **[designed]**; the
   default `AUTH` scope is therefore narrow (typically program launch),
   not every `open`.
@@ -237,9 +272,10 @@ this page does not change it. What must exist before each part:
 
 ## Open questions
 
-1. May a user remove a company computer from the register alone, or only
-   with the organization (policy)? Options: A) always (loses the company
-   features), B) only with the organization, C) decided by policy.
+1. May a user disconnect a company computer alone, or only with the
+   organization's signature? Options: A) always (loses the company
+   features), B) only with the organization, C) decided by policy (the
+   default proposal).
 2. Who may confirm enrollment on a shared computer with several accounts
    (only the administration role, or every account owner for their own
    home)?

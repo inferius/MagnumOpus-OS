@@ -214,7 +214,9 @@ nezaznamenává nikdy.
   operace čeká na verdikt agenta. Návrh to omezuje **termínem** (po něm
   platí výchozí politika) a **cache verdiktů** (opakovaná operace se
   neptá). Odhad: zásah do cache je levný (bez komunikace s agentem),
-  chybějící položka stojí jednu výměnu zpráv s agentem plus jeho práci.
+  chybějící položka stojí jednu výměnu zpráv s agentem (řádově desítky µs
+  plus jeho práce); nezapsaný počítač nemá žádnou režii kromě čtení
+  příznaku „má odběr“ (jednotky ns).
   Konkrétní termín a dopad se **změří** při zavedení **[navrženo]**;
   výchozí rozsah `AUTH` je proto úzký (typicky spuštění programů), ne
   každý `open`.
