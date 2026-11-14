@@ -13,7 +13,7 @@ use fsproto::FsClient;
 use fsproto::v2::{access, open_flags, share};
 use libos::Channel;
 
-pub use fsproto::perm::rights;
+pub use fsproto::perm::{Acl, EVERYONE, Grant, Permissions, rights};
 pub use fsproto::{DirEntry, Stat, kind};
 
 use crate::start::Init;
@@ -33,6 +33,12 @@ pub(crate) unsafe fn init(channel: Option<Channel>) {
 
 fn session() -> Result<&'static FsClient> {
     SESSION.get().ok_or(Error::NotSupported)
+}
+
+/// Nova relace FS se stejnou identitou a pripojenymi cestami (pro
+/// potomka); `None` = proces relaci nema.
+pub fn new_session() -> Option<Channel> {
+    SESSION.get()?.connect().ok().map(FsClient::into_channel)
 }
 
 /// Ma proces relaci FS?
@@ -220,4 +226,16 @@ pub fn remove_dir(path: &[u8]) -> Result<()> {
 
 pub fn rename(from: &[u8], to: &[u8]) -> Result<()> {
     session()?.rename(&crate::env::resolve(from)?, &crate::env::resolve(to)?)
+}
+
+/// Opravneni objektu: vlastnik, ucinna prava volajiciho a popis
+/// opravneni (ACL), kdyz ho objekt ma vlastni (`None` = dedi od rodice).
+pub fn permissions(path: &[u8]) -> Result<Permissions> {
+    session()?.permissions(&crate::env::resolve(path)?)
+}
+
+/// Nastavi popis opravneni (`None` = dedit od rodice). Vyzaduje pravo
+/// `MANAGE` na objekt.
+pub fn set_acl(path: &[u8], acl: Option<&Acl>) -> Result<()> {
+    session()?.set_acl(&crate::env::resolve(path)?, acl)
 }

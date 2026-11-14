@@ -148,7 +148,10 @@ directory in a read-only memory object in the startup message
 hello-std: argumenty, vlakna, TLS, soubory`). A memory object instead of
 message data: the size is not limited by the channel message limit.
 Standard handles travel in the same message as `kind::USER` with tags from
-`abi::params::tag` (`STDIN`, `STDOUT`, `STDERR`, `FS`, `NET`).
+`abi::params::tag` (`STDIN`, `STDOUT`, `STDERR`, `FS`, `NET`, `LAUNCH` =
+channel to the launchd launcher service). Format v2 has a flags field
+(`abi::params::flags`: `STDOUT_NULL`, `STDERR_NULL` = discard the output,
+`Stdio::null`).
 
 ```rust
 use libos::params::Params;

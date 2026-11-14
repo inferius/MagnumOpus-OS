@@ -7,12 +7,15 @@
 //!
 //! ```text
 //! 0   magic   u32  "OSPA"
-//! 4   version u32  1
+//! 4   version u32  2
 //! 8   size    u32  velikost celeho bloku (objekt pameti muze byt vetsi)
-//! 12  argc    u32
-//! 16  envc    u32
-//! 20  retezce: cwd, argv[0..argc], env[0..envc]; kazdy = delka u32 + bajty
+//! 12  flags   u32  [`flags`]
+//! 16  argc    u32
+//! 20  envc    u32
+//! 24  retezce: cwd, argv[0..argc], env[0..envc]; kazdy = delka u32 + bajty
 //! ```
+//!
+//! Verze 2 pridala `flags` (verze 1 se uz necte).
 //!
 //! Retezce jsou bajty (v systemu UTF-8, ale format to nevynucuje); polozka
 //! prostredi je `JMENO=HODNOTA`. Standardni handly (stdin, stdout, relace
@@ -21,10 +24,20 @@
 
 /// "OSPA" v ASCII.
 pub const MAGIC: u32 = u32::from_le_bytes(*b"OSPA");
-pub const VERSION: u32 = 1;
-pub const HEADER_SIZE: usize = 20;
+pub const VERSION: u32 = 2;
+pub const HEADER_SIZE: usize = 24;
 /// Nejvetsi blok, ktery ctenar prijme (ochrana pred nesmyslnou velikosti).
 pub const MAX_SIZE: usize = 16 * 1024 * 1024;
+
+/// Priznaky bloku (`flags`).
+pub mod flags {
+    /// Standardni vystup zahodit (`Stdio::null`): bez kanalu `STDOUT` by
+    /// vystup sel do logu jadra.
+    pub const STDOUT_NULL: u32 = 1 << 0;
+    /// Chybovy vystup zahodit.
+    pub const STDERR_NULL: u32 = 1 << 1;
+    pub const ALL: u32 = STDOUT_NULL | STDERR_NULL;
+}
 
 /// Stitky standardnich handlu ve startovni zprave (`kind::USER`, `arg`).
 /// Rozsah `0x7FFF_0000..` je vyhrazeny pro system.
@@ -39,12 +52,16 @@ pub mod tag {
     pub const FS: u32 = 0x7FFF_0003;
     /// Relace site (netproto).
     pub const NET: u32 = 0x7FFF_0004;
+    /// Kanal ke spousteci sluzbe launchd (`launchproto`).
+    pub const LAUNCH: u32 = 0x7FFF_0005;
 }
 
 /// Precteny blok (odkazuje do bufferu).
 #[derive(Debug, Clone, Copy)]
 pub struct Params<'a> {
     pub cwd: &'a [u8],
+    /// Priznaky ([`flags`]); nezname bity se ignoruji.
+    pub flags: u32,
     argc: u32,
     envc: u32,
     /// Retezce za `cwd` (argumenty, pak prostredi).
@@ -77,14 +94,15 @@ impl<'a> Params<'a> {
     /// velikosti z hlavicky; data za ni se ignoruji).
     pub fn parse(data: &'a [u8]) -> Option<Self> {
         let data = data.get(..Self::size(data)?)?;
-        let argc = u32_at(data, 12)?;
-        let envc = u32_at(data, 16)?;
+        let flags = u32_at(data, 12)?;
+        let argc = u32_at(data, 16)?;
+        let envc = u32_at(data, 20)?;
         let (cwd, rest) = take(data.get(HEADER_SIZE..)?)?;
         let mut check = rest;
         for _ in 0..u64::from(argc) + u64::from(envc) {
             check = take(check)?.1;
         }
-        Some(Self { cwd, argc, envc, rest })
+        Some(Self { cwd, flags, argc, envc, rest })
     }
 
     /// Argumenty (prvni je obvykle jmeno programu).
@@ -132,6 +150,7 @@ pub fn encoded_len<'s>(cwd: &[u8], args: impl IntoIterator<Item = &'s [u8]>, env
 /// spatna velikost nebo prilis mnoho polozek.
 pub fn encode<'s>(
     out: &mut [u8],
+    flags: u32,
     cwd: &'s [u8],
     args: impl IntoIterator<Item = &'s [u8]> + Clone,
     env: impl IntoIterator<Item = &'s [u8]> + Clone,
@@ -145,8 +164,9 @@ pub fn encode<'s>(
     out[4..8].copy_from_slice(&VERSION.to_le_bytes());
     let size = u32::try_from(out.len()).ok()?;
     out[8..12].copy_from_slice(&size.to_le_bytes());
-    out[12..16].copy_from_slice(&argc.to_le_bytes());
-    out[16..20].copy_from_slice(&envc.to_le_bytes());
+    out[12..16].copy_from_slice(&flags.to_le_bytes());
+    out[16..20].copy_from_slice(&argc.to_le_bytes());
+    out[20..24].copy_from_slice(&envc.to_le_bytes());
     let mut at = HEADER_SIZE;
     for s in core::iter::once(cwd).chain(args).chain(env) {
         out[at..at + 4].copy_from_slice(&u32::try_from(s.len()).ok()?.to_le_bytes());

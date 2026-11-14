@@ -51,7 +51,12 @@ switch `fsd` to debug mode (power-loss simulation for the FS tests).
    producer channels with an identity; fsd gets a producer channel, the
    supervisor reports service state after every round (at most 2 s),
    applications with a window are reported together with their job,
-8. in the normal run the GUI (`compd`, the windows `gui-term` and
+8. `launchd` (the launcher service for `std::process`, see
+   [Rust std](rust-std.md#processes-stdprocess)) right after `taskd`: it
+   gets only the initfs image; init holds its control channel and mints
+   client channels for applications (tag `LAUNCH`); the supervisor watches
+   it, no restart yet **[implemented]**,
+9. in the normal run the GUI (`compd`, the windows `gui-term` and
    `gui-demo`), without a GUI the fallback console (see
    [Terminal](#terminal)).
 

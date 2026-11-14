@@ -23,6 +23,9 @@ pub mod env;
 pub mod fs;
 pub mod futex;
 pub mod heap;
+pub mod net;
+pub mod pipe;
+pub mod process;
 pub mod start;
 pub mod stdio;
 pub mod thread;
@@ -36,6 +39,36 @@ pub type Result<T> = core::result::Result<T, Error>;
 
 /// Ukonci proces s navratovym kodem.
 pub fn exit(code: i32) -> ! {
+    run_at_exit();
+    libos::sys::process_exit(i64::from(code))
+}
+
+/// Funkce volane pri ukonceni procesu (`exit`, navrat z `main`): C
+/// `atexit` a vyprazdneni bufferu stdio knihovny `cstd`. Volaji se v
+/// obracenem poradi registrace, kazda jednou.
+static AT_EXIT: libos::sync::Mutex<alloc::vec::Vec<extern "C" fn()>> = libos::sync::Mutex::new(alloc::vec::Vec::new());
+
+/// Zaregistruje funkci pro ukonceni procesu; `false` = moc registraci.
+pub fn at_exit(f: extern "C" fn()) -> bool {
+    let mut v = AT_EXIT.lock();
+    // C pozaduje aspon 32; vic nedovolime (ochrana pred smyckou).
+    if v.len() >= 1024 {
+        return false;
+    }
+    v.push(f);
+    true
+}
+
+fn run_at_exit() {
+    loop {
+        // Zamek se pred volanim uvolni: funkce smi registrovat dalsi.
+        let Some(f) = AT_EXIT.lock().pop() else { break };
+        f();
+    }
+}
+
+/// Ukonci proces bez funkci `at_exit` (C `_Exit`).
+pub fn exit_now(code: i32) -> ! {
     libos::sys::process_exit(i64::from(code))
 }
 

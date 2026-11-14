@@ -28,6 +28,10 @@
 //!
 //! [[network.listen]]
 //! ports = "8080"
+//!
+//! [[command]]                      # prikaz terminalu (registr prikazu)
+//! name = "rg"                      # jmeno pro `Command::new` a shell
+//! program = "rg"                   # program balicku (vychozi tento)
 //! ```
 //!
 //! Prava site (`rights`): `info`, `tcp`, `listen`, `udp`, `dns`, `ping`,
@@ -82,6 +86,25 @@ pub struct Manifest {
     /// `[app] jit = true`: program smi spoustet pamet bez pecete (JIT,
     /// napr. prohlizec, .NET). Vychozi ne.
     pub jit: bool,
+    /// Prikazy terminalu, ktere program (balicek) poskytuje.
+    pub commands: Vec<CommandDecl>,
+}
+
+/// Prikaz terminalu z `[[command]]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandDecl {
+    /// Jmeno prikazu (`a-z 0-9 . _ -`, zacina pismenem nebo cislici).
+    pub name: String,
+    /// Program, ktery prikaz spusti (`None` = program manifestu).
+    pub program: Option<String>,
+}
+
+/// Platne jmeno prikazu.
+pub fn valid_command_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.as_bytes()[0].is_ascii_alphanumeric()
+        && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b))
 }
 
 impl Manifest {
@@ -104,12 +127,28 @@ impl Manifest {
             None => None,
             Some(n) => Some(network(n, id)?),
         };
+        let mut commands: Vec<CommandDecl> = Vec::new();
+        for c in t.tables("command") {
+            let name = c.get_str("name").ok_or_else(|| err("command: chybi name"))?;
+            if !valid_command_name(name) {
+                return Err(err("command.name: jen a-z 0-9 . _ - (nejvys 64)"));
+            }
+            if commands.iter().any(|x| x.name == name) {
+                return Err(err("command.name: opakovane jmeno"));
+            }
+            let program = c.get_str("program").map(String::from);
+            if program.as_deref().is_some_and(|p| p.is_empty() || p.contains('/')) {
+                return Err(err("command.program: jmeno programu balicku bez cesty"));
+            }
+            commands.push(CommandDecl { name: String::from(name), program });
+        }
         Ok(Self {
             id: String::from(id),
             name: String::from(name),
             limits,
             network,
             jit: t.get_bool("app.jit").unwrap_or(false),
+            commands,
         })
     }
 }

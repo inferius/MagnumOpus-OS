@@ -7,9 +7,10 @@ This page describes how C plugs into the build, what it stands on (the
 `cstd` library) and how its safety is guarded.
 
 > **Status:** done: compilation (clang, `libs/cbuild`), the libc base
-> (`libs/cstd`: strings, memory, ctype, `printf` to the log, stack
-> protection) and the first user, ACPICA. Files (`fopen`), threads and time
-> are not in the libc yet.
+> (`libs/cstd-core`: strings, memory, ctype, `printf` to the log, stack
+> protection) and the first user, ACPICA. For applications with std the
+> POSIX layer (`FILE` files, `errno`, `atexit`) is in the [cstd](cstd.md)
+> library **[verified in QEMU]**; threads and time are not in the libc yet.
 
 ## How C plugs into the build
 
@@ -23,7 +24,7 @@ This page describes how C plugs into the build, what it stands on (the
 <rect class="box" x="550" y="20" width="220" height="80" rx="6"/><text class="t b" x="660" y="45" text-anchor="middle">libacpica.a</text><text class="m" x="660" y="64" text-anchor="middle">llvm-ar, in OUT_DIR</text><text class="m" x="660" y="80" text-anchor="middle">cargo:rustc-link-lib</text>
 <path class="ln" d="M660 100 L660 150" marker-end="url(#pe1)"/>
 <rect class="ok" x="430" y="152" width="340" height="80" rx="6"/><text class="t b" x="600" y="177" text-anchor="middle">program (rust-lld)</text><text class="m" x="600" y="196" text-anchor="middle">Rust code + C library + cstd</text><text class="m" x="600" y="212" text-anchor="middle">+ compiler_builtins (memcpy, memset)</text>
-<rect class="box" x="10" y="152" width="380" height="80" rx="6"/><text class="t b" x="200" y="177" text-anchor="middle">libs/cstd (Rust, C ABI)</text><text class="m" x="200" y="196" text-anchor="middle">include/*.h: string, stdlib, ctype, stdio, assert</text><text class="m" x="200" y="212" text-anchor="middle">strlen, malloc, printf, __stack_chk_*</text>
+<rect class="box" x="10" y="152" width="380" height="80" rx="6"/><text class="t b" x="200" y="177" text-anchor="middle">libs/cstd-core (Rust, C ABI)</text><text class="m" x="200" y="196" text-anchor="middle">include/*.h: string, stdlib, ctype, stdio, assert</text><text class="m" x="200" y="212" text-anchor="middle">strlen, malloc, printf, __stack_chk_*</text>
 <path class="ln" d="M390 192 L428 192" marker-end="url(#pe1)"/>
 </svg>
 <figcaption>C is compiled in the build.rs of the crate that contains it; the resulting static library is linked with the program together with cstd.</figcaption>
@@ -39,7 +40,8 @@ This page describes how C plugs into the build, what it stands on (the
    program using the crate. rust-lld links it together with the Rust code.
 4. Functions the C code needs from the system are provided by Rust with the
    C ABI (`#[unsafe(no_mangle)] extern "C"`): the C library is
-   `libs/cstd`, OS services come from the particular program (ACPICA:
+   `libs/cstd-core` (no_std services) or `libs/cstd` (applications with
+   std, [cstd](cstd.md)), OS services come from the particular program (ACPICA:
    `user/acpid/src/osl`).
 
 Only what changed is recompiled (file time against the `.o`); changing the
@@ -63,7 +65,7 @@ fn main() {
     cbuild::Build::new("foo")
         .trust(cbuild::Trust::Own)          // own code: warnings = errors
         .include("include")
-        .include("../cstd/include")         // the system libc
+        .include("../cstd-core/include")    // the system libc (no_std service)
         .file("c/foo.c")
         .compile();
 }
@@ -71,7 +73,7 @@ fn main() {
 
 ```toml
 [dependencies]
-cstd = { path = "../cstd" }                # the C library gets linked in
+cstd = { package = "cstd-core", path = "../cstd-core" }  # the C library gets linked in
 
 [build-dependencies]
 cbuild = { path = "../cbuild" }
@@ -86,9 +88,10 @@ changed), and vendored headers included from own code via
 | Flag | Why |
 |---|---|
 | `--target=x86_64-unknown-none-elf` / `aarch64-unknown-none-elf` | the same ABI as the Rust targets (ELF, no OS) |
-| `-mgeneral-regs-only` | programs are soft-float (no FPU/SIMD), like the Rust code |
+| `-mgeneral-regs-only` | services are soft-float (no FPU/SIMD), like the Rust code |
 | `-mno-red-zone`, `-mcmodel=small` (x86) | the same model as the Rust target |
 | `-mstrict-align` (aarch64) | as the Rust target; an unaligned device register access = exception |
+| applications with std (`*-unknown-magnumopus`) | without `-mgeneral-regs-only` and `-mstrict-align` (hard-float SSE2 / NEON like the Rust target), plus `-ftls-model=local-exec` (`_Thread_local` and `errno` in the program TLS), `-mcmodel=small` on x86_64; see [cstd](cstd.md) |
 | `-ffreestanding -nostdlibinc` | no host headers (Windows SDK, glibc), only clang's and cstd |
 | `-fno-pic -fno-common -ffunction-sections -fdata-sections` | static programs, the linker drops unused functions |
 | `-O2` | an AML interpreter and similar code is many times slower unoptimised |
@@ -113,10 +116,14 @@ To consider next: `-fsanitize=bounds -fsanitize-trap` (array bounds without
 a runtime library; ACPICA has variable-length arrays declared as `[1]`,
 needs checking), CFI (`-fsanitize=cfi` needs LTO).
 
-## The `cstd` library
+## The `cstd-core` library
+
+The base shared by no_std services and applications; the POSIX layer for
+applications with std is described in [cstd](cstd.md).
+
 
 The base of our own libc, written in Rust (tested on the host:
-`cargo test -p cstd`). The headers are in `libs/cstd/include`; the types
+`cargo test -p cstd-core`). The headers are in `libs/cstd-core/include`; the types
 `stddef.h`, `stdint.h`, `stdarg.h`, `stdbool.h` and `limits.h` come from
 clang.
 
@@ -142,10 +149,9 @@ Floating point is not there yet (programs have no FPU; `?` is printed).
 
 ### Plan: our own libc and porting more C
 
-- **libc over libos** (the languages milestone): files (`FILE`, `fopen`
-  over fsd), `errno`, time, threads (`pthread` over `libos::thread`),
-  `qsort`, `bsearch`, floating point. Built on the same headers and the
-  same approach (Rust with the C ABI, headers in `include`).
+- **The libc for applications** is [cstd](cstd.md) over Rust std (part 1:
+  `FILE`, `errno`, `atexit`, `getenv`); further parts (threads, fd
+  numbers, time, floating point) are in its plan.
 - **DRM drivers from Linux**: the compatibility layer (`linux/*.h` onto
   system primitives) will be another crate with a `build.rs` via `cbuild`;
   the driver will run as a userspace process like other drivers.

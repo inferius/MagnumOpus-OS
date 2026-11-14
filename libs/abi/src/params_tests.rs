@@ -4,7 +4,7 @@ use crate::params::{Params, encode, encoded_len};
 
 fn build(cwd: &[u8], args: &[&[u8]], env: &[&[u8]]) -> Vec<u8> {
     let mut out = vec![0; encoded_len(cwd, args.iter().copied(), env.iter().copied())];
-    encode(&mut out, cwd, args.iter().copied(), env.iter().copied()).unwrap();
+    encode(&mut out, 0, cwd, args.iter().copied(), env.iter().copied()).unwrap();
     out
 }
 
@@ -35,11 +35,11 @@ fn corrupted_rejected() {
     }
     // Pocet polozek vetsi nez data.
     let mut bad = data.clone();
-    bad[12] = 200;
+    bad[16] = 200;
     assert!(Params::parse(&bad).is_none());
     // Delka retezce za koncem.
     let mut bad = data.clone();
-    bad[20] = 0xFF;
+    bad[24] = 0xFF;
     assert!(Params::parse(&bad).is_none());
     let mut bad = data;
     bad[0] = b'X';
@@ -58,5 +58,20 @@ fn trailing_data_ignored() {
 #[test]
 fn wrong_output_size() {
     let mut out = [0u8; 10];
-    assert!(encode(&mut out, b"/", [&b"a"[..]], []).is_none());
+    assert!(encode(&mut out, 0, b"/", [&b"a"[..]], []).is_none());
+}
+
+#[test]
+fn flags_roundtrip() {
+    let cwd = b"/";
+    let mut out = vec![0; encoded_len(cwd, [], [])];
+    encode(&mut out, crate::params::flags::STDOUT_NULL, cwd, [], []).unwrap();
+    assert_eq!(Params::parse(&out).unwrap().flags, crate::params::flags::STDOUT_NULL);
+}
+
+#[test]
+fn old_version_rejected() {
+    let mut data = build(b"/", &[], &[]);
+    data[4] = 1;
+    assert!(Params::parse(&data).is_none());
 }

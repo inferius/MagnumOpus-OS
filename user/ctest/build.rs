@@ -1,0 +1,11 @@
+//! Preklad testu v C (`c/ctest.c`) s hlavickami cstd (`DEP_CSTD_INCLUDE`).
+
+fn main() {
+    let includes = std::env::var("DEP_CSTD_INCLUDE").expect("cstd predava adresare hlavicek");
+    let mut b = cbuild::Build::new("ctest").trust(cbuild::Trust::Own).file("c/ctest.c");
+    for dir in includes.split(';') {
+        b = b.include(dir);
+    }
+    b.compile();
+    println!("cargo::rerun-if-changed=c/ctest.c");
+}

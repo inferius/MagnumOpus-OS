@@ -15,6 +15,6 @@ bench = false
 libos = { path = "../../libs/libos" }
 abi = { workspace = true }
 acpica = { path = "../../libs/acpica" }
-cstd = { path = "../../libs/cstd" }
+cstd = { package = "cstd-core", path = "../../libs/cstd-core" }
 powerproto = { path = "../../libs/powerproto" }
 spin = "0.12"

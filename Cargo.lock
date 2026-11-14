@@ -68,7 +68,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "cbuild",
- "cstd",
+ "cstd-core",
 ]
 
 [[package]]
@@ -77,7 +77,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "acpica",
- "cstd",
+ "cstd-core",
  "libos",
  "powerproto",
  "spin 0.12.3",
@@ -256,6 +256,12 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "base64ct"
@@ -651,6 +657,21 @@ version = "0.1.0"
 [[package]]
 name = "cstd"
 version = "0.1.0"
+dependencies = [
+ "cstd-core",
+]
+
+[[package]]
+name = "cstd-core"
+version = "0.1.0"
+
+[[package]]
+name = "ctest"
+version = "0.1.0"
+dependencies = [
+ "cbuild",
+ "cstd",
+]
 
 [[package]]
 name = "ctr"
@@ -1679,6 +1700,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "launchd"
+version = "0.1.0"
+dependencies = [
+ "fsproto",
+ "launchproto",
+ "libos",
+ "manifest",
+ "netproto",
+]
+
+[[package]]
+name = "launchproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "rustc-std-workspace-alloc",
+ "rustc-std-workspace-core",
+ "wire",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1844,6 +1886,8 @@ dependencies = [
  "abi",
  "aes-siv",
  "libos",
+ "rustc-std-workspace-alloc",
+ "rustc-std-workspace-core",
  "wire",
 ]
 
@@ -1980,7 +2024,9 @@ dependencies = [
  "abi",
  "dlmalloc",
  "fsproto",
+ "launchproto",
  "libos",
+ "netproto",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
 ]
@@ -2033,9 +2079,15 @@ version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d30c53c26bc5b31a98cd02d20f25a7c8567146caf63ed593a9d87b2775291be"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "serde_core",
 ]
+
+[[package]]
+name = "percent-encoding"
+version = "2.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pin-project-lite"
@@ -2687,6 +2739,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
+name = "std-http"
+version = "0.1.0"
+dependencies = [
+ "ureq",
+]
+
+[[package]]
+name = "std-net"
+version = "0.1.0"
+
+[[package]]
+name = "std-proc"
+version = "0.1.0"
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3114,6 +3181,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
+name = "ureq"
+version = "3.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ac5cecf619ca81f66a96482db09687c9f7465af65f4300a8c30cca05bd5a59d"
+dependencies = [
+ "base64 0.23.1",
+ "log",
+ "percent-encoding",
+ "ureq-proto",
+ "utf8-zero",
+]
+
+[[package]]
+name = "ureq-proto"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "622dce33c252115466d83f63e9744a18f12b4406aae51a01c15ad8fcf1185eb3"
+dependencies = [
+ "base64 0.23.1",
+ "http",
+ "httparse",
+ "log",
+]
+
+[[package]]
 name = "usb-hid"
 version = "0.1.0"
 dependencies = [
@@ -3157,6 +3249,12 @@ version = "0.1.0"
 dependencies = [
  "inputproto",
 ]
+
+[[package]]
+name = "utf8-zero"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8c0a043c9540bae7c578c88f91dda8bd82e59ae27c21baca69c8b191aaf5a6e"
 
 [[package]]
 name = "venus"

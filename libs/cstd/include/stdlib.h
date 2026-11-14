@@ -1,25 +1,18 @@
-/* stdlib.h - pamet, prevody cisel, abort (cstd). */
-#ifndef _STDLIB_H
-#define _STDLIB_H
+/* stdlib.h - konec procesu a prostredi (cstd nad std); zaklad v cstd-core. */
+#ifndef _CSTD_POSIX_STDLIB_H
+#define _CSTD_POSIX_STDLIB_H
 
-#include <stddef.h>
-#include "_cstd.h"
+#include_next <stdlib.h>
 
 _CSTD_BEGIN
 
-void *malloc(size_t size);
-void *calloc(size_t count, size_t size);
-void *realloc(void *p, size_t size);
-void free(void *p);
+#define EXIT_SUCCESS 0
+#define EXIT_FAILURE 1
 
-unsigned long strtoul(const char *s, char **end, int base);
-unsigned long long strtoull(const char *s, char **end, int base);
-long strtol(const char *s, char **end, int base);
-long long strtoll(const char *s, char **end, int base);
-int atoi(const char *s);
-int abs(int v);
-
-_CSTD_NORETURN void abort(void);
+_CSTD_NORETURN void exit(int code);
+_CSTD_NORETURN void _Exit(int code);
+int atexit(void (*f)(void));
+char *getenv(const char *name);
 
 _CSTD_END
 

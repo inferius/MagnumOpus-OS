@@ -104,6 +104,27 @@ fn threads() -> Check {
     Ok(())
 }
 
+/// Opravneni: `readonly` z ucinnych prav, rozsireni pro ACL
+/// (`std::os::magnumopus::fs`).
+fn acl(path: &std::path::Path, meta: &fs::Metadata) -> Check {
+    use std::os::magnumopus::fs::{Acl, Grant, MetadataExt, access, rights, set_acl, EVERYONE};
+    ensure(!meta.permissions().readonly(), "vlastni soubor je jen pro cteni")?;
+    ensure(meta.rights() & rights::WRITE != 0, format!("prava {:#x}", meta.rights()))?;
+    let mut p = meta.permissions();
+    p.set_readonly(true);
+    ensure(
+        fs::set_permissions(path, p).map_err(|e| e.kind()) == Err(std::io::ErrorKind::Unsupported),
+        "set_permissions ma vratit Unsupported (prava jdou pres ACL)",
+    )?;
+    let before = access(path).map_err(|e| format!("access: {e}"))?;
+    let want = Acl { protected: false, grants: vec![Grant { who: EVERYONE, rights: rights::READ, flags: 1 }] };
+    set_acl(path, Some(&want)).map_err(|e| format!("set_acl: {e}"))?;
+    let after = access(path).map_err(|e| format!("access po set_acl: {e}"))?;
+    ensure(after.acl.as_ref() == Some(&want), format!("ACL po nastaveni: {:?}", after.acl))?;
+    set_acl(path, before.acl.as_ref()).map_err(|e| format!("set_acl zpet: {e}"))?;
+    ensure(access(path).map_err(|e| e.to_string())?.acl == before.acl, "ACL po vraceni")
+}
+
 fn files() -> Check {
     let base = PathBuf::from(std::env::var("HELLO_DIR").map_err(|_| "chybi HELLO_DIR")?);
     let dir = base.join("hello-std");
@@ -116,6 +137,7 @@ fn files() -> Check {
     ensure(back == text, format!("obsah: {} B misto {}", back.len(), text.len()))?;
     let meta = fs::metadata(&path).map_err(|e| format!("metadata: {e}"))?;
     ensure(meta.is_file() && meta.len() == text.len() as u64, format!("metadata: {meta:?}"))?;
+    acl(&path, &meta)?;
 
     // Pozice, dopsani, zkraceni.
     let mut f = fs::OpenOptions::new().read(true).write(true).open(&path).map_err(|e| format!("open: {e}"))?;

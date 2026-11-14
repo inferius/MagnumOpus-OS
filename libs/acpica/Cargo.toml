@@ -9,7 +9,7 @@ build = "build.rs"
 links = "acpica"
 
 [dependencies]
-cstd = { path = "../cstd" }
+cstd = { package = "cstd-core", path = "../cstd-core" }
 abi = { workspace = true }
 
 [build-dependencies]

@@ -30,6 +30,7 @@ mod nethelper;
 mod dnshelper;
 mod ntshelper;
 mod revhelper;
+mod ports;
 mod stdsys;
 mod webhelper;
 mod powertest;
@@ -57,6 +58,8 @@ prikazy:
   build    prelozi kernel, loader a programy userspace (i aplikace se std)
   std      jen std pro aplikace: zdroje s lepidlem a sysroot pro --arch
            (docs/cs/rust-std.md)
+  std-patch  upravy v target/std-src/<nightly>/library ulozi zpet do
+           third_party/rust-std/std.patch
   image    build + vytvori target/os-<arch>-<profil>.img (GPT, ESP FAT32)
   run      image + spusti QEMU (x86_64: q35 + OVMF, aarch64: virt + edk2)
   test     testy knihoven na hostiteli, kontrola prekladu jadra pro ostatni
@@ -380,6 +383,7 @@ fn run_cli() -> Result<()> {
 
     match command.to_str() {
         Some("build") => build(&opts).map(|_| ()),
+        Some("std-patch") => stdsys::save_patch().map(|p| println!("xtask: patch std ulozen do {}", p.display())),
         Some("std") => stdsys::build_sysroot(opts.arch).map(|p| println!("xtask: sysroot std {}", p.display())),
         Some("image") => build(&opts).and_then(|a| image_for(&a, &opts)).map(|_| ()),
         Some("run") => {
@@ -647,6 +651,12 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "manifest",
             "--package",
+            "launchproto",
+            "--package",
+            "cstd-core",
+            "--package",
+            "cstd",
+            "--package",
             "netfilter",
             "--package",
             "guiproto",
@@ -837,6 +847,7 @@ const USER_PROGRAMS: &[&str] = &[
     "termd",
     "shsess",
     "taskd",
+    "launchd",
     "console",
     "virtio-net",
     "e1000e",
@@ -893,6 +904,7 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("files-copy.manifest.toml", "user/files-copy/files-copy.manifest.toml"),
     ("gui-install.manifest.toml", "user/gui-install/gui-install.manifest.toml"),
     ("agentd.manifest.toml", "user/agentd/agentd.manifest.toml"),
+    ("std-proc.manifest.toml", "user/std-proc/std-proc.manifest.toml"),
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
@@ -1013,6 +1025,11 @@ fn build(opts: &Options) -> Result<Artifacts> {
         let data = std::fs::read(user_bin.join(name))
             .map_err(|e| format!("nelze cist program {name}: {e}"))?;
         files.push((name.to_string(), loadable_only(&data)));
+    }
+    // Prevzate aplikace (ripgrep, ...) bez uprav: overeni std v praxi.
+    for (name, path) in ports::build(a)? {
+        let data = std::fs::read(&path).map_err(|e| format!("nelze cist port {name}: {e}"))?;
+        files.push((name, loadable_only(&data)));
     }
     for name in stdsys::STD_PROGRAMS {
         let data = std::fs::read(std_bin.join(name))

@@ -124,44 +124,86 @@ fn read_stream(ch: &Channel, deadline: u64) -> Result<Vec<u8>, String> {
     }
 }
 
+/// Vysledek behu aplikace se std.
+pub(super) struct Run {
+    pub code: i64,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Spusti aplikaci `name` z initfs s argumenty, prostredim, stdout/stderr
+/// jako kanaly proudu a dalsimi handly (`extra`, napr. relace FS a site);
+/// pocka na konec a vrati vystup (radky stdout vypise do logu).
+pub(super) fn run_std_app(
+    s: &Startup,
+    name: &str,
+    args: &[&str],
+    env: &[&str],
+    extra: Vec<StartHandle>,
+    limit: Duration,
+) -> Result<Run, String> {
+    let initfs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
+    let image = initfs.find(name).ok_or_else(|| format!("{name} neni v initfs"))?;
+    let params = Params {
+        cwd: b"/".to_vec(),
+        args: core::iter::once(name).chain(args.iter().copied()).map(|a| a.as_bytes().to_vec()).collect(),
+        env: env.iter().map(|e| e.as_bytes().to_vec()).collect(),
+        flags: 0,
+    };
+    let (out, out_child) = Channel::create().map_err(|e| fail("kanal stdout", e))?;
+    let (err, err_child) = Channel::create().map_err(|e| fail("kanal stderr", e))?;
+    let mut handles = vec![
+        params.start_handle().map_err(|e| fail("blok parametru", e))?,
+        StartHandle::tagged(tag::STDOUT, out_child.into_handle()),
+        StartHandle::tagged(tag::STDERR, err_child.into_handle()),
+    ];
+    handles.extend(extra);
+    let (process, _bootstrap) = libos::spawn(name, image, handles).map_err(|e| fail("spusteni", e))?;
+    let deadline = time::deadline_after(limit);
+    let stdout = read_stream(&out, deadline)?;
+    let code = process.wait_exit(Some(deadline)).map_err(|e| fail("konec procesu", e))?;
+    let stderr = read_stream(&err, time::deadline_after(Duration::from_secs(1))).unwrap_or_default();
+    let run = Run {
+        code,
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+    };
+    for line in run.stdout.lines() {
+        libos::println!("init: {name}: {line}");
+    }
+    Ok(run)
+}
+
+impl Run {
+    /// Uspech = kod 0, posledni radek `<jmeno>: hotovo` a vsechna `ok <x>`.
+    pub(super) fn expect(&self, name: &str, oks: &[&str]) -> TestResult {
+        if self.code != 0 || !self.stdout.contains(&format!("{name}: hotovo")) {
+            return Err(format!("kod {}; stderr: {}; stdout: {}", self.code, self.stderr.trim(), self.stdout.trim()));
+        }
+        for ok in oks {
+            check!(self.stdout.contains(&format!("ok {ok}
+")), format!("chybi ok {ok}"));
+        }
+        Ok(())
+    }
+}
+
 fn hello_std(s: &Startup) -> TestResult {
     let fs = devices().and_then(|d| d.fs.as_ref()).ok_or("sluzba fsd nebezi")?;
-    let initfs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
-    let image = initfs.find("hello-std").ok_or("hello-std neni v initfs")?;
     match fs.create("/std-test", fsproto::kind::DIR) {
         Ok(()) | Err(Error::AlreadyExists) => {}
         Err(e) => return Err(fail("adresar /std-test", e)),
     }
     let own = fs.connect().map_err(|e| fail("relace fsd", e))?;
-    let params = Params {
-        cwd: b"/".to_vec(),
-        args: vec![b"hello-std".to_vec(), b"alfa".to_vec(), b"beta".to_vec()],
-        env: vec![b"HELLO=svet".to_vec(), b"HELLO_DIR=/std-test".to_vec()],
-    };
-    let (out, out_child) = Channel::create().map_err(|e| fail("kanal stdout", e))?;
-    let (err, err_child) = Channel::create().map_err(|e| fail("kanal stderr", e))?;
-    let handles = vec![
-        params.start_handle().map_err(|e| fail("blok parametru", e))?,
-        StartHandle::tagged(tag::STDOUT, out_child.into_handle()),
-        StartHandle::tagged(tag::STDERR, err_child.into_handle()),
-        StartHandle::tagged(tag::FS, own.into_channel().into_handle()),
-    ];
-    let (process, _bootstrap) = libos::spawn("hello-std", image, handles).map_err(|e| fail("spusteni", e))?;
-    let deadline = time::deadline_after(Duration::from_secs(120));
-    let stdout = read_stream(&out, deadline)?;
-    let code = process.wait_exit(Some(deadline)).map_err(|e| fail("konec procesu", e))?;
-    let stderr = read_stream(&err, time::deadline_after(Duration::from_secs(1))).unwrap_or_default();
-    let stdout = String::from_utf8_lossy(&stdout);
-    let stderr = String::from_utf8_lossy(&stderr);
-    for line in stdout.lines() {
-        libos::println!("init: hello-std: {line}");
-    }
-    if code != 0 || !stdout.contains("hello-std: hotovo") {
-        return Err(format!("kod {code}; stderr: {}; stdout: {}", stderr.trim(), stdout.trim()));
-    }
-    for name in ["args_env", "time", "hashmap", "threads", "files"] {
-        check!(stdout.contains(&format!("ok {name}\n")), format!("chybi ok {name}"));
-    }
-    check!(stdout.contains("argumenty: alfa beta"), "argumenty ve vystupu");
+    let run = run_std_app(
+        s,
+        "hello-std",
+        &["alfa", "beta"],
+        &["HELLO=svet", "HELLO_DIR=/std-test"],
+        vec![StartHandle::tagged(tag::FS, own.into_channel().into_handle())],
+        Duration::from_secs(120),
+    )?;
+    run.expect("hello-std", &["args_env", "time", "hashmap", "threads", "files"])?;
+    check!(run.stdout.contains("argumenty: alfa beta"), "argumenty ve vystupu");
     Ok(())
 }

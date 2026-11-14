@@ -31,7 +31,7 @@ fn main() {
     let mut sources = Vec::new();
     c_files(&root.join("components"), &mut sources);
     let include = root.join("include");
-    let cstd = here.join("../cstd/include");
+    let cstd = here.join("../cstd-core/include");
     let own = here.join("include");
 
     cbuild::Build::new("acpica")

@@ -1,0 +1,20 @@
+[package]
+name = "cstd-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Jadro knihovny C (no_std): retezce, pamet, ctype, formatovani, printf do logu pro sluzby, ochrana zasobniku"
+
+[lib]
+# Testy formatovani a retezcu bezi na hostiteli (`cargo test -p cstd`).
+test = true
+
+[features]
+# Vystup pro sluzby no_std: printf/puts/putchar do logu programu
+# (`set_output`), abort a assert pres paniku. Aplikace se std je maji
+# v `libs/cstd` (stdio, stderr) a pouzivaji cstd-core bez teto feature.
+default = ["service-io"]
+service-io = []
+
+[dependencies]

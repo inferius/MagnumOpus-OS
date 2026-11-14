@@ -30,6 +30,7 @@ mod fsd;
 mod gui;
 mod input;
 mod install;
+mod launch;
 mod logd;
 mod ntp;
 mod power;
@@ -75,6 +76,16 @@ fn main(startup: Startup) -> i64 {
             }
         }
         Err(e) => println!("init: sluzbu uloh (taskd) nelze spustit: {e}"),
+    }
+    // Spousteci sluzba pro aplikace (std::process): jen initfs, nic dalsiho
+    // nepotrebuje.
+    match launch::start(&startup) {
+        Ok(()) => {
+            if let Some(l) = launch::LAUNCH.lock().as_ref() {
+                sup.watch("launchd", &l.process, None);
+            }
+        }
+        Err(e) => println!("init: spousteci sluzbu (launchd) nelze spustit: {e}"),
     }
     // Sluzba ACPI (napajeni, tlacitka): co nejdriv, inicializace ACPICA
     // bezi soubezne se startem ostatnich sluzeb.

@@ -144,7 +144,9 @@ formát `abi::params`) **[ověřeno v QEMU]** (test `std: hello-std:
 argumenty, vlakna, TLS, soubory`). Objekt paměti místo dat zprávy:
 velikost neomezuje limit zprávy kanálu. Standardní handly jdou ve stejné
 zprávě jako `kind::USER` se štítky z `abi::params::tag` (`STDIN`,
-`STDOUT`, `STDERR`, `FS`, `NET`).
+`STDOUT`, `STDERR`, `FS`, `NET`, `LAUNCH` = kanál ke spouštěcí službě
+launchd). Formát v2 má pole příznaků (`abi::params::flags`:
+`STDOUT_NULL`, `STDERR_NULL` = výstup zahodit, `Stdio::null`).
 
 ```rust
 use libos::params::Params;

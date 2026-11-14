@@ -1,0 +1,12 @@
+# Testovaci aplikace std::process: prikaz `std-proc-kid` v registru prikazu
+# launchd. Bez [network]: potomek spusteny pres prikaz sit nedostane ani
+# s CommandExt::network(true).
+[app]
+id = "org.magnumopus.std-proc"
+name = "Test procesu std"
+
+[limits]
+memory = "64M"
+
+[[command]]
+name = "std-proc-kid"

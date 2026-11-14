@@ -4,10 +4,19 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "Zaklad vlastni knihovny C: retezce, pamet, ctype, printf do logu, ochrana zasobniku"
+# Hlavicky pro build.rs programu v C: promenna DEP_CSTD_INCLUDE (build.rs).
+links = "cstd"
+description = "Knihovna C a vrstva POSIX pro aplikace se std (cil magnumopus): stdio, errno, exit, getenv, ..."
 
 [lib]
-# Testy formatovani a retezcu bezi na hostiteli (`cargo test -p cstd`).
+# Logika (prevody chyb, rezimy fopen) se testuje na hostiteli; symboly C
+# se exportuji jen na cili magnumopus.
 test = true
 
 [dependencies]
+# Retezce, ctype, malloc (nad alokatorem std), snprintf a SSP bez vystupu
+# do logu (ten maji jen sluzby no_std).
+cstd-core = { path = "../cstd-core", default-features = false }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("magnumopus"))'] }

@@ -1,0 +1,15 @@
+[package]
+name = "std-net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Test std::net (cil magnumopus) proti pomocnym serverum xtasku"
+
+[[bin]]
+name = "std-net"
+test = false
+bench = false
+
+# Jen std. Sestavuje `cargo xtask build` (stdsys::STD_PROGRAMS).
+[dependencies]

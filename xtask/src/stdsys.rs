@@ -27,7 +27,7 @@ use crate::{Options, Result, target_dir, workspace_root};
 
 /// Aplikace se std, ktere se pribali do initfs (jmeno crate = jmeno
 /// souboru).
-pub const STD_PROGRAMS: &[&str] = &["hello-std"];
+pub const STD_PROGRAMS: &[&str] = &["hello-std", "std-net", "std-proc", "std-http", "ctest"];
 
 /// Pripnuty nightly z `rust-toolchain.toml` (cesty std-src a sysrootu).
 fn nightly() -> Result<String> {
@@ -117,7 +117,12 @@ pub fn prepare_sources() -> Result<PathBuf> {
         if st.success() { Ok(()) } else { Err(format!("git {} selhal", args.join(" ")).into()) }
     };
     git(&["init", "-q"])?;
-    git(&["-c", "core.autocrlf=false", "apply", "--whitespace=nowarn", &patch_path.to_string_lossy()])
+    git(&["config", "core.autocrlf", "false"])?;
+    // Vychozi commit = neupraveny rust-src: `cargo xtask std-patch` pak
+    // ulozi upravy v kopii zpet do patche (`git diff`).
+    git(&["add", "-A"])?;
+    git(&["-c", "user.name=xtask", "-c", "user.email=xtask@localhost", "commit", "-q", "-m", "rust-src"])?;
+    git(&["apply", "--whitespace=nowarn", &patch_path.to_string_lossy()])
         .map_err(|e| format!("{e}: patch std nesedi na rust-src tohoto nightly (aktualizace toolchainu = obnovit patch)"))?;
     // Cesta k osrt v patchi je relativni vuci target/ v repozitari; s jinym
     // CARGO_TARGET_DIR plati absolutni.
@@ -134,8 +139,38 @@ pub fn prepare_sources() -> Result<PathBuf> {
 
 /// Vylucny zamek pripravy std (zdroje, sysroot, aplikace) pro soubezne
 /// behy xtask.
-fn lock_std() -> Result<std::fs::File> {
+pub fn lock_std() -> Result<std::fs::File> {
     crate::lock_shared("std")
+}
+
+/// Ulozi upravy v kopii zdroju std (`target/std-src/<nightly>/library`)
+/// zpet do `third_party/rust-std/std.patch` (vcetne novych souboru).
+/// Postup pri zmene lepidla: upravit kopii, `cargo xtask std` (preklad),
+/// `cargo xtask std-patch`, commit patche.
+pub fn save_patch() -> Result<PathBuf> {
+    // Kopie zdroju je spolecna soubeznym behum (viz `lock_std`).
+    let _lock = lock_std()?;
+    let library = target_dir().join("std-src").join(nightly()?).join("library");
+    let run = |args: &[&str]| -> Result<Vec<u8>> {
+        let out = Command::new("git").args(args).current_dir(&library).output()?;
+        if out.status.success() {
+            Ok(out.stdout)
+        } else {
+            Err(format!("git {} selhal: {}", args.join(" "), String::from_utf8_lossy(&out.stderr)).into())
+        }
+    };
+    run(&["rev-parse", "--verify", "HEAD"]).map_err(|_| "kopie std nema vychozi commit; spust `cargo xtask std` (pripravi ji znovu)")?;
+    run(&["add", "-A"])?;
+    let mut diff = run(&["diff", "--cached", "--binary", "HEAD"])?;
+    // Cesta k osrt v patchi je relativni (viz `prepare_sources`).
+    let osrt = workspace_root().join("libs/osrt").display().to_string().replace('\\', "/");
+    let text = String::from_utf8(diff).map_err(|_| "patch std neni UTF-8")?;
+    diff = text.replace(&format!("path = \"{osrt}\""), "path = \"../../../../../libs/osrt\"").into_bytes();
+    let patch_path = workspace_root().join("third_party/rust-std/std.patch");
+    std::fs::write(&patch_path, &diff)?;
+    // Kopie odpovida novemu patchi: otisk, aby se nepripravovala znovu.
+    std::fs::write(library.parent().unwrap().join("patch.stamp"), patch_fingerprint(&diff))?;
+    Ok(patch_path)
 }
 
 /// Sestavi sysroot std pro architekturu (inkrementalne); vraci cestu
@@ -162,10 +197,17 @@ fn build_sysroot_locked(arch: &Arch) -> Result<PathBuf> {
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .env_remove("RUSTFLAGS")
         .env("CARGO_ENCODED_RUSTFLAGS", ["-Zunstable-options", "-Zforce-unstable-if-unmarked"].join("\u{1f}"))
-        .stdout(Stdio::piped());
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     println!("xtask: std pro {target}");
     let out = cmd.output()?;
     if !out.status.success() {
+        // Hlaseni cargo (chyby prekladu, zamky) ze stdout v JSON i stderr.
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines().filter(|l| l.contains("\"level\":\"error\"") || !l.starts_with('{')) {
+            eprintln!("{line}");
+        }
+        eprintln!("{}", String::from_utf8_lossy(&out.stderr));
         return Err(format!("sestaveni std pro {target} selhalo").into());
     }
     // Soubory knihoven z hlaseni cargo (compiler-artifact, pole filenames).
@@ -221,20 +263,7 @@ pub fn build_apps(programs: &[&str], opts: &Options) -> Result<PathBuf> {
     let arch = opts.arch;
     // Zamek drzi i preklad aplikaci: cte sysroot, ktery jiny beh muze menit.
     let _lock = lock_std()?;
-    let sysroot = build_sysroot_locked(arch)?;
-    let script = workspace_root().join("user/user-std.ld");
-    let fingerprint = std::fs::read_to_string(
-        sysroot.join("lib/rustlib").join(target_name(arch)).join("lib/fingerprint"),
-    )?;
-    let flags = [
-        format!("--sysroot={}", sysroot.display()),
-        format!("-Clink-arg=-T{}", script.display()),
-        String::from("-Zunstable-options"),
-        // Zmena std/osrt = novy otisk = aplikace se prelozi znovu.
-        format!("--cfg=mo_sysroot=\"{fingerprint}\""),
-        String::from("--check-cfg=cfg(mo_sysroot,values(any()))"),
-    ]
-    .join("\u{1f}");
+    let flags = app_rustflags_locked(arch)?;
     let apps_dir = target_dir().join("std-apps");
     let mut cmd = Command::new(cargo());
     cmd.current_dir(workspace_root()).arg("build").arg("--target").arg(target_json(arch)).arg("-Zjson-target-spec");
@@ -252,4 +281,35 @@ pub fn build_apps(programs: &[&str], opts: &Options) -> Result<PathBuf> {
         return Err(format!("build aplikaci se std ({}) selhal", programs.join(", ")).into());
     }
     Ok(apps_dir.join(target_name(arch)).join(if opts.release { "release" } else { "debug" }))
+}
+
+/// Cil JSON (cesta) pro `--target`.
+pub fn target_json_path(arch: &Arch) -> PathBuf {
+    target_json(arch)
+}
+
+/// Prikaz cargo (z promenne `CARGO`).
+pub fn cargo_cmd() -> Command {
+    Command::new(cargo())
+}
+
+/// Priznaky prekladu aplikace se std (`CARGO_ENCODED_RUSTFLAGS`):
+/// sysroot (sestavi ho), linker skript a otisk sysrootu. Volajici drzi
+/// `lock_std` po celou dobu prekladu (sysroot se cte az pri linkovani).
+pub fn app_rustflags_locked(arch: &Arch) -> Result<String> {
+    let sysroot = build_sysroot_locked(arch)?;
+    let script = workspace_root().join("user/user-std.ld");
+    let fingerprint = std::fs::read_to_string(
+        sysroot.join("lib/rustlib").join(target_name(arch)).join("lib/fingerprint"),
+    )?;
+    let flags = [
+        format!("--sysroot={}", sysroot.display()),
+        format!("-Clink-arg=-T{}", script.display()),
+        String::from("-Zunstable-options"),
+        // Zmena std/osrt = novy otisk = aplikace se prelozi znovu.
+        format!("--cfg=mo_sysroot=\"{fingerprint}\""),
+        String::from("--check-cfg=cfg(mo_sysroot,values(any()))"),
+    ]
+    .join("\u{1f}");
+    Ok(flags)
 }

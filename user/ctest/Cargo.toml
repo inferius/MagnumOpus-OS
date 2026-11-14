@@ -1,0 +1,19 @@
+[package]
+name = "ctest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Test knihovny C cstd: program v C nad std (stdio, errno, exit, getenv)"
+
+[[bin]]
+name = "ctest"
+test = false
+bench = false
+
+# Sestavuje `cargo xtask build` (stdsys::STD_PROGRAMS).
+[dependencies]
+cstd = { path = "../../libs/cstd" }
+
+[build-dependencies]
+cbuild = { path = "../../libs/cbuild" }

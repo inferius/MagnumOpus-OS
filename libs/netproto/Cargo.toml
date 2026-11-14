@@ -12,12 +12,16 @@ description = "Protokol site (programy <-> netd, netd <-> ovladac sitove karty)"
 # v xtask.
 default = []
 client = ["dep:libos"]
+# Preklad jako zavislost std (osrt, docs/cs/rust-std.md).
+rustc-dep-of-std = ["dep:core", "dep:alloc", "client", "abi/rustc-dep-of-std", "wire/rustc-dep-of-std", "libos/rustc-dep-of-std"]
 std = []
 # NTS (RFC 8915): zaznamy NTS-KE a rozsireni NTP s AES-SIV (ntpd, testy).
 nts = ["dep:aes-siv"]
 
 [dependencies]
+core = { version = "1.0.0", optional = true, package = "rustc-std-workspace-core" }
+alloc = { version = "1.0.0", optional = true, package = "rustc-std-workspace-alloc" }
 abi = { workspace = true }
 wire = { path = "../wire" }
-libos = { path = "../libos", optional = true }
+libos = { path = "../libos", optional = true, default-features = false }
 aes-siv = { version = "0.7", default-features = false, features = ["alloc"], optional = true }

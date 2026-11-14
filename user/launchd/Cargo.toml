@@ -1,0 +1,18 @@
+[package]
+name = "launchd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "launchd"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+launchproto = { path = "../../libs/launchproto" }
+manifest = { path = "../../libs/manifest" }
+fsproto = { path = "../../libs/fsproto" }
+netproto = { path = "../../libs/netproto", features = ["client"] }

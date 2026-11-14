@@ -327,6 +327,13 @@ N s` ("the network service did not answer request <op> within N s"). The
 channel is then unusable (`BAD_STATE`): a late answer would belong to
 another request.
 
+**Concurrency:** replies carry no request number and netd has only one
+request in progress per channel (session, connection, socket). Two
+threads on the same channel must therefore take turns (std locks it, see
+[Rust std](rust-std.md#network-stdnet)): a read blocked on data delays a
+write on the same connection. `netproto` v2 with request numbers and
+concurrent read, write and accept **[designed]**.
+
 ```rust
 use core::time::Duration;
 use netproto::io::{Read, Write};

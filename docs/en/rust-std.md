@@ -8,18 +8,20 @@ mapping of `std` onto libos and services, what the kernel added for it,
 and the impact on future plans.
 
 > **Status:** design approved on 2026-11-12 (all recommendations, see
-> [Approved decisions](#approved-decisions)). Phase 1 is done:
-> `hello-std` with arguments, threads, TLS and files **[verified in QEMU]**
-> on x86_64 and aarch64 (suite `std`). Network, processes and stdin are
-> the next step.
+> [Approved decisions](#approved-decisions)). Phases 1 and 2 are done:
+> allocation, threads, TLS, files including ACLs, network, processes
+> through `launchd` and crates taken over (ripgrep, ureq)
+> **[verified in QEMU]** on x86_64 and aarch64 (suites `std`, `std sit`,
+> `std procesy`, `std porty`).
 
 ## Goal and scope
 
 - Targets `x86_64-unknown-magnumopus` and `aarch64-unknown-magnumopus`
   (`target_os = "magnumopus"`) **[verified in QEMU]**.
 - `std` on top of libos: allocation, threads, synchronization, TLS, time,
-  files through `fsd`, arguments, environment variables, stdout/stderr
-  **[verified in QEMU]**; network through `netd`, processes and stdin
+  files through `fsd`, arguments, environment variables, stdio, network
+  through `netd`, processes through `launchd` **[verified in QEMU]**;
+  stdin from the terminal, async (tokio) and dynamic libraries
   **[designed]** (per-part status in the
   [mapping](#mapping-std-onto-libos-and-services)).
 - `cargo xtask build` builds std (a sysroot) and the applications and puts
@@ -231,7 +233,7 @@ hello-std: argumenty, vlakna, TLS, soubory` (x86_64 and aarch64).
 | `env::var`, `set_var`, `vars` | parameter block, changes kept in-process | **[verified in QEMU]** hello-std |
 | `env::current_dir` / `set_current_dir` | path in `osrt::env`, relative paths joined in-process (`.` and `..`) | **[verified in QEMU]** hello-std |
 | `io::stdout/stderr` | byte-stream channel; without one the kernel log, line by line | **[verified in QEMU]** hello-std |
-| `io::stdin` | stream channel (`osrt::stdio::read`) | **[implemented]**, termd integration **[designed]** |
+| `io::stdin` | stream channel (`osrt::stdio::read`) | **[verified in QEMU]** std-proc (pipe), termd integration **[designed]** |
 | `time::Instant` | `clock_monotonic` | **[verified in QEMU]** hello-std |
 | `time::SystemTime` | `clock_realtime` (before 1970 = the epoch) | **[verified in QEMU]** hello-std |
 | `thread::spawn`, `join`, `sleep`, `yield_now` | `libos::thread` + a TLS block (`osrt::thread`) | **[verified in QEMU]** hello-std |
@@ -241,10 +243,10 @@ hello-std: argumenty, vlakna, TLS, soubory` (x86_64 and aarch64).
 | `random` (`HashMap` `RandomState`) | `random_get` | **[verified in QEMU]** hello-std |
 | `fs::File` open/read/write/seek/`set_len`/`sync_all`, append | fsproto v2 (session handles; position in `osrt::fs::File`) | **[verified in QEMU]** hello-std |
 | `fs::read_dir`, `metadata`, `create_dir`, `remove_*`, `rename`, `canonicalize` | fsproto (`STAT`, `LIST`, `CREATE`, `REMOVE`, `RENAME`); `canonicalize` = normalization + existence check | **[verified in QEMU]** hello-std (except `canonicalize`) |
-| `fs::Permissions` | only `readonly` from the effective FS rights; setting is Unsupported | **[implemented]** |
+| `fs::Permissions`, ACL | `readonly` from the effective rights, setting is Unsupported; ACLs through `std::os::magnumopus::fs` | **[verified in QEMU]** hello-std |
 | symlinks, `hard_link`, file locks, file times | Unsupported | FS v3 decides **[designed]** |
-| `net::TcpStream`, `TcpListener`, `UdpSocket`, DNS | netproto (`tcp_connect`, `tcp_listen`, `udp_bind`, `resolve`), network session with tag `NET` | **[designed]** (phase 2) |
-| `process::Command`, `io::pipe` | launcher service with the child's manifest (decision 4), pipes = channel pairs | **[designed]** (phase 2); Unsupported today |
+| `net::TcpStream`, `TcpListener`, `UdpSocket`, DNS | netproto (`tcp_connect`, `tcp_listen`, `udp_bind`, `resolve`), network session with tag `NET` (see [Network](#network-stdnet)) | **[verified in QEMU]** std-net |
+| `process::Command`, `Child`, `io::pipe` | the `launchd` launcher service with the child's manifest, pipes = channel pairs (see [Processes](#processes-stdprocess)) | **[verified in QEMU]** std-proc |
 | `os_str`, `path` | bytes (like unix), separator `/`; `std::os::magnumopus::ffi::{OsStrExt, OsStringExt}` | **[verified in QEMU]** hello-std |
 | `backtrace` | Unsupported (a panic prints the message to stderr) | later |
 | `fork`, signals, `os::unix` | never | on purpose |
@@ -255,7 +257,8 @@ Format `abi::params`, reading and creating with `libos::params::Params`,
 passed in the startup message as `kind::PARAMS` **[verified in QEMU]**
 (hello-std; format tests on the host `cargo test -p abi params`). Standard
 handles have tags from `abi::params::tag` (`STDIN`, `STDOUT`, `STDERR`,
-`FS`, `NET`). Details and an example: [libos](libos.md#process-parameter-block).
+`FS`, `NET`, `LAUNCH`); format v2 has the `STDOUT_NULL`/`STDERR_NULL`
+flags (`Stdio::null`). Details and an example: [libos](libos.md#process-parameter-block).
 
 ### Byte-stream protocol
 
@@ -265,6 +268,151 @@ not the end **[verified in QEMU]** (hello-std, the test reads stdout until
 it closes). Back-pressure: a channel has no "writable" signal, so with a
 full queue (`SHOULD_WAIT`) a write waits a millisecond and retries. Integration
 with termd and the shell is work for the terminal thread **[designed]**.
+
+### Network (`std::net`)
+
+`TcpStream`, `TcpListener`, `UdpSocket` and name resolution
+(`ToSocketAddrs`) go through the network session the process received with
+the `NET` tag **[verified in QEMU]** (test `std sit: std-net: TCP, vlakna,
+UDP, DNS, opravneni`, x86_64 and aarch64). What the session may do
+(protocols, targets, ports, firewall questions) is decided by whoever
+created it; outside the permission it returns `PermissionDenied`, and so
+does listening without the right. Without a network session the
+operations return `Unsupported`.
+
+- `UdpSocket::connect` is emulated in the process (`send`/`recv` only with
+  the target).
+- `TcpListener::bind`: netd listens on all interfaces; the interface
+  address is not used yet.
+- `set_nonblocking(true)`, `peek`, `ttl`, `linger`, `keepalive` and
+  multicast return `Unsupported`; `set_nodelay` only reports success.
+- **Limitation today:** `netproto` replies carry no request number and
+  netd has only one request in progress per connection. osrt therefore
+  locks every channel (session, connection, socket): a thread blocked in
+  `read` delays a write on the same connection (a `try_clone` clone) until
+  the read ends, and a long `connect` (firewall question up to 300 s)
+  delays the other calls of the session. The `shared_stream_serialized`
+  check in `std-net` verifies this. The fix (`netproto` v2: request
+  numbers, concurrent RECV, SEND and ACCEPT per connection, several
+  requests per session, deadlines and cancellation) is being done by the
+  network thread **[designed]**; osrt then drops the locks and the test is
+  inverted.
+
+### Processes (`std::process`)
+
+<figure class="diagram">
+<svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Launching processes through launchd">
+<defs><marker id="rs3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="ok" x="10" y="20" width="230" height="110" rx="6"/><text class="t b" x="125" y="45" text-anchor="middle">parent (std)</text><text class="m" x="125" y="66" text-anchor="middle">Command::spawn</text><text class="m" x="125" y="84" text-anchor="middle">job, new FS session,</text><text class="m" x="125" y="102" text-anchor="middle">network only with network(true),</text><text class="m" x="125" y="120" text-anchor="middle">stdio, parameter block</text>
+<path class="ln" d="M240 75 L298 75" marker-end="url(#rs3)"/><text class="m" x="269" y="66" text-anchor="middle">LAUNCH</text>
+<rect class="acc" x="300" y="20" width="230" height="110" rx="6"/><text class="t b" x="415" y="45" text-anchor="middle">launchd</text><text class="m" x="415" y="66" text-anchor="middle">finds the program</text><text class="m" x="415" y="84" text-anchor="middle">manifest: job limits,</text><text class="m" x="415" y="102" text-anchor="middle">network = intersection</text><text class="m" x="415" y="120" text-anchor="middle">no root rights</text>
+<path class="ln" d="M530 75 L588 75" marker-end="url(#rs3)"/>
+<rect class="ok" x="590" y="20" width="180" height="110" rx="6"/><text class="t b" x="680" y="45" text-anchor="middle">child</text><text class="m" x="680" y="66" text-anchor="middle">sub-job of the parent</text><text class="m" x="680" y="84" text-anchor="middle">own channel</text><text class="m" x="680" y="102" text-anchor="middle">to launchd</text>
+<rect class="box" x="300" y="180" width="470" height="100" rx="6"/><text class="t b" x="535" y="205" text-anchor="middle">lookup by name</text><text class="m" x="535" y="228" text-anchor="middle">1. command registry ([[command]] in manifests)</text><text class="m" x="535" y="246" text-anchor="middle">2. /system/bin/&lt;name&gt; in the parent's FS session  3. initfs</text><text class="m" x="535" y="264" text-anchor="middle">absolute path = file with the EXECUTE right (manifest next to it)</text>
+<path class="ln" d="M415 130 L415 178" marker-end="url(#rs3)"/>
+</svg>
+<figcaption>A child never gets more than its parent: the parent supplies the capabilities, launchd only narrows them by the manifest.</figcaption>
+</figure>
+
+`Command`, `Child`, `ExitStatus`, `kill`, `wait`, `try_wait`, `output`,
+`Stdio::piped/null/inherit` and `io::pipe` **[verified in QEMU]** (test
+`std procesy: std-proc: Command, roury, stdio, kody, sit, registr`, x86_64
+and aarch64). They are launched by the `launchd` service
+(`user/launchd`, protocol `libs/launchproto`, decisions 1 and 4):
+
+- **The child's capabilities** come from the parent in the request: its
+  job (the child gets a sub-job, never more than the parent), a new FS
+  session with the same identity (files are inherited), the network
+  session **only explicitly**
+  (`std::os::magnumopus::process::CommandExt::network(true)`), stdio.
+  launchd has no root rights; it adds only what the parent cannot do
+  itself: it finds the program, applies the manifest and gives the child
+  its own channel to launchd.
+- **The child's manifest** (next to the program,
+  `<program>.manifest.toml`): job limits, and network = the parent's
+  session narrowed by the manifest (netd narrows, never widens); a
+  manifest without `[network]` = no network even with `network(true)`. A
+  program without a manifest (a helper) gets the network session as the
+  parent passed it.
+- **Finding the program:** a bare name = the command registry
+  (`[[command]]` in manifests), then `/system/bin/<name>` in the parent's
+  FS session, then initfs; an absolute path = a file in the FS opened with
+  the `EXECUTE` right (datasets with execution disabled refuse it). No
+  `PATH`.
+- **Stdio:** `inherit` = a duplicate of the parent's channel, `piped` = a
+  new channel pair, `null` = a flag in the parameter block (format v2),
+  `io::pipe` = a channel pair. A file as the child's stdio returns
+  `Unsupported` for now.
+- **Codes:** `ExitStatus::code` = the `PROCESS_EXIT` code (kernel codes,
+  e.g. -1,000,000 after `kill`, fit into `i32`). `Child::id` = the process
+  handle number; `process::id` = a random number chosen at start (the
+  kernel does not report a process number yet).
+- A launch error carries a description from launchd (e.g. "volume X is
+  not mounted", code `NOT_MOUNTED`).
+
+### Command registry and application installation
+
+The registry interface (`launchproto::Registry`: command name -> program
+source and application) **[implemented]**; today launchd fills it from the
+manifests in initfs **[verified in QEMU]** (test `std-proc`, command
+`std-proc-kid`). Connection to installed applications **[designed]** (see
+[Architecture](architecture.md), Applications): packages on any volume
+(`/svazky/<name>`) add their commands to the same registry; an application
+on an unmounted volume = error `NOT_MOUNTED` naming the volume, not "not
+found". Launching directly from foreign file systems (FAT, NTFS without
+our rights) only with the explicit `ALLOW_FOREIGN` flag **[designed]**
+(foreign file systems are not recognised yet).
+
+### File permissions
+
+`fs::Permissions::readonly` = the write right is missing from the
+caller's effective rights; `set_permissions` returns `Unsupported` (the
+decision: rights go through ACLs). Full permissions:
+`std::os::magnumopus::fs::{access, set_acl, Acl, Grant, MetadataExt}`
+(owner, effective rights, permission description with grants)
+**[verified in QEMU]** (hello-std sets and restores an ACL).
+
+## Ports: crates taken over unmodified
+
+Practical check (x86_64 and aarch64, suite `std porty`):
+
+| Program | Source | Changes | Status |
+|---|---|---|---|
+| ripgrep 15.2.0 (`rg`) | crates.io, `cargo install --locked` (`xtask/src/ports.rs`) | patch to `ignore` 0.4.29 (7 lines, `third_party/ports`) | **[verified in QEMU]** test `ripgrep: hledani ve strome souboru` |
+| `std-http` on ureq 3.5.2 | library from crates.io without TLS | none | **[verified in QEMU]** test `ureq: HTTP klient, 4 vlakna soubezne` |
+| `getrandom-probe` (`user/port-tests`) | getrandom 0.4.3 from crates.io | patch to `getrandom` (`RANDOM_GET` backend) | **[verified in QEMU]** test `getrandom: backend RANDOM_GET` |
+
+### Patches for upstream
+
+Dependency fixes are in `third_party/ports/` and xtask applies them to all
+ports (`xtask/src/ports.rs`, `PATCHES`: a copy of the source from the cargo
+cache + `[patch.crates-io]`). We will send them to the authors one day
+(once the `*-unknown-magnumopus` target is public, ideally as tier 3):
+
+| Crate | Patch | What it changes | Upstream status |
+|---|---|---|---|
+| `ignore` 0.4.29 | `ignore-0.4.29.patch` | the generic arm of parallel directory traversal creates an entry without an inode number instead of the "unsupported platform" error (helps other platforms too) | not sent |
+| `getrandom` 0.4.3 | `getrandom-0.4.3.patch` | a backend for `target_os = "magnumopus"`: the `RANDOM_GET` syscall with `REQUIRE_SEEDED`; until the generator is seeded the thread yields and retries | not sent (requires the target in upstream rustc) |
+
+What was missing (found by compiling for our target, outside the tests):
+
+- **`ignore` (ripgrep):** parallel directory traversal had only `unix` and
+  `windows` arms and returned "unsupported platform" elsewhere. Fix: the
+  generic arm creates an entry without an inode number. A candidate for
+  upstream.
+- **tokio with `net` (mio, socket2):** `mio` has no backend for our system
+  (Selector, Waker, Event) and `socket2` does not know our target. Needed:
+  a readiness API in the kernel and netd (a signal on an object or a
+  port), a `mio` backend for MagnumOpus and support in `socket2`
+  **[designed]**. tokio without `net` (runtime only) should work.
+- **gix 0.90 (`sha1`, no default features):** `getrandom` 0.4 did not know
+  our target (solved by the patch above); next
+  `gix-sec` (file owner check via `libc::geteuid` and `os::unix`, the
+  "not Windows" arm assumes unix). Further errors will show only after
+  these.
+- **Target family:** in general, crates with only `unix`/`windows` arms
+  need a third arm; upstream tier 3 would help broaden support (see
+  [Approach](#approach)).
 
 ## What the kernel added
 
@@ -297,6 +445,13 @@ with termd and the shell is work for the terminal thread **[designed]**.
   program may even come from initfs).
 - **Returning memory**: dlmalloc returns only whole segments; smaller
   free pieces stay with the process.
+- **Concurrency on a network connection** is serialized (see
+  [Network](#network-stdnet)) until `netproto` v2.
+- **launchd** is not restarted by the supervisor after a crash yet (only
+  watched); applications then get `SERVICE_UNAVAILABLE`.
+- **Narrowing the FS session by the child's manifest** (mounted paths by
+  profile) is not done yet: the child gets a new session with the same
+  paths as the parent **[designed]**.
 
 ## Phase 1 (done)
 
@@ -310,14 +465,28 @@ with termd and the shell is work for the terminal thread **[designed]**.
 6. `cargo xtask std` and `cargo xtask build` build std and the
    applications **[verified in QEMU]**.
 
-Next step (phase 2) **[designed]**: network (`std::net` on netproto),
-`std::process::Command` through the launcher service with a manifest,
-stdin and stdio in the terminal, the stack guard page, then a
-`cargo check -p gix` survey.
+## Phase 2 (done)
+
+1. `std::net` on top of netd with a restricted network session
+   **[verified in QEMU]**.
+2. `std::process` through `launchd` (command registry, manifest, pipes,
+   stdio, codes, `kill`, network only explicitly) **[verified in QEMU]**.
+3. File permissions and ACLs **[verified in QEMU]**.
+4. Ports from crates.io: ripgrep and ureq **[verified in QEMU]**, a tokio
+   and gix survey (see [Ports](#ports-crates-taken-over-unmodified)).
+5. `cargo xtask std-patch`: glue changes in `target/std-src` are saved
+   back to `third_party/rust-std/std.patch` **[implemented]**.
+
+Next step **[designed]**: `netproto` v2 (network thread), stdin and stdio
+in the terminal, a readiness API for async (mio), a `getrandom` backend
+and arms for gix, the stack guard page.
 
 ## Impact on the future
 
 ### libc/POSIX layer (cstd) for FFmpeg
+
+Part 1 is done, description and plan: [The C library (cstd)](cstd.md).
+
 
 - **One runtime per process.** A Rust program with linked C (FFmpeg in a
   media player) must have one allocator (`malloc` = the libos heap,
@@ -361,6 +530,9 @@ design already now:
   the crates is better.
 
 ### gix for the FS git layer
+
+Survey on 2026-11-14 (gix 0.90): the first obstacles are `getrandom` and
+`gix-sec` (see [Ports](#ports-crates-taken-over-unmodified)).
 
 gix rests on `std::fs`, `std::path`, `std::process` (only for external
 helpers) and pure Rust (SHA-1, zlib via `miniz_oxide`). Risks: some gix

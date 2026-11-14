@@ -181,7 +181,9 @@ Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
   kontextu ji vždy uloží a obnoví. Nové vlákno začíná s výchozím stavem
   (FCW 0x037F, MXCSR 0x1F80), takže data jiného vlákna nemohou uniknout.
   Jádro samo FPU/SSE nepoužívá (soft-float). AVX není zapnuté (instrukce
-  skončí výjimkou #UD).
+  skončí výjimkou #UD). **Požadavek [navrženo]:** XSAVE/XRSTOR s AVX
+  (oblast podle CPUID 0xD) pro výkonný kód v C a Rustu (FFmpeg, kodeky),
+  viz [cstd](cstd.md#požadavek-na-jádro-avx-a-xsave).
 - **Rozpočty a meze:** paměť jádra a uživatelská paměť se strhává
   z rozpočtu jobu procesu (strom jobů, limity v bajtech), rezerva paměti
   jádra a strukturální meze - viz

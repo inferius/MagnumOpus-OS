@@ -24,6 +24,8 @@ pub struct Params {
     pub args: Vec<Vec<u8>>,
     /// Polozky prostredi `JMENO=HODNOTA`.
     pub env: Vec<Vec<u8>>,
+    /// Priznaky (`abi::params::flags`, napr. zahodit stdout).
+    pub flags: u32,
 }
 
 impl Params {
@@ -37,6 +39,7 @@ impl Params {
         let p = fmt::Params::parse(&data).ok_or(Error::Corrupted)?;
         Ok(Self {
             cwd: p.cwd.to_vec(),
+            flags: p.flags,
             args: p.args().map(<[u8]>::to_vec).collect(),
             env: p.env().map(<[u8]>::to_vec).collect(),
         })
@@ -51,7 +54,7 @@ impl Params {
             return Err(Error::InvalidArgs);
         }
         let mut out = vec![0u8; len];
-        fmt::encode(&mut out, &self.cwd, args, env).ok_or(Error::InvalidArgs)?;
+        fmt::encode(&mut out, self.flags, &self.cwd, args, env).ok_or(Error::InvalidArgs)?;
         Ok(out)
     }
 
