@@ -616,6 +616,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "abi",
             "--package",
+            "elf",
+            "--package",
             "initfs",
             "--package",
             "tz",

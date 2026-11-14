@@ -1,26 +1,98 @@
-//! Minimalni parser ELF64: staticke spustitelne soubory (ET_EXEC) pro
-//! architekturu, pro kterou je crate prelozeny (x86_64 nebo aarch64).
-//! Pouziva ho UEFI loader (jadro), jadro (proces init) a libos (dalsi
-//! procesy) - vsichni nahravaji kod pro sve vlastni CPU. Overuje, ze vsechna
-//! data lezi uvnitr souboru.
+//! Parser ELF64 (little endian) pro x86_64 a aarch64.
+//!
+//! - **Staticke programy (`ET_EXEC`)**: [`ElfFile::parse`] pro architekturu,
+//!   pro kterou je crate prelozeny. Pouziva ho UEFI loader (jadro), jadro
+//!   (proces init) a libos (dalsi procesy).
+//! - **Sdilene knihovny a PIE (`ET_DYN`)**: [`ElfFile::parse_object`] pro
+//!   zadanou architekturu (host testy umi obe): programove hlavicky
+//!   (`PT_INTERP`, `PT_TLS`, `PT_GNU_RELRO`, `PT_DYNAMIC`), dynamicka sekce
+//!   ([`dynamic`]), symboly s GNU a SysV hashem ([`symbols`]) a relokace
+//!   RELA a RELR ([`reloc`]). Pouzije ho zavadec `ld.so`
+//!   (`docs/cs/dynamicke-linkovani.md`).
+//!
+//! Vsechna data se ctou s kontrolou mezi souboru; nic nepanikari na vadnem
+//! vstupu (soubor je neduveryhodny).
 
 #![no_std]
+
+pub mod dynamic;
+pub mod reloc;
+pub mod symbols;
+
+#[cfg(test)]
+mod tests;
 
 const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
 const ELFCLASS64: u8 = 2;
 const ELFDATA2LSB: u8 = 1;
 const ET_EXEC: u16 = 2;
-/// Architektura, jejiz programy tento build umi nahrat (EM_X86_64 = 0x3E,
-/// EM_AARCH64 = 0xB7).
-#[cfg(target_arch = "x86_64")]
-const EM_NATIVE: (u16, &str) = (0x3E, "ocekavan x86_64");
-#[cfg(target_arch = "aarch64")]
-const EM_NATIVE: (u16, &str) = (0xB7, "ocekavan aarch64");
-const PT_LOAD: u32 = 1;
+const ET_DYN: u16 = 3;
+
+/// Typy programovych hlavicek.
+pub mod pt {
+    pub const LOAD: u32 = 1;
+    pub const DYNAMIC: u32 = 2;
+    pub const INTERP: u32 = 3;
+    pub const PHDR: u32 = 6;
+    pub const TLS: u32 = 7;
+    pub const GNU_STACK: u32 = 0x6474_E551;
+    pub const GNU_RELRO: u32 = 0x6474_E552;
+}
 
 pub const PF_X: u32 = 1;
 pub const PF_W: u32 = 2;
 pub const PF_R: u32 = 4;
+
+/// Architektura (`e_machine`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Machine {
+    X86_64,
+    Aarch64,
+}
+
+impl Machine {
+    /// Architektura, pro kterou je crate prelozeny.
+    #[cfg(target_arch = "x86_64")]
+    pub const NATIVE: Machine = Machine::X86_64;
+    /// Architektura, pro kterou je crate prelozeny.
+    #[cfg(target_arch = "aarch64")]
+    pub const NATIVE: Machine = Machine::Aarch64;
+
+    fn code(self) -> u16 {
+        match self {
+            Self::X86_64 => 0x3E,
+            Self::Aarch64 => 0xB7,
+        }
+    }
+
+    fn expected(self) -> &'static str {
+        match self {
+            Self::X86_64 => "ocekavan x86_64",
+            Self::Aarch64 => "ocekavan aarch64",
+        }
+    }
+}
+
+/// Druh souboru.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElfType {
+    /// Staticky program na pevnych adresach.
+    Exec,
+    /// Sdilena knihovna nebo PIE (adresy relativni k bazi).
+    Dyn,
+}
+
+/// Programova hlavicka (libovolny typ).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Phdr {
+    pub p_type: u32,
+    pub flags: u32,
+    pub offset: u64,
+    pub vaddr: u64,
+    pub file_size: u64,
+    pub mem_size: u64,
+    pub align: u64,
+}
 
 /// Nahratelny segment (PT_LOAD).
 #[derive(Debug, Clone, Copy)]
@@ -30,22 +102,49 @@ pub struct Segment {
     pub file_offset: u64,
     pub file_size: u64,
     pub flags: u32,
+    /// Zarovnani (`p_align`); zavadec ET_DYN vola bazi s timto zarovnanim.
+    pub align: u64,
+}
+
+/// Sablona TLS modulu (`PT_TLS`): inicializovana data `file_size` B ze
+/// souboru, zbytek do `mem_size` nuly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Tls {
+    pub vaddr: u64,
+    pub file_size: u64,
+    pub mem_size: u64,
+    pub align: u64,
+}
+
+/// Oblast, ktera je po relokaci jen pro cteni (`PT_GNU_RELRO`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Relro {
+    pub vaddr: u64,
+    pub mem_size: u64,
 }
 
 pub struct ElfFile<'a> {
     data: &'a [u8],
     pub entry: u64,
+    pub elf_type: ElfType,
+    pub machine: Machine,
     phoff: u64,
     phentsize: u16,
     phnum: u16,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ElfError {
     TooShort,
     BadMagic,
     Unsupported(&'static str),
     BadSegment,
+    /// Vadna dynamicka cast (tabulka mimo segmenty, spatna velikost
+    /// polozky, chybejici povinna polozka).
+    BadDynamic(&'static str),
+    /// Relokace v kodu (`DT_TEXTREL`): zapis do spustitelne pameti,
+    /// odporuje W^X - odmitnuto.
+    TextRelocations,
 }
 
 impl core::fmt::Display for ElfError {
@@ -55,31 +154,43 @@ impl core::fmt::Display for ElfError {
             Self::BadMagic => f.write_str("neni to ELF (chybi magicke cislo)"),
             Self::Unsupported(what) => write!(f, "nepodporovany ELF: {what}"),
             Self::BadSegment => f.write_str("segment ELF lezi mimo soubor nebo pretece"),
+            Self::BadDynamic(what) => write!(f, "vadna dynamicka cast ELF: {what}"),
+            Self::TextRelocations => f.write_str("relokace v kodu (TEXTREL) - odporuje W^X, prelozte s -fPIC"),
         }
     }
 }
 
-fn bytes<const N: usize>(d: &[u8], off: usize) -> Result<[u8; N], ElfError> {
+pub(crate) fn bytes<const N: usize>(d: &[u8], off: usize) -> Result<[u8; N], ElfError> {
     off.checked_add(N)
         .and_then(|end| d.get(off..end))
         .map(|b| b.try_into().unwrap())
         .ok_or(ElfError::TooShort)
 }
 
-fn u16_at(d: &[u8], off: usize) -> Result<u16, ElfError> {
+pub(crate) fn u16_at(d: &[u8], off: usize) -> Result<u16, ElfError> {
     bytes(d, off).map(u16::from_le_bytes)
 }
 
-fn u32_at(d: &[u8], off: usize) -> Result<u32, ElfError> {
+pub(crate) fn u32_at(d: &[u8], off: usize) -> Result<u32, ElfError> {
     bytes(d, off).map(u32::from_le_bytes)
 }
 
-fn u64_at(d: &[u8], off: usize) -> Result<u64, ElfError> {
+pub(crate) fn u64_at(d: &[u8], off: usize) -> Result<u64, ElfError> {
     bytes(d, off).map(u64::from_le_bytes)
 }
 
 impl<'a> ElfFile<'a> {
+    /// Staticky program (`ET_EXEC`) pro tuto architekturu.
     pub fn parse(data: &'a [u8]) -> Result<Self, ElfError> {
+        let elf = Self::parse_object(data, Machine::NATIVE)?;
+        if elf.elf_type != ElfType::Exec {
+            return Err(ElfError::Unsupported("ocekavan ET_EXEC (staticky, ne-PIE)"));
+        }
+        Ok(elf)
+    }
+
+    /// Program nebo sdilena knihovna (`ET_EXEC` i `ET_DYN`) pro `machine`.
+    pub fn parse_object(data: &'a [u8], machine: Machine) -> Result<Self, ElfError> {
         if data.len() < 64 {
             return Err(ElfError::TooShort);
         }
@@ -89,15 +200,19 @@ impl<'a> ElfFile<'a> {
         if data[4] != ELFCLASS64 || data[5] != ELFDATA2LSB {
             return Err(ElfError::Unsupported("ocekavan ELF64 little-endian"));
         }
-        if u16_at(data, 16)? != ET_EXEC {
-            return Err(ElfError::Unsupported("ocekavan ET_EXEC (staticky, ne-PIE)"));
-        }
-        if u16_at(data, 18)? != EM_NATIVE.0 {
-            return Err(ElfError::Unsupported(EM_NATIVE.1));
+        let elf_type = match u16_at(data, 16)? {
+            ET_EXEC => ElfType::Exec,
+            ET_DYN => ElfType::Dyn,
+            _ => return Err(ElfError::Unsupported("ocekavan ET_EXEC nebo ET_DYN")),
+        };
+        if u16_at(data, 18)? != machine.code() {
+            return Err(ElfError::Unsupported(machine.expected()));
         }
         let elf = Self {
             data,
             entry: u64_at(data, 24)?,
+            elf_type,
+            machine,
             phoff: u64_at(data, 32)?,
             phentsize: u16_at(data, 54)?,
             phnum: u16_at(data, 56)?,
@@ -108,24 +223,48 @@ impl<'a> ElfFile<'a> {
         Ok(elf)
     }
 
-    /// Iteruje nahratelne segmenty a overi, ze jejich data lezi uvnitr souboru.
-    pub fn load_segments(&self) -> impl Iterator<Item = Result<Segment, ElfError>> + '_ {
-        (0..self.phnum as usize).filter_map(move |i| self.parse_phdr(i).transpose())
+    /// Cely soubor.
+    pub fn data(&self) -> &'a [u8] {
+        self.data
     }
 
-    fn parse_phdr(&self, i: usize) -> Result<Option<Segment>, ElfError> {
+    /// Vsechny programove hlavicky.
+    pub fn program_headers(&self) -> impl Iterator<Item = Result<Phdr, ElfError>> + '_ {
+        (0..self.phnum as usize).map(move |i| self.phdr(i))
+    }
+
+    fn phdr(&self, i: usize) -> Result<Phdr, ElfError> {
         let off = (self.phoff as usize)
             .checked_add(i * self.phentsize as usize)
             .ok_or(ElfError::TooShort)?;
-        if u32_at(self.data, off)? != PT_LOAD {
-            return Ok(None);
-        }
-        let seg = Segment {
+        Ok(Phdr {
+            p_type: u32_at(self.data, off)?,
             flags: u32_at(self.data, off + 4)?,
-            file_offset: u64_at(self.data, off + 8)?,
+            offset: u64_at(self.data, off + 8)?,
             vaddr: u64_at(self.data, off + 16)?,
             file_size: u64_at(self.data, off + 32)?,
             mem_size: u64_at(self.data, off + 40)?,
+            align: u64_at(self.data, off + 48)?,
+        })
+    }
+
+    /// Iteruje nahratelne segmenty a overi, ze jejich data lezi uvnitr souboru.
+    pub fn load_segments(&self) -> impl Iterator<Item = Result<Segment, ElfError>> + '_ {
+        self.program_headers().filter_map(move |p| match p {
+            Ok(p) if p.p_type == pt::LOAD => Some(self.check_segment(p)),
+            Ok(_) => None,
+            Err(e) => Some(Err(e)),
+        })
+    }
+
+    fn check_segment(&self, p: Phdr) -> Result<Segment, ElfError> {
+        let seg = Segment {
+            flags: p.flags,
+            file_offset: p.offset,
+            vaddr: p.vaddr,
+            file_size: p.file_size,
+            mem_size: p.mem_size,
+            align: p.align,
         };
         let file_end = seg.file_offset.checked_add(seg.file_size);
         if seg.file_size > seg.mem_size
@@ -134,11 +273,100 @@ impl<'a> ElfFile<'a> {
         {
             return Err(ElfError::BadSegment);
         }
-        Ok(Some(seg))
+        Ok(seg)
     }
 
     /// Data segmentu ulozena v souboru (rozsah overen v `load_segments`).
     pub fn segment_data(&self, seg: &Segment) -> &'a [u8] {
         &self.data[seg.file_offset as usize..(seg.file_offset + seg.file_size) as usize]
+    }
+
+    /// Prvni programova hlavicka typu `p_type`.
+    fn find(&self, p_type: u32) -> Result<Option<Phdr>, ElfError> {
+        for p in self.program_headers() {
+            let p = p?;
+            if p.p_type == p_type {
+                return Ok(Some(p));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Bajty souboru v rozsahu programove hlavicky (`offset`, `file_size`).
+    fn file_range(&self, p: &Phdr) -> Result<&'a [u8], ElfError> {
+        let start = usize::try_from(p.offset).map_err(|_| ElfError::BadSegment)?;
+        let len = usize::try_from(p.file_size).map_err(|_| ElfError::BadSegment)?;
+        start.checked_add(len).and_then(|end| self.data.get(start..end)).ok_or(ElfError::BadSegment)
+    }
+
+    /// Cesta zavadece (`PT_INTERP`, bez koncove nuly); `None` = staticky
+    /// nebo knihovna.
+    pub fn interp(&self) -> Result<Option<&'a str>, ElfError> {
+        let Some(p) = self.find(pt::INTERP)? else { return Ok(None) };
+        let b = self.file_range(&p)?;
+        let b = b.strip_suffix(&[0]).unwrap_or(b);
+        core::str::from_utf8(b).map(Some).map_err(|_| ElfError::BadDynamic("PT_INTERP neni UTF-8"))
+    }
+
+    /// Sablona TLS (`PT_TLS`); `None` = modul TLS nema.
+    pub fn tls(&self) -> Result<Option<Tls>, ElfError> {
+        let Some(p) = self.find(pt::TLS)? else { return Ok(None) };
+        self.file_range(&p)?;
+        if p.file_size > p.mem_size || (p.align > 1 && !p.align.is_power_of_two()) {
+            return Err(ElfError::BadSegment);
+        }
+        Ok(Some(Tls { vaddr: p.vaddr, file_size: p.file_size, mem_size: p.mem_size, align: p.align.max(1) }))
+    }
+
+    /// Inicializovana data sablony TLS.
+    pub fn tls_data(&self, tls: &Tls) -> Result<&'a [u8], ElfError> {
+        self.at_vaddr(tls.vaddr, tls.file_size)
+    }
+
+    /// Oblast RELRO (`PT_GNU_RELRO`).
+    pub fn relro(&self) -> Result<Option<Relro>, ElfError> {
+        Ok(self.find(pt::GNU_RELRO)?.map(|p| Relro { vaddr: p.vaddr, mem_size: p.mem_size }))
+    }
+
+    /// Dynamicka sekce (`PT_DYNAMIC`); `None` = staticky soubor. Odmitne
+    /// `DT_TEXTREL` a `DT_REL` (x86_64 a aarch64 pouzivaji RELA).
+    pub fn dynamic(&self) -> Result<Option<dynamic::Dynamic>, ElfError> {
+        let Some(p) = self.find(pt::DYNAMIC)? else { return Ok(None) };
+        let b = self.at_vaddr(p.vaddr, p.file_size)?;
+        dynamic::Dynamic::parse(b).map(Some)
+    }
+
+    /// `len` B souboru na virtualni adrese `vaddr` (relativni k bazi u
+    /// ET_DYN): musi lezet v datech ze souboru jednoho segmentu PT_LOAD.
+    pub fn at_vaddr(&self, vaddr: u64, len: u64) -> Result<&'a [u8], ElfError> {
+        for seg in self.load_segments() {
+            let seg = seg?;
+            let end = vaddr.checked_add(len).ok_or(ElfError::BadDynamic("adresa pretece"))?;
+            if vaddr >= seg.vaddr && end <= seg.vaddr + seg.file_size {
+                let off = (seg.file_offset + (vaddr - seg.vaddr)) as usize;
+                return Ok(&self.data[off..off + len as usize]);
+            }
+        }
+        Err(ElfError::BadDynamic("adresa mimo data segmentu"))
+    }
+
+    /// Retezec zakonceny nulou na offsetu `off` tabulky retezcu.
+    pub(crate) fn cstr_at(&self, strtab: &'a [u8], off: u64) -> Result<&'a str, ElfError> {
+        let start = usize::try_from(off).map_err(|_| ElfError::BadDynamic("retezec mimo tabulku"))?;
+        let rest = strtab.get(start..).ok_or(ElfError::BadDynamic("retezec mimo tabulku"))?;
+        let end = rest.iter().position(|&b| b == 0).ok_or(ElfError::BadDynamic("retezec bez nuly"))?;
+        core::str::from_utf8(&rest[..end]).map_err(|_| ElfError::BadDynamic("retezec neni UTF-8"))
+    }
+
+    /// Tabulka retezcu dynamicke casti (`DT_STRTAB`, `DT_STRSZ`).
+    pub fn strtab(&self, d: &dynamic::Dynamic) -> Result<&'a [u8], ElfError> {
+        let (addr, size) = (d.strtab.ok_or(ElfError::BadDynamic("chybi DT_STRTAB"))?, d.strsz);
+        self.at_vaddr(addr, size)
+    }
+
+    /// Jmeno z tabulky retezcu dynamicke casti.
+    pub fn dyn_str(&self, d: &dynamic::Dynamic, off: u64) -> Result<&'a str, ElfError> {
+        let s = self.strtab(d)?;
+        self.cstr_at(s, off)
     }
 }
