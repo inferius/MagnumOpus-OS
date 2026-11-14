@@ -149,6 +149,12 @@ Cíl: **nikdy nezůstat s černou obrazovkou.**
   zapíše záznam zpět, pošle `RESET` a dál slouží **jen režim firmwaru**
   (bez `MODESET`, jeden buffer). Kompozitor se znovu připojí.
 - **Čistý konec** (vypnutí) obraz firmwaru také vrátí.
+- **Kdy ovladač končí**: jen když se zavře poslední konec klienta. Ten drží
+  init (`gui::display`), kompozitor dostává duplikát, takže konec nebo pád
+  kompozitoru ovladač neukončí. Vybraný ovladač hlídá supervisor initu
+  a po **jakémkoli** konci (i s kódem 0) spustí instanci obnovy. devmgr
+  nativní ovladače displeje nehlídá: pravidlo manifestu „kód 0 = bez
+  restartu“ (`devmgr/src/manifest.rs`) se na ně nevztahuje.
 - **Log jádra**: ovladač vybraný pro GUI dostane od initu framebuffer
   firmwaru a převezme ho (`FB_CONTROL CLAIM`, jako `fbdisplay`) – jádro pak
   nekreslí log do paměti, kterou ukazuje GUI. Init kvůli tomu instanci od

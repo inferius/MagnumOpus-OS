@@ -76,6 +76,16 @@ Details, design comparison and measurements: [Scheduler](scheduler.md).
 - **Wake-ups**: each wait has a sequence number; a wake-up with an old
   number is ignored. Spurious wake-ups are allowed; the waiting code
   re-checks its condition.
+- **Waiting on several objects** (`object/wait.rs`): the thread announces
+  the wait (state `BLOCKING`), then at each object, under its lock, either
+  finds the signal already set or registers. A signal arriving anywhere
+  between that and falling asleep switches `BLOCKING` -> `RUNNING` (CAS, so
+  the sleep does not happen); after falling asleep it puts the thread on a
+  run queue. The other registrations and the timer are always removed after
+  waking. **[verified in QEMU]** by a test that sends the signal at every
+  point of registration (another thread and the thread itself, with and
+  without a deadline) and 400 times from another CPU right after falling
+  asleep (`tests/object_wait.rs`, hook `wait::test_hook`).
 - **Switching to a process thread** activates its address space (CR3) and
   the kernel stack for entries from userspace (TSS.RSP0); kernel threads and
   exiting process threads run in the kernel address space.

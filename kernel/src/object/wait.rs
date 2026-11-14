@@ -30,6 +30,7 @@ pub fn wait_many(
                 break;
             }
             registered = i + 1;
+            test_hook::run(&me, test_hook::Point::Registered(i));
         }
         let mut timer = None;
         if result.is_none() {
@@ -42,6 +43,7 @@ pub fn wait_many(
         if result.is_some() {
             me.cancel_wait();
         } else {
+            test_hook::run(&me, test_hook::Point::BeforeBlock);
             sched::block();
         }
         // Uklid registraci: pozorovatele u objektu i casovac (kdyz cekani
@@ -75,4 +77,52 @@ pub fn sleep(duration: Duration) {
 /// Deadline za `duration` od ted.
 pub fn deadline_after(duration: Duration) -> u64 {
     arch::now_ns() + duration.as_nanos() as u64
+}
+
+/// Hacek pro self-testy jadra (bez nastaveni stoji jedno atomicke cteni):
+/// zavola se v urcenych mistech `wait_many` jen pro
+/// jedno vybrane vlakno, takze test muze deterministicky poslat signal
+/// "mezi kontrolou a usnutim" (i z jineho CPU).
+pub mod test_hook {
+    use alloc::sync::Arc;
+    use core::sync::atomic::{AtomicU64, Ordering};
+
+    use crate::sched::Thread;
+    use crate::sync::SpinLock;
+
+    /// Misto v `wait_many`.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum Point {
+        /// Polozka `i` je zaregistrovana (dalsi jeste ne).
+        Registered(usize),
+        /// Vse zaregistrovane (i casovac), vlakno je BLOCKING a jde usnout.
+        BeforeBlock,
+    }
+
+    type Hook = Arc<dyn Fn(Point) + Send + Sync>;
+
+    /// Id vlakna, pro ktere hacek plati (0 = zadne).
+    static TARGET: AtomicU64 = AtomicU64::new(0);
+    static HOOK: SpinLock<Option<Hook>> = SpinLock::new(None);
+
+    /// Nastavi hacek pro vlakno `thread_id` (`None` = zrusit).
+    pub fn set(thread_id: u64, hook: Option<Hook>) {
+        TARGET.store(0, Ordering::SeqCst);
+        let on = hook.is_some();
+        *HOOK.lock() = hook;
+        if on {
+            TARGET.store(thread_id, Ordering::SeqCst);
+        }
+    }
+
+    pub(super) fn run(me: &Thread, point: Point) {
+        if TARGET.load(Ordering::Relaxed) != me.id {
+            return;
+        }
+        // Hacek se vola bez zamku (muze cekat na jine vlakno).
+        let hook = HOOK.lock().clone();
+        if let Some(h) = hook {
+            h(point);
+        }
+    }
 }

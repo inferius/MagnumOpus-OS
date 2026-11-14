@@ -152,6 +152,13 @@ Goal: **never end up with a black screen.**
   serves **only the firmware mode** (no `MODESET`, one buffer). The
   compositor re-attaches.
 - **Clean exit** (shutdown) restores the firmware image as well.
+- **When the driver exits**: only when the last client end is closed. Init
+  holds it (`gui::display`) and the compositor gets a duplicate, so the
+  compositor exiting or crashing does not stop the driver. Init's
+  supervisor watches the chosen driver and after **any** exit (code 0
+  included) starts a restore instance. devmgr does not watch native
+  display drivers: the manifest rule "code 0 = no restart"
+  (`devmgr/src/manifest.rs`) does not apply to them.
 - **Kernel log**: the driver chosen for the GUI gets the firmware
   framebuffer from init and claims it (`FB_CONTROL CLAIM`, like
   `fbdisplay`), so the kernel stops drawing its log into memory the GUI

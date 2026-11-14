@@ -34,6 +34,7 @@ Mikrojádro (`no_std`, `no_main`): paměť, plánovač, objekty s handly a práv
 - Plánovač: vlákno, které ještě běží (`on_cpu`), nesmí být v **cizí** frontě - jiné CPU by na něj čekalo se zakázanými přerušeními a dvě CPU by se mohla zablokovat navzájem. Přesun na jiné CPU a zařazení vlákna probuzeného během usínání dělá `finish_switch`; kradení taková vlákna přeskakuje (`sched/mod.rs`, `sched/balance.rs`).
 - Synchronizace mezi CPU nesmí stát na vzoru „zapiš svůj příznak, přečti cizí“ (dvě adresy): QEMU TCG na x86 hostiteli nedodrží pořadí `stlr` -> `ldar` a probuzení se ztratí. Stav, o kterém rozhodují dvě strany, patří do jednoho atomického slova (CAS/swap), jako `Thread::cpu_flags`, nebo pod zámek.
 - Zásobník jádra vlákna uvolňuje `finish_switch` po dobrovolném odchodu z mrtvého vlákna (`PerCpu::exited` z větve DEAD ve `switch_away`), ne `Drop` vlákna. Na zásobník mrtvého vlákna se po tom nesmí nic odkazovat; `kernel_stack_top` je pevná hodnota jen pro spouštěná (živá) vlákna.
+- Čekání (`object/wait.rs`): signál mezi registrací a usnutím nesmí utéct - registrace pod zámkem objektu, stav `BLOCKING` -> `RUNNING` jen CAS. Změna cesty čekání musí projít `tests/object_wait.rs` (háček `wait::test_hook` posílá signál v každém místě registrace).
 - Selhaný test plánovače má vypsat stav (`sched::dump_state`: fronty, časovače, `on_cpu`) - bez něj se uváznutí nedá rozebrat.
 
 ## Testy

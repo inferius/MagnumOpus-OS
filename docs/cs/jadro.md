@@ -72,6 +72,15 @@ Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
   vlákno může být přerušeno kdekoli, i uprostřed přípravy na čekání.
 - **Probuzení**: každé čekání má pořadové číslo; probuzení se starým číslem
   se ignoruje. Plané probuzení je dovolené, čekající kód podmínku ověří znovu.
+- **Čekání na víc objektů** (`object/wait.rs`): vlákno ohlásí čekání
+  (stav `BLOCKING`), pak se u každého objektu pod jeho zámkem buď dozví, že
+  signál už je, nebo se zaregistruje. Signál, který přijde kdykoli mezi tím
+  a usnutím, přepne `BLOCKING` -> `RUNNING` (CAS, usínání tedy neproběhne),
+  po usnutí vlákno zařadí do fronty. Registrace ostatních objektů a časovač
+  se po probuzení vždy zruší. **[ověřeno v QEMU]** testem, který signál
+  pošle v každém místě registrace (jiné vlákno i vlákno samo, s termínem
+  i bez) a 400× z jiného CPU těsně po usnutí (`tests/object_wait.rs`,
+  háček `wait::test_hook`).
 - **Přepnutí na vlákno procesu** nastaví jeho adresní prostor (CR3)
   a zásobník jádra pro vstup z userspace (TSS.RSP0); vlákna jádra a končící
   vlákna procesu běží v adresním prostoru jádra.

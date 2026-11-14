@@ -149,7 +149,10 @@ fn current(ctl: &Channel) -> Result<String, String> {
 
 fn compd_mode_change(startup: &Startup) -> TestResult {
     with(|s| {
-        let ch = s.kit.client.take().ok_or("kanal klienta chybi")?;
+        // Kompozitor dostane duplikat konce (jako v systemu, kde konec drzi
+        // init, `gui::display`): jeho konec pak neukonci ovladac.
+        let ch = s.kit.client.as_ref().ok_or("kanal klienta chybi")?;
+        let ch = Channel::from_handle(ch.handle().duplicate(None).map_err(|e| fail("duplikat konce klienta", e))?);
         let (p, ctl, size) = start_compd(startup, ch)?;
         println!("init: test displej: compd nad bochs-display {size}");
         let r = mode_change_checks(&ctl, &size);
@@ -236,7 +239,9 @@ fn crash_restores_firmware(startup: &Startup) -> TestResult {
         s.kit.process = Some(p);
         Ok(())
     });
-    // Uklid: kompozitor a ovladac sady.
+    // Uklid: kompozitor sady skonci, ovladac se vrati do stavu po startu
+    // systemu (bezna instance, ne obnova) a zpet do seznamu, aby dalsi
+    // kolo (`--repeat`) a dalsi sady nasly stejny ovladac.
     if let Some(mut st) = STATE.lock().take() {
         if let Some((p, ctl)) = st.compd.take() {
             drop(ctl);
@@ -244,6 +249,14 @@ fn crash_restores_firmware(startup: &Startup) -> TestResult {
         }
         if let Some(p) = st.kit.process.take() {
             let _ = p.kill();
+            let _ = p.wait_exit(deadline());
+        }
+        match st.kit.spawn(startup, false) {
+            Ok(p) => {
+                st.kit.process = Some(p);
+                NATIVES.lock().push(st.kit);
+            }
+            Err(e) => println!("init: test displej: ovladac {} nejde spustit znovu: {e}", st.kit.program),
         }
     }
     r
