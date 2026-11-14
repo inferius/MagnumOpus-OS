@@ -54,7 +54,7 @@ Code:
 | new folder, rename (name and collision check), to trash with "Undo" | **[verified in QEMU]** (trash), the rest host |
 | trash of all datasets: restore, delete permanently (with confirmation) | **[implemented]** (host `trash_undo_and_trash_view`) |
 | file version history: Restore, Copy beside | **[implemented]** (host `preview_shows_three_states_and_versions`) |
-| copy / cut / paste through the system clipboard, also between windows: formats `application/x-mo-paths` (with the operation), `text/uri-list`, text; a list over 60 KiB only within the window | **[verified in QEMU]** with acceleration (WHPX), under TCG the clipboard part is skipped (see Performance); formats host `clipboard_formats_roundtrip` |
+| copy / cut / paste through the system clipboard, also between windows: formats `application/x-mo-paths` (with the operation), `text/uri-list`, text; a list over 60 KiB only within the window | **[verified in QEMU]** (TCG and WHPX; the clipboard gesture is the serial number of the key press, not a time); formats host `clipboard_formats_roundtrip` |
 | copy and move as a `files-copy` task with progress, pause and cancel | **[verified in QEMU]** |
 | conflict: overwrite / skip / keep both, "for all" | **[verified in QEMU]** (keep both), the rest host `fileops` |
 | task recovery after an interruption (also after a restart) | **[verified in QEMU]** (test `gui: files-copy: uloha s konfliktem prezije restart procesu`) |
@@ -204,11 +204,9 @@ path for each item); speeding it up is work for fsd. In QEMU without
 acceleration (TCG) the compositor composes a frame on the CPU in
 0.6-1.4 s, so new content after an action appears only after ~2.6 s (two
 frames) regardless of the folder size; with WHPX it is 0.2-0.3 s (the
-measurements above). For the same reason, under TCG the app handles a key
-only ~1.5 s after the press and the compositor refuses the clipboard
-offer (the gesture is valid for 1 s); the test reports this under TCG as
-`[preskoceno]` and makes the copy directly through the FS (reported to
-the GUI thread).
+measurements above). Under TCG the app handles a key only ~1.5 s after
+the press; the clipboard does not mind, because the gesture is the serial
+number of the physical press (`clipproto`), not a time window.
 
 ## Security
 

@@ -486,6 +486,10 @@ fn context_menu_and_open_reply() {
     assert_eq!(m.b.opened, vec![String::from("/home/jana/zprava.txt")]);
     assert!(m.external_from(1, &openwith::msg::Reply::Revealed(String::from("org.magnumopus.files")).encode()));
     assert_eq!(m.status, "Pro tento typ souboru zatím není aplikace.");
+    m.external_from(1, &openwith::msg::Reply::NoApp(String::from("xyz")).encode());
+    assert_eq!(m.status, "Pro soubory .xyz zatím není aplikace.");
+    m.external_from(1, &openwith::msg::Reply::NoApp(String::new()).encode());
+    assert_eq!(m.status, "Pro soubory bez přípony zatím není aplikace.");
     m.external_from(1, &openwith::msg::Reply::Failed(String::from("x: NOT_FOUND")).encode());
     assert_eq!(m.status, "Nejde otevřít: x: NOT_FOUND");
     assert!(!m.external_from(1, b"nesmysl"));

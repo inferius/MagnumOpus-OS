@@ -180,40 +180,16 @@ fn run(startup: &Startup, s: &mut super::gui::State, f: &FsClient) -> TestResult
     wait_tree(&s.inspect, w, "vypis Projektu", |t| row(t, "plan.md").is_some())?;
     settle(&s.inspect)?;
     println!("{QEMU_PASTE}");
-    // Kompozitor povoli schranku jen do 1 s po fyzickem stisku (gesto).
-    // V QEMU bez akcelerace (TCG) aplikace klavesu zpracuje az po
-    // dokonceni snimku (~1,5 s) a nabidku kompozitor odmitne; pak se cast
-    // se schrankou vyslovne preskoci (kopie primo pres FS), zbytek testu
-    // bezi dal. S akceleraci (WHPX/KVM) se overuje cela cesta.
-    let pasted = (|| {
-        let end = time::deadline_after(Duration::from_secs(15));
-        loop {
-            let t = super::gui::tree(&s.inspect, w)?;
-            if row(&t, "a.txt").is_some() {
-                return Ok::<bool, String>(true);
-            }
-            if time::now() > end {
-                return Ok(false);
-            }
-            time::sleep(Duration::from_millis(100));
-        }
-    })()?;
-    if !pasted {
-        println!("init: test soubory: [preskoceno] schranka: gesto (1 s) v QEMU bez akcelerace nestihnuto, kopie primo pres FS");
-        f.clone_path(&alloc::format!("{HOME}/a.txt"), &alloc::format!("{HOME}/Projekty/a.txt")).map_err(|e| fail("kopie pres FS", e))?;
-        f.clone_path(&alloc::format!("{HOME}/a.txt"), &alloc::format!("{HOME}/Projekty/a (2).txt")).map_err(|e| fail("kopie pres FS", e))?;
-        press(s, w, "Znovu načíst")?;
-    }
+    // Gesto schranky je seriove cislo fyzickeho stisku (ne cas), takze
+    // cesta pres schranku se overuje vzdy, i v QEMU bez akcelerace.
     wait_tree(&s.inspect, w, "kopie v Projektech", |t| row(t, "a.txt").is_some())?;
     let copied = f.read(&alloc::format!("{HOME}/Projekty/a.txt"), 0, 64).map_err(|e| fail("cteni kopie", e))?;
     check!(copied == b"obsah souboru\n", "obsah kopie");
     // Znovu: konflikt, ponechat obe.
     settle(&s.inspect)?;
     println!("{QEMU_PASTE_AGAIN}");
-    if pasted {
-        wait_tree(&s.inspect, w, "konflikt", |t| has(t, Role::Label, "\"a.txt\" už v cíli je."))?;
-        press(s, w, "Ponechat obě")?;
-    }
+    wait_tree(&s.inspect, w, "konflikt", |t| has(t, Role::Label, "\"a.txt\" už v cíli je."))?;
+    press(s, w, "Ponechat obě")?;
     wait_tree(&s.inspect, w, "druha kopie", |t| row(t, "a (2).txt").is_some())?;
     // Do kose.
     select(s, w, "a (2).txt")?;
