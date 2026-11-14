@@ -468,3 +468,77 @@ pub fn with_user<T>(fd: i32, f: impl FnOnce(&(dyn core::any::Any + Send + Sync))
         _ => Err(errno::EINVAL),
     }
 }
+
+// --- pamet na hostiteli: alokace std (jen testy logiky mmap) ----------------
+
+const PAGE: u64 = 4096;
+
+static MAPS: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
+
+pub fn page_size() -> u64 {
+    PAGE
+}
+
+fn host_alloc(len: u64) -> R<u64> {
+    let layout = std::alloc::Layout::from_size_align(len as usize, PAGE as usize).map_err(|_| errno::EINVAL)?;
+    // SAFETY: nenulova delka (overuje volajici).
+    let p = unsafe { std::alloc::alloc_zeroed(layout) };
+    if p.is_null() {
+        return Err(errno::ENOMEM);
+    }
+    MAPS.lock().unwrap().push((p as u64, len));
+    Ok(p as u64)
+}
+
+pub fn vm_alloc(len: u64, _prot: u32) -> R<u64> {
+    host_alloc(len)
+}
+
+pub fn vm_reserve(len: u64) -> R<u64> {
+    host_alloc(len)
+}
+
+pub fn vm_reserve_at(_addr: u64, _len: u64) -> R<u64> {
+    Err(errno::ENOTSUP)
+}
+
+pub fn vm_commit(_addr: u64, _len: u64, _prot: u32) -> R<()> {
+    Ok(())
+}
+
+pub fn vm_protect(_addr: u64, _len: u64, _prot: u32) -> R<()> {
+    Ok(())
+}
+
+pub fn vm_release(addr: u64, len: u64) -> R<()> {
+    let mut m = MAPS.lock().unwrap();
+    let i = m.iter().position(|&(a, l)| a == addr && l == len).ok_or(errno::EINVAL)?;
+    m.remove(i);
+    let layout = std::alloc::Layout::from_size_align(len as usize, PAGE as usize).map_err(|_| errno::EINVAL)?;
+    // SAFETY: alokovano host_alloc se stejnym rozlozenim.
+    unsafe { std::alloc::dealloc(addr as *mut u8, layout) };
+    Ok(())
+}
+
+pub fn vm_decommit(addr: u64, len: u64) -> R<()> {
+    // SAFETY: rozsah lezi v alokaci (kontrakt volajiciho).
+    unsafe { core::ptr::write_bytes(addr as *mut u8, 0, len as usize) };
+    Ok(())
+}
+
+pub fn vm_seal(_addr: u64, _len: u64, _prot: u32) -> R<()> {
+    Ok(())
+}
+
+pub fn vm_query(addr: u64) -> R<super::Region> {
+    let m = MAPS.lock().unwrap();
+    m.iter()
+        .find(|&&(a, l)| addr >= a && addr < a + l)
+        .map(|&(a, l)| super::Region { kind: 2, start: a, len: l, prot: 3 })
+        .ok_or(errno::ENOMEM)
+}
+
+/// Zamky na hostiteli nejsou (logiku testuje `libs/fs`).
+pub fn file_lock(_fd: i32, _cmd: u8, _class: u8, _write: bool, _start: u64, _len: u64) -> R<super::LockResult> {
+    Err(errno::ENOLCK)
+}

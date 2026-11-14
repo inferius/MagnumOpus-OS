@@ -74,5 +74,6 @@ _CSTD_END
 #define ENOBUFS 105
 #define EISCONN 106
 #define ENFILE 23
+#define ENODEV 19
 
 #endif

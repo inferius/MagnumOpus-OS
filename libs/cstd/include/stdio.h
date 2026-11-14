@@ -24,6 +24,9 @@ extern FILE *stderr;
 #define _IOLBF 1
 #define _IONBF 2
 #define BUFSIZ 4096
+#define FILENAME_MAX 4096
+#define FOPEN_MAX 4096
+#define L_tmpnam 64
 
 FILE *fopen(const char *path, const char *mode);
 int fclose(FILE *f);
@@ -58,6 +61,12 @@ int fseeko(FILE *f, off_t off, int whence);
 off_t ftello(FILE *f);
 ssize_t getline(char **line, size_t *cap, FILE *f);
 ssize_t getdelim(char **line, size_t *cap, int delim, FILE *f);
+
+int sscanf(const char *s, const char *fmt, ...);
+int vsscanf(const char *s, const char *fmt, va_list ap);
+int fscanf(FILE *f, const char *fmt, ...);
+int vfscanf(FILE *f, const char *fmt, va_list ap);
+int scanf(const char *fmt, ...);
 
 _CSTD_END
 

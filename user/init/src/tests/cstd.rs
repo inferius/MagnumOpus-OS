@@ -16,7 +16,10 @@ use super::{Test, TestResult, devices, fail};
 use crate::check;
 use libos::Error;
 
-pub const TESTS: &[Test] = &[("ctest: stdio, soubory, errno, getenv, atexit", ctest)];
+pub const TESTS: &[Test] = &[
+    ("ctest: stdio, soubory, errno, getenv, atexit", ctest),
+    ("ctest lock: zamky fcntl a flock mezi dvema procesy, EDEADLK", ctest_lock),
+];
 
 fn ctest(s: &Startup) -> TestResult {
     let fs = devices().and_then(|d| d.fs.as_ref()).ok_or("sluzba fsd nebezi")?;
@@ -33,7 +36,7 @@ fn ctest(s: &Startup) -> TestResult {
         vec![StartHandle::tagged(tag::FS, own.into_channel().into_handle())],
         Duration::from_secs(120),
     )?;
-    run.expect("ctest", &["args", "getenv", "format", "memory", "files", "errno", "posix", "threads", "time", "math"])?;
+    run.expect("ctest", &["args", "getenv", "format", "memory", "files", "errno", "posix", "threads", "time", "math", "mmap", "signal"])?;
     check!(run.stdout.ends_with("ctest: hotovo\n"), "atexit v obracenem poradi a vyprazdneni pri konci");
     check!(run.stderr.contains("chyba na stderr\n"), "stderr");
     check!(run.stderr.contains("ctest perror: Invalid argument\n"), "perror");
@@ -89,4 +92,34 @@ fn ctest_net(s: &Startup) -> TestResult {
         Duration::from_secs(120),
     )?;
     run.expect("ctest", &["tcp", "udp", "dns", "refused", "accept"])
+}
+
+/// Dva procesy `ctest lock` nad jednim souborem (zamky drzi fsd).
+fn ctest_lock(s: &Startup) -> TestResult {
+    use super::std_app::start_std_app;
+
+    let fs = devices().and_then(|d| d.fs.as_ref()).ok_or("sluzba fsd nebezi")?;
+    match fs.create("/std-test", fsproto::kind::DIR) {
+        Ok(()) | Err(Error::AlreadyExists) => {}
+        Err(e) => return Err(fail("adresar /std-test", e)),
+    }
+    let dir = "/std-test/zamky";
+    // Cisty adresar (znacky z minuleho behu pryc).
+    for name in ["a-ready", "b-ready", "a-got", "lock.db"] {
+        let _ = fs.remove(&alloc::format!("{dir}/{name}"));
+    }
+    match fs.create(dir, fsproto::kind::DIR) {
+        Ok(()) | Err(Error::AlreadyExists) => {}
+        Err(e) => return Err(fail("adresar zamku", e)),
+    }
+    let session = || -> Result<Vec<StartHandle>, String> {
+        let own = fs.connect().map_err(|e| fail("relace fsd", e))?;
+        Ok(vec![StartHandle::tagged(tag::FS, own.into_channel().into_handle())])
+    };
+    let a = start_std_app(s, "ctest", &["lock", "a", dir], &[], session()?)?;
+    let b = start_std_app(s, "ctest", &["lock", "b", dir], &[], session()?)?;
+    let rb = b.finish(Duration::from_secs(60))?;
+    let ra = a.finish(Duration::from_secs(60))?;
+    ra.expect("ctest", &["lock-a"])?;
+    rb.expect("ctest", &["lock-b"])
 }

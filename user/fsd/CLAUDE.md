@@ -14,6 +14,7 @@ Služba souborového systému nad knihovnou `libs/fs`. Startovní zpráva (kind 
 - Pád `fsd` nesmí poškodit data (commit je atomický, `libs/fs`); klienti se po restartu připojí přes lístky (`docs/cs/obnova-sluzeb.md`).
 - Pozdní práce (defrag, scrub) musí ustoupit požadavkům klientů (malé kroky mezi požadavky).
 - `DATASETS` (`serve_hist.rs`, protokol `libs/fsproto/src/datasets.rs`): jen datasety, jejichž kořen relace vidí a které leží v jejích připojených cestách (cesty relace přes `unmap`); `Stat` kořene beze změny masek; původ klonu ve třech stavech - známý, skrytý (relace ho nevidí, i když existuje: nikdy neprozradit cestu), neexistuje. Průchod adresářů svazku je drahý, nevolat ho v jiných operacích.
+- Zámky POSIX (`op::POSIX_LOCK`, `Service.posix` = `fs::posix_lock::PosixLocks`): vlastník `fcntl` = `Session.id`, `flock` = handle s horním bitem (`flock_owner`); uvolnit při `CLOSE` posledního handlu relace na souboru a v `close_session`. Čekání vede klient, fsd jen pamatuje graf čekání (EDEADLK).
 - Masky dostupnosti z `fs::Stat` jdou do `fsproto::Stat` beze změny (shodu bitů hlídá `const assert` v `serve.rs`); `StatEntry` dostane jen bity svých polí (`ENTRY_AVAIL`). Změna tvaru `Stat` = nová verze v `fsproto::v2::VERSION`.
 
 ## Testy

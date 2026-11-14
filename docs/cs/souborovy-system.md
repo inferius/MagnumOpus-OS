@@ -1071,9 +1071,31 @@ objektu vyžaduje, aby všechny handly sdílely mazání. Operace přes cestu
 hlídá jen jiné zámky, **povinný** navíc brání zápisu (výhradní i čtení)
 jiných handlů a cest. Patří handlu a mizí s jeho zavřením.
 
+**Zámky POSIX** (`fcntl` `F_SETLK`/`F_SETLKW`/`F_GETLK` a `flock`,
+zpráva `POSIX_LOCK`) **[ověřeno v QEMU]** (sada `cstd`, test `ctest lock`:
+dva procesy nad jedním souborem): poradní zámky rozsahů s vlastníkem
+**relace** (proces; `flock`: handle). Drží je fsd v paměti
+(`libs/fs/src/posix_lock.rs`, host testy `cargo test -p fs --features std
+posix_lock`), na disk se nezapisují.
+
+- Vlastní zámky se nikdy nebijí: nový zámek v rozsahu nahradí starý
+  (změna druhu, rozdělení), sousední stejného druhu se sloučí; odemčení
+  části rozsah rozdělí. `F_GETLK` vrátí první cizí zámek v konfliktu.
+- Uvolnění: zavření posledního handlu relace na souboru (`flock`: zavření
+  handlu) a konec relace (konec procesu); restart fsd zámky zahodí
+  (klient s handlem, který zámek měl, dostane `SERVICE_RESTARTED`).
+- **Čekání** (`F_SETLKW`) vede klient opakovaným zkoušením (od milisekundy
+  do padesáti milisekund mezi pokusy): blokující dotaz by držel jediný
+  kanál relace a zastavil ostatní souborové operace procesu. Pokus s
+  ohlášeným čekáním (`SET_WAIT`) si fsd zapamatuje (kdo čeká na koho,
+  platnost jedna sekunda bez obnovení) a uzavřený cyklus čekání hlásí
+  jako uváznutí (`EDEADLK`).
+- `flock` a `fcntl` se navzájem neovlivňují (jako v Linuxu).
+
 ⚠️ **Omezení:** handly jsou v paměti jedné instance knihovny (služba,
-ovladač) a po restartu neplatí; trvalé handly zatím nejsou. Čekání na zámek
-(blokující zámek) zatím není - konflikt hned vrátí `LOCKED`.
+ovladač) a po restartu neplatí; trvalé handly zatím nejsou. Zámky rozsahu
+(`LOCK`) nečekají - konflikt hned vrátí `LOCKED`; čekání mají zámky POSIX
+(výše).
 
 ## Snapshoty
 
@@ -1671,6 +1693,7 @@ zůstávají. Z receptu systému se nezužuje. Jinak `ACCESS_DENIED`.
 |---|---|---|---|
 | 31 | `CONNECT` | příznaky u32 (1 = řídicí, jen z řídicí relace) | nová relace (handle) |
 | 118 | `REOPEN` | dataset u64, oid u64, generace u64, přístup u8, sdílení u8 | handle u64, `Stat`, `Revision` (jako `OPEN`) |
+| 119 | `POSIX_LOCK` | handle u64, příkaz u8 (`TEST` 0, `SET` 1, `SET_WAIT` 2, `UNLOCK` 3), třída u8 (`FCNTL` 0, `FLOCK` 1), výhradní u8, od u64, délka u64 (0 = do konce) | výsledek u8: `DONE` 0, `CONFLICT` 1 + výhradní u8, od u64, délka u64; `DEADLOCK` 2 |
 
 Relace s lístkem dnes: init (řídicí), `fwd` (`/config`). Relace pro
 `dnsd`, `ntpd` (úložiště certifikátů) a `revocd` zatím lístek nemají -

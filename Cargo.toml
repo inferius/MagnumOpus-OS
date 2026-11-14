@@ -21,6 +21,7 @@ members = [
     "libs/libdproto",
     "libs/cstd",
     "libs/cstd-core",
+    "libs/cstd-libc",
     "libs/conf",
     "libs/theme",
     "libs/dns",

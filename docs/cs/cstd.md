@@ -16,8 +16,12 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
 > Část 2c **[ověřeno v QEMU]** (krok `time`): čas, kalendář, `setenv`.
 > Část 2d **[ověřeno v QEMU]** (krok `math`): `math.h`, plovoucí čárka
 > v `printf`, `strtod`. Část 2e **[ověřeno v QEMU]** (sada `cstd sit`):
-> sockety BSD, `getaddrinfo`, `poll`, `select`, `epoll`. Další části (`mmap`,
-> signály, zámky souborů,
+> sockety BSD, `getaddrinfo`, `poll`, `select`, `epoll`. Část 2f
+> **[ověřeno v QEMU]** (krok `mmap`): `mmap`, `mprotect`, `madvise`,
+> `mseal`. Část 2g **[ověřeno v QEMU]** (krok `signal`): signály,
+> `setjmp`. Zámky souborů **[ověřeno v QEMU]** (test `ctest lock`: dva
+> procesy, `EDEADLK`). Část 2i **[ověřeno v QEMU]** (sada `cstd porty`):
+> `libc.a`, sysroot C a porty zlib a sqlite. Další části (
 > `libc.so`, porty) **[navrženo]**, viz
 > [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
 
@@ -97,7 +101,7 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 | Hlavička | Funkce | Poznámka |
 |---|---|---|
 | `unistd.h` | `close`, `read`, `write`, `pread`, `pwrite`, `lseek`, `dup`, `dup2`, `dup3`, `pipe`, `pipe2`, `isatty`, `fsync`, `fdatasync`, `ftruncate`, `truncate`, `unlink`, `rmdir`, `getcwd`, `chdir`, `access`, `sysconf`, `getpagesize` | `fork`, `vfork`, `exec*` vrací `ENOSYS` (viz [Bez fork](#procesy-locale-wchar)) |
-| `fcntl.h` | `open`, `openat` (jen `AT_FDCWD` nebo absolutní cesta), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | hodnoty `O_*` jako Linux, `O_DIRECTORY` stejné na obou architekturách; zámky `F_*LK` zatím `ENOLCK` |
+| `fcntl.h` | `open`, `openat` (jen `AT_FDCWD` nebo absolutní cesta), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | hodnoty `O_*` jako Linux, `O_DIRECTORY` stejné na obou architekturách; zámky `F_GETLK`, `F_SETLK`, `F_SETLKW` viz Zámky souborů |
 | `sys/stat.h` | `stat`, `lstat` (= `stat`), `fstat`, `mkdir`, `chmod`, `fchmod`, `umask` | `st_mode` z druhu a účinných práv relace; `chmod` nemá účinek (práva jsou granty FS) |
 | `sys/uio.h` | `readv`, `writev` | `writev` jedním zápisem |
 | `dirent.h` | `opendir`, `fdopendir`, `readdir`, `closedir`, `rewinddir`, `dirfd` | první dvě položky `.` a `..` |
@@ -185,6 +189,135 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 - **`epoll`** je množina v tabulce fd; úrovňový režim přesně, `EPOLLET`
   hlásí jen nově nastavené bity, `EPOLLONESHOT` položku vypne do
   `EPOLL_CTL_MOD`. Backend mio přímo nad připraveností **[navrženo]**.
+
+## Funkce (část 2f: mapování paměti)
+
+| Hlavička | Funkce | Poznámka |
+|---|---|---|
+| `sys/mman.h` | `mmap`, `munmap` (i část), `mprotect`, `madvise`, `posix_madvise`, `mseal`, `msync`, `mlock`, `munlock` | nad `libos::vm` (přes `osrt::vm`) |
+| `unistd.h` | `sysconf(_SC_PAGESIZE)`, `getpagesize` | velikost stránky od jádra (ne konstanta) |
+
+- **Anonymní paměť** má stránky na požádání (první zápis). `PROT_NONE` =
+  jen rezervace adres bez paměti; `mprotect` s právy ji doplní (vzor GC
+  a JIT: rezervovat velký rozsah, používat po částech). `MAP_FIXED`
+  nahradí, co v rozsahu bylo; `MAP_FIXED_NOREPLACE` jen volné místo.
+- **`MAP_SHARED` anonymní** je v rámci procesu totéž co soukromá (`fork`
+  není).
+- **Soubor:** obsah se načte do anonymní paměti (`MAP_PRIVATE`, nebo
+  `MAP_SHARED` jen pro čtení - pozdější změny souboru se neprojeví).
+  `MAP_SHARED` se zápisem = `ENOTSUP`, dokud fsd nedá objekt paměti
+  souboru **[navrženo]**. Roura nebo socket = `ENODEV`.
+- **W^X:** `PROT_EXEC` na nezapečetěné paměti jen s oprávněním JIT
+  z manifestu ([sprava-pameti.md](sprava-pameti.md)), jinak `EACCES`.
+- `madvise(MADV_DONTNEED | MADV_FREE)` vrátí paměť a další čtení vrátí
+  nuly; ostatní rady se přijmou bez účinku. `mseal` zapečetí rozsah se
+  současnými právy (pak nejde odmapovat ani změnit práva).
+
+## Funkce (část 2g: signály a nelokální skoky)
+
+| Hlavička | Funkce | Poznámka |
+|---|---|---|
+| `signal.h` | `signal`, `sigaction` (`SA_SIGINFO`, `SA_RESETHAND`, `SA_NODEFER`), `raise`, `kill`, `sigprocmask`, `pthread_sigmask`, `sigpending`, `sigsuspend`, `sig*set`, `sigaltstack`, `strsignal`, `psignal` | čísla jako Linux |
+| `unistd.h`, `sys/time.h` | `alarm`, `pause`, `setitimer` (`ITIMER_REAL`), `getpid`, `getppid` | |
+| `setjmp.h` | `setjmp`, `longjmp`, `sigsetjmp`, `siglongjmp`, `_setjmp`, `_longjmp` | `jmp_buf` 320 B na obou architekturách; nahé funkce v asembleru |
+
+Rozhodnutí 6A - signály bez podpory jádra:
+
+- **Synchronní** (`SIGSEGV`, `SIGBUS`, `SIGFPE`, `SIGILL`, `SIGTRAP`):
+  první `sigaction` s obsluhou zaregistruje obsluhu výjimek ve vlákně
+  ([vyjimky.md](vyjimky.md)); ta zavolá obsluhu signálu v témže vlákně se
+  `si_addr` z výjimky. Návrat z obsluhy = pokračovat (instrukce se
+  zopakuje - vzor GC a JIT: `mprotect` v obsluze), `SIG_DFL` = další
+  obsluha a konec procesu. Odchod `siglongjmp` funguje. `ucontext_t`
+  (třetí argument) zatím vyplněný není (nuly) **[navrženo]**. Na aarch64
+  dělení nulou `SIGFPE` nedá (CPU ho nehlásí).
+- **`raise`, `kill` na vlastní proces:** obsluha běží hned ve volajícím
+  vlákně; blokovaný signál čeká a doručí se po odblokování.
+- **Časovače** (`alarm`, `setitimer`): obsluha `SIGALRM` běží ve zvláštním
+  vlákně signálů (jako obsluha Ctrl+C konzole ve Windows); `EINTR`
+  nevzniká, `pause` a `sigsuspend` se probudí.
+- **Výchozí akce:** konec procesu kódem 128 + číslo signálu (`SIGABRT` =
+  `abort`), `SIGCHLD`, `SIGCONT`, `SIGWINCH` a zastavovací signály se
+  ignorují.
+- **Nejsou:** signály od jiných procesů (terminál, rodič; událost `SIGNAL`
+  v bloku parametrů **[navrženo]**), `SIGPIPE` (zápis do zavřené roury
+  vrátí jen `EPIPE`).
+- **`getpid`:** jádro programům číslo procesu nedává; `getpid` vrací
+  náhodné kladné číslo, stálé po dobu běhu (jména dočasných souborů,
+  `kill` na sebe). `getppid` = 1.
+
+### Zámky souborů
+
+`fcntl(F_GETLK/F_SETLK/F_SETLKW)`, `flock` (`sys/file.h`) a `lockf`
+**[ověřeno v QEMU]** (sada `cstd`, test `ctest lock`: dva procesy nad
+jedním souborem, konflikt, `F_GETLK`, uváznutí, uvolnění koncem procesu).
+Zámky drží fsd (zpráva `POSIX_LOCK`, [souborovy-system.md](souborovy-system.md)):
+vlastník `fcntl` je proces (relace FS), `flock` otevřený soubor. Uvolní je
+zavření posledního fd procesu na souboru (`flock`: zavření fd) a konec
+procesu. `F_SETLKW` a `flock` bez `LOCK_NB` čekají opakovaným zkoušením;
+fsd přitom hlídá cyklus čekání (`EDEADLK`). `l_pid` z `F_GETLK` je -1
+(čísla procesů fsd nezná).
+
+## Sysroot C a porty (část 2i)
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (sada `cstd porty`).
+
+<figure class="diagram">
+<svg viewBox="0 0 780 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sestavení portu v C proti sysrootu">
+<defs><marker id="cs3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="10" width="220" height="60" rx="6"/><text class="t b" x="120" y="34" text-anchor="middle">zdroje portu</text><text class="m" x="120" y="52" text-anchor="middle">HTTPS + SHA-256, tar</text>
+<rect class="acc" x="280" y="10" width="220" height="60" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">clang + sysroot C</text><text class="m" x="390" y="52" text-anchor="middle">include, clang.cfg</text>
+<rect class="acc" x="550" y="10" width="220" height="60" rx="6"/><text class="t b" x="660" y="34" text-anchor="middle">ld.lld</text><text class="m" x="660" y="52" text-anchor="middle">libc.a, magnumopus.ld</text>
+<path class="ln" d="M230 40 L276 40" marker-end="url(#cs3)"/>
+<path class="ln" d="M500 40 L546 40" marker-end="url(#cs3)"/>
+<path class="ln" d="M660 70 L660 98" marker-end="url(#cs3)"/>
+<rect class="ok" x="400" y="100" width="370" height="60" rx="6"/><text class="t b" x="585" y="124" text-anchor="middle">statický program ET_EXEC v initfs</text><text class="m" x="585" y="142" text-anchor="middle">zlib-example, minigzip, sqlite3, sqltest</text>
+<rect class="box" x="10" y="100" width="370" height="60" rx="6"/><text class="t b" x="195" y="124" text-anchor="middle">libc.a = cstd + std + osrt</text><text class="m" x="195" y="142" text-anchor="middle">crate libs/cstd-libc (staticlib), _start z osrt</text>
+</svg>
+<figcaption>Port v C se přeloží clangem proti sysrootu a slinkuje s libc.a; _start z osrt zavolá jeho main.</figcaption>
+</figure>
+
+- **`libc.a`** (crate `libs/cstd-libc`, `staticlib`): `cstd`, `std`
+  a `osrt` včetně `_start`, který zavolá `main` programu v C. Staví se se
+  std aplikacemi (`stdsys::STD_LIBS`).
+- **Sysroot C** `target/c-sysroot/<arch>/` (`xtask/src/csysroot.rs`):
+  `include/` (cstd) a `include-core/` (cstd-core), `lib/libc.a`,
+  `lib/magnumopus.ld` (linker skript programu se std) a `clang.cfg`
+  s příznaky překladu i linku pro `clang --config=...` - cizí build
+  systémy (`configure`, CMake, Meson) ho použijí jako křížový překlad
+  **[implementováno]** (porty níže ho používají přes stejné příznaky).
+- **Porty** (`xtask/src/cports.rs`): zdroje z oficiálních míst přes HTTPS
+  (`curl`), ověřený SHA-256 (zlib shodný s hashem vydání; sqlite připnutý
+  z prvního stažení ze sqlite.org), rozbalení `tar`, překlad clangem
+  s `-w` a link s `libc.a`. Objekty se překládají znovu jen při změně.
+  - **zlib 1.3.1** (licence zlib): `zlib-example` (vlastní test balíku)
+    a `minigzip`; test: všechny kroky `example`, komprese souboru a zpět
+    se shodným obsahem.
+  - **sqlite 3.46.1** (public domain): shell `sqlite3` a `sqltest`
+    (`user/ctest/c/sqltest.c`); výchozí unixové VFS se zámky `fcntl`
+    ve fsd. Bez WAL a mmap I/O (`SQLITE_OMIT_WAL`,
+    `SQLITE_MAX_MMAP_SIZE=0`: sdílená paměť souboru zatím není), bez
+    `load_extension` (statický program). Test: shell nad souborem
+    a trvalost, dva procesy nad jednou databází - zápis při cizí
+    exkluzivní transakci = `SQLITE_BUSY`, s `busy_timeout` uspěje po
+    `COMMIT` druhého procesu.
+- Doplněné funkce pro porty: `strspn`, `strcspn`, `strpbrk`, `strtok_r`,
+  `strdup`, `strndup`, `strcasecmp`, `strerror_r`, `qsort`, `bsearch`,
+  `rand`, `div`, `atol`, rodina `scanf`, `getpwuid` (uživatel z `USER`
+  a `HOME`), `getuid` a spol. (0), `fchown` a `utimes` bez účinku,
+  `readlink`/`symlink`/`link` (symlinky FS zatím nejsou), `ioctl`
+  (`ENOTTY`), `setlocale`/`localeconv` (C, C.UTF-8), `uname`,
+  `getrusage`/`getrlimit`, `system` (`ENOSYS`; spouštění procesů
+  `posix_spawn` **[navrženo]**).
+- **`libc.so`** (sdílená) **[navrženo]**, další krok hned po této části
+  (samostatná větev před SDL a FFmpegem, které na ní budou stavět):
+  druhý sysroot std přeložený jako PIC (nový JSON cíl s
+  `relocation-model: pic`, TLS přes zavaděč - initial-exec/TLSDESC místo
+  `local-exec`, `osrt` pod `ld.so` bez vlastního bloku TLS), `libc.so` jako
+  `cdylib` cstd + std + osrt v `/system/lib`, programy PIE s `PT_INTERP`.
+  Odhad času sestavení: druhý překlad std pro každou architekturu, tedy
+  zhruba stejně dlouho jako dnešní sysroot std navíc (inkrementálně jen
+  při změně std nebo osrt).
 
 ### Čísla fd
 

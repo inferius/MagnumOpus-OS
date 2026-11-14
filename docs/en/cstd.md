@@ -18,7 +18,12 @@ Compiling C (clang, flags, protections) is described in
 > time, calendar, `setenv`. Part 2d **[verified in QEMU]** (step `math`):
 > `math.h`, floating point in `printf`, `strtod`. Part 2e **[verified in
 > QEMU]** (suite `cstd sit`): BSD sockets, `getaddrinfo`, `poll`, `select`,
-> `epoll`. Further parts (`mmap`,
+> `epoll`. Part 2f **[verified in QEMU]** (step `mmap`): `mmap`, `mprotect`,
+> `madvise`, `mseal`. Part 2g **[verified in QEMU]** (step `signal`):
+> signals, `setjmp`. File locks **[verified in QEMU]** (test `ctest lock`:
+> two processes, `EDEADLK`). Part 2i **[verified in QEMU]** (suite
+> `cstd porty`): `libc.a`, the C sysroot and the zlib and sqlite ports.
+> Further parts (
 > signals, file locks, `libc.so`, ports) **[designed]**, see [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
 
 ## Layers
@@ -99,7 +104,7 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 | Header | Functions | Note |
 |---|---|---|
 | `unistd.h` | `close`, `read`, `write`, `pread`, `pwrite`, `lseek`, `dup`, `dup2`, `dup3`, `pipe`, `pipe2`, `isatty`, `fsync`, `fdatasync`, `ftruncate`, `truncate`, `unlink`, `rmdir`, `getcwd`, `chdir`, `access`, `sysconf`, `getpagesize` | `fork`, `vfork`, `exec*` return `ENOSYS` (see [No fork](#processes-locale-wchar)) |
-| `fcntl.h` | `open`, `openat` (only `AT_FDCWD` or an absolute path), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | `O_*` values as Linux, `O_DIRECTORY` the same on both architectures; `F_*LK` locks `ENOLCK` for now |
+| `fcntl.h` | `open`, `openat` (only `AT_FDCWD` or an absolute path), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | `O_*` values as Linux, `O_DIRECTORY` the same on both architectures; locks `F_GETLK`, `F_SETLK`, `F_SETLKW` see File locks |
 | `sys/stat.h` | `stat`, `lstat` (= `stat`), `fstat`, `mkdir`, `chmod`, `fchmod`, `umask` | `st_mode` from the kind and the session's effective rights; `chmod` has no effect (rights are FS grants) |
 | `sys/uio.h` | `readv`, `writev` | `writev` in one write |
 | `dirent.h` | `opendir`, `fdopendir`, `readdir`, `closedir`, `rewinddir`, `dirfd` | the first two entries are `.` and `..` |
@@ -189,6 +194,142 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
   `EPOLLET` reports only newly set bits, `EPOLLONESHOT` disables the entry
   until `EPOLL_CTL_MOD`. An mio backend directly over readiness
   **[designed]**.
+
+## Functions (part 2f: memory mapping)
+
+| Header | Functions | Note |
+|---|---|---|
+| `sys/mman.h` | `mmap`, `munmap` (also a part), `mprotect`, `madvise`, `posix_madvise`, `mseal`, `msync`, `mlock`, `munlock` | over `libos::vm` (via `osrt::vm`) |
+| `unistd.h` | `sysconf(_SC_PAGESIZE)`, `getpagesize` | page size from the kernel (not a constant) |
+
+- **Anonymous memory** has on-demand pages (first write). `PROT_NONE` =
+  an address reservation without memory; `mprotect` with rights fills it in
+  (the GC and JIT pattern: reserve a large range, use it in parts).
+  `MAP_FIXED` replaces whatever was in the range; `MAP_FIXED_NOREPLACE` only
+  free space.
+- **Anonymous `MAP_SHARED`** is the same as private within the process (no
+  `fork`).
+- **File:** the content is read into anonymous memory (`MAP_PRIVATE`, or
+  read-only `MAP_SHARED` - later changes to the file are not visible).
+  `MAP_SHARED` with writing = `ENOTSUP` until fsd provides a file memory
+  object **[designed]**. A pipe or socket = `ENODEV`.
+- **W^X:** `PROT_EXEC` on unsealed memory only with the JIT permission from
+  the manifest ([memory-management.md](memory-management.md)), otherwise
+  `EACCES`.
+- `madvise(MADV_DONTNEED | MADV_FREE)` returns the memory and the next read
+  returns zeros; other advice is accepted without effect. `mseal` seals the
+  range with its current rights (then it cannot be unmapped or have its
+  rights changed).
+
+## Functions (part 2g: signals and non-local jumps)
+
+| Header | Functions | Note |
+|---|---|---|
+| `signal.h` | `signal`, `sigaction` (`SA_SIGINFO`, `SA_RESETHAND`, `SA_NODEFER`), `raise`, `kill`, `sigprocmask`, `pthread_sigmask`, `sigpending`, `sigsuspend`, `sig*set`, `sigaltstack`, `strsignal`, `psignal` | numbers as Linux |
+| `unistd.h`, `sys/time.h` | `alarm`, `pause`, `setitimer` (`ITIMER_REAL`), `getpid`, `getppid` | |
+| `setjmp.h` | `setjmp`, `longjmp`, `sigsetjmp`, `siglongjmp`, `_setjmp`, `_longjmp` | `jmp_buf` 320 B on both architectures; naked functions in assembly |
+
+Decision 6A - signals without kernel support:
+
+- **Synchronous** (`SIGSEGV`, `SIGBUS`, `SIGFPE`, `SIGILL`, `SIGTRAP`): the
+  first `sigaction` with a handler registers the in-thread exception
+  handler ([exceptions.md](exceptions.md)); it calls the signal handler in
+  the same thread with `si_addr` from the exception. Returning from the
+  handler = continue (the instruction is retried - the GC and JIT pattern:
+  `mprotect` in the handler), `SIG_DFL` = the next handler and the end of
+  the process. Leaving with `siglongjmp` works. `ucontext_t` (the third
+  argument) is not filled in yet (zeros) **[designed]**. On aarch64
+  division by zero gives no `SIGFPE` (the CPU does not report it).
+- **`raise`, `kill` of the own process:** the handler runs immediately in
+  the calling thread; a blocked signal waits and is delivered once
+  unblocked.
+- **Timers** (`alarm`, `setitimer`): the `SIGALRM` handler runs in a
+  dedicated signal thread (like the Windows console Ctrl+C handler); there
+  is no `EINTR`, `pause` and `sigsuspend` wake up.
+- **Default action:** the process ends with code 128 + signal number
+  (`SIGABRT` = `abort`); `SIGCHLD`, `SIGCONT`, `SIGWINCH` and stop signals
+  are ignored.
+- **Not available:** signals from other processes (terminal, parent; a
+  `SIGNAL` event in the parameter block **[designed]**), `SIGPIPE` (writing
+  to a closed pipe only returns `EPIPE`).
+- **`getpid`:** the kernel does not give programs a process number;
+  `getpid` returns a random positive number, stable for the run (temporary
+  file names, `kill` of itself). `getppid` = 1.
+
+### File locks
+
+`fcntl(F_GETLK/F_SETLK/F_SETLKW)`, `flock` (`sys/file.h`) and `lockf`
+**[verified in QEMU]** (suite `cstd`, test `ctest lock`: two processes over
+one file, conflict, `F_GETLK`, deadlock, release at process exit). fsd holds
+the locks (message `POSIX_LOCK`, [file-system.md](file-system.md)): the
+`fcntl` owner is the process (FS session), the `flock` owner is the open
+file. They are released by closing the process's last fd on the file
+(`flock`: closing the fd) and by the end of the process. `F_SETLKW` and
+`flock` without `LOCK_NB` wait by retrying; fsd watches for a wait cycle
+(`EDEADLK`). `l_pid` from `F_GETLK` is -1 (fsd does not know process
+numbers).
+
+## C sysroot and ports (part 2i)
+
+**[verified in QEMU]** x86_64 and aarch64 (suite `cstd porty`).
+
+<figure class="diagram">
+<svg viewBox="0 0 780 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Building a C port against the sysroot">
+<defs><marker id="cs3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="10" width="220" height="60" rx="6"/><text class="t b" x="120" y="34" text-anchor="middle">port sources</text><text class="m" x="120" y="52" text-anchor="middle">HTTPS + SHA-256, tar</text>
+<rect class="acc" x="280" y="10" width="220" height="60" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">clang + C sysroot</text><text class="m" x="390" y="52" text-anchor="middle">include, clang.cfg</text>
+<rect class="acc" x="550" y="10" width="220" height="60" rx="6"/><text class="t b" x="660" y="34" text-anchor="middle">ld.lld</text><text class="m" x="660" y="52" text-anchor="middle">libc.a, magnumopus.ld</text>
+<path class="ln" d="M230 40 L276 40" marker-end="url(#cs3)"/>
+<path class="ln" d="M500 40 L546 40" marker-end="url(#cs3)"/>
+<path class="ln" d="M660 70 L660 98" marker-end="url(#cs3)"/>
+<rect class="ok" x="400" y="100" width="370" height="60" rx="6"/><text class="t b" x="585" y="124" text-anchor="middle">static ET_EXEC program in initfs</text><text class="m" x="585" y="142" text-anchor="middle">zlib-example, minigzip, sqlite3, sqltest</text>
+<rect class="box" x="10" y="100" width="370" height="60" rx="6"/><text class="t b" x="195" y="124" text-anchor="middle">libc.a = cstd + std + osrt</text><text class="m" x="195" y="142" text-anchor="middle">crate libs/cstd-libc (staticlib), _start from osrt</text>
+</svg>
+<figcaption>A C port is compiled by clang against the sysroot and linked with libc.a; _start from osrt calls its main.</figcaption>
+</figure>
+
+- **`libc.a`** (crate `libs/cstd-libc`, `staticlib`): `cstd`, `std` and
+  `osrt` including `_start`, which calls the C program's `main`. Built with
+  the std applications (`stdsys::STD_LIBS`).
+- **C sysroot** `target/c-sysroot/<arch>/` (`xtask/src/csysroot.rs`):
+  `include/` (cstd) and `include-core/` (cstd-core), `lib/libc.a`,
+  `lib/magnumopus.ld` (the linker script of std programs) and `clang.cfg`
+  with compile and link flags for `clang --config=...` - foreign build
+  systems (`configure`, CMake, Meson) use it as a cross build
+  **[implemented]** (the ports below use the same flags).
+- **Ports** (`xtask/src/cports.rs`): sources from the official places over
+  HTTPS (`curl`), verified SHA-256 (zlib matches the release hash; sqlite
+  pinned from the first download from sqlite.org), unpacked with `tar`,
+  compiled by clang with `-w` and linked with `libc.a`. Objects are
+  recompiled only on change.
+  - **zlib 1.3.1** (zlib licence): `zlib-example` (the package's own test)
+    and `minigzip`; test: every `example` step, compressing a file and back
+    with identical content.
+  - **sqlite 3.46.1** (public domain): the `sqlite3` shell and `sqltest`
+    (`user/ctest/c/sqltest.c`); the default unix VFS with `fcntl` locks in
+    fsd. No WAL and no mmap I/O (`SQLITE_OMIT_WAL`,
+    `SQLITE_MAX_MMAP_SIZE=0`: shared file memory does not exist yet), no
+    `load_extension` (static program). Test: the shell over a file and
+    persistence, two processes over one database - a write during a
+    foreign exclusive transaction = `SQLITE_BUSY`, with `busy_timeout` it
+    succeeds after the other process's `COMMIT`.
+- Functions added for the ports: `strspn`, `strcspn`, `strpbrk`,
+  `strtok_r`, `strdup`, `strndup`, `strcasecmp`, `strerror_r`, `qsort`,
+  `bsearch`, `rand`, `div`, `atol`, the `scanf` family, `getpwuid` (user
+  from `USER` and `HOME`), `getuid` and friends (0), `fchown` and `utimes`
+  without effect, `readlink`/`symlink`/`link` (no FS symlinks yet),
+  `ioctl` (`ENOTTY`), `setlocale`/`localeconv` (C, C.UTF-8), `uname`,
+  `getrusage`/`getrlimit`, `system` (`ENOSYS`; starting processes via
+  `posix_spawn` **[designed]**).
+- **`libc.so`** (shared) **[designed]**, the next step right after this
+  part (a separate branch before SDL and FFmpeg, which will build on it): a
+  second std sysroot built as PIC (a new JSON target with
+  `relocation-model: pic`, TLS via the loader - initial-exec/TLSDESC instead
+  of `local-exec`, `osrt` under `ld.so` without its own TLS block), `libc.so`
+  as a `cdylib` of cstd + std + osrt in `/system/lib`, PIE programs with
+  `PT_INTERP`. Build time estimate: a second std build per architecture,
+  i.e. roughly as long again as today's std sysroot (incremental, only when
+  std or osrt changes).
 
 ### fd numbers
 

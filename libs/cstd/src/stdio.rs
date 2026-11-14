@@ -221,6 +221,11 @@ static STDIN: FILE = FILE::new(0, Buffering::Full, true, false);
 static STDOUT: FILE = FILE::new(1, Buffering::Line, false, true);
 static STDERR: FILE = FILE::new(2, Buffering::None, false, true);
 
+/// `stdin` jako `FILE *` (pro `scanf`).
+pub fn stdin_ptr() -> *mut FILE {
+    &STDIN as *const FILE as *mut FILE
+}
+
 /// Ukazatel na `FILE` jako globalni promenna C (`extern FILE *stdout`).
 #[repr(transparent)]
 pub struct FilePtr(*const FILE);

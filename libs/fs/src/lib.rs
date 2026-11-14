@@ -39,6 +39,7 @@ mod merge3;
 mod names;
 mod node;
 pub mod perm;
+pub mod posix_lock;
 pub mod records;
 mod space;
 mod store;

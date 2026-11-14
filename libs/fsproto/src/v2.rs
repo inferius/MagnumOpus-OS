@@ -69,6 +69,43 @@ pub mod op {
     /// u64, pristup u8, sdileni u8 -> handle u64, Stat, Revision (jako
     /// `OPEN`). Prava se overi znovu; objekt s jinou generaci = `NOT_FOUND`.
     pub const REOPEN: u32 = 118;
+    /// Zamek POSIX (`fcntl` F_SETLK/F_GETLK, `flock`): handle u64, prikaz
+    /// u8 ([`posix_lock`]), trida u8, druh u8, start u64, delka u64 (0 = do
+    /// konce) -> vysledek u8 (`DONE`, `CONFLICT` + druh u8, start u64,
+    /// delka u64; `DEADLOCK`). Vlastnik `fcntl` = relace, `flock` = handle.
+    pub const POSIX_LOCK: u32 = 119;
+}
+
+/// Prikazy, tridy a vysledky `POSIX_LOCK`.
+pub mod posix_lock {
+    /// Zjistit konflikt (`F_GETLK`).
+    pub const TEST: u8 = 0;
+    /// Zamknout bez cekani (`F_SETLK`).
+    pub const SET: u8 = 1;
+    /// Zamknout, klient bude cekat (`F_SETLKW`): pri konfliktu se ulozi
+    /// cekani a odhali cyklus (`DEADLOCK`).
+    pub const SET_WAIT: u8 = 2;
+    /// Odemknout (`F_UNLCK`).
+    pub const UNLOCK: u8 = 3;
+    /// Trida `fcntl` (vlastnik relace) a `flock` (vlastnik handle).
+    pub const FCNTL: u8 = 0;
+    pub const FLOCK: u8 = 1;
+    /// Druh: sdileny / vyhradni.
+    pub const READ: u8 = 0;
+    pub const WRITE: u8 = 1;
+    /// Vysledek.
+    pub const DONE: u8 = 0;
+    pub const CONFLICT: u8 = 1;
+    pub const DEADLOCK: u8 = 2;
+}
+
+/// Vysledek [`crate::FsClient::posix_lock`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PosixLock {
+    Done,
+    /// Cizi zamek v konfliktu: vyhradni?, start, delka (0 = do konce).
+    Conflict { write: bool, start: u64, len: u64 },
+    Deadlock,
 }
 
 /// Pristup a sdileni pri `OPEN` (stejne bity jako `fs::access`/`fs::share`).
@@ -381,6 +418,24 @@ impl FsClient {
         })?;
         self.handles.lock().update(h, |r| r.locked = true);
         Ok(())
+    }
+
+    /// Zamek POSIX (viz [`op::POSIX_LOCK`]).
+    pub fn posix_lock(&self, h: u64, cmd: u8, class: u8, write: bool, start: u64, len: u64) -> Result<PosixLock> {
+        let body = self.h_call(h, Kind::Effect, |fsd| {
+            let mut w = Self::req(op::POSIX_LOCK);
+            w.u64(fsd).u8(cmd).u8(class).u8(u8::from(write)).u64(start).u64(len);
+            w
+        })?;
+        if cmd != posix_lock::TEST && cmd != posix_lock::UNLOCK {
+            self.handles.lock().update(h, |r| r.locked = true);
+        }
+        let mut r = Reader::new(&body);
+        Ok(match r.u8()? {
+            posix_lock::DONE => PosixLock::Done,
+            posix_lock::CONFLICT => PosixLock::Conflict { write: r.u8()? != 0, start: r.u64()?, len: r.u64()? },
+            _ => PosixLock::Deadlock,
+        })
     }
 
     pub fn unlock(&self, h: u64, start: u64, len: u64) -> Result<()> {

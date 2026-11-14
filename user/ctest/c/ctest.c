@@ -17,6 +17,9 @@ int threads_test(void);
 int time_test(void);
 int math_test(void);
 int net_main(void);
+int mmap_test(const char *dir);
+int signal_test(void);
+int lock_main(const char *side, const char *dir);
 
 #define CHECK(name, cond)                                              \
     do {                                                               \
@@ -120,6 +123,8 @@ static int errors(void) {
 int main(int argc, char **argv) {
     /* Rezim "net": jen sitovy test (sada "cstd sit", relace site). */
     if (argc == 2 && strcmp(argv[1], "net") == 0) return net_main();
+    /* Rezim "lock a|b DIR": zamky mezi dvema procesy. */
+    if (argc == 4 && strcmp(argv[1], "lock") == 0) return lock_main(argv[2], argv[3]);
     atexit(first_registered);
     atexit(last_words);
 
@@ -141,6 +146,12 @@ int main(int argc, char **argv) {
     int mt = math_test();
     if (mt != 0) fprintf(stderr, "ctest math: krok %d\n", mt);
     CHECK("math", mt == 0);
+    int mm = dir != NULL ? mmap_test(dir) : -1;
+    if (mm != 0) fprintf(stderr, "ctest mmap: krok %d errno %d\n", mm, errno);
+    CHECK("mmap", mm == 0);
+    int sg = signal_test();
+    if (sg != 0) fprintf(stderr, "ctest signal: krok %d errno %d\n", sg, errno);
+    CHECK("signal", sg == 0);
     assert(failures == 0);
     fputs("chyba na stderr\n", stderr);
     fflush(stdout);

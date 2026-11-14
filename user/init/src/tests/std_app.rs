@@ -134,14 +134,14 @@ pub(super) struct Run {
 /// Spusti aplikaci `name` z initfs s argumenty, prostredim, stdout/stderr
 /// jako kanaly proudu a dalsimi handly (`extra`, napr. relace FS a site);
 /// pocka na konec a vrati vystup (radky stdout vypise do logu).
-pub(super) fn run_std_app(
+/// Spusti program se std z initfs (stdout a stderr do kanalu), neceka.
+pub(super) fn start_std_app(
     s: &Startup,
     name: &str,
     args: &[&str],
     env: &[&str],
     extra: Vec<StartHandle>,
-    limit: Duration,
-) -> Result<Run, String> {
+) -> Result<Started, String> {
     let initfs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
     let image = initfs.find(name).ok_or_else(|| format!("{name} neni v initfs"))?;
     let params = Params {
@@ -159,19 +159,46 @@ pub(super) fn run_std_app(
     ];
     handles.extend(extra);
     let (process, _bootstrap) = libos::spawn(name, image, handles).map_err(|e| fail("spusteni", e))?;
-    let deadline = time::deadline_after(limit);
-    let stdout = read_stream(&out, deadline)?;
-    let code = process.wait_exit(Some(deadline)).map_err(|e| fail("konec procesu", e))?;
-    let stderr = read_stream(&err, time::deadline_after(Duration::from_secs(1))).unwrap_or_default();
-    let run = Run {
-        code,
-        stdout: String::from_utf8_lossy(&stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr).into_owned(),
-    };
-    for line in run.stdout.lines() {
-        libos::println!("init: {name}: {line}");
+    Ok(Started { name: String::from(name), process, out, err })
+}
+
+/// Bezici program se std (viz [`start_std_app`]).
+pub(super) struct Started {
+    name: String,
+    process: libos::Process,
+    out: Channel,
+    err: Channel,
+}
+
+impl Started {
+    /// Precte vystup a pocka na konec (nejdele `limit`).
+    pub(super) fn finish(self, limit: Duration) -> Result<Run, String> {
+        let deadline = time::deadline_after(limit);
+        let stdout = read_stream(&self.out, deadline)?;
+        let code = self.process.wait_exit(Some(deadline)).map_err(|e| fail("konec procesu", e))?;
+        let stderr = read_stream(&self.err, time::deadline_after(Duration::from_secs(1))).unwrap_or_default();
+        let run = Run {
+            code,
+            stdout: String::from_utf8_lossy(&stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&stderr).into_owned(),
+        };
+        for line in run.stdout.lines() {
+            libos::println!("init: {}: {line}", self.name);
+        }
+        Ok(run)
     }
-    Ok(run)
+}
+
+/// Spusti program se std a pocka na jeho konec.
+pub(super) fn run_std_app(
+    s: &Startup,
+    name: &str,
+    args: &[&str],
+    env: &[&str],
+    extra: Vec<StartHandle>,
+    limit: Duration,
+) -> Result<Run, String> {
+    start_std_app(s, name, args, env, extra)?.finish(limit)
 }
 
 impl Run {

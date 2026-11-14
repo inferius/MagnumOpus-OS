@@ -161,6 +161,7 @@ fn main(startup: Startup) -> i64 {
         scrubbing: true,
         tasks: tasks::FsTasks::default(),
         orphan_cleanup: restart.map(|_| time::deadline_after(ORPHAN_GRACE)),
+        posix: fs::posix_lock::PosixLocks::new(),
     };
     if let Some(g) = restart {
         println!("fsd: nova instance po padu (generace {g}), sirotky uklidi za {} s", ORPHAN_GRACE.as_secs());

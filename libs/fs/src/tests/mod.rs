@@ -29,6 +29,7 @@ mod ondisk;
 mod perf;
 mod perf_shell;
 mod perm;
+mod posix_lock;
 mod scrub;
 mod sharing;
 mod times;

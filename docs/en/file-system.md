@@ -1103,10 +1103,33 @@ lock only guards against other locks, a **mandatory** one also blocks
 writes (exclusive: reads too) by other handles and paths. They belong to a
 handle and go away when it is closed.
 
+**POSIX locks** (`fcntl` `F_SETLK`/`F_SETLKW`/`F_GETLK` and `flock`, message
+`POSIX_LOCK`) **[verified in QEMU]** (suite `cstd`, test `ctest lock`: two
+processes over one file): advisory range locks owned by the **session**
+(process; `flock`: the handle). fsd keeps them in memory
+(`libs/fs/src/posix_lock.rs`, host tests `cargo test -p fs --features std
+posix_lock`); they are not written to disk.
+
+- Own locks never conflict: a new lock in a range replaces the old one
+  (change of kind, splitting), adjacent locks of the same kind merge;
+  unlocking a part splits the range. `F_GETLK` returns the first foreign
+  conflicting lock.
+- Release: closing the session's last handle on the file (`flock`: closing
+  the handle) and the end of the session (end of the process); an fsd
+  restart drops the locks (a client whose handle had a lock gets
+  `SERVICE_RESTARTED`).
+- **Waiting** (`F_SETLKW`) is done by the client by retrying (from a
+  millisecond up to fifty milliseconds between attempts): a blocking request
+  would hold the session's only channel and stop the process's other file
+  operations. fsd remembers an attempt announced as waiting (`SET_WAIT`:
+  who waits for whom, valid for one second without renewal) and reports a
+  closed wait cycle as a deadlock (`EDEADLK`).
+- `flock` and `fcntl` do not affect each other (as on Linux).
+
 ⚠️ **Limitations:** handles live in the memory of one library instance (a
 service, a driver) and are gone after a restart; there are no durable
-handles yet. Waiting for a lock (a blocking lock) does not exist yet - a
-conflict returns `LOCKED` at once.
+handles yet. Range locks (`LOCK`) do not wait - a conflict returns
+`LOCKED` at once; POSIX locks (above) do wait.
 
 ## Snapshots
 
@@ -1722,6 +1745,7 @@ groups stay. A system recipe cannot be narrowed. Otherwise `ACCESS_DENIED`.
 |---|---|---|---|
 | 31 | `CONNECT` | flags u32 (1 = control, only from a control session) | new session (handle) |
 | 118 | `REOPEN` | dataset u64, oid u64, generation u64, access u8, share u8 | handle u64, `Stat`, `Revision` (like `OPEN`) |
+| 119 | `POSIX_LOCK` | handle u64, command u8 (`TEST` 0, `SET` 1, `SET_WAIT` 2, `UNLOCK` 3), class u8 (`FCNTL` 0, `FLOCK` 1), exclusive u8, from u64, length u64 (0 = to the end) | result u8: `DONE` 0, `CONFLICT` 1 + exclusive u8, from u64, length u64; `DEADLOCK` 2 |
 
 Sessions with a lease today: init (control), `fwd` (`/config`). The sessions
 for `dnsd`, `ntpd` (certificate store) and `revocd` have no lease yet -

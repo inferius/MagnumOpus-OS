@@ -126,6 +126,24 @@ Not in the repository yet; the rules apply from the first vendored code.
 - **Popis / Description:** `docs/cs/cstd.md` (kapitola FFmpeg a licence),
   `docs/en/cstd.md`.
 
+## zlib 1.3.1 a SQLite 3.46.1 (porty v C / C ports)
+
+Nejsou v repozitáři: `cargo xtask` je stáhne z oficiálních míst (HTTPS),
+ověří SHA-256 (`xtask/src/cports.rs`) a přeloží proti sysrootu C bez úprav
+zdrojů; programy jsou v initfs (testovací obraz). / Not in the repository:
+`cargo xtask` downloads them from the official places (HTTPS), verifies the
+SHA-256 (`xtask/src/cports.rs`) and builds them against the C sysroot
+without source changes; the programs are in the initfs (test image).
+
+- **zlib** - licence zlib (Jean-loup Gailly, Mark Adler); zdroj / source:
+  <https://github.com/madler/zlib/releases/tag/v1.3.1>. Programy / programs:
+  `zlib-example`, `minigzip`.
+- **SQLite** - public domain; zdroj / source: amalgamace / amalgamation
+  <https://www.sqlite.org/2024/sqlite-amalgamation-3460100.zip>. Programy /
+  programs: `sqlite3` (shell), `sqltest` (náš test / our test).
+- **Popis / Description:** `docs/cs/cstd.md` (kapitola Sysroot C a porty),
+  `docs/en/cstd.md`.
+
 ## Písmo Tuffy / Tuffy font
 
 - **Název / Name:** Tuffy Regular

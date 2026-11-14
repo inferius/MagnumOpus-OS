@@ -140,3 +140,22 @@ pub struct PollItem {
     pub events: u16,
     pub revents: u16,
 }
+
+/// Oblast adresniho prostoru (`vm_query`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Region {
+    /// 0 volne, 1 rezervace, 2 mapovani (`abi::vm::region`).
+    pub kind: u32,
+    pub start: u64,
+    pub len: u64,
+    /// Prava `PROT_*` (hodnoty jako `abi::vm::MAP_*`).
+    pub prot: u32,
+}
+
+/// Vysledek zamku souboru (`fcntl`, `flock`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockResult {
+    Done,
+    Conflict { write: bool, start: u64, len: u64 },
+    Deadlock,
+}

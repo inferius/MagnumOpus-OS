@@ -6,6 +6,7 @@ Souborový systém (`no_std`, `std` jen přes feature pro nástroje). Copy-on-wr
 
 - `src/fs/mod.rs` (soubory, adresáře), `fs/commit.rs`, `fs/zil.rs` (intent log), `fs/check.rs`, `fs/scrub.rs`, `fs/snap.rs`, `fs/dataset.rs`, `fs/merge.rs`.
 - `src/layout.rs` + `src/layout/` (formát na disku), `store.rs`, `records.rs`, `btree.rs`, `space/` (volné místo), `names.rs` (jména), `perm.rs` (oprávnění).
+- `src/posix_lock.rs` - zámky POSIX pro fsd (vlastník, dělení a slučování rozsahů, graf čekání pro EDEADLK); čistá logika bez I/O, testy `src/tests/posix_lock.rs`.
 - `src/tests/` - model, výpadky proudu, výkon, verze, sdílení.
 
 ## Invarianty

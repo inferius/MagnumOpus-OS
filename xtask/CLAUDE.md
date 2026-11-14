@@ -9,6 +9,7 @@
 - `src/boottest.rs`, `crashtest.rs`, `powertest.rs` - zvláštní testovací běhy (`--only release|zaznam-padu|opakovany-start|napajeni|zive-usb`).
 - `src/docs.rs`, `docs_books.rs`, `docs_check.rs`, `docs_tests.rs`, `highlight.rs` - generátor webu dokumentace a kontrola odkazů, kotev a značek stavu.
 - `src/usb/install_test.rs` - test instalátoru (`--only instalace`): instalace ze živého USB na prázdný NVMe a vedle "Windows", start bez flashky, kontrola disku na hostiteli (`image::open_fs`); `--only instalace-gui` totéž přes grafický instalátor se snímkem každého kroku (QMP `screendump`, háček `usb::boot::boot_with`).
+- `src/csysroot.rs` - sysroot C `target/c-sysroot/<arch>` (hlavičky cstd, `libc.a`, linker skript, `clang.cfg`); `src/cports.rs` - porty v C (zlib, sqlite): stažení HTTPS + SHA-256, `tar`, překlad proti sysrootu, do initfs.
 - `src/drivers.rs` - `new-driver` a hledání ovladačů z manifestů; `src/usb/`, `src/venus/`, `*helper.rs` - USB obraz, generátor Venus, pomocné servery pro testy sítě.
 
 ## Invarianty
