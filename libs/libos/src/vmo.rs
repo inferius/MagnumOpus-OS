@@ -22,6 +22,13 @@ impl Vmo {
         sys::vmo_create(size, process.handle().raw()).map(|h| Self(Handle::from_raw(h)))
     }
 
+    /// Zapeceti objekt (`VMO_SEAL`): obsah se uz nikdy nezmeni. Bez
+    /// opravneni JIT jde spoustet jen zapecetena pamet (kod nahrany
+    /// zapisem, pak pecet, pak mapovani pro spusteni).
+    pub fn seal(&self) -> Result<()> {
+        sys::vmo_seal(self.handle().raw())
+    }
+
     /// Klon `len` bajtu od `offset` s kopii pri zapisu (`VMO_CLONE`): sdili
     /// stranky, dokud do nich nekdo z obou nezapise. Na ucet vlastniho jobu.
     pub fn clone_range(&self, offset: u64, len: u64) -> Result<Self> {

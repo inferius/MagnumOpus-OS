@@ -258,6 +258,21 @@ impl AddressSpace {
         flags: u32,
         addr: u64,
     ) -> Result<u64, Error> {
+        self.map_with_max(vmo, vmo_offset, len, flags, addr, flags & PROT)
+    }
+
+    /// Jako [`AddressSpace::map`], s nejvyssimi pravy `max` pro pozdejsi
+    /// `VM_PROTECT` (nadmnozina `flags`; urci je volajici podle prav handlu
+    /// a politiky JIT). Zapisovat do zapeceteneho objektu nejde nikdy.
+    pub fn map_with_max(
+        &self,
+        vmo: Arc<MemoryObject>,
+        vmo_offset: u64,
+        len: u64,
+        flags: u32,
+        addr: u64,
+        max: u32,
+    ) -> Result<u64, Error> {
         let known = PROT | MAP_FIXED | MAP_IN_RESERVATION;
         if flags & !known != 0 || flags & MAP_READ == 0 {
             return Err(Error::InvalidArgs);
@@ -271,6 +286,9 @@ impl AddressSpace {
             return Err(Error::InvalidArgs);
         }
         if len == 0 || !page_aligned(len) || !page_aligned(vmo_offset) {
+            return Err(Error::InvalidArgs);
+        }
+        if max & !PROT != 0 || flags & PROT & !max != 0 {
             return Err(Error::InvalidArgs);
         }
         match vmo_offset.checked_add(len) {
@@ -315,6 +333,15 @@ impl AddressSpace {
         if vmo.is_revoked() {
             return Err(Error::AccessDenied);
         }
+        // Pecet (pod zamkem prostoru, viz `MemoryObject::seal`).
+        let max = if vmo.is_sealed() {
+            if flags & MAP_WRITE != 0 {
+                return Err(Error::AccessDenied);
+            }
+            max & !MAP_WRITE
+        } else {
+            max
+        };
         let table = inner.table.as_mut().expect("adresni prostor je zruseny");
         for off in (0..len).step_by(PAGE_SIZE as usize) {
             // Jen existujici stranky; ostatni doplni vypadek. Sdileny ramec
@@ -355,7 +382,7 @@ impl AddressSpace {
                 vmo: Some(vmo),
                 vmo_offset,
                 flags: flags & PROT,
-                max_flags: flags & PROT,
+                max_flags: max,
                 guard: false,
                 in_reservation,
                 charge,
@@ -541,6 +568,14 @@ impl AddressSpace {
         self.with_user_range(addr, data.len(), true, |dst, at, n| {
             // SAFETY: viz `copy_from_user`.
             unsafe { core::ptr::copy_nonoverlapping(src.add(at), dst, n) }
+        })
+    }
+
+    /// Ma nektere mapovani objektu `vmo` pravo zapisu (i jen nejvyssi)?
+    pub fn maps_writable(&self, vmo: &MemoryObject) -> bool {
+        self.inner.lock().mappings.values().any(|m| {
+            m.max_flags & MAP_WRITE != 0
+                && m.vmo.as_ref().is_some_and(|v| core::ptr::eq(Arc::as_ptr(v), vmo))
         })
     }
 

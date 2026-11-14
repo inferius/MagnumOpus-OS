@@ -15,8 +15,8 @@ in [kernel.md](kernel.md#memory), syscalls in [syscalls.md](syscalls.md).
 | 1 | demand paging, zero page, faults in the kernel, commit and ceiling, pins | **[verified in QEMU]** x86_64 and aarch64 (kernel self-tests `pamet`, the `pamet` suite in init) |
 | 2 | reservations (`VM_RESERVE`), partial `VM_UNMAP` and decommit, `VM_PROTECT`, `VM_QUERY`, guard regions | **[verified in QEMU]** x86_64 and aarch64 (self-tests `mm_regions`, suite `pamet`) |
 | 3 | `VMO_CLONE` (copy-on-write) and shared code of programs from initfs | **[verified in QEMU]** x86_64 and aarch64 (self-tests `mm_cow`, suite `pamet`) |
-| 4 | `VMO_SEAL`, W^X with a "may JIT" permission, audit | **[designed]** |
-| 5 | libos API (basis of `mmap` in `cstd`), guards below stacks | **[designed]** |
+| 4 | `VMO_SEAL`, W^X with a "may JIT" permission (job policy, manifest), audit | **[verified in QEMU]** x86_64 and aarch64 (self-tests `mm_wx`, suite `pamet`) |
+| 5 | libos API (basis of `mmap` in `cstd`), guard regions below stacks | **[verified in QEMU]** x86_64 and aarch64 (suite `pamet`) |
 
 ## Demand paging
 
@@ -160,6 +160,72 @@ own job's account. Only an image inside the mapped initfs is shared
 elsewhere (e.g. from a file into the heap) is loaded as before, so a
 swapped image cannot slip in foreign code. Sealing templates (`VMO_SEAL`)
 comes in part 4.
+
+## W^X, sealing and the JIT permission
+
+- **Never write and execute together**, not even with JIT (`VM_MAP` and
+  `VM_PROTECT`).
+- **The seal** (`VMO_SEAL`): the object's content never changes again
+  (kernel writes, mapping for writing and pinning for a device fail). An
+  object with a mapping that may write cannot be sealed. Programs are
+  loaded by writing, then sealing, then mapping for execution: spawn in
+  libos seals code templates, the kernel seals init's code.
+- **Without the JIT permission** only sealed memory can be executed: code
+  cannot change once it runs.
+- **With the JIT permission** (`jit::RUN` of the target process's job)
+  `VM_MAP` and `VM_PROTECT` may execute unsealed memory: switch RW <-> RX or
+  map the same object twice (RW for writing, RX for executing - without a
+  shootdown on every switch).
+- **Who grants JIT:** the job policy (`JOB_SET_LIMIT` with `policy::JIT`).
+  A new job has nothing, the root job (init) only granting; only someone
+  whose parent may grant (`jit::GRANT`)
+  can turn it on, and removing it applies to descendants at once. Init
+  gives session jobs the right to grant and gives `jit::RUN` to an app
+  whose manifest has `[app] jit = true` (a browser, .NET).
+- **Audit:** a process's first executable unsealed memory is logged (a
+  warning with address and length) and `JOB_PROCESSES` shows
+  `proc_flags::JIT_USED`.
+- **The maximum rights of a mapping** come from `VM_MAP` by the handle's
+  rights and the policy: write only with `WRITE` and not for a sealed
+  object, execute only with `EXECUTE` and only for a sealed object or with
+  JIT.
+
+**Limitation (stated explicitly):** W^X here protects against executable
+code changing at run time and against memory that is writable and
+executable at once (a typical memory-corruption exploit). **It does not
+protect against a process that can make syscalls:** such a process can
+write new code into an object, seal it and execute it - just like the
+program loader does. Stronger protection (execute only code sealed by a
+trusted loader, or signed) is **[designed]** and belongs to the planned
+program signatures (Secure Boot, a launch gate - see
+[architecture.md](architecture.md#security)); it needs a "may create
+executable code" capability for sealing.
+
+## The libos API
+
+Functions over the own address space (`libs/libos/src/vm.rs`), the basis
+for `mmap` in the C library (`cstd`) and for Wine:
+
+| Function | What it does | Corresponds to |
+|---|---|---|
+| `vm::reserve(len, flags)`, `vm::reserve_at(addr, len, flags)` | a reservation without memory (`RESERVE_GUARD` = a guard) | `VirtualAlloc(MEM_RESERVE)` |
+| `vm::alloc(len, prot)` | anonymous memory in a free range (demand paging) | `mmap(MAP_ANONYMOUS)` |
+| `vm::commit(addr, len, prot)` | anonymous memory into a reservation | `MEM_COMMIT` |
+| `vm::protect(addr, len, prot)` | rights (0 = no access) | `mprotect`, `VirtualProtect` |
+| `vm::decommit(addr, len)` | memory back, addresses stay reserved | `MEM_DECOMMIT` |
+| `vm::release(addr, len)` | releases also a part of a region | `munmap`, `MEM_RELEASE` |
+| `vm::query(addr)` | the region or free range | `VirtualQuery` |
+| `vm::map_stack(process, vmo, len)` | a stack with a guard region below it | - |
+
+For other processes (a loader, debugging) the same operations exist on
+`Process` (`map`, `reserve`, `protect`, `query`, `decommit`, `unmap`).
+
+**Guard regions below stacks:** a program's main stack (`spawn`) and every
+thread's stack (`thread::spawn`) have a guard reservation
+`vm::STACK_GUARD` (64 KiB, costs no memory) below them. A stack overflow
+thus ends with a fault in the guard region and the message "access to a
+guard region (stack overflow?)" instead of silently overwriting foreign
+memory. A thread's `join` releases the stack and the guard together.
 
 ## The zero page
 

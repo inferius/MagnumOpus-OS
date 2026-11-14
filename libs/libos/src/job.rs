@@ -43,6 +43,12 @@ impl Job {
         sys::job_set_limit(self.0.raw(), pool, bytes)
     }
 
+    /// Politika JIT jobu (`abi::job::jit::RUN`, `GRANT`; 0 = nic). Zapnout
+    /// jde jen v jobu, jehoz rodic smi udelovat.
+    pub fn set_jit(&self, bits: u64) -> Result<()> {
+        sys::job_set_limit(self.0.raw(), abi::job::policy::JIT, bits)
+    }
+
     /// Spotreba a limity.
     pub fn info(&self) -> Result<JobInfo> {
         sys::job_info(self.0.raw())

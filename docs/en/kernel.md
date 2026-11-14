@@ -143,13 +143,10 @@ Details, design comparison and measurements: [Scheduler](scheduler.md).
   their syscalls. Operations of other processes through a handle (`VM_MAP`
   -> `BAD_STATE`, `VM_UNMAP` -> `NOT_FOUND`, `THREAD_CREATE` ->
   `BAD_STATE`) are serialized by the address space lock.
-- **DMA memory without an IOMMU** (`VMO_CREATE_CONTIGUOUS` without a device
-  domain) is not returned when the process ends: the device may keep
-  writing into it from the dead driver's descriptors. The tombstone keeps
-  it and it is returned with the last handle to the process (a warning in
-  the log). With an IOMMU it is returned at once, because its pages are
-  unmapped from the device domain first. The full fix (stop the device,
-  clear bus mastering, then return the memory) is **[designed]**.
+- **DMA memory of a driven device** is not returned at once when the
+  process ends: it goes to the DMA quarantine, the kernel stops the device
+  and releases the memory only afterwards (see [IOMMU](#iommu-dma-protection),
+  DMA quarantine).
 - **An exception in a program** (page fault, invalid opcode, ...) ends only
   that process, not the kernel: code -1,000,100 - vector, address and fault
   type in the log.
@@ -215,16 +212,35 @@ and the rest of the kernel does not distinguish them (`arch::iommu::Domain`):
 - **Without an IOMMU** (the machine has none, has it disabled in the
   firmware, or `cargo xtask run --iommu none`) the kernel logs a warning and
   DMA is not restricted.
-- **Known risk without an IOMMU: a device after its driver dies.** The
-  kernel does not stop a device today when its driver ends; the device may
-  keep writing from the dead driver's descriptors. DMA memory is therefore
-  kept by the driver process's tombstone (see [Processes and
-  threads](#processes-and-threads)). Once the last handle to that process
-  goes away (e.g. devmgr drops it on a restart), the memory returns to the
-  allocator and a device write can corrupt data of another process or of
-  the kernel. Fix **[designed]**: when the last resource of the device goes
-  away (or its driver ends), clear bus mastering in the PCI configuration,
-  wait for in-flight transfers to finish, and only then return the memory.
+- **DMA quarantine: a device after its driver dies** **[verified in
+  QEMU]** (test `edu: obnova po padu`, with and without an IOMMU, x86_64
+  and aarch64; decisions in the self-test `karantena DMA`). After its
+  driver ends, a device may keep writing from the driver's descriptors -
+  without an IOMMU into pages someone else already got. Therefore
+  (`kernel/src/object/quarantine.rs`):
+  1. when a process that **drove** a device (created DMA memory for it
+     itself) ends, its DMA memory of that device goes to quarantine;
+  2. the kernel clears the device's **bus mastering** in the PCI
+     configuration (it writes only the COMMAND register) and waits for
+     in-flight transfers to finish (PCIe Device Status, Transactions
+     Pending, at most a hundred milliseconds; without a PCIe capability a
+     fixed ten milliseconds);
+  3. only then it releases the memory - and only then the process gets
+     `TERMINATED`, so a new driver starts only after the stop. The new
+     driver enables bus mastering itself (`libs/pci`).
+- **A client** with a shared buffer of the driver does not stop the device:
+  only a device for which the dying process created DMA memory itself is
+  stopped.
+- **`dk:crash`** in driverkit behaves like a real crash: the driver neither
+  stops nor releases anything; the kernel cleans up and stops the device.
+- **A device that cannot be stopped** (not on PCI Express, or it does not
+  finish its transfers) keeps its memory in quarantine forever; the kernel
+  logs it with the text `karantena DMA` and `report` (the developer bundle)
+  shows it in the preview and in a section of its own.
+- **DMA memory only with a device identity:** `VMO_CREATE_CONTIGUOUS` from a
+  resource without a device identity returns `ACCESS_DENIED` (the kernel
+  could neither stop the device nor put the memory into an IOMMU domain).
+  All drivers get a resource with an identity from devmgr.
 - A virtio driver must accept the `VIRTIO_F_ACCESS_PLATFORM` feature (the
   device then uses translation); virtio-blk does.
 

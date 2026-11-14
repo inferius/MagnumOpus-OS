@@ -67,7 +67,9 @@ pub enum Exit {
     ClientClosed,
     /// Restart na zadost (`dk:restart`).
     Restart,
-    /// Simulovany pad (`dk:crash`).
+    /// Simulovany pad (`dk:crash`): jako skutecny pad - ovladac se
+    /// nezastavi a nic neuvolni (zarizeni zastavi a pamet uklidi jadro,
+    /// karantena DMA).
     Crash,
     /// Chyba ovladace nebo zarizeni (`probe` = jeste pred startem).
     Failed { probe: bool, err: DriverError },
@@ -207,6 +209,13 @@ pub fn run<P: Platform, D: Driver<P>>(p: &P) -> Exit {
     };
     loop {
         if let Some(exit) = runner.step(p) {
+            if exit == Exit::Crash {
+                // Pad: bez `stop` a bez uvolneni (buffery DMA, mapovani,
+                // prostredek zustanou az do konce procesu).
+                log_exit(p, &exit);
+                core::mem::forget(runner);
+                return exit;
+            }
             runner.finish(p, &exit);
             return exit;
         }

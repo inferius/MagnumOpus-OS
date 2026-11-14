@@ -53,6 +53,10 @@ pub fn job_in(parent: &Job, m: Option<&Manifest>) -> Result<Job> {
         if let Some(v) = m.limits.kernel_memory {
             job.set_limit(pool::KERNEL, v)?;
         }
+        // Opravneni JIT jen podle manifestu (rodic musi smet udelovat).
+        if m.jit {
+            job.set_jit(libos::abi::job::jit::RUN)?;
+        }
     }
     Ok(job)
 }

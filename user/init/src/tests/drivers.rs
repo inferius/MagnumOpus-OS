@@ -100,6 +100,13 @@ fn restricted_resource(s: &Startup) -> TestResult {
         Ok(())
     };
     check_eq!(plain, expected, "preruseni bez identity zarizeni");
+    // Pamet pro DMA bez identity zarizeni nejde (jadro by zarizeni po konci
+    // ovladace nemohlo zastavit).
+    check_eq!(
+        root.restrict(&[(base, page)], 1, page).and_then(|r| r.dma_memory(page).map(|_| ())),
+        Err(Error::AccessDenied),
+        "DMA bez identity zarizeni"
+    );
     // Dal prostredek se zarizenim 00:00.0 (jeho konfiguracni prostor je
     // prave tato stranka): preruseni musi jit na obou architekturach.
     let child = root

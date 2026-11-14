@@ -308,6 +308,18 @@ length), `OUT_OF_RANGE`, `NOT_SUPPORTED` (contiguous, DMA or physical
 object), `NO_MEMORY`, `NO_RESOURCES`, `BAD_HANDLE`, `ACCESS_DENIED`,
 `WRONG_TYPE`.
 
+### `VMO_SEAL`
+
+`(vmo) -> 0`. Seals the memory object: its content never changes again.
+`VMO_WRITE`, mapping for writing and `VMO_PHYS_ADDR` then return
+`ACCESS_DENIED`; mappings get maximum rights without write. A clone
+(`VMO_CLONE`) of a sealed object is a regular object. Irreversible; sealing
+again does nothing. Without the JIT permission only sealed memory can be
+executed (see [memory-management.md](memory-management.md)). Requires
+`WRITE`. Errors: `BAD_STATE` (the object has a mapping that may write -
+even only as a maximum right), `NOT_SUPPORTED` (contiguous, DMA or physical
+object), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+
 ### `VMO_READ`
 
 `(handle, offset, buf_ptr, len) -> 0`. Reads object data (max 1 MiB per
@@ -563,8 +575,14 @@ budget of `parent`. Rights: `DUPLICATE`, `TRANSFER`, `WAIT`, `READ`,
 
 `(job, pool, bytes) -> 0`. Sets the own limit of budget `pool`
 (`KERNEL` = 0, `USER` = 1) in bytes; `u64::MAX` (`job::UNLIMITED`) = no
-own limit. Requires `WRITE`. Errors: `INVALID_ARGS` (unknown `pool`),
-`BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+own limit. With `pool` = `policy::JIT` (2) it sets the JIT policy: the
+value is the bits `jit::RUN` (processes of the job may execute unsealed
+memory) and `jit::GRANT` (the job may grant JIT to sub-jobs); only someone
+whose parent job may grant can turn them on, turning off always works (and
+applies to descendants at once). A new job has neither, the root job only `GRANT`.
+Requires `WRITE`. Errors: `INVALID_ARGS` (unknown `pool`, unknown bit),
+`ACCESS_DENIED` (the parent does not grant JIT), `BAD_HANDLE`,
+`WRONG_TYPE`.
 
 ### `JOB_INFO`
 
@@ -584,7 +602,9 @@ Writes at most `max` (up to 4096) `abi::job::ProcEntry` records (64 B,
 little endian) to `out_ptr`: `pid`, `job` (the process's job number),
 `cpu_ns` (CPU time of all threads, added by the scheduler on a switch),
 `threads` (live threads), `flags` (`proc_flags::FINISHED` = exited; only a
-tombstone without memory remains while someone holds a handle), `name` (32 B UTF-8, zero padded). Returns the total
+tombstone without memory remains while someone holds a handle;
+`proc_flags::JIT_USED` = the process got executable unsealed memory - the
+JIT audit), `name` (32 B UTF-8, zero padded). Returns the total
 count (also above `max`). Requires `READ`. Errors: `INVALID_ARGS` (`max`
 > 4096), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
 
@@ -703,8 +723,12 @@ console `user/console`.
 a coherent platform (x86_64, QEMU virt) normally cached, on a non-coherent
 one (e.g. Raspberry Pi 4) uncached, so the device and the driver see the
 same data without manual cache maintenance. The driver must order writes
-towards the device with barriers (`libos::barrier`). Errors: `INVALID_ARGS`
-(0 or over 4 MiB), `NO_MEMORY` (no contiguous block), `ACCESS_DENIED`,
+towards the device with barriers (`libos::barrier`). Only from a resource
+with a device identity (`RESOURCE_CREATE` with `device`): when the driver
+ends, the kernel stops the device and releases the memory only afterwards
+(the DMA quarantine, see [kernel.md](kernel.md#iommu-dma-protection)).
+Errors: `INVALID_ARGS` (0 or over 4 MiB), `NO_MEMORY` (no contiguous
+block), `ACCESS_DENIED` (also a resource without a device identity),
 `WRONG_TYPE`.
 
 ### `VMO_CREATE_PHYSICAL`

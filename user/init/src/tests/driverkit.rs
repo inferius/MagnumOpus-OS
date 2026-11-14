@@ -161,7 +161,39 @@ fn edu_crash_recovery(startup: &Startup) -> TestResult {
     let ch = wait_new_generation("edu", generation)?;
     let r = ask(&ch, "fact 6")?;
     check!(r == "fact 6 720", format!("obnoveny edu: fact 6 -> '{r}'"));
+    // Jadro zarizeni po padu ovladace zastavilo (bus master) a jeho pamet
+    // pro DMA pustilo az potom (karantena DMA); novy ovladac DMA zapnul.
+    let log = kernel_log(startup)?;
+    check!(
+        log.lines().any(|l| l.contains("DMA: zarizeni") && l.contains("zastaveno")),
+        "v logu jadra chybi zastaveni zarizeni edu po padu ovladace"
+    );
+    // (Self-test jadra pouziva smyslene zarizeni fff0:..., to se nepocita.)
+    check!(
+        !log.lines().any(|l| l.contains("zustava v karantene") && !l.contains("fff0:")),
+        "zarizeni edu zustalo v karantene"
+    );
+    let text = "po obnove";
+    let r = ask(&ch, &format!("dma {text}"))?;
+    check!(r == format!("dma {text}"), "DMA po obnove ovladace");
     Ok(())
+}
+
+/// Cely dostupny log jadra (korenovy prostredek s pravem DIAG).
+fn kernel_log(startup: &Startup) -> Result<String, String> {
+    let root = startup.root_resource.as_ref().ok_or("chybi korenovy Resource")?;
+    let mut all = Vec::new();
+    let mut buf = alloc::vec![0u8; 16 * 1024];
+    let mut cursor = 0;
+    loop {
+        let (start, n, _) = root.log_read(cursor, &mut buf).map_err(|e| fail("LOG_READ", e))?;
+        if n == 0 {
+            break;
+        }
+        all.extend_from_slice(&buf[..n]);
+        cursor = start + n as u64;
+    }
+    Ok(String::from_utf8_lossy(&all).into_owned())
 }
 
 fn edu_restart(startup: &Startup) -> TestResult {

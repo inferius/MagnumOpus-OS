@@ -119,6 +119,11 @@ fn load_segments(process: &Process, elf: &elf::ElfFile) -> Result<()> {
         let end = (seg.vaddr + seg.mem_size).next_multiple_of(page);
         let vmo = MemoryObject::new(end - start, Some(process.job()))?;
         vmo.write(seg.vaddr - start, elf.segment_data(&seg))?;
+        // Kod a konstanty se uz nezmeni: pecet (spustit jde jen zapecetena
+        // pamet bez opravneni JIT).
+        if seg.flags & elf::PF_W == 0 {
+            vmo.seal()?;
+        }
         let mut flags = MAP_READ | MAP_FIXED;
         if seg.flags & elf::PF_W != 0 {
             flags |= MAP_WRITE;

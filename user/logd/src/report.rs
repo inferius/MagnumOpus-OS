@@ -45,6 +45,19 @@ pub fn build(d: &mut Logd) -> Result<(String, String)> {
     // Log tohoto bootu (zapsana cast; fronta se pred balickem zapsala).
     let cur = format!("/log/{}", d.log_name());
     let data = read_all(d, &cur, u64::MAX).unwrap_or_default();
+    // Diagnostika: zarizeni, ktera jadro po konci ovladace nedokazalo
+    // zastavit (jejich pamet pro DMA zustava v karantene).
+    let text = String::from_utf8_lossy(&data);
+    let stuck: Vec<&str> = text.lines().filter(|l| l.contains("karantena DMA")).collect();
+    if !stuck.is_empty() {
+        preview.push_str(&format!("  POZOR: karantena DMA ({} hlaseni): zarizeni nejde zastavit, cast pameti zustava zabrana\n", stuck.len()));
+        out.push_str("===== karantena DMA (zarizeni, ktera jadro nezastavilo) =====\n");
+        for l in &stuck {
+            out.push_str(l);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
     preview.push_str(&format!("  log tohoto bootu {} ({} B)\n", d.log_name(), data.len()));
     out.push_str(&format!("===== /system{cur} =====\n"));
     out.push_str(&String::from_utf8_lossy(&data));

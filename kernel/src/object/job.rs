@@ -58,6 +58,8 @@ pub struct Job {
     qos_max: AtomicU8,
     /// Job ukonceny `JOB_KILL`: neprijme novy proces ani podjob.
     killed: AtomicBool,
+    /// Politika JIT (`abi::job::jit`: RUN, GRANT).
+    jit: AtomicU8,
     /// Strzeni za tento objekt (z rozpoctu jobu, ktery ho vytvoril).
     _charge: Charge,
 }
@@ -66,7 +68,42 @@ impl Job {
     /// Korenovy job (dostane init). Bez limitu: pamet systemu chrani
     /// rezerva jadra, rozdeleni mezi sluzby urci init.
     pub fn new_root() -> Arc<Self> {
-        Self::make(None, Charge::none())
+        let root = Self::make(None, Charge::none());
+        // Koren JIT udeluje, sam ho nema (init JIT nepotrebuje).
+        root.jit.store(abi::job::jit::GRANT as u8, Ordering::Release);
+        root
+    }
+
+    /// Smi job (a vsichni jeho predci) udelovat JIT?
+    fn can_grant(&self) -> bool {
+        let mut node = Some(self);
+        while let Some(j) = node {
+            if j.jit.load(Ordering::Acquire) as u64 & abi::job::jit::GRANT == 0 {
+                return false;
+            }
+            node = j.parent.as_deref();
+        }
+        true
+    }
+
+    /// Smi procesy jobu JIT (spustitelna pamet bez pecete)? Vlastni bit
+    /// `RUN` a vsichni predci smi udelovat (odebrani u predka plati hned).
+    pub fn may_jit(&self) -> bool {
+        self.jit.load(Ordering::Acquire) as u64 & abi::job::jit::RUN != 0
+            && self.parent.as_deref().is_none_or(Job::can_grant)
+    }
+
+    /// Nastavi politiku JIT (`abi::job::jit`). Zapnout cokoli smi jen
+    /// v jobu, jehoz rodic smi udelovat (`AccessDenied`); vypnout vzdy.
+    pub fn set_jit(&self, bits: u64) -> Result<(), Error> {
+        if bits & !(abi::job::jit::RUN | abi::job::jit::GRANT) != 0 {
+            return Err(Error::InvalidArgs);
+        }
+        if bits != 0 && !self.parent.as_deref().is_none_or(Job::can_grant) {
+            return Err(Error::AccessDenied);
+        }
+        self.jit.store(bits as u8, Ordering::Release);
+        Ok(())
     }
 
     /// Podrizeny job bez vlastniho limitu (plati limity predku). Objekt
@@ -112,6 +149,7 @@ impl Job {
             used: [AtomicU64::new(0), AtomicU64::new(0)],
             qos_max: AtomicU8::new(Class::Realtime as u8),
             killed: AtomicBool::new(false),
+            jit: AtomicU8::new(0),
             _charge: charge,
         })
     }

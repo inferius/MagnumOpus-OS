@@ -76,7 +76,12 @@ fn template(off: u64, image: &[u8], elf: &elf::ElfFile, page: u64) -> Result<Arc
         let end = (seg.vaddr + seg.mem_size).next_multiple_of(page);
         let vmo = Vmo::create(end - start)?;
         vmo.write(seg.vaddr - start, elf.segment_data(&seg))?;
-        segments.push(Segment { start, len: end - start, flags: segment_flags(&seg), vmo });
+        let flags = segment_flags(&seg);
+        // Kod a konstanty: pecet (spustit jde jen zapecetena pamet).
+        if flags & MAP_WRITE == 0 {
+            vmo.seal()?;
+        }
+        segments.push(Segment { start, len: end - start, flags, vmo });
     }
     let t = Arc::new(Template { key, segments });
     let mut all = TEMPLATES.lock();
@@ -208,14 +213,19 @@ pub fn spawn_with(
                 let end = (seg.vaddr + seg.mem_size).next_multiple_of(page);
                 let vmo = Vmo::create_for(end - start, &process)?;
                 vmo.write(seg.vaddr - start, elf.segment_data(&seg))?;
-                process.map(&vmo, 0, end - start, segment_flags(&seg) | MAP_FIXED, start)?;
+                let flags = segment_flags(&seg);
+                if flags & MAP_WRITE == 0 {
+                    vmo.seal()?;
+                }
+                process.map(&vmo, 0, end - start, flags | MAP_FIXED, start)?;
             }
         }
     }
 
     let stack_size = opts.stack_size.max(page).next_multiple_of(page);
     let stack = Vmo::create_for(stack_size, &process)?;
-    let stack_top = process.map(&stack, 0, stack_size, MAP_READ | MAP_WRITE, 0)? + stack_size;
+    // Pod zasobnikem ochranna oblast (preteceni = hlaska, ne cizi pamet).
+    let (_, _, stack_top) = crate::vm::map_stack(&process, &stack, stack_size)?;
 
     let (parent_end, child_end) = Channel::create()?;
     let mut data = Vec::new();

@@ -126,7 +126,6 @@ impl HandleTable {
         slot.entry.as_ref().ok_or(Error::BadHandle)
     }
 
-    #[allow(dead_code, reason = "API pro syscally (milnik 4)")]
     pub fn rights(&self, handle: Handle) -> Result<Rights, Error> {
         self.entry(handle).map(|e| e.rights)
     }

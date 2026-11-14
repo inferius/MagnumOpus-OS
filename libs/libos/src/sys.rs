@@ -207,6 +207,10 @@ pub fn vmo_create(size: u64, process: u32) -> Result<u32> {
     call(nr::VMO_CREATE, [size, process as u64, 0, 0, 0, 0]).map(|v| v as u32)
 }
 
+pub fn vmo_seal(vmo: u32) -> Result<()> {
+    call(nr::VMO_SEAL, [vmo as u64, 0, 0, 0, 0, 0]).map(|_| ())
+}
+
 pub fn vmo_clone(vmo: u32, offset: u64, len: u64, process: u32) -> Result<u32> {
     call(nr::VMO_CLONE, [vmo as u64, offset, len, process as u64, 0, 0]).map(|v| v as u32)
 }

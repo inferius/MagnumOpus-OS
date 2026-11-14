@@ -4,6 +4,7 @@ Sada pro autory ovladačů (DDK, `no_std`). Dělá jednou a pořádně, co ovlad
 
 ## Invarianty
 
+- `dk:crash` (`Exit::Crash`) je skutečný pád: bez `stop` a bez uvolnění (runner se zapomene); zařízení zastaví a DMA paměť uklidí jádro (karanténa DMA, `docs/cs/jadro.md`).
 - Každé číslo od zařízení je nedůvěryhodný vstup: kruhy odmítnou hlavu mimo kruh, ovladač vrací `DriverError::Device`, nepanikaří a nečte mimo buffer.
 - Adresu pro zařízení dává jen `DmaBuffer::iova_of` s kontrolou mezí. Zápis hodnoty, která se nevejde do pole registru, je chyba, ne tichý přepis sousedních bitů.
 - Bez IOMMU může zařízení přes DMA zapsat kamkoli; driverkit chrání aspoň stranu ovladače. Tohle omezení řekni výslovně při návrhu ovladače.

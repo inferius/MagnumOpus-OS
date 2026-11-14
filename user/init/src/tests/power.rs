@@ -75,8 +75,10 @@ fn acpi_memory(s: &Startup) -> TestResult {
     check!(len >= 4096, "oblast ACPI mensi nez stranka");
     root.device_memory(start, 4096).map_err(|e| fail("mapovani pameti ACPI", e))?;
     // Bezna RAM (pamet pro DMA s fyzickou adresou) mapovat nejde.
-    let dma = root.dma_memory(4096).map_err(|e| fail("DMA pamet", e))?;
-    let phys = root.phys_addr(&dma, 0).map_err(|e| fail("fyzicka adresa", e))?;
+    // Pamet pro DMA jen s identitou zarizeni (00:00.0).
+    let dev = root.restrict_device(&[], 0, 4096, (0, 0, 0, 0)).map_err(|e| fail("prostredek zarizeni", e))?;
+    let dma = dev.dma_memory(4096).map_err(|e| fail("DMA pamet", e))?;
+    let phys = dev.phys_addr(&dma, 0).map_err(|e| fail("fyzicka adresa", e))?;
     check_eq!(root.device_memory(phys, 4096).err(), Some(Error::AccessDenied), "RAM pres VMO_CREATE_PHYSICAL");
     // Rozsah pres hranici oblasti ACPI (cast RAM) take ne.
     check_eq!(

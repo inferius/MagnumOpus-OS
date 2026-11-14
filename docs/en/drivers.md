@@ -256,7 +256,7 @@ Client messages starting with `dk:` are handled by the loop itself:
 | `dk:ping` | `dk:pong <name>` |
 | `dk:info` | `dk:info <name> <PCI address> <vendor>:<device>` |
 | `dk:restart` | the driver stops the device and exits with code 75; devmgr starts it again at once (not counted as a crash) |
-| `dk:crash` | like a crash (code 70): devmgr recovers it as after a crash; for recovery tests |
+| `dk:crash` | like a real crash (code 70): the driver neither stops nor releases anything (the kernel stops the device, the DMA quarantine), devmgr recovers it as after a crash; for recovery tests |
 
 ## The first driver step by step
 

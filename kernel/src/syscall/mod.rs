@@ -119,6 +119,7 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::VM_PROTECT => vm::protect(a),
         nr::VM_QUERY => vm::query(a),
         nr::VMO_CLONE => vm::vmo_clone(a),
+        nr::VMO_SEAL => vm::seal(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -191,6 +192,7 @@ pub fn name(number: u64) -> &'static str {
         "VM_PROTECT",
         "VM_QUERY",
         "VMO_CLONE",
+        "VMO_SEAL",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

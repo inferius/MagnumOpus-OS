@@ -14,8 +14,8 @@ z fsd. Rozložení adresního prostoru a ochrany (SMAP, NX) popisuje
 | 1 | stránky na požádání, nulová stránka, výpadek v jádře, commit a strop, piny | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy jádra `pamet`, sada `pamet` v initu) |
 | 2 | rezervace (`VM_RESERVE`), částečné `VM_UNMAP` a decommit, `VM_PROTECT`, `VM_QUERY`, ochranné oblasti | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy `mm_regions`, sada `pamet`) |
 | 3 | `VMO_CLONE` (copy-on-write) a sdílený kód programů z initfs | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy `mm_cow`, sada `pamet`) |
-| 4 | `VMO_SEAL`, W^X s oprávněním „smí JIT“, audit | **[navrženo]** |
-| 5 | API v libos (podklad `mmap` v `cstd`), guard pod zásobníky | **[navrženo]** |
+| 4 | `VMO_SEAL`, W^X s oprávněním „smí JIT“ (politika jobu, manifest), audit | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy `mm_wx`, sada `pamet`) |
+| 5 | API v libos (podklad `mmap` v `cstd`), ochranná oblast pod zásobníky | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `pamet`) |
 
 ## Stránky na požádání
 
@@ -155,6 +155,69 @@ Sdílí se jen obraz uvnitř namapovaného initfs (neměnný obsah, klíč je
 offset v initfs); program načtený odjinud (např. ze souboru do haldy) se
 nahrává jako dřív, aby záměna obrazu nemohla podstrčit cizí kód.
 Zapečetění šablon (`VMO_SEAL`) přijde v části 4.
+
+## W^X, pečeť a oprávnění JIT
+
+- **Nikdy zápis a spuštění zároveň**, ani s JIT (`VM_MAP` i `VM_PROTECT`).
+- **Pečeť** (`VMO_SEAL`): obsah objektu se už nikdy nezmění (zápis
+  jádrem, mapování pro zápis i připnutí pro zařízení selžou). Objekt
+  s mapováním, které smí zapisovat, zapečetit nejde. Programy se nahrávají
+  zápisem, pak pečeť, pak mapování pro spuštění: spawn v libos zapečetí
+  šablony kódu, jádro zapečetí kód initu.
+- **Bez oprávnění JIT** jde spouštět jen zapečetěná paměť: kód se po
+  spuštění už nemůže změnit.
+- **S oprávněním JIT** (`jit::RUN` jobu cílového procesu) smí `VM_MAP`
+  i `VM_PROTECT` spouštět nezapečetěnou paměť: přepínat RW <-> RX nebo
+  mapovat tentýž objekt dvakrát (RW pro zápis, RX pro spuštění - bez
+  shootdownu při každém přepnutí).
+- **Kdo JIT dává:** politika jobu (`JOB_SET_LIMIT` s `policy::JIT`). Nový
+  job nemá nic, kořenový (init) jen udělování; zapnout ho smí jen ten,
+  jehož rodič smí udělovat
+  (`jit::GRANT`), odebrání platí hned i pro potomky. Init dá právo
+  udělovat jobům relací a `jit::RUN` aplikaci, která má v manifestu
+  `[app] jit = true` (prohlížeč, .NET).
+- **Audit:** první spustitelná nezapečetěná paměť procesu se zaloguje
+  (varování s adresou a délkou) a `JOB_PROCESSES` ukáže
+  `proc_flags::JIT_USED`.
+- **Nejvyšší práva mapování** určí `VM_MAP` podle práv handlu a politiky:
+  zápis jen s `WRITE` a ne u zapečetěného objektu, spuštění jen s
+  `EXECUTE` a jen u zapečetěného objektu nebo s JIT.
+
+**Omezení (řečeno výslovně):** W^X tady chrání proti tomu, aby se
+spustitelný kód za běhu změnil nebo aby vznikla paměť zapisovatelná
+a spustitelná zároveň (typický exploit přes poškozenou paměť). **Nechrání
+proti procesu, který může volat syscally:** ten si může nový kód zapsat do
+objektu, zapečetit ho a spustit - stejně jako to dělá zavaděč programů.
+Silnější ochrana (spouštět jen kód zapečetěný důvěryhodným zavaděčem nebo
+podepsaný) je **[navrženo]** a patří k plánovaným podpisům programů
+(Secure Boot, brána spuštění - viz [architektura.md](architektura.md#bezpečnost));
+potřebuje k pečeti capability „smí vytvářet spustitelný kód“.
+
+## API v libos
+
+Funkce nad vlastním adresním prostorem (`libs/libos/src/vm.rs`), podklad
+pro `mmap` v C knihovně (`cstd`) a pro Wine:
+
+| Funkce | Co dělá | Odpovídá |
+|---|---|---|
+| `vm::reserve(len, flags)`, `vm::reserve_at(addr, len, flags)` | rezervace bez paměti (`RESERVE_GUARD` = ochranná) | `VirtualAlloc(MEM_RESERVE)` |
+| `vm::alloc(len, prot)` | anonymní paměť na volném místě (stránky na požádání) | `mmap(MAP_ANONYMOUS)` |
+| `vm::commit(addr, len, prot)` | anonymní paměť do rezervace | `MEM_COMMIT` |
+| `vm::protect(addr, len, prot)` | práva (0 = žádný přístup) | `mprotect`, `VirtualProtect` |
+| `vm::decommit(addr, len)` | paměť zpět, adresy zůstanou rezervované | `MEM_DECOMMIT` |
+| `vm::release(addr, len)` | uvolní i část oblasti | `munmap`, `MEM_RELEASE` |
+| `vm::query(addr)` | oblast nebo volné místo | `VirtualQuery` |
+| `vm::map_stack(process, vmo, len)` | zásobník s ochrannou oblastí pod sebou | - |
+
+Pro jiné procesy (zavaděč, ladění) jsou stejné operace na `Process`
+(`map`, `reserve`, `protect`, `query`, `decommit`, `unmap`).
+
+**Ochranná oblast pod zásobníky:** hlavní zásobník programu (`spawn`)
+i zásobník každého vlákna (`thread::spawn`) má pod sebou ochrannou
+rezervaci `vm::STACK_GUARD` (64 KiB, nestojí paměť). Přetečení zásobníku
+tak skončí výpadkem v ochranné oblasti s hláškou „přístup do ochranné
+oblasti (přetečení zásobníku?)“ místo tichého přepsání cizí paměti.
+`join` vlákna uvolní zásobník i ochrannou oblast najednou.
 
 ## Nulová stránka
 

@@ -167,7 +167,7 @@ fn kernel_copy_lazy() {
 }
 
 fn pins() {
-    let dma = MemoryObject::new_contiguous_dma(3 * PAGE_SIZE, None, None).unwrap();
+    let dma = MemoryObject::new_contiguous_dma(3 * PAGE_SIZE, None, None, None).unwrap();
     let frame = dma.page(PAGE_SIZE).unwrap();
     assert!(phys::is_pinned(frame), "DMA pamet je pripnuta");
     drop(dma);

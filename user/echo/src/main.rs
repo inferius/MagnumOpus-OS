@@ -5,6 +5,8 @@
 //! - `signal` + jeden handle (event) -> signalizuje ho, odpovi `ok`
 //! - `exit:<cislo>` -> ukonci proces s timto kodem
 //! - `crash` -> zapis na adresu 0 (test ukonceni procesu pri vyjimce)
+//! - `overflow` -> nekonecna rekurze (test ochranne oblasti pod
+//!   zasobnikem: proces skonci vypadkem stranky, nic jineho neprepise)
 //! - `sleep` -> ceka navzdy (test PROCESS_KILL)
 //! - `killjob:<kod>` -> `JOB_KILL` na vlastni job (test: volajici skonci
 //!   take); kdyby prezil, odpovi `prezil`
@@ -26,6 +28,14 @@ use alloc::vec::Vec;
 use libos::{Error, Startup, println};
 
 libos::entry!(main);
+
+/// Rekurze bez konce: kazde volani zabere kus zasobniku (pole pres
+/// `black_box`, aby ho prekladac neodstranil).
+#[allow(unconditional_recursion, reason = "zamerne preteceni zasobniku (test)")]
+fn overflow(depth: u64) -> u64 {
+    let pad = core::hint::black_box([depth; 64]);
+    overflow(depth + 1) + pad[(depth % 64) as usize]
+}
 
 fn main(startup: Startup) -> i64 {
     let channel = startup.bootstrap;
@@ -55,6 +65,8 @@ fn main(startup: Startup) -> i64 {
             }
         } else if let Some(code) = text.strip_prefix("exit:") {
             return code.parse().unwrap_or(-1);
+        } else if text == "overflow" {
+            return overflow(0) as i64;
         } else if text == "crash" {
             // SAFETY: zamerne neplatny zapis - test, ze jadro proces ukonci.
             unsafe { core::ptr::write_volatile(core::ptr::null_mut::<u64>(), 1) };

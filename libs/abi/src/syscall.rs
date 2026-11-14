@@ -220,8 +220,14 @@ pub const VM_QUERY: u64 = 59;
 /// (handle s `WRITE`; 0 = volajici). Zdroj `READ`; jen bezne objekty.
 pub const VMO_CLONE: u64 = 60;
 
+/// Pecet objektu pameti: `(vmo) -> 0`. Obsah se uz nikdy nezmeni
+/// (`VMO_WRITE`, mapovani pro zapis a `VMO_PHYS_ADDR` selzou). Bez
+/// opravneni JIT jde spoustet jen zapecetena pamet. Nevratne. Pravo
+/// `WRITE`; objekt nesmi mit mapovani, ktere smi zapisovat.
+pub const VMO_SEAL: u64 = 61;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 61;
+pub const COUNT: u64 = 62;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {

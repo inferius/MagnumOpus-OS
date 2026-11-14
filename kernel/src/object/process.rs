@@ -11,9 +11,10 @@
 //!    `TERMINATED` - kdo na nej ceka, uz vidi pamet vracenou.
 //! 5. Zustane jen "nahrobek" (tahle struktura bez prostoru a handlu): cislo,
 //!    jmeno, kod ukonceni, cas CPU a signaly pro `JOB_PROCESSES` a cekani.
-//!    Zanikne s poslednim handlem. Vyjimka: pamet pro DMA bez IOMMU
-//!    (`MemoryObject::is_unprotected_dma`) drzi nahrobek, protoze zarizeni
-//!    do ni muze dal zapisovat.
+//!    Zanikne s poslednim handlem.
+//! 6. Pamet pro DMA zarizeni, ktera proces ridil (sam pro ne pamet pro DMA
+//!    vytvoril), jde do karanteny: jadro zarizeni zastavi (bus master)
+//!    a pamet pusti az potom (`quarantine.rs`).
 
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::String;
@@ -54,18 +55,14 @@ pub struct Process {
     job: Arc<Job>,
     /// Cas na CPU vsech vlaken (ns; pricita scheduler pri prepnuti).
     pub cpu_ns: AtomicU64,
+    /// Audit JIT: kolikrat proces dostal spustitelnou pamet bez pecete.
+    jit_events: AtomicU64,
     /// Trida QoS novych vlaken a Realtime parametry (ns) z `PROCESS_SET`.
     qos: SpinLock<(schedcore::Class, Option<(u64, u64)>)>,
     /// Fronty futexu (`FUTEX`): virtualni adresa ->
     /// cekajici vlakna (vlakno, poradove cislo cekani) v poradi prichodu.
     /// Polozek je nejvys tolik, kolik ma proces vlaken.
     pub futex: SpinLock<BTreeMap<u64, VecDeque<(Arc<Thread>, u64)>>>,
-    /// Po skonceni: pamet pro DMA bez IOMMU, kterou proces mel namapovanou
-    /// nebo za handlem. Zarizeni do ni muze zapisovat i po smrti ovladace,
-    /// proto se vrati alokatoru az se zanikem nahrobku (jako pred
-    /// uvolnovanim pri konci).
-    #[allow(dead_code, reason = "jen drzi objekty nazivu, nikdo je necte")]
-    parked: SpinLock<Vec<Arc<MemoryObject>>>,
 }
 
 /// Vsechny procesy (slabe odkazy) pro `JOB_PROCESSES`. Mrtve se uklidi pri
@@ -102,9 +99,9 @@ impl Process {
             }),
             job,
             cpu_ns: AtomicU64::new(0),
+            jit_events: AtomicU64::new(0),
             qos: SpinLock::new((schedcore::Class::Normal, None)),
             futex: SpinLock::new(BTreeMap::new()),
-            parked: SpinLock::new(Vec::new()),
         });
         p.core.set_charge(charge);
         {
@@ -123,6 +120,23 @@ impl Process {
         }
         log::debug!("proces {} ({}) vytvoren", p.id, p.name);
         Ok(p)
+    }
+
+    /// Audit JIT: proces prave dostal spustitelnou pamet bez pecete
+    /// (`VM_MAP` nebo `VM_PROTECT`). Prvni udalost se zaloguje.
+    pub fn note_jit(&self, addr: u64, len: u64) {
+        if self.jit_events.fetch_add(1, Ordering::Relaxed) == 0 {
+            log::warn!(
+                "proces {} ({}): JIT - spustitelna pamet bez pecete na {addr:#x} ({len} B)",
+                self.id,
+                self.name
+            );
+        }
+    }
+
+    /// Pouzil proces JIT (audit, `JOB_PROCESSES`)?
+    pub fn jit_used(&self) -> bool {
+        self.jit_events.load(Ordering::Relaxed) != 0
     }
 
     /// Trida QoS pro nova vlakna procesu (a jejich Realtime parametry).
@@ -250,32 +264,38 @@ impl Process {
         // vlakno se pred `thread_exited` prepnulo na koren jadra a planovac
         // mu koren procesu uz nenahraje (`sched::exit`); nespusteny proces
         // svuj prostor nikdy neaktivoval.
-        let mut parked = unsafe { self.space.teardown(MemoryObject::is_unprotected_dma) };
+        let mut dma = unsafe { self.space.teardown(MemoryObject::is_dma) };
         // 2. Objekty za handly. Tabulku vymenime za prazdnou a zrusime ji az
-        // mimo zamek (Drop objektu muze budit dalsi vlakna).
+        // mimo zamek (Drop objektu muze budit dalsi vlakna). Pamet pro DMA
+        // si poznamename pro karantenu.
         let table = core::mem::take(&mut *self.handles.lock());
         for object in table.objects() {
             let any: Arc<dyn core::any::Any + Send + Sync> = object.clone();
             if let Ok(vmo) = any.downcast::<MemoryObject>()
-                && vmo.is_unprotected_dma()
-                && !parked.iter().any(|p| Arc::ptr_eq(p, &vmo))
+                && vmo.is_dma()
+                && !dma.iter().any(|p| Arc::ptr_eq(p, &vmo))
             {
-                parked.push(vmo);
+                dma.push(vmo);
             }
         }
         drop(table);
-        // 3. Fronty futexu (vlakna uz neexistuji) a seznam vlaken.
+        // Zarizeni, ktera proces ridil: ta, pro ktera sam vytvoril pamet
+        // pro DMA (klient se sdilenym bufferem ovladace zarizeni neridi).
+        let mut driven: Vec<super::quarantine::DeviceId> = Vec::new();
+        for v in &dma {
+            if v.dma_creator() == Some(self.id)
+                && let Some(d) = v.dma_device()
+                && !driven.contains(&d)
+            {
+                driven.push(d);
+            }
+        }
+        // 3. Zarizeni, ktera proces ridil, zastavit; jejich pamet pustit az
+        // potom (pred TERMINATED: novy ovladac nastartuje az po tom).
+        super::quarantine::driver_gone(&driven, dma);
+        // 4. Fronty futexu (vlakna uz neexistuji) a seznam vlaken.
         drop(core::mem::take(&mut *self.futex.lock()));
         self.state.lock().threads = Vec::new();
-        if !parked.is_empty() {
-            log::warn!(
-                "proces {} ({}): {} objektu pameti pro DMA bez IOMMU zustava do zaniku procesu (zarizeni muze dal zapisovat)",
-                self.id,
-                self.name,
-                parked.len()
-            );
-            *self.parked.lock() = parked;
-        }
         if crate::console::process_finished(self.id) {
             log::info!("framebuffer: proces {} skoncil, vracen jadru", self.id);
         }
