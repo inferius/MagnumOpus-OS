@@ -49,7 +49,12 @@ výpadku proudu pro testy FS).
    a producentů s identitou; fsd dostane kanál producenta, supervisor
    hlásí stav služeb po každém kole (nejdéle 2 s), aplikace s oknem se
    hlásí i se svým jobem,
-8. v běžném běhu GUI (`compd`, okna `gui-term` a `gui-demo`), bez GUI
+8. `launchd` (spouštěcí služba pro `std::process`, viz
+   [Rust std](rust-std.md#procesy-stdprocess)) hned po `taskd`: dostane
+   jen obraz initfs, init drží jeho řídicí kanál a razí klientské kanály
+   pro aplikace (štítek `LAUNCH`); supervisor ho sleduje, restart zatím
+   ne **[implementováno]**,
+9. v běžném běhu GUI (`compd`, okna `gui-term` a `gui-demo`), bez GUI
    záložní konzoli (viz [Terminál](#terminál)).
 
 Konfiguraci `fsd` (první zpráva řídicího kanálu) posílá init vždy:

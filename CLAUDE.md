@@ -15,7 +15,7 @@ ve složce, kde pracuješ.
   - souborový systém: `fs`, `fsproto`, `osfs-proto`, `initfs`
   - GUI: `comp` (jádro kompozitoru), `ui`, `gfx`, `font`, `theme`, `guiproto`, `vkcomp`
   - shell a terminál: `shlang`, `term`, `agentsh`; účty: `accounts`; ovladače: `driverkit`, `pci`, `virtio`, `nic`, ...
-- `user/` - procesy userspace: `init` (první proces, supervisor, testy userspace), služby (`fsd`, `netd`, `compd`, `termd`, `accountd`, `devmgr`, `inputd`, `logd`, `timed`, ...), ovladače (`virtio-*`, `nvme`, `ahci`, `xhci`, `e1000e`, `hda`, ...), Soubory (`gui-files` + `files-copy`), ukázky (`echo`, `gui-demo`).
+- `user/` - procesy userspace: `init` (první proces, supervisor, testy userspace), služby (`fsd`, `netd`, `compd`, `termd`, `accountd`, `devmgr`, `inputd`, `logd`, `timed`, `launchd`, ...), ovladače (`virtio-*`, `nvme`, `ahci`, `xhci`, `e1000e`, `hda`, ...), Soubory (`gui-files` + `files-copy`), ukázky (`echo`, `gui-demo`).
 - `xtask/` - `cargo xtask`: build, obraz disku, QEMU, testy, docs, USB, VMware.
 - `design/` - klikací HTML prototypy GUI a `tokens.toml` (zdroj pravdy pro vzhled).
 - `docs/` - `cs/` a `en/` (vývojářská kniha), `prirucka/` (uživatelská), `README.md` (rozcestník, tabulka stránek).

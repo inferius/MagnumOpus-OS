@@ -1,10 +1,11 @@
 # user/init
 
-První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`, `inputd`, `netd`, `fwd`, `dnsd`, `ntpd`, `revocd`, `taskd`, `accountd`, GUI `compd`, zvuk), pak běží jako **supervisor** (`src/supervisor/`: zařízení připojená za běhu, restart spadlých služeb, registr služeb se závislostmi a lístky). V testovacím běhu (příznak `TEST_RUN` od jádra) místo supervisoru spustí testy userspace (`src/tests/`) a skončí s výsledkem. Popis: `docs/cs/init.md`, `docs/cs/obnova-sluzeb.md`.
+První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`, `inputd`, `netd`, `fwd`, `dnsd`, `ntpd`, `revocd`, `taskd`, `launchd`, `accountd`, GUI `compd`, zvuk), pak běží jako **supervisor** (`src/supervisor/`: zařízení připojená za běhu, restart spadlých služeb, registr služeb se závislostmi a lístky). V testovacím běhu (příznak `TEST_RUN` od jádra) místo supervisoru spustí testy userspace (`src/tests/`) a skončí s výsledkem. Popis: `docs/cs/init.md`, `docs/cs/obnova-sluzeb.md`.
 
 ## Klíčové soubory
 
 - `src/main.rs` - pořadí startu; `src/system.rs`, `gui.rs`, `accounts.rs`, `session.rs`, `terminal.rs`, `audio.rs`, ... - start jednotlivých služeb.
+- `src/launch.rs` - spouštěcí služba `launchd` (std::process): start, klientské kanály (`launch::client`, štítek `LAUNCH`).
 - `src/files.rs` - `files-copy` pro každou relaci a handly okna Soubory; `src/open.rs` - služba „otevři cestu“ (asociace `[open]`, kanál pro každou relaci, volání akce přes kompozitor, spuštění aplikace v relaci).
 - `src/supervisor/` - `mod.rs` smyčka (`Supervisor::step`), `lifecycle.rs` restart a závislosti, `leases.rs` lístky, `service.rs` adaptér služby.
 - `src/tests/mod.rs` - `SUITES` (jména sad pro `--only`), makra `check!` / `check_eq!`; jeden soubor na oblast (`gui.rs`, `net.rs`, `fs.rs`, ...).

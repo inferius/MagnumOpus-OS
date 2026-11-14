@@ -7,17 +7,19 @@ popisuje přístup, sestavení, mapování částí `std` na libos a služby, co
 k tomu přidalo jádro a dopady na budoucí plány.
 
 > **Stav:** návrh schválen 2026-11-12 (všechna doporučení, viz
-> [Schválená rozhodnutí](#schválená-rozhodnutí)). Fáze 1 hotová:
-> `hello-std` s argumenty, vlákny, TLS a soubory **[ověřeno v QEMU]** na
-> x86_64 i aarch64 (sada `std`). Síť, procesy a stdin jsou další krok.
+> [Schválená rozhodnutí](#schválená-rozhodnutí)). Fáze 1 a 2 hotové:
+> alokace, vlákna, TLS, soubory včetně ACL, síť, procesy přes `launchd`
+> a převzaté crates (ripgrep, ureq) **[ověřeno v QEMU]** na x86_64
+> i aarch64 (sady `std`, `std sit`, `std procesy`, `std porty`).
 
 ## Cíl a rozsah
 
 - Cíle `x86_64-unknown-magnumopus` a `aarch64-unknown-magnumopus`
   (`target_os = "magnumopus"`) **[ověřeno v QEMU]**.
 - `std` nad libos: alokace, vlákna, synchronizace, TLS, čas, soubory přes
-  `fsd`, argumenty, proměnné prostředí, stdout/stderr **[ověřeno v QEMU]**;
-  síť přes `netd`, procesy a stdin **[navrženo]** (stav po částech
+  `fsd`, argumenty, proměnné prostředí, stdio, síť přes `netd`, procesy
+  přes `launchd` **[ověřeno v QEMU]**; stdin z terminálu, async (tokio)
+  a dynamické knihovny **[navrženo]** (stav po částech
   v [mapování](#mapování-std-na-libos-a-služby)).
 - `cargo xtask build` sestaví std (sysroot) i aplikace a dá je do initfs
   **[ověřeno v QEMU]**.
@@ -220,7 +222,7 @@ argumenty, vlakna, TLS, soubory` (x86_64 i aarch64).
 | `env::var`, `set_var`, `vars` | blok parametrů, změny jen v procesu | **[ověřeno v QEMU]** hello-std |
 | `env::current_dir` / `set_current_dir` | cesta v `osrt::env`, relativní cesty se skládají v procesu (`.` a `..`) | **[ověřeno v QEMU]** hello-std |
 | `io::stdout/stderr` | kanál proudu bajtů; bez něj log jádra po řádcích | **[ověřeno v QEMU]** hello-std |
-| `io::stdin` | kanál proudu (`osrt::stdio::read`) | **[implementováno]**, napojení na termd **[navrženo]** |
+| `io::stdin` | kanál proudu (`osrt::stdio::read`) | **[ověřeno v QEMU]** std-proc (roura), napojení na termd **[navrženo]** |
 | `time::Instant` | `clock_monotonic` | **[ověřeno v QEMU]** hello-std |
 | `time::SystemTime` | `clock_realtime` (před rokem 1970 = epocha) | **[ověřeno v QEMU]** hello-std |
 | `thread::spawn`, `join`, `sleep`, `yield_now` | `libos::thread` + blok TLS (`osrt::thread`) | **[ověřeno v QEMU]** hello-std |
@@ -230,10 +232,10 @@ argumenty, vlakna, TLS, soubory` (x86_64 i aarch64).
 | `random` (`HashMap` `RandomState`) | `random_get` | **[ověřeno v QEMU]** hello-std |
 | `fs::File` open/read/write/seek/`set_len`/`sync_all`, append | fsproto v2 (handly relace; pozice v `osrt::fs::File`) | **[ověřeno v QEMU]** hello-std |
 | `fs::read_dir`, `metadata`, `create_dir`, `remove_*`, `rename`, `canonicalize` | fsproto (`STAT`, `LIST`, `CREATE`, `REMOVE`, `RENAME`); `canonicalize` = normalizace + kontrola existence | **[ověřeno v QEMU]** hello-std (bez `canonicalize`) |
-| `fs::Permissions` | jen `readonly` z účinných práv FS; nastavení Unsupported | **[implementováno]** |
+| `fs::Permissions`, ACL | `readonly` z účinných práv, nastavení Unsupported; ACL přes `std::os::magnumopus::fs` | **[ověřeno v QEMU]** hello-std |
 | symlinky, `hard_link`, zámky souborů, časy souborů | Unsupported | FS v3 rozhodne **[navrženo]** |
-| `net::TcpStream`, `TcpListener`, `UdpSocket`, DNS | netproto (`tcp_connect`, `tcp_listen`, `udp_bind`, `resolve`), relace sítě se štítkem `NET` | **[navrženo]** (fáze 2) |
-| `process::Command`, `io::pipe` | spouštěcí služba s manifestem dítěte (rozhodnutí 4), roury = dvojice kanálů | **[navrženo]** (fáze 2); dnes Unsupported |
+| `net::TcpStream`, `TcpListener`, `UdpSocket`, DNS | netproto (`tcp_connect`, `tcp_listen`, `udp_bind`, `resolve`), relace sítě se štítkem `NET` (viz [Síť](#síť-stdnet)) | **[ověřeno v QEMU]** std-net |
+| `process::Command`, `Child`, `io::pipe` | spouštěcí služba `launchd` s manifestem potomka, roury = dvojice kanálů (viz [Procesy](#procesy-stdprocess)) | **[ověřeno v QEMU]** std-proc |
 | `os_str`, `path` | bajty (jako unix), oddělovač `/`; `std::os::magnumopus::ffi::{OsStrExt, OsStringExt}` | **[ověřeno v QEMU]** hello-std |
 | `backtrace` | Unsupported (panika vypíše zprávu na stderr) | později |
 | `fork`, signály, `os::unix` | nebude | záměrně |
@@ -244,7 +246,8 @@ Formát `abi::params`, čtení a vytvoření `libos::params::Params`, předání
 ve startovní zprávě jako `kind::PARAMS` **[ověřeno v QEMU]** (hello-std;
 testy formátu na hostiteli `cargo test -p abi params`). Standardní
 handly mají štítky `abi::params::tag` (`STDIN`, `STDOUT`, `STDERR`, `FS`,
-`NET`). Podrobnosti a příklad: [libos](libos.md#blok-parametrů-procesu).
+`NET`, `LAUNCH`); formát v2 má příznaky `STDOUT_NULL`/`STDERR_NULL`
+(`Stdio::null`). Podrobnosti a příklad: [libos](libos.md#blok-parametrů-procesu).
 
 ### Protokol proudu bajtů
 
@@ -254,6 +257,126 @@ handly mají štítky `abi::params::tag` (`STDIN`, `STDOUT`, `STDERR`, `FS`,
 Zpětný tlak: kanál nemá signál „lze zapisovat“, proto při plné frontě
 (`SHOULD_WAIT`) zápis počká milisekundu a zkusí to znovu. Napojení na termd
 a shell je práce vlákna terminálu **[navrženo]**.
+
+### Síť (`std::net`)
+
+`TcpStream`, `TcpListener`, `UdpSocket` a překlad jmen (`ToSocketAddrs`)
+jdou přes relaci sítě, kterou proces dostal se štítkem `NET`
+**[ověřeno v QEMU]** (test `std sit: std-net: TCP, vlakna, UDP, DNS,
+opravneni`, x86_64 i aarch64). Co relace smí (protokoly, cíle, porty,
+dotazy firewallu), určil ten, kdo ji vytvořil; mimo povolení vrací
+`PermissionDenied`, naslouchání bez práva taky. Bez relace sítě vrací
+operace `Unsupported`.
+
+- `UdpSocket::connect` se emuluje v procesu (`send`/`recv` jen s cílem).
+- `TcpListener::bind`: netd poslouchá na všech rozhraních, adresa
+  rozhraní se zatím nepoužije.
+- `set_nonblocking(true)`, `peek`, `ttl`, `linger`, `keepalive`, multicast
+  vrací `Unsupported`; `set_nodelay` jen hlásí úspěch.
+- **Omezení dnes:** odpovědi `netproto` nemají číslo dotazu a netd má na
+  spojení jen jeden rozpracovaný dotaz. osrt proto každý kanál (relace,
+  spojení, socket) zamyká: vlákno blokované ve `read` zdrží zápis na
+  stejném spojení (klon přes `try_clone`), dokud čtení neskončí, a dlouhý
+  `connect` (dotaz firewallu až 300 s) zdrží ostatní volání relace. Test
+  `shared_stream_serialized` v `std-net` to ověřuje. Opravu (`netproto` v2:
+  číslo dotazu, souběžný RECV, SEND a ACCEPT na spojení, víc dotazů na
+  relaci, termín a zrušení) dělá vlákno sítě **[navrženo]**; osrt pak
+  zámky zruší a test se otočí.
+
+### Procesy (`std::process`)
+
+<figure class="diagram">
+<svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Spousteni procesu pres launchd">
+<defs><marker id="rs3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="ok" x="10" y="20" width="230" height="110" rx="6"/><text class="t b" x="125" y="45" text-anchor="middle">rodič (std)</text><text class="m" x="125" y="66" text-anchor="middle">Command::spawn</text><text class="m" x="125" y="84" text-anchor="middle">job, nová relace FS,</text><text class="m" x="125" y="102" text-anchor="middle">síť jen s network(true),</text><text class="m" x="125" y="120" text-anchor="middle">stdio, blok parametrů</text>
+<path class="ln" d="M240 75 L298 75" marker-end="url(#rs3)"/><text class="m" x="269" y="66" text-anchor="middle">LAUNCH</text>
+<rect class="acc" x="300" y="20" width="230" height="110" rx="6"/><text class="t b" x="415" y="45" text-anchor="middle">launchd</text><text class="m" x="415" y="66" text-anchor="middle">najde program</text><text class="m" x="415" y="84" text-anchor="middle">manifest: limity jobu,</text><text class="m" x="415" y="102" text-anchor="middle">síť = průnik s manifestem</text><text class="m" x="415" y="120" text-anchor="middle">bez kořenových práv</text>
+<path class="ln" d="M530 75 L588 75" marker-end="url(#rs3)"/>
+<rect class="ok" x="590" y="20" width="180" height="110" rx="6"/><text class="t b" x="680" y="45" text-anchor="middle">potomek</text><text class="m" x="680" y="66" text-anchor="middle">podjob rodiče</text><text class="m" x="680" y="84" text-anchor="middle">vlastní kanál</text><text class="m" x="680" y="102" text-anchor="middle">ke launchd</text>
+<rect class="box" x="300" y="180" width="470" height="100" rx="6"/><text class="t b" x="535" y="205" text-anchor="middle">hledání podle jména</text><text class="m" x="535" y="228" text-anchor="middle">1. registr příkazů ([[command]] v manifestech)</text><text class="m" x="535" y="246" text-anchor="middle">2. /system/bin/&lt;jméno&gt; v relaci FS rodiče  3. initfs</text><text class="m" x="535" y="264" text-anchor="middle">absolutní cesta = soubor s právem EXECUTE (manifest vedle)</text>
+<path class="ln" d="M415 130 L415 178" marker-end="url(#rs3)"/>
+</svg>
+<figcaption>Potomek nikdy nedostane víc než rodič: schopnosti dodává rodič, launchd je jen zúží manifestem.</figcaption>
+</figure>
+
+`Command`, `Child`, `ExitStatus`, `kill`, `wait`, `try_wait`, `output`,
+`Stdio::piped/null/inherit` a `io::pipe` **[ověřeno v QEMU]** (test `std
+procesy: std-proc: Command, roury, stdio, kody, sit, registr`, x86_64
+i aarch64). Spouští je služba `launchd` (`user/launchd`, protokol
+`libs/launchproto`, rozhodnutí 1 a 4):
+
+- **Schopnosti potomka** dodává rodič v požadavku: svůj job (potomek
+  dostane podřízený job, nikdy víc než rodič), novou relaci FS se stejnou
+  identitou (soubory se dědí), relaci sítě **jen výslovně**
+  (`std::os::magnumopus::process::CommandExt::network(true)`), stdio.
+  launchd nemá kořenová práva; přidává jen to, co rodič sám neumí: najde
+  program, uplatní manifest a dá potomkovi vlastní kanál ke launchd.
+- **Manifest potomka** (vedle programu, `<program>.manifest.toml`):
+  limity jobu a síť = relace rodiče zúžená manifestem (netd zužuje, nikdy
+  nerozšíří); manifest bez `[network]` = žádná síť ani s
+  `network(true)`. Program bez manifestu (pomocný) dostane relaci sítě,
+  jak ji rodič předal.
+- **Hledání programu:** holé jméno = registr příkazů (`[[command]]`
+  v manifestech), pak `/system/bin/<jméno>` v relaci FS rodiče, pak
+  initfs; absolutní cesta = soubor ve FS otevřený s právem `EXECUTE`
+  (datasety se zákazem spouštění ho odmítnou). `PATH` se nepoužívá.
+- **Stdio:** `inherit` = duplikát kanálu rodiče, `piped` = nová dvojice
+  kanálů, `null` = příznak v bloku parametrů (formát v2), `io::pipe` =
+  dvojice kanálů. Soubor jako stdio potomka zatím vrací `Unsupported`.
+- **Kódy:** `ExitStatus::code` = kód z `PROCESS_EXIT` (kódy jádra, např.
+  -1 000 000 po `kill`, se do `i32` vejdou). `Child::id` = číslo handlu
+  procesu; `process::id` = náhodné číslo zvolené při startu (jádro číslo
+  procesu zatím nesděluje).
+- Chyba spuštění nese popis od launchd (např. „svazek X není připojen“,
+  kód `NOT_MOUNTED`).
+
+### Registr příkazů a instalace aplikací
+
+Rozhraní registru (`launchproto::Registry`: jméno příkazu -> zdroj
+programu a aplikace) **[implementováno]**; dnes ho launchd plní
+z manifestů v initfs **[ověřeno v QEMU]** (test `std-proc`, příkaz
+`std-proc-kid`). Napojení na instalované aplikace **[navrženo]**
+(viz [Architektura](architektura.md), Aplikace): balíčky na libovolném
+svazku (`/svazky/<jméno>`) přidají své příkazy do stejného registru;
+aplikace na odpojeném svazku = chyba `NOT_MOUNTED` se jménem svazku, ne
+„nenalezeno“. Spouštění přímo z cizích FS (FAT, NTFS bez našich práv)
+jen s výslovným příznakem `ALLOW_FOREIGN` **[navrženo]** (cizí FS se
+zatím nerozpoznává).
+
+### Oprávnění souborů
+
+`fs::Permissions::readonly` = chybí právo zápisu v účinných právech
+volajícího; `set_permissions` vrací `Unsupported` (rozhodnutí: práva jdou
+přes ACL). Plná oprávnění: `std::os::magnumopus::fs::{access, set_acl,
+Acl, Grant, MetadataExt}` (vlastník, účinná práva, popis oprávnění
+s granty) **[ověřeno v QEMU]** (hello-std nastaví a vrátí ACL).
+
+## Porty: převzaté crates bez úprav
+
+Ověření v praxi (x86_64 i aarch64, sada `std porty`):
+
+| Program | Zdroj | Úpravy | Stav |
+|---|---|---|---|
+| ripgrep 15.2.0 (`rg`) | crates.io, `cargo install --locked` (`xtask/src/ports.rs`) | patch `ignore` 0.4.29 (7 řádků, `third_party/ports`) | **[ověřeno v QEMU]** test `ripgrep: hledani ve strome souboru` |
+| `std-http` nad ureq 3.5.2 | knihovna z crates.io bez TLS | žádné | **[ověřeno v QEMU]** test `ureq: HTTP klient, 4 vlakna soubezne` |
+
+Co chybělo (zjištěno překladem pro náš cíl, mimo testy):
+
+- **`ignore` (ripgrep):** paralelní průchod adresářů měl jen větve `unix`
+  a `windows`, jinde vracel „unsupported platform“. Oprava: obecná větev
+  vytvoří záznam bez čísla inode. Kandidát na upstream.
+- **tokio s `net` (mio, socket2):** `mio` nemá pro náš systém backend
+  (Selector, Waker, Event) a `socket2` náš cíl nezná. Potřeba: API
+  připravenosti v jádře a netd (signál na objektu nebo port), backend
+  `mio` pro MagnumOpus a podpora v `socket2` **[navrženo]**. tokio bez
+  `net` (jen běhové prostředí) by mělo jít.
+- **gix 0.90 (`sha1`, bez výchozích features):** `getrandom` 0.4 náš cíl
+  nezná (potřeba backend, který volá `RANDOM_GET`); po něm `gix-sec`
+  (kontrola vlastníka souboru přes `libc::geteuid` a `os::unix`, větev
+  pro „ne Windows“ předpokládá unix). Další chyby se ukážou až po nich.
+- **Cílová rodina:** obecně platí, že crates s větvemi jen `unix`/`windows`
+  potřebují třetí větev; pro rozšíření podpory pomůže upstream tier 3
+  (viz [Přístup](#přístup)).
 
 ## Co přidalo jádro
 
@@ -284,6 +407,13 @@ a shell je práce vlákna terminálu **[navrženo]**.
   může být i z initfs).
 - **Odmapování paměti** vrací dlmalloc jen po celých segmentech; menší
   volné kusy zůstávají procesu.
+- **Souběh na síťovém spojení** je serializovaný (viz [Síť](#síť-stdnet)),
+  do `netproto` v2.
+- **launchd** po pádu supervisor zatím nerestartuje (jen sleduje);
+  aplikace pak dostane `SERVICE_UNAVAILABLE`.
+- **Zúžení relace FS manifestem potomka** (připojené cesty podle profilu)
+  zatím není: potomek dostane novou relaci se stejnými cestami jako rodič
+  **[navrženo]**.
 
 ## Fáze 1 (hotovo)
 
@@ -296,9 +426,20 @@ a shell je práce vlákna terminálu **[navrženo]**.
 6. `cargo xtask std` a `cargo xtask build` sestaví std i aplikace
    **[ověřeno v QEMU]**.
 
-Další krok (fáze 2) **[navrženo]**: síť (`std::net` nad netproto),
-`std::process::Command` přes spouštěcí službu s manifestem, stdin a stdio
-v terminálu, strážní stránka zásobníku, pak průzkum `cargo check -p gix`.
+## Fáze 2 (hotovo)
+
+1. `std::net` nad netd s omezenou relací sítě **[ověřeno v QEMU]**.
+2. `std::process` přes `launchd` (registr příkazů, manifest, roury, stdio,
+   kódy, `kill`, síť jen výslovně) **[ověřeno v QEMU]**.
+3. Oprávnění souborů a ACL **[ověřeno v QEMU]**.
+4. Porty z crates.io: ripgrep a ureq **[ověřeno v QEMU]**, průzkum tokio
+   a gix (viz [Porty](#porty-převzaté-crates-bez-úprav)).
+5. `cargo xtask std-patch`: úpravy lepidla v `target/std-src` se uloží
+   zpět do `third_party/rust-std/std.patch` **[implementováno]**.
+
+Další krok **[navrženo]**: `netproto` v2 (vlákno sítě), stdin a stdio
+v terminálu, API připravenosti pro async (mio), backend `getrandom`
+a větve pro gix, strážní stránka zásobníku.
 
 ## Dopady na budoucnost
 
@@ -340,6 +481,9 @@ návrh už teď:
   z nich je drahý; dlouhodobě je lepší upstream tier 3 a podpora v crates.
 
 ### gix pro git vrstvu FS
+
+Průzkum 2026-11-14 (gix 0.90): první překážky jsou `getrandom` a `gix-sec`
+(viz [Porty](#porty-převzaté-crates-bez-úprav)).
 
 gix stojí na `std::fs`, `std::path`, `std::process` (jen pro externí
 helpery) a čistém Rustu (SHA-1, zlib přes `miniz_oxide`). Rizika: některé

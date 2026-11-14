@@ -309,6 +309,13 @@ program dostane `TIMED_OUT` a v logu je `netproto: sluzba site
 neodpovedela na pozadavek <op> do N s`. Kanál pak už nejde použít
 (`BAD_STATE`): pozdní odpověď by patřila jinému požadavku.
 
+**Souběh:** odpovědi nemají číslo požadavku a netd má na jednom kanálu
+(relace, spojení, socket) rozpracovaný jen jeden požadavek. Dvě vlákna
+na stejném kanálu se proto musí střídat (std to zamyká, viz
+[Rust std](rust-std.md#síť-stdnet)): čtení blokované na data zdrží zápis
+na stejném spojení. `netproto` v2 s číslem požadavku a souběžným
+čtením, zápisem a přijímáním **[navrženo]**.
+
 ```rust
 use core::time::Duration;
 use netproto::io::{Read, Write};
