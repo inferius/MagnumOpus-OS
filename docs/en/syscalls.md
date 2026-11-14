@@ -505,17 +505,26 @@ win: a suspended thread ends. Requires `MANAGE` on the thread. Errors:
 `READ`) or writes (`WRITE`, right `WRITE`) the context of a suspended
 thread. `kind`: `thread::kind::GENERAL` - general registers, PC, SP, flags
 and the TLS base (`abi::thread::X64General` 160 B, `A64General` 280 B);
-`FP` - FPU/SIMD (x86_64 an FXSAVE image of 512 B, aarch64 V0-V31 + FPCR +
-FPSR, 528 B); `len` exactly per architecture. A read waits (at most about a
+`FP` - FPU/SIMD: the header `abi::thread::fp::Header` (64 B: format, data
+length, x86_64 XCR0) and the data - on x86_64 an XSAVE image in the
+standard format for the parts the kernel enabled (size depends on the CPU,
+CPUID 0xD; without XSAVE an FXSAVE image of 512 B), on aarch64 V0-V31 +
+FPCR + FPSR, 528 B. A program gets the size from
+`libos::exception::fp_state_size()` (or from the header). `len` at least
+the state size (a larger buffer is used only up to it, a smaller one =
+`BUFFER_TOO_SMALL`; reading the FPU with a buffer of at least the header
+size, the kernel writes the needed length into it). A read waits (at most about a
 tenth of a second) until the suspended thread really stands in the kernel.
 The kernel validates a write and the thread applies it right before
 returning to userspace (a read already sees it); for a thread sleeping in a
 syscall it also overwrites the return value (rax / x0). Write validation:
 PC, SP and the TLS base inside the process memory (canonical on x86_64,
 below `USER_MAX`), only user bits of the flags (x86_64 RFLAGS without IOPL,
-IF always 1; aarch64 only NZCV), zero reserved bits for the FPU (MXCSR,
-FPCR, FPSR). Errors: `INVALID_ARGS` (unknown `op`/`kind`, wrong length,
-invalid context), `BAD_STATE` (the thread is not suspended), `WRONG_TYPE`,
+IF always 1; aarch64 only NZCV), for the FPU the header of this CPU
+(format, length, XCR0) and zero reserved bits (MXCSR, FPCR, FPSR; in the
+XSAVE header XSTATE_BV only parts from XCR0, XCOMP_BV 0 - the compacted
+format is not accepted). Errors: `BUFFER_TOO_SMALL` (`len` below the
+state size), `INVALID_ARGS` (unknown `op`/`kind`, invalid context), `BAD_STATE` (the thread is not suspended), `WRONG_TYPE`,
 `BAD_ADDRESS`, `BAD_HANDLE`, `ACCESS_DENIED`.
 
 ### `EXCEPTION_CHANNEL`

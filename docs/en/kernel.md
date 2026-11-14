@@ -189,14 +189,35 @@ Details, design comparison and measurements: [Scheduler](scheduler.md).
   0. A value of one process is thus never visible in another
   **[verified in QEMU]** (test `procesy: TPIDR_EL0 neprosakuje mezi
   procesy`, aarch64). On x86_64 a program cannot set `FS_BASE` itself.
-- **FPU/SSE state:** each thread has its own 512 B FXSAVE area; a context
-  switch always saves and restores it. A new thread starts with the default
-  state (FCW 0x037F, MXCSR 0x1F80), so data of another thread cannot leak.
-  The kernel itself does not use FPU/SSE (soft-float). AVX is not enabled
-  (its instructions fault with #UD).
-  **Requirement [designed]:** XSAVE/XRSTOR with AVX (area sized by CPUID
-  0xD) for high-performance C and Rust code (FFmpeg, codecs), see
-  [cstd](cstd.md#kernel-requirement-avx-and-xsave).
+- **FPU/SIMD state** **[verified in QEMU]** (FPU-2): with XSAVE the kernel
+  enables x87, SSE, AVX and AVX-512 in XCR0 (what the CPU has; not AMX) and
+  each thread has an area with an XSAVE image in the standard format (size
+  from CPUID 0xD, the same for all threads, aligned to 64 B). A context
+  switch always saves it (XSAVEOPT, else XSAVE) and restores it (XRSTOR);
+  a CPU without XSAVE = 512 B FXSAVE. A new thread starts with the default
+  state (FCW 0x037F, MXCSR 0x1F80, XSTATE_BV 0), so data of another thread
+  cannot leak. The kernel itself does not use the FPU (soft-float); programs
+  do (hard-float, [hardware-requirements.md](hardware-requirements.md)) and
+  detect AVX and above at run time (CPUID, XGETBV). Verified: XSAVE with
+  AVX (QEMU TCG `-cpu max`: XCR0 0x7, 832 B per thread; `FPU: AVX ...`
+  tests) and FXSAVE (`--cpu Nehalem`, 512 B). **AVX-512 not verified**
+  (TCG does not offer it) - the path is the same, only a larger area;
+  verify on hardware or with WHPX/KVM.
+  - **AMX** **[designed]**: automatically on first use via XFD (no request
+    from the process): an AMX instruction raises #NM (XFD), the kernel
+    gives the thread an 8 KiB area for tile data, enables the part in its
+    XFD and repeats the instruction. A larger area, exception frame and
+    alternate stack only for threads that used AMX. Implementation once a
+    CPU with AMX is available for testing.
+  - **Saving tiers by CPUID:** (1) without XSAVE (Nehalem, Westmere - part
+    of the x86-64-v2 baseline): FXSAVE 512 B, header
+    `format = X64_FXSAVE`, `features` = x87|SSE (0b11), programs tell it
+    from the header; (2) XSAVE/XSAVEOPT (Sandy Bridge and newer): the
+    standard XSAVE image; (3) future XSAVES for the CET shadow stack (CET
+    state is a supervisor part) - **an addition, not a replacement**: only
+    inside the kernel, the external format (`THREAD_STATE`, frame) stays the
+    standard XSAVE. Tier 1 is checked by
+    `cargo xtask test --only procesy --cpu Nehalem`.
 - **Budgets and limits:** kernel memory and user memory are charged to
   the budget of the process job (a tree of jobs, limits in bytes), the
   kernel memory reserve and structural limits - see

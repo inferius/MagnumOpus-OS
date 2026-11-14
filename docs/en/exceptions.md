@@ -90,7 +90,13 @@ if e.report.kind == abi::exception::kind::PAGE_FAULT {
 
 The handler (`libos::exception::set_handler`) gets the frame
 `abi::exception::frame` (aligned to 64 B): `Report`, general registers and
-FPU/SIMD at the moment of the exception. It lies on the **alternate
+FPU/SIMD at the moment of the exception. The FP part has the header
+`abi::thread::fp::Header` (as in `THREAD_STATE`) and the data after it; its
+length depends on the CPU (on x86_64 an XSAVE image with AVX/AVX-512), so
+**the frame has a variable size** (`libos::exception::frame_size()`,
+`abi::exception::frame::size`). Typed access: `Frame::fp_header()`,
+`fp()`, `fp_mut()`; the smallest alternate stack
+`libos::exception::min_alt_stack()`. It lies on the **alternate
 stack** (`set_alt_stack`, like `sigaltstack`) if set and the thread is not
 on it yet, otherwise below SP (on x86_64 below the 128 B red zone). The
 handler does not return, it ends with `handler_return(frame, RESUME |
@@ -150,8 +156,8 @@ extern "C" fn on_fault(f: *mut u8) -> ! {
   thread stands at the boundary of returning to userspace; one sleeping in
   a syscall is suspended at once.
 - `THREAD_STATE` reads and writes general registers
-  (`abi::thread::X64General`, `A64General`) and FPU/SIMD (FXSAVE, V0-V31 +
-  FPCR + FPSR) of a suspended thread or a thread in an exception. The
+  (`abi::thread::X64General`, `A64General`) and FPU/SIMD (header and an
+  XSAVE/FXSAVE image, V0-V31 + FPCR + FPSR) of a suspended thread or a thread in an exception. The
   thread applies a write itself before returning.
 - `PROCESS_THREADS` gives a debugger handles of all threads.
 

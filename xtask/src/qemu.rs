@@ -326,7 +326,7 @@ fn machine_x86_64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
         .arg(format!("q35,accel={accel}"))
         // 1 GiB jako aarch64: plna sada testu s GUI se do 512 MiB uz nevejde
         // (skoncene procesy drzi pamet az do zavreni posledniho handlu).
-        .args(["-cpu", "max", "-smp", "4", "-m", "1G"]);
+        .args(["-cpu", opts.cpu.as_deref().unwrap_or("max"), "-smp", "4", "-m", "1G"]);
     // Graficka karta s vlastnim id (jinak stejna jako vychozi `-vga std`
     // na 00:01.0): k jeji konzoli se navazi klavesnice a mys virtio, viz nize.
     // `--res`: preferovany rezim v EDID karty (firmware a ovladac
@@ -384,7 +384,7 @@ fn machine_aarch64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
         .arg(format!(
             "virt,gic-version=3,its=on,virtualization=on,secure=off{iommu},accel={accel}"
         ))
-        .args(["-cpu", "cortex-a76", "-smp", "4", "-m", "1G"]);
+        .args(["-cpu", opts.cpu.as_deref().unwrap_or("cortex-a76"), "-smp", "4", "-m", "1G"]);
     // Jednoduchy framebuffer v RAM (GOP firmwaru, bez ovladace v jadru) jako
     // konzole `video0` a druha karta `video1`: k nim se navazi klavesnice a mys
     // virtio a klavesnice USB stejne jako na x86 (udalosti QMP testu vstupu).

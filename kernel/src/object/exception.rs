@@ -204,12 +204,13 @@ fn in_thread(me: &Arc<Thread>, process: &super::process::Process, report: &Repor
     let mut general = vec![0u8; ustate::GENERAL_SIZE];
     // SAFETY: vlastni ramec (vlakno je v jadre kvuli vyjimce).
     unsafe { ustate::read_general(top, sched::user_thread_pointer(me), &mut general) };
-    let mut frame = vec![0u8; ustate::FRAME_SIZE];
+    let frame_size = ustate::frame_size();
+    let mut frame = vec![0u8; frame_size];
     frame[..Report::SIZE].copy_from_slice(&report.encode());
     let g = abi::exception::frame::GENERAL;
     frame[g..g + general.len()].copy_from_slice(&general);
     // SAFETY: vlastni vlakno, registry FPU patri jemu.
-    unsafe { ustate::save_fp(&mut frame[ustate::FRAME_FP..ustate::FRAME_FP + ustate::FP_SIZE]) };
+    unsafe { ustate::save_fp(&mut frame[ustate::FRAME_FP..ustate::FRAME_FP + ustate::fp_size()]) };
     let (sp, _) = ustate::general_sp_ret(&general);
     let (alt, alt_len) = sched::suspend::alt_stack(me);
     let base = if alt_len != 0 && !(alt..alt + alt_len).contains(&sp) {
@@ -218,7 +219,7 @@ fn in_thread(me: &Arc<Thread>, process: &super::process::Process, report: &Repor
         // x86_64: cervena zona 128 B pod SP patri prerusene funkci.
         sp.saturating_sub(128)
     };
-    let at = base.saturating_sub(ustate::FRAME_SIZE as u64 + 64) & !63;
+    let at = base.saturating_sub(frame_size as u64 + 64) & !63;
     let space = process.address_space();
     let mut call = general.clone();
     let ret_slot = ustate::prepare_handler_call(&mut call, entry, at);
@@ -254,11 +255,11 @@ pub fn handler_return(frame_ptr: u64, disposition: u32) -> Result<u64, Error> {
     if sched::suspend::in_thread_depth(&me) == 0 {
         return Err(Error::BadState);
     }
-    let mut frame = vec![0u8; ustate::FRAME_SIZE];
+    let mut frame = vec![0u8; ustate::frame_size()];
     process.address_space().copy_from_user(frame_ptr, &mut frame)?;
     let g = abi::exception::frame::GENERAL;
     let general = &frame[g..g + ustate::GENERAL_SIZE];
-    let fp = &frame[ustate::FRAME_FP..ustate::FRAME_FP + ustate::FP_SIZE];
+    let fp = &frame[ustate::FRAME_FP..ustate::FRAME_FP + ustate::fp_size()];
     if !ustate::check_general(general) || !ustate::check_fp(fp) {
         return Err(Error::InvalidArgs);
     }

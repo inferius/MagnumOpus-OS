@@ -241,6 +241,12 @@ pub fn breakpoint() {
     <Current as Cpu>::breakpoint()
 }
 
+/// Zakladni uroven CPU programu a co z ni chybi (viz `api::Cpu::missing_baseline`).
+pub fn missing_baseline(f: &mut dyn FnMut(&'static str)) -> &'static str {
+    <Current as Cpu>::missing_baseline(f);
+    <Current as Cpu>::BASELINE
+}
+
 /// 64 bitu z hardwaroveho generatoru CPU (viz `api::Cpu::hw_random`).
 #[inline]
 pub fn hw_random() -> Option<u64> {
@@ -297,7 +303,15 @@ pub mod ustate {
     use super::context::Context;
 
     pub const GENERAL_SIZE: usize = <Current as UserState>::GENERAL_SIZE;
-    pub const FP_SIZE: usize = <Current as UserState>::FP_SIZE;
+    /// Velikost stavu FPU (s hlavickou), viz `api::UserState::fp_size`.
+    pub fn fp_size() -> usize {
+        <Current as UserState>::fp_size()
+    }
+
+    /// Hlavicka stavu FPU tohoto CPU (`api::UserState::fp_header`).
+    pub fn fp_header() -> abi::thread::fp::Header {
+        <Current as UserState>::fp_header()
+    }
 
     /// # Safety
     ///
@@ -343,8 +357,12 @@ pub mod ustate {
         unsafe { <Current as UserState>::save_fp(out) }
     }
 
-    pub const FRAME_SIZE: usize = <Current as UserState>::FRAME_SIZE;
     pub const FRAME_FP: usize = <Current as UserState>::FRAME_FP;
+
+    /// Velikost ramce vyjimky (zavisi na velikosti stavu FPU).
+    pub fn frame_size() -> usize {
+        abi::exception::frame::size(FRAME_FP, fp_size() - abi::thread::fp::HEADER)
+    }
 
     pub fn general_sp_ret(buf: &[u8]) -> (u64, u64) {
         <Current as UserState>::general_sp_ret(buf)

@@ -77,14 +77,48 @@ pub type General = abi::thread::X64General;
 #[cfg(target_arch = "aarch64")]
 pub type General = abi::thread::A64General;
 
+/// Offset FP casti (hlavicka `abi::thread::fp::Header`, pak data) v ramci.
 #[cfg(target_arch = "x86_64")]
-const FP_OFF: usize = abi::exception::frame::X64_FP;
-#[cfg(target_arch = "x86_64")]
-const FP_LEN: usize = abi::thread::X64_FP_SIZE;
+pub const FP_OFF: usize = abi::exception::frame::X64_FP;
+/// Offset FP casti (hlavicka `abi::thread::fp::Header`, pak data) v ramci.
 #[cfg(target_arch = "aarch64")]
-const FP_OFF: usize = abi::exception::frame::A64_FP;
-#[cfg(target_arch = "aarch64")]
-const FP_LEN: usize = abi::thread::A64_FP_SIZE;
+pub const FP_OFF: usize = abi::exception::frame::A64_FP;
+
+/// Velikost dat stavu FPU/SIMD na tomto CPU (bez hlavicky): x86_64 obraz
+/// XSAVE pro casti zapnute jadrem (CPUID 0xD.0 EBX, kdyz je OSXSAVE),
+/// jinak obraz FXSAVE (512 B); aarch64 528 B. Stejnou hodnotu ma jadro
+/// v hlavicce stavu.
+pub fn fp_data_len() -> usize {
+    #[cfg(target_arch = "x86_64")]
+    {
+        use core::arch::x86_64::__cpuid_count;
+        // OSXSAVE (CPUID.1:ECX bit 27): jadro zaplo XSAVE a XCR0.
+        if __cpuid_count(1, 0).ecx & (1 << 27) != 0 {
+            (__cpuid_count(0xD, 0).ebx as usize).max(576)
+        } else {
+            abi::thread::X64_FP_SIZE
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        abi::thread::A64_FP_SIZE
+    }
+}
+
+/// Velikost stavu FPU pro `THREAD_STATE` (`kind::FP`): hlavicka a data.
+pub fn fp_state_size() -> usize {
+    abi::thread::fp::HEADER + fp_data_len()
+}
+
+/// Velikost ramce obsluhy ve vlaknu na tomto CPU.
+pub fn frame_size() -> usize {
+    abi::exception::frame::size(FP_OFF, fp_data_len())
+}
+
+/// Nejmensi alternativni zasobnik, ktery jadro prijme (ramec a rezerva).
+pub fn min_alt_stack() -> usize {
+    frame_size() + 256
+}
 
 /// Ramec obsluhy ve vlaknu s typovym pristupem (podklad pro `ucontext_t`
 /// signalu v `cstd` a `CONTEXT` SEH ve Windows vrstve). Zmeny se projevi
@@ -106,7 +140,7 @@ impl Frame {
     }
 
     fn bytes(&self, off: usize, len: usize) -> &[u8] {
-        // SAFETY: ramec od jadra ma `frame::*_SIZE` B (`from_raw`).
+        // SAFETY: ramec od jadra ma `frame_size()` B (`from_raw`).
         unsafe { core::slice::from_raw_parts(self.ptr.add(off), len) }
     }
 
@@ -131,13 +165,19 @@ impl Frame {
         self.bytes_mut(abi::exception::frame::GENERAL, General::SIZE).copy_from_slice(&g.encode());
     }
 
-    /// FPU/SIMD (x86_64 obraz FXSAVE, aarch64 V0-V31 + FPCR + FPSR).
+    /// Hlavicka FP casti (format, delka dat, x86_64 XCR0).
+    pub fn fp_header(&self) -> abi::thread::fp::Header {
+        abi::thread::fp::Header::decode(self.bytes(FP_OFF, abi::thread::fp::HEADER)).unwrap_or_default()
+    }
+
+    /// Data stavu FPU/SIMD (x86_64 obraz XSAVE - prvnich 512 B je obraz
+    /// FXSAVE: x87, XMM0-15, MXCSR; aarch64 V0-V31 + FPCR + FPSR).
     pub fn fp(&self) -> &[u8] {
-        self.bytes(FP_OFF, FP_LEN)
+        self.bytes(FP_OFF + abi::thread::fp::HEADER, fp_data_len())
     }
 
     pub fn fp_mut(&mut self) -> &mut [u8] {
-        self.bytes_mut(FP_OFF, FP_LEN)
+        self.bytes_mut(FP_OFF + abi::thread::fp::HEADER, fp_data_len())
     }
 
     /// Adresa instrukce (x86_64 po `int3` uz za ni, aarch64 na `brk`).

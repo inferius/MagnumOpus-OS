@@ -195,17 +195,18 @@ první věc, ještě před kódem `std`.
 |---|---|---|---|
 | `llvm-target` | `x86_64-unknown-none-elf` | `aarch64-unknown-none` | ELF bez OS v LLVM |
 | `os` / `target-family` | `magnumopus` / žádná | totéž | ne `unix`, viz varianty |
-| plovoucí čárka | SSE2 (hard-float) | NEON, `fp-armv8` (hard-float) | výkon (FFmpeg, LLVM, prohlížeč); jádro stav FPU/SIMD vláken už ukládá |
+| plovoucí čárka | x86-64-v2: SSE až SSE4.2 (hard-float, [pozadavky-hw.md](pozadavky-hw.md)) | NEON, `fp-armv8` (hard-float) | výkon (FFmpeg, LLVM, prohlížeč); jádro stav FPU/SIMD vláken už ukládá |
 | `panic-strategy` | `abort` | `abort` | unwind později (viz rustc) |
 | `relocation-model`, linker | `static`, rust-lld, `user/user.ld` | totéž | zavaděč umí jen `ET_EXEC` |
 | `has-thread-local`, `tls-model` | ano, `local-exec` | ano, `local-exec` | nativní TLS (vyžaduje změnu jádra) |
 | `max-atomic-width` | 64 | 128 | |
 
-**Pozor:** služby se dál překládají pro `*-none` se soft-float (jádro
-a služby bez SSE/NEON). Std aplikace budou **hard-float**. Je to jiný cíl,
-takže se `.rlib` nemíchají; jen sdílené crates (libos, fsproto...) se
-překládají dvakrát. AVX zatím nejde (jádro ukládá stav přes FXSAVE,
-instrukce AVX skončí `#UD`); pro FFmpeg bude potřeba XSAVE v jádře.
+Od FPU-1 se pro stejné cíle (`*-unknown-magnumopus`, hard-float)
+překládají i služby a programy bez std (core a alloc přes `-Zbuild-std`);
+jádro zůstává `*-none` se soft-float. Std aplikace mají vlastní sysroot,
+takže sdílené crates (libos, fsproto...) se překládají dvakrát. AVX
+a AVX-512 jdou od FPU-2 (jádro ukládá stav přes XSAVE), zjišťují se
+za běhu.
 
 ## Mapování std na libos a služby
 
@@ -403,7 +404,7 @@ Co chybělo (zjištěno překladem pro náš cíl, mimo testy):
    přepnutí. Tím je opravený i únik `TPIDR_EL0` mezi procesy na aarch64
    (program si ho mohl zapsat a jádro ho při přepnutí nenulovalo).
 3. **Počet CPU** už jádro dávalo (`SCHED_CONTROL` `CPU_INFO`).
-4. Později: XSAVE (AVX) pro FFmpeg, alokace stránek na požádání (viz
+4. Později: alokace stránek na požádání (viz
    [Správa paměti](#správa-paměti)), zavádění `ET_DYN` (viz rustc).
 
 ## Známá omezení
@@ -470,8 +471,8 @@ a větve pro gix, strážní stránka zásobníku.
 - `cstd` potřebuje tabulku čísel fd (int -> soubor, proud, socket); patří
   do `osrt`, aby `std` a C viděly totéž (`os::magnumopus::io::AsRawFd`).
 - FFmpeg: `pthread_*`, `mmap` anonymní (jde přes VMO), soubory, sockety
-  volitelně, bez `fork`. Asembler pro SIMD: na x86_64 jen SSE (AVX čeká na
-  XSAVE v jádře), na aarch64 NEON; std cíl musí být hard-float (je).
+  volitelně, bez `fork`. Asembler pro SIMD: na x86_64 SSE až AVX-512 (zjištění
+  za běhu, XSAVE v jádře od FPU-2), na aarch64 NEON; std cíl musí být hard-float (je).
 
 ### Port rustc + LLVM + lld v systému
 

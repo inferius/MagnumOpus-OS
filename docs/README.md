@@ -12,6 +12,7 @@ site menu.
 | [Architektura](cs/architektura.md) | [Architecture](en/architecture.md) | návrh systému, milníky a důvody / system design, milestones and reasons |
 | [Vlastní, nebo převzaté](cs/vlastni-prevzate.md) | [Own or adopted](en/own-or-adopted.md) | co psát sami a co převzít hotové, hraniční případy, jak převzít / what to write ourselves and what to adopt, borderline cases, how to adopt |
 | [Psaní dokumentace](cs/dokumentace.md) | [Writing documentation](en/documentation.md) | značky stavu, jeden zdroj pravdy, tvrzení a testy, měření s podmínkami / status marks, one source of truth, claims and tests, measurements with conditions |
+| [Požadavky na hardware](cs/pozadavky-hw.md) | [Hardware requirements](en/hardware-requirements.md) | procesor (x86-64-v2, aarch64 s NEON), kontrola při startu jádra, proč tahle úroveň / processor (x86-64-v2, aarch64 with NEON), the kernel start check, why this level |
 | [Instalace](cs/instalace.md) | [Installation](en/installation.md) | instalace z živého USB na interní disk: příkaz install, celý disk / volné místo / přeinstalace, ochrana cizích oddílů, NVRAM, system.toml, test / installing from the live USB to an internal disk: the install command, whole disk / free space / reinstall, foreign partition protection, NVRAM, system.toml, test |
 | [Živé USB](cs/zive-usb.md) | [Live USB](en/live-usb.md) | zkoušení na skutečném PC: obraz, zápis na flashku (xtask, Rufus, dd), start, rizika, logy, záznamy pádů, příkaz report, co dělat při problému / trying it on a real PC: image, writing the stick (xtask, Rufus, dd), boot, risks, logs, crash records, the report command, what to do when something goes wrong |
 
@@ -21,6 +22,7 @@ site menu.
 |---|---|---|
 | [Jádro](cs/jadro.md) | [Kernel](en/kernel.md) | jak jádro funguje / how the kernel works |
 | [Výjimky a kontext vlákna](cs/vyjimky.md) | [Exceptions and thread context](en/exceptions.md) | pozastavení vlákna, čtení a zápis registrů, kanály výjimek, doručení ve vlákně (SEH, signály, debugger) / suspending a thread, reading and writing registers, exception channels, in-thread delivery (SEH, signals, debugger) |
+| [Dynamické linkování](cs/dynamicke-linkovani.md) | [Dynamic linking](en/dynamic-linking.md) | sdílené knihovny ELF a PIE: ld.so, relokace, TLS, dlopen, sdílení kódu, RELRO; parser libs/elf / ELF shared libraries and PIE: ld.so, relocations, TLS, dlopen, code sharing, RELRO; the libs/elf parser |
 | [Správa paměti](cs/sprava-pameti.md) | [Memory management](en/memory-management.md) | paměť procesů: stránky na požádání, nulová stránka, commit a strop, piny; plán rezervací, CoW a JIT / process memory: demand paging, the zero page, commit and ceiling, pins; plan for reservations, CoW and JIT |
 | [Plánovač](cs/planovac.md) | [Scheduler](en/scheduler.md) | třídy QoS, spravedlivé dělení, hybridní CPU / QoS classes, fair sharing, hybrid CPUs |
 | [Syscally](cs/syscally.md) | [Syscalls](en/syscalls.md) | referenční popis syscallů / syscall reference |

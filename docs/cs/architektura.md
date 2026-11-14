@@ -1001,7 +1001,7 @@ obě architektury projdou všemi testy.
 |---|---|---|---|
 | `Cpu` | start CPU, HW ID, per-CPU ukazatel, zastavení, breakpoint | GDT/TSS/IDT, ID lokálního APIC, GS báze | VBAR_EL1, MPIDR_EL1, TPIDR_EL1 |
 | `Interrupts` | zapnout/vypnout přerušení, uspat do přerušení | `sti`/`cli`/`hlt` | DAIF, `wfi` |
-| `Threads` | kontext vlákna, přepnutí, zásobník jádra, vstup do userspace | callee-saved + FXSAVE, `iretq` | x19-x30 + v0-v31, `eret` |
+| `Threads` | kontext vlákna, přepnutí, zásobník jádra, vstup do userspace | callee-saved + XSAVE/FXSAVE, `iretq` | x19-x30 + v0-v31, `eret` |
 | `Time` | hodiny v ns, čítač cyklů, jednorázový časovač, navázání času firmwaru (`ns_from_counter_to_start`), hardwarové hodiny ([reálný čas](cas.md)) | TSC (kalibrace HPET), APIC timer, CMOS RTC | CNTVCT_EL0, CNTP; hodiny zatím jen z UEFI |
 | `Ipi` | přeplánuj, zastav, vyprázdni TLB | APIC IPI | GICv3 SGI |
 | `Memory` | tabulky stránek (`PageTableOps`), TLB, cache pro DMA | 4 úrovně, CR3, IPI shootdown | TTBR0/TTBR1, `TLBI ... IS` bez IPI |
@@ -1151,9 +1151,9 @@ výchozí; `--iommu none` bez překladu DMA). Testy končí přes semihosting
 
 Rozdíly proti x86, o kterých je dobré vědět:
 
-- **Programy jsou zatím bez FPU** (cíl `aarch64-unknown-none-softfloat`,
-  stejně jako x86 bez SSE). Jádro přesto ukládá stav FPU při přepnutí, test
-  ověřuje registr V0.
+- **Programy mají FPU a NEON** (cíl `aarch64-unknown-magnumopus`,
+  hard-float, stejně jako x86 s SSE); jádro zůstává bez FPU a stav FPU
+  vláken ukládá při přepnutí (testy `FPU: ...` v sadě `procesy`).
 - **MSI potřebuje identitu zařízení** (DeviceID pro ITS): `INTERRUPT_CREATE`
   bez zařízení vrátí `INVALID_ARGS`. Stránka ITS (GITS_TRANSLATER) se
   mapuje do domény SMMU zařízení, jinak by jeho MSI SMMU zablokovala.
@@ -1302,9 +1302,14 @@ Co zatím funguje jednodušeji, než návrh popisuje (a proč to nevadí teď):
 - **Objekty paměti alokují stránky hned** (žádné lazy alokace ani CoW klony).
 - **Odmapování jen celých mapování.**
 - **Návrat ze syscallu přes `iretq`** místo rychlejšího `sysret`.
-- **Programy se zatím překládají bez SSE/FPU** (soft-float). Jádro už stav
-  FPU/SSE každého vlákna ukládá (FXSAVE, x87 + XMM0-15); AVX (XSAVE) zapne
-  milník jazyků.
+- **Programy mají FPU a SIMD** **[ověřeno v QEMU]** (FPU-1): všechny
+  služby, ovladače i aplikace se překládají pro cíle
+  `x86_64-unknown-magnumopus` (základní úroveň x86-64-v2) a
+  `aarch64-unknown-magnumopus` (NEON) s hard-float ABI; core a alloc
+  z rust-src (`-Zbuild-std`), kód v C stejné ABI (`cbuild`). Jádro zůstává
+  soft-float a stav FPU vláken ukládá (FPU-2: XSAVE s AVX a AVX-512, bez
+  XSAVE FXSAVE; [jadro.md](jadro.md)). Starší CPU jádro zastaví při startu
+  ([pozadavky-hw.md](pozadavky-hw.md)). AMX zatím zapnuté není.
 - **IOMMU (Intel VT-d, AMD-Vi) jen pro překlad DMA:** chybí překlad
   přerušení a oblasti RMRR/IVMD; na stroji bez IOMMU DMA omezené není
   (jádro to zaloguje).

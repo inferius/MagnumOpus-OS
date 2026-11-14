@@ -42,6 +42,40 @@ pub use fatal::fatal_stop;
 /// Informace o platforme, zjistene jednou pri startu.
 static PLATFORM: spin::Once<Platform> = spin::Once::new();
 
+/// Programy jsou prelozene pro zakladni uroven CPU (x86-64-v2, aarch64 FP
+/// a NEON). Starsi CPU se zastavi hned se srozumitelnou hlaskou na obrazovce
+/// i v logu - jinak by nektery program spadl na neplatne instrukci
+/// nahodne za behu. Bez restartu (stejny stroj by se jen tocil dokola).
+fn check_cpu_baseline() {
+    let mut missing = [""; 8];
+    let mut n = 0;
+    let baseline = arch::missing_baseline(&mut |name| {
+        if n < missing.len() {
+            missing[n] = name;
+            n += 1;
+        }
+    });
+    if n == 0 {
+        return;
+    }
+    // Halda jeste neni: seznam se sklada bez alokace.
+    struct List<'a>(&'a [&'a str]);
+    impl core::fmt::Display for List<'_> {
+        fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+            for (i, s) in self.0.iter().enumerate() {
+                write!(f, "{}{s}", if i > 0 { ", " } else { "" })?;
+            }
+            Ok(())
+        }
+    }
+    log::error!("procesor nesplnuje pozadavky systemu ({baseline}): chybi {}", List(&missing[..n]));
+    log::error!("system potrebuje procesor s {baseline} (x86_64 zhruba od roku 2009); viz docs/cs/pozadavky-hw.md");
+    if cfg!(feature = "qemu-test") {
+        arch::qemu_exit(false);
+    }
+    arch::halt_forever();
+}
+
 /// Vstupni bod, na ktery skace loader (viz `ENTRY` v linker.ld).
 ///
 /// Loader predava virtualni adresu `BootInfo` v prime mape fyzicke pameti
@@ -72,6 +106,8 @@ extern "C" fn _start(boot_info: &'static BootInfo) -> ! {
         // Commit a datum doda xtask (`MO_BUILD`); `*` = neulozene zmeny.
         option_env!("MO_BUILD").unwrap_or("bez xtask")
     );
+
+    check_cpu_baseline();
 
     // SAFETY: jednou, na bootovacim CPU, preruseni jsou zakazana.
     unsafe { arch::init_boot_cpu() };

@@ -114,15 +114,13 @@ Chyba `std::io::Error` se převádí na `errno` podle druhu chyby
   alokaci stránek na požádání), sockety.
 - **Porty:** nejdřív zlib (malý, testy v balíku), později sqlite.
 
-### Požadavek na jádro: AVX a XSAVE
+### Jádro: AVX a XSAVE
 
-Jádro dnes ukládá stav FPU/SIMD přes FXSAVE (x87 + XMM0-15) a AVX nezapíná
-(instrukce skončí `#UD`). Výkonný kód v C (FFmpeg, kodeky) potřebuje AVX
-a AVX2, proto **[navrženo]**: jádro zapne `XSAVE`/`XRSTOR` (CR4.OSXSAVE,
-XCR0 s x87, SSE, AVX; později AVX-512 podle CPUID), oblast stavu vlákna
-o velikosti z CPUID (leaf 0xD) místo pevných 512 B a líné nebo vždy
-úplné ukládání. Do té doby se kód v C překládá jen s SSE2 (x86_64)
-a NEON (aarch64). Viz [Jádro](jadro.md).
+**[ověřeno v QEMU]** Jádro ukládá stav FPU/SIMD přes XSAVE (x87, SSE, AVX
+a AVX-512 podle CPUID, bez XSAVE FXSAVE), viz [Jádro](jadro.md). Kód v C
+se překládá pro základní úroveň CPU (x86-64-v2, NEON,
+[pozadavky-hw.md](pozadavky-hw.md)); AVX/AVX2 a výš volí knihovny
+(FFmpeg, kodeky) za běhu podle CPUID.
 
 ## FFmpeg a licence
 

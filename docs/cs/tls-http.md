@@ -32,8 +32,8 @@ se ověřuje podle reálného času, proto na ní TLS závisí.
 > - **Kryptografie RustCrypto není auditovaná jako celek.** Jednotlivé
 >   crate (AES-GCM, ChaCha20-Poly1305, P-256) prošly dílčími audity, ale
 >   ne všechny. ring (auditovaný, s assemblerem) nejde přeložit pro naše
->   cíle: potřebuje překladač C a na aarch64 NEON, který programy bez FPU
->   nemají.
+>   cíle: potřebuje překladač C pro naše cíle a assembler podle platformy
+>   (NEON a SSE už programy od FPU-1 mají; převzetí je samostatná práce).
 > - **Softwarové AES** (bez AES-NI) je pomalejší a jen „bitsliced“
 >   konstantní v čase; na sdíleném CPU je odolnější ChaCha20-Poly1305.
 > - **Odvolání jen „měkce“:** když stav odvolání nejde zjistit (CRL nejde
@@ -113,11 +113,11 @@ Protokol obstarává **rustls** (0.23, bez `std`, rozhraní
 | `provider/kx.rs` | ECDHE: X25519 (odmítne nulové sdílené tajemství), P-256/P-384 (jen nekomprimovaný bod, kontrola, že leží na křivce) |
 | `provider/verify.rs` | ověření podpisů pro webpki a mapování schémat TLS |
 
-Programy běží bez SSE a NEON. `xtask` proto překládá RustCrypto jen
-softwarově (`--cfg aes_force_soft`, `polyval_force_soft`,
+`xtask` překládá RustCrypto zatím jen softwarově (programy mají od FPU-1
+SSE a NEON, ale detekce AES-NI/PCLMUL za běhu a AES na aarch64 přijdou
+zvlášť s měřením; x86-64-v2 AES-NI nezaručuje) (`--cfg aes_force_soft`, `polyval_force_soft`,
 `poly1305_force_soft`, `chacha20_force_soft`,
-`curve25519_dalek_backend="serial"`, u `sha2` feature `force-soft`):
-detekce AES-NI za běhu by jinak spustila instrukce SIMD. Ladicí build
+`curve25519_dalek_backend="serial"`, u `sha2` feature `force-soft`). Ladicí build
 kryptografii optimalizuje (`opt-level = 3` v `Cargo.toml`), jinak by
 handshake v QEMU trval desítky sekund.
 
@@ -509,6 +509,11 @@ testovací CA vygenerovaná při každém běhu):
 - **Spojení znovu** (keep-alive HTTP/1.1, víc proudů HTTP/2) a komprese
   (gzip, brotli).
 - **NTS** (RFC 8915) pro ověřený čas; DoH/DoT pro ověřené DNS.
-- **ring nebo vlastní assembler** pro AES-GCM s AES-NI/ARMv8 Crypto, až
-  budou programy smět používat SIMD.
+- **Hardwarové AES a GHASH** (fronta, SIMD programy mají od FPU-1):
+  zrušit `--cfg aes_force_soft` / `polyval_force_soft` a nechat
+  RustCrypto zjistit AES-NI a PCLMULQDQ za běhu (CPUID; x86-64-v2 je
+  nezaručuje). Na aarch64 potřebuje detekce ARMv8 Crypto informaci od
+  jádra (obdoba HWCAP, `ID_AA64ISAR0_EL1` z EL0 nejde číst). Změřit
+  handshake a propustnost a ověřit konstantní čas. Pak případně ring
+  nebo vlastní assembler.
 - **Klientské certifikáty** a TLS server (pro služby v systému).

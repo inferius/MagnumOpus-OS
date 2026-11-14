@@ -15,7 +15,8 @@ pub mod kind {
     /// Obecne registry, PC, SP, priznaky a baze TLS
     /// ([`X64General`] / [`A64General`]).
     pub const GENERAL: u32 = 0;
-    /// FPU/SIMD: x86_64 obraz FXSAVE (512 B), aarch64 [`A64Fp`] (528 B).
+    /// FPU/SIMD: hlavicka [`fp::Header`] (64 B), pak data podle formatu
+    /// (velikost se lisi podle CPU, viz modul [`fp`]).
     pub const FP: u32 = 1;
 }
 
@@ -94,11 +95,72 @@ impl X64General {
     }
 }
 
-/// Obraz FXSAVE x86_64 (512 B): x87, MMX, XMM0-15, MXCSR. Pri zapisu nesmi
-/// mit MXCSR nastavene rezervovane bity (16-31).
+/// Obraz FXSAVE x86_64 (512 B): x87, MMX, XMM0-15, MXCSR. Je to i zacatek
+/// (legacy oblast) obrazu XSAVE. Pri zapisu nesmi mit MXCSR nastavene
+/// rezervovane bity (16-31).
 pub const X64_FP_SIZE: usize = 512;
 /// Offset MXCSR v obrazu FXSAVE.
 pub const X64_FP_MXCSR: usize = 24;
+/// Offset hlavicky XSAVE (XSTATE_BV, XCOMP_BV) v obrazu XSAVE.
+pub const X64_XSAVE_HEADER: usize = 512;
+
+/// Stav FPU/SIMD vlakna (`kind::FP` a FP cast ramce vyjimky): hlavicka
+/// 64 B, hned za ni data. Delka dat zavisi na CPU (x86_64: velikost obrazu
+/// XSAVE pro zapnute casti, CPUID 0xD), proto ji nese hlavicka a program ji
+/// nema predpokladat.
+pub mod fp {
+    /// Velikost hlavicky (data za ni jsou zarovnana na 64 B jako obraz
+    /// XSAVE).
+    pub const HEADER: usize = 64;
+
+    /// Format dat.
+    pub mod format {
+        /// x86_64 bez XSAVE: obraz FXSAVE (512 B).
+        pub const X64_FXSAVE: u32 = 1;
+        /// x86_64: obraz XSAVE ve standardnim (nekompaktnim) formatu,
+        /// `features` = XCR0 (zapnute casti). Zacina obrazem FXSAVE.
+        pub const X64_XSAVE: u32 = 2;
+        /// aarch64: V0-V31 (po 16 B), FPCR a FPSR (528 B).
+        pub const A64_NEON: u32 = 3;
+    }
+
+    /// Hlavicka (little endian): format, delka dat, mapa casti (x86_64
+    /// XCR0, jinak 0); zbytek do 64 B je rezerva (0).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct Header {
+        pub format: u32,
+        pub len: u32,
+        pub features: u64,
+    }
+
+    impl Header {
+        pub fn encode(&self) -> [u8; HEADER] {
+            let mut b = [0u8; HEADER];
+            b[0..4].copy_from_slice(&self.format.to_le_bytes());
+            b[4..8].copy_from_slice(&self.len.to_le_bytes());
+            b[8..16].copy_from_slice(&self.features.to_le_bytes());
+            b
+        }
+
+        /// `None` = kratky buffer nebo nenulova rezerva.
+        pub fn decode(b: &[u8]) -> Option<Self> {
+            let b = b.get(..HEADER)?;
+            if b[16..].iter().any(|&x| x != 0) {
+                return None;
+            }
+            Some(Self {
+                format: u32::from_le_bytes(b[0..4].try_into().ok()?),
+                len: u32::from_le_bytes(b[4..8].try_into().ok()?),
+                features: u64::from_le_bytes(b[8..16].try_into().ok()?),
+            })
+        }
+
+        /// Velikost cele FP casti (hlavicka a data).
+        pub fn total(&self) -> usize {
+            HEADER + self.len as usize
+        }
+    }
+}
 
 /// Obecne registry aarch64 (280 B). Pri zapisu: `pc`, `sp` a `tpidr` musi
 /// lezet v pameti procesu (pod `vm::USER_MAX`), z `pstate` se prevezmou jen

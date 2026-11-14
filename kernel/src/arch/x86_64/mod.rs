@@ -74,7 +74,8 @@ impl api::Cpu for X86_64 {
             idt::init();
             idt::load();
             paging::init_cpu();
-            context::init_cpu();
+            context::init_cpu(true);
+            log_fpu();
             user::init_cpu();
             // 8259 PIC: zamaskovat vsechny linky na master i slave.
             cpu::outb(0x21, 0xFF);
@@ -89,7 +90,7 @@ impl api::Cpu for X86_64 {
             Self::clear_cpu_local();
             idt::load();
             paging::init_cpu();
-            context::init_cpu();
+            context::init_cpu(false);
             user::init_cpu();
             apic::init_cpu(false, 0);
         }
@@ -109,6 +110,12 @@ impl api::Cpu for X86_64 {
 
     fn hw_random() -> Option<u64> {
         cpu::hw_random()
+    }
+
+    const BASELINE: &'static str = "x86-64-v2";
+
+    fn missing_baseline(f: &mut dyn FnMut(&'static str)) {
+        cpu::missing_v2(f)
     }
 
     fn clear_cpu_local() {
@@ -560,5 +567,15 @@ fn stack_trace(mut rbp: u64, mut f: impl FnMut(u64)) {
         }
         f(ret);
         rbp = next;
+    }
+}
+
+/// Zaloguje, jak se uklada stav FPU vlaken (format, XCR0, velikost).
+fn log_fpu() {
+    let x = context::xcr0();
+    if x == 0 {
+        crate::log::info!("FPU: FXSAVE (CPU bez XSAVE), {} B na vlakno", context::fp_len());
+    } else {
+        crate::log::info!("FPU: XSAVE, XCR0 {x:#x}, {} B na vlakno", context::fp_len());
     }
 }

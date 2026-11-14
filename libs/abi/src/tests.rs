@@ -240,9 +240,24 @@ fn exception_frame_layout() {
     use crate::thread::{A64_FP_SIZE, A64General, X64_FP_SIZE, X64General};
     assert!(GENERAL >= crate::exception::Report::SIZE);
     assert!(X64_FP >= GENERAL + X64General::SIZE && X64_FP % 64 == 0);
-    assert!(X64_SIZE >= X64_FP + X64_FP_SIZE && X64_SIZE % 64 == 0);
     assert!(A64_FP >= GENERAL + A64General::SIZE && A64_FP % 64 == 0);
-    assert!(A64_SIZE >= A64_FP + A64_FP_SIZE && A64_SIZE % 64 == 0);
+    // Puvodni pevne velikosti (FXSAVE, NEON) a XSAVE s AVX-512 (2688 B).
+    assert_eq!(size(X64_FP, X64_FP_SIZE), 832);
+    assert_eq!(size(A64_FP, A64_FP_SIZE), 1024);
+    assert_eq!(size(X64_FP, 2688) % 64, 0);
+}
+
+#[test]
+fn fp_header_roundtrip() {
+    use crate::thread::fp::{HEADER, Header, format};
+    let h = Header { format: format::X64_XSAVE, len: 832, features: 0x7 };
+    let b = h.encode();
+    assert_eq!(Header::decode(&b), Some(h));
+    assert_eq!(h.total(), HEADER + 832);
+    let mut bad = b;
+    bad[40] = 1;
+    assert_eq!(Header::decode(&bad), None, "nenulova rezerva");
+    assert_eq!(Header::decode(&b[..10]), None);
 }
 
 /// Dlouha zprava DEBUG_LOG se deli (jadro by ji odmitla celou): kusy

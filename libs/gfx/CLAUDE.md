@@ -7,7 +7,7 @@ Softwarové kreslení pro kompozitor a knihovnu UI (`no_std` + `alloc`): `shape`
 - Všechny operace ořezávají na plochu a na `clip`; žádná nesáhne mimo paměť ani při nesmyslných souřadnicích (vstup od aplikací je nedůvěryhodný).
 - Premultiplied alfa všude; barvy z `libs/theme` mají stejný formát.
 - Výkon je součást návrhu (efekty v rozpočtu snímku); měř, než přidáš náročný efekt.
-- Žádné `f32` na pixel: programy v OS jsou bez FPU (soft-float), každá operace `f32` je volání funkce (v QEMU TCG i na HW řádově pomalejší). `f32` jen v přípravě (masky stínů, glyfy do mezipaměti, geometrie přechodu) nebo v rohových čtvercích (`shape::round_rect_coverage`); rozmazání a body plochy jsou celočíselné. Celočíselná náhrada má test proti původnímu výpočtu v `f32` (`tests.rs`: `*_matches_float`).
+- Žádné `f32` na pixel: dřív kvůli soft-float (do FPU-1 každá operace `f32` = volání funkce), dnes kvůli ceně i s FPU a kvůli stejnému výsledku na obou architekturách (otisky snímků). `f32` jen v přípravě (masky stínů, glyfy do mezipaměti, geometrie přechodu) nebo v rohových čtvercích (`shape::round_rect_coverage`); rozmazání a body plochy jsou celočíselné. Celočíselná náhrada má test proti původnímu výpočtu v `f32` (`tests.rs`: `*_matches_float`).
 
 ## Testy
 

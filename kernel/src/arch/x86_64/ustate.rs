@@ -2,15 +2,15 @@
 //!
 //! Ramec registru je na vrcholu zasobniku jadra vlakna (syscall i preruseni
 //! z userspace ukladaji stejny `TrapFrame`; TSS.RSP0 i zasobnik syscallu =
-//! vrchol, zarovnany na 16 B). Stav FPU/SSE je obraz FXSAVE v `Context`.
+//! vrchol, zarovnany na 16 B). Stav FPU je obraz XSAVE (nebo FXSAVE na CPU
+//! bez XSAVE) v `Context`; ven jde s hlavickou `abi::thread::fp::Header`.
 
-use core::arch::asm;
-
-use abi::thread::{X64_FP_MXCSR, X64_FP_SIZE, X64General};
+use abi::thread::fp::{HEADER, Header, format};
+use abi::thread::{X64_FP_MXCSR, X64_XSAVE_HEADER, X64General};
 use abi::vm::USER_MAX;
 
 use super::X86_64;
-use super::context::Context;
+use super::context::{self, Context, FpuArea};
 use super::idt::TrapFrame;
 use crate::arch::api::UserState;
 
@@ -27,13 +27,39 @@ fn general(buf: &[u8]) -> Option<X64General> {
     Some(X64General::decode(buf.try_into().ok()?))
 }
 
-/// Zarovnany buffer pro FXRSTOR64.
-#[repr(C, align(16))]
-struct Fx([u8; X64_FP_SIZE]);
+/// Hlavicka stavu FPU tohoto CPU.
+fn header() -> Header {
+    let xcr0 = context::xcr0();
+    // Bez XSAVE (Nehalem, Westmere): obraz FXSAVE = casti x87 a SSE.
+    let (format, features) = if xcr0 != 0 { (format::X64_XSAVE, xcr0) } else { (format::X64_FXSAVE, 0b11) };
+    Header { format, len: context::fp_len() as u32, features }
+}
+
+/// Je obraz XSAVE/FXSAVE (bez hlavicky) bezpecny pro XRSTOR/FXRSTOR?
+/// Rezervovane bity MXCSR, XSTATE_BV mimo XCR0, kompaktni format nebo
+/// nenulova rezerva hlavicky XSAVE = #GP v jadre.
+fn check_image(data: &[u8]) -> bool {
+    let u64_at = |i: usize| u64::from_le_bytes(data[i..i + 8].try_into().unwrap());
+    if u32::from_le_bytes(data[X64_FP_MXCSR..X64_FP_MXCSR + 4].try_into().unwrap()) & 0xFFFF_0000 != 0 {
+        return false;
+    }
+    let xcr0 = context::xcr0();
+    if xcr0 == 0 {
+        return true;
+    }
+    let h = X64_XSAVE_HEADER;
+    u64_at(h) & !xcr0 == 0 && u64_at(h + 8) == 0 && data[h + 16..h + 64].iter().all(|&b| b == 0)
+}
 
 impl UserState for X86_64 {
     const GENERAL_SIZE: usize = X64General::SIZE;
-    const FP_SIZE: usize = X64_FP_SIZE;
+    fn fp_size() -> usize {
+        HEADER + context::fp_len()
+    }
+
+    fn fp_header() -> Header {
+        header()
+    }
 
     unsafe fn read_general(stack_top: u64, tp: u64, out: &mut [u8]) {
         // SAFETY: predano volajicim (ramec stojiciho vlakna).
@@ -96,23 +122,22 @@ impl UserState for X86_64 {
     }
 
     fn read_fp(ctx: &Context, out: &mut [u8]) {
-        out.copy_from_slice(ctx.fpu_bytes());
+        out[..HEADER].copy_from_slice(&header().encode());
+        out[HEADER..].copy_from_slice(ctx.fpu_bytes());
     }
 
     fn check_fp(buf: &[u8]) -> bool {
-        // Rezervovane bity MXCSR = #GP ve FXRSTOR (v jadre).
-        buf.len() == X64_FP_SIZE
-            && u32::from_le_bytes(buf[X64_FP_MXCSR..X64_FP_MXCSR + 4].try_into().unwrap()) & 0xFFFF_0000 == 0
+        buf.len() == Self::fp_size() && Header::decode(buf) == Some(header()) && check_image(&buf[HEADER..])
     }
 
-    const FRAME_SIZE: usize = abi::exception::frame::X64_SIZE;
     const FRAME_FP: usize = abi::exception::frame::X64_FP;
 
     unsafe fn save_fp(out: &mut [u8]) {
-        let mut fx = Fx([0; X64_FP_SIZE]);
-        // SAFETY: zarovnany buffer 512 B; FXSAVE jen cte registry FPU/SSE.
-        unsafe { asm!("fxsave64 [{}]", in(reg) fx.0.as_mut_ptr(), options(nostack)) };
-        out.copy_from_slice(&fx.0);
+        let mut a = FpuArea::zeroed(context::fp_len());
+        // SAFETY: predano volajicim (registry FPU patri vlaknu).
+        unsafe { a.save() };
+        out[..HEADER].copy_from_slice(&header().encode());
+        out[HEADER..].copy_from_slice(a.bytes());
     }
 
     fn general_sp_ret(buf: &[u8]) -> (u64, u64) {
@@ -131,11 +156,11 @@ impl UserState for X86_64 {
     }
 
     unsafe fn load_fp(buf: &[u8]) {
-        let mut fx = Fx([0; X64_FP_SIZE]);
-        fx.0.copy_from_slice(buf);
-        // SAFETY: obraz FXSAVE prosel `check_fp` (MXCSR bez rezervovanych
-        // bitu), buffer zarovnany na 16 B. Jadro FPU/SSE nepouziva, stav
+        let mut a = FpuArea::zeroed(context::fp_len());
+        a.bytes_mut().copy_from_slice(&buf[HEADER..]);
+        // SAFETY: obraz prosel `check_fp` (hlavicka tohoto CPU, rezervovane
+        // bity nulove), oblast zarovnana na 64 B. Jadro FPU nepouziva, stav
         // patri vlaknu, ktere se vraci do userspace.
-        unsafe { asm!("fxrstor64 [{}]", in(reg) fx.0.as_ptr(), options(nostack, readonly)) };
+        unsafe { a.load() };
     }
 }

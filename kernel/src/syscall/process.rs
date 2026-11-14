@@ -123,9 +123,18 @@ pub fn thread_state(a: Args) -> Result<u64> {
         u32::try_from(a[1]).map_err(|_| Error::InvalidArgs)?,
         u32::try_from(a[2]).map_err(|_| Error::InvalidArgs)?,
     );
+    // Velikost stavu FPU zavisi na CPU (hlavicka `abi::thread::fp`):
+    // vetsi buffer se pouzije jen do velikosti stavu, mensi = chyba.
     let size = sched::suspend::state_size(kind)?;
-    if a[4] != size as u64 {
-        return Err(Error::InvalidArgs);
+    if a[4] < size as u64 {
+        // Cteni FPU s bufferem aspon na hlavicku: jadro do ni zapise
+        // potrebnou delku (program si pak alokuje spravny buffer).
+        let hdr = abi::thread::fp::HEADER;
+        if op == abi::thread::op::READ && kind == abi::thread::kind::FP && a[4] >= hdr as u64 {
+            p.handles().get_as::<Thread>(arg_handle(a[0])?, Rights::READ)?;
+            user::write_bytes(&p, a[3], &crate::arch::ustate::fp_header().encode())?;
+        }
+        return Err(Error::BufferTooSmall);
     }
     match op {
         abi::thread::op::READ => {
@@ -198,7 +207,7 @@ pub fn exception_handler(a: Args) -> Result<u64> {
             let (base, size) = (a[1], a[2]);
             if size != 0 {
                 let end = base.checked_add(size).ok_or(Error::InvalidArgs)?;
-                let min = crate::arch::ustate::FRAME_SIZE as u64 + 256;
+                let min = crate::arch::ustate::frame_size() as u64 + 256;
                 if base < abi::vm::USER_MIN || end > abi::vm::USER_MAX || size < min {
                     return Err(Error::InvalidArgs);
                 }

@@ -1051,7 +1051,7 @@ only through a fixed contract. Status: the interface is implemented by
 |---|---|---|---|
 | `Cpu` | CPU init, HW ID, per-CPU pointer, halt, breakpoint | GDT/TSS/IDT, local APIC ID, GS base | VBAR_EL1, MPIDR_EL1, TPIDR_EL1 |
 | `Interrupts` | enable/disable interrupts, sleep until an interrupt | `sti`/`cli`/`hlt` | DAIF, `wfi` |
-| `Threads` | thread context, switch, kernel stack, entering user space | callee-saved + FXSAVE, `iretq` | x19-x30 + v0-v31, `eret` |
+| `Threads` | thread context, switch, kernel stack, entering user space | callee-saved + XSAVE/FXSAVE, `iretq` | x19-x30 + v0-v31, `eret` |
 | `Time` | clock in ns, cycle counter, one-shot timer, linking firmware time (`ns_from_counter_to_start`), hardware clock ([real time](time.md)) | TSC (calibrated by HPET), APIC timer, CMOS RTC | CNTVCT_EL0, CNTP; clock only from UEFI so far |
 | `Ipi` | reschedule, halt, flush TLB | APIC IPI | GICv3 SGI |
 | `Memory` | page tables (`PageTableOps`), TLB, cache for DMA | 4 levels, CR3, IPI shootdown | TTBR0/TTBR1, `TLBI ... IS` without IPI |
@@ -1206,9 +1206,10 @@ slower than x86 under TCG.
 
 Differences from x86 worth knowing:
 
-- **Programs are built without FPU for now** (`aarch64-unknown-none-softfloat`,
-  like x86 without SSE). The kernel still saves the FPU state on switches;
-  a test checks register V0.
+- **Programs have FPU and NEON** (target `aarch64-unknown-magnumopus`,
+  hard-float, like x86 with SSE); the kernel stays without FPU and saves
+  the threads' FPU state on switches (`FPU: ...` tests in the `procesy`
+  suite).
 - **MSI needs the device identity** (DeviceID for the ITS): `INTERRUPT_CREATE`
   without a device returns `INVALID_ARGS`. The ITS page (GITS_TRANSLATER)
   is mapped into the device's SMMU domain, otherwise the SMMU would block
@@ -1369,9 +1370,16 @@ fine for now):
 - **Memory objects allocate pages up front** (no lazy allocation, no CoW clones).
 - **Only whole mappings can be unmapped.**
 - **Syscalls return via `iretq`** instead of the faster `sysret`.
-- **Programs are still compiled without SSE/FPU** (soft-float). The kernel
-  already saves each thread's FPU/SSE state (FXSAVE, x87 + XMM0-15); AVX
-  (XSAVE) comes with the languages milestone.
+- **Programs have FPU and SIMD** **[verified in QEMU]** (FPU-1): all
+  services, drivers and applications are built for the targets
+  `x86_64-unknown-magnumopus` (baseline x86-64-v2) and
+  `aarch64-unknown-magnumopus` (NEON) with the hard-float ABI; core and
+  alloc from rust-src (`-Zbuild-std`), C code with the same ABI (`cbuild`).
+  The kernel stays soft-float and saves the threads' FPU state (FPU-2:
+  XSAVE with AVX and AVX-512, FXSAVE without XSAVE; [kernel.md](kernel.md)).
+  The kernel stops an older CPU at start
+  ([hardware-requirements.md](hardware-requirements.md)). AMX is not
+  enabled yet.
 - **IOMMU (Intel VT-d, AMD-Vi) only for DMA translation:** interrupt
   remapping and RMRR/IVMD regions are missing; on a machine without an
   IOMMU DMA is not restricted (the kernel logs it).

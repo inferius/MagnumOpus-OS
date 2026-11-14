@@ -87,11 +87,11 @@ changed), and vendored headers included from own code via
 
 | Flag | Why |
 |---|---|
-| `--target=x86_64-unknown-none-elf` / `aarch64-unknown-none-elf` | the same ABI as the Rust targets (ELF, no OS) |
-| `-mgeneral-regs-only` | services are soft-float (no FPU/SIMD), like the Rust code |
-| `-mno-red-zone`, `-mcmodel=small` (x86) | the same model as the Rust target |
+| `--target=x86_64-unknown-none-elf` / `aarch64-unknown-none-elf` | OS-less ELF in LLVM, the ABI of the Rust targets `*-unknown-magnumopus` |
+| `-march=x86-64-v2` (x86) / `-march=armv8-a+simd` (aarch64) | hard-float like Rust: `float`/`double` in FPU registers, the CPU baseline ([hardware-requirements.md](hardware-requirements.md)) |
+| `-mcmodel=small` (x86) | the same model as the Rust target |
 | `-mstrict-align` (aarch64) | as the Rust target; an unaligned device register access = exception |
-| applications with std (`*-unknown-magnumopus`) | without `-mgeneral-regs-only` and `-mstrict-align` (hard-float SSE2 / NEON like the Rust target), plus `-ftls-model=local-exec` (`_Thread_local` and `errno` in the program TLS), `-mcmodel=small` on x86_64; see [cstd](cstd.md) |
+| `-ftls-model=local-exec` | `_Thread_local` and `errno` in C share the program TLS blocks with Rust (static ET_EXEC); see [cstd](cstd.md) |
 | `-ffreestanding -nostdlibinc` | no host headers (Windows SDK, glibc), only clang's and cstd |
 | `-fno-pic -fno-common -ffunction-sections -fdata-sections` | static programs, the linker drops unused functions |
 | `-O2` | an AML interpreter and similar code is many times slower unoptimised |
@@ -145,7 +145,7 @@ cstd::init_stack_guard(libos::random::u64().0);
 
 `printf` supports the flags `-+ #0`, width and precision (also `*`), the
 lengths `hh h l ll z j t` and the conversions `d i u o x X c s p %`.
-Floating point is not there yet (programs have no FPU; `?` is printed).
+Floating point is not in `cstd` yet (`?` is printed); programs already have an FPU.
 
 ### Plan: our own libc and porting more C
 

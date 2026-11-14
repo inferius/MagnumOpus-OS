@@ -297,7 +297,8 @@ potlačený aspoň o 40 dB. Na konci `DRAIN` se historie převodníku
 vytlačí tichem, takže zazní i poslední vzorky. Mix sčítá v i64 se
 zesílením streamu, pak hlavní hlasitost a ořez na 16 nebo 24 bitů
 (ořezává se až součet). Vše v celých číslech (koeficienty filtru se
-spočítají jednou při otevření): programy na aarch64 běží bez FPU.
+spočítají jednou při otevření) - napsáno v době, kdy programy na aarch64
+běžely bez FPU; celá čísla dávají stejný výsledek na obou architekturách.
 
 ## Příkaz shellu `audio`
 

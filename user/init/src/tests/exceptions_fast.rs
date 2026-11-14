@@ -26,7 +26,7 @@ pub const TESTS: &[Test] = &[
     ("ve vlaknu: preteceni bez alternativniho zasobniku konci cisty", overflow_clean_end),
     ("ve vlaknu: vnoreni nad limit jde na kanal procesu", nesting_limit),
     ("ve vlaknu: chybne argumenty a RETURN bez obsluhy", bad_args),
-    ("ve vlaknu: typovy ramec (breakpoint, alternativni zasobnik)", frame_api),
+    ("ve vlaknu: typovy ramec (breakpoint, alternativni zasobnik, FPU)", frame_api),
 ];
 
 const RW: u32 = MAP_READ | MAP_WRITE;
@@ -56,6 +56,15 @@ const M_FRAME: u64 = 6;
 /// Alternativni zasobnik testu `frame_api` (zacatek, delka).
 static ALT: AtomicU64 = AtomicU64::new(0);
 const ALT_LEN: u64 = 64 * 1024;
+
+/// Spodnich 64 bitu XMM0/V0 pred breakpointem a hodnota, kterou do FP casti
+/// ramce zapise obsluha (po RESUME ji vlakno musi videt v registru).
+const FP_BEFORE: u64 = 0x0123_4567_89AB_CDEF;
+const FP_AFTER: u64 = 0xFEDC_BA98_7654_3210;
+/// Offset XMM0 v obrazu FXSAVE (x86_64), Q0 na zacatku (aarch64).
+const FP_REG0: usize = if cfg!(target_arch = "x86_64") { 160 } else { 0 };
+/// XMM0/V0 videne vlaknem po navratu z obsluhy.
+static FP_SEEN: AtomicU64 = AtomicU64::new(0);
 
 /// Offset PC v obecnych registrech ramce.
 const PC_OFF: usize = frame::GENERAL + if cfg!(target_arch = "x86_64") { 16 * 8 } else { 32 * 8 };
@@ -103,8 +112,12 @@ extern "C" fn handler(f: *mut u8) -> ! {
                 && signal_class(fr.report().kind) == SignalClass::Trap
                 && fr.pc() == r.pc
                 && fr.sp() != 0
-                && fr.fp().len() == if cfg!(target_arch = "x86_64") { 512 } else { 528 }
+                && fr.fp().len() == libos::exception::fp_data_len()
+                && fr.fp_header().len as usize == libos::exception::fp_data_len()
+                && fr.fp()[FP_REG0..FP_REG0 + 8] == FP_BEFORE.to_le_bytes()
                 && on_alt;
+            // Zmena FP casti ramce se po RESUME projevi v registru.
+            fr.fp_mut()[FP_REG0..FP_REG0 + 8].copy_from_slice(&FP_AFTER.to_le_bytes());
             HITS.fetch_add(1, Ordering::SeqCst);
             RESULT.store(if ok { 77 } else { 1 }, Ordering::SeqCst);
             // aarch64: PC stoji na `brk`, posunout za nej (x86_64 uz je za `int3`).
@@ -296,15 +309,18 @@ fn frame_api(_: &Startup) -> TestResult {
     let w = libos::thread::spawn("breakpoint", || {
         let Ok(alt) = alloc_alt_stack(ALT_LEN) else { return };
         ALT.store(alt, Ordering::SeqCst);
-        // SAFETY: breakpoint; obsluha ho preskoci a vlakno pokracuje.
+        let seen: u64;
+        // SAFETY: breakpoint; obsluha ho preskoci a vlakno pokracuje. XMM0/V0
+        // se nastavi a precte v tomtez bloku (prekladac ho mezi tim nepouzije).
         #[cfg(target_arch = "x86_64")]
         unsafe {
-            core::arch::asm!("int3");
+            core::arch::asm!("movq xmm0, {v}", "int3", "movq {v}, xmm0", v = inout(reg) FP_BEFORE => seen, out("xmm0") _);
         }
         #[cfg(target_arch = "aarch64")]
         unsafe {
-            core::arch::asm!("brk #0");
+            core::arch::asm!("fmov d0, {v}", "brk #0", "fmov {v}, d0", v = inout(reg) FP_BEFORE => seen, out("v0") _);
         }
+        FP_SEEN.store(seen, Ordering::SeqCst);
         HITS.fetch_add(100, Ordering::SeqCst);
         let _ = set_alt_stack(0, 0);
         let _ = vm::release(alt, ALT_LEN);
@@ -314,6 +330,7 @@ fn frame_api(_: &Startup) -> TestResult {
     finish(base, 1);
     r.map_err(|e| fail("vlakno", e))?;
     check_eq!(RESULT.load(Ordering::SeqCst), 77, "ramec: druh, trida, PC, SP, FPU, alternativni zasobnik");
+    check_eq!(FP_SEEN.load(Ordering::SeqCst), FP_AFTER, "XMM0/V0 z FP casti ramce po RESUME");
     check_eq!(HITS.load(Ordering::SeqCst), 101, "obsluha jednou, vlakno pokracovalo za breakpointem");
     Ok(())
 }

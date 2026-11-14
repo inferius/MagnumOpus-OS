@@ -23,7 +23,6 @@ pub const TESTS: &[Test] = &[
         "vlakno mimo pamet procesu -> INVALID_ARGS",
         thread_bad_entry,
     ),
-    ("stav SSE je oddeleny mezi vlakny", sse_isolated),
     ("TPIDR_EL0 neprosakuje mezi procesy", tpidr_isolated),
 ];
 
@@ -171,79 +170,6 @@ fn thread_bad_entry(s: &Startup) -> TestResult {
         t.start(0x40_0000, USER_MAX + 4096, 0, 0),
         Err(Error::InvalidArgs),
         "zasobnik za koncem pameti procesu"
-    );
-    Ok(())
-}
-
-/// XMM0 nove spusteneho vlakna (musi byt 0) a hodnota, kterou si zapsalo.
-static SSE_SEEN: AtomicU64 = AtomicU64::new(u64::MAX);
-
-/// Spodnich 64 bitu prvniho registru FPU/SIMD (x86_64 XMM0, aarch64 V0).
-fn xmm0_read() -> u64 {
-    let v: u64;
-    // SAFETY: jen presun z registru FPU do obecneho registru; jadro FPU
-    // pro programy zapnulo.
-    #[cfg(target_arch = "x86_64")]
-    unsafe {
-        core::arch::asm!("movq {}, xmm0", out(reg) v, options(nomem, nostack))
-    };
-    // SAFETY: viz vyse.
-    #[cfg(target_arch = "aarch64")]
-    unsafe {
-        core::arch::asm!(".arch_extension fp", "fmov {}, d0", out(reg) v, options(nomem, nostack))
-    };
-    v
-}
-
-fn xmm0_write(v: u64) {
-    // SAFETY: XMM0 program (soft-float) jinak nepouziva.
-    #[cfg(target_arch = "x86_64")]
-    unsafe {
-        core::arch::asm!("movq xmm0, {}", in(reg) v, options(nomem, nostack))
-    };
-    // SAFETY: V0 program (soft-float) jinak nepouziva.
-    #[cfg(target_arch = "aarch64")]
-    unsafe {
-        core::arch::asm!(".arch_extension fp", "fmov d0, {}", in(reg) v, options(nomem, nostack))
-    };
-}
-
-extern "C" fn sse_worker(event: u64, _: u64) -> ! {
-    SSE_SEEN.store(xmm0_read(), Ordering::SeqCst);
-    xmm0_write(0xBAD0_BAD0_BAD0_BAD0);
-    let _ = libos::sys::object_signal(event as u32, 0, Signals::SIGNALED.0);
-    libos::sys::thread_exit()
-}
-
-fn sse_isolated(s: &Startup) -> TestResult {
-    let e = Event::create().map_err(|e| fail("event", e))?;
-    let stack = Vmo::create(64 * 1024).map_err(|e| fail("zasobnik", e))?;
-    let flags = libos::abi::vm::MAP_READ | libos::abi::vm::MAP_WRITE;
-    let base = s
-        .process
-        .map(&stack, 0, 64 * 1024, flags, 0)
-        .map_err(|e| fail("mapovani", e))?;
-    let t = Thread::create(&s.process, "sse").map_err(|e| fail("vlakno", e))?;
-    xmm0_write(0x1234_5678_9ABC_DEF0);
-    t.start(
-        sse_worker as *const () as u64,
-        base + 64 * 1024 - 8,
-        e.handle().raw() as u64,
-        0,
-    )
-    .map_err(|e| fail("spusteni", e))?;
-    wait_one(e.handle(), Signals::SIGNALED, deadline()).map_err(|e| fail("cekani", e))?;
-    t.wait_exit(deadline())
-        .map_err(|e| fail("konec vlakna", e))?;
-    check_eq!(
-        SSE_SEEN.load(Ordering::SeqCst),
-        0,
-        "XMM0 noveho vlakna (unik z jineho vlakna)"
-    );
-    check_eq!(
-        xmm0_read(),
-        0x1234_5678_9ABC_DEF0,
-        "XMM0 po prepnuti vlaken"
     );
     Ok(())
 }

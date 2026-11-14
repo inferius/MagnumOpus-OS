@@ -12,9 +12,10 @@ pub struct Arch {
     pub kernel_target: &'static str,
     /// Rust cil UEFI loaderu.
     pub loader_target: &'static str,
-    /// Rust cil programu v userspace. Zatim bez FPU (soft-float) na obou
-    /// architekturach; jadro presto uklada stav FPU pri prepnuti vlaken,
-    /// takze programy s FPU (napr. jazyky s vlastnim cilem) fungovat budou.
+    /// Rust cil programu v userspace (JSON v `third_party/rust-std/targets`,
+    /// jmeno = jmeno souboru = adresar vystupu): hard-float s FPU/SIMD
+    /// (x86_64 x86-64-v2, aarch64 NEON), jadro stav FPU vlaken uklada.
+    /// core a alloc se prekladaji z rust-src (`-Zbuild-std`).
     pub user_target: &'static str,
     /// Cesta loaderu v ESP, kterou firmware spusti sam (vychozi zavadec).
     pub boot_file: &'static str,
@@ -37,7 +38,7 @@ pub const X86_64: Arch = Arch {
     name: "x86_64",
     kernel_target: "x86_64-unknown-none",
     loader_target: "x86_64-unknown-uefi",
-    user_target: "x86_64-unknown-none",
+    user_target: "x86_64-unknown-magnumopus",
     boot_file: "EFI/BOOT/BOOTX64.EFI",
     qemu: "qemu-system-x86_64",
     firmware: ("edk2-x86_64-code.fd", "edk2-i386-vars.fd"),
@@ -55,7 +56,7 @@ pub const AARCH64: Arch = Arch {
     name: "aarch64",
     kernel_target: "aarch64-unknown-none-softfloat",
     loader_target: "aarch64-unknown-uefi",
-    user_target: "aarch64-unknown-none-softfloat",
+    user_target: "aarch64-unknown-magnumopus",
     boot_file: "EFI/BOOT/BOOTAA64.EFI",
     qemu: "qemu-system-aarch64",
     firmware: ("edk2-aarch64-code.fd", "edk2-arm-vars.fd"),

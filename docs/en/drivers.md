@@ -283,12 +283,12 @@ The logic lives in the library (`src/lib.rs`); the program only starts the
 driverkit. On the host the program builds empty so that `cargo test` works:
 
 ```rust
-#![cfg_attr(target_os = "none", no_std, no_main)]
+#![cfg_attr(target_os = "magnumopus", no_std, no_main)]
 
-#[cfg(target_os = "none")]
+#[cfg(target_os = "magnumopus")]
 libos::entry!(main);
 
-#[cfg(target_os = "none")]
+#[cfg(target_os = "magnumopus")]
 fn main(startup: libos::Startup) -> i64 {
     driverkit::os::main::<edu::Edu<_>>(startup, "edu")
 }

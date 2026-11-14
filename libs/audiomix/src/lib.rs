@@ -8,8 +8,9 @@
 //! - [`tone`]: sinusovy ton v celych cislech (testy, `audio tone`),
 //! - [`wav`]: cteni a zapis souboru WAV (RIFF).
 //!
-//! Vse je v celych cislech: na aarch64 bezi programy bez FPU (softfloat)
-//! a mix kazde periody musi stihnout desetiny milisekundy.
+//! Vse je v celych cislech (vzniklo, kdyz programy bezely bez FPU): stejny
+//! vysledek na obou architekturach a mix kazde periody musi stihnout
+//! desetiny milisekundy.
 
 #![no_std]
 

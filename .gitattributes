@@ -1,3 +1,6 @@
 * text=auto eol=lf
 *.fd binary
 *.img binary
+# Testovaci ELF (libs/elf/tests/fixtures).
+*.so binary
+*.pie binary

@@ -118,16 +118,13 @@ An invalid `fopen` mode or a name that is not UTF-8 = `EINVAL`.
   (after on-demand page allocation), sockets.
 - **Ports:** zlib first (small, tests in the package), sqlite later.
 
-### Kernel requirement: AVX and XSAVE
+### Kernel: AVX and XSAVE
 
-The kernel today saves FPU/SIMD state with FXSAVE (x87 + XMM0-15) and does
-not enable AVX (the instructions fault with `#UD`). High-performance C code
-(FFmpeg, codecs) needs AVX and AVX2, therefore **[designed]**: the kernel
-enables `XSAVE`/`XRSTOR` (CR4.OSXSAVE, XCR0 with x87, SSE, AVX; later
-AVX-512 according to CPUID), a per-thread state area sized from CPUID (leaf
-0xD) instead of a fixed 512 B, and lazy or always-full saving. Until then C
-code is compiled with SSE2 only (x86_64) and NEON (aarch64). See
-[Kernel](kernel.md).
+**[verified in QEMU]** The kernel saves the FPU/SIMD state with XSAVE (x87,
+SSE, AVX and AVX-512 per CPUID, FXSAVE without XSAVE), see
+[Kernel](kernel.md). C code is compiled for the CPU baseline (x86-64-v2,
+NEON, [hardware-requirements.md](hardware-requirements.md)); libraries
+(FFmpeg, codecs) pick AVX/AVX2 and higher at run time via CPUID.
 
 ## FFmpeg and licences
 

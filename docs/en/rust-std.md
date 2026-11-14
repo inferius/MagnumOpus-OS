@@ -205,18 +205,18 @@ action, before any `std` code.
 |---|---|---|---|
 | `llvm-target` | `x86_64-unknown-none-elf` | `aarch64-unknown-none` | OS-less ELF in LLVM |
 | `os` / `target-family` | `magnumopus` / none | same | not `unix`, see options |
-| floating point | SSE2 (hard-float) | NEON, `fp-armv8` (hard-float) | performance (FFmpeg, LLVM, browser); the kernel already saves thread FPU/SIMD state |
+| floating point | x86-64-v2: SSE up to SSE4.2 (hard-float, [hardware-requirements.md](hardware-requirements.md)) | NEON, `fp-armv8` (hard-float) | performance (FFmpeg, LLVM, browser); the kernel already saves thread FPU/SIMD state |
 | `panic-strategy` | `abort` | `abort` | unwind later (see rustc) |
 | `relocation-model`, linker | `static`, rust-lld, `user/user.ld` | same | the loader only handles `ET_EXEC` |
 | `has-thread-local`, `tls-model` | yes, `local-exec` | yes, `local-exec` | native TLS (requires a kernel change) |
 | `max-atomic-width` | 64 | 128 | |
 
-**Note:** services keep being built for `*-none` with soft-float (the
-kernel and services use no SSE/NEON). std applications will be
-**hard-float**. It is a different target, so `.rlib` files never mix;
-only shared crates (libos, fsproto...) are compiled twice. AVX is not
-possible yet (the kernel saves state with FXSAVE, AVX instructions end
-with `#UD`); FFmpeg will need XSAVE in the kernel.
+Since FPU-1 services and programs without std are built for the same
+targets (`*-unknown-magnumopus`, hard-float; core and alloc via
+`-Zbuild-std`); the kernel stays `*-none` with soft-float. std
+applications have their own sysroot, so shared crates (libos,
+fsproto...) are compiled twice. AVX and AVX-512 work since FPU-2 (the
+kernel saves state with XSAVE) and are detected at run time.
 
 ## Mapping std onto libos and services
 
@@ -428,7 +428,7 @@ What was missing (found by compiling for our target, outside the tests):
    switch).
 3. **CPU count** was already provided by the kernel (`SCHED_CONTROL`
    `CPU_INFO`).
-4. Later: XSAVE (AVX) for FFmpeg, demand paging (see
+4. Later: demand paging (see
    [Memory management](#memory-management)), loading `ET_DYN` (see rustc).
 
 ## Known limitations
@@ -499,8 +499,8 @@ Part 1 is done, description and plan: [The C library (cstd)](cstd.md).
   belongs in `osrt` so that `std` and C see the same thing
   (`os::magnumopus::io::AsRawFd`).
 - FFmpeg: `pthread_*`, anonymous `mmap` (works through VMOs), files,
-  optional sockets, no `fork`. SIMD assembly: SSE only on x86_64 (AVX
-  waits for XSAVE in the kernel), NEON on aarch64; the std target must be
+  optional sockets, no `fork`. SIMD assembly: SSE up to AVX-512 on x86_64
+  (run-time detection, XSAVE in the kernel since FPU-2), NEON on aarch64; the std target must be
   hard-float (it is).
 
 ### Porting rustc + LLVM + lld into the system

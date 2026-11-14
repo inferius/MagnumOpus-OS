@@ -89,6 +89,8 @@ prepinace:
   --headless       (run) bez okna, jen seriova linka v terminalu
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
   --res <SxV>      (run, x86_64) vychozi rozliseni, napr. 1920x1080
+  --cpu <model>    (run, test) model CPU QEMU misto vychoziho (x86_64 max,
+                   aarch64 cortex-a76), napr. Nehalem = CPU bez XSAVE
   --iommu <typ>    (run, test) IOMMU v QEMU: x86_64 intel (vychozi), amd,
                    none; aarch64 smmu (vychozi), none
   --data-disk <r>  (run, test) radic datoveho disku: virtio (vychozi), nvme,
@@ -140,6 +142,8 @@ pub struct Options {
     iommu: String,
     /// `--res SxV`: vychozi rozliseni grafiky v QEMU (x86_64).
     res: Option<(u32, u32)>,
+    /// `--cpu`: model CPU QEMU (`None` = vychozi architektury).
+    cpu: Option<String>,
     /// Radic datoveho disku: "virtio", "nvme", "nvme4k" (sektor 4 KiB), "ahci",
     /// "usb" (flash disk usb-storage na radici xHCI).
     data_disk: String,
@@ -271,6 +275,7 @@ fn run_cli() -> Result<()> {
         accel: None,
         iommu: String::new(),
         res: None,
+        cpu: None,
         data_disk: String::from("virtio"),
         gpu: String::from("2d"),
         qemu_wsl: false,
@@ -297,6 +302,10 @@ fn run_cli() -> Result<()> {
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--release") => opts.release = true,
+            Some("--cpu") => {
+                let value = args.next().ok_or("--cpu ocekava model CPU QEMU, napr. Nehalem")?;
+                opts.cpu = Some(value.to_string_lossy().into_owned());
+            }
             Some("--res") => {
                 let value = args.next().ok_or("--res ocekava SxV, napr. 1920x1080")?;
                 let value = value.to_string_lossy().into_owned();
@@ -611,6 +620,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "abi",
             "--package",
+            "elf",
+            "--package",
             "initfs",
             "--package",
             "tz",
@@ -910,8 +921,27 @@ const INITFS_FILES: &[(&str, &str)] = &[
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let mut cmd = Command::new(cargo);
-    cmd.current_dir(workspace_root())
-        .args(["build", "--target", target]);
+    cmd.current_dir(workspace_root()).arg("build");
+    if user {
+        // Cil programu je JSON (hard-float, docs/cs/architektura.md);
+        // core, alloc a compiler_builtins (s memcpy) z rust-src.
+        let json = workspace_root().join("third_party/rust-std/targets").join(format!("{target}.json"));
+        cmd.arg("--target").arg(json).args([
+            "-Zjson-target-spec",
+            "-Zbuild-std=core,alloc",
+            "-Zbuild-std-features=compiler-builtins-mem",
+        ]);
+        // core, alloc a compiler_builtins vzdy optimalizovane a bez
+        // ladicich kontrol (jako predpripraveny sysroot): v ladicim buildu
+        // by memcpy a iteratory zpomalily cely userspace.
+        for krate in ["core", "alloc", "compiler_builtins"] {
+            for (k, v) in [("opt-level", "3"), ("debug-assertions", "false"), ("overflow-checks", "false")] {
+                cmd.arg("--config").arg(format!("profile.dev.package.{krate}.{k}={v}"));
+            }
+        }
+    } else {
+        cmd.args(["--target", target]);
+    }
     for p in packages {
         cmd.args(["--package", p]);
     }
@@ -940,8 +970,10 @@ fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> R
             "-Clink-arg=-T{}",
             workspace_root().join("user").join("user.ld").display()
         );
-        // Kryptografie RustCrypto (libs/tls) jen softwarove: programy bezi
-        // bez SSE/NEON a detekce AES-NI za behu by spustila instrukce SIMD.
+        // Kryptografie RustCrypto (libs/tls) zatim softwarove i s FPU/SIMD:
+        // detekce AES-NI/PCLMUL za behu (x86 CPUID) a AES na aarch64
+        // (bez HWCAP od jadra) prijdou samostatne s merenim; zakladni
+        // uroven x86-64-v2 AES-NI nezarucuje.
         let flags = [
             "-Crelocation-model=static",
             "-Cforce-frame-pointers=yes",

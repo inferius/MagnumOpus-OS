@@ -149,6 +149,19 @@ impl api::Cpu for Aarch64 {
         // SAFETY: brk vyvola vyjimku, obsluha ji zaloguje a vrati se za ni.
         unsafe { asm!("brk #0", options(nomem, nostack)) };
     }
+
+    const BASELINE: &'static str = "ARMv8-A s FP a AdvSIMD (NEON)";
+
+    fn missing_baseline(f: &mut dyn FnMut(&'static str)) {
+        // ID_AA64PFR0_EL1: FP [19:16], AdvSIMD [23:20]; 0xF = neni.
+        let pfr0 = mrs!("id_aa64pfr0_el1");
+        if (pfr0 >> 16) & 0xF == 0xF {
+            f("FP");
+        }
+        if (pfr0 >> 20) & 0xF == 0xF {
+            f("AdvSIMD");
+        }
+    }
 }
 
 /// Zakaze preruseni a navzdy zastavi aktualni CPU.
