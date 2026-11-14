@@ -4,12 +4,12 @@ Jednotný formát pro všechna vlákna: jeden řádek na zdroj. Sloupce:
 **Název**, **Verze** (tag, commit nebo datum stažení), **Zdroj** (URL),
 **Licence** (SPDX, u souborů bez SPDX text hlavičky), **Cesta** (kde je to
 v repozitáři), **Jak použito** (převzato / přeloženo do Rustu / jen fakta).
-Kód pod GPL se nepřekládá; z GPL zdrojů jen fakta (hodnoty registrů,
-pořadí kroků z dokumentace).
+Kód pod GPL smí být převzat jen do oddělené složky `gpl/` (viz níže); mimo
+ni z GPL zdrojů jen fakta (hodnoty registrů, pořadí kroků z dokumentace).
 
 One line per source, same format for all threads: name, version, source,
 licence, path in the repository, how it is used (copied / translated to
-Rust / facts only). GPL code is never translated.
+Rust / facts only). GPL code may be adopted only into the separate `gpl/` folder (see below); outside it, facts only.
 
 Kód převzatý celý do repozitáře (vendored, např. ACPICA) má vlastní sekci
 s plným textem licence, pokud ho licence vyžaduje v binární distribuci.
@@ -149,3 +149,30 @@ Not in the repository yet; the rules apply from the first vendored code.
 - **Zdroj / Source:** https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304 (`fonts/ttf/`)
 - **Licence / Licence:** SIL Open Font License 1.1, plný text / full text: `libs/font/fonts/JetBrainsMono-OFL.txt`
 - **Cesta / Path:** `libs/font/fonts/JetBrainsMono-*.ttf`
+
+## Kód pod GPL (`gpl/`) / Code under the GPL (`gpl/`)
+
+Pravidlo (rozhodnuto 2026-11-14): kód pod GPL jen ve složce `gpl/`
+(GPL-2.0-only, `gpl/LICENSE`), jen jako samostatný proces ovladače
+komunikující přes veřejný protokol; podrobně `gpl/README.md` a
+`docs/cs/ovladace.md`. Zatím tam žádný kód není.
+
+Rule (decided 2026-11-14): GPL code only in `gpl/` (GPL-2.0-only), only as
+a standalone driver process talking over the public protocol; details in
+`gpl/README.md` and `docs/en/drivers.md`. No code there yet.
+
+Šablona hlavičky souboru v `gpl/` / header template for files in `gpl/`:
+
+```text
+// SPDX-License-Identifier: GPL-2.0-only
+// Puvod / Origin: <projekt, verze nebo commit, cesta> (<URL>)
+// Copyright (C) <puvodni autori>
+// Zmeny / Changes: <co se zmenilo oproti puvodnimu kodu>
+// Tento ovladac je samostatny proces; se systemem mluvi jen pres
+// protokol <nazev protokolu>. Zadne sdilene vnitrni struktury.
+```
+
+Tabulka / table (stejné sloupce jako výše / same columns as above):
+
+| Název | Verze | Zdroj | Licence | Cesta | Jak použito |
+|---|---|---|---|---|---|

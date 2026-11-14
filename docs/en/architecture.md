@@ -954,6 +954,15 @@ documentation is in Czech and English (`docs/cs`, `docs/en`).
 ## Third-party code and license
 
 - Project license `MIT OR Apache-2.0`.
+- **Code under the GPL** (decided 2026-11-14, **[designed]**) may be adopted
+  and translated to Rust, but only in the separate `gpl/` folder (licence
+  GPL-2.0-only) and only as a standalone driver process that talks to the
+  system by messages over the public protocol. Never in the kernel,
+  `libs/`, services or applications; a driver in `gpl/` may use our
+  libraries, not the other way round. According to the FSF FAQ, processes
+  communicating only through IPC are separate works. ⚠️ The reading has not
+  been tested in court; have a lawyer assess it before commercial
+  distribution. Rules: [Drivers](drivers.md#source-and-licence-rules).
 - Anything may be reused (Mesa, DXVK, VKD3D, ...) where writing our own does
   not make sense. Long-term we aim for our own components.
 - The system font Tuffy (Thatcher Ulrich) is public domain

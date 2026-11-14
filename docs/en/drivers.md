@@ -640,7 +640,7 @@ workarounds (errata) are worth more than a fresh attempt.
 | Origin | How to adopt |
 |---|---|
 | a small driver under BSD, MIT, ISC, Apache-2.0 (FreeBSD, OpenBSD, NetBSD, Redox, Haiku) | translate to Rust on the driverkit; keep the copyright and licence in the file header |
-| code under the GPL (most of Linux) | **do not translate** or copy; take only facts about the hardware (registers, order of steps, errata), preferably from the datasheet |
+| code under the GPL (most of Linux, new NVIDIA, parts of amdgpu) | may be adopted and translated to Rust, but **only in the separate `gpl/` part** as a standalone driver process (see [Code under the GPL](#code-under-the-gpl-the-separate-gpl-part)); otherwise facts only (registers, order of steps, errata), preferably from the datasheet |
 | a huge driver (DRM graphics AMD/NVIDIA, Wi-Fi, ACPICA) | adopt it in C as an isolated process through the compatibility layer (below); only with a licence that allows it |
 | datasheet, specification (PCI-SIG, NVMe, AHCI, xHCI, virtio, HDA) | freely; cite the source in the header |
 
@@ -650,13 +650,45 @@ and what changed. Adopted code also goes into `THIRD-PARTY.md` in the
 repository root (project, version, licence, our path). In the manifest
 `driver.origin` and `driver.license` say the same.
 
+### Code under the GPL: the separate `gpl/` part
+
+**Status: [designed]** (decided 2026-11-14; until then "do not translate the
+GPL" applied). Code under the GPL may be adopted and translated to Rust, but
+only under these rules:
+
+- **Where:** only in the `gpl/` folder at the repository root, which has its
+  own licence (`gpl/LICENSE`, GPL-2.0-only) and its own rules
+  (`gpl/README.md`). Never in the kernel, `libs/`, services (`user/`) or
+  applications.
+- **How:** only as a **standalone driver process** that talks to the system
+  exclusively by messages over our public, documented protocol (display,
+  render, network, audio, input classes, ...). No shared internal
+  structures, headers or memory outside the protocol.
+- **Direction of dependencies:** a driver in `gpl/` may use our MIT/Apache
+  libraries (driverkit, protocols); our libraries and services never depend
+  on code from `gpl/`.
+- **Licences inside:** do not mix GPL-2.0-only with GPL-3.0 in one driver.
+- **Distribution:** the sources of the `gpl/` parts always accompany the
+  distribution (the system image), for every binary driver.
+- **Records:** every such driver has a header from the template in
+  `THIRD-PARTY.md` and a row in its table.
+
+Rationale: according to the Free Software Foundation's FAQ, programs that
+communicate only through IPC (messages) are separate works, so our system
+does not become GPL. ⚠️ **Risk:** this reading **has not been tested in
+court**. Have a lawyer assess it before commercial distribution.
+
+What it brings: new NVIDIA drivers (Rust, GPL), parts of `amdgpu`, Qualcomm
+drivers for phones. None of it may weaken isolation: a GPL driver runs like
+any other (restricted Resource, IOMMU, manifest, crash recovery).
+
 ## Rust, or adopted C
 
 | Situation | Choice |
 |---|---|
 | a new or small driver (up to a few thousand lines), a BSD/MIT source or just a datasheet | Rust on the driverkit |
 | a driver whose main value is years of debugging (hundreds of thousands of lines, firmware, errata): DRM AMD/NVIDIA, Wi-Fi (iwlwifi, ath), ACPICA | adopt the C without changing the logic, as an isolated process |
-| code under the GPL | neither: facts only, write the driver in Rust |
+| code under the GPL | Rust or C only in `gpl/` as a standalone driver process; outside `gpl/` facts only and a fresh driver in Rust |
 
 Adopted C runs as a **separate process** with the same rules as a Rust
 driver: a restricted Resource, the IOMMU, a manifest, crash recovery. A
@@ -695,7 +727,7 @@ Building C for the OS target and its library belong to the language plan
 - [ ] Manifest: only the BARs needed, `irq_max` and `dma_max` with some
       headroom, not a lot; `driver.origin` and `driver.license` filled in.
 - [ ] Code origin: file headers, `THIRD-PARTY.md` for adopted code, no
-      translation of GPL code.
+      GPL code only in `gpl/` and as a standalone driver process.
 - [ ] `probe` starts with a device reset and assumes no state from before.
 - [ ] `stop` stops DMA and interrupts; verified by a test (model state
       after `finish`).

@@ -238,7 +238,7 @@ name = "{{name}}"
 description = "TODO: co je to za zarizeni"
 license = "MIT OR Apache-2.0"
 # TODO: "vlastni", nebo odkud je kod prevzaty (projekt, verze, licence).
-# Kod pod GPL neprekladat: z nej jen fakta o hardwaru.
+# Kod pod GPL jen v gpl/ (samostatny proces ovladace); jinak jen fakta o hardwaru.
 origin = "vlastni"
 
 [match]

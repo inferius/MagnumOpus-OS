@@ -8,7 +8,7 @@ ji znovu by bylo vyrábění kola: hodně práce a víc chyb než v kódu, kter�
 léta testují tisíce projektů.
 
 Pravidla pro ovladače (malé překládat do Rustu z BSD/ISC/MIT, velké jako
-izolovaný proces v C, z GPL brát jen fakta) popisuje
+izolovaný proces v C, GPL jen v odděleném `gpl/`) popisuje
 [Ovladače](ovladace.md) (kapitola Pravidla zdrojů a licencí). Převzatý kód
 a jeho licence se zapisuje do `THIRD-PARTY.md`.
 
@@ -64,7 +64,7 @@ Další otázky, které rozhodují:
   paměť bez omezení nebo root, je lepší napsat vlastní tenkou vrstvu nad ní,
   ne ji přepsat celou.
 - **Licence.** MIT, Apache 2.0, BSD, ISC a zlib bereme. LGPL jen jako
-  oddělený proces nebo dynamická knihovna. GPL nepřekládáme, AGPL nebereme.
+  oddělený proces nebo dynamická knihovna. GPL jen v oddělené složce `gpl/` jako samostatný proces ovladače (viz [Ovladače](ovladace.md#pravidla-zdrojů-a-licencí)), AGPL nebereme.
 
 ## Vlastní (teď i do budoucna)
 

@@ -31,6 +31,7 @@ Vrstvy: aplikace -> libos -> služby (userspace) -> jádro -> `arch`. Přehled a
 - `unsafe` jen kde je nutné a vždy s komentářem `// SAFETY:`. Kód specifický pro architekturu jen v `kernel/src/arch/<arch>/`.
 - Konce řádků LF, UTF-8 bez BOM; čtení tolerantní k CRLF, žádné tiché převody.
 - Veřejné API (abi, libos, protokoly) je hotové až s ověřeným chováním na x86_64 **i** aarch64. Rozhraní se nesmí jen "hodit" na x86.
+- Kód pod GPL smí být převzat jen do složky `gpl/` (GPL-2.0-only) a jen jako samostatný proces ovladače mluvící přes veřejný protokol; nikdy do jádra, `libs/`, služeb ani aplikací (`gpl/README.md`).
 - Aplikace nikdy nedostane capability k ovladači (registry, DMA); mluví se službou (`docs/cs/rozhrani-zarizeni.md`).
 - Dokumentace cs+en, se SVG diagramy a značkami stavu **[navrženo]** / **[implementováno]** / **[ověřeno v QEMU]** / **[ověřeno na HW]** (pravidla: `docs/cs/dokumentace.md`). Změníš kód -> změň značku ve stejném commitu.
 - Rozumné rozhodnutí = správné, ne nejjednodušší; kompatibilita se starými verzemi FS není priorita. Drahé úspory místa (komprese) jsou ve výchozím stavu vypnuté.
