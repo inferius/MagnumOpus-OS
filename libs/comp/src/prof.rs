@@ -21,10 +21,14 @@ pub enum Part {
     BarBlur,
     /// Vrstva nad okny (lista, popovery, paleta, dialog, kurzor).
     Top,
+    /// Z vrstvy nad okny: lista.
+    Bar,
+    /// Z vrstvy nad okny: ztlumeni a systemovy dialog.
+    Dialog,
 }
 
-pub const PARTS: usize = 5;
-const NAMES: [&str; PARTS] = ["plocha", "stiny", "okna", "rozmazani listy", "nad okny"];
+pub const PARTS: usize = 7;
+const NAMES: [&str; PARTS] = ["plocha", "stiny", "okna", "rozmazani listy", "nad okny", "z toho lista", "z toho dialog"];
 
 /// Soucty casu po castech (ns) od posledniho `take`.
 #[derive(Debug, Clone, Default)]

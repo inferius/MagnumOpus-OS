@@ -6,7 +6,7 @@ Jádro kompozitoru `compd` bez závislosti na jádru OS (`no_std` + `alloc`, tes
 
 - Obsahu bufferu aplikace se nikdy nevěří: rozměry se kontrolují při vytvoření, čtení je omezené na VMO; aplikace smí buffer měnit i během čtení (nejhorší důsledek je roztržené její vlastní okno).
 - Priorita vstupu před skládáním (smyčka v `user/compd`); na displeji je vždy nejvýš jeden snímek.
-- Skládají se jen poškozené oblasti a nic se nekreslí, když se nic nemění (výkon softwarového skládání, `docs/cs/gui.md`).
+- Skládají se jen poškozené oblasti a nic se nekreslí, když se nic nemění (výkon softwarového skládání, `docs/cs/gui.md`). Pod neprůhledným jádrem okna (bez rohů) se plocha ani nižší okna nekreslí (`render::visible_parts`); test `culling_keeps_pixels` hlídá stejné pixely.
 - Žádná čísla vzhledu v kódu: hodnoty jsou z tokenů `design/tokens.toml` přes `libs/theme`. Vzhled a svižnost jsou stejně důležité; efekty musí vejít do rozpočtu snímku.
 - Systémové dialogy a odznak důvěry kreslí systém, aplikace je nemůže zakrýt ani zfalšovat.
 - Po pádu kompozitoru se stav obnoví (`docs/cs/gui.md#obnova-po-pádu-kompozitoru`, `user/compd/src/snapshot.rs`).
@@ -18,5 +18,6 @@ Jádro kompozitoru `compd` bez závislosti na jádru OS (`no_std` + `alloc`, tes
 
 ## Pasti
 
+- Čas skládání po částech měří `prof.rs` (hodiny dodá `compd`, výpis v logu `compd: snimek cele obrazovky ...`). Novou drahou část kresli uvnitř změřené části nebo přidej vlastní `Part`.
 - `src/tests.rs` má přes 1700 řádků (nad limitem ~1500 se nesmí dál růst): nové testy dávej do `src/tests/`.
 - Protokol okna a displeje je v `libs/guiproto`; změna zasahuje i `libs/ui` a `user/compd`.

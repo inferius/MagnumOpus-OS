@@ -585,7 +585,9 @@ impl Comp {
             dnd: self.do_not_disturb(),
             pressed: self.input.sys_press.map(|(k, ..)| k).filter(|&k| self.sys_pressed(k)),
         };
+        let t0 = self.prof.start();
         draw_bar(canvas, &mut self.style, bar, &info);
+        self.prof.add(Part::Bar, t0);
         if !dialog_active {
             self.draw_flyout(canvas);
             self.draw_max_menu(canvas);
@@ -593,8 +595,10 @@ impl Comp {
         }
         if dialog_active {
             // Ztlumeni vseho pod dialogem (jen system kresli nad nim).
+            let t0 = self.prof.start();
             canvas.blend(self.screen(), self.style.theme.color.scrim);
             self.dialogs.draw(canvas, &mut self.style, self.w, self.h);
+            self.prof.add(Part::Dialog, t0);
         }
         match self.input.cursor {
             crate::input::Cursor::Arrow => draw_cursor(canvas, self.input.px, self.input.py),
