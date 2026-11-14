@@ -13,6 +13,7 @@
 static int failures;
 
 int posix_test(const char *dir);
+int threads_test(void);
 
 #define CHECK(name, cond)                                              \
     do {                                                               \
@@ -126,6 +127,9 @@ int main(int argc, char **argv) {
     CHECK("files", dir != NULL && files(dir));
     CHECK("errno", errors());
     CHECK("posix", dir != NULL && posix_test(dir) == 0);
+    int th = threads_test();
+    if (th != 0) fprintf(stderr, "ctest threads: krok %d\n", th);
+    CHECK("threads", th == 0);
     assert(failures == 0);
     fputs("chyba na stderr\n", stderr);
     fflush(stdout);

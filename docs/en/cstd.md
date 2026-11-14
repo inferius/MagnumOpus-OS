@@ -13,9 +13,9 @@ Compiling C (clang, flags, protections) is described in
 > `FILE` (stdin/stdout/stderr, files), `exit`/`atexit`, `getenv`.
 > Part 2a **[verified in QEMU]** on x86_64 and aarch64 (step `posix` of
 > the same test): fd numbers, `unistd.h`, `fcntl.h`, `sys/stat.h`,
-> `dirent.h`, `FILE` over fd numbers. Further parts (threads, time,
-> sockets, `math.h`, `mmap`, signals, file locks, `libc.so`, ports)
-> **[designed]**, see [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
+> `dirent.h`, `FILE` over fd numbers. Part 2b **[verified in QEMU]** (step
+> `threads`): `pthread`. Further parts (time, sockets, `math.h`, `mmap`,
+> signals, file locks, `libc.so`, ports) **[designed]**, see [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
 
 ## Layers
 
@@ -100,6 +100,26 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 | `sys/uio.h` | `readv`, `writev` | `writev` in one write |
 | `dirent.h` | `opendir`, `fdopendir`, `readdir`, `closedir`, `rewinddir`, `dirfd` | the first two entries are `.` and `..` |
 | `stdio.h` | `fdopen`, `fileno`, `fseeko`, `ftello`, `getline`, `getdelim` | `FILE` sits on an fd number |
+
+## Functions (part 2b: threads)
+
+| Header | Functions | Note |
+|---|---|---|
+| `pthread.h` | `pthread_create`, `join`, `detach`, `self`, `equal`, `exit`, `cancel`, `testcancel`, `setcancelstate`, `setcanceltype`; attributes (`stacksize`, `detachstate`) | `osrt` threads (TLS like std); default stack 2 MiB, at least 16 KiB |
+| `pthread.h` | `pthread_mutex_*` (normal, recursive, error-checking, `timedlock`), `pthread_cond_*` (`CLOCK_REALTIME` and `CLOCK_MONOTONIC`), `pthread_rwlock_*`, `pthread_barrier_*`, `pthread_spin_*`, `pthread_once` | over the futex; types with their own fixed layout, static initialisers = zeros |
+| `pthread.h` | `pthread_key_*`, `pthread_getspecific`, `pthread_setspecific`, `pthread_cleanup_push`/`pop` | 1024 keys, destructors at most 4 rounds |
+| `sched.h` | `sched_yield` | |
+
+- The target has `panic=abort`, so `pthread_exit` and cancellation end the
+  thread with a syscall (`osrt::thread::exit_current`) without unwinding:
+  cleanup handlers (`pthread_cleanup_push`) and key destructors run, Rust
+  `thread_local!` destructors of that thread do not.
+- Cancellation is deferred only (decision 5): cancellation points are
+  `pthread_testcancel`, `pthread_join` and waiting on a condition (in
+  100 ms slices, so cancellation is at most 100 ms late).
+- `pthread_exit` in the main thread ends the process with code 0 (it does
+  not wait for the other threads).
+- No `PTHREAD_PROCESS_SHARED` (the futex is private to the process).
 
 ### fd numbers
 

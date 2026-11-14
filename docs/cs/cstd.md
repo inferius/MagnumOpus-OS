@@ -12,8 +12,9 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
 > `FILE` (stdin/stdout/stderr, soubory), `exit`/`atexit`, `getenv`.
 > Část 2a **[ověřeno v QEMU]** na x86_64 i aarch64 (krok `posix` téhož
 > testu): čísla fd, `unistd.h`, `fcntl.h`, `sys/stat.h`, `dirent.h`, `FILE`
-> nad čísly fd. Další části (vlákna, čas, sockety, `math.h`, `mmap`,
-> signály, zámky souborů, `libc.so`, porty) **[navrženo]**, viz
+> nad čísly fd. Část 2b **[ověřeno v QEMU]** (krok `threads`): `pthread`.
+> Další části (čas, sockety, `math.h`, `mmap`, signály, zámky souborů,
+> `libc.so`, porty) **[navrženo]**, viz
 > [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
 
 ## Vrstvy
@@ -97,6 +98,26 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 | `sys/uio.h` | `readv`, `writev` | `writev` jedním zápisem |
 | `dirent.h` | `opendir`, `fdopendir`, `readdir`, `closedir`, `rewinddir`, `dirfd` | první dvě položky `.` a `..` |
 | `stdio.h` | `fdopen`, `fileno`, `fseeko`, `ftello`, `getline`, `getdelim` | `FILE` stojí nad číslem fd |
+
+## Funkce (část 2b: vlákna)
+
+| Hlavička | Funkce | Poznámka |
+|---|---|---|
+| `pthread.h` | `pthread_create`, `join`, `detach`, `self`, `equal`, `exit`, `cancel`, `testcancel`, `setcancelstate`, `setcanceltype`; atributy (`stacksize`, `detachstate`) | vlákna `osrt` (TLS jako std); zásobník výchozí 2 MiB, nejméně 16 KiB |
+| `pthread.h` | `pthread_mutex_*` (normální, rekurzivní, s kontrolou chyb, `timedlock`), `pthread_cond_*` (`CLOCK_REALTIME` i `CLOCK_MONOTONIC`), `pthread_rwlock_*`, `pthread_barrier_*`, `pthread_spin_*`, `pthread_once` | nad futexem; typy s vlastním pevným rozložením, statické inicializátory = nuly |
+| `pthread.h` | `pthread_key_*`, `pthread_getspecific`, `pthread_setspecific`, `pthread_cleanup_push`/`pop` | 1024 klíčů, destruktory nejvýš 4 kola |
+| `sched.h` | `sched_yield` | |
+
+- Cíl má `panic=abort`, proto `pthread_exit` a zrušení vlákno ukončí
+  syscallem (`osrt::thread::exit_current`) bez rozbalení zásobníku: uklízecí
+  funkce (`pthread_cleanup_push`) a destruktory klíčů proběhnou,
+  destruktory `thread_local!` v Rustu toho vlákna ne.
+- Zrušení je jen odložené (rozhodnutí 5): body zrušení jsou
+  `pthread_testcancel`, `pthread_join` a čekání na podmínku (po kusech
+  100 ms, zrušení tedy nejvýš o 100 ms později).
+- `pthread_exit` v hlavním vlákně ukončí proces kódem 0 (ostatní vlákna
+  nečeká).
+- `PTHREAD_PROCESS_SHARED` není (futex je soukromý procesu).
 
 ### Čísla fd
 

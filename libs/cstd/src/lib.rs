@@ -28,6 +28,7 @@ extern crate cstd_core;
 pub mod dirent;
 pub mod errno;
 pub mod flock;
+pub mod pthread;
 pub mod stat;
 pub mod stdio;
 pub mod stdlib;
@@ -38,6 +39,8 @@ pub mod unistd;
 mod tests;
 #[cfg(test)]
 mod fd_tests;
+#[cfg(test)]
+mod pthread_tests;
 
 pub use cstd_core::ctypes::{c_char, c_int, c_long, c_uint, c_ulong, size_t};
 

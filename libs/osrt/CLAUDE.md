@@ -16,6 +16,7 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 - Handle vlastního procesu se nesmí zavřít (`start::init` ho zapomene).
 - Nové vlákno nastaví TP jako první věc, před jakýmkoli kódem std.
 - `at_exit` volá funkce bez drženého zámku (smí registrovat další); `exit_now` je nevolá.
+- `thread::exit_current` (C `pthread_exit`) ukončí vlákno syscallem bez destruktorů std; zásobník a TLS uvolní až `Thread::join`.
 
 ## Testy
 

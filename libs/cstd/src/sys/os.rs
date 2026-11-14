@@ -216,3 +216,45 @@ pub fn chdir(path: &[u8]) -> R<()> {
     }
     rt::env::set_current_dir(path).map_err(e)
 }
+
+/// Bezici vlakno (C `pthread_t` drzi popis s timto handlem).
+pub struct Thread(rt::thread::Thread);
+
+/// Nove vlakno nad osrt (TLS jako std, i pod zavadecem).
+pub fn spawn(stack: usize, f: super::ThreadFn) -> R<Thread> {
+    rt::thread::spawn(stack, f).map(Thread).map_err(|_| errno::EAGAIN)
+}
+
+impl Thread {
+    pub fn join(self) -> R<()> {
+        self.0.join().map_err(e)
+    }
+}
+
+/// Ukonci aktualni vlakno bez rozbaleni zasobniku (`pthread_exit`).
+pub fn exit_thread() -> ! {
+    rt::thread::exit_current()
+}
+
+/// Ceka, dokud `*f == expected` (nejdele `timeout`); `false` = vyprselo.
+pub fn futex_wait(f: &std::sync::atomic::AtomicU32, expected: u32, timeout: Option<core::time::Duration>) -> bool {
+    rt::futex::futex_wait(f, expected, timeout)
+}
+
+pub fn futex_wake(f: &std::sync::atomic::AtomicU32, all: bool) {
+    if all {
+        rt::futex::futex_wake_all(f);
+    } else {
+        rt::futex::futex_wake(f);
+    }
+}
+
+/// Monotonni cas v ns od startu.
+pub fn monotonic_ns() -> u64 {
+    rt::time::monotonic_ns()
+}
+
+/// Realny cas (sekundy, ns od 1970 UTC); `None` = jadro ho nezna.
+pub fn realtime() -> Option<(i64, u32)> {
+    rt::time::realtime()
+}

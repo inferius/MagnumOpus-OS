@@ -325,3 +325,56 @@ pub fn getcwd() -> Vec<u8> {
 pub fn chdir(p: &[u8]) -> R<()> {
     std::env::set_current_dir(path(p)?).map_err(io)
 }
+
+/// Vlakno na hostiteli (std::thread).
+pub struct Thread(std::thread::JoinHandle<()>);
+
+pub fn spawn(stack: usize, f: super::ThreadFn) -> R<Thread> {
+    std::thread::Builder::new().stack_size(stack).spawn(f).map(Thread).map_err(|_| errno::EAGAIN)
+}
+
+impl Thread {
+    pub fn join(self) -> R<()> {
+        self.0.join().map_err(|_| errno::EINVAL)
+    }
+}
+
+/// Na hostiteli se vlakno ukoncit bez rozbaleni neda (testy to nevolaji).
+pub fn exit_thread() -> ! {
+    panic!("pthread_exit na hostiteli neni")
+}
+
+/// Nahrada futexu: jeden globalni zamek a podminka (pomale, ale spravne).
+static FUTEX: (Mutex<()>, std::sync::Condvar) = (Mutex::new(()), std::sync::Condvar::new());
+
+pub fn futex_wait(f: &std::sync::atomic::AtomicU32, expected: u32, timeout: Option<core::time::Duration>) -> bool {
+    let g = FUTEX.0.lock().unwrap_or_else(|e| e.into_inner());
+    if f.load(std::sync::atomic::Ordering::SeqCst) != expected {
+        return true;
+    }
+    match timeout {
+        Some(t) => {
+            let (_g, r) = FUTEX.1.wait_timeout(g, t).unwrap_or_else(|e| e.into_inner());
+            !r.timed_out()
+        }
+        None => {
+            drop(FUTEX.1.wait(g));
+            true
+        }
+    }
+}
+
+pub fn futex_wake(_f: &std::sync::atomic::AtomicU32, _all: bool) {
+    let _g = FUTEX.0.lock().unwrap_or_else(|e| e.into_inner());
+    FUTEX.1.notify_all();
+}
+
+pub fn monotonic_ns() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
+}
+
+pub fn realtime() -> Option<(i64, u32)> {
+    let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some((d.as_secs() as i64, d.subsec_nanos()))
+}

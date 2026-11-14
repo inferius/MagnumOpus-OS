@@ -121,3 +121,6 @@ pub struct Entry {
     pub kind: Kind,
     pub ino: u64,
 }
+
+/// Funkce vlakna pro [`spawn`].
+pub type ThreadFn = Box<dyn FnOnce() + Send + 'static>;

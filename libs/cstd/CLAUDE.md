@@ -7,6 +7,7 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 - `src/errno.rs` - čísla POSIX, `errno` v TLS (`__errno_location`), převod `io::Error` -> `errno`, `strerror`.
 - `src/sys/` - systémová vrstva s chybou = `errno`: `os.rs` nad `std::os::magnumopus::runtime` (= crate `osrt`, tabulka `osrt::fd`), `host.rs` náhrada nad `std::fs` jen pro host testy (stejná pravidla čísel).
 - `src/unistd.rs` (`open`, `read`, `dup`, `pipe`, `fcntl`, `fork` = `ENOSYS` ...), `src/stat.rs`, `src/dirent.rs`, `src/flock.rs` (zámky, zatím `ENOLCK`).
+- `src/pthread/` - `mod.rs` vlákna nad `sys::spawn` (osrt), `pthread_exit`/zrušení syscallem (`sys::exit_thread`, `panic=abort`); `sync.rs` mutex, podmínka, rwlock, bariéra, once, spin nad futexem; `key.rs` klíče a `pthread_cleanup_*`.
 - `src/stdio.rs` - `FILE` nad číslem fd (zámek, buffery: stdout po řádcích, stderr bez, soubory 4 KiB), `fdopen`/`fileno`, `getline`, seznam otevřených proudů, vyprázdnění při konci (`ensure_exit_hook`).
 - `src/stdlib.rs` - `exit`, `_Exit`, `atexit`, `getenv` (cache řetězců C), `abort`, `__cstd_assert_fail`.
 - `include/` - hlavičky POSIX; `stdio.h`, `stdlib.h`, `string.h` doplňují cstd-core přes `#include_next`.
@@ -20,6 +21,8 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 - Čísla `E*` v `src/errno.rs` a `include/errno.h` musí sedět (test `errno_header_matches`).
 - Hodnoty `O_*`, `F_*`, `S_IF*` a rozložení `struct stat`/`dirent`/`flock` v `src/*.rs` a `include/` musí sedět (stejné na obou architekturách).
 - Systémová volání jdou jen přes `sys` (ne přímo `std::fs`), aby C i Rust sdílely tabulku fd v osrt.
+- Velikosti typů `pthread_*` v `src/pthread/` a `include/pthread.h` musí sedět (test `type_sizes_match_header`).
+- Nic v cstd nesmí spoléhat na rozbalení zásobníku (`catch_unwind`): cíl má `panic=abort`.
 
 ## Testy
 

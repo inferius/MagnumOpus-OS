@@ -58,6 +58,13 @@ impl Drop for Thread {
     }
 }
 
+/// Ukonci aktualni vlakno hned (C `pthread_exit` a zruseni vlakna).
+/// Zbytek funkce vlakna ani destruktory std neprobehnou; zasobnik a blok
+/// TLS uvolni [`Thread::join`] (u odpojeneho vlakna zustanou).
+pub fn exit_current() -> ! {
+    libos::sys::thread_exit()
+}
+
 pub fn yield_now() {
     libos::sys::thread_yield();
 }
