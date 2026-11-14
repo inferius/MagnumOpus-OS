@@ -70,6 +70,61 @@ impl UserState for Aarch64 {
         fpcr & !A64_FPCR_MASK == 0 && fpsr & !A64_FPSR_MASK == 0
     }
 
+    const FRAME_SIZE: usize = abi::exception::frame::A64_SIZE;
+    const FRAME_FP: usize = abi::exception::frame::A64_FP;
+
+    unsafe fn save_fp(out: &mut [u8]) {
+        let mut b = [0u8; A64_FP_SIZE];
+        let (fpcr, fpsr): (u64, u64);
+        // SAFETY: buffer 528 B; jen cteni registru FPU/SIMD vlakna.
+        unsafe {
+            asm!(
+                ".arch_extension fp",
+                ".arch_extension simd",
+                "stp q0, q1, [{p}, #0]",
+                "stp q2, q3, [{p}, #32]",
+                "stp q4, q5, [{p}, #64]",
+                "stp q6, q7, [{p}, #96]",
+                "stp q8, q9, [{p}, #128]",
+                "stp q10, q11, [{p}, #160]",
+                "stp q12, q13, [{p}, #192]",
+                "stp q14, q15, [{p}, #224]",
+                "stp q16, q17, [{p}, #256]",
+                "stp q18, q19, [{p}, #288]",
+                "stp q20, q21, [{p}, #320]",
+                "stp q22, q23, [{p}, #352]",
+                "stp q24, q25, [{p}, #384]",
+                "stp q26, q27, [{p}, #416]",
+                "stp q28, q29, [{p}, #448]",
+                "stp q30, q31, [{p}, #480]",
+                "mrs {cr}, fpcr",
+                "mrs {sr}, fpsr",
+                p = in(reg) b.as_mut_ptr(),
+                cr = out(reg) fpcr,
+                sr = out(reg) fpsr,
+                options(nostack)
+            )
+        };
+        b[512..520].copy_from_slice(&fpcr.to_le_bytes());
+        b[520..528].copy_from_slice(&fpsr.to_le_bytes());
+        out.copy_from_slice(&b);
+    }
+
+    fn general_sp_ret(buf: &[u8]) -> (u64, u64) {
+        let g = general(buf).expect("velikost overena");
+        (g.sp, g.x[0])
+    }
+
+    fn prepare_handler_call(buf: &mut [u8], entry: u64, frame: u64) -> Option<u64> {
+        let mut g = general(buf)?;
+        g.pc = entry;
+        g.x[0] = frame;
+        g.x[30] = 0;
+        g.sp = frame;
+        buf.copy_from_slice(&g.encode());
+        None
+    }
+
     unsafe fn load_fp(buf: &[u8]) {
         let (fpcr, fpsr) = fp_regs(buf);
         // SAFETY: buffer ma 528 B (overeno), FPCR/FPSR jen definovane bity.

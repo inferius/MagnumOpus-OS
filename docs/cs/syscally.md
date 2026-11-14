@@ -521,6 +521,37 @@ na x86_64 je PC už za `int3`, na aarch64 na `brk` (obsluha ho posune o 4).
 Chyby: `INVALID_ARGS` (neznámá akce), `BAD_STATE` (už rozhodnuto nebo
 vlákno skončilo - kill vždy vyhraje), `WRONG_TYPE`, `BAD_HANDLE`.
 
+### `EXCEPTION_HANDLER`
+
+`(op, a0, a1) -> ...`. Doručení výjimky přímo ve vlákně (rychlá cesta pro
+SEH ve Windows vrstvě a signály v `cstd`). Operace `exception::handler`:
+
+- `SET_ENTRY(process, entry)`: vstup obsluhy procesu (0 = zrušit; právo
+  `WRITE` na procesu). `entry` musí ležet ve spustitelném mapování - tedy
+  zapečetěném nebo s oprávněním JIT (W^X), obsluha pravidla spustitelné
+  paměti neobejde. Jinak `INVALID_ARGS`.
+- `SET_STACK(base, size)`: alternativní zásobník aktuálního vlákna (jako
+  `sigaltstack`, 0 = žádný; aspoň rámec + 256 B), nutný pro obsluhu
+  přetečení zásobníku.
+- `RETURN(frame, disposition)`: návrat z obsluhy. `RESUME` obnoví kontext
+  z rámce (stejná kontrola jako `THREAD_STATE`: PC, SP v userspace,
+  uživatelské příznaky, FPU bez rezervovaných bitů; báze TLS se
+  neobnovuje) a vlákno pokračuje; `NEXT` obnoví kontext a výjimku nabídne
+  dalším obsluhám (kanál vlákna, procesu, debugger, konec procesu) - druh
+  a adresu výjimky bere jádro ze své kopie, ne z rámce. Úspěšný návrat se
+  nevrací volajícímu. Chyby: `INVALID_ARGS` (neplatný rámec, neznámá
+  akce), `BAD_STATE` (žádná obsluha neběží), `BAD_ADDRESS`.
+
+Pořadí obsluh: debugger (první šance), obsluha ve vlákně, kanál vlákna,
+kanál procesu, debugger (druhá šance). Obsluha ve vlákně dostane rámec
+`exception::frame` (zarovnaný na 64 B: `Report`, obecné registry
+a FPU/SIMD) na alternativním zásobníku (je-li nastavený a vlákno na něm
+ještě není), jinak pod SP (x86_64 pod červenou zónou 128 B); x86_64:
+`rdi` = rámec, `rsp % 16 == 8`, návratová adresa 0; aarch64: `x0` =
+rámec, `x30` = 0. Když se rámec nevejde (ochranná oblast při přetečení),
+obsluha se přeskočí a výjimka jde dál - nikdy rekurze. Vnoření (výjimka
+v obsluze) nejvýš `handler::MAX_DEPTH` (8); další jde rovnou dál.
+
 ### `PROCESS_THREADS`
 
 `(process, out_ptr, max) -> počet`. Zapíše na `out_ptr` až `max` (do 4096)

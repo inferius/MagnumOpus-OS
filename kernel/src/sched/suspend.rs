@@ -65,6 +65,42 @@ pub(super) struct Stop {
     exc_channel: Option<Arc<Channel>>,
     /// Vlakno obsluhy: jeho vyjimky preskoci kanaly vlakna a procesu.
     handler: bool,
+    /// Alternativni zasobnik pro obsluhu ve vlaknu (zacatek, delka).
+    alt_stack: (u64, u64),
+    /// Vyjimky prave obsluhovane ve vlaknu (vlastni kopie jadra pro NEXT;
+    /// delka = hloubka vnoreni).
+    in_thread: Vec<abi::exception::Report>,
+}
+
+/// Alternativni zasobnik vlakna (zacatek, delka; delka 0 = zadny).
+pub fn alt_stack(t: &Thread) -> (u64, u64) {
+    t.stop.lock().alt_stack
+}
+
+pub fn set_alt_stack(t: &Thread, base: u64, size: u64) {
+    t.stop.lock().alt_stack = (base, size);
+}
+
+/// Zacina obsluha ve vlaknu: ulozi kopii zpravy. `false` = hloubka
+/// vnoreni dosahla `abi::exception::handler::MAX_DEPTH`.
+pub fn in_thread_push(t: &Thread, r: abi::exception::Report) -> Result<bool, Error> {
+    let mut s = t.stop.lock();
+    if s.in_thread.len() >= abi::exception::handler::MAX_DEPTH as usize {
+        return Ok(false);
+    }
+    s.in_thread.try_reserve(1).map_err(|_| Error::NoMemory)?;
+    s.in_thread.push(r);
+    Ok(true)
+}
+
+/// Konci obsluha ve vlaknu: vraci kopii zpravy (`None` = zadna nebezi).
+pub fn in_thread_pop(t: &Thread) -> Option<abi::exception::Report> {
+    t.stop.lock().in_thread.pop()
+}
+
+/// Bezi ve vlaknu obsluha (hloubka > 0)?
+pub fn in_thread_depth(t: &Thread) -> usize {
+    t.stop.lock().in_thread.len()
 }
 
 /// Vlakno stoji ve vyjimce (cteni a zapis kontextu povoleny).

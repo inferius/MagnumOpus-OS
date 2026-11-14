@@ -179,6 +179,38 @@ pub fn exception_channel(a: Args) -> Result<u64> {
     Ok(p.handles().insert(user_end, rights)?.0 as u64)
 }
 
+/// `EXCEPTION_HANDLER(op, a0, a1)`: doruceni vyjimek primo ve vlaknu.
+pub fn exception_handler(a: Args) -> Result<u64> {
+    use abi::exception::handler::{RETURN, SET_ENTRY, SET_STACK};
+    let op = u32::try_from(a[0]).map_err(|_| Error::InvalidArgs)?;
+    match op {
+        SET_ENTRY => {
+            let p = current_process();
+            let target = p.handles().get_as::<Process>(arg_handle(a[1])?, Rights::WRITE)?;
+            target.set_exception_entry(a[2])?;
+            Ok(0)
+        }
+        SET_STACK => {
+            let me = sched::current();
+            if me.process.is_none() {
+                return Err(Error::WrongType);
+            }
+            let (base, size) = (a[1], a[2]);
+            if size != 0 {
+                let end = base.checked_add(size).ok_or(Error::InvalidArgs)?;
+                let min = crate::arch::ustate::FRAME_SIZE as u64 + 256;
+                if base < abi::vm::USER_MIN || end > abi::vm::USER_MAX || size < min {
+                    return Err(Error::InvalidArgs);
+                }
+            }
+            sched::suspend::set_alt_stack(&me, base, size);
+            Ok(0)
+        }
+        RETURN => crate::object::exception::handler_return(a[1], u32::try_from(a[2]).map_err(|_| Error::InvalidArgs)?),
+        _ => Err(Error::InvalidArgs),
+    }
+}
+
 /// `EXCEPTION_RESOLVE(token, action)`.
 pub fn exception_resolve(a: Args) -> Result<u64> {
     let p = current_process();

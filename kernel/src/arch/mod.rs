@@ -334,6 +334,25 @@ pub mod ustate {
         // SAFETY: predano volajicim.
         unsafe { <Current as UserState>::load_fp(buf) }
     }
+
+    /// # Safety
+    ///
+    /// Viz `api::UserState::save_fp`.
+    pub unsafe fn save_fp(out: &mut [u8]) {
+        // SAFETY: predano volajicim.
+        unsafe { <Current as UserState>::save_fp(out) }
+    }
+
+    pub const FRAME_SIZE: usize = <Current as UserState>::FRAME_SIZE;
+    pub const FRAME_FP: usize = <Current as UserState>::FRAME_FP;
+
+    pub fn general_sp_ret(buf: &[u8]) -> (u64, u64) {
+        <Current as UserState>::general_sp_ret(buf)
+    }
+
+    pub fn prepare_handler_call(buf: &mut [u8], entry: u64, frame: u64) -> Option<u64> {
+        <Current as UserState>::prepare_handler_call(buf, entry, frame)
+    }
 }
 
 /// Prvni vstup aktualniho vlakna do userspace.

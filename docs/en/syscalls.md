@@ -539,6 +539,40 @@ already past `int3`, on aarch64 at `brk` (the handler advances it by 4).
 Errors: `INVALID_ARGS` (unknown action), `BAD_STATE` (already decided or
 the thread has ended - kill always wins), `WRONG_TYPE`, `BAD_HANDLE`.
 
+### `EXCEPTION_HANDLER`
+
+`(op, a0, a1) -> ...`. Exception delivery right in the thread (the fast
+path for SEH in the Windows layer and signals in `cstd`). Operations
+`exception::handler`:
+
+- `SET_ENTRY(process, entry)`: the process's handler entry (0 = clear;
+  right `WRITE` on the process). `entry` must lie in an executable mapping
+  - sealed or with the JIT permission (W^X), so a handler cannot bypass
+  the executable memory rules. Otherwise `INVALID_ARGS`.
+- `SET_STACK(base, size)`: an alternate stack of the current thread (like
+  `sigaltstack`, 0 = none; at least a frame + 256 B), needed to handle a
+  stack overflow.
+- `RETURN(frame, disposition)`: return from the handler. `RESUME` restores
+  the context from the frame (the same validation as `THREAD_STATE`: PC,
+  SP in userspace, user flags, FPU without reserved bits; the TLS base is
+  not restored) and the thread continues; `NEXT` restores the context and
+  offers the exception to the next handlers (thread channel, process
+  channel, debugger, end of the process) - the kernel takes the exception
+  kind and address from its own copy, not from the frame. A successful
+  return does not return to the caller. Errors: `INVALID_ARGS` (invalid
+  frame, unknown action), `BAD_STATE` (no handler running), `BAD_ADDRESS`.
+
+Handler order: debugger (first chance), in-thread handler, thread channel,
+process channel, debugger (second chance). The in-thread handler gets the
+`exception::frame` (aligned to 64 B: `Report`, general registers and
+FPU/SIMD) on the alternate stack (if set and the thread is not on it yet),
+otherwise below SP (x86_64 below the 128 B red zone); x86_64: `rdi` =
+frame, `rsp % 16 == 8`, return address 0; aarch64: `x0` = frame, `x30` =
+0. If the frame does not fit (a guard region on stack overflow), the
+handler is skipped and the exception goes on - never recursion. Nesting
+(an exception inside the handler) is limited to `handler::MAX_DEPTH` (8);
+the next one goes straight on.
+
 ### `PROCESS_THREADS`
 
 `(process, out_ptr, max) -> count`. Writes up to `max` (at most 4096)

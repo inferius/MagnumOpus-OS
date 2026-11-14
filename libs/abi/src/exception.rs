@@ -30,6 +30,8 @@ pub mod stage {
     pub const THREAD: u32 = 2;
     pub const PROCESS: u32 = 3;
     pub const DEBUGGER_SECOND: u32 = 4;
+    /// Obsluha primo ve vlaknu (`EXCEPTION_HANDLER`).
+    pub const IN_THREAD: u32 = 5;
 }
 
 /// Druh pristupu u vypadku stranky (`Report::access`).
@@ -57,6 +59,40 @@ pub mod channel {
     /// kanaly vlakna a procesu (necekalo by samo na sebe). Kanal nevznikne,
     /// syscall vrati 0.
     pub const HANDLER_THREAD: u32 = 1 << 1;
+}
+
+/// Doruceni primo ve vlaknu (`EXCEPTION_HANDLER`): operace.
+pub mod handler {
+    /// `(process, entry)`: vstupni adresa obsluhy procesu (0 = zrusit);
+    /// musi lezet ve spustitelnem mapovani (W^X: zapecetene nebo s JIT).
+    pub const SET_ENTRY: u32 = 0;
+    /// `(base, size)`: alternativni zasobnik aktualniho vlakna (0 = zadny).
+    pub const SET_STACK: u32 = 1;
+    /// `(frame, disposition)`: navrat z obsluhy; `disposition` =
+    /// `action::RESUME` (obnovit kontext z ramce) nebo `action::NEXT`
+    /// (dalsi obsluha v poradi).
+    pub const RETURN: u32 = 2;
+    /// Nejvetsi hloubka vnoreni obsluh ve vlaknu; dalsi vyjimka jde rovnou
+    /// na kanaly vyjimek nebo ke konci procesu.
+    pub const MAX_DEPTH: u32 = 8;
+}
+
+/// Ramec vyjimky na uzivatelskem zasobniku (zarovnany na 64 B), ktery
+/// dostane obsluha ve vlaknu (x86_64 `rdi`, aarch64 `x0`): `Report`, pak
+/// obecne registry a stav FPU/SIMD (formaty `abi::thread`) v okamziku
+/// vyjimky. `RETURN` z neho kontext obnovi (s kontrolou jako
+/// `THREAD_STATE`).
+pub mod frame {
+    /// Offset `Report`.
+    pub const REPORT: usize = 0;
+    /// Offset obecnych registru.
+    pub const GENERAL: usize = 64;
+    /// x86_64: offset obrazu FXSAVE a velikost ramce.
+    pub const X64_FP: usize = 256;
+    pub const X64_SIZE: usize = 768;
+    /// aarch64: offset V0-V31 + FPCR + FPSR a velikost ramce.
+    pub const A64_FP: usize = 384;
+    pub const A64_SIZE: usize = 960;
 }
 
 /// Zprava o vyjimce (56 B, little endian). Ke zprave patri dva handly:

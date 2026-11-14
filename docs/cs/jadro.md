@@ -158,7 +158,9 @@ Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
   a měnit jeho kontext a nechat ho pokračovat, poslat výjimku dál, nebo
   proces ukončit. Vlákno obsluhy (`HANDLER_THREAD`) přeskočí kanály vlákna
   a procesu, aby nečekalo samo na sebe. Kill vždy vyhraje. Podklad pro SEH
-  ve Windows vrstvě, signály v `cstd` a debugger.
+  ve Windows vrstvě, signály v `cstd` a debugger. Rychlá cesta bez
+  přepnutí: obsluha přímo ve vlákně (`EXCEPTION_HANDLER`); podrobně
+  [vyjimky.md](vyjimky.md).
 - **aarch64 dělení nulou nehlásí** (`udiv`/`sdiv` vrátí 0), výjimka
   „dělení nulou“ existuje jen na x86_64. `cstd` (SIGFPE) a Wine
   (`EXCEPTION_INT_DIVIDE_BY_ZERO`) ji na aarch64 musí zajistit kontrolou

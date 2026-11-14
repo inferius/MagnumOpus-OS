@@ -59,6 +59,9 @@ pub struct Process {
     jit_events: AtomicU64,
     /// Trida QoS novych vlaken a Realtime parametry (ns) z `PROCESS_SET`.
     qos: SpinLock<(schedcore::Class, Option<(u64, u64)>)>,
+    /// Vstup obsluhy vyjimek primo ve vlaknu (`EXCEPTION_HANDLER`), 0 =
+    /// zadna.
+    exc_entry: AtomicU64,
     /// Kanaly vyjimek procesu (konec jadra): [debugger, proces].
     exc: SpinLock<[Option<Arc<super::channel::Channel>>; 2]>,
     /// Fronty futexu (`FUTEX`): virtualni adresa ->
@@ -105,6 +108,7 @@ impl Process {
             qos: SpinLock::new((schedcore::Class::Normal, None)),
             futex: SpinLock::new(BTreeMap::new()),
             exc: SpinLock::new([None, None]),
+            exc_entry: AtomicU64::new(0),
         });
         p.core.set_charge(charge);
         {
@@ -123,6 +127,25 @@ impl Process {
         }
         log::debug!("proces {} ({}) vytvoren", p.id, p.name);
         Ok(p)
+    }
+
+    /// Vstup obsluhy vyjimek ve vlaknu (0 = zadna).
+    pub fn exception_entry(&self) -> u64 {
+        self.exc_entry.load(Ordering::Acquire)
+    }
+
+    /// Nastavi vstup obsluhy; musi lezet ve spustitelnem mapovani (W^X:
+    /// zapecetena pamet, nebo s opravnenim JIT) - obsluha tak neobejde
+    /// pravidla spustitelne pameti. 0 = zrusit.
+    pub fn set_exception_entry(&self, entry: u64) -> Result<(), Error> {
+        if entry != 0 {
+            let r = self.space.query(entry).map_err(|_| Error::InvalidArgs)?;
+            if r.kind != abi::vm::region::MAPPED || r.flags & abi::vm::MAP_EXECUTE == 0 {
+                return Err(Error::InvalidArgs);
+            }
+        }
+        self.exc_entry.store(entry, Ordering::Release);
+        Ok(())
     }
 
     /// Zivy kanal vyjimek procesu (`debugger` = kanal debuggeru).

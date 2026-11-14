@@ -105,6 +105,31 @@ impl UserState for X86_64 {
             && u32::from_le_bytes(buf[X64_FP_MXCSR..X64_FP_MXCSR + 4].try_into().unwrap()) & 0xFFFF_0000 == 0
     }
 
+    const FRAME_SIZE: usize = abi::exception::frame::X64_SIZE;
+    const FRAME_FP: usize = abi::exception::frame::X64_FP;
+
+    unsafe fn save_fp(out: &mut [u8]) {
+        let mut fx = Fx([0; X64_FP_SIZE]);
+        // SAFETY: zarovnany buffer 512 B; FXSAVE jen cte registry FPU/SSE.
+        unsafe { asm!("fxsave64 [{}]", in(reg) fx.0.as_mut_ptr(), options(nostack)) };
+        out.copy_from_slice(&fx.0);
+    }
+
+    fn general_sp_ret(buf: &[u8]) -> (u64, u64) {
+        let g = general(buf).expect("velikost overena");
+        (g.rsp, g.rax)
+    }
+
+    fn prepare_handler_call(buf: &mut [u8], entry: u64, frame: u64) -> Option<u64> {
+        let mut g = general(buf)?;
+        g.rip = entry;
+        g.rdi = frame;
+        // Jako po `call`: rsp % 16 == 8, na [rsp] navratova adresa 0.
+        g.rsp = frame - 8;
+        buf.copy_from_slice(&g.encode());
+        Some(frame - 8)
+    }
+
     unsafe fn load_fp(buf: &[u8]) {
         let mut fx = Fx([0; X64_FP_SIZE]);
         fx.0.copy_from_slice(buf);

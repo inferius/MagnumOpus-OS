@@ -130,6 +130,7 @@ fn every_syscall_is_documented() {
         "EXCEPTION_CHANNEL",
         "EXCEPTION_RESOLVE",
         "PROCESS_THREADS",
+        "EXCEPTION_HANDLER",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {
@@ -231,4 +232,15 @@ fn exception_report_roundtrip() {
     let r = Report { kind: 14, stage: 3, access: 1, _reserved: 0, pid: 7, tid: 9, pc: 0x40_1000, addr: 0x1234, code: 6 };
     assert_eq!(Report::decode(&r.encode()), Some(r));
     assert_eq!(Report::decode(&[0u8; 10]), None);
+}
+
+#[test]
+fn exception_frame_layout() {
+    use crate::exception::frame::*;
+    use crate::thread::{A64_FP_SIZE, A64General, X64_FP_SIZE, X64General};
+    assert!(GENERAL >= crate::exception::Report::SIZE);
+    assert!(X64_FP >= GENERAL + X64General::SIZE && X64_FP % 64 == 0);
+    assert!(X64_SIZE >= X64_FP + X64_FP_SIZE && X64_SIZE % 64 == 0);
+    assert!(A64_FP >= GENERAL + A64General::SIZE && A64_FP % 64 == 0);
+    assert!(A64_SIZE >= A64_FP + A64_FP_SIZE && A64_SIZE % 64 == 0);
 }

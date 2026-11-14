@@ -255,8 +255,15 @@ pub const EXCEPTION_RESOLVE: u64 = 65;
 /// kontext, s `WRITE` i zapsat a pozastavit). Vraci celkovy pocet.
 pub const PROCESS_THREADS: u64 = 66;
 
+/// Doruceni vyjimky primo ve vlaknu: `(op, a0, a1) -> ...`, operace
+/// `exception::handler` (SET_ENTRY s handlem procesu a pravem `WRITE`,
+/// SET_STACK, RETURN). Obsluha dostane ramec `exception::frame` na
+/// zasobniku; poradi: debugger, obsluha ve vlaknu, kanal vlakna, kanal
+/// procesu, debugger.
+pub const EXCEPTION_HANDLER: u64 = 67;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 67;
+pub const COUNT: u64 = 68;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {

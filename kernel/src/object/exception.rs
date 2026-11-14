@@ -18,6 +18,9 @@ use alloc::sync::Arc;
 use alloc::vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 
+use crate::arch::{interrupts, ustate};
+use crate::log;
+
 use abi::exception::{Report, action, stage};
 
 use super::channel::{Channel, Message};
@@ -110,17 +113,36 @@ pub fn deliver(mut report: Report) -> Outcome {
     };
     report.pid = process.id;
     report.tid = me.id;
-    let handler = sched::suspend::is_handler(&me);
+    deliver_from(&me, &process, report, stage::DEBUGGER_FIRST)
+}
+
+/// Poradi obsluh od stupne `from`: debugger (prvni sance), obsluha ve
+/// vlaknu, kanal vlakna, kanal procesu, debugger (druha sance).
+fn deliver_from(
+    me: &Arc<Thread>,
+    process: &Arc<super::process::Process>,
+    mut report: Report,
+    from: u32,
+) -> Outcome {
+    let handler = sched::suspend::is_handler(me);
     let order = [
-        (process.exception_channel(true), stage::DEBUGGER_FIRST),
-        (if handler { None } else { sched::suspend::exception_channel(&me) }, stage::THREAD),
-        (if handler { None } else { process.exception_channel(false) }, stage::PROCESS),
-        (process.exception_channel(true), stage::DEBUGGER_SECOND),
+        (stage::DEBUGGER_FIRST, process.exception_channel(true)),
+        (stage::IN_THREAD, None),
+        (stage::THREAD, if handler { None } else { sched::suspend::exception_channel(me) }),
+        (stage::PROCESS, if handler { None } else { process.exception_channel(false) }),
+        (stage::DEBUGGER_SECOND, process.exception_channel(true)),
     ];
-    for (channel, st) in order {
-        let Some(channel) = channel else { continue };
+    let start = order.iter().position(|(s, _)| *s == from).unwrap_or(0);
+    for (st, channel) in order.into_iter().skip(start) {
         report.stage = st;
-        match offer(&me, &channel, &report) {
+        if st == stage::IN_THREAD {
+            if !handler && in_thread(me, process, &report) {
+                return Outcome::Resume;
+            }
+            continue;
+        }
+        let Some(channel) = channel else { continue };
+        match offer(me, &channel, &report) {
             Some(action::RESUME) => return Outcome::Resume,
             Some(action::KILL) => return Outcome::Unhandled,
             // Kill behem cekani: navrat, vlakno skonci v `on_return_to_user`.
@@ -159,4 +181,110 @@ fn offer(me: &Arc<Thread>, channel: &Arc<Channel>, report: &Report) -> Option<u3
             None
         }
     }
+}
+
+/// Doruceni primo ve vlaknu: ramec vyjimky na zasobnik (alternativni,
+/// je-li nastaveny a vlakno na nem jeste neni), skok na vstup obsluhy.
+/// `false` = neni obsluha, hloubka vnoreni vycerpana nebo se ramec
+/// nevesel (ochranna oblast pri preteceni zasobniku) - vyjimka jde dal
+/// v poradi, nikdy do rekurze.
+fn in_thread(me: &Arc<Thread>, process: &super::process::Process, report: &Report) -> bool {
+    let entry = process.exception_entry();
+    if entry == 0 {
+        return false;
+    }
+    let Some(top) = me.kernel_stack_top() else { return false };
+    match sched::suspend::in_thread_push(me, *report) {
+        Ok(true) => {}
+        _ => {
+            log::warn!("proces {} ({}): vyjimka v obsluze nad limit vnoreni, jde dal", process.id, process.name);
+            return false;
+        }
+    }
+    let mut general = vec![0u8; ustate::GENERAL_SIZE];
+    // SAFETY: vlastni ramec (vlakno je v jadre kvuli vyjimce).
+    unsafe { ustate::read_general(top, sched::user_thread_pointer(me), &mut general) };
+    let mut frame = vec![0u8; ustate::FRAME_SIZE];
+    frame[..Report::SIZE].copy_from_slice(&report.encode());
+    let g = abi::exception::frame::GENERAL;
+    frame[g..g + general.len()].copy_from_slice(&general);
+    // SAFETY: vlastni vlakno, registry FPU patri jemu.
+    unsafe { ustate::save_fp(&mut frame[ustate::FRAME_FP..ustate::FRAME_FP + ustate::FP_SIZE]) };
+    let (sp, _) = ustate::general_sp_ret(&general);
+    let (alt, alt_len) = sched::suspend::alt_stack(me);
+    let base = if alt_len != 0 && !(alt..alt + alt_len).contains(&sp) {
+        alt + alt_len
+    } else {
+        // x86_64: cervena zona 128 B pod SP patri prerusene funkci.
+        sp.saturating_sub(128)
+    };
+    let at = base.saturating_sub(ustate::FRAME_SIZE as u64 + 64) & !63;
+    let space = process.address_space();
+    let mut call = general.clone();
+    let ret_slot = ustate::prepare_handler_call(&mut call, entry, at);
+    let written = space.copy_to_user(at, &frame).is_ok()
+        && ret_slot.is_none_or(|s| space.copy_to_user(s, &0u64.to_le_bytes()).is_ok())
+        && ustate::check_general(&call);
+    if !written {
+        sched::suspend::in_thread_pop(me);
+        log::warn!(
+            "proces {} ({}): ramec vyjimky se nevesel na zasobnik ({at:#x}), obsluha ve vlaknu preskocena",
+            process.id,
+            process.name
+        );
+        return false;
+    }
+    let irq = interrupts::disable();
+    // SAFETY: vlastni ramec, zakazana preruseni, `call` prosel kontrolou.
+    unsafe { ustate::write_general(top, &call) };
+    interrupts::restore(irq);
+    true
+}
+
+/// `EXCEPTION_HANDLER` RETURN: navrat z obsluhy ve vlaknu. Kontext z ramce
+/// projde stejnou kontrolou jako `THREAD_STATE`; druh a adresu vyjimky pro
+/// NEXT bere jadro ze sve kopie. Vraci hodnotu rax / x0 obnoveneho
+/// kontextu (syscall ji zapise jako navratovou hodnotu).
+pub fn handler_return(frame_ptr: u64, disposition: u32) -> Result<u64, Error> {
+    let me = sched::current();
+    let process = me.process.clone().ok_or(Error::WrongType)?;
+    if disposition != action::RESUME && disposition != action::NEXT {
+        return Err(Error::InvalidArgs);
+    }
+    if sched::suspend::in_thread_depth(&me) == 0 {
+        return Err(Error::BadState);
+    }
+    let mut frame = vec![0u8; ustate::FRAME_SIZE];
+    process.address_space().copy_from_user(frame_ptr, &mut frame)?;
+    let g = abi::exception::frame::GENERAL;
+    let general = &frame[g..g + ustate::GENERAL_SIZE];
+    let fp = &frame[ustate::FRAME_FP..ustate::FRAME_FP + ustate::FP_SIZE];
+    if !ustate::check_general(general) || !ustate::check_fp(fp) {
+        return Err(Error::InvalidArgs);
+    }
+    let report = sched::suspend::in_thread_pop(&me).ok_or(Error::BadState)?;
+    let top = me.kernel_stack_top().ok_or(Error::WrongType)?;
+    let irq = interrupts::disable();
+    // SAFETY: vlastni ramec syscallu, zakazana preruseni, overeno vyse.
+    // Baze TLS se neobnovuje (behem obsluhy se nemeni a na aarch64 ji
+    // program meni sam).
+    unsafe {
+        ustate::write_general(top, general);
+        ustate::load_fp(fp);
+    }
+    interrupts::restore(irq);
+    let (_, ret) = ustate::general_sp_ret(general);
+    if disposition == action::NEXT
+        && deliver_from(&me, &process, report, stage::THREAD) == Outcome::Unhandled
+    {
+        log::error!(
+            "proces {} ({}): neosetrena vyjimka {} na {:#x} (obsluha ve vlaknu ji odmitla)",
+            process.id,
+            process.name,
+            report.kind,
+            report.pc
+        );
+        process.terminate(abi::process::EXIT_FAULT_BASE - report.kind as i64);
+    }
+    Ok(ret)
 }

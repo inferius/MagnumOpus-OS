@@ -161,6 +161,11 @@ pub fn exit() -> ! {
     unreachable!("mrtve vlakno bylo znovu naplanovano");
 }
 
+/// Ulozena baze TLS vlakna (u bezici aarch64 muze byt starsi nez registr).
+pub fn user_thread_pointer(t: &Thread) -> u64 {
+    t.user_tp.load(Ordering::Relaxed)
+}
+
 /// Nastavi registr ukazatele vlakna (TLS) aktualniho vlakna.
 pub fn set_user_thread_pointer(value: u64) {
     let irq = interrupts::disable();

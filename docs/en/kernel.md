@@ -169,7 +169,9 @@ Details, design comparison and measurements: [Scheduler](scheduler.md).
   context and let it continue, pass the exception on, or end the process.
   A handler thread (`HANDLER_THREAD`) skips the thread and process
   channels so it never waits for itself. Kill always wins. The basis for
-  SEH in the Windows layer, signals in `cstd` and a debugger.
+  SEH in the Windows layer, signals in `cstd` and a debugger. The fast path
+  without a switch: a handler right in the thread (`EXCEPTION_HANDLER`);
+  details in [exceptions.md](exceptions.md).
 - **aarch64 does not report division by zero** (`udiv`/`sdiv` return 0);
   the "divide by zero" exception exists only on x86_64. `cstd` (SIGFPE)
   and Wine (`EXCEPTION_INT_DIVIDE_BY_ZERO`) must provide it on aarch64 by

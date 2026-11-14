@@ -125,6 +125,7 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::EXCEPTION_CHANNEL => process::exception_channel(a),
         nr::EXCEPTION_RESOLVE => process::exception_resolve(a),
         nr::PROCESS_THREADS => process::process_threads(a),
+        nr::EXCEPTION_HANDLER => process::exception_handler(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -203,6 +204,7 @@ pub fn name(number: u64) -> &'static str {
         "EXCEPTION_CHANNEL",
         "EXCEPTION_RESOLVE",
         "PROCESS_THREADS",
+        "EXCEPTION_HANDLER",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

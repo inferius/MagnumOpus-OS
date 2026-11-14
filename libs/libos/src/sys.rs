@@ -344,6 +344,10 @@ pub fn exception_channel(task: u32, flags: u32) -> Result<u32> {
     call(nr::EXCEPTION_CHANNEL, [task as u64, flags as u64, 0, 0, 0, 0]).map(|v| v as u32)
 }
 
+pub fn exception_handler(op: u32, a0: u64, a1: u64) -> Result<u64> {
+    call(nr::EXCEPTION_HANDLER, [op as u64, a0, a1, 0, 0, 0])
+}
+
 pub fn exception_resolve(token: u32, action: u32) -> Result<()> {
     call(nr::EXCEPTION_RESOLVE, [token as u64, action as u64, 0, 0, 0, 0]).map(|_| ())
 }

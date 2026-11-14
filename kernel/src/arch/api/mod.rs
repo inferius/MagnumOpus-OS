@@ -551,4 +551,26 @@ pub trait UserState: Threads {
     /// Vola vlakno samo pred navratem do userspace (zakazana preruseni),
     /// `buf` prosel `check_fp`.
     unsafe fn load_fp(buf: &[u8]);
+
+    /// Ulozi aktualni stav FPU/SIMD (registry tohoto CPU) do `out`
+    /// (`FP_SIZE` B) - stav vlakna, ktere je prave v jadre.
+    ///
+    /// # Safety
+    ///
+    /// Vola vlakno samo (jadro FPU/SIMD nepouziva, registry patri jemu).
+    unsafe fn save_fp(out: &mut [u8]);
+
+    /// Velikost a offset FPU v ramci vyjimky (`abi::exception::frame`).
+    const FRAME_SIZE: usize;
+    const FRAME_FP: usize;
+
+    /// SP a hodnota navratoveho registru syscallu (rax / x0) z obecnych
+    /// registru.
+    fn general_sp_ret(buf: &[u8]) -> (u64, u64);
+
+    /// Upravi obecne registry pro skok do obsluhy vyjimky: PC = `entry`,
+    /// argument (rdi / x0) = `frame`, SP podle ABI (x86_64 `frame - 8` jako
+    /// po `call`, navratova adresa 0 v pameti; aarch64 `frame`, x30 = 0).
+    /// Vraci adresu, kam patri 8 B nul (navratova adresa), nebo `None`.
+    fn prepare_handler_call(buf: &mut [u8], entry: u64, frame: u64) -> Option<u64>;
 }
