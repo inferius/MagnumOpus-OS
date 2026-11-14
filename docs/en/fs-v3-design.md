@@ -357,15 +357,52 @@ All **[designed]**.
   to all their files through the file manager and the system dialog - user
   convenience does not require broad application access.
 - ⚠️ Old programs (mainly through the Windows layer) expect access to the
-  whole Documents folder: a one-time prompt "The application wants access to
-  Documents", or the Relaxed profile for that application only.
+  whole Documents folder: if they are trusted, they have it in the working
+  folders without a prompt ([Working folders](#working-folders-and-protected-areas));
+  otherwise the picker dialog only, or the Relaxed profile for that
+  application only.
 - **Profiles in the system settings:**
 
 | Profile | For whom | Behaviour |
 |---|---|---|
-| **Standard** (default) | everyday use | the user accesses their files without restrictions or prompts; applications only their own directory + what the user picked (can be remembered); not system or other users' files |
-| **Strict** | sensitive data, companies | applications sandboxed (picker dialog only), vaults lock on sleep, audit of changes and reads, ransomware detection by entropy (see [Defaults and profiles](#defaults-and-profiles)) |
-| **Relaxed** | developers | applications see the whole user home, fewer confirmations |
+| **Standard** (default) | everyday use | the user accesses their files without restrictions or prompts; trusted applications may use the **working folders** without a prompt, others only their own directory + what the user picked (can be remembered); not system, other users' or secret files |
+| **Strict** | sensitive data, companies | applications sandboxed (picker dialog only, also for working folders), vaults lock on sleep, audit of changes and reads, ransomware detection by entropy (see [Defaults and profiles](#defaults-and-profiles)) |
+| **Relaxed** | developers | applications see the whole user home (except the [always protected](#working-folders-and-protected-areas)), fewer confirmations |
+
+### Working folders and protected areas
+
+**Principle:** prompt fatigue is a security problem (users start clicking
+"allow" without reading), so the system **must not ask during everyday
+work**: **launching an application never asks** and **access by intent**
+(the Open/Save dialog, drag and drop, "Open with" - the powerbox) never
+asks, because picking a file **is** the consent. The general query-budget
+rule is in [Security](architecture.md#security). All **[designed]**.
+
+- **Working folders** are a list in settings; the default: **Documents,
+  Pictures, Music, Videos, Downloads, Projects**. The user can edit it.
+- **Standard profile:** **trusted applications** may use the working
+  folders **without a prompt**: those from the official source or signed,
+  and **everything the user installed themselves**. An application from an
+  **unknown source** (a downloaded and launched file) may use only the
+  **picker dialog** until the user **says "trust" once** (an option in the
+  application menu or in settings, not a prompt at launch).
+- **Strict profile:** the picker dialog only, for all applications.
+- **Relaxed profile:** the whole user home, except the always protected
+  areas below.
+- **Always protected, even in Relaxed:** the **system**, **other
+  accounts** and **secrets**: `~/.ssh`, keys, passwords and keychains,
+  browser profiles (cookies, saved passwords, sessions), wallets and the
+  **data of other applications**. **Why:** this is exactly what malware
+  steals. One application with broad access would otherwise read bank
+  sign-ins, a crypto wallet or server keys, even where the user "just
+  wanted free access to files". The only way to these areas is an explicit
+  permission from settings for a specific application (e.g. an SSH client
+  for its own keys).
+- **The safety net that lets us afford the looser default:** [FS versions
+  and snapshots](#snapshots-trash-ransomware-protection) and [ransomware
+  detection by entropy](#ransomware-protection-behaviour-detection) with
+  recovery. A trusted application that broke or encrypted something in a
+  working folder can be rolled back, so we need not ask beforehand.
 
 ## Encrypted vaults
 
@@ -728,9 +765,13 @@ The user's home (accountd, agreed with the accounts thread):
 - Every new file gets the extended attribute **`sys.origin`**: where it came
   from (download URL, the application that created it, copy source,
   removable disk). Copy and move carry it over; rename does not change it.
-- **An executable with origin "internet" or "removable disk"** asks before
-  its first run (like Mark of the Web, but it cannot be bypassed by renaming
-  or copying inside the system).
+- **An executable with origin "internet" or "removable disk"** is an
+  application from an **unknown source**: launching it **does not ask**, but
+  the application may use files only through the picker dialog until the
+  user says "trust"
+  ([Working folders](#working-folders-and-protected-areas)). The origin
+  cannot be bypassed by renaming or copying inside the system (similar to
+  Mark of the Web).
 - Only the FS and system services may set the attribute, not applications.
 
 ### Ransomware protection (behaviour detection)
@@ -813,7 +854,7 @@ whole system).
 | audit of reads | medium (a record per open) | option | sensitive datasets | option |
 | "who read my file" | depends on the read audit | only with the read audit | on | option |
 | file origin | negligible (an attribute at creation) | on | on | on |
-| prompt before running a file from the internet | none | on | on | option |
+| limited access for an application from an unknown source (picker dialog only, no prompt at launch) | none | on | on | option |
 | ransomware decoys | none | on | on | option |
 | ransomware detection by rewrite count | small (counters) | on | on | option |
 | ransomware detection by content entropy | medium (computed over a sample of blocks) | option | on | option |

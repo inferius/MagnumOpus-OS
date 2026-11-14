@@ -79,6 +79,11 @@ ports = "8080"
 
 ## Dotaz uživateli
 
+Platí [rozpočet dotazů](architektura.md#bezpečnost): **běžný provoz se
+neptá**. Odchozí spojení podle manifestu aplikace proběhne bez dotazu
+(dotaz vznikne až u **neočekávaného cíle**) a spuštění aplikace se nikdy
+neptá na síť.
+
 Vrstva relace s příznakem `ask` není pevná hranice: cíl mimo její pravidla
 rozhodne uživatel. Vrstva bez `ask` je pevná. Rodič tak může dítě uzavřít
 a uživatel ji nepřebije.
@@ -248,6 +253,9 @@ resolveru. Kdo ovládá síť, může jméno přeložit na svou adresu, a ta pak
 pravidlem projde.
 
 ## Audit a provoz
+
+> Audit sítě bude jedním ze zdrojů událostí pro sledování koncových bodů na
+> počítači spravovaném organizací: [Správa organizace](sprava-organizace.md#sledování-koncových-bodů-edr) **[navrženo]**.
 
 `netd` drží kruhový seznam záznamů (`audit_entries`, výchozí 4096).
 Relace s právem `AUDIT` je čte přes `Net::audit(od, nejvíc)`.

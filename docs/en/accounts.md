@@ -520,6 +520,15 @@ Why: what is confirmed is a concrete action the person sees (the same
 principle as the [action API](gui.md#action-api)); whoever does longer
 administration turns the dialogs off for a while themselves, knowingly.
 
+**A computer managed by an organization** (company, school): enrolling the
+computer, policies and endpoint monitoring are described in
+[Organization management](organization-management.md) **[designed]**,
+including the right to
+[install applications](organization-management.md#the-right-to-install-applications)
+(Freely / From the catalog / None; the administration role may set it for
+another account, e.g. parental control). A personal computer never has
+these features.
+
 ## Home encryption
 
 The user's choice on their account (default: off, decided when creating
@@ -562,6 +571,12 @@ the account or any time in settings). Encrypting the dataset itself is a
   role can delete an account or set a new password for it, but for an
   encrypted home it **does not obtain** the home key (the new password
   gets a wrap only after the owner unlocks with their recovery key).
+
+**Company backup of the home key:** on a computer enrolled in organization
+management the home key can get one more wrap with the organization's
+public key (the private part outside the computer); see
+[Organization management](organization-management.md#company-backup-of-the-home-key-escrow)
+**[designed]**.
 
 ⚠️ **Risk of data loss:** whoever forgets the password, loses the key and
 **has no recovery key, loses the home data for good**. Nobody (neither
@@ -727,6 +742,11 @@ aarch64):
 - ⚠️ The device key (`/db/device.key`) and the DB are protected only by FS
   permissions: against processes in the system yes, against booting
   another system from USB no.
+- ⚠️ **The workaround with an unencrypted home:** the administration role can
+  set a new password on an account and sign in as it; with an
+  **unencrypted** home it thereby gets its data. With an encrypted home this
+  is not possible (see [Home encryption](#home-encryption)). Related to
+  [Organization management](organization-management.md#risks).
 - A security key **without a key PIN**: whoever steals the key and knows
   the account name can sign in. Settings therefore offer a key PIN and warn
   without one.

@@ -1637,7 +1637,10 @@ fs.set_acl("/home/alice/shared/private", Some(Acl {
   escape through them either.
 - **`GRANT` / `REVOKE`** (control only) add or remove a mounted path of a
   session - the Open/Save dialog (powerbox): the application gets only what
-  the user picked.
+  the user picked; by the same mechanism a trusted application gets the
+  working folders without a prompt
+  ([Working folders](fs-v3-design.md#working-folders-and-protected-areas)
+  **[designed]**).
 - `CONNECT` from a user session creates another session with the same
   identity and paths (not a control one).
 - Operations on the whole root dataset (v1 snapshots, check,

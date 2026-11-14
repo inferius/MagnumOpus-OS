@@ -44,6 +44,7 @@ site menu.
 | Česky | English | Obsah / Contents |
 |---|---|---|
 | [Uživatelské účty](cs/ucty.md) | [User accounts](en/accounts.md) | služba accountd, heslo Argon2id, PIN, bezpečnostní klíč FIDO2, relace, správa počítače bez roota, šifrování domova / accountd service, Argon2id password, PIN, FIDO2 security key, sessions, administration without root, home encryption |
+| [Správa organizace](cs/sprava-organizace.md) | [Organization management](en/organization-management.md) | zápis počítače do správy organizace, firemní záloha klíče domova (escrow), sledování koncových bodů (EDR), rizika, pořadí **[navrženo]** / enrolling a computer, company home-key backup (escrow), endpoint monitoring (EDR), risks, order **[designed]** |
 
 ### Vstup a zařízení / Input and devices
 

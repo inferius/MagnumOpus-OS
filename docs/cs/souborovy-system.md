@@ -1588,7 +1588,10 @@ fs.set_acl("/home/alice/sdilene/soukrome", Some(Acl {
   (z připojení nejde utéct). Odkazy FS nenásleduje, takže ani jimi ne.
 - **`GRANT` / `REVOKE`** (jen řídicí) přidá nebo odebere relaci připojenou
   cestu - dialog Otevřít/Uložit (powerbox): aplikace dostane jen to, co
-  uživatel vybral.
+  uživatel vybral; stejným mechanismem dostane důvěryhodná aplikace
+  pracovní složky bez dotazu
+  ([Pracovní složky](navrh-fs-v3.md#pracovní-složky-a-chráněné-oblasti)
+  **[navrženo]**).
 - `CONNECT` z relace uživatele založí další relaci se stejnou identitou
   a cestami (ne řídicí).
 - Operace nad celým kořenovým datasetem (snapshoty v1, kontrola,

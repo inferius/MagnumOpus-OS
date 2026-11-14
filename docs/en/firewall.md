@@ -81,6 +81,11 @@ ports = "8080"
 
 ## Asking the user
 
+The [query budget](architecture.md#security) applies: **everyday traffic does
+not ask**. An outgoing connection allowed by the application manifest goes
+through without a prompt (a prompt arises only for an **unexpected target**)
+and launching an application never asks about the network.
+
 A session layer with the `ask` flag is not a hard boundary: the user
 decides about a target outside its rules. A layer without `ask` is hard,
 so a parent can lock a child in and the user cannot override it.
@@ -258,6 +263,9 @@ resolver. Whoever controls the network can translate the name to their
 address, and it then passes the rule.
 
 ## Audit and traffic
+
+> The network audit will be one of the event sources for endpoint monitoring on
+> a computer managed by an organization: [Organization management](organization-management.md#endpoint-monitoring-edr) **[designed]**.
 
 `netd` keeps a ring of records (`audit_entries`, default 4096). A session
 with the `AUDIT` right reads them with `Net::audit(from, max)`.
