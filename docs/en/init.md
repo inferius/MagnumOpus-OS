@@ -27,7 +27,9 @@ switch `fsd` to debug mode (power-loss simulation for the FS tests).
 1. `timed` (the time service, the only one allowed to set the clock),
    right after it `acpid` (ACPI: power, buttons, sensors; the only one with
    the `POWER` right, see [ACPI](acpi.md)) - ACPICA initialisation runs in
-   parallel with the next steps,
+   parallel with the next steps, and `libd` (the library service, initfs
+   only; init keeps the first connection, see
+   [Dynamic linking](dynamic-linking.md#the-library-service-and-sealing-dl-4a)),
 2. `devmgr`: finds devices and starts drivers. It reports disks (`block`)
    and input devices (`input`), and then `done` once the USB devices
    present at boot are ready too; while waiting long for a disk driver it

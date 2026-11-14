@@ -96,6 +96,13 @@ pub fn protect(addr: u64, len: u64, prot: u32) -> abi::Result<()> {
     sys::vm_protect(me(), addr, len, prot)
 }
 
+/// Nastavi prava rozsahu na `prot` a oblasti **zapecetí** (`PROT_SEAL`,
+/// jako `mseal`): uz nepujde zmenit prava, odmapovat ani mapovat pres ne,
+/// do konce procesu. Rezervace v rozsahu se jen zapecetí.
+pub fn seal(addr: u64, len: u64, prot: u32) -> abi::Result<()> {
+    sys::vm_protect(me(), addr, len, prot | abi::vm::PROT_SEAL)
+}
+
 /// Pamet rozsahu zpet, adresy zustanou rezervovane (`MEM_DECOMMIT`).
 pub fn decommit(addr: u64, len: u64) -> abi::Result<()> {
     sys::vm_unmap_flags(me(), addr, len, abi::vm::UNMAP_DECOMMIT)

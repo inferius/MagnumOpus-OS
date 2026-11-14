@@ -13,7 +13,8 @@ bench = false
 
 [dependencies]
 # Bez vlastniho runtime libos (vstup, heap a panic handler ma zavadec svuj).
-libos = { path = "../../libs/libos", default-features = false }
+libos = { path = "../../libs/libos", default-features = false, features = ["libd"] }
 abi.workspace = true
 elf.workspace = true
 dynload = { path = "../../libs/dynload" }
+libdproto = { path = "../../libs/libdproto" }

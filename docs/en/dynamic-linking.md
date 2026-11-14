@@ -14,7 +14,9 @@ static (`ET_EXEC`, [rust-std.md](rust-std.md)).
 | DL-1 | the `ET_DYN` parser in `libs/elf`: program headers (`PT_INTERP`, `PT_TLS`, `PT_GNU_RELRO`, `PT_DYNAMIC`), the dynamic section, symbols with GNU and SysV hash, RELA and RELR relocations of both architectures, rejecting TEXTREL | **[implemented]** (host tests `cargo test -p elf` against files from clang and ld.lld) |
 | DL-2 | the `user/ld` + `libs/dynload` loader: `PT_INTERP` in `spawn`, ASLR, `DT_NEEDED`, `BIND_NOW`, relocations, static TLS of the main thread, read-only RELRO; PIC and linking via `ld.lld` in `cbuild`, libraries in initfs (`lib/`) | **[verified in QEMU]** x86_64 and aarch64 (`procesy` suite, `dynamicke linkovani: ...` tests) |
 | DL-3 | the loader table (`abi::loader`, `dl*` already in the ABI), TLS of new threads (libos, osrt), DTV and generations, static TLS surplus, `fini`, `dl_iterate_phdr`, `dladdr`, `r_debug` | **[verified in QEMU]** x86_64 and aarch64 (test `dynamicke linkovani: vlakna libos ...`) |
-| DL-4 | the `libd` template service (sharing library code, libraries from disk too), `dlopen`/`dlsym`/`dlclose` (dynamic TLS: lazy allocation via the DTV, dynamic TLSDESC), the RELRO seal | **[designed]** |
+| DL-4a | the `libd` library service (sealed templates, sharing library code between processes), a libd connection for every process (anyone can start a program with the loader), region sealing (`PROT_SEAL`, like `mseal`) for code and RELRO | **[verified in QEMU]** x86_64 and aarch64 (`pamet`, `procesy` suites) |
+| DL-4b | `dlopen`/`dlsym`/`dlclose` via libd (dynamic TLS: lazy allocation via the DTV, dynamic TLSDESC), static TLS reserve from the manifest (`[app] static_tls_reserve`) and measurement | **[designed]** |
+| DL-4c | libraries from disk and `$ORIGIN` (once applications run from disk `/apps/<id>/`) | **[designed]** |
 
 ## Design (approved choices)
 
@@ -135,17 +137,49 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
 
 ⚠️ **Limitations of DL-2 (deliberate, solved by DL-3 and DL-4):**
 
-- **Library code is not shared between processes**: each process copies the
-  library into its own memory (sharing through the `libd` template service
-  in DL-4).
-- **Libraries only from initfs**, and only a process that has initfs
-  (init today) may start a program with the loader; disk, application
-  `$ORIGIN` and `libd` in DL-4.
+- Sharing library code and starting by anyone is solved by DL-4a (`libd`,
+  above); libraries from disk and `$ORIGIN` by DL-4c.
 - TLS of new threads and fini are solved by DL-3a (above).
-- **RELRO can be switched back to RW** (`VM_PROTECT`); the `max_flags` seal
-  in DL-4.
+- RELRO is sealed since DL-4a (`PROT_SEAL`).
 - The loader has all of initfs (read-only) while loading; the program does
   not get it (the loader unmaps it and closes the handles before the jump).
+
+## The library service and sealing (DL-4a)
+
+**[verified in QEMU]** x86_64 and aarch64.
+
+- **`libd`** (`user/libd`, protocol `libs/libdproto`) holds templates of
+  shared libraries from `/system/lib` (initfs `lib/<name>`): segments
+  without write as **sealed VMOs** (all processes map the same code pages),
+  data ones as a template for a copy-on-write clone (`VMO_CLONE`, zeros up
+  to `mem_size` included). A template is found by name and content
+  (BLAKE3). The client gets code handles `READ | MAP | EXECUTE` and data
+  handles `READ | MAP`, never write.
+- **Connections:** init starts libd right after the time service (initfs
+  only) and its bootstrap channel is the first connection. `spawn` (libos)
+  creates its own connection for every child (`Connect`,
+  `bootstrap::kind::LIBD`), so **anyone** with a connection can start a
+  program with the loader, not only init. The loader gets another
+  connection in the loader message (instead of initfs) and keeps it
+  (`dlopen` in DL-4b). The libos build for Rust std has no connection yet
+  (it closes it): std applications do not start programs with the loader.
+- `spawn` also takes **`ld.so`** itself from libd (shared loader code).
+- **Sealing** (`PROT_SEAL` in `VM_PROTECT`, like Linux `mseal`,
+  [syscalls.md](syscalls.md#vm_protect)): a sealed region cannot be
+  unmapped, released, have its rights changed or be mapped over, until the
+  process ends. `spawn` seals the program and loader code, the loader seals
+  library code and the RELRO of the program, the libraries and itself after
+  relocation (so the GOT cannot be switched back to RW or replaced with a new
+  anonymous mapping).
+- **Untrusted input:** names only `A-Z a-z 0-9 . _ + -` without a leading
+  dot, at most 255 B (`libdproto::valid_name`, a decoder fuzz test); a file
+  at most 256 MiB, at most 16 segments, ELF via `libs/elf` (TEXTREL, REL
+  rejected, headers in the first segment). Connections: at most 256 live
+  ones created from one connection (per process) and 4096 in total.
+- ⚠️ **libd restart:** processes started before have a connection to the
+  old instance (closed) and can no longer start a program with the loader;
+  init gets a new connection. Reconnecting through a lease (`svcclient`)
+  does not exist yet.
 
 ## Threads, fini and the debugger (DL-3)
 
@@ -239,3 +273,7 @@ not produce it on aarch64). They are built with clang and ld.lld with
 | QEMU `procesy`: `chybejici knihovna -> kod 127` | `dltest-missing`: `ld.so: knihovna ... nenalezena`, code 127 |
 | QEMU `procesy`: `vlakna libos s TLS knihoven, dl_iterate_phdr, r_debug, fini` | `dltest-rs` (Rust + libos as PIE, test only): 4 threads have their own fresh copy of the library TLS (through the DTV), the main thread unchanged; the loader table; `dl_iterate_phdr` (3 modules, names, TLS); `r_debug` via `DT_DEBUG` (version 1, 3 nodes); the library finalizer; `dlopen` = null + `dlerror`, `dladdr` of a library function |
 | `cargo test -p dynload` (`tls_surplus_after_modules`) | the TLS surplus after the modules does not change their offsets |
+| `cargo test -p libdproto` | library names, messages and limits; decoder fuzzing (20,000 damaged messages without a panic) |
+| QEMU `pamet`: `pecet: ...` | a sealed mapping and reservation: `VM_PROTECT`, `VM_UNMAP`, decommit, mapping over it and filling the reservation fail, neighbouring regions work |
+| QEMU `procesy`: `libd sdili sablony knihoven mezi procesy` | the second `dltest` run creates no new template, only libd cache hits |
+| QEMU `procesy`: `vlakna libos ...` (bit 256) | library code and RELRO are sealed (`ATTR_SEALED`, changing rights and unmapping fail) |

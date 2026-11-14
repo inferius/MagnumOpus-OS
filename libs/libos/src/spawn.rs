@@ -17,11 +17,16 @@
 //! nacteny ze souboru do haldy) se nahrava jako drive, bez sdileni.
 //!
 //! **Program se zavadecem** (`ET_DYN` s `PT_INTERP` = `/system/lib/ld.so`,
-//! `docs/cs/dynamicke-linkovani.md`): program i zavadec (z initfs
-//! volajiciho) se namapuji na nahodne baze (ASLR), na vrchol zasobniku jde
-//! auxv (`abi::auxv`) a do bootstrap kanalu pred startovni zpravu zprava
-//! zavadece (handle procesu a initfs jen pro cteni). Vlakno zacne na
-//! vstupu zavadece; ten nahraje knihovny a skoci na vstup programu.
+//! `docs/cs/dynamicke-linkovani.md`): program a zavadec (sablona od sluzby
+//! knihoven `libd`, sdileny kod) se namapuji na nahodne baze (ASLR), jejich
+//! kod se zapeceti, na vrchol zasobniku jde auxv (`abi::auxv`) a do
+//! bootstrap kanalu pred startovni zpravu zprava zavadece (handle procesu
+//! a spojeni s libd). Vlakno zacne na vstupu zavadece; ten nahraje knihovny
+//! a skoci na vstup programu.
+//!
+//! Ma-li volajici spojeni s libd, dostane kazdy potomek vlastni
+//! (`bootstrap::kind::LIBD`) - muze tak spoustet dalsi programy se
+//! zavadecem.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -135,6 +140,40 @@ fn map_image(process: &Process, image: &[u8], elf: &elf::ElfFile, page: u64, bas
         }
     }
     Ok(())
+}
+
+/// Zapeceti segmenty bez zapisu (kod a konstanty) modulu na `base`: jejich
+/// mapovani uz nejde nahradit ani zmenit (`PROT_SEAL`).
+fn seal_readonly(process: &Process, elf: &elf::ElfFile, page: u64, base: u64) -> Result<()> {
+    for seg in elf.load_segments() {
+        let seg = seg.map_err(|_| Error::Corrupted)?;
+        let flags = segment_flags(&seg);
+        if flags & MAP_WRITE == 0 {
+            let start = seg.vaddr & !(page - 1);
+            let end = (seg.vaddr + seg.mem_size).next_multiple_of(page);
+            process.protect(base + start, end - start, flags | abi::vm::PROT_SEAL)?;
+        }
+    }
+    Ok(())
+}
+
+/// Namapuje knihovnu od libd (zavadec `ld.so`) na nahodnou bazi v `process`:
+/// kod primo ze zapecetene sablony (sdilene stranky, zapeceti se),
+/// data jako klon s kopii pri zapisu. Vraci bazi.
+#[cfg(feature = "libd")]
+fn map_library(process: &Process, lib: &libdproto::Library, vmos: &[Vmo]) -> Result<u64> {
+    let base = random_base(process, lib.span)?;
+    let fixed = MAP_FIXED | MAP_IN_RESERVATION;
+    for (seg, vmo) in lib.segments.iter().zip(vmos) {
+        if seg.kind == libdproto::kind::SHARED {
+            process.map(vmo, 0, seg.len, seg.prot | fixed, base + seg.start)?;
+            process.protect(base + seg.start, seg.len, seg.prot | abi::vm::PROT_SEAL)?;
+        } else {
+            let own = vmo.clone_for(0, seg.len, process)?;
+            process.map(&own, 0, seg.len, seg.prot | fixed, base + seg.start)?;
+        }
+    }
+    Ok(base)
 }
 
 /// Rozsah adres modulu ET_DYN (od 0 po konec posledniho segmentu,
@@ -285,23 +324,7 @@ pub fn spawn_with_thread(
     // Program se zavadecem: oba na nahodne baze, auxv pro zavadec.
     let mut loader = None;
     if dynamic {
-        let ld_name = abi::auxv::INTERP.trim_start_matches(abi::auxv::SYSTEM_LIB);
-        let ld_image = crate::initfs::global_find(&alloc::format!("{}{ld_name}", abi::auxv::INITFS_LIB)).ok_or(Error::NotFound)?;
-        let ld = elf::ElfFile::parse_object(ld_image, elf::Machine::NATIVE).map_err(|_| Error::Corrupted)?;
-        if ld.elf_type != elf::ElfType::Dyn {
-            return Err(Error::Corrupted);
-        }
-        let base = random_base(&process, image_span(&elf, page)?)?;
-        map_image(&process, image, &elf, page, base, true)?;
-        let ld_base = random_base(&process, image_span(&ld, page)?)?;
-        map_image(&process, ld_image, &ld, page, ld_base, true)?;
-        loader = Some(Loader {
-            phdr: base + elf.phdr_vaddr().map_err(|_| Error::Corrupted)?,
-            phnum: u64::from(elf.phnum()),
-            entry: base + elf.entry,
-            ld_base,
-            ld_entry: ld_base + ld.entry,
-        });
+        loader = Some(map_with_loader(&process, image, &elf, page)?);
     } else {
         map_image(&process, image, &elf, page, 0, false)?;
     }
@@ -322,15 +345,19 @@ pub fn spawn_with_thread(
 
     let (parent_end, child_end) = Channel::create()?;
     if loader.is_some() {
-        // Zprava zavadece pred startovni zpravou: handle procesu
-        // a initfs jen pro cteni (knihovny). Zavadec je pred skokem do
-        // programu zavre.
+        // Zprava zavadece pred startovni zpravou: handle procesu a spojeni
+        // s libd (knihovny). Startovni zprava a kanal zustanou programu.
         let mut d = Vec::new();
         let h = Header { magic: bootstrap::LOADER_MAGIC, version: bootstrap::VERSION, count: 2, _reserved: 0 };
         d.extend_from_slice(&h.to_bytes());
         d.extend_from_slice(&Entry { kind: bootstrap::kind::SELF_PROCESS, arg: 0 }.to_bytes());
-        d.extend_from_slice(&Entry { kind: bootstrap::kind::INITFS, arg: 0 }.to_bytes());
-        parent_end.write(&d, alloc::vec![process.handle().duplicate(None)?, crate::initfs::global_vmo()?])?;
+        d.extend_from_slice(&Entry { kind: bootstrap::kind::LIBD, arg: 0 }.to_bytes());
+        parent_end.write(&d, alloc::vec![process.handle().duplicate(None)?, loader_libd()?])?;
+    }
+    // Spojeni s libd pro potomka (smi spoustet programy se zavadecem).
+    let mut handles = handles;
+    if let Some(ch) = child_libd() {
+        handles.push(StartHandle::new(bootstrap::kind::LIBD, 0, ch));
     }
     let mut data = Vec::new();
     let header = Header {
@@ -414,5 +441,58 @@ impl Loader {
         crate::random::fill(&mut r);
         b[len - 16..].copy_from_slice(&r);
         b
+    }
+}
+
+/// Spojeni s libd pro potomka (`None` = volajici spojeni nema nebo libd
+/// neodpovida - potomek pak programy se zavadecem nespusti).
+fn child_libd() -> Option<Handle> {
+    #[cfg(feature = "libd")]
+    {
+        if crate::libd::available() {
+            return crate::libd::connect().ok().map(Channel::into_handle);
+        }
+    }
+    None
+}
+
+/// Spojeni s libd pro zavadec potomka.
+fn loader_libd() -> Result<Handle> {
+    #[cfg(feature = "libd")]
+    {
+        return crate::libd::connect().map(Channel::into_handle);
+    }
+    #[allow(unreachable_code)]
+    Err(Error::NotSupported)
+}
+
+/// Program se zavadecem: program (sablona z initfs volajiciho, nebo kopie)
+/// a zavadec `ld.so` (sablona od libd) na nahodne baze, kod obou
+/// zapeceteny. Bez spojeni s libd = `NOT_SUPPORTED`.
+fn map_with_loader(process: &Process, image: &[u8], elf: &elf::ElfFile, page: u64) -> Result<Loader> {
+    #[cfg(feature = "libd")]
+    {
+        let ld_name = abi::auxv::INTERP.trim_start_matches(abi::auxv::SYSTEM_LIB);
+        let (lib, vmos) = crate::libd::open(ld_name)?;
+        let base = random_base(process, image_span(elf, page)?)?;
+        map_image(process, image, elf, page, base, true)?;
+        seal_readonly(process, elf, page, base)?;
+        let ld_base = map_library(process, &lib, &vmos)?;
+        // Vstup zavadece: z hlavicky ELF v jeho prvnim (sdilenem) segmentu.
+        let mut hdr = [0u8; 64];
+        vmos.first().ok_or(Error::Corrupted)?.read(0, &mut hdr)?;
+        let ld_entry = u64::from_le_bytes(hdr[24..32].try_into().map_err(|_| Error::Corrupted)?);
+        return Ok(Loader {
+            phdr: base + elf.phdr_vaddr().map_err(|_| Error::Corrupted)?,
+            phnum: u64::from(elf.phnum()),
+            entry: base + elf.entry,
+            ld_base,
+            ld_entry: ld_base + ld_entry,
+        });
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = (process, image, elf, page);
+        Err(Error::NotSupported)
     }
 }

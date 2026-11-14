@@ -31,6 +31,7 @@ mod gui;
 mod input;
 mod install;
 mod launch;
+mod libd;
 mod logd;
 mod ntp;
 mod power;
@@ -66,6 +67,12 @@ fn main(startup: Startup) -> i64 {
             *system::TIME.lock() = Some(t);
         }
         Err(e) => println!("init: sluzbu casu nelze spustit: {e}"),
+    }
+    // Sluzba knihoven hned po case (jen initfs): od ted dostane kazdy
+    // spusteny proces spojeni s ni (programy se zavadecem ld.so).
+    match libd::start(&startup) {
+        Ok(p) => sup.watch("libd", &p, Some(libd::RESTART)),
+        Err(e) => println!("init: sluzbu knihoven (libd) nelze spustit: {e}"),
     }
     // Prehled uloh hned po case: FS nepotrebuje a sluzby (fsd, okna,
     // relace) se v nem pri startu registruji.

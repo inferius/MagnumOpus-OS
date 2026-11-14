@@ -625,6 +625,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "dynload",
             "--package",
+            "libdproto",
+            "--package",
             "initfs",
             "--package",
             "tz",
@@ -838,6 +840,7 @@ pub struct Artifacts {
 /// souboru v initfs).
 const USER_PROGRAMS: &[&str] = &[
     "init",
+    "libd",
     "echo",
     "svctest",
     "fsrtest",

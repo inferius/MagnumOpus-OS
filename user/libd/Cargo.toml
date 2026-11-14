@@ -1,0 +1,19 @@
+[package]
+name = "libd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Sluzba knihoven: zapecetene sablony segmentu sdilenych knihoven pro ld.so (docs/cs/dynamicke-linkovani.md)"
+
+[[bin]]
+name = "libd"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+abi.workspace = true
+elf.workspace = true
+libdproto = { path = "../../libs/libdproto" }
+blake3 = { version = "1.8", default-features = false, features = ["pure"] }

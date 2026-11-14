@@ -9,7 +9,7 @@ Zavaděč sdílených knihoven `ld.so` (v initfs `lib/ld.so`, `PT_INTERP` = `/sy
 ## Invarianty
 
 - Před `relocate_self` žádný přístup k datům s ukazateli (vtabulky, statické ukazatele, formátování): jen čtení/zápis přes ukazatele.
-- Zavaděč nečte startovní zprávu (patří programu): jen první zprávu `LOADER_MAGIC`. Initfs (handle i mapování) před skokem zavře; handle vlastního procesu si nechá (bloky TLS vláken).
+- Zavaděč nečte startovní zprávu (patří programu): jen první zprávu `LOADER_MAGIC` (proces, spojení s libd). Knihovny jen od `libd` (initfs nemá); kód knihoven, RELRO všech modulů i své vlastní zapečetí (`PROT_SEAL`).
 - Tabulka `iface::INTERFACE` (`abi::loader`) se volá z vláken programu: bez alokací (alokátor `bump.rs` neuvolňuje), stav pod `iface::STATE`.
 - Heap zavaděče nesmí být na pevné adrese heapu libos (`bump.rs`, adresu vybírá jádro); libos bez feature `rt`.
 - Segmenty bez zápisu vždy zapečetit (W^X); TEXTREL a REL odmítá už `libs/elf`.

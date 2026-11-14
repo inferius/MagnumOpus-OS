@@ -1,5 +1,9 @@
-//! Oblasti adresniho prostoru: rezervace, castecne odmapovani, zmena prav
-//! a dotaz (`VM_RESERVE`, `VM_UNMAP`, `VM_PROTECT`, `VM_QUERY`).
+//! Oblasti adresniho prostoru: rezervace, castecne odmapovani, zmena prav,
+//! pecet a dotaz (`VM_RESERVE`, `VM_UNMAP`, `VM_PROTECT`, `VM_QUERY`).
+//!
+//! **Pecet** (`PROT_SEAL`, jako `mseal`): zapecetena oblast nejde odmapovat
+//! (ani decommit), zmenit prava ani nahradit rezervaci mapovanim; mapovat
+//! pres ni nejde (prekryv). Rusi ji jen `teardown` (konec procesu).
 //!
 //! Oblast je mapovani objektu pameti nebo rezervace. Operace na rozsahu
 //! uvnitr oblasti ji nejdriv rozdeli na hranicich rozsahu (`split`); kazdy
@@ -10,7 +14,7 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use abi::vm::{MAP_FIXED, RESERVE_GUARD, RegionInfo, UNMAP_DECOMMIT, USER_MAX, USER_MIN, region};
+use abi::vm::{MAP_FIXED, PROT_SEAL, RESERVE_GUARD, RegionInfo, UNMAP_DECOMMIT, USER_MAX, USER_MIN, region};
 
 use super::{AddressSpace, Inner, MAPPING_COST, Mapping, PROT, page_aligned, region_cost};
 use crate::arch::paging::{PAGE_SIZE, PageTableOps};
@@ -58,6 +62,7 @@ impl Inner {
             max_flags: m.max_flags,
             guard: m.guard,
             in_reservation: m.in_reservation,
+            sealed: m.sealed,
             charge: new_charge,
         };
         let old_cost = region_cost(m.len, mapped);
@@ -80,10 +85,15 @@ impl Inner {
         Some(starts)
     }
 
-    /// Lezi cely rozsah v rezervacich (souvisle)?
+    /// Lezi cely rozsah v nezapecetenych rezervacich (souvisle)?
     pub(super) fn all_reserved(&self, addr: u64, end: u64) -> bool {
         self.covering(addr, end)
-            .is_some_and(|s| s.iter().all(|st| self.mappings[st].vmo.is_none()))
+            .is_some_and(|s| s.iter().all(|st| self.mappings[st].vmo.is_none() && !self.mappings[st].sealed))
+    }
+
+    /// Je nektera oblast v rozsahu zapecetena?
+    fn any_sealed(starts: &[u64], mappings: &alloc::collections::BTreeMap<u64, Mapping>) -> bool {
+        starts.iter().any(|s| mappings[s].sealed)
     }
 }
 
@@ -130,7 +140,10 @@ impl AddressSpace {
             return Err(Error::InvalidArgs);
         }
         let mut inner = self.inner.lock();
-        inner.covering(addr, end).ok_or(Error::NotFound)?;
+        let starts = inner.covering(addr, end).ok_or(Error::NotFound)?;
+        if Inner::any_sealed(&starts, &inner.mappings) {
+            return Err(Error::AccessDenied);
+        }
         inner.split(addr, &self.job)?;
         inner.split(end, &self.job)?;
         let starts: Vec<u64> = inner.mappings.range(addr..end).map(|(&s, _)| s).collect();
@@ -174,18 +187,28 @@ impl AddressSpace {
     /// v mapovanich (diry `NotFound`, rezervace `BadState`). Namapovane
     /// stranky se odmapuji a vypadek je doplni s novymi pravy.
     /// Spusteni na nezapecetenem objektu jen s `jit` (opravneni procesu);
-    /// vraci, zda k tomu doslo (audit).
+    /// vraci, zda k tomu doslo (audit). `PROT_SEAL` v `prot`: oblasti navic
+    /// zapecetit (rezervace v rozsahu jsou pak povolene, jen se zapecetí);
+    /// zapecetena oblast v rozsahu = `AccessDenied`.
     pub fn protect(&self, addr: u64, len: u64, prot: u32, jit: bool) -> Result<bool, Error> {
+        let seal = prot & PROT_SEAL != 0;
+        let prot = prot & !PROT_SEAL;
         if prot & !PROT != 0 || (prot & abi::vm::MAP_WRITE != 0 && prot & abi::vm::MAP_EXECUTE != 0) {
             return Err(Error::InvalidArgs);
         }
         let end = user_range(addr, len)?;
         let mut inner = self.inner.lock();
         let starts = inner.covering(addr, end).ok_or(Error::NotFound)?;
+        if Inner::any_sealed(&starts, &inner.mappings) {
+            return Err(Error::AccessDenied);
+        }
         let mut jit_used = false;
         for s in &starts {
             let m = &inner.mappings[s];
             let Some(vmo) = &m.vmo else {
+                if seal {
+                    continue;
+                }
                 return Err(Error::BadState);
             };
             if prot & !m.max_flags != 0 {
@@ -205,7 +228,17 @@ impl AddressSpace {
         let table = table.as_mut().ok_or(Error::BadState)?;
         for s in starts {
             let m = mappings.get_mut(&s).expect("nalezeno vyse");
+            if seal {
+                m.sealed = true;
+            }
+            if m.vmo.is_none() {
+                continue;
+            }
             m.flags = prot;
+            if seal {
+                // Pecet: prava uz nikdy nad nynejsi.
+                m.max_flags = prot;
+            }
             for off in (0..m.len).step_by(PAGE_SIZE as usize) {
                 table.unmap_4k(VirtAddr::new(s + off));
             }
@@ -229,6 +262,9 @@ impl AddressSpace {
             }
             if m.in_reservation {
                 attrs |= region::ATTR_IN_RESERVATION;
+            }
+            if m.sealed {
+                attrs |= region::ATTR_SEALED;
             }
             return Ok(RegionInfo {
                 start,

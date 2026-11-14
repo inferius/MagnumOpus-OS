@@ -7,14 +7,13 @@ use alloc::vec::Vec;
 
 use abi::auxv::{AT_BASE, AT_ENTRY, AT_NULL, AT_PHDR, AT_PHNUM};
 use abi::bootstrap::{self, Entry, Header};
-use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_IN_RESERVATION, MAP_READ, MAP_WRITE};
+use abi::vm::{MAP_FIXED, MAP_IN_RESERVATION, MAP_READ};
 use dynload::{Apply, Def, TlsModule};
 use elf::dynamic::Dynamic;
 use elf::reloc::Kind;
 use elf::symbols::bind;
-use elf::{ElfFile, ElfType, Machine, Tls, pt};
-use libos::initfs::Initfs;
-use libos::{Handle, Process, Vmo, sys};
+use elf::{ElfFile, Machine, Tls, pt};
+use libos::{Handle, Process, sys};
 
 use crate::iface::{self, ModInfo, State, TlsState, TlsTemplate};
 use crate::{fail, tls};
@@ -49,7 +48,7 @@ fn check<T, E: core::fmt::Display>(r: Result<T, E>, what: &str) -> T {
 }
 
 /// Zprava zavadece (`abi::bootstrap::LOADER_MAGIC`): handle procesu
-/// a initfs.
+/// a spojeni s libd.
 fn loader_message(bootstrap: u64) -> (u32, u32) {
     let mut data = [0u8; 64];
     let mut handles = [0u32; 4];
@@ -60,20 +59,20 @@ fn loader_message(bootstrap: u64) -> (u32, u32) {
     let Some(h) = Header::from_bytes_with(&data[..dlen], bootstrap::LOADER_MAGIC) else {
         fail("neplatna zprava zavadece");
     };
-    let (mut process, mut initfs) = (None, None);
+    let (mut process, mut libd) = (None, None);
     for (i, &raw) in handles[..(h.count as usize).min(hlen)].iter().enumerate() {
         let off = bootstrap::HEADER_SIZE + i * bootstrap::ENTRY_SIZE;
         match data.get(off..dlen).and_then(Entry::from_bytes).map(|e| e.kind) {
             Some(bootstrap::kind::SELF_PROCESS) => process = Some(raw),
-            Some(bootstrap::kind::INITFS) => initfs = Some(raw),
+            Some(bootstrap::kind::LIBD) => libd = Some(raw),
             _ => {
                 let _ = sys::handle_close(raw);
             }
         }
     }
-    match (process, initfs) {
-        (Some(p), Some(i)) => (p, i),
-        _ => fail("zprava zavadece bez procesu nebo initfs"),
+    match (process, libd) {
+        (Some(p), Some(l)) => (p, l),
+        _ => fail("zprava zavadece bez procesu nebo spojeni s libd"),
     }
 }
 
@@ -155,43 +154,37 @@ fn module(name: String, base: u64, mem: &'static [u8]) -> Module {
     Module { name, soname, base, elf, dynamic, tls, tls_info: None }
 }
 
-/// Nahraje knihovnu `needed` z initfs na nahodnou bazi.
-fn load_library(fs: &Initfs, process: &Process, needed: &str, page: u64) -> Module {
-    let path = dynload::initfs_path(needed).unwrap_or_else(|| fail(&format!("knihovna {needed}: jen /system/lib")));
-    let image = fs.find(&path).unwrap_or_else(|| fail(&format!("knihovna {needed} nenalezena ({path})")));
-    let file = check(ElfFile::parse_object(image, Machine::NATIVE), needed);
-    if file.elf_type != ElfType::Dyn || check(file.interp(), needed).is_some() {
-        fail(&format!("{needed} neni sdilena knihovna"));
+/// Nahraje knihovnu `needed` od sluzby knihoven libd na nahodnou bazi:
+/// kod primo ze zapecetene sablony (sdilene stranky, zapeceti se), data
+/// jako klon s kopii pri zapisu.
+fn load_library(process: &Process, needed: &str) -> Module {
+    let name = needed.strip_prefix(abi::auxv::SYSTEM_LIB).unwrap_or(needed);
+    if !libdproto::valid_name(name) {
+        fail(&format!("knihovna {needed}: jen jmeno v /system/lib"));
     }
-    let mut end = 0;
-    for seg in file.load_segments() {
-        let seg = check(seg, needed);
-        end = end.max(seg.vaddr + seg.mem_size);
-    }
-    let span = end.next_multiple_of(abi::vm::MAX_PAGE_SIZE);
-    let base = check(libos::spawn::random_base(process, span), "misto pro knihovnu");
-    for seg in file.load_segments() {
-        let seg = check(seg, needed);
-        let start = seg.vaddr & !(page - 1);
-        let stop = (seg.vaddr + seg.mem_size).next_multiple_of(page);
-        let vmo = check(Vmo::create(stop - start), "pamet knihovny");
-        check(vmo.write(seg.vaddr - start, file.segment_data(&seg)), "zapis knihovny");
-        let mut flags = MAP_READ;
-        if seg.flags & elf::PF_W != 0 {
-            flags |= MAP_WRITE;
+    let (lib, vmos) = match libos::libd::open(name) {
+        Ok(r) => r,
+        Err(libos::Error::NotFound) => fail(&format!("knihovna {needed} nenalezena")),
+        Err(e) => fail(&format!("knihovna {needed}: {e}")),
+    };
+    let base = check(libos::spawn::random_base(process, lib.span), "misto pro knihovnu");
+    let fixed = MAP_FIXED | MAP_IN_RESERVATION;
+    for (seg, vmo) in lib.segments.iter().zip(&vmos) {
+        if seg.kind == libdproto::kind::SHARED {
+            check(process.map(vmo, 0, seg.len, seg.prot | fixed, base + seg.start), "mapovani knihovny");
+            check(process.protect(base + seg.start, seg.len, seg.prot | abi::vm::PROT_SEAL), "pecet kodu");
+        } else {
+            let own = check(vmo.clone_for(0, seg.len, process), "data knihovny");
+            check(process.map(&own, 0, seg.len, seg.prot | fixed, base + seg.start), "mapovani dat");
         }
-        if seg.flags & elf::PF_X != 0 {
-            flags |= MAP_EXECUTE;
-        }
-        // Kod a konstanty zapecetit: spustit jde jen zapecetena pamet (W^X).
-        if flags & MAP_WRITE == 0 {
-            check(vmo.seal(), "pecet kodu");
-        }
-        check(process.map(&vmo, 0, stop - start, flags | MAP_FIXED | MAP_IN_RESERVATION, base + start), "mapovani knihovny");
     }
     // SAFETY: segmenty jsou prave namapovane v rezervaci `base..base+span`.
-    let mem = unsafe { module_memory(base, end) };
-    module(needed.to_string(), base, mem)
+    let mem = unsafe { module_memory(base, lib.span) };
+    let m = module(needed.to_string(), base, mem);
+    if check(m.elf.interp(), needed).is_some() {
+        fail(&format!("{needed} neni sdilena knihovna"));
+    }
+    m
 }
 
 /// Rozlozi staticke TLS vsech modulu (s rezervou pro `dlopen`), vytvori
@@ -305,12 +298,38 @@ fn relocate(mods: &[Module], i: usize) {
 }
 
 /// RELRO jen pro cteni (cele stranky uvnitr oblasti).
-fn protect_relro(m: &Module, page: u64) {
-    let Some(r) = check(m.elf.relro(), &m.name) else { return };
-    let start = (m.base + r.vaddr).next_multiple_of(page);
-    let end = (m.base + r.vaddr + r.mem_size) & !(page - 1);
+/// RELRO jen pro cteni a zapecetit (nevratne: GOT nejde vratit na RW ani
+/// nahradit novym mapovanim). Cele stranky uvnitr oblasti.
+fn seal_relro(base: u64, r: elf::Relro, page: u64) {
+    let start = (base + r.vaddr).next_multiple_of(page);
+    let end = (base + r.vaddr + r.mem_size) & !(page - 1);
     if end > start {
-        check(libos::vm::protect(start, end - start, MAP_READ), "RELRO");
+        check(libos::vm::seal(start, end - start, MAP_READ), "RELRO");
+    }
+}
+
+fn protect_relro(m: &Module, page: u64) {
+    if let Some(r) = check(m.elf.relro(), &m.name) {
+        seal_relro(m.base, r, page);
+    }
+}
+
+/// RELRO zavadece samotneho (jeho GOT a tabulka `INTERFACE`): po
+/// samorelokaci ho nic nemeni.
+fn seal_own_relro(base: u64, page: u64) {
+    // SAFETY: hlavicka ELF a programove hlavicky zavadece v jeho prvnim
+    // segmentu (namapoval spawn).
+    unsafe {
+        let phoff = ((base + 32) as *const u64).read_unaligned();
+        let phnum = ((base + 56) as *const u16).read_unaligned() as u64;
+        for i in 0..phnum {
+            let p = base + phoff + i * 56;
+            if (p as *const u32).read_unaligned() == pt::GNU_RELRO {
+                let vaddr = ((p + 16) as *const u64).read_unaligned();
+                let mem_size = ((p + 40) as *const u64).read_unaligned();
+                seal_relro(base, elf::Relro { vaddr, mem_size }, page);
+            }
+        }
     }
 }
 
@@ -383,11 +402,11 @@ fn debug_hook(mods: &[Module], ldbase: u64) {
 
 /// Zavede program; vraci jeho vstupni bod (skok dela `_start`).
 pub extern "C" fn main(sp: *const u64, bootstrap: u64) -> u64 {
-    let (process_raw, initfs_raw) = loader_message(bootstrap);
+    let (process_raw, libd_raw) = loader_message(bootstrap);
     libos::rt::set_self_process(process_raw);
     let process = Process::from_handle(Handle::from_raw(process_raw));
-    let initfs_vmo = Vmo::from_handle(Handle::from_raw(initfs_raw));
-    let fs = check(Initfs::from_vmo(&initfs_vmo), "initfs");
+    // Spojeni s libd si zavadec nechava (dlopen); program ma svoje.
+    libos::libd::set_connection(libos::Channel::from_handle(Handle::from_raw(libd_raw)));
     let page = libos::vm::page_size();
     // SAFETY: SP vlakna s blokem od spawn.
     let aux = unsafe { read_auxv(sp) };
@@ -407,7 +426,7 @@ pub extern "C" fn main(sp: *const u64, bootstrap: u64) -> u64 {
             if mods.iter().any(|m| m.name == n || m.soname.as_deref() == Some(n.as_str())) {
                 continue;
             }
-            let m = load_library(&fs, &process, &n, page);
+            let m = load_library(&process, &n);
             mods.push(m);
         }
         next += 1;
@@ -431,11 +450,10 @@ pub extern "C" fn main(sp: *const u64, bootstrap: u64) -> u64 {
         unsafe { (aux.loader_slot as *mut u64).write(&iface::INTERFACE as *const _ as u64) };
     }
 
-    // Uklid: initfs program nedostane. Handle vlastniho procesu si zavadec
-    // nechava (bloky TLS novych vlaken, pozdeji dlopen); program ma handle
-    // na tentyz proces stejne (zadna prava navic).
-    fs.close();
-    drop(initfs_vmo);
+    seal_own_relro(aux.base, page);
+    // Handle vlastniho procesu si zavadec nechava (bloky TLS novych
+    // vlaken, dlopen); program ma handle na tentyz proces stejne (zadna
+    // prava navic).
     core::mem::forget(process);
     aux.entry
 }

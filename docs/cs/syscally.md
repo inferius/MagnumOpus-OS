@@ -381,9 +381,17 @@ oblast se rozdělí). `prot` je podmnožina `MAP_READ | MAP_WRITE |
 MAP_EXECUTE`, 0 = žádný přístup. Nikdy zápis a spuštění zároveň (W^X)
 a nikdy nad práva při `VM_MAP` (ta ověřila práva handlu objektu).
 Namapované stránky se odmapují a výpadek je doplní s novými právy.
-Vyžaduje `WRITE` na procesu. Chyby: `INVALID_ARGS` (neznámý bit, W+X,
-zarovnání), `ACCESS_DENIED` (nad původní práva), `NOT_FOUND` (díra),
-`BAD_STATE` (rezervace v rozsahu), `NO_RESOURCES`, `BAD_HANDLE`.
+Vyžaduje `WRITE` na procesu. **`PROT_SEAL`** v `prot` oblasti navíc
+**zapečetí** (jako Linux `mseal`, nevratně do konce procesu): práva se
+nastaví na `prot` a strop `max_flags` sníží na ně; zapečetěnou oblast pak
+nejde odmapovat (`VM_UNMAP` i `UNMAP_DECOMMIT` = `ACCESS_DENIED`), změnit
+její práva (`ACCESS_DENIED`), obsadit zapečetěnou rezervaci ani mapovat přes
+ni (`BAD_STATE`); `VM_QUERY` hlásí `region::ATTR_SEALED`. S pečetí smí
+rozsah obsahovat i rezervace (jen se zapečetí). Použití: RELRO po relokaci,
+kód knihoven ([dynamicke-linkovani.md](dynamicke-linkovani.md)). Chyby:
+`INVALID_ARGS` (neznámý bit, W+X, zarovnání), `ACCESS_DENIED` (nad původní
+práva, zapečetěná oblast), `NOT_FOUND` (díra), `BAD_STATE` (rezervace
+v rozsahu bez pečeti), `NO_RESOURCES`, `BAD_HANDLE`.
 
 ### `VM_QUERY`
 

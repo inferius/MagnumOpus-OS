@@ -60,6 +60,9 @@ struct Mapping {
     guard: bool,
     /// Mapovani vzniklo uvnitr rezervace (`MAP_IN_RESERVATION`).
     in_reservation: bool,
+    /// Zapecetena oblast (`PROT_SEAL`): nejde zmenit prava, odmapovat ani
+    /// nahradit; plati do `teardown`.
+    sealed: bool,
     charge: Charge,
 }
 
@@ -73,6 +76,7 @@ impl Mapping {
             max_flags: 0,
             guard,
             in_reservation: false,
+            sealed: false,
             charge,
         }
     }
@@ -385,6 +389,7 @@ impl AddressSpace {
                 max_flags: max,
                 guard: false,
                 in_reservation,
+                sealed: false,
                 charge,
             },
         );

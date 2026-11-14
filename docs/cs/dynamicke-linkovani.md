@@ -14,7 +14,9 @@ Wine a FFmpeg (LGPL, dynamicky). Programy v Rustu zůstávají statické
 | DL-1 | parser `ET_DYN` v `libs/elf`: programové hlavičky (`PT_INTERP`, `PT_TLS`, `PT_GNU_RELRO`, `PT_DYNAMIC`), dynamická sekce, symboly s GNU a SysV hashem, relokace RELA a RELR obou architektur, odmítnutí TEXTREL | **[implementováno]** (host testy `cargo test -p elf` proti souborům z clang a ld.lld) |
 | DL-2 | zavaděč `user/ld` + `libs/dynload`: `PT_INTERP` ve `spawn`, ASLR, `DT_NEEDED`, `BIND_NOW`, relokace, statické TLS hlavního vlákna, RELRO jen pro čtení; PIC a link přes `ld.lld` v `cbuild`, knihovny v initfs (`lib/`) | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `procesy`, testy `dynamicke linkovani: ...`) |
 | DL-3 | tabulka zavaděče (`abi::loader`, `dl*` v ABI už teď), TLS nových vláken (libos, osrt), DTV a generace, statická rezerva TLS, `fini`, `dl_iterate_phdr`, `dladdr`, `r_debug` | **[ověřeno v QEMU]** x86_64 i aarch64 (test `dynamicke linkovani: vlakna libos ...`) |
-| DL-4 | služba šablon `libd` (sdílení kódu knihoven, knihovny i z disku), `dlopen`/`dlsym`/`dlclose` (dynamické TLS: líná alokace přes DTV, dynamický TLSDESC), pečeť RELRO | **[navrženo]** |
+| DL-4a | služba knihoven `libd` (zapečetěné šablony, sdílení kódu knihoven mezi procesy), spojení s libd pro každý proces (program se zavaděčem spustí kdokoli), pečeť oblastí (`PROT_SEAL`, jako `mseal`) pro kód a RELRO | **[ověřeno v QEMU]** x86_64 i aarch64 (sady `pamet`, `procesy`) |
+| DL-4b | `dlopen`/`dlsym`/`dlclose` přes libd (dynamické TLS: líná alokace přes DTV, dynamický TLSDESC), rezerva statického TLS z manifestu (`[app] static_tls_reserve`) a měření | **[navrženo]** |
+| DL-4c | knihovny z disku a `$ORIGIN` (až budou aplikace z disku `/apps/<id>/`) | **[navrženo]** |
 
 ## Návrh (schválené volby)
 
@@ -130,14 +132,46 @@ moduly jsou v `user/dltest` (minimální `crt.c`: `_start` -> `program_main`
 
 ⚠️ **Omezení DL-2 (vědomá, řeší DL-3 a DL-4):**
 
-- **Kód knihoven se mezi procesy nesdílí**: každý proces si knihovnu
-  zkopíruje do vlastní paměti (sdílení přes službu šablon `libd` v DL-4).
-- **Knihovny jen z initfs** a program se zavaděčem smí spustit jen proces,
-  který má initfs (dnes init); disk, `$ORIGIN` aplikací a `libd` v DL-4.
+- Sdílení kódu knihoven a spouštění kýmkoli řeší DL-4a (`libd`, výše); knihovny
+  z disku a `$ORIGIN` DL-4c.
 - TLS nových vláken a fini řeší DL-3a (výše).
-- **RELRO jde vrátit na RW** (`VM_PROTECT`); pečeť `max_flags` v DL-4.
+- RELRO je od DL-4a zapečetěné (`PROT_SEAL`).
 - Initfs je pro zavaděč dostupný celý (jen pro čtení) po dobu zavádění;
   program ho nedostane (zavaděč ho před skokem odmapuje a handly zavře).
+
+## Služba knihoven a pečeť (DL-4a)
+
+**[ověřeno v QEMU]** x86_64 i aarch64.
+
+- **`libd`** (`user/libd`, protokol `libs/libdproto`) drží šablony
+  sdílených knihoven z `/system/lib` (initfs `lib/<jméno>`): segmenty bez
+  zápisu jako **zapečetěné VMO** (všechny procesy mapují tytéž stránky
+  kódu), datové jako šablonu pro klon s kopií při zápisu (`VMO_CLONE`,
+  i nuly do `mem_size`). Šablona se hledá podle jména a obsahu (BLAKE3).
+  Klient dostane handly kódu `READ | MAP | EXECUTE` a dat `READ | MAP`,
+  nikdy zápis.
+- **Spojení:** init spustí libd hned po službě času (jen initfs) a jeho
+  bootstrap kanál je první spojení. `spawn` (libos) vytvoří každému
+  potomkovi vlastní spojení (`Connect`, `bootstrap::kind::LIBD`), takže
+  program se zavaděčem může spustit **kdokoli** se spojením, ne jen init.
+  Zavaděč dostane ve zprávě zavaděče další spojení (místo initfs) a nechá
+  si ho (`dlopen` v DL-4b). Sestavení libos pro Rust std spojení zatím
+  nemá (zavře ho): aplikace se std programy se zavaděčem nespouštějí.
+- **`ld.so`** samotný dává `spawn` také od libd (sdílený kód zavaděče).
+- **Pečeť** (`PROT_SEAL` ve `VM_PROTECT`, jako Linux `mseal`,
+  [syscally.md](syscally.md#vm_protect)): zapečetěnou oblast nejde
+  odmapovat, uvolnit, změnit její práva ani přes ni mapovat, do konce
+  procesu. `spawn` zapečetí kód programu a zavaděče, zavaděč kód knihoven,
+  RELRO programu, knihoven i své vlastní po relokaci (GOT tak nejde vrátit
+  na RW ani nahradit novým anonymním mapováním).
+- **Nedůvěryhodný vstup:** jména jen `A-Z a-z 0-9 . _ + -` bez tečky na
+  začátku, nejvýš 255 B (`libdproto::valid_name`, fuzz test dekodéru);
+  soubor nejvýš 256 MiB, nejvýš 16 segmentů, ELF přes `libs/elf` (TEXTREL,
+  REL odmítnuty, hlavičky v prvním segmentu). Spojení: nejvýš 256 živých
+  vytvořených z jednoho spojení (na proces) a 4096 celkem.
+- ⚠️ **Restart libd:** procesy spuštěné dřív mají spojení se starou
+  instancí (zavřené) a program se zavaděčem už nespustí; init dostane nové
+  spojení. Obnova spojení lístkem (`svcclient`) zatím není.
 
 ## Vlákna, fini a debugger (DL-3)
 
@@ -226,3 +260,7 @@ a commitují se, testy clang nepotřebují.
 | QEMU `procesy`: `chybejici knihovna -> kod 127` | `dltest-missing`: `ld.so: knihovna ... nenalezena`, kód 127 |
 | QEMU `procesy`: `vlakna libos s TLS knihoven, dl_iterate_phdr, r_debug, fini` | `dltest-rs` (Rust + libos jako PIE, jen test): 4 vlákna mají vlastní čerstvou kopii TLS knihovny (přes DTV), hlavní vlákno beze změny; tabulka zavaděče; `dl_iterate_phdr` (3 moduly, jména, TLS); `r_debug` přes `DT_DEBUG` (verze 1, 3 uzly); finalizátor knihovny; `dlopen` = null + `dlerror`, `dladdr` funkce knihovny |
 | `cargo test -p dynload` (`tls_surplus_after_modules`) | rezerva TLS za moduly nemění jejich posuny |
+| `cargo test -p libdproto` | jména knihoven, zprávy a meze; fuzz dekodéru (20 000 poškozených zpráv bez paniky) |
+| QEMU `pamet`: `pecet: ...` | zapečetěné mapování a rezervace: `VM_PROTECT`, `VM_UNMAP`, decommit, mapování přes ni a obsazení rezervace selžou, sousední oblasti fungují |
+| QEMU `procesy`: `libd sdili sablony knihoven mezi procesy` | druhý běh `dltest` nevytvoří novou šablonu, jen zásahy mezipaměti libd |
+| QEMU `procesy`: `vlakna libos ...` (bit 256) | kód a RELRO knihovny jsou zapečetěné (`ATTR_SEALED`, změna práv i odmapování selže) |

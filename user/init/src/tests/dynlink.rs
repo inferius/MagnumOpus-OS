@@ -15,6 +15,7 @@ pub const TESTS: &[Test] = &[
     ("dynamicke linkovani: ASLR - dva behy, ruzne baze", aslr_differs),
     ("dynamicke linkovani: chybejici knihovna -> kod 127", missing_library),
     ("dynamicke linkovani: vlakna libos s TLS knihoven, dl_iterate_phdr, r_debug, fini", rust_program),
+    ("dynamicke linkovani: libd sdili sablony knihoven mezi procesy", libd_shares),
 ];
 
 fn deadline() -> Option<u64> {
@@ -52,6 +53,18 @@ fn missing_library(s: &Startup) -> TestResult {
 fn rust_program(s: &Startup) -> TestResult {
     let code = run(s, "dltest-rs")?;
     // Bity viz user/dltest-rs/src/main.rs (E_*).
-    check_eq!(code, 0, "dltest-rs: 1 hlavni vlakno, 2 TLS vlaken, 4 tabulka zavadece, 8 dl_iterate_phdr, 16 r_debug, 32 fini, 64 vlakna, 128 dlopen/dladdr");
+    check_eq!(code, 0, "dltest-rs: 1 hlavni vlakno, 2 TLS vlaken, 4 tabulka zavadece, 8 dl_iterate_phdr, 16 r_debug, 32 fini, 64 vlakna, 128 dlopen/dladdr, 256 pecet kodu/RELRO");
+    Ok(())
+}
+
+/// Dva behy `dltest`: druhy nevytvori zadnou novou sablonu (ld.so,
+/// libdltest, libdltest2 uz libd ma), jen zasahy mezipameti.
+fn libd_shares(s: &Startup) -> TestResult {
+    run(s, "dltest")?;
+    let a = libos::libd::stats().map_err(|e| fail("statistika libd", e))?;
+    check_eq!(run(s, "dltest")? & 0xFF, 0, "druhy beh dltest");
+    let b = libos::libd::stats().map_err(|e| fail("statistika libd", e))?;
+    check_eq!(b.templates, a.templates, "zadna nova sablona pri druhem behu");
+    check!(b.hits >= a.hits + 3, alloc::format!("zasahy mezipameti {} -> {}", a.hits, b.hits));
     Ok(())
 }
