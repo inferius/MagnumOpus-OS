@@ -1,0 +1,17 @@
+[package]
+name = "std-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Klient HTTP nad knihovnou ureq z crates.io (bez uprav): overeni std::net a vlaken v praxi"
+
+[[bin]]
+name = "std-http"
+test = false
+bench = false
+
+# Sestavuje `cargo xtask build` (stdsys::STD_PROGRAMS). ureq bez TLS a gzip:
+# cisty std::net.
+[dependencies]
+ureq = { version = "=3.5.2", default-features = false }

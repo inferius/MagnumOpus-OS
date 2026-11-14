@@ -11,10 +11,14 @@ use libos::spawn::StartHandle;
 use libos::{Error, Startup};
 
 use super::std_app::run_std_app;
+use super::net::{HOST, configured, net};
 use super::{Test, TestResult, devices, fail};
 use crate::{check, check_eq};
 
-pub const TESTS: &[Test] = &[("ripgrep: hledani ve strome souboru", ripgrep)];
+pub const TESTS: &[Test] = &[
+    ("ripgrep: hledani ve strome souboru", ripgrep),
+    ("ureq: HTTP klient, 4 vlakna soubezne", http),
+];
 
 const DIR: &str = "/std-test/rg";
 
@@ -71,4 +75,42 @@ fn ripgrep(s: &Startup) -> TestResult {
     let none = run(&["neexistujici-slovo", DIR])?;
     check_eq!(none.code, 1, "kod pri zadne shode");
     Ok(())
+}
+
+/// Port testovaciho serveru HTTP (`http` v `net-test`, `xtask/src/webhelper.rs`).
+fn http_port(s: &Startup) -> Result<Option<u16>, alloc::string::String> {
+    let fs = libos::initfs::Initfs::open(s).map_err(|e| fail("initfs", e))?;
+    let Some(cfg) = fs.find("net-test") else {
+        libos::println!("[preskoceno] std porty: chybi pomocne servery (jen `cargo xtask test`)");
+        return Ok(None);
+    };
+    let text = core::str::from_utf8(cfg).map_err(|_| alloc::string::String::from("net-test neni UTF-8"))?;
+    Ok(text
+        .lines()
+        .filter_map(|l| l.split_once('='))
+        .find(|(k, _)| k.trim() == "http")
+        .and_then(|(_, v)| v.trim().parse().ok()))
+}
+
+/// Aplikace nad knihovnou ureq (crates.io, bez uprav): TCP jen na server
+/// HTTP hostitele.
+fn http(s: &Startup) -> TestResult {
+    use netproto::{Policy, Rule, Target, proto, rights};
+    let Some(port) = http_port(s)? else {
+        return Ok(());
+    };
+    let root = net()?;
+    configured(root)?;
+    let policy = Policy::only(vec![Rule::port(proto::TCP, Target::Net { addr: HOST, prefix: 32 }, port)]);
+    let session = root.restrict(rights::CLIENT, &policy).map_err(|e| fail("restrict", e))?;
+    let base = format!("BASE=http://{HOST}:{port}");
+    let run = run_std_app(
+        s,
+        "std-http",
+        &[],
+        &[base.as_str()],
+        vec![StartHandle::tagged(tag::NET, session.into_channel().into_handle())],
+        Duration::from_secs(120),
+    )?;
+    run.expect("std-http", &["hello", "echo", "parallel"])
 }

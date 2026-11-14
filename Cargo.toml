@@ -88,6 +88,7 @@ members = [
     "user/launchd",
     "user/std-net",
     "user/std-proc",
+    "user/std-http",
     "user/agentd",
     "user/svctest",
     "user/fsrtest",
