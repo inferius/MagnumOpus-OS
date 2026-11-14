@@ -244,7 +244,9 @@ Vlastního kódu ~11 000 řádků Rustu, převzatého ~14 000 řádků. Celá mu
   `posix_spawn_file_actions_*` a `posix_spawnattr_*`: aplikace
   s manifestem přes `launchd`, pomocné programy přes `spawn` (jako
   `std::process`), akce souborů pro fd 0-2 (otázka 4), `waitpid` nad
-  handlem procesu, `system`/`popen` přes shell systému.
+  handlem procesu, `system`/`popen` přes shell systému. Spuštění programu
+  PIE (dynamický proces) potřebuje u spouštějícího relaci s libd
+  (`spawn::Options::libd`, DL-4b); `cstd` ji předá, má-li ji proces sám.
 - **`vfork`** (otázka 11): návrh A **(doporučeno)** také -1 s `ENOSYS`.
   Alias na pomocnou funkci spawn nejde: `vfork` vrací dvakrát a dítě do
   `exec*` běží v paměti rodiče, což bez `fork` v jádře nesplníme; tichý
@@ -287,7 +289,9 @@ sqlite, zlib a SDL `fork` nepotřebují.
    B cstd přepsat nad `osrt` bez `std` (menší `libc.so`, ale druhá
    implementace stdio a souborů vedle std). C jen statická `libc.a`,
    dynamické až s FFmpegem.
-2. **Zavaděč a libc.** A **(doporučeno)** `ld.so` zůstane samostatný
+2. **Zavaděč a libc.** Původní návrh DL ([dynamicke-linkovani.md](dynamicke-linkovani.md))
+   počítal s `ld.so` „zároveň `libc.so` ve stylu musl“; s libc nad std to
+   přehodnocuji. A **(doporučeno)** `ld.so` zůstane samostatný
    a malý (Rust, dnešní stav, `dl*` vestavěné), `libc.so` je běžná
    knihovna z `DT_NEEDED`. B spojit `ld.so` a `libc.so` do jednoho souboru
    jako musl (rychlejší start, ale std v zavaděči a větší zavaděč).

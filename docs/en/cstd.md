@@ -250,7 +250,10 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
   with `posix_spawn_file_actions_*` and `posix_spawnattr_*`: applications
   with a manifest via `launchd`, helper programs via `spawn` (like
   `std::process`), file actions for fd 0-2 (question 4), `waitpid` over the
-  process handle, `system`/`popen` via the system shell.
+  process handle, `system`/`popen` via the system shell. Starting a PIE
+  program (dynamic process) needs a libd session in the spawner
+  (`spawn::Options::libd`, DL-4b); `cstd` passes it on when the process has
+  one itself.
 - **`vfork`** (question 11): proposal A **(recommended)** also -1 with
   `ENOSYS`. An alias to a spawn helper is impossible: `vfork` returns twice
   and the child runs in the parent's memory until `exec*`, which we cannot
@@ -294,7 +297,9 @@ FFmpeg, sqlite, zlib and SDL do not need `fork`.
    rewrite cstd over `osrt` without `std` (smaller `libc.so`, but a second
    implementation of stdio and files next to std). C only a static
    `libc.a`, dynamic later with FFmpeg.
-2. **Loader and libc.** A **(recommended)** `ld.so` stays separate and
+2. **Loader and libc.** The original DL design ([dynamic-linking.md](dynamic-linking.md))
+   planned `ld.so` as "also `libc.so` in the musl style"; with libc over std
+   I reconsider it. A **(recommended)** `ld.so` stays separate and
    small (Rust, as today, `dl*` built in), `libc.so` is an ordinary library
    from `DT_NEEDED`. B merge `ld.so` and `libc.so` into one file like musl
    (faster start-up, but std inside the loader and a bigger loader).
