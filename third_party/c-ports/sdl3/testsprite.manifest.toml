@@ -1,0 +1,8 @@
+# Test SDL (port SDL 3, docs/cs/sdl.md): pohyblive sprity softwarovym
+# rendererem v okne kompozitoru. Sada testu `sdl`.
+[app]
+id = "org.libsdl.testsprite"
+name = "SDL testsprite"
+
+[limits]
+memory = "128M"

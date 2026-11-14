@@ -18,7 +18,9 @@ theme = { path = "../theme" }
 # nadpis 650 -> 700); kazdy rez ~0,4 MB v programu.
 font = { path = "../font", features = ["inter-400", "inter-500", "inter-600", "inter-700"] }
 inputproto = { path = "../inputproto" }
-libos = { path = "../libos", optional = true }
+# Bez `rt`: aplikace no_std maji libos primo (vstupni bod), aplikace se
+# std (SDL pres `mosdl`) ho maji od std.
+libos = { path = "../libos", optional = true, default-features = false }
 # Popis bufferu povrchu videa (`client/video.rs`).
 bufdesc = { path = "../bufdesc", optional = true }
 # Obnova okna po padu kompozitoru (listek k supervisoru).

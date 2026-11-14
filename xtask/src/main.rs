@@ -679,6 +679,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "cstd",
             "--package",
+            "mosdl",
+            "--package",
             "netfilter",
             "--package",
             "guiproto",
@@ -1105,9 +1107,17 @@ fn build(opts: &Options) -> Result<Artifacts> {
         let data = std::fs::read(&path).map_err(|e| format!("nelze cist port {name}: {e}"))?;
         files.push((name, loadable_only(&data)));
     }
-    for (name, path) in c_ports {
-        let data = std::fs::read(&path).map_err(|e| format!("nelze cist port C {name}: {e}"))?;
-        files.push((name, loadable_only(&data)));
+    for out in c_ports {
+        match out {
+            cports::Output::Program(name, path) => {
+                let data = std::fs::read(&path).map_err(|e| format!("nelze cist port C {name}: {e}"))?;
+                files.push((name, loadable_only(&data)));
+            }
+            cports::Output::Data(name, path) => {
+                let data = std::fs::read(&path).map_err(|e| format!("nelze cist soubor portu C {name}: {e}"))?;
+                files.push((name, data));
+            }
+        }
     }
     for name in stdsys::STD_PROGRAMS {
         let data = std::fs::read(std_bin.join(name))

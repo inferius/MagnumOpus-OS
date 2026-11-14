@@ -115,3 +115,32 @@ fn errno_header_matches() {
     let consts = rust.lines().filter(|l| l.starts_with("pub const E")).count();
     assert_eq!(count, consts, "errno.h a errno.rs maji ruzny pocet cisel");
 }
+
+#[test]
+fn langinfo_header_matches() {
+    use crate::misc::{langinfo, nl};
+    let h = include_str!("../include/langinfo.h");
+    for (name, v) in [("CODESET", nl::CODESET), ("D_FMT", nl::D_FMT), ("T_FMT", nl::T_FMT), ("RADIXCHAR", nl::RADIXCHAR), ("DAY_1", nl::DAY_1), ("ABDAY_1", nl::ABDAY_1), ("MON_1", nl::MON_1), ("ABMON_1", nl::ABMON_1), ("CRNCYSTR", nl::CRNCYSTR)] {
+        assert!(h.contains(&format!("#define {name} {v}\n")), "{name}");
+    }
+    assert_eq!(langinfo(nl::CODESET, true), b"UTF-8\0");
+    assert_eq!(langinfo(nl::D_FMT, false), b"%m/%d/%y\0");
+    assert_eq!(langinfo(nl::DAY_1 + 6, false), b"Saturday\0");
+    assert_eq!(langinfo(nl::ABMON_1 + 11, false), b"Dec\0");
+    assert_eq!(langinfo(999, false), b"\0");
+}
+
+#[test]
+fn sched_policy_rules() {
+    use crate::pthread::{SCHED_FIFO, SCHED_OTHER, SCHED_RR, sched_set_check};
+    assert_eq!(sched_set_check(SCHED_OTHER, Some(0)), 0);
+    assert_eq!(sched_set_check(SCHED_FIFO, Some(10)), crate::errno::EPERM);
+    assert_eq!(sched_set_check(SCHED_RR, Some(1)), crate::errno::EPERM);
+    assert_eq!(sched_set_check(SCHED_OTHER, Some(5)), crate::errno::EINVAL);
+    assert_eq!(sched_set_check(42, Some(0)), crate::errno::EINVAL);
+    assert_eq!(sched_set_check(SCHED_OTHER, None), crate::errno::EINVAL);
+    let h = include_str!("../include/sched.h");
+    for (n, v) in [("SCHED_OTHER", SCHED_OTHER), ("SCHED_FIFO", SCHED_FIFO), ("SCHED_RR", SCHED_RR)] {
+        assert!(h.contains(&format!("#define {n} {v}\n")), "{n}");
+    }
+}

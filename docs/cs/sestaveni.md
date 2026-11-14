@@ -17,6 +17,13 @@
   Debian/Ubuntu `apt install clang llvm`, Fedora `dnf install clang llvm`,
   Arch `pacman -S clang llvm`, macOS `brew install llvm`. Jiné místo:
   proměnná `CLANG`.
+- **CMake 3.24+ a Ninja 1.10+** pro porty v C se CMake (SDL, viz
+  [Porty v C](porty-c.md)): Windows `winget install Kitware.CMake` a
+  `winget install Ninja-build.Ninja`, Debian/Ubuntu `apt install cmake
+  ninja-build`, macOS `brew install cmake ninja`. xtask verze kontroluje
+  (`cmake --version`, `ninja --version`) a při chybějícím nebo starém
+  nástroji skončí s radou k instalaci. Ověřeno s CMake 4.4.4 a Ninja
+  1.13.2 (Windows, winget). Jiné místo: proměnné `CMAKE`, `NINJA`.
 - Volitelně **GDB** pro ladění.
 
 xtask hledá QEMU v `PATH` a na obvyklých místech, firmware vedle QEMU nebo

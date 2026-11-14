@@ -146,10 +146,10 @@ Not in the repository yet; the rules apply from the first vendored code.
 ## zlib 1.3.1 a SQLite 3.46.1 (porty v C / C ports)
 
 Nejsou v repozitáři: `cargo xtask` je stáhne z oficiálních míst (HTTPS),
-ověří SHA-256 (`xtask/src/cports.rs`) a přeloží proti sysrootu C bez úprav
+ověří SHA-256 (`xtask/src/cports/`) a přeloží proti sysrootu C bez úprav
 zdrojů; programy jsou v initfs (testovací obraz). / Not in the repository:
 `cargo xtask` downloads them from the official places (HTTPS), verifies the
-SHA-256 (`xtask/src/cports.rs`) and builds them against the C sysroot
+SHA-256 (`xtask/src/cports/`) and builds them against the C sysroot
 without source changes; the programs are in the initfs (test image).
 
 - **zlib** - licence zlib (Jean-loup Gailly, Mark Adler); zdroj / source:
@@ -160,6 +160,28 @@ without source changes; the programs are in the initfs (test image).
   programs: `sqlite3` (shell), `sqltest` (náš test / our test).
 - **Popis / Description:** `docs/cs/cstd.md` (kapitola Sysroot C a porty),
   `docs/en/cstd.md`.
+
+## SDL 3.4.20 (port v C / C port)
+
+Není v repozitáři: `cargo xtask` stáhne vydání z GitHubu (HTTPS), ověří
+SHA-256, použije naši záplatu a vlastní ovladač videa
+(`third_party/c-ports/sdl3/`) a sestaví ho CMake + Ninja proti sysrootu C
+(`xtask/src/cports/`). / Not in the repository: `cargo xtask` downloads the
+release from GitHub (HTTPS), verifies the SHA-256, applies our patch and own
+video driver (`third_party/c-ports/sdl3/`) and builds it with CMake + Ninja
+against the C sysroot (`xtask/src/cports/`).
+
+- **Licence / Licence:** zlib (Sam Lantinga a přispěvatelé / and
+  contributors); zdroj / source:
+  <https://github.com/libsdl-org/SDL/releases/tag/release-3.4.20>.
+- **Naše úpravy / Our changes:** `0001-video-magnumopus.patch` (registrace
+  ovladače, `SDL_PLATFORM_MAGNUMOPUS`, bez GTK a `misc/unix`) a ovladač
+  `overlay/src/video/magnumopus/SDL_mosvideo.c` (náš kód, licence zlib jako
+  SDL). Úpravy se neposílají do projektu SDL: ten nepřijímá kód
+  generovaný AI. / Our changes stay here: the SDL project does not accept
+  AI-generated contributions.
+- **Programy / programs:** `testsprite`, `checkkeys` (testy SDL / SDL tests).
+- **Popis / Description:** `docs/cs/sdl.md`, `docs/en/sdl.md`.
 
 ## Písmo Tuffy / Tuffy font
 

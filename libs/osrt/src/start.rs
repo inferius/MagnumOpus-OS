@@ -8,6 +8,7 @@
 
 use core::cell::UnsafeCell;
 use core::ptr;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use libos::{Channel, Startup};
 
@@ -44,6 +45,28 @@ static BOOTSTRAP: Init<Channel> = Init::new();
 /// Bootstrap kanal od rodice (napr. pro protokol mezi rodicem a ditetem).
 pub fn bootstrap_channel() -> Option<&'static Channel> {
     BOOTSTRAP.get()
+}
+
+/// Netagovane handly startovni zpravy (`Startup::handles`, v poradi
+/// zpravy): aplikace s oknem ma 0 = kanal okna, 1 = listek, 2+ = dalsi
+/// (init `gui.rs`). Runtime je nepouziva; vezme si je knihovna aplikace
+/// (`mosdl`) pres [`take_handles`].
+static HANDLES: Init<alloc::vec::Vec<u32>> = Init::new();
+static HANDLES_TAKEN: AtomicBool = AtomicBool::new(false);
+
+/// Vezme netagovane handly startovni zpravy (syrova cisla, volajici je
+/// vlastni a zavira). Jen jednou: dalsi volani vrati prazdny seznam.
+pub fn take_handles() -> alloc::vec::Vec<u32> {
+    if HANDLES_TAKEN.swap(true, Ordering::AcqRel) {
+        return alloc::vec::Vec::new();
+    }
+    HANDLES.get().cloned().unwrap_or_default()
+}
+
+/// Syrovy handle vlastniho procesu (pro dalsi kopii `libos` v aplikaci:
+/// `libos::rt::set_self_process`).
+pub fn self_process() -> u32 {
+    libos::rt::self_process()
 }
 
 #[cfg(all(target_arch = "x86_64", not(target_env = "dyn")))]
@@ -155,9 +178,11 @@ unsafe fn init(mut startup: Startup) {
         crate::net::init(net);
         crate::process::init(launch);
         BOOTSTRAP.set(startup.bootstrap);
+        HANDLES.set(core::mem::take(&mut startup.handles).into_iter().map(|h| h.into_raw()).collect());
     }
     // Handle vlastniho procesu pouziva runtime po celou dobu behu
     // (`libos::rt::self_process`: mapovani pameti, vlakna); zavrit se
-    // nesmi. Ostatni nepouzite handly ze zpravy se zavrou.
+    // nesmi. Netagovane handly ceka `take_handles`; ostatni nepouzite
+    // handly ze zpravy se zavrou.
     core::mem::forget(startup.process);
 }

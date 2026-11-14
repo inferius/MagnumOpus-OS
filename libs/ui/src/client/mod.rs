@@ -592,6 +592,25 @@ impl Window {
         self.send(ClientMsg::LayerSet { layer: POPOVER_LAYER, props: LayerProps { mask: prop::VISIBLE, visible: false, ..Default::default() } })
     }
 
+    /// Novy titulek okna (plati s pristim commitem; okna, ktera kresli
+    /// sama, napr. SDL pres `mosdl`). Ostatni vlastnosti vychozi jako
+    /// v [`run`].
+    pub fn set_title(&mut self, title: &str) -> Result<()> {
+        if title == self.title {
+            return Ok(());
+        }
+        self.send(ClientMsg::WindowSet {
+            window: 1,
+            title: title.into(),
+            min_w: 64,
+            min_h: 32,
+            side: guiproto::window::ButtonSide::Right,
+            button_color: 0,
+        })?;
+        self.title = title.into();
+        Ok(())
+    }
+
     /// Nakresli cele okno.
     pub fn draw(&mut self, f: impl FnOnce(&mut Canvas<'_>)) -> Result<()> {
         let r = Rect::new(0, 0, self.w, self.h);

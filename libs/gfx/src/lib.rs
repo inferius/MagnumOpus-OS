@@ -171,6 +171,12 @@ impl<'a> Canvas<'a> {
         self.px
     }
 
+    /// Pixely platna k primemu zapisu (kopie hotoveho snimku, napr. SDL
+    /// pres `mosdl`); krok radku je [`Canvas::stride`], orez neplati.
+    pub fn pixels_mut(&mut self) -> &mut [u32] {
+        self.px
+    }
+
     /// Krok radku v pixelech.
     pub fn stride(&self) -> u32 {
         self.stride

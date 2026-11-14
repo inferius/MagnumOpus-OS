@@ -1,0 +1,134 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f7c1528..59b47e7 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -2110,8 +2110,10 @@ elseif(UNIX AND NOT APPLE AND NOT RISCOS AND NOT HAIKU)
+     endif()
+   endif()
+ 
+-  sdl_glob_sources("${SDL3_SOURCE_DIR}/src/misc/unix/*.c")
+-  set(HAVE_SDL_MISC TRUE)
++  if(NOT MAGNUMOPUS)
++    sdl_glob_sources("${SDL3_SOURCE_DIR}/src/misc/unix/*.c")
++    set(HAVE_SDL_MISC TRUE)
++  endif()
+ 
+   if(SDL_POWER)
+     if(LINUX)
+@@ -3536,6 +3538,16 @@ endif()
+ 
+ # Platform-independent options
+ 
++# MagnumOpus: okno kompozitoru pres libs/mosdl (modul platformy z xtasku
++# nastavi MAGNUMOPUS).
++if(SDL_VIDEO AND MAGNUMOPUS)
++  set(SDL_VIDEO_DRIVER_MAGNUMOPUS 1)
++  sdl_glob_sources(
++    "${SDL3_SOURCE_DIR}/src/video/magnumopus/*.c"
++  )
++  set(HAVE_SDL_VIDEO TRUE)
++endif()
++
+ if(SDL_VIDEO)
+   if(SDL_OFFSCREEN)
+     set(SDL_VIDEO_DRIVER_OFFSCREEN 1)
+diff --git a/include/SDL3/SDL_platform_defines.h b/include/SDL3/SDL_platform_defines.h
+index 7963149..de6abaa 100644
+--- a/include/SDL3/SDL_platform_defines.h
++++ b/include/SDL3/SDL_platform_defines.h
+@@ -38,6 +38,19 @@
+ #define SDL_PLATFORM_AIX 1
+ #endif
+ 
++#ifdef __magnumopus__
++
++/**
++ * A preprocessor macro that is only defined if compiling for MagnumOpus.
++ *
++ * \since This macro is available since SDL 3.4.20 (MagnumOpus port).
++ */
++#define SDL_PLATFORM_MAGNUMOPUS 1
++/* System POSIX (cstd): unixove cesty SDL (vlakna pthread, cas, soubory).
++   Jen makro SDL, ne __unix__ (to by se dostalo i do aplikaci). */
++#define SDL_PLATFORM_UNIX 1
++#endif
++
+ #ifdef __HAIKU__
+ 
+ /**
+diff --git a/include/build_config/SDL_build_config.h.cmake b/include/build_config/SDL_build_config.h.cmake
+index d7bb97b..d214211 100644
+--- a/include/build_config/SDL_build_config.h.cmake
++++ b/include/build_config/SDL_build_config.h.cmake
+@@ -404,6 +404,7 @@
+ #cmakedefine SDL_VIDEO_DRIVER_EMSCRIPTEN 1
+ #cmakedefine SDL_VIDEO_DRIVER_HAIKU 1
+ #cmakedefine SDL_VIDEO_DRIVER_KMSDRM 1
++#cmakedefine SDL_VIDEO_DRIVER_MAGNUMOPUS 1
+ #cmakedefine SDL_VIDEO_DRIVER_KMSDRM_DYNAMIC @SDL_VIDEO_DRIVER_KMSDRM_DYNAMIC@
+ #cmakedefine SDL_VIDEO_DRIVER_KMSDRM_DYNAMIC_GBM @SDL_VIDEO_DRIVER_KMSDRM_DYNAMIC_GBM@
+ #cmakedefine SDL_VIDEO_DRIVER_N3DS 1
+diff --git a/src/core/unix/SDL_gtk.c b/src/core/unix/SDL_gtk.c
+index 92e8a16..90a93d0 100644
+--- a/src/core/unix/SDL_gtk.c
++++ b/src/core/unix/SDL_gtk.c
+@@ -21,6 +21,15 @@
+ #include "SDL_internal.h"
+ #include "SDL_gtk.h"
+ 
++#ifdef SDL_PLATFORM_MAGNUMOPUS
++/* MagnumOpus: bez GTK (lista a dialogy maji vlastni rozhrani systemu). */
++bool SDL_CanUseGtk(void) { return false; }
++bool SDL_Gtk_Init(void) { return false; }
++void SDL_Gtk_Quit(void) {}
++SDL_GtkContext *SDL_Gtk_EnterContext(void) { return NULL; }
++void SDL_Gtk_ExitContext(SDL_GtkContext *ctx) { (void)ctx; }
++void SDL_UpdateGtk(void) {}
++#else
+ #include <dlfcn.h>
+ #include <errno.h>
+ #include <unistd.h>
+@@ -298,3 +307,4 @@ void SDL_UpdateGtk(void)
+         gtk.g.main_context_iteration(NULL, GTK_FALSE);
+     }
+ }
++#endif /* SDL_PLATFORM_MAGNUMOPUS */
+diff --git a/src/events/SDL_scancode_tables.c b/src/events/SDL_scancode_tables.c
+index d3cbf7a..6c36c9c 100644
+--- a/src/events/SDL_scancode_tables.c
++++ b/src/events/SDL_scancode_tables.c
+@@ -20,7 +20,7 @@
+ */
+ #include "SDL_internal.h"
+ 
+-#if defined(SDL_INPUT_LINUXEV) || defined(SDL_VIDEO_DRIVER_WAYLAND) || defined(SDL_VIDEO_DRIVER_X11)
++#if defined(SDL_INPUT_LINUXEV) || defined(SDL_VIDEO_DRIVER_WAYLAND) || defined(SDL_VIDEO_DRIVER_X11) || defined(SDL_VIDEO_DRIVER_MAGNUMOPUS)
+ 
+ #include "SDL_scancode_tables_c.h"
+ 
+diff --git a/src/video/SDL_sysvideo.h b/src/video/SDL_sysvideo.h
+index 4cd1ee5..ab15d93 100644
+--- a/src/video/SDL_sysvideo.h
++++ b/src/video/SDL_sysvideo.h
+@@ -544,6 +544,7 @@ extern VideoBootStrap Wayland_preferred_bootstrap;
+ extern VideoBootStrap Wayland_bootstrap;
+ extern VideoBootStrap VIVANTE_bootstrap;
+ extern VideoBootStrap Emscripten_bootstrap;
++extern VideoBootStrap MAGNUMOPUS_bootstrap;
+ extern VideoBootStrap OFFSCREEN_bootstrap;
+ extern VideoBootStrap QNX_bootstrap;
+ extern VideoBootStrap OPENVR_bootstrap;
+diff --git a/src/video/SDL_video.c b/src/video/SDL_video.c
+index 8d8002f..673c50f 100644
+--- a/src/video/SDL_video.c
++++ b/src/video/SDL_video.c
+@@ -146,6 +146,9 @@ static VideoBootStrap *bootstrap[] = {
+ #ifdef SDL_VIDEO_DRIVER_QNX
+     &QNX_bootstrap,
+ #endif
++#ifdef SDL_VIDEO_DRIVER_MAGNUMOPUS
++    &MAGNUMOPUS_bootstrap,
++#endif
+ #ifdef SDL_VIDEO_DRIVER_OFFSCREEN
+     &OFFSCREEN_bootstrap,
+ #endif
