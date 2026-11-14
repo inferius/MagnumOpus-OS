@@ -55,9 +55,10 @@ pub struct Build {
     trust: Trust,
 }
 
-/// Priznaky pro cil Rustu (`TARGET` z cargo). Programy v userspace nemaji
-/// FPU ani SIMD (stav se uklada, ale ABI cilu je soft-float), na aarch64
-/// navic striktni zarovnani jako cil Rustu.
+/// Priznaky pro cil Rustu (`TARGET` z cargo). Sluzby (`*-none`) nemaji FPU
+/// ani SIMD (stav se uklada, ale ABI cilu je soft-float), na aarch64 navic
+/// striktni zarovnani jako cil Rustu; aplikace se std (`*-magnumopus`) jsou
+/// hard-float.
 pub fn target_flags(target: &str) -> Result<&'static [&'static str], String> {
     match target {
         "x86_64-unknown-none" => Ok(&[
@@ -71,7 +72,21 @@ pub fn target_flags(target: &str) -> Result<&'static [&'static str], String> {
             "-mgeneral-regs-only",
             "-mstrict-align",
         ]),
-        _ => Err(format!("cbuild: cil {target} neni podporovany (jen x86_64-unknown-none a aarch64-unknown-none-softfloat)")),
+        // Aplikace se std (docs/cs/rust-std.md): hard-float jako cil Rustu
+        // (SSE2 / NEON), nativni TLS v modelu local-exec (staticky ET_EXEC,
+        // `_Thread_local` a `errno` v C sdili bloky TLS s Rustem).
+        "x86_64-unknown-magnumopus" => Ok(&[
+            "--target=x86_64-unknown-none-elf",
+            "-mcmodel=small",
+            "-ftls-model=local-exec",
+        ]),
+        "aarch64-unknown-magnumopus" => Ok(&[
+            "--target=aarch64-unknown-none-elf",
+            "-ftls-model=local-exec",
+        ]),
+        _ => Err(format!(
+            "cbuild: cil {target} neni podporovany (x86_64-unknown-none, aarch64-unknown-none-softfloat, *-unknown-magnumopus)"
+        )),
     }
 }
 
@@ -79,7 +94,7 @@ pub fn target_flags(target: &str) -> Result<&'static [&'static str], String> {
 pub const COMMON_FLAGS: &[&str] = &[
     "-std=c11",
     // Bez systemovych hlavicek hostitele (Windows SDK, glibc): jen hlavicky
-    // clangu (stddef.h, stdint.h, stdarg.h, ...) a nase (`libs/cstd/include`).
+    // clangu (stddef.h, stdint.h, stdarg.h, ...) a nase (`libs/cstd-core/include`).
     "-ffreestanding",
     "-nostdlibinc",
     "-fno-pic",
@@ -91,7 +106,7 @@ pub const COMMON_FLAGS: &[&str] = &[
     "-O2",
     // --- Bezpecnost (viz docs/cs/preklad-c.md, "Jak se hlida bezpecnost") ---
     // Kanarek na zasobniku u funkci s poli a adresami lokalnich promennych;
-    // hodnota je globalni `__stack_chk_guard` (libs/cstd), ne TLS.
+    // hodnota je globalni `__stack_chk_guard` (libs/cstd-core), ne TLS.
     "-fstack-protector-strong",
     "-mstack-protector-guard=global",
     // Neinicializovane lokalni promenne = nuly (zadny unik starych dat

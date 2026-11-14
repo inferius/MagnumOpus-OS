@@ -1,7 +1,7 @@
 /*
  * Spolecne makra hlavicek cstd (zaklad libc systemu MagnumOpus).
  *
- * Implementace funkci je v Rustu (libs/cstd/src), hlavicky jen deklaruji
+ * Implementace funkci je v Rustu (libs/cstd-core/src), hlavicky jen deklaruji
  * rozhrani C. Typy size_t, stdint, stdarg a stdbool dodava clang
  * (-ffreestanding -nostdlibinc ponecha jeho vestavene hlavicky).
  */

@@ -485,6 +485,9 @@ and arms for gix, the stack guard page.
 
 ### libc/POSIX layer (cstd) for FFmpeg
 
+Part 1 is done, description and plan: [The C library (cstd)](cstd.md).
+
+
 - **One runtime per process.** A Rust program with linked C (FFmpeg in a
   media player) must have one allocator (`malloc` = the libos heap,
   already today), one TLS (`errno` and `_Thread_local` in C need native

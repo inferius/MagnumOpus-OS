@@ -22,7 +22,7 @@ Vynecháno / Left out: `source/components/{debugger,disassembler}`,
 `source/compiler` (iASL), `source/tools`, `source/os_specific`, testy a
 dokumentace. Nepřekládá se / Not compiled: `resources/rsdump.c` (ladicí
 výpis), `utilities/utprint.c` (vlastní `printf` ACPICA - máme ho v
-`libs/cstd`).
+`libs/cstd-core`).
 
 ## Zásahy / Edits
 

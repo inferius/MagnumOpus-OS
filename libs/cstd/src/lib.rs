@@ -1,65 +1,42 @@
-//! cstd - zaklad vlastni knihovny C systemu.
+//! cstd - knihovna C a vrstva POSIX pro aplikace se std (cil magnumopus).
 //!
-//! Funkce standardni knihovny C s ABI C, napsane v Rustu: kod v C
-//! (prevzaty jako ACPICA, pozdeji prenesene ovladace DRM, vlastni libc)
-//! je vola pres hlavicky v `libs/cstd/include`. Zatim jen to, co nepotrebuje
-//! sluzby systemu (soubory, vlakna, cas):
+//! Stoji nad `std` (a rozsirenimi `std::os::magnumopus`), takze proces ma
+//! vzdy jeden runtime: alokator, TLS, vlakna i stdio sdili s kodem v Rustu
+//! (navrh: docs/cs/cstd.md). Spolecne casti bez systemovych sluzeb
+//! (retezce, ctype, `malloc`, `snprintf`, ochrana zasobniku) jsou v
+//! `cstd-core`, ktery pouzivaji i sluzby no_std.
 //!
-//! - `string.h`: retezce (`strlen`, `strcmp`, ...) a `memchr`; `memcpy`,
-//!   `memmove`, `memset` a `memcmp` dodava `compiler_builtins` (je v kazdem
-//!   programu v Rustu, stejne symboly by se tloukly),
-//! - `ctype.h`: tridy znaku ASCII,
-//! - `stdlib.h`: `malloc`/`calloc`/`realloc`/`free` nad alokatorem programu,
-//!   `strtoul` a spol., `abort`,
-//! - `stdio.h`: `printf`, `vprintf`, `snprintf`, `vsnprintf`, `puts`,
-//!   `putchar` - vystup jde po radcich do logu programu ([`set_output`]),
-//! - ochrana zasobniku (`__stack_chk_guard`, `__stack_chk_fail`) pro
-//!   priznak `-fstack-protector-strong`, se kterym se vsechno C preklada.
+//! Cast 1: `errno.h`, `stdio.h` (FILE, soubory, stdin/stdout/stderr),
+//! `stdlib.h` (`exit`, `atexit`, `getenv`, `abort`), `assert`.
 //!
-//! Zamerne chybi funkce bez kontroly delky (`sprintf`, `gets`, `strtok`):
-//! kod, ktery je potrebuje, se musi upravit, ne prelozit.
+//! Program v C: crate `#![no_main]` s `extern crate cstd;`, ktery v
+//! `build.rs` prelozi zdroje C (`cbuild`); adresare hlavicek dostane od
+//! cargo v promenne `DEP_CSTD_INCLUDE` (oddelene `;`, viz build.rs).
+//! osrt pri startu zavola C `main(argc, argv)`.
 //!
-//! Crate nezavisi na libos (testy bezi na hostiteli). Program nastavi vystup
-//! a seminko kanarku na zacatku `main`, pred prvnim volanim kodu v C:
-//!
-//! ```ignore
-//! cstd::set_output(|b| libos::log::write_bytes(b));
-//! cstd::init_stack_guard(libos::random::u64());
-//! ```
-//!
-//! `#![no_builtins]`: LLVM jinak smycku ve `strlen` "optimalizuje" na volani
-//! `strlen` (nekonecna rekurze) - stejne jako `compiler_builtins`.
+//! Symboly C se exportuji jen na cili magnumopus: na hostiteli
+//! by se tloukly se systemovou libc (testy logiky bezi na hostiteli).
 
-#![cfg_attr(not(test), no_std)]
-#![no_builtins]
-// `char` bereme jako `u8` (znamenko `char` se mezi x86_64 a aarch64 lisi,
-// na ABI nema vliv); rustc by jinak varoval u `strlen` a `memchr`.
-#![allow(suspicious_runtime_symbol_definitions)]
+#![allow(non_camel_case_types)]
 
-extern crate alloc;
+// Symboly cstd-core (strlen, malloc, snprintf, ...) se musi prilinkovat.
+extern crate cstd_core;
 
-pub mod ctype;
-pub mod format;
-pub mod ssp;
+pub mod errno;
 pub mod stdio;
 pub mod stdlib;
-pub mod string;
 
-pub use ssp::init_stack_guard;
-pub use stdio::{flush, set_output};
+#[cfg(test)]
+mod tests;
 
-/// Typy jazyka C na nasich cilech (LP64: `long` ma 64 bitu).
-#[allow(non_camel_case_types)]
-pub mod ctypes {
-    pub type c_char = u8;
-    pub type c_int = i32;
-    pub type c_uint = u32;
-    pub type c_long = i64;
-    pub type c_ulong = u64;
-    pub type size_t = usize;
+pub use cstd_core::ctypes::{c_char, c_int, c_long, c_uint, c_ulong, size_t};
+
+/// Retezec C (`*const c_char` zakonceny nulou) jako bajty.
+///
+/// # Safety
+///
+/// `s` je platny retezec zakonceny nulou.
+pub(crate) unsafe fn c_bytes<'a>(s: *const c_char) -> &'a [u8] {
+    // SAFETY: predano volajicim.
+    unsafe { core::slice::from_raw_parts(s, cstd_core::string::strlen(s)) }
 }
-
-#[cfg(test)]
-mod format_tests;
-#[cfg(test)]
-mod string_tests;

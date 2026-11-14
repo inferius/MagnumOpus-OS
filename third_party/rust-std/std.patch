@@ -363,10 +363,10 @@ index 0000000..78f53c6
 +}
 diff --git a/std/src/os/magnumopus/mod.rs b/std/src/os/magnumopus/mod.rs
 new file mode 100644
-index 0000000..b87321c
+index 0000000..90ca713
 --- /dev/null
 +++ b/std/src/os/magnumopus/mod.rs
-@@ -0,0 +1,16 @@
+@@ -0,0 +1,17 @@
 +//! Rozsireni std pro MagnumOpus.
 +
 +#![stable(feature = "rust1", since = "1.0.0")]
@@ -375,6 +375,7 @@ index 0000000..b87321c
 +pub mod ffi;
 +pub mod fs;
 +pub mod process;
++pub mod rt;
 +
 +/// Rozsirujici traity (`use std::os::magnumopus::prelude::*`).
 +#[stable(feature = "rust1", since = "1.0.0")]
@@ -420,6 +421,31 @@ index 0000000..bdd315a
 +
 +#[stable(feature = "rust1", since = "1.0.0")]
 +impl Sealed for process::Command {}
+diff --git a/std/src/os/magnumopus/rt.rs b/std/src/os/magnumopus/rt.rs
+new file mode 100644
+index 0000000..8ca2855
+--- /dev/null
++++ b/std/src/os/magnumopus/rt.rs
+@@ -0,0 +1,19 @@
++//! Behove prostredi procesu (osrt) pro knihovny nad std, napr. knihovnu C
++//! `cstd`.
++
++#![stable(feature = "rust1", since = "1.0.0")]
++
++/// Zaregistruje funkci volanou pri ukonceni procesu (`exit`, navrat
++/// z `main`), v obracenem poradi registrace; `false` = prilis mnoho
++/// registraci (C `atexit`).
++#[stable(feature = "rust1", since = "1.0.0")]
++pub fn at_exit(f: extern "C" fn()) -> bool {
++    osrt::at_exit(f)
++}
++
++/// Ukonci proces hned, bez funkci `at_exit` a bez vyprazdneni bufferu
++/// (C `_Exit`).
++#[stable(feature = "rust1", since = "1.0.0")]
++pub fn exit_now(code: i32) -> ! {
++    osrt::exit_now(code)
++}
 diff --git a/std/src/os/mod.rs b/std/src/os/mod.rs
 index f95c6ac..2ca68ab 100644
 --- a/std/src/os/mod.rs

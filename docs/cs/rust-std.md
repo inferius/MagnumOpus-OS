@@ -458,6 +458,9 @@ a větve pro gix, strážní stránka zásobníku.
 
 ### libc/POSIX vrstva (cstd) pro FFmpeg
 
+Část 1 je hotová, popis a plán: [Knihovna C (cstd)](cstd.md).
+
+
 - **Jeden runtime na proces.** Program v Rustu s přilinkovaným C (FFmpeg
   v přehrávači) musí mít jeden alokátor (`malloc` = heap libos, už dnes),
   jedno TLS (`errno` a `_Thread_local` v C potřebují nativní ELF TLS, ne

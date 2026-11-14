@@ -101,6 +101,31 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+## FFmpeg (plánováno / planned)
+
+Zatím není v repozitáři; pravidla platí od prvního převzatého kódu.
+Not in the repository yet; the rules apply from the first vendored code.
+
+- **Licence / Licence:** jen LGPL-2.1-or-later. Nikdy `--enable-gpl`,
+  `--enable-version3` jen po kontrole, nikdy `--enable-nonfree`. / Only
+  LGPL-2.1-or-later. Never `--enable-gpl`, `--enable-version3` only after a
+  review, never `--enable-nonfree`.
+- **Použití / Use:** samostatný izolovaný proces (služba přehrávání
+  a dekódování), aplikace FFmpeg nelinkují. Povinnost LGPL (znovu slinkovat
+  upravenou knihovnu) se týká jen binárky tohoto procesu. / A separate
+  isolated process (the playback and decoding service); applications do not
+  link FFmpeg. The LGPL relinking obligation applies only to that process
+  binary.
+- **Co dodáme / What we ship:** zdroje použité verze, naše úpravy
+  (patche) a skript sestavení procesu, kterým si uživatel proces sestaví
+  s vlastní verzí knihovny; později dynamické linkování (stačí vyměnit
+  sdílenou knihovnu). / The sources of the version used, our changes
+  (patches) and the build script for the process, so users can rebuild it
+  with their own version of the library; later dynamic linking (replacing
+  the shared library is enough).
+- **Popis / Description:** `docs/cs/cstd.md` (kapitola FFmpeg a licence),
+  `docs/en/cstd.md`.
+
 ## Písmo Tuffy / Tuffy font
 
 - **Název / Name:** Tuffy Regular

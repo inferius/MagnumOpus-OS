@@ -68,7 +68,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "cbuild",
- "cstd",
+ "cstd-core",
 ]
 
 [[package]]
@@ -77,7 +77,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "acpica",
- "cstd",
+ "cstd-core",
  "libos",
  "powerproto",
  "spin 0.12.3",
@@ -657,6 +657,21 @@ version = "0.1.0"
 [[package]]
 name = "cstd"
 version = "0.1.0"
+dependencies = [
+ "cstd-core",
+]
+
+[[package]]
+name = "cstd-core"
+version = "0.1.0"
+
+[[package]]
+name = "ctest"
+version = "0.1.0"
+dependencies = [
+ "cbuild",
+ "cstd",
+]
 
 [[package]]
 name = "ctr"

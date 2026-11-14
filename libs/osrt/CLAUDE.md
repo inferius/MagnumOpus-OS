@@ -4,7 +4,8 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 
 ## Klíčové soubory
 
-- `src/start.rs` - `_start`, startovní zpráva, rozdělení handlů podle štítků `abi::params::tag`.
+- `src/start.rs` - `_start`, startovní zpráva, rozdělení handlů podle štítků `abi::params::tag`; volá `main(argc, argv)` (z rustc nebo z programu v C, `c_argv`).
+- `src/lib.rs` - `exit` (nejdřív funkce `at_exit` v obráceném pořadí), `exit_now` (bez nich, C `_Exit`), `at_exit` (max 1024; C `atexit` a vyprázdnění stdio knihovny `cstd`, v std `os::magnumopus::rt`).
 - `src/tls.rs` - bloky TLS (local-exec, varianta II x86_64 / I aarch64; posuny musí sedět s lld).
 - `src/stdio.rs`, `src/pipe.rs` - protokol proudu bajtů; `src/process.rs` - `LAUNCH` ke launchd; `src/net.rs` - std::net (zámky do netproto v2).
 
@@ -13,10 +14,11 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 - Crate se překládá jako závislost std (`rustc-dep-of-std`): závislosti jen naše crates s toutéž feature a vendorované crates z rust-src; libos vždy s `default-features = false` (bez `rt`).
 - Handle vlastního procesu se nesmí zavřít (`start::init` ho zapomene).
 - Nové vlákno nastaví TP jako první věc, před jakýmkoli kódem std.
+- `at_exit` volá funkce bez drženého zámku (smí registrovat další); `exit_now` je nevolá.
 
 ## Testy
 
-- `cargo check -p osrt --target x86_64-unknown-none` (rychlá kontrola), QEMU: `cargo xtask test --only "std,std sit,std procesy,std porty"`.
+- `cargo check -p osrt --target x86_64-unknown-none` (rychlá kontrola), QEMU: `cargo xtask test --only "std,std sit,std procesy,std porty,cstd"`.
 - Změna lepidla std: upravit `target/std-src/<nightly>/library`, `cargo xtask std`, `cargo xtask std-patch`, commit `std.patch`.
 
 ## Pasti

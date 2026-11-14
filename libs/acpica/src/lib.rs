@@ -5,7 +5,7 @@
 //! - konfigurace platformy: `include/acmagnum.h`,
 //! - preklad: `build.rs` pres `libs/cbuild` (stejne priznaky a ochrany jako
 //!   veskery kod v C),
-//! - knihovna C: `libs/cstd` (crate se prilinkuje sam - ACPICA vola
+//! - knihovna C: `libs/cstd-core` (crate se prilinkuje sam - ACPICA vola
 //!   `strlen`, `memcpy`, ...),
 //! - vrstvu OS (`AcpiOs*`) dodava program, ktery ACPICA pouziva
 //!   (`user/acpid/src/osl`); bez ni se program neslinkuje.

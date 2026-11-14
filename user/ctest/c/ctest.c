@@ -1,0 +1,130 @@
+/*
+ * Test knihovny cstd: program v C nad std (docs/cs/cstd.md). Kazda
+ * kontrola vypise "ok <jmeno>"; init (sada "cstd") overi vystup a kod.
+ * Posledni radek "ctest: hotovo" vypise funkce atexit az po navratu
+ * z main - overuje tak atexit i vyprazdneni stdout pri konci.
+ */
+#include <assert.h>
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static int failures;
+
+#define CHECK(name, cond)                                              \
+    do {                                                               \
+        if (cond) {                                                    \
+            printf("ok %s\n", name);                                   \
+        } else {                                                       \
+            fprintf(stderr, "ctest: selhalo %s (%s:%d)\n", name,       \
+                    __FILE__, __LINE__);                               \
+            failures++;                                                \
+        }                                                              \
+    } while (0)
+
+static void last_words(void) {
+    /* Bez konce radku: vyprazdnit musi az konec procesu. */
+    printf("ctest: hotovo");
+}
+
+static void first_registered(void) {
+    printf("\n");
+}
+
+static int args(int argc, char **argv) {
+    return argc == 3 && strcmp(argv[0], "ctest") == 0 &&
+           strcmp(argv[1], "jedna") == 0 && strcmp(argv[2], "dva") == 0 &&
+           argv[3] == NULL;
+}
+
+static int formatting(void) {
+    char buf[64];
+    int n = snprintf(buf, sizeof buf, "%d|%5s|%-3x|%lu|%c|%%", -42, "ab", 255,
+                     (unsigned long)123456789, 'z');
+    return n == (int)strlen(buf) && strcmp(buf, "-42|   ab|ff |123456789|z|%") == 0;
+}
+
+static int memory(void) {
+    char *p = malloc(10);
+    if (p == NULL) return 0;
+    memcpy(p, "123456789", 10);
+    p = realloc(p, 100000);
+    if (p == NULL || strcmp(p, "123456789") != 0) return 0;
+    free(p);
+    int *z = calloc(1000, sizeof(int));
+    for (int i = 0; i < 1000; i++)
+        if (z[i] != 0) return 0;
+    free(z);
+    return 1;
+}
+
+static int files(const char *dir) {
+    char path[256];
+    snprintf(path, sizeof path, "%s/ctest.txt", dir);
+    remove(path);
+    FILE *f = fopen(path, "w");
+    if (f == NULL) return 0;
+    for (int i = 0; i < 1000; i++) fprintf(f, "radek %d\n", i);
+    if (fputs("konec\n", f) != 0 || fclose(f) != 0) return 0;
+
+    f = fopen(path, "r");
+    if (f == NULL) return 0;
+    char line[64];
+    int count = 0;
+    while (fgets(line, sizeof line, f) != NULL) {
+        if (count < 1000) {
+            char want[32];
+            snprintf(want, sizeof want, "radek %d\n", count);
+            if (strcmp(line, want) != 0) return 0;
+        }
+        count++;
+    }
+    if (count != 1001 || !feof(f) || strcmp(line, "konec\n") != 0) return 0;
+    if (fseek(f, 6, SEEK_SET) != 0 || fgetc(f) != '0' || ftell(f) != 7) return 0;
+    fclose(f);
+
+    /* Pripojeni na konec a cteni po blocich. */
+    f = fopen(path, "a+");
+    if (f == NULL || fwrite("XYZ", 1, 3, f) != 3) return 0;
+    fseek(f, -4, SEEK_END);
+    char tail[8] = {0};
+    if (fread(tail, 1, 8, f) != 4 || memcmp(tail, "\nXYZ", 4) != 0) return 0;
+    fclose(f);
+
+    char renamed[256];
+    snprintf(renamed, sizeof renamed, "%s/ctest2.txt", dir);
+    remove(renamed);
+    if (rename(path, renamed) != 0) return 0;
+    if (fopen(path, "r") != NULL || errno != ENOENT) return 0;
+    return remove(renamed) == 0;
+}
+
+static int errors(void) {
+    errno = 0;
+    FILE *f = fopen("/neexistuje/soubor", "r");
+    if (f != NULL || errno != ENOENT) return 0;
+    if (strcmp(strerror(ENOENT), "No such file or directory") != 0) return 0;
+    errno = 0;
+    if (fopen("/x", "q") != NULL || errno != EINVAL) return 0;
+    perror("ctest perror");
+    return 1;
+}
+
+int main(int argc, char **argv) {
+    atexit(first_registered);
+    atexit(last_words);
+
+    CHECK("args", args(argc, argv));
+    const char *dir = getenv("CTEST_DIR");
+    CHECK("getenv", dir != NULL && getenv("NEEXISTUJE") == NULL &&
+                        strcmp(getenv("CTEST_HELLO"), "svet") == 0);
+    CHECK("format", formatting());
+    CHECK("memory", memory());
+    CHECK("files", dir != NULL && files(dir));
+    CHECK("errno", errors());
+    assert(failures == 0);
+    fputs("chyba na stderr\n", stderr);
+    fflush(stdout);
+    return failures == 0 ? 0 : 1;
+}

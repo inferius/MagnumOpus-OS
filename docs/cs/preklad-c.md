@@ -6,9 +6,11 @@ z Linuxu (přes vrstvu kompatibility) a vlastní libc. Tahle stránka popisuje,
 jak se C zapojuje do sestavení, na čem stojí (knihovna `cstd`) a jak se
 hlídá jeho bezpečnost.
 
-> **Stav:** hotový překlad (clang, `libs/cbuild`), základ libc (`libs/cstd`:
-> řetězce, paměť, ctype, `printf` do logu, ochrana zásobníku) a první
-> uživatel ACPICA. Soubory (`fopen`), vlákna a čas v libc zatím nejsou.
+> **Stav:** hotový překlad (clang, `libs/cbuild`), základ libc
+> (`libs/cstd-core`: řetězce, paměť, ctype, `printf` do logu, ochrana
+> zásobníku) a první uživatel ACPICA. Pro aplikace se std je vrstva POSIX
+> (soubory `FILE`, `errno`, `atexit`) v knihovně [cstd](cstd.md)
+> **[ověřeno v QEMU]**; vlákna a čas v libc zatím nejsou.
 
 ## Jak se C zapojí do sestavení
 
@@ -22,7 +24,7 @@ hlídá jeho bezpečnost.
 <rect class="box" x="550" y="20" width="220" height="80" rx="6"/><text class="t b" x="660" y="45" text-anchor="middle">libacpica.a</text><text class="m" x="660" y="64" text-anchor="middle">llvm-ar, v OUT_DIR</text><text class="m" x="660" y="80" text-anchor="middle">cargo:rustc-link-lib</text>
 <path class="ln" d="M660 100 L660 150" marker-end="url(#pc1)"/>
 <rect class="ok" x="430" y="152" width="340" height="80" rx="6"/><text class="t b" x="600" y="177" text-anchor="middle">program (rust-lld)</text><text class="m" x="600" y="196" text-anchor="middle">kód v Rustu + knihovna C + cstd</text><text class="m" x="600" y="212" text-anchor="middle">+ compiler_builtins (memcpy, memset)</text>
-<rect class="box" x="10" y="152" width="380" height="80" rx="6"/><text class="t b" x="200" y="177" text-anchor="middle">libs/cstd (Rust, ABI C)</text><text class="m" x="200" y="196" text-anchor="middle">include/*.h: string, stdlib, ctype, stdio, assert</text><text class="m" x="200" y="212" text-anchor="middle">strlen, malloc, printf, __stack_chk_*</text>
+<rect class="box" x="10" y="152" width="380" height="80" rx="6"/><text class="t b" x="200" y="177" text-anchor="middle">libs/cstd-core (Rust, ABI C)</text><text class="m" x="200" y="196" text-anchor="middle">include/*.h: string, stdlib, ctype, stdio, assert</text><text class="m" x="200" y="212" text-anchor="middle">strlen, malloc, printf, __stack_chk_*</text>
 <path class="ln" d="M390 192 L428 192" marker-end="url(#pc1)"/>
 </svg>
 <figcaption>C se překládá v build.rs crate, který ho obsahuje; výsledná statická knihovna se slinkuje s programem spolu s cstd.</figcaption>
@@ -36,7 +38,8 @@ hlídá jeho bezpečnost.
 3. Cargo knihovnu přilinkuje (`cargo:rustc-link-lib=static=...`) k programu,
    který crate používá. Linkuje rust-lld spolu s kódem v Rustu.
 4. Funkce, které kód v C potřebuje od systému, dodá Rust s ABI C
-   (`#[unsafe(no_mangle)] extern "C"`): knihovna C je `libs/cstd`, služby
+   (`#[unsafe(no_mangle)] extern "C"`): knihovna C je `libs/cstd-core` (služby
+   no_std) nebo `libs/cstd` (aplikace se std, [cstd](cstd.md)), služby
    OS konkrétní program (ACPICA: `user/acpid/src/osl`).
 
 Znovu se překládá jen to, co se změnilo (čas souboru proti `.o`); změna
@@ -60,7 +63,7 @@ fn main() {
     cbuild::Build::new("foo")
         .trust(cbuild::Trust::Own)          // vlastní kód: varování = chyba
         .include("include")
-        .include("../cstd/include")         // libc systému
+        .include("../cstd-core/include")    // libc systému (služba no_std)
         .file("c/foo.c")
         .compile();
 }
@@ -68,7 +71,7 @@ fn main() {
 
 ```toml
 [dependencies]
-cstd = { path = "../cstd" }                # knihovna C se přilinkuje
+cstd = { package = "cstd-core", path = "../cstd-core" }  # knihovna C se přilinkuje
 
 [build-dependencies]
 cbuild = { path = "../cbuild" }
@@ -83,9 +86,10 @@ a hlavičky převzatého kódu ve vlastním kódu přes `include_system`
 | Příznak | Proč |
 |---|---|
 | `--target=x86_64-unknown-none-elf` / `aarch64-unknown-none-elf` | stejné ABI jako cíle Rustu (ELF, bez OS) |
-| `-mgeneral-regs-only` | programy jsou soft-float (bez FPU/SIMD), stejně jako kód v Rustu |
+| `-mgeneral-regs-only` | služby jsou soft-float (bez FPU/SIMD), stejně jako kód v Rustu |
 | `-mno-red-zone`, `-mcmodel=small` (x86) | stejný model jako cíl Rustu |
 | `-mstrict-align` (aarch64) | jako cíl Rustu; nezarovnaný přístup do registrů zařízení = výjimka |
+| aplikace se std (`*-unknown-magnumopus`) | bez `-mgeneral-regs-only` a `-mstrict-align` (hard-float SSE2 / NEON jako cíl Rustu), navíc `-ftls-model=local-exec` (`_Thread_local` a `errno` v TLS programu), na x86_64 `-mcmodel=small`; viz [cstd](cstd.md) |
 | `-ffreestanding -nostdlibinc` | žádné hlavičky hostitele (Windows SDK, glibc), jen clangu a cstd |
 | `-fno-pic -fno-common -ffunction-sections -fdata-sections` | statické programy, nepoužité funkce vyhodí linker |
 | `-O2` | AML interpret a podobný kód je bez optimalizace mnohonásobně pomalejší |
@@ -110,10 +114,14 @@ Na zvážení dál: `-fsanitize=bounds -fsanitize-trap` (meze polí bez
 běhové knihovny; ACPICA má pole proměnné délky deklarovaná jako `[1]`,
 muselo by se ověřit), CFI (`-fsanitize=cfi` potřebuje LTO).
 
-## Knihovna `cstd`
+## Knihovna `cstd-core`
+
+Základ sdílený službami no_std a aplikacemi; vrstvu POSIX pro aplikace
+se std popisuje [cstd](cstd.md).
+
 
 Základ vlastní libc, napsaný v Rustu (testovatelný na hostiteli:
-`cargo test -p cstd`). Hlavičky jsou v `libs/cstd/include`; typy
+`cargo test -p cstd-core`). Hlavičky jsou v `libs/cstd-core/include`; typy
 `stddef.h`, `stdint.h`, `stdarg.h`, `stdbool.h` a `limits.h` dodává clang.
 
 | Hlavička | Funkce |
@@ -138,10 +146,9 @@ není (programy jsou bez FPU, vypíše se `?`).
 
 ### Plán: vlastní libc a přenos dalšího C
 
-- **libc nad libos** (milník jazyků): soubory (`FILE`, `fopen` nad fsd),
-  `errno`, čas, vlákna (`pthread` nad `libos::thread`), `qsort`, `bsearch`,
-  plovoucí čárka. Staví se na stejných hlavičkách a stejném postupu
-  (Rust s ABI C, hlavičky v `include`).
+- **libc pro aplikace** je [cstd](cstd.md) nad Rust std (část 1:
+  `FILE`, `errno`, `atexit`, `getenv`); další části (vlákna, čísla fd, čas,
+  plovoucí čárka) popisuje tamní plán.
 - **Ovladače DRM z Linuxu**: vrstva kompatibility (`linux/*.h` na
   primitiva systému) bude další crate s `build.rs` přes `cbuild`; ovladač
   poběží jako proces v userspace jako ostatní ovladače.

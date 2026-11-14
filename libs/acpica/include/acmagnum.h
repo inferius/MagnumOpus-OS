@@ -3,7 +3,7 @@
  * jediny zasah do prevzatych zdroju, viz third_party/acpica/README.md).
  *
  * ACPICA bezi jako sluzba v userspace (user/acpid). Vrstva OS (AcpiOs*) je
- * v Rustu (user/acpid/src/osl), knihovna C je libs/cstd.
+ * v Rustu (user/acpid/src/osl), knihovna C je libs/cstd-core.
  */
 #ifndef __ACMAGNUM_H__
 #define __ACMAGNUM_H__

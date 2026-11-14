@@ -72,8 +72,25 @@ extern "C" fn _start() -> ! {
 }
 
 unsafe extern "C" {
-    /// Vygeneruje rustc pro binarku se `std` (`lang_start`).
+    /// Vygeneruje rustc pro binarku se `std` (`lang_start`), nebo je to
+    /// `main` programu v C (crate `#![no_main]` s knihovnou `cstd`).
     fn main(argc: i32, argv: *const *const u8) -> i32;
+}
+
+/// `argv` pro C: retezce zakoncene nulou a pole ukazatelu zakoncene NULL
+/// (zije do konce procesu). std argumenty cte samo pres `env::args`.
+fn c_argv() -> (i32, *const *const u8) {
+    let args = crate::env::args();
+    let mut ptrs: alloc::vec::Vec<*const u8> = alloc::vec::Vec::with_capacity(args.len() + 1);
+    for a in args {
+        let mut s = alloc::vec::Vec::with_capacity(a.len() + 1);
+        s.extend_from_slice(a);
+        s.push(0);
+        ptrs.push(alloc::boxed::Box::leak(s.into_boxed_slice()).as_ptr());
+    }
+    ptrs.push(ptr::null());
+    let argc = i32::try_from(args.len()).unwrap_or(i32::MAX);
+    (argc, alloc::boxed::Box::leak(ptrs.into_boxed_slice()).as_ptr())
 }
 
 extern "C" fn start_rust(bootstrap: u64) -> ! {
@@ -82,8 +99,10 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
     let startup = libos::rt::startup(bootstrap, |_| {});
     // SAFETY: bezi jen toto vlakno, nikdo nic necte.
     unsafe { init(startup) };
-    // SAFETY: `main` vygeneroval rustc; argumenty cte std pres `env`.
-    let code = unsafe { main(0, ptr::null()) };
+    let (argc, argv) = c_argv();
+    // SAFETY: `main` vygeneroval rustc nebo je z programu v C; `argv`
+    // zije do konce procesu.
+    let code = unsafe { main(argc, argv) };
     crate::exit(code)
 }
 
