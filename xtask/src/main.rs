@@ -429,7 +429,7 @@ fn run_cli() -> Result<()> {
             let expect: Vec<&str> = if opts.edu { vec!["edu"] } else { Vec::new() };
             opts.extra_initfs.push((
                 String::from("driver-test"),
-                drivers::test_plan(&expect, opts.test_driver.as_deref()).into_bytes(),
+                drivers::test_plan(&expect, opts.test_driver.as_deref(), &opts.iommu).into_bytes(),
             ));
             // Pomocne servery pro testy site bezi, dokud bezi xtask.
             let helper = nethelper::start()?;
