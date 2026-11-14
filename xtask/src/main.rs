@@ -19,6 +19,7 @@ mod audio;
 mod boottest;
 mod crashtest;
 mod datadisk;
+mod dynlink;
 mod drivers;
 mod docs;
 mod docs_books;
@@ -622,6 +623,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "elf",
             "--package",
+            "dynload",
+            "--package",
             "initfs",
             "--package",
             "tz",
@@ -1048,6 +1051,9 @@ fn build(opts: &Options) -> Result<Artifacts> {
     cargo_build(&programs, a.user_target, opts, true)?;
     // Aplikace se std (vlastni cil a sysroot, docs/cs/rust-std.md).
     let std_bin = stdsys::build_apps(stdsys::STD_PROGRAMS, opts)?;
+    // Zavadec sdilenych knihoven a testovaci moduly v C.
+    let ld = dynlink::build_ld(opts)?;
+    let dl_tests = dynlink::build_tests(opts)?;
     let target = target_dir();
     let profile = profile_dir(opts);
 
@@ -1068,6 +1074,10 @@ fn build(opts: &Options) -> Result<Artifacts> {
             .map_err(|e| format!("nelze cist aplikaci {name}: {e}"))?;
         files.push((name.to_string(), loadable_only(&data)));
     }
+    // ET_DYN se do initfs dava cele (zavadec cte dynamickou cast pres
+    // segmenty; `loadable_only` je jen pro ET_EXEC).
+    files.push((String::from("lib/ld.so"), std::fs::read(&ld).map_err(|e| format!("nelze cist zavadec: {e}"))?));
+    files.extend(dl_tests);
     for (name, path) in INITFS_FILES {
         let data = std::fs::read(workspace_root().join(path))
             .map_err(|e| format!("nelze cist {path}: {e}"))?;

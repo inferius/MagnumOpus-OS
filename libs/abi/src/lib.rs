@@ -14,11 +14,13 @@
 #![cfg_attr(not(test), no_std)]
 
 pub mod acpi;
+pub mod auxv;
 pub mod bootstrap;
 pub mod error;
 pub mod exception;
 pub mod job;
 pub mod limits;
+pub mod loader;
 pub mod object;
 pub mod params;
 pub mod process;

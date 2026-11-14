@@ -1,0 +1,19 @@
+[package]
+name = "ld"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Zavadec sdilenych knihoven ld.so (static-PIE, docs/cs/dynamicke-linkovani.md)"
+
+[[bin]]
+name = "ld"
+test = false
+bench = false
+
+[dependencies]
+# Bez vlastniho runtime libos (vstup, heap a panic handler ma zavadec svuj).
+libos = { path = "../../libs/libos", default-features = false }
+abi.workspace = true
+elf.workspace = true
+dynload = { path = "../../libs/dynload" }

@@ -433,6 +433,9 @@ dependencies = [
 [[package]]
 name = "cbuild"
 version = "0.1.0"
+dependencies = [
+ "elf",
+]
 
 [[package]]
 name = "cc"
@@ -822,6 +825,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dltest-rs"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "libos",
+]
+
+[[package]]
 name = "dns"
 version = "0.1.0"
 dependencies = [
@@ -856,6 +867,13 @@ dependencies = [
  "conf",
  "libos",
  "pci",
+]
+
+[[package]]
+name = "dynload"
+version = "0.1.0"
+dependencies = [
+ "elf",
 ]
 
 [[package]]
@@ -1727,6 +1745,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 dependencies = [
  "spin 0.9.9",
+]
+
+[[package]]
+name = "ld"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "dynload",
+ "elf",
+ "libos",
 ]
 
 [[package]]
@@ -3624,6 +3652,7 @@ dependencies = [
  "accountproto",
  "accounts",
  "bytes",
+ "cbuild",
  "diskguard",
  "dns",
  "driverkit",

@@ -18,6 +18,7 @@ mod drivers;
 mod driverkit;
 mod events;
 mod firewall;
+mod dynlink;
 mod fpu;
 mod fpu_avx;
 mod fs;
@@ -90,6 +91,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("procesy", exceptions::TESTS),
     ("procesy", exceptions_fast::TESTS),
     ("procesy", fpu::TESTS),
+    ("procesy", dynlink::TESTS),
     ("joby", jobs::TESTS),
     ("ovladace", drivers::TESTS),
     ("ovladace z manifestu", driverkit::TESTS),

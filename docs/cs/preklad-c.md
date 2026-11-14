@@ -95,6 +95,21 @@ a hlavičky převzatého kódu ve vlastním kódu přes `include_system`
 | `-O2` | AML interpret a podobný kód je bez optimalizace mnohonásobně pomalejší |
 | `-std=c11` | jazyk ACPICA i Linuxu |
 
+## Sdílené knihovny a programy PIE
+
+**[implementováno]** (host test `cbuild`: `link_skutecne_moduly`, obě
+architektury) `Build::link(cíl, adresář, výstup, &Link)` přeloží zdroje
+s `-fPIC` a slinkuje je **přímo `ld.lld`** (driver clang u cílů
+`*-none-elf` `-shared` ignoruje a cíl linuxu by tahal předpoklady
+hostitele). `Link::shared("libx.so.1")` = knihovna se `SONAME` (soubor se
+jmenuje stejně), `Link::pie()` = program se zavaděčem `/system/lib/ld.so`;
+`.needs(knihovna)` přidá `DT_NEEDED`, `.runpath("$ORIGIN")` `DT_RUNPATH`.
+Příznaky linkeru (`link_flags`): `-z now -z relro` (vše hned, GOT pak jen
+pro čtení), `-z text` (relokace v kódu = chyba, W^X), `-z
+max-page-size=65536`, `--hash-style=both`, `-z pack-relative-relocs`
+(RELR), `--gc-sections`. Volá ho xtask, ne `build.rs`. Zavaděč a návrh:
+[dynamicke-linkovani.md](dynamicke-linkovani.md).
+
 ## Jak se hlídá bezpečnost
 
 Kód v C nemá kontroly paměti Rustu. Proto:

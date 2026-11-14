@@ -1,0 +1,9 @@
+[package]
+name = "dynload"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Logika zavadece ld.so bez systemu: rozlozeni TLS, hodnoty relokaci, cesty knihoven (testy na hostiteli)"
+
+[dependencies]
+elf.workspace = true

@@ -1,0 +1,99 @@
+//! Rozhrani zavadece `ld.so` pro behove prostredi programu (DL-3,
+//! `docs/cs/dynamicke-linkovani.md`).
+//!
+//! Zavadec zapise adresu tabulky [`Interface`] do auxv programu (typ
+//! [`AT_MO_LOADER`]) a pri skoku na vstup programu preda navic SP (auxv)
+//! a [`ENTRY_MAGIC`] (x86_64 `rsi`, `rdx`; aarch64 `x1`, `x2`). Behove
+//! prostredi (libos, crt) tak pozna, ze bezi pod zavadecem, a pres tabulku:
+//!
+//! - dostane blok TLS pro nove vlakno (staticke TLS vsech modulu),
+//! - pri konci procesu zavola finalizatory modulu,
+//! - projde nahrane moduly (`dl_iterate_phdr`).
+//!
+//! Kod v C vola funkce zavadece jmenem (`dl_iterate_phdr`, `__tls_get_addr`,
+//! pozdeji `dlopen` ...): zavadec je resi jako vestavene symboly.
+
+/// Typ auxv s adresou [`Interface`] (mimo rozsah SysV, "MO").
+pub const AT_MO_LOADER: u64 = 0x4D4F_0001;
+
+/// Hodnota v tretim argumentu vstupu programu od zavadece ("MOLD").
+pub const ENTRY_MAGIC: u64 = 0x4D4F_4C44;
+
+/// Verze tabulky (nova pole jen na konec, `size` rika kolik jich je).
+pub const VERSION: u32 = 1;
+
+/// Informace o modulu pro `dl_iterate_phdr` (rozlozeni jako glibc
+/// `struct dl_phdr_info`, aby slo predat prevzatemu kodu).
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct PhdrInfo {
+    /// Baze modulu.
+    pub addr: u64,
+    /// Jmeno (C retezec; program = "").
+    pub name: *const u8,
+    /// Programove hlavicky v pameti.
+    pub phdr: *const u8,
+    pub phnum: u16,
+    /// Pocet nahrani a odstraneni modulu (zmena = seznam se zmenil).
+    pub adds: u64,
+    pub subs: u64,
+    /// Cislo modulu TLS (0 = bez TLS) a data TLS volajiciho vlakna.
+    pub tls_modid: u64,
+    pub tls_data: *mut u8,
+}
+
+/// Vysledek `dladdr` (rozlozeni jako glibc `Dl_info`).
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct DlInfo {
+    /// Jmeno modulu (C retezec).
+    pub fname: *const u8,
+    /// Baze modulu.
+    pub fbase: u64,
+    /// Nejblizsi symbol (C retezec) a jeho adresa; null/0 = neznamy.
+    pub sname: *const u8,
+    pub saddr: u64,
+}
+
+/// Priznaky `dlopen` (hodnoty jako glibc).
+pub mod rtld {
+    pub const LAZY: i32 = 1;
+    pub const NOW: i32 = 2;
+    pub const GLOBAL: i32 = 0x100;
+    pub const LOCAL: i32 = 0;
+    pub const NODELETE: i32 = 0x1000;
+}
+
+/// Callback `dl_iterate_phdr`: nenulova navratova hodnota zastavi pruchod.
+pub type PhdrCallback = unsafe extern "C" fn(info: *mut PhdrInfo, size: usize, data: *mut u8) -> i32;
+
+/// Tabulka funkci zavadece (ABI C, adresa v auxv `AT_MO_LOADER`).
+#[repr(C)]
+pub struct Interface {
+    pub version: u32,
+    /// Velikost tabulky v bajtech (starsi program cte jen co zna).
+    pub size: u32,
+    /// Novy blok TLS pro vlakno: vraci ukazatel vlakna (TP) nebo 0 (malo
+    /// pameti). Blok obsahuje kopii sablon vsech modulu a rezervu.
+    pub thread_tls_new: unsafe extern "C" fn() -> u64,
+    /// Uvolni blok vlakna, ktere skoncilo (`tp` z `thread_tls_new`).
+    pub thread_tls_free: unsafe extern "C" fn(tp: u64),
+    /// Finalizatory modulu (`DT_FINI_ARRAY` pozpatku, `DT_FINI`), program
+    /// prvni, zavislosti posledni; podruhe nic nedela.
+    pub run_fini: unsafe extern "C" fn(),
+    /// `dl_iterate_phdr` (glibc): projde nahrane moduly.
+    pub dl_iterate_phdr: unsafe extern "C" fn(cb: PhdrCallback, data: *mut u8) -> i32,
+    /// `dlopen(cesta, rtld::*)` -> handle, null = chyba (`dlerror`). Do DL-4
+    /// (sluzba knihoven `libd`) vzdy null s duvodem "nepodporovano".
+    pub dlopen: unsafe extern "C" fn(path: *const u8, flags: i32) -> *mut u8,
+    /// `dlsym(handle, jmeno)` -> adresa, null = nenalezeno.
+    pub dlsym: unsafe extern "C" fn(handle: *mut u8, name: *const u8) -> *mut u8,
+    /// `dlclose(handle)`: 0 = ok. Modul zustava nahrany (pocitadlo odkazu).
+    pub dlclose: unsafe extern "C" fn(handle: *mut u8) -> i32,
+    /// Posledni chyba `dl*` jako C retezec (null = zadna); cteni ji vymaze.
+    /// Zatim jedna pro cely proces (POSIX chce vlakno) - staci, dokud
+    /// `dlopen` neni (DL-4).
+    pub dlerror: unsafe extern "C" fn() -> *const u8,
+    /// `dladdr(adresa, &mut DlInfo)`: nenulove = adresa lezi v modulu.
+    pub dladdr: unsafe extern "C" fn(addr: *const u8, info: *mut DlInfo) -> i32,
+}

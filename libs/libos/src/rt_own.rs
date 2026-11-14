@@ -160,10 +160,16 @@ extern "C" fn _start() -> ! {
     )
 }
 
-extern "C" fn start_rust(bootstrap: u64) -> ! {
+/// `sp` a `magic` preda jen zavadec `ld.so` (`abi::loader`); bez nej jsou
+/// registry nulove nebo nahodne a `magic` nesedi.
+extern "C" fn start_rust(bootstrap: u64, sp: u64, magic: u64) -> ! {
+    // SAFETY: registry ze vstupu procesu (zavadec nebo jadro).
+    unsafe { crate::loader::init(sp, magic) };
     let startup = crate::rt::startup(bootstrap, init_heap);
     // SAFETY: funkci definuje program makrem `entry!` se spravnou signaturou.
     let code = unsafe { __libos_main(startup) };
+    // Normalni konec: finalizatory modulu (pod zavadecem).
+    crate::loader::run_fini();
     sys::process_exit(code)
 }
 

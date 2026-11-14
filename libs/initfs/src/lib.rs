@@ -66,6 +66,11 @@ pub struct File<'a> {
 }
 
 impl<'a> Initfs<'a> {
+    /// Cely obraz (jak ho dostal `parse`).
+    pub fn bytes(&self) -> &'a [u8] {
+        self.data
+    }
+
     pub fn parse(data: &'a [u8]) -> Result<Self, InitfsError> {
         if data.get(0..8) != Some(&MAGIC[..]) {
             return Err(InitfsError::BadMagic);

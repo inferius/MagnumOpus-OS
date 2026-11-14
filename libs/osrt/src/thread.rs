@@ -20,6 +20,12 @@ pub struct Thread {
 
 /// Spusti `f` v novem vlakne se zasobnikem aspon `stack` bajtu.
 pub fn spawn(stack: usize, f: Box<dyn FnOnce() + Send>) -> Result<Thread> {
+    // Pod zavadecem ld.so dostane vlakno blok TLS vsech modulu od libos
+    // (`abi::loader`); vlastni blok jednoho modulu by ho prepsal.
+    if libos::loader::interface().is_some() {
+        let handle = libos::thread::spawn_sized("std", stack as u64, f)?;
+        return Ok(Thread { handle: Some(handle), tls: None });
+    }
     let tls = Block::new().ok_or(Error::NoMemory)?;
     let tp = tls.thread_pointer();
     let handle = libos::thread::spawn_sized("std", stack as u64, move || {

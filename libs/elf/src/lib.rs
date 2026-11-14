@@ -125,6 +125,9 @@ pub struct Relro {
 
 pub struct ElfFile<'a> {
     data: &'a [u8],
+    /// `data` je modul nahrany v pameti od baze (adresa `vaddr` = index
+    /// `vaddr`), ne soubor: zavadec cte program, ktery namapoval `spawn`.
+    loaded: bool,
     pub entry: u64,
     pub elf_type: ElfType,
     pub machine: Machine,
@@ -210,6 +213,7 @@ impl<'a> ElfFile<'a> {
         }
         let elf = Self {
             data,
+            loaded: false,
             entry: u64_at(data, 24)?,
             elf_type,
             machine,
@@ -223,9 +227,34 @@ impl<'a> ElfFile<'a> {
         Ok(elf)
     }
 
-    /// Cely soubor.
+    /// Modul uz nahrany v pameti: `mem` zacina bazi modulu (adresa 0
+    /// souboru) a pokryva vsechny jeho segmenty. Hlavicky ELF musi byt
+    /// v prvnim segmentu (offset 0 na adrese 0, jak to dela lld). Data se
+    /// ctou primo z `mem[vaddr..]` (relokace uz mohly obsah zmenit).
+    pub fn parse_loaded(mem: &'a [u8], machine: Machine) -> Result<Self, ElfError> {
+        let mut elf = Self::parse_object(mem, machine)?;
+        if elf.elf_type != ElfType::Dyn {
+            return Err(ElfError::Unsupported("nahrany modul musi byt ET_DYN"));
+        }
+        elf.loaded = true;
+        Ok(elf)
+    }
+
+    /// Cely soubor (nebo pamet modulu u `parse_loaded`).
     pub fn data(&self) -> &'a [u8] {
         self.data
+    }
+
+    /// Pocet programovych hlavicek (`e_phnum`).
+    pub fn phnum(&self) -> u16 {
+        self.phnum
+    }
+
+    /// Adresa programovych hlavicek v pameti modulu (relativni k bazi):
+    /// `PT_PHDR`, jinak `e_phoff` (lld dava hlavicky do prvniho segmentu,
+    /// offset 0 = adresa 0).
+    pub fn phdr_vaddr(&self) -> Result<u64, ElfError> {
+        Ok(self.find(pt::PHDR)?.map_or(self.phoff, |p| p.vaddr))
     }
 
     /// Vsechny programove hlavicky.
@@ -266,7 +295,9 @@ impl<'a> ElfFile<'a> {
             mem_size: p.mem_size,
             align: p.align,
         };
-        let file_end = seg.file_offset.checked_add(seg.file_size);
+        // V souboru lezi data od `file_offset`, v nahranem modulu od `vaddr`.
+        let at = if self.loaded { seg.vaddr } else { seg.file_offset };
+        let file_end = at.checked_add(seg.file_size);
         if seg.file_size > seg.mem_size
             || file_end.is_none_or(|e| e > self.data.len() as u64)
             || seg.vaddr.checked_add(seg.mem_size).is_none()
@@ -278,7 +309,8 @@ impl<'a> ElfFile<'a> {
 
     /// Data segmentu ulozena v souboru (rozsah overen v `load_segments`).
     pub fn segment_data(&self, seg: &Segment) -> &'a [u8] {
-        &self.data[seg.file_offset as usize..(seg.file_offset + seg.file_size) as usize]
+        let at = if self.loaded { seg.vaddr } else { seg.file_offset } as usize;
+        &self.data[at..at + seg.file_size as usize]
     }
 
     /// Prvni programova hlavicka typu `p_type`.
@@ -294,7 +326,8 @@ impl<'a> ElfFile<'a> {
 
     /// Bajty souboru v rozsahu programove hlavicky (`offset`, `file_size`).
     fn file_range(&self, p: &Phdr) -> Result<&'a [u8], ElfError> {
-        let start = usize::try_from(p.offset).map_err(|_| ElfError::BadSegment)?;
+        let at = if self.loaded { p.vaddr } else { p.offset };
+        let start = usize::try_from(at).map_err(|_| ElfError::BadSegment)?;
         let len = usize::try_from(p.file_size).map_err(|_| ElfError::BadSegment)?;
         start.checked_add(len).and_then(|end| self.data.get(start..end)).ok_or(ElfError::BadSegment)
     }
@@ -339,6 +372,13 @@ impl<'a> ElfFile<'a> {
     /// `len` B souboru na virtualni adrese `vaddr` (relativni k bazi u
     /// ET_DYN): musi lezet v datech ze souboru jednoho segmentu PT_LOAD.
     pub fn at_vaddr(&self, vaddr: u64, len: u64) -> Result<&'a [u8], ElfError> {
+        if self.loaded {
+            let end = vaddr.checked_add(len).ok_or(ElfError::BadDynamic("adresa pretece"))?;
+            return usize::try_from(end)
+                .ok()
+                .and_then(|e| self.data.get(vaddr as usize..e))
+                .ok_or(ElfError::BadDynamic("adresa mimo modul"));
+        }
         for seg in self.load_segments() {
             let seg = seg?;
             let end = vaddr.checked_add(len).ok_or(ElfError::BadDynamic("adresa pretece"))?;

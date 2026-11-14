@@ -35,6 +35,7 @@ mod handle;
 pub mod hw;
 pub mod initfs;
 pub mod job;
+pub mod loader;
 pub mod log;
 mod mapping;
 mod port;
