@@ -14,13 +14,14 @@ the second driver in the same layer. Intel has its own Rust driver
 
 | Question | Recommendation |
 |---|---|
-| NVIDIA driver | **nouveau** from Linux (MIT licence), logic unchanged, in C, as an isolated process |
+| NVIDIA driver | **open** (question 1): nouveau from Linux (MIT) in C over the compatibility layer, or our own Rust driver for GSP only (Turing+) translated from nouveau – [comparison](#comparison-nouveau-in-c-or-our-own-rust-driver-for-gsp) |
 | NVIDIA generations | Kepler to Blackwell. Turing and newer through GSP-RM firmware (full clocks, Vulkan); Maxwell 2 to Volta display and slow acceleration only (the card stays at boot clocks) |
 | NVIDIA Vulkan | **NVK** from Mesa (MIT), same nouveau kernel part |
 | AMD driver | **amdgpu** + display core (MIT), same layer, second step |
 | Compatibility layer | our own "LinuxKPI" in Rust on driverkit; model: FreeBSD drm-kmod (BSD) |
-| Without an IOMMU | **do not start** the native GPU driver, stay on the firmware framebuffer (proposal, question B) |
-| Foundations now | our own fence object, shared buffers with a lifecycle, large scatter-gather DMA memory, firmware loading, a "render" class for Vulkan |
+| Without an IOMMU | **decided**: start with a warning (like disks and network), DMA quarantine after a crash, advice to enable VT-d / AMD-Vi |
+| Foundations | **decided**: points 1, 2, 4 and 8 (fence, shared buffer, scatter-gather DMA, render class) as kernel work after dynamic linking and before FFmpeg ([architecture](architecture.md#adopting-existing-software-order)) |
+| Firmware | **decided**: bundle it into the image; the NVIDIA and AMD licences allow it (conditions below) |
 
 ## Architecture
 
@@ -124,6 +125,84 @@ Blackwell in each path: nouveau has GB100/GB102 and GB202 to GB207 (GB203
 Blackwell (Mesa 25.2), open-gpu-kernel-modules "Turing or later", nova
 lists GB20x in its chip enum (`gpu.rs`) but has no display.
 
+## Comparison: nouveau in C, or our own Rust driver for GSP
+
+**Status: open (question 1).** Variant B: our own Rust driver for Turing
+and newer only (GSP), translated from nouveau (the MIT licence allows a
+translation; nova is GPL, facts only). Pascal and older would stay on the
+firmware framebuffer. The compatibility layer (LinuxKPI) would be postponed
+to AMD (possibly Intel acceleration).
+
+### What GSP does and what is left to the host
+
+From Turing on, the GPU runs the GSP-RM firmware (NVIDIA's Resource
+Manager). It takes over clocks, power, engine initialisation and channel
+scheduling; the driver talks to it through RPC. Based on nouveau
+(`nvkm/subdev/gsp`, `gsp/rm/r535`, `gsp/rm/r570`; 11 `.c` files in `gsp/`,
+12 in `rm/`, 18 in `rm/r535/`, plus generated message definitions in
+`nvrm/`):
+
+| Part | What the driver must do | Where in nouveau | Rust estimate |
+|---|---|---|---|
+| GSP boot | find FWSEC in the VBIOS and run FWSEC-FRTS (WPR2 region), prepare WPR metadata, load `booter_load`, the `gsp` firmware and the bootloader, pass the libos buffer address | `gsp/fwsec.c`, `gsp/tu102.c`, `rm/r535/gsp.c` | 3–5 k lines |
+| RPC queues | shared memory: command and message queues (`cmdq`/`msgq`, 256 KiB each), read and write pointers, message encoding, asynchronous events from GSP | `rm/r535/rpc.c`, `gsp.c` | 2–3 k |
+| RM objects | object allocation (client, device, channel, ...) and control calls – messages with NVIDIA's numeric structures | `rm/r535/alloc.c`, `ctrl.c`, `client.c`, `device.c` + `nvrm/` | 2–4 k + definitions |
+| GPU memory | GPU virtual address page tables, BAR1/BAR2, VRAM | `rm/r535/vmm.c`, `bar.c`, `subdev/mmu` | 4–6 k |
+| channels | channel allocation through RM, push buffers, semaphores; GSP does the scheduling | `rm/r535/fifo.c`, `ce.c`, `gr.c` | 3–5 k |
+| display | outputs, DP, HDMI, backlight through `NV0073_CTRL_*` control calls; the driver fills the display channel (methods) and reads its registers | `rm/r535/disp.c`, `engine/disp/tu102.c` to `gb202.c` | 6–10 k |
+| suspend and recovery | saving VRAM on suspend (fbsr), reset after a GSP crash | `rm/r535/fbsr.c` | 1–2 k |
+| uAPI for NVK | see below | `nouveau_drm.h`, `nouveau_uvmm.c`, `nouveau_exec.c` | 4–6 k |
+
+Total estimate (not measured): **25–40 thousand lines of Rust** + generated
+RPC message definitions.
+
+### RPC and firmware versions
+
+- nouveau has GSP-RM interfaces for two firmware versions: `r535`
+  (535.113.01) and `r570` (570.144), selected by the firmware available
+  (tables in `gsp/tu102.c`). Message structures differ between versions;
+  NVIDIA keeps no stable ABI.
+- For us: **one fixed firmware version** (the newest supported by
+  nouveau, 570.144 today, covering Turing to Blackwell). Generate the
+  message definitions from nouveau's headers (MIT) into Rust with an
+  `xtask` script; an "rm" layer with an interface like nouveau's
+  `rm/rm.h`, so the next version is a new definition set plus small
+  differences. Firmware and driver are updated together.
+
+### What NVK needs
+
+NVK (Mesa) talks to the kernel through the nouveau uAPI
+(`include/uapi/drm/nouveau_drm.h`, MIT licence): `GETPARAM`,
+`CHANNEL_ALLOC`/`FREE`, `VM_INIT` (must come first), `VM_BIND`, `EXEC`,
+`GEM_NEW`, `GEM_INFO` (returns a `map_handle` for mapping),
+`GEM_CPU_PREP`/`FINI`. Synchronisation goes through `drm_nouveau_sync`
+with syncobj or timeline syncobj (no fence ioctl of its own).
+
+Proposal for both variants: the render node ([point 8](#impact-on-the-foundations))
+offers **exactly these semantics** as messages over a channel and a
+"winsys" in Mesa replaces `ioctl` with messages; NVK logic stays
+unchanged. Syncobj = our fence object (point 1), `map_handle` = the
+buffer's VMO (point 2), `VM_BIND` = mapping into the GPU context's
+virtual addresses. The exact layer inside Mesa is not verified (the Mesa
+source was unreachable during the research).
+
+### Comparing the variants
+
+| | A: nouveau in C over LinuxKPI | B: our own Rust for GSP only |
+|---|---|---|
+| generations | Kepler to Blackwell (Maxwell 2 to Volta slow) | Turing to Blackwell; Pascal and older firmware framebuffer only |
+| our code | layer 15–30 k + reused C (hundreds of thousands) | 25–40 k of our own Rust |
+| safety | C in an isolated process | Rust, smaller attack surface |
+| updates | LTS import, patches only in the layer | port nouveau changes by hand; a new chip = work |
+| LinuxKPI | now | only for AMD |
+| NVK | nouveau uAPI through the render node | imitate the same uAPI |
+| risk | size and maintenance of the layer | we fix bugs the nouveau community fixes |
+| user's cards | 4090, 5070 Ti, 2080 Ti fully; GT 1030 slowly | 4090, 5070 Ti, 2080 Ti fully; GT 1030 firmware framebuffer only |
+
+B is smaller and cleaner for Turing+ because GSP does most of the work; A
+gives wider coverage and a layer shared with AMD. Foundation points 1, 2,
+4 and 8 apply to both variants.
+
 ## AMD (second step)
 
 | Part | Licence (verified in headers) |
@@ -158,6 +237,22 @@ Rule: **check the licence of every file before reusing it** and replace
 GPL-only files with our own implementation (from the API and
 documentation only). The import script keeps the list automatically
 (SPDX header / MIT text).
+
+### Firmware licences
+
+Verified in a copy of linux-firmware (GitHub mirror, 2026-11-14):
+
+| Firmware | Licence | Redistribution | Conditions |
+|---|---|---|---|
+| NVIDIA (`LICENCE.nvidia`, "License For Customer Use of NVIDIA Software") | proprietary | only "for use on operating systems distributed under the terms of an OSI-approved open source license" – our system is MIT OR Apache-2.0, so yes | binaries unmodified, include the licence text; no reverse engineering, decompilation or translation; only for microprocessors designed by NVIDIA |
+| AMD (`LICENSE.amdgpu`) | proprietary, free of fees | in binary form, yes | reproduce the copyright and licence text; no reverse engineering; US export regulations |
+
+**Open:** the available copy of `WHENCE` has no entry for
+`nvidia/<chip>/gsp/` (the copy is probably older). Before bundling, verify
+in current linux-firmware that the GSP firmware falls under
+`LICENCE.nvidia`. The image then carries the firmware unmodified in
+`/system/firmware/` with the licences next to it; `THIRD-PARTY.md` records
+the linux-firmware version.
 
 ## Compatibility layer (LinuxKPI)
 
@@ -208,14 +303,17 @@ hundreds of thousands of lines of reused C plus firmware (GSP is a
 processor of its own with memory access). **Without an IOMMU a bug in the
 driver or firmware can overwrite any memory, including the kernel.**
 
-Proposal:
+Decision (2026-11-14, consistent with disks and network):
 
 - with an IOMMU: the device has its own domain (already today), DMA only
   into memory the driver maps for it; after a crash devmgr turns bus
   master off and drops the domain;
-- **without an IOMMU do not start the native GPU driver**: the display
-  stays on the firmware framebuffer (`fbdisplay`) and the user is told why;
-  optionally a manual override with a warning (question B);
+- **without an IOMMU the GPU driver starts with a warning**: a message in
+  the log and in system notifications that DMA is unrestricted, with the
+  advice to enable VT-d (Intel) or AMD-Vi / IOMMU (AMD) in the firmware.
+  After a driver crash the kernel's **DMA quarantine** applies (turn bus
+  master off, wait for transfers to finish, only then release the memory
+  – [Kernel](kernel.md));
 - turn interrupt remapping on (off today) before a GPU runs (a DMA device
   could otherwise forge an MSI).
 
@@ -264,11 +362,14 @@ they would change in more places.
 
 - **Size**: hundreds of thousands of lines of reused C; upstream updates
   are permanent work (hence one LTS version and patches only in the layer).
-- **NVIDIA and AMD firmware is closed** (binary, redistribution under the
-  licence in linux-firmware – **not verified**, the source was unreachable
-  during the research). Turing+ runs nothing without it; verify the
-  licence before bundling it into the image.
-- **Without an IOMMU** the risk is unacceptable (see above).
+- **NVIDIA and AMD firmware is closed** (binary; redistribution allowed,
+  see [Firmware licences](#firmware-licences)). Turing+ runs nothing
+  without it, not even display on Blackwell. The NVIDIA licence applies
+  only to open-source systems – if the system licence changed, the
+  firmware could not be bundled.
+- **Without an IOMMU** (decided: start with a warning) a bug in the driver
+  or firmware can overwrite kernel memory; DMA quarantine protects only
+  after a crash, not while running.
 - **Optimus laptops**: the integrated Intel drives the display; NVIDIA only
   computes – requires shared buffers between drivers (point 2) and power
   (point 10).
@@ -277,6 +378,11 @@ they would change in more places.
 - **GSP firmware crashes**: recovery only by a device reset, briefly no image.
 - **Licences can change** per file: licence check at every import.
 
-## Questions
+## Decisions and questions
 
-See the message to the coordinator; added here after the decision.
+| # | Question | Decision (2026-11-14) |
+|---|---|---|
+| 1 | NVIDIA path | **open**: A nouveau in C over LinuxKPI, or B our own Rust for GSP only ([comparison](#comparison-nouveau-in-c-or-our-own-rust-driver-for-gsp)) |
+| 2 | without an IOMMU | **B**: start with a warning, DMA quarantine, advice to enable VT-d / AMD-Vi |
+| 3 | firmware | **A**: bundle into the image after verifying the licence (verified; the GSP entry in `WHENCE` remains) |
+| 4 | foundations | points 1, 2, 4, 8 as kernel work **after dynamic linking and before FFmpeg** (video uses fences and shared buffers too) |

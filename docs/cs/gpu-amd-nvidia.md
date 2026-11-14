@@ -13,13 +13,14 @@ ovladač ve stejné vrstvě. Intel má vlastní ovladač v Rustu
 
 | Otázka | Doporučení |
 |---|---|
-| Ovladač NVIDIA | **nouveau** z Linuxu (licence MIT) beze změny logiky, v C, jako izolovaný proces |
+| Ovladač NVIDIA | **otevřené** (otázka 1): nouveau z Linuxu (MIT) v C přes vrstvu kompatibility, nebo vlastní ovladač v Rustu jen pro GSP (Turing+) přeložený z nouveau - [srovnání](#srovnání-nouveau-v-c-nebo-vlastní-ovladač-v-rustu-pro-gsp) |
 | Generace NVIDIA | Kepler až Blackwell. Turing a novější přes firmware GSP-RM (plné takty, Vulkan); Maxwell 2 až Volta jen obraz a pomalá akcelerace (karta zůstane na startovních taktech) |
 | Vulkan NVIDIA | **NVK** z Mesy (MIT), stejné jádro nouveau |
 | Ovladač AMD | **amdgpu** + display core (MIT), stejná vrstva, druhý krok |
 | Vrstva kompatibility | vlastní „LinuxKPI“ v Rustu nad driverkitem; vzor FreeBSD drm-kmod (BSD) |
-| Bez IOMMU | nativní ovladač GPU **nespouštět**, zůstat na framebufferu firmwaru (návrh, otázka B) |
-| Základy už teď | vlastní objekt plotu (fence), sdílené buffery se životním cyklem, velká DMA paměť po kusech, nahrávání firmwaru, třída „render“ pro Vulkan |
+| Bez IOMMU | **rozhodnuto**: spustit s varováním (jako disky a síť), karanténa DMA po pádu, rada zapnout VT-d / AMD-Vi |
+| Základy | **rozhodnuto**: body 1, 2, 4 a 8 (plot, sdílený buffer, DMA po kusech, třída render) jako jaderná práce po dynamickém linkování a před FFmpeg ([architektura](architektura.md#převzetí-cizího-software-pořadí)) |
+| Firmware | **rozhodnuto**: přibalit do obrazu; licence NVIDIA i AMD to dovolují (podmínky níže) |
 
 ## Architektura
 
@@ -121,6 +122,80 @@ spotřebitelský Blackwell podporuje (Mesa 25.2), open-gpu-kernel-modules
 „Turing nebo novější“, nova má GB20x ve výčtu čipů (`gpu.rs`), ale bez
 zobrazení.
 
+## Srovnání: nouveau v C, nebo vlastní ovladač v Rustu pro GSP
+
+**Stav: otevřené (otázka 1).** Varianta B: vlastní ovladač v Rustu jen pro
+Turing a novější (GSP), přeložený z nouveau (licence MIT překlad dovoluje;
+nova je GPL, z ní jen fakta). Pascal a starší by zůstaly na framebufferu
+firmwaru. Vrstva kompatibility (LinuxKPI) by se odložila na AMD (případně
+akceleraci Intel).
+
+### Co dělá GSP a co zbývá hostiteli
+
+Od Turingu běží na GPU firmware GSP-RM (Resource Manager NVIDIA). Převezme
+takty, napájení, inicializaci enginů a plánování kanálů; ovladač s ním
+mluví přes RPC. Podle nouveau (`nvkm/subdev/gsp`, `gsp/rm/r535`,
+`gsp/rm/r570`; v `gsp/` 11 souborů `.c`, v `rm/` 12, v `rm/r535/` 18,
+plus generované definice zpráv `nvrm/`):
+
+| Část | Co musí udělat ovladač | Kde v nouveau | Odhad Rust |
+|---|---|---|---|
+| start GSP | najít FWSEC ve VBIOS a spustit FWSEC-FRTS (oblast WPR2), připravit metadata WPR, zavést `booter_load`, firmware `gsp` a bootloader, předat adresu bufferu libos | `gsp/fwsec.c`, `gsp/tu102.c`, `rm/r535/gsp.c` | 3-5 tis. řádků |
+| fronty RPC | sdílená paměť: fronta příkazů a zpráv (`cmdq`/`msgq`, po 256 KiB), ukazatele čtení a zápisu, kódování zpráv, asynchronní události od GSP | `rm/r535/rpc.c`, `gsp.c` | 2-3 tis. |
+| objekty RM | alokace objektů (klient, zařízení, kanál, ...) a řídicí volání - zprávy s číselnými strukturami NVIDIA | `rm/r535/alloc.c`, `ctrl.c`, `client.c`, `device.c` + `nvrm/` | 2-4 tis. + definice |
+| paměť GPU | tabulky stránek virtuálních adres GPU, BAR1/BAR2, VRAM | `rm/r535/vmm.c`, `bar.c`, `subdev/mmu` | 4-6 tis. |
+| kanály | alokace kanálů přes RM, push buffery, semafory; plánování dělá GSP | `rm/r535/fifo.c`, `ce.c`, `gr.c` | 3-5 tis. |
+| obraz | výstupy, DP, HDMI, podsvícení přes řídicí volání `NV0073_CTRL_*`; ovladač plní kanál displeje (metody) a čte jeho registry | `rm/r535/disp.c`, `engine/disp/tu102.c` až `gb202.c` | 6-10 tis. |
+| uspání a obnova | uložení VRAM při uspání (fbsr), reset po pádu GSP | `rm/r535/fbsr.c` | 1-2 tis. |
+| uAPI pro NVK | viz níže | `nouveau_drm.h`, `nouveau_uvmm.c`, `nouveau_exec.c` | 4-6 tis. |
+
+Celkem odhad (neměřeno): **25-40 tisíc řádků Rustu** + generované
+definice zpráv RPC.
+
+### Verze RPC a firmwaru
+
+- nouveau má rozhraní GSP-RM pro dvě verze firmwaru: `r535` (535.113.01)
+  a `r570` (570.144), vybírá podle dostupného firmwaru (tabulky v
+  `gsp/tu102.c`). Struktury zpráv se mezi verzemi liší; NVIDIA stabilní
+  ABI nedrží.
+- Pro nás: **pevně jedna verze firmwaru** (nejnovější podporovaná
+  v nouveau, dnes 570.144, pokrývá Turing až Blackwell). Definice zpráv
+  generovat z hlaviček nouveau (MIT) do Rustu skriptem v `xtask`; vrstva
+  „rm“ s rozhraním jako `rm/rm.h` v nouveau, aby další verze byla nová
+  sada definic a malé rozdíly. Firmware a ovladač se aktualizují spolu.
+
+### Co potřebuje NVK
+
+NVK (Mesa) mluví s jádrem přes uAPI nouveau (`include/uapi/drm/nouveau_drm.h`,
+licence MIT): `GETPARAM`, `CHANNEL_ALLOC`/`FREE`, `VM_INIT` (musí být
+první), `VM_BIND`, `EXEC`, `GEM_NEW`, `GEM_INFO` (vrací `map_handle` pro
+mapování), `GEM_CPU_PREP`/`FINI`. Synchronizace jde přes `drm_nouveau_sync`
+se syncobj nebo timeline syncobj (vlastní ioctl na ploty nemá).
+
+Návrh pro obě varianty: render uzel ([bod 8](#vlivy-na-základy)) nabídne
+**přesně tuto sémantiku** jako zprávy po kanálu a „winsys“ v Mesa nahradí
+`ioctl` zprávami; logika NVK zůstane beze změny. Syncobj = náš objekt
+plotu (bod 1), `map_handle` = VMO bufferu (bod 2), `VM_BIND` = mapování do
+virtuálních adres kontextu GPU. Přesná vrstva uvnitř Mesy neověřena
+(zdroj Mesy byl při průzkumu nedostupný).
+
+### Srovnání variant
+
+| | A: nouveau v C přes LinuxKPI | B: vlastní Rust jen pro GSP |
+|---|---|---|
+| generace | Kepler až Blackwell (Maxwell 2 až Volta pomalé) | Turing až Blackwell; Pascal a starší jen framebuffer firmwaru |
+| kód u nás | vrstva 15-30 tis. + převzaté C (stovky tisíc) | 25-40 tis. vlastního Rustu |
+| bezpečnost | C v izolovaném procesu | Rust, menší plocha útoku |
+| aktualizace | import LTS, záplaty jen ve vrstvě | změny z nouveau přenášet ručně; nový čip = práce |
+| LinuxKPI | hned | až pro AMD |
+| NVK | uAPI nouveau přes render uzel | totéž uAPI napodobit |
+| riziko | rozsah a údržba vrstvy | chyby, které v nouveau řeší komunita, řešíme sami |
+| karty uživatele | 4090, 5070 Ti, 2080 Ti plně; GT 1030 pomalu | 4090, 5070 Ti, 2080 Ti plně; GT 1030 jen framebuffer firmwaru |
+
+B je pro Turing+ menší a čistší, protože GSP dělá většinu práce; A dává
+širší pokrytí a vrstvu sdílenou s AMD. Body základů 1, 2, 4 a 8 platí pro
+obě varianty.
+
 ## AMD (druhý krok)
 
 | Část | Licence (ověřeno v hlavičkách) |
@@ -153,6 +228,21 @@ hlavičky:
 Pravidlo: **před převzetím každého souboru ověřit licenci** a GPL-only
 soubory nahradit vlastní implementací (jen podle API a dokumentace). Seznam
 se udržuje automaticky skriptem importu (hlavička SPDX / text MIT).
+
+### Licence firmwaru
+
+Ověřeno v kopii linux-firmware (zrcadlo na GitHubu, 2026-11-14):
+
+| Firmware | Licence | Redistribuce | Podmínky |
+|---|---|---|---|
+| NVIDIA (`LICENCE.nvidia`, „License For Customer Use of NVIDIA Software“) | proprietární | jen „pro použití v operačních systémech šířených pod licencí schválenou OSI“ - náš systém je MIT OR Apache-2.0, tedy ano | binárky beze změny, přiložit text licence; zákaz zpětného inženýrství, dekompilace a překladu; jen pro procesory navržené NVIDIA |
+| AMD (`LICENSE.amdgpu`) | proprietární, bez poplatků | binárně ano | přiložit copyright a text licence; zákaz zpětného inženýrství; exportní předpisy USA |
+
+**Otevřené:** v dostupné kopii souboru `WHENCE` chybí záznam pro
+`nvidia/<čip>/gsp/` (kopie je zřejmě starší). Před přibalením ověřit
+v aktuálním linux-firmware, že firmware GSP spadá pod `LICENCE.nvidia`.
+Obraz pak nese firmware v `/system/firmware/` beze změny a licence vedle
+něj; `THIRD-PARTY.md` uvede verzi linux-firmware.
 
 ## Vrstva kompatibility (LinuxKPI)
 
@@ -204,13 +294,15 @@ GPU je nejsilnější DMA zařízení v počítači a ovladač má stovky tisíc
 k paměti). **Bez IOMMU může chyba v ovladači nebo firmwaru přepsat
 libovolnou paměť včetně jádra.**
 
-Návrh:
+Rozhodnutí (2026-11-14, jednotně s disky a sítí):
 
 - s IOMMU: zařízení má vlastní doménu (už dnes), DMA jen do paměti, kterou
   mu ovladač namapuje; po pádu devmgr vypne bus master a doménu zruší;
-- **bez IOMMU nativní ovladač GPU nespouštět**: obraz zůstane na
-  framebufferu firmwaru (`fbdisplay`) a uživatel dostane hlášení, proč;
-  volitelně ruční povolení s varováním (otázka B);
+- **bez IOMMU se ovladač GPU spustí s varováním**: hláška v logu a
+  v systémových oznámeních, že DMA není omezené, s radou zapnout ve
+  firmwaru VT-d (Intel) nebo AMD-Vi / IOMMU (AMD). Po pádu ovladače platí
+  **karanténa DMA** z jádra (bus master vypnout, počkat na dokončení
+  přenosů, paměť pustit až potom - [Jádro](jadro.md));
 - remapování přerušení (dnes vypnuté) zapnout dřív, než poběží GPU
   (zařízení s DMA by jinak mohlo podvrhnout MSI).
 
@@ -258,11 +350,12 @@ které už používají displej a Venus, a později by se měnily na víc míste
 
 - **Rozsah**: stovky tisíc řádků převzatého C; aktualizace z upstreamu
   jsou trvalá práce (proto jedna LTS verze a záplaty jen ve vrstvě).
-- **Firmware NVIDIA a AMD je uzavřený** (binární, redistribuce podle
-  licence v linux-firmware - **neověřeno**, zdroj byl při průzkumu
-  nedostupný). Bez něj na Turing+ nepojede nic; před přibalením do obrazu
-  ověřit licenci.
-- **Bez IOMMU** neúnosné riziko (viz výše).
+- **Firmware NVIDIA a AMD je uzavřený** (binární; redistribuce dovolená,
+  viz [Licence firmwaru](#licence-firmwaru)). Bez něj na Turing+ nepojede
+  nic, ani obraz na Blackwellu. Licence NVIDIA platí jen pro open-source
+  systémy - kdyby se licence systému změnila, firmware by nešlo přibalit.
+- **Bez IOMMU** (rozhodnuto: spustit s varováním) může chyba v ovladači nebo
+  firmwaru přepsat paměť jádra; karanténa DMA chrání jen po pádu, ne za běhu.
 - **Notebooky s Optimus**: obraz vede integrovaná Intel; NVIDIA jen
   počítá - vyžaduje sdílené buffery mezi ovladači (bod 2) a napájení (bod 10).
 - **Testy jen na skutečném hardwaru**: pomalejší cyklus, nutná sériová
@@ -270,6 +363,11 @@ které už používají displej a Venus, a později by se měnily na víc míste
 - **Pády firmwaru GSP**: obnova jen resetem zařízení, na chvíli bez obrazu.
 - **Licence se mohou měnit** souborově: kontrola licencí při každém importu.
 
-## Otázky
+## Rozhodnutí a otázky
 
-Viz zpráva koordinátorovi; po rozhodnutí se doplní sem.
+| # | Otázka | Rozhodnutí (2026-11-14) |
+|---|---|---|
+| 1 | cesta pro NVIDIA | **otevřené**: A nouveau v C přes LinuxKPI, nebo B vlastní Rust jen pro GSP ([srovnání](#srovnání-nouveau-v-c-nebo-vlastní-ovladač-v-rustu-pro-gsp)) |
+| 2 | bez IOMMU | **B**: spustit s varováním, karanténa DMA, rada zapnout VT-d / AMD-Vi |
+| 3 | firmware | **A**: přibalit do obrazu po ověření licence (ověřeno, zbývá záznam GSP ve `WHENCE`) |
+| 4 | základy | body 1, 2, 4, 8 jako jaderná práce **po dynamickém linkování a před FFmpeg** (ploty a sdílené buffery využije i video) |
