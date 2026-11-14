@@ -28,6 +28,7 @@ mod suggest;
 pub mod complete;
 mod table;
 pub mod text;
+pub mod wrap;
 /// Prodleva dvoj- a trojkliku (pole, tabulka, mrizka terminalu).
 pub use field::MULTI_CLICK;
 

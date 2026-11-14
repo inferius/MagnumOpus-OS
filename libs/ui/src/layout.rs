@@ -15,7 +15,9 @@ use crate::node::{Key, Kind, Node};
 
 /// Prvek po rozvrzeni.
 pub enum ElemKind<M> {
-    Label { text: String, heading: bool, warn: bool },
+    /// `lines` = nejvys radku (0 = bez omezeni); radky se pocitaji pri
+    /// kresleni ze sirky obdelniku (`wrap.rs`).
+    Label { text: String, heading: bool, warn: bool, lines: u32 },
     Button { text: String, on_click: Option<M>, icon: Option<&'static str> },
     TextInput { value: String, placeholder: String, secure: bool, multiline: bool, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<crate::node::KeyMapFn>, suggest: Option<alloc::boxed::Box<crate::suggest::Suggest<M>>> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
@@ -126,13 +128,32 @@ fn child_key<M>(n: &Node<M>, parent: Key, counts: &mut [u64; TAGS]) -> Key {
     }
 }
 
-/// Prirozena velikost uzlu (rozmery z tokenu).
-fn measure<M>(n: &Node<M>, t: &Look) -> (u32, u32) {
+/// Radky stitku pri sirce `width` (`max` = nejvys radku, 0 = bez omezeni).
+pub(crate) fn label_lines(t: &Look, text: &str, s: theme::TextStyle, width: u32, max: u32) -> Vec<String> {
+    crate::wrap::wrap(text, width, max as usize, &|x| t.width(x, s))
+}
+
+/// Velikost obycejneho stitku pri dostupne sirce `avail`: jeden radek,
+/// kdyz se vejde, jinak zalomeny (vyska podle poctu radku).
+fn label_size(t: &Look, text: &str, s: theme::TextStyle, avail: u32, max: u32) -> (u32, u32) {
+    let tw = t.width(text, s);
+    if !text.contains('\n') && (tw <= avail || max == 1) {
+        return (tw.min(avail), s.line);
+    }
+    let ls = label_lines(t, text, s, avail, max);
+    let w = ls.iter().map(|l| t.width(l, s)).max().unwrap_or(0).min(avail);
+    (w, ls.len() as u32 * s.line)
+}
+
+/// Prirozena velikost uzlu (rozmery z tokenu) pri dostupne sirce `avail`
+/// (zalamovane stitky; sirka nikdy nepresahne `avail`, kdyz jde zalomit).
+fn measure<M>(n: &Node<M>, t: &Look, avail: u32) -> (u32, u32) {
+    let avail = if n.width > 0 { n.width } else { avail };
     let th = &t.theme;
     let sp = &th.space;
     let ctl = t.control_h();
     let (w, h) = match &n.kind {
-        Kind::Label { text, heading, warn } => {
+        Kind::Label { text, heading, warn, lines } => {
             let s = if *heading { t.heading() } else { t.body() };
             if n.agent {
                 // Stitek agenta: ikona a text v pilulce.
@@ -141,7 +162,7 @@ fn measure<M>(n: &Node<M>, t: &Look) -> (u32, u32) {
                 // Stitek: pilulka s okrajem `s4`.
                 (t.width(text, s) + 2 * sp[4], s.line + 2 * sp[2])
             } else {
-                (t.width(text, s), s.line)
+                label_size(t, text, s, avail, *lines)
             }
         }
         // Jen ikona: ctverec `control_h`; jinak text (a ikona) s okraji.
@@ -175,17 +196,68 @@ fn measure<M>(n: &Node<M>, t: &Look) -> (u32, u32) {
         // Pruh 44 px (`.dbar`) a radek legendy.
         Kind::Segments { legend, .. } => (th.size.hit_min * 6, ctl + sp[2] + if *legend { sp[2] + th.text.caption.line } else { 0 }),
         Kind::Column(ch) => ch.iter().fold((0, 0), |(w, h), c| {
-            let (cw, chh) = measure(c, t);
+            let (cw, chh) = measure(c, t, avail);
             (w.max(cw), h + chh + if h > 0 { t.gap() } else { 0 })
         }),
-        Kind::Row(ch) => ch.iter().fold((0, 0), |(w, h), c| {
-            let (cw, chh) = measure(c, t);
-            (w + cw + if w > 0 { t.gap() } else { 0 }, h.max(chh))
-        }),
-        Kind::Scroll(c) => (measure(c, t).0, th.size.hit_min * 4),
+        Kind::Row(ch) => {
+            // Sirka bez rozdeleni zbytku (`grow`), vyska pri sirkach po nem
+            // (zalomeny stitek s `grow` ma radku mene).
+            let natural = row_sizes(ch, avail, t, false);
+            let w = natural.iter().map(|s| s.0).sum::<u32>() + t.gap() * ch.len().saturating_sub(1) as u32;
+            (w, row_sizes(ch, avail, t, true).iter().map(|s| s.1).max().unwrap_or(0))
+        }
+        Kind::Scroll(c) => (measure(c, t, avail).0, th.size.hit_min * 4),
         Kind::Spacer => (0, 0),
     };
     (if n.width > 0 { n.width } else { w }, if n.height > 0 { n.height } else { h })
+}
+
+/// Je uzel zalamovany stitek (smi se v radku zuzit)?
+fn wraps<M>(n: &Node<M>) -> bool {
+    matches!(n.kind, Kind::Label { warn: false, lines, .. } if lines != 1) && !n.agent && n.width == 0
+}
+
+/// Sirky a vysky deti radku sirky `avail`. Kdyz se nevejdou, zuzi se
+/// zalamovane stitky (umerne sve sirce); s `grow` dostanou deti s `grow`
+/// zbytek sirky. Vyska zalomenych stitku je pro jejich konecnou sirku.
+fn row_sizes<M>(ch: &[Node<M>], avail: u32, t: &Look, grow: bool) -> Vec<(u32, u32)> {
+    let mut sizes: Vec<(u32, u32)> = ch.iter().map(|c| measure(c, t, avail)).collect();
+    let gaps = t.gap() * ch.len().saturating_sub(1) as u32;
+    let total = sizes.iter().map(|s| s.0).sum::<u32>() + gaps;
+    let mut changed = alloc::vec![false; ch.len()];
+    if total > avail {
+        let over = (total - avail) as u64;
+        let wrap_w: u64 = ch.iter().zip(&sizes).filter(|(c, _)| wraps(c)).map(|(_, s)| s.0 as u64).sum();
+        if wrap_w > 0 {
+            for (k, c) in ch.iter().enumerate() {
+                if wraps(c) {
+                    let cut = (over * sizes[k].0 as u64).div_ceil(wrap_w) as u32;
+                    sizes[k].0 = sizes[k].0.saturating_sub(cut).max(1);
+                    changed[k] = true;
+                }
+            }
+        }
+    }
+    if grow {
+        let fixed = sizes.iter().map(|s| s.0).sum::<u32>() + gaps;
+        let n = ch.iter().filter(|c| c.grow).count() as u32;
+        let extra = avail.saturating_sub(fixed);
+        if n > 0 {
+            for (k, c) in ch.iter().enumerate() {
+                if c.grow {
+                    sizes[k].0 += extra / n;
+                    changed[k] = true;
+                }
+            }
+        }
+    }
+    // Vyska pri konecne sirce (jen zalamovane stitky na ni zavisi).
+    for (k, c) in ch.iter().enumerate() {
+        if changed[k] && wraps(c) {
+            sizes[k].1 = measure(c, t, sizes[k].0).1;
+        }
+    }
+    sizes
 }
 
 /// Rozvrhne strom do obdelniku `area` (souradnice okna).
@@ -221,8 +293,8 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
         out.len()
     };
     match n.kind {
-        Kind::Label { text, heading, warn } => {
-            push(out, ElemKind::Label { text, heading, warn }, r);
+        Kind::Label { text, heading, warn, lines } => {
+            push(out, ElemKind::Label { text, heading, warn, lines }, r);
         }
         Kind::Button { text, on_click, icon } => {
             push(out, ElemKind::Button { text, on_click, icon }, r);
@@ -292,7 +364,7 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
         Kind::Column(children) => {
             let id = push(out, ElemKind::Group, r);
             let mut counts = [0; TAGS];
-            let sizes: Vec<(u32, u32)> = children.iter().map(|c| measure(c, t)).collect();
+            let sizes: Vec<(u32, u32)> = children.iter().map(|c| measure(c, t, r.w)).collect();
             let fixed: u32 = sizes.iter().map(|s| s.1).sum::<u32>() + t.gap() * children.len().saturating_sub(1) as u32;
             let grow = children.iter().filter(|c| c.grow).count() as u32;
             let extra = r.h.saturating_sub(fixed);
@@ -307,13 +379,10 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
         Kind::Row(children) => {
             let id = push(out, ElemKind::Group, r);
             let mut counts = [0; TAGS];
-            let sizes: Vec<(u32, u32)> = children.iter().map(|c| measure(c, t)).collect();
-            let fixed: u32 = sizes.iter().map(|s| s.0).sum::<u32>() + t.gap() * children.len().saturating_sub(1) as u32;
-            let grow = children.iter().filter(|c| c.grow).count() as u32;
-            let extra = r.w.saturating_sub(fixed);
+            // Konecne sirky (zuzeni zalamovanych stitku, zbytek pro `grow`).
+            let sizes = row_sizes(&children, r.w, t, true);
             let mut x = r.x;
             for (c, (w, h)) in children.into_iter().zip(sizes) {
-                let w = if c.grow && grow > 0 { w + extra / grow } else { w };
                 // Svisle na stred radku.
                 let y = r.y + (r.h.saturating_sub(h) / 2) as i32;
                 let k = child_key(&c, key, &mut counts);
@@ -322,7 +391,7 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
             }
         }
         Kind::Scroll(child) => {
-            let (_, ch) = measure(&child, t);
+            let (_, ch) = measure(&child, t, r.w);
             let id = push(out, ElemKind::Scroll { content_h: ch }, r);
             // Obsah ve vlastnim prostoru (souradnice od 0).
             let k = child_key(&child, key, &mut [0; TAGS]);

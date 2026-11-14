@@ -75,7 +75,7 @@ impl<M: Clone> Ui<M> {
             let st = self.state(i);
             let (focused, hover, pressed, dim) = (st.focus_visible, st.hover, st.pressed, st.disabled);
             match &e.kind {
-                ElemKind::Label { text, heading, warn } => {
+                ElemKind::Label { text, heading, warn, lines } => {
                     let s = if *heading { self.look.heading() } else { self.look.body() };
                     let old = c.clip();
                     c.set_clip(old.intersect(&r));
@@ -89,10 +89,20 @@ impl<M: Clone> Ui<M> {
                         let f = self.look.face(s);
                         let b = chip.y + f.baseline_in(s.size, chip.h);
                         f.draw(c, chip.x + sp[4] as i32, b, text, s.size, col.warn);
-                    } else {
+                    } else if *lines == 1 || (!text.contains('\n') && self.look.width(text, s) <= r.w) {
+                        // Jeden radek (vejde se nebo `lines(1)`: zkratit s `...`).
                         let f = self.look.face(s);
                         let b = r.y + f.baseline_in(s.size, r.h);
-                        f.draw(c, r.x, b, text, s.size, col.ink);
+                        f.draw_ellipsized(c, r.x, b, text, s.size, col.ink, r.w);
+                    } else {
+                        // Zalomeny: radky pod sebou, blok svisle na stredu.
+                        let ls = crate::layout::label_lines(&self.look, text, s, r.w, *lines);
+                        let top = r.y + (r.h.saturating_sub(ls.len() as u32 * s.line) / 2) as i32;
+                        let f = self.look.face(s);
+                        let b0 = f.baseline_in(s.size, s.line);
+                        for (k, l) in ls.iter().enumerate() {
+                            f.draw_ellipsized(c, r.x, top + k as i32 * s.line as i32 + b0, l, s.size, col.ink, r.w);
+                        }
                     }
                     c.set_clip(old);
                 }

@@ -1386,6 +1386,17 @@ Fokus se posouvá klávesou Tab (Shift+Tab zpět). **Posouvaná oblast**
 (`scroll`) je vlastní vrstva: kolečko změní jen vlastnost vrstvy
 `scroll` a obsah posune kompozitor, aplikace nic nepřekresluje.
 
+**Zalamování štítků** **[implementováno]**: `label` se zalamuje po slovech
+podle šířky, kterou mu dá rozvržení; výška štítku je počet řádků krát
+výška řádku, takže se prvky pod ním posunou. `\n` je vynucený konec řádku.
+Slovo širší než řádek (cesta, adresa) se rozdělí, nejraději za oddělovačem
+(`/`, `\`, `-`, `_`, `.`, `:`). V řádku (`row`) se zalamovaný štítek zúží, aby se
+vešly ostatní prvky. `.lines(n)` omezí počet řádků a delší text skončí
+`...`; `.lines(1)` je jeden řádek bez zalamování. Výrazný štítek (`.warn()`)
+a štítek agenta zůstávají na jednom řádku (pilulka). Kód: `libs/ui/src/wrap.rs`
+(zalamování bez písma), `layout.rs` (`label_size`, `row_sizes`), testy
+`libs/ui/src/tests/wrap.rs`.
+
 ### Klíče, stav a přístupnost prvků
 
 Aplikace po každé změně vrátí nový strom a knihovna ho znovu rozvrhne.
