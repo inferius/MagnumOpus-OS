@@ -15,3 +15,6 @@ test = false
 
 [dependencies]
 cstd = { path = "../cstd" }
+# Rozhrani pro port SDL (`mosdl_*`, docs/cs/sdl.md): soucast libc.a, aby
+# program mel jedinou kopii std.
+mosdl = { path = "../mosdl" }

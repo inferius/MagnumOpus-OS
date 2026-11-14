@@ -11,6 +11,7 @@
 
 #include <_cstd.h>
 #include <sys/types.h>
+#include <sched.h>
 
 _CSTD_BEGIN
 
@@ -56,6 +57,8 @@ int pthread_join(pthread_t t, void **result);
 int pthread_detach(pthread_t t);
 pthread_t pthread_self(void);
 int pthread_equal(pthread_t a, pthread_t b);
+int pthread_getschedparam(pthread_t t, int *policy, struct sched_param *param);
+int pthread_setschedparam(pthread_t t, int policy, const struct sched_param *param);
 _CSTD_NORETURN void pthread_exit(void *result);
 int pthread_cancel(pthread_t t);
 void pthread_testcancel(void);

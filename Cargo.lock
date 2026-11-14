@@ -686,6 +686,7 @@ name = "cstd-libc"
 version = "0.1.0"
 dependencies = [
  "cstd",
+ "mosdl",
 ]
 
 [[package]]
@@ -1959,6 +1960,17 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mosdl"
+version = "0.1.0"
+dependencies = [
+ "gfx",
+ "guiproto",
+ "inputproto",
+ "libos",
+ "ui",
 ]
 
 [[package]]

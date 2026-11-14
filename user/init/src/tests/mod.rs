@@ -31,6 +31,7 @@ mod fs_hist;
 mod fs_perf;
 mod fs_recovery;
 mod gui;
+mod sdl;
 mod gui_gpu;
 mod gui_video;
 mod gui_recovery;
@@ -145,6 +146,8 @@ const SUITES: &[(&str, &[Test])] = &[
     ("agent AI", agent::TESTS),
     // GUI posledni: kompozitor prevezme fokus vstupu.
     ("gui", gui::TESTS),
+    // Port SDL: okno kompozitoru (sdili ho se sadou gui, bezi-li).
+    ("sdl", sdl::TESTS),
     // Zvuk po padu: ridi hlavni supervisor (jako obnova fsd, pred ni).
     ("obnova zvuku", audio_recovery::TESTS),
     // Po vsech testech FS: cena radku shellu na plnem svazku.

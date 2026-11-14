@@ -18,6 +18,35 @@ static ARGS: Init<Vec<Vec<u8>>> = Init::new();
 static VARS: Mutex<Vec<(Vec<u8>, Vec<u8>)>> = Mutex::new(Vec::new());
 static CWD: Mutex<String> = Mutex::new(String::new());
 
+/// Prazdne `environ` (jen ukoncujici NULL) pred startem.
+static EMPTY_ENVIRON: [usize; 1] = [0];
+
+/// `environ` pro programy v C (POSIX `extern char **environ`): pole
+/// ukazatelu na "JMENO=HODNOTA\0" zakoncene NULL. Prestavi se pri startu
+/// a pri kazde zmene promennych (`set_var`, `remove_var`) pod zamkem
+/// `VARS`. Stara pole a retezce se neuvolnuji (ukazatele na ne mohl vzit
+/// jiny kod; jako glibc): zmena prostredi stoji jednu kopii promennych.
+#[unsafe(no_mangle)]
+pub static mut environ: *const *const u8 = &raw const EMPTY_ENVIRON as *const *const u8;
+
+/// Prestavi `environ` z promennych (volat s drzenym zamkem `VARS`).
+fn rebuild_environ(vars: &[(Vec<u8>, Vec<u8>)]) {
+    let mut ptrs: Vec<*const u8> = Vec::with_capacity(vars.len() + 1);
+    for (k, v) in vars {
+        let mut s = Vec::with_capacity(k.len() + v.len() + 2);
+        s.extend_from_slice(k);
+        s.push(b'=');
+        s.extend_from_slice(v);
+        s.push(0);
+        ptrs.push(alloc::boxed::Box::leak(s.into_boxed_slice()).as_ptr());
+    }
+    ptrs.push(core::ptr::null());
+    let arr = alloc::boxed::Box::leak(ptrs.into_boxed_slice()).as_ptr();
+    // SAFETY: zapis ukazatele pod zamkem VARS; ctenari (C) vidi stare nebo
+    // nove platne pole (obe zustavaji alokovana).
+    unsafe { (&raw mut environ).write_volatile(arr) };
+}
+
 /// # Safety
 ///
 /// Jen pri startu (viz `start::Init`).
@@ -33,6 +62,7 @@ pub(crate) unsafe fn init(params: Params) {
             vars.push((k.to_vec(), v.to_vec()));
         }
     }
+    rebuild_environ(&vars);
     *VARS.lock() = vars;
     let cwd = String::from_utf8(params.cwd).ok().and_then(|c| normalize("/", &c).ok());
     *CWD.lock() = cwd.unwrap_or_else(|| String::from("/"));
@@ -58,11 +88,17 @@ pub fn set_var(key: &[u8], value: &[u8]) -> Result<()> {
         Some((_, v)) => *v = value.to_vec(),
         None => vars.push((key.to_vec(), value.to_vec())),
     }
+    rebuild_environ(&vars);
     Ok(())
 }
 
 pub fn remove_var(key: &[u8]) {
-    VARS.lock().retain(|(k, _)| k.as_slice() != key);
+    let mut vars = VARS.lock();
+    let before = vars.len();
+    vars.retain(|(k, _)| k.as_slice() != key);
+    if vars.len() != before {
+        rebuild_environ(&vars);
+    }
 }
 
 /// Kopie vsech promennych (v poradi pridani).

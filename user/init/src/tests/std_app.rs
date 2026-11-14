@@ -171,6 +171,11 @@ pub(super) struct Started {
 }
 
 impl Started {
+    /// Ukonci program (testy programu, ktere samy nekonci, napr. SDL).
+    pub(super) fn kill(self) {
+        let _ = self.process.kill();
+    }
+
     /// Precte vystup a pocka na konec (nejdele `limit`).
     pub(super) fn finish(self, limit: Duration) -> Result<Run, String> {
         let deadline = time::deadline_after(limit);

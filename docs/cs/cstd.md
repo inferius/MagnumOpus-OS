@@ -287,7 +287,7 @@ fsd přitom hlídá cyklus čekání (`EDEADLK`). `l_pid` z `F_GETLK` je -1
   s příznaky překladu i linku pro `clang --config=...` - cizí build
   systémy (`configure`, CMake, Meson) ho použijí jako křížový překlad
   **[implementováno]** (porty níže ho používají přes stejné příznaky).
-- **Porty** (`xtask/src/cports.rs`): zdroje z oficiálních míst přes HTTPS
+- **Porty** (`xtask/src/cports/`, mechanismus popisuje [Porty v C](porty-c.md)): zdroje z oficiálních míst přes HTTPS
   (`curl`), ověřený SHA-256 (zlib shodný s hashem vydání; sqlite připnutý
   z prvního stažení ze sqlite.org), rozbalení `tar`, překlad clangem
   s `-w` a link s `libc.a`. Objekty se překládají znovu jen při změně.
@@ -639,6 +639,25 @@ a AVX-512 podle CPUID, bez XSAVE FXSAVE), viz [Jádro](jadro.md). Kód v C
 se překládá pro základní úroveň CPU (x86-64-v2, NEON,
 [pozadavky-hw.md](pozadavky-hw.md)); AVX/AVX2 a výš volí knihovny
 (FFmpeg, kodeky) za běhu podle CPUID.
+
+## SDL (krok 6)
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (sada `sdl`, [SDL](sdl.md)). Co port
+SDL potřeboval a doplnilo se:
+
+| Co | Jak |
+|---|---|
+| `environ` | pole `JMENO=HODNOTA` zakončené NULL v `osrt` (`env.rs`); přestaví se při startu a při každém `setenv`/`unsetenv` (i z Rustu `std::env::set_var`). Stará pole se neuvolňují (ukazatele na ně mohl vzít jiný kód, jako v glibc) |
+| `nl_langinfo` (`langinfo.h`) | texty locale C (formáty data a času, dny, měsíce); `CODESET` je `UTF-8` v `C.UTF-8`, jinak `ANSI_X3.4-1968` |
+| `sched.h`, `pthread_getschedparam`/`setschedparam` | jen `SCHED_OTHER` s prioritou 0; `SCHED_FIFO`/`SCHED_RR` = `EPERM` (jako Linux bez oprávnění), nesmysl = `EINVAL` |
+| `fenv.h` | výjimky, zaokrouhlení, `fegetenv`/`feholdexcept`/`fesetenv`/`feupdateenv`, `FE_DFL_ENV`; x86_64 nad x87 a MXCSR, aarch64 nad FPCR a FPSR (`src/fenv.rs`), hodnoty a `fenv_t` jako glibc. Pasti výjimek se nezapínají. Test: krok `math` (`ctest`) na obou architekturách, host test na x86_64 (SDL převádí zvuk přes NEON s `feholdexcept`) |
+| `SIGVTALRM`, `SIGPROF` | čísla jako v Linuxu (26, 27) pro masky signálů; časovače `setitimer` zatím nejsou |
+| `wchar.h` | zatím jen typy a konstanty (`wint_t`, `mbstate_t`, `WEOF`); funkce `wcs*` a převody s plnou podporou wchar (níže) |
+| `inttypes.h` | makra `PRI*`/`SCN*` (LP64), `imaxabs`, `imaxdiv`, `strtoimax`, `strtoumax` |
+| `libm.a`, `libpthread.a`, `librt.a` | prázdné archivy v sysrootu (vše je v `libc.a`, jako musl); build systémy linkují `-lm -lpthread` |
+
+`dlfcn.h` přinese `libc.so` (samostatná větev); SDL ho zatím nepotřebuje
+(GTK a `dlopen` záplata pro MagnumOpus vypíná).
 
 ## FFmpeg a licence
 

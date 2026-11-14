@@ -1,0 +1,25 @@
+[package]
+name = "mosdl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Rozhrani C pro port SDL (okno, snimek, udalosti) nad oknem z libs/ui; soucast libc.a"
+
+[lib]
+# Preklad udalosti a kontrola snimku se testuji na hostiteli; symboly C
+# a okno jen na cili magnumopus.
+test = true
+
+[dependencies]
+guiproto = { path = "../guiproto" }
+inputproto = { path = "../inputproto" }
+
+[target.'cfg(target_os = "magnumopus")'.dependencies]
+# Bez `rt`: vstupni bod, heap a vlakna dava std (osrt).
+libos = { path = "../libos", default-features = false }
+ui = { path = "../ui", features = ["os"] }
+gfx = { path = "../gfx" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("magnumopus"))'] }

@@ -417,6 +417,72 @@ pub extern "C" fn localeconv() -> *const lconv {
     &LCONV.0
 }
 
+// --- langinfo.h -----------------------------------------------------------------
+
+/// Polozky `nl_langinfo` (cisla musi sedet s `include/langinfo.h`).
+pub mod nl {
+    use core::ffi::c_int;
+    pub const CODESET: c_int = 0;
+    pub const D_T_FMT: c_int = 1;
+    pub const D_FMT: c_int = 2;
+    pub const T_FMT: c_int = 3;
+    pub const T_FMT_AMPM: c_int = 4;
+    pub const AM_STR: c_int = 5;
+    pub const PM_STR: c_int = 6;
+    pub const RADIXCHAR: c_int = 7;
+    pub const THOUSEP: c_int = 8;
+    pub const YESEXPR: c_int = 9;
+    pub const NOEXPR: c_int = 10;
+    pub const DAY_1: c_int = 11;
+    pub const ABDAY_1: c_int = 18;
+    pub const MON_1: c_int = 25;
+    pub const ABMON_1: c_int = 37;
+    pub const CRNCYSTR: c_int = 49;
+}
+
+const DAYS: [&[u8]; 7] = [b"Sunday\0", b"Monday\0", b"Tuesday\0", b"Wednesday\0", b"Thursday\0", b"Friday\0", b"Saturday\0"];
+const ABDAYS: [&[u8]; 7] = [b"Sun\0", b"Mon\0", b"Tue\0", b"Wed\0", b"Thu\0", b"Fri\0", b"Sat\0"];
+const MONTHS: [&[u8]; 12] = [
+    b"January\0", b"February\0", b"March\0", b"April\0", b"May\0", b"June\0", b"July\0", b"August\0", b"September\0", b"October\0", b"November\0", b"December\0",
+];
+const ABMONTHS: [&[u8]; 12] = [b"Jan\0", b"Feb\0", b"Mar\0", b"Apr\0", b"May\0", b"Jun\0", b"Jul\0", b"Aug\0", b"Sep\0", b"Oct\0", b"Nov\0", b"Dec\0"];
+
+/// Text polozky v locale C / C.UTF-8 (zakonceny nulou); neznama = "".
+pub fn langinfo(item: c_int, utf8: bool) -> &'static [u8] {
+    let idx = |base: c_int, n: c_int| (base..base + n).contains(&item).then(|| (item - base) as usize);
+    match item {
+        nl::CODESET => if utf8 { b"UTF-8\0" } else { b"ANSI_X3.4-1968\0" },
+        nl::D_T_FMT => b"%a %b %e %H:%M:%S %Y\0",
+        nl::D_FMT => b"%m/%d/%y\0",
+        nl::T_FMT => b"%H:%M:%S\0",
+        nl::T_FMT_AMPM => b"%I:%M:%S %p\0",
+        nl::AM_STR => b"AM\0",
+        nl::PM_STR => b"PM\0",
+        nl::RADIXCHAR => b".\0",
+        nl::YESEXPR => b"^[yY]\0",
+        nl::NOEXPR => b"^[nN]\0",
+        _ => {
+            if let Some(i) = idx(nl::DAY_1, 7) {
+                DAYS[i]
+            } else if let Some(i) = idx(nl::ABDAY_1, 7) {
+                ABDAYS[i]
+            } else if let Some(i) = idx(nl::MON_1, 12) {
+                MONTHS[i]
+            } else if let Some(i) = idx(nl::ABMON_1, 12) {
+                ABMONTHS[i]
+            } else {
+                b"\0"
+            }
+        }
+    }
+}
+
+/// `nl_langinfo`: texty locale C (C.UTF-8 se lisi jen v `CODESET`).
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn nl_langinfo(item: c_int) -> *const c_char {
+    langinfo(item, LOCALE_UTF8.load(Ordering::Relaxed)).as_ptr() as *const c_char
+}
+
 // --- uname ----------------------------------------------------------------------
 
 #[repr(C)]

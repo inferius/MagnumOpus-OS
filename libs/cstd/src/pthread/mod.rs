@@ -283,6 +283,85 @@ pub extern "C" fn sched_yield() -> c_int {
     0
 }
 
+/// Politiky planovani (`sched.h`). Aplikace maji jen `SCHED_OTHER`
+/// s prioritou 0: planovac zatim realny cas aplikacim nedava.
+pub const SCHED_OTHER: c_int = 0;
+pub const SCHED_FIFO: c_int = 1;
+pub const SCHED_RR: c_int = 2;
+
+/// `struct sched_param`.
+#[repr(C)]
+pub struct sched_param {
+    pub sched_priority: c_int,
+}
+
+fn known_policy(policy: c_int) -> bool {
+    matches!(policy, SCHED_OTHER | SCHED_FIFO | SCHED_RR)
+}
+
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn sched_get_priority_min(policy: c_int) -> c_int {
+    if known_policy(policy) {
+        0
+    } else {
+        crate::errno::set(crate::errno::EINVAL);
+        -1
+    }
+}
+
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn sched_get_priority_max(policy: c_int) -> c_int {
+    if known_policy(policy) {
+        0
+    } else {
+        crate::errno::set(crate::errno::EINVAL);
+        -1
+    }
+}
+
+/// `pthread_getschedparam`: vzdy `SCHED_OTHER`, priorita 0.
+///
+/// # Safety
+///
+/// `policy` a `param` jsou platne ukazatele nebo NULL.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn pthread_getschedparam(_t: pthread_t, policy: *mut c_int, param: *mut sched_param) -> c_int {
+    // SAFETY: platne nebo NULL podle smlouvy.
+    unsafe {
+        if let Some(p) = policy.as_mut() {
+            *p = SCHED_OTHER;
+        }
+        if let Some(p) = param.as_mut() {
+            p.sched_priority = 0;
+        }
+    }
+    0
+}
+
+/// `pthread_setschedparam`: `SCHED_OTHER` s prioritou 0 projde, realny cas
+/// = `EPERM` (jako Linux bez opravneni), nesmysl = `EINVAL`. Vraci kod
+/// chyby (ne `errno`), jako vsechny funkce `pthread_*`.
+///
+/// # Safety
+///
+/// `param` je platny ukazatel nebo NULL.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn pthread_setschedparam(_t: pthread_t, policy: c_int, param: *const sched_param) -> c_int {
+    // SAFETY: platny nebo NULL podle smlouvy.
+    let prio = unsafe { param.as_ref() }.map(|p| p.sched_priority);
+    sched_set_check(policy, prio)
+}
+
+/// Pravidlo `pthread_setschedparam` (ciste, test na hostiteli).
+pub fn sched_set_check(policy: c_int, prio: Option<c_int>) -> c_int {
+    match (policy, prio) {
+        (_, None) => crate::errno::EINVAL,
+        (SCHED_OTHER, Some(0)) => 0,
+        (SCHED_FIFO | SCHED_RR, Some(_)) => crate::errno::EPERM,
+        _ => crate::errno::EINVAL,
+    }
+}
+
 /// Bod zruseni: zrusene vlakno skonci s `PTHREAD_CANCELED`.
 pub fn testcancel() {
     let me = current();
