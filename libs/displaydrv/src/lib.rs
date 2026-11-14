@@ -310,8 +310,9 @@ fn req_op(r: &Request) -> u32 {
         Request::Sync { .. } => op::SYNC,
         Request::Connectors => op::CONNECTORS,
         Request::SetMode { .. } => op::SET_MODE,
-        #[allow(unreachable_patterns)]
-        _ => 0,
+        // Bez GPU: chyba musi nest kod pozadavku, jinak ji klient
+        // (kompozitor u `backend gpu`) nesparuje a ceka do vyprseni.
+        Request::OpenRender => op::OPEN_RENDER,
     }
 }
 

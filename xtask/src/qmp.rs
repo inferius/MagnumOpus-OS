@@ -11,7 +11,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::{Duration, Instant};
@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 /// Musi sedet s `QEMU_MARKER` v `user/init/src/tests/input.rs`.
 pub const MARKER: &str = "init: test vstupu: cekam na udalosti z QEMU";
 
-/// Jak dlouho nejdyl cekat na znacku (cely beh testu).
+/// Jak dlouho nejdyl cekat na jednu znacku uvnitr useku.
 const WAIT_MAX: Duration = Duration::from_secs(600);
 
 /// Volny port TCP na localhostu pro QMP.
@@ -40,19 +40,80 @@ pub const MARKER_PS2: &str = "init: test vstupu: cekam na udalosti PS/2 z QEMU";
 /// Musi sedet s `QEMU_MARKER_SECURE` v `user/init/src/tests/input.rs`.
 pub const MARKER_SECURE: &str = "init: test vstupu: cekam na zkratku z QEMU";
 
-/// Pocka, az se v logu objevi `marker`; `false` = nedockal se.
-fn wait_marker(log: &Path, marker: &str, start: Instant) -> bool {
-    loop {
-        if start.elapsed() > WAIT_MAX {
-            return false;
+/// Sledovani logu seriove linky od posledni nalezene znacky. Znacky se
+/// hledaji jen za `pos`: s `--repeat` je kazde kolo v logu znovu a znacka
+/// z minuleho kola uz neplati (jinak by se useky dalsich kol spustily
+/// hned, nebo vubec).
+struct Log {
+    path: PathBuf,
+    pos: usize,
+}
+
+/// Vysledek hledani v logu ([`scan`]).
+#[derive(Debug, PartialEq)]
+enum Scan {
+    /// Znacka `wanted[i]` zacina na bajtu `at` a jeji radek je cely; `rest`
+    /// = zbytek radku za znackou.
+    Found { i: usize, at: usize, rest: String },
+    /// Driv nez kterakoli hledana znacka se objevila znacka z `abort`.
+    Aborted,
+    /// Zatim nic (nebo radek se znackou jeste neni cely).
+    Pending,
+}
+
+/// Nejdrive se objevujici znacka z `wanted` v `text[pos..]` (cely radek),
+/// nebo [`Scan::Aborted`], kdyz pred ni lezi znacka z `abort`.
+fn scan(text: &[u8], pos: usize, wanted: &[&str], abort: &[&str]) -> Scan {
+    let hay = text.get(pos..).unwrap_or(&[]);
+    let first = |ms: &[&str]| ms.iter().enumerate().filter_map(|(i, m)| find(hay, m.as_bytes()).map(|k| (k, i))).min();
+    let hit = first(wanted);
+    if let Some((k, _)) = first(abort)
+        && hit.is_none_or(|(h, _)| k < h)
+    {
+        return Scan::Aborted;
+    }
+    let Some((k, i)) = hit else { return Scan::Pending };
+    let after = &hay[k + wanted[i].len()..];
+    let Some(nl) = after.iter().position(|&c| c == b'\n') else { return Scan::Pending };
+    let rest = String::from_utf8_lossy(&after[..nl]).trim_end_matches('\r').to_string();
+    Scan::Found { i, at: pos + k, rest }
+}
+
+/// Pozice `needle` v `hay`.
+fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    hay.windows(needle.len()).position(|w| w == needle)
+}
+
+impl Log {
+    fn read(&mut self) -> Vec<u8> {
+        let text = std::fs::read(&self.path).unwrap_or_default();
+        // Opakovany start QEMU log smaze: hledat znovu od zacatku.
+        if text.len() < self.pos {
+            self.pos = 0;
         }
-        let seen = std::fs::read(log)
-            .map(|b| String::from_utf8_lossy(&b).contains(marker))
-            .unwrap_or(false);
-        if seen {
-            return true;
+        text
+    }
+
+    /// Pocka na `marker` za posledni znackou; vrati zbytek jeho radku
+    /// a posune se za nej. `None` = driv prisla znacka z `abort` (test
+    /// skoncil nebo prestoupil k dalsimu useku) nebo vyprsel limit.
+    fn wait(&mut self, marker: &str, abort: &[&str]) -> Option<String> {
+        let start = Instant::now();
+        while start.elapsed() < WAIT_MAX {
+            let text = self.read();
+            match scan(&text, self.pos, &[marker], abort) {
+                Scan::Found { at, rest, .. } => {
+                    self.pos = at + marker.len();
+                    return Some(rest);
+                }
+                Scan::Aborted => return None,
+                Scan::Pending => std::thread::sleep(Duration::from_millis(200)),
+            }
         }
-        std::thread::sleep(Duration::from_millis(200));
+        None
     }
 }
 
@@ -60,14 +121,15 @@ fn wait_marker(log: &Path, marker: &str, start: Instant) -> bool {
 /// = stroj ma radic PS/2; bez nej test PS/2 svou znacku nevypise a kroky
 /// PS/2 se preskoci (jinak by vlakno na znacku cekalo a k USB se nedostalo).
 /// `port` cte az pri vkladani: opakovany start QEMU (souboj o port) ho
-/// zmeni.
+/// zmeni. S `--repeat` se useky spousti v kazdem kole znovu (znacky se
+/// hledaji za posledni nalezenou, [`Log`]).
 pub fn spawn_injector(log: PathBuf, port: Arc<AtomicU16>, ps2: bool) {
     std::thread::spawn(move || {
-        let start = Instant::now();
+        let mut log = Log { path: log, pos: 0 };
         let segs = segments(ps2);
         // Pripojit az na zacatku prvniho useku (QEMU uz bezi).
-        let Some(first) = next_segment(&log, &segs, 0, start) else { return };
-        match inject(port.load(Ordering::Relaxed), &log, start, &segs, first) {
+        let Some(first) = next_segment(&mut log, &segs) else { return };
+        match inject(port.load(Ordering::Relaxed), &mut log, &segs, first) {
             Ok(n) => println!("xtask: QMP: udalosti vstupu poslany ({n} useku)"),
             Err(e) => eprintln!("xtask: QMP: vkladani vstupu selhalo: {e}"),
         }
@@ -111,23 +173,30 @@ fn segments(ps2: bool) -> Vec<(&'static str, Vec<Step>)> {
     out
 }
 
-/// Pocka na zacatek nektereho useku od `from`; vrati jeho index (nejdriv
-/// zacinajici z tech, jejichz znacka v logu je). `None` = beh testu skoncil
-/// nebo vyprsel limit.
-fn next_segment(log: &Path, segs: &[(&'static str, Vec<Step>)], from: usize, start: Instant) -> Option<usize> {
+/// Pocka na zacatek nektereho useku za posledni znackou v logu; vrati
+/// index useku, jehoz znacka se objevila nejdriv (useky testu, ktere
+/// nebezi, se tak preskoci), a nastavi pozici na ni. `None` = beh testu
+/// skoncil. Bez limitu: mezi useky muzou bezet dlouhe sady (beh hlida
+/// limit testu v `qemu.rs`, vlakno skonci s xtaskem).
+fn next_segment(log: &mut Log, segs: &[(&'static str, Vec<Step>)]) -> Option<usize> {
+    let starts: Vec<&str> = segs.iter().map(|s| s.0).collect();
     loop {
-        if start.elapsed() > WAIT_MAX {
-            return None;
+        let text = log.read();
+        match scan(&text, log.pos, &starts, &END) {
+            Scan::Found { i, at, .. } => {
+                log.pos = at;
+                return Some(i);
+            }
+            Scan::Aborted => return None,
+            Scan::Pending => std::thread::sleep(Duration::from_millis(200)),
         }
-        let text = std::fs::read(log).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
-        if let Some(j) = (from..segs.len()).find(|&j| text.contains(segs[j].0)) {
-            return Some(j);
-        }
-        if END.iter().any(|e| text.contains(e)) {
-            return None;
-        }
-        std::thread::sleep(Duration::from_millis(200));
     }
+}
+
+/// Znacky, ktere ukonci cekani uvnitr useku: zacatek jineho useku nebo
+/// konec behu (test selhal a znacku nevypise).
+fn aborts(marker: &str) -> Vec<&'static str> {
+    STARTS.iter().chain(END.iter()).copied().filter(|m| *m != marker).collect()
 }
 
 /// Klavesa (qcode QEMU).
@@ -470,8 +539,10 @@ fn reply(reader: &mut impl BufRead) -> Result<(), String> {
 }
 
 /// Projde useky od `first` (dalsi vzdy az po objeveni jeho znacky, useky
-/// bez znacky preskoci); vrati pocet provedenych useku.
-fn inject(port: u16, log: &Path, start: Instant, segs: &[(&'static str, Vec<Step>)], first: usize) -> Result<usize, String> {
+/// bez znacky preskoci, s `--repeat` i dalsi kola); vrati pocet
+/// provedenych useku. Usek, jehoz test skoncil driv (chybi znacka), se
+/// vzda a pokracuje se dalsim.
+fn inject(port: u16, log: &mut Log, segs: &[(&'static str, Vec<Step>)], first: usize) -> Result<usize, String> {
     let stream = TcpStream::connect(("127.0.0.1", port)).map_err(|e| e.to_string())?;
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
@@ -496,8 +567,19 @@ fn inject(port: u16, log: &Path, start: Instant, segs: &[(&'static str, Vec<Step
     while let Some(i) = next {
         done += 1;
         println!("xtask: QMP: usek '{}'", segs[i].0);
-        for step in &segs[i].1 {
+        'steps: for step in &segs[i].1 {
             let step = step.clone();
+            // Cekani na znacku (i s polohou za ni); chybi-li, usek se vzda.
+            let rest = match &step {
+                Step::WaitFor(m) | Step::ClickAt(m) | Step::DragAt(m) => match log.wait(m, &aborts(m)) {
+                    Some(rest) => rest,
+                    None => {
+                        eprintln!("xtask: QMP: znacka '{m}' se neobjevila, usek '{}' preskocen", segs[i].0);
+                        break 'steps;
+                    }
+                },
+                _ => String::new(),
+            };
             let (events, device) = match step {
                 Step::Send(e) => (e, r#""device":"video0","#),
                 Step::SendPs2(e) => (e, ""),
@@ -506,17 +588,9 @@ fn inject(port: u16, log: &Path, start: Instant, segs: &[(&'static str, Vec<Step
                     send(cmd, &mut reader)?;
                     continue;
                 }
-                Step::WaitFor(marker) => {
-                    if !wait_marker(log, marker, start) {
-                        return Err(format!("znacka '{marker}' se neobjevila"));
-                    }
-                    continue;
-                }
+                Step::WaitFor(_) => continue,
                 Step::DragAt(marker) => {
-                    if !wait_marker(log, marker, start) {
-                        return Err(format!("znacka '{marker}' se neobjevila"));
-                    }
-                    let p = marker_numbers(log, marker).filter(|v| v.len() >= 4).ok_or_else(|| format!("poloha za znackou '{marker}'"))?;
+                    let p = numbers(&rest).filter(|v| v.len() >= 4).ok_or_else(|| format!("poloha za znackou '{marker}'"))?;
                     for events in [
                         vec![rel("x", -30000), rel("y", -30000)],
                         vec![rel("x", p[0]), rel("y", p[1]), btn("left", true)],
@@ -530,10 +604,10 @@ fn inject(port: u16, log: &Path, start: Instant, segs: &[(&'static str, Vec<Step
                     continue;
                 }
                 Step::ClickAt(marker) => {
-                    if !wait_marker(log, marker, start) {
-                        return Err(format!("znacka '{marker}' se neobjevila"));
-                    }
-                    let (x, y) = marker_point(log, marker).ok_or_else(|| format!("poloha za znackou '{marker}'"))?;
+                    let (x, y) = numbers(&rest)
+                        .filter(|v| v.len() >= 2)
+                        .map(|v| (v[0], v[1]))
+                        .ok_or_else(|| format!("poloha za znackou '{marker}'"))?;
                     for events in [
                         vec![rel("x", -30000), rel("y", -30000)],
                         vec![rel("x", x), rel("y", y), btn("left", true)],
@@ -552,23 +626,14 @@ fn inject(port: u16, log: &Path, start: Instant, segs: &[(&'static str, Vec<Step
             );
             send(cmd, &mut reader)?;
         }
-        next = next_segment(log, segs, i + 1, start);
+        next = next_segment(log, segs);
     }
     Ok(done)
 }
 
-/// Dve cisla "x y" za znackou v logu.
-fn marker_point(log: &Path, marker: &str) -> Option<(i32, i32)> {
-    let v = marker_numbers(log, marker)?;
-    Some((*v.first()?, *v.get(1)?))
-}
-
-/// Cisla oddelena mezerami za znackou v logu (do konce radku).
-fn marker_numbers(log: &Path, marker: &str) -> Option<Vec<i32>> {
-    let b = std::fs::read(log).ok()?;
-    let text = String::from_utf8_lossy(&b);
-    let rest = &text[text.find(marker)? + marker.len()..];
-    rest.lines().next()?.split_whitespace().map(|v| v.parse::<i32>().ok()).collect()
+/// Cisla oddelena mezerami (zbytek radku za znackou).
+fn numbers(rest: &str) -> Option<Vec<i32>> {
+    rest.split_whitespace().map(|v| v.parse::<i32>().ok()).collect()
 }
 
 /// Posle jeden prikaz QMP (napr. `system_powerdown`) a pocka na odpoved.
@@ -591,3 +656,7 @@ pub fn command(port: u16, cmd: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "qmp_tests.rs"]
+mod tests;

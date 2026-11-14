@@ -29,3 +29,4 @@
 - Nový crate s host testy se musí přidat do seznamu `--package` ve `host_tests` (`src/main.rs`) a do `members` kořenového `Cargo.toml`; jinak ho `cargo xtask test` nespustí.
 - Běžící `cargo xtask run` zamyká `xtask.exe`; jiný xtask se nepřeloží, nejdřív zavři QEMU.
 - Restart v okně QEMU s WHPX se zasekne (chyba QEMU/WHPX).
+- QMP (`qmp.rs`): značky testů se v logu hledají jen za poslední nalezenou (`Log::pos`), jinak by `--repeat` v dalších kolech spouštěl úseky hned nebo vůbec. Nová značka začátku úseku patří do `STARTS` a nesmí být podřetězcem jiné (test `qmp_tests.rs`); chybějící značka uvnitř úseku úsek vzdá, ne celé vkládání.

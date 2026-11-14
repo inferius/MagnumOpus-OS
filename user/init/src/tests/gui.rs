@@ -501,11 +501,14 @@ fn look_shots(startup: &Startup) -> TestResult {
             s.gui.command(alloc::format!("theme {name}").as_bytes(), Vec::new()).map_err(|e| fail("theme", e))?;
             // Ne `settle`: terminal s bezici ulohou animuje a kompozitor
             // neni nikdy uplne v klidu. Pockat na zobrazeni snimku po
-            // zmene (prekresleni cele obrazovky) a na prekresleni aplikaci
-            // (dostaly zpravu o motivu).
+            // zmene: kompozitor po `theme` prekresli celou obrazovku vzdy
+            // (i pri stejnem motivu). Pocet dalsich snimku od aplikaci neni
+            // pevny (pomaly displej je slije do jednoho, stejny motiv je
+            // neprekresli; drive `+ 3` selhavalo v dalsim kole --repeat na
+            // bochs-display), na ne se ceka casem nize.
             let end = time::deadline_after(TIMEOUT);
-            while s.gui.status().map_err(|e| fail("status", e))?.presented < before + 3 {
-                check!(time::now() < end, "snimek po zmene motivu");
+            while s.gui.status().map_err(|e| fail("status", e))?.presented < before + 1 {
+                check!(time::now() < end, alloc::format!("snimek po zmene motivu {name}"));
                 time::sleep(Duration::from_millis(100));
             }
             // Aplikace prekresluji samy (velke okno je v emulaci pomale).

@@ -32,7 +32,7 @@ a `AARCH64_FW_CODE`/`AARCH64_FW_VARS`.
 | `cargo xtask image` | build + obraz disku `target/os-<arch>-<profil>.img` (GPT, ESP FAT32) |
 | `cargo xtask run` | image + QEMU s oknem; sériová linka v terminálu. Init testy nespouští a běží jako supervisor ([Init](init.md)). Bez `--gpu` GUI kreslí přes framebuffer firmwaru (`--gpu none`, [GUI](gui.md)), aby bylo vidět v okně. Konzoli Windows xtask přepne na UTF-8 |
 | `cargo xtask test` | testy knihoven na hostiteli (`abi`, `initfs`, `fs`), kontrola překladu jádra pro ostatní architektury, dokumentace, pak jádro a userspace v QEMU bez okna |
-| `cargo xtask test --only sit --repeat 20` | jen vybrané sady testů userspace (jména jako v logu, oddělená čárkou), n-krát za sebou – hledání nestabilních testů; každé další kolo přidá 60 s k limitu běhu. Test delší než 20 s se v logu označí `[pomaly]` |
+| `cargo xtask test --only sit --repeat 20` | jen vybrané sady testů userspace (jména jako v logu, oddělená čárkou), n-krát za sebou – hledání nestabilních testů; každé další kolo přidá 60 s k limitu běhu. Vstup přes QMP (klávesy, myš, snímky) xtask posílá v každém kole znovu: značky testů hledá v logu jen za poslední nalezenou. Test delší než 20 s se v logu označí `[pomaly]` |
 | `cargo xtask test --only napajeni` | jen zvláštní běhy testu napájení (vypnutí tlačítkem přes ACPI, restart; po hlavním běhu se spouští vždy, vypne je `--no-power`), viz [ACPI](acpi.md#testy) |
 | `cargo xtask test --net-online` | navíc testy proti skutečné síti hostitele (resolver hostitele přes slirp); bez volby se přeskočí |
 | `cargo xtask usb` | živé USB: obraz `target/usb-<arch>-<profil>.img`; `--list`, `--write <disk>`, `--run`, `--test`, `--size <MiB>`, `--out <soubor>`, viz [Živé USB](zive-usb.md) |
