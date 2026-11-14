@@ -835,9 +835,10 @@ stojí na předchozím:
 | 4 | Dynamické linkování: zavádění sdílených knihoven (ELF `ET_DYN`) | Wine a většina C/C++ projektů | [navrženo] |
 | 5 | Doručení výjimek (SEH, signály) a pozastavení vlákna se čtením a zápisem kontextu | Wine, ladicí nástroje | [navrženo] |
 | 6 | SDL2/3 nad kompozitorem a `audiod` | jeden port otevře hry a multimediální aplikace | [navrženo] |
+| 6a | Grafické a video základy v jádře: objekt plotu, sdílený buffer, DMA po kusech s mapováním do IOMMU, třída render ([Grafika NVIDIA a AMD](gpu-amd-nvidia.md#vlivy-na-základy), body 1, 2, 4, 8) | ploty a buffery bez kopie pro video (FFmpeg), kompozitor, Vulkan a ovladače GPU; `dma-fence` z Linuxu je GPL, potřebujeme vlastní | [navrženo] |
 | 7 | FFmpeg jako izolovaný proces (LGPL), pak přehrávač | multimédia | [navrženo] |
 | 8 | Windows vrstva (Wine/Proton nad naším spodním patrem, viz výše) | aplikace a hry pro Windows | [navrženo] |
-| 9 | Vulkan na skutečném HW: Intel nativně, AMD/NVIDIA přes LinuxKPI | DXVK/VKD3D a hry na železe (v QEMU zatím Venus) | [navrženo] |
+| 9 | Vulkan na skutečném HW: Intel nativně, NVIDIA vlastním ovladačem pro GSP ([návrh](gpu-amd-nvidia.md)), AMD přes LinuxKPI | DXVK/VKD3D a hry na železe (v QEMU zatím Venus) | [navrženo] |
 
 Kroky 2-5 se dají částečně souběžně (paměť je jádro, `cstd` userspace),
 ale `cstd` potřebuje `mmap` z kroku 3 pro většinu reálných programů.

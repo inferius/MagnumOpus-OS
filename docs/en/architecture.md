@@ -883,9 +883,10 @@ on the previous one:
 | 4 | Dynamic linking: loading shared libraries (ELF `ET_DYN`) | Wine and most C/C++ projects | [designed] |
 | 5 | Exception delivery (SEH, signals) and suspending a thread with reading and writing its context | Wine, debuggers | [designed] |
 | 6 | SDL2/3 on top of the compositor and `audiod` | one port opens games and multimedia apps | [designed] |
+| 6a | Graphics and video foundations in the kernel: fence object, shared buffer, scatter-gather DMA mapped into the IOMMU, render class ([NVIDIA and AMD graphics](gpu-amd-nvidia.md#impact-on-the-foundations), points 1, 2, 4, 8) | fences and copy-free buffers for video (FFmpeg), the compositor, Vulkan and GPU drivers; Linux's `dma-fence` is GPL, we need our own | [designed] |
 | 7 | FFmpeg as an isolated process (LGPL), then a player | multimedia | [designed] |
 | 8 | Windows layer (Wine/Proton on our lower tier, see above) | Windows applications and games | [designed] |
-| 9 | Vulkan on real hardware: Intel natively, AMD/NVIDIA through LinuxKPI | DXVK/VKD3D and games on hardware (Venus in QEMU for now) | [designed] |
+| 9 | Vulkan on real hardware: Intel natively, NVIDIA with our own GSP driver ([design](gpu-amd-nvidia.md)), AMD through LinuxKPI | DXVK/VKD3D and games on hardware (Venus in QEMU for now) | [designed] |
 
 Steps 2-5 can partly run in parallel (memory is kernel, `cstd` is
 userspace), but `cstd` needs `mmap` from step 3 for most real programs.
