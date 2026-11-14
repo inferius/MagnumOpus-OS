@@ -57,6 +57,12 @@ int chdir(const char *path);
 int access(const char *path, int mode);
 long sysconf(int name);
 int getpagesize(void);
+pid_t getpid(void);
+pid_t getppid(void);
+unsigned alarm(unsigned secs);
+int pause(void);
+unsigned sleep(unsigned secs);
+int usleep(unsigned us);
 
 _CSTD_NO_FORK pid_t fork(void);
 _CSTD_NO_FORK pid_t vfork(void);

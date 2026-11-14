@@ -18,7 +18,8 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
 > v `printf`, `strtod`. Část 2e **[ověřeno v QEMU]** (sada `cstd sit`):
 > sockety BSD, `getaddrinfo`, `poll`, `select`, `epoll`. Část 2f
 > **[ověřeno v QEMU]** (krok `mmap`): `mmap`, `mprotect`, `madvise`,
-> `mseal`. Další části (signály, zámky souborů,
+> `mseal`. Část 2g **[ověřeno v QEMU]** (krok `signal`): signály,
+> `setjmp`. Další části (zámky souborů,
 > `libc.so`, porty) **[navrženo]**, viz
 > [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
 
@@ -209,6 +210,39 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 - `madvise(MADV_DONTNEED | MADV_FREE)` vrátí paměť a další čtení vrátí
   nuly; ostatní rady se přijmou bez účinku. `mseal` zapečetí rozsah se
   současnými právy (pak nejde odmapovat ani změnit práva).
+
+## Funkce (část 2g: signály a nelokální skoky)
+
+| Hlavička | Funkce | Poznámka |
+|---|---|---|
+| `signal.h` | `signal`, `sigaction` (`SA_SIGINFO`, `SA_RESETHAND`, `SA_NODEFER`), `raise`, `kill`, `sigprocmask`, `pthread_sigmask`, `sigpending`, `sigsuspend`, `sig*set`, `sigaltstack`, `strsignal`, `psignal` | čísla jako Linux |
+| `unistd.h`, `sys/time.h` | `alarm`, `pause`, `setitimer` (`ITIMER_REAL`), `getpid`, `getppid` | |
+| `setjmp.h` | `setjmp`, `longjmp`, `sigsetjmp`, `siglongjmp`, `_setjmp`, `_longjmp` | `jmp_buf` 320 B na obou architekturách; nahé funkce v asembleru |
+
+Rozhodnutí 6A - signály bez podpory jádra:
+
+- **Synchronní** (`SIGSEGV`, `SIGBUS`, `SIGFPE`, `SIGILL`, `SIGTRAP`):
+  první `sigaction` s obsluhou zaregistruje obsluhu výjimek ve vlákně
+  ([vyjimky.md](vyjimky.md)); ta zavolá obsluhu signálu v témže vlákně se
+  `si_addr` z výjimky. Návrat z obsluhy = pokračovat (instrukce se
+  zopakuje - vzor GC a JIT: `mprotect` v obsluze), `SIG_DFL` = další
+  obsluha a konec procesu. Odchod `siglongjmp` funguje. `ucontext_t`
+  (třetí argument) zatím vyplněný není (nuly) **[navrženo]**. Na aarch64
+  dělení nulou `SIGFPE` nedá (CPU ho nehlásí).
+- **`raise`, `kill` na vlastní proces:** obsluha běží hned ve volajícím
+  vlákně; blokovaný signál čeká a doručí se po odblokování.
+- **Časovače** (`alarm`, `setitimer`): obsluha `SIGALRM` běží ve zvláštním
+  vlákně signálů (jako obsluha Ctrl+C konzole ve Windows); `EINTR`
+  nevzniká, `pause` a `sigsuspend` se probudí.
+- **Výchozí akce:** konec procesu kódem 128 + číslo signálu (`SIGABRT` =
+  `abort`), `SIGCHLD`, `SIGCONT`, `SIGWINCH` a zastavovací signály se
+  ignorují.
+- **Nejsou:** signály od jiných procesů (terminál, rodič; událost `SIGNAL`
+  v bloku parametrů **[navrženo]**), `SIGPIPE` (zápis do zavřené roury
+  vrátí jen `EPIPE`).
+- **`getpid`:** jádro programům číslo procesu nedává; `getpid` vrací
+  náhodné kladné číslo, stálé po dobu běhu (jména dočasných souborů,
+  `kill` na sebe). `getppid` = 1.
 
 ### Čísla fd
 

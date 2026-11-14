@@ -20,7 +20,7 @@
 //! by se tloukly se systemovou libc (testy logiky bezi na hostiteli).
 
 #![allow(non_camel_case_types, non_upper_case_globals)]
-#![cfg_attr(target_os = "magnumopus", feature(magnumopus_runtime, rustc_private))]
+#![cfg_attr(target_os = "magnumopus", feature(rustc_private))]
 
 // Symboly cstd-core (strlen, malloc, snprintf, ...) se musi prilinkovat.
 extern crate cstd_core;
@@ -31,6 +31,8 @@ pub mod flock;
 pub mod math;
 pub mod mman;
 pub mod poll;
+pub mod setjmp;
+pub mod signal;
 pub mod pthread;
 pub mod stat;
 pub mod stdio;
@@ -52,6 +54,8 @@ mod time_tests;
 mod socket_tests;
 #[cfg(test)]
 mod mman_tests;
+#[cfg(test)]
+mod signal_tests;
 
 pub use cstd_core::ctypes::{c_char, c_int, c_long, c_uint, c_ulong, size_t};
 

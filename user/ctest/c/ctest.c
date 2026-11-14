@@ -18,6 +18,7 @@ int time_test(void);
 int math_test(void);
 int net_main(void);
 int mmap_test(const char *dir);
+int signal_test(void);
 
 #define CHECK(name, cond)                                              \
     do {                                                               \
@@ -145,6 +146,9 @@ int main(int argc, char **argv) {
     int mm = dir != NULL ? mmap_test(dir) : -1;
     if (mm != 0) fprintf(stderr, "ctest mmap: krok %d errno %d\n", mm, errno);
     CHECK("mmap", mm == 0);
+    int sg = signal_test();
+    if (sg != 0) fprintf(stderr, "ctest signal: krok %d errno %d\n", sg, errno);
+    CHECK("signal", sg == 0);
     assert(failures == 0);
     fputs("chyba na stderr\n", stderr);
     fflush(stdout);

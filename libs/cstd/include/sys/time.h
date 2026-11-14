@@ -14,6 +14,13 @@ struct timeval {
 
 int gettimeofday(struct timeval *tv, void *tz);
 
+struct itimerval {
+    struct timeval it_interval;
+    struct timeval it_value;
+};
+#define ITIMER_REAL 0
+int setitimer(int which, const struct itimerval *nv, struct itimerval *ov);
+
 _CSTD_END
 
 #endif

@@ -19,7 +19,8 @@ Compiling C (clang, flags, protections) is described in
 > `math.h`, floating point in `printf`, `strtod`. Part 2e **[verified in
 > QEMU]** (suite `cstd sit`): BSD sockets, `getaddrinfo`, `poll`, `select`,
 > `epoll`. Part 2f **[verified in QEMU]** (step `mmap`): `mmap`, `mprotect`,
-> `madvise`, `mseal`. Further parts (
+> `madvise`, `mseal`. Part 2g **[verified in QEMU]** (step `signal`):
+> signals, `setjmp`. Further parts (
 > signals, file locks, `libc.so`, ports) **[designed]**, see [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
 
 ## Layers
@@ -216,6 +217,41 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
   returns zeros; other advice is accepted without effect. `mseal` seals the
   range with its current rights (then it cannot be unmapped or have its
   rights changed).
+
+## Functions (part 2g: signals and non-local jumps)
+
+| Header | Functions | Note |
+|---|---|---|
+| `signal.h` | `signal`, `sigaction` (`SA_SIGINFO`, `SA_RESETHAND`, `SA_NODEFER`), `raise`, `kill`, `sigprocmask`, `pthread_sigmask`, `sigpending`, `sigsuspend`, `sig*set`, `sigaltstack`, `strsignal`, `psignal` | numbers as Linux |
+| `unistd.h`, `sys/time.h` | `alarm`, `pause`, `setitimer` (`ITIMER_REAL`), `getpid`, `getppid` | |
+| `setjmp.h` | `setjmp`, `longjmp`, `sigsetjmp`, `siglongjmp`, `_setjmp`, `_longjmp` | `jmp_buf` 320 B on both architectures; naked functions in assembly |
+
+Decision 6A - signals without kernel support:
+
+- **Synchronous** (`SIGSEGV`, `SIGBUS`, `SIGFPE`, `SIGILL`, `SIGTRAP`): the
+  first `sigaction` with a handler registers the in-thread exception
+  handler ([exceptions.md](exceptions.md)); it calls the signal handler in
+  the same thread with `si_addr` from the exception. Returning from the
+  handler = continue (the instruction is retried - the GC and JIT pattern:
+  `mprotect` in the handler), `SIG_DFL` = the next handler and the end of
+  the process. Leaving with `siglongjmp` works. `ucontext_t` (the third
+  argument) is not filled in yet (zeros) **[designed]**. On aarch64
+  division by zero gives no `SIGFPE` (the CPU does not report it).
+- **`raise`, `kill` of the own process:** the handler runs immediately in
+  the calling thread; a blocked signal waits and is delivered once
+  unblocked.
+- **Timers** (`alarm`, `setitimer`): the `SIGALRM` handler runs in a
+  dedicated signal thread (like the Windows console Ctrl+C handler); there
+  is no `EINTR`, `pause` and `sigsuspend` wake up.
+- **Default action:** the process ends with code 128 + signal number
+  (`SIGABRT` = `abort`); `SIGCHLD`, `SIGCONT`, `SIGWINCH` and stop signals
+  are ignored.
+- **Not available:** signals from other processes (terminal, parent; a
+  `SIGNAL` event in the parameter block **[designed]**), `SIGPIPE` (writing
+  to a closed pipe only returns `EPIPE`).
+- **`getpid`:** the kernel does not give programs a process number;
+  `getpid` returns a random positive number, stable for the run (temporary
+  file names, `kill` of itself). `getppid` = 1.
 
 ### fd numbers
 
