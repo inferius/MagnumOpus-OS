@@ -380,6 +380,19 @@ Practical check (x86_64 and aarch64, suite `std porty`):
 |---|---|---|---|
 | ripgrep 15.2.0 (`rg`) | crates.io, `cargo install --locked` (`xtask/src/ports.rs`) | patch to `ignore` 0.4.29 (7 lines, `third_party/ports`) | **[verified in QEMU]** test `ripgrep: hledani ve strome souboru` |
 | `std-http` on ureq 3.5.2 | library from crates.io without TLS | none | **[verified in QEMU]** test `ureq: HTTP klient, 4 vlakna soubezne` |
+| `getrandom-probe` (`user/port-tests`) | getrandom 0.4.3 from crates.io | patch to `getrandom` (`RANDOM_GET` backend) | **[verified in QEMU]** test `getrandom: backend RANDOM_GET` |
+
+### Patches for upstream
+
+Dependency fixes are in `third_party/ports/` and xtask applies them to all
+ports (`xtask/src/ports.rs`, `PATCHES`: a copy of the source from the cargo
+cache + `[patch.crates-io]`). We will send them to the authors one day
+(once the `*-unknown-magnumopus` target is public, ideally as tier 3):
+
+| Crate | Patch | What it changes | Upstream status |
+|---|---|---|---|
+| `ignore` 0.4.29 | `ignore-0.4.29.patch` | the generic arm of parallel directory traversal creates an entry without an inode number instead of the "unsupported platform" error (helps other platforms too) | not sent |
+| `getrandom` 0.4.3 | `getrandom-0.4.3.patch` | a backend for `target_os = "magnumopus"`: the `RANDOM_GET` syscall with `REQUIRE_SEEDED`; until the generator is seeded the thread yields and retries | not sent (requires the target in upstream rustc) |
 
 What was missing (found by compiling for our target, outside the tests):
 
@@ -392,8 +405,8 @@ What was missing (found by compiling for our target, outside the tests):
   a readiness API in the kernel and netd (a signal on an object or a
   port), a `mio` backend for MagnumOpus and support in `socket2`
   **[designed]**. tokio without `net` (runtime only) should work.
-- **gix 0.90 (`sha1`, no default features):** `getrandom` 0.4 does not know
-  our target (a backend calling `RANDOM_GET` is needed); after it
+- **gix 0.90 (`sha1`, no default features):** `getrandom` 0.4 did not know
+  our target (solved by the patch above); next
   `gix-sec` (file owner check via `libc::geteuid` and `os::unix`, the
   "not Windows" arm assumes unix). Further errors will show only after
   these.

@@ -18,6 +18,7 @@ use crate::{check, check_eq};
 pub const TESTS: &[Test] = &[
     ("ripgrep: hledani ve strome souboru", ripgrep),
     ("ureq: HTTP klient, 4 vlakna soubezne", http),
+    ("getrandom: backend RANDOM_GET", getrandom),
 ];
 
 const DIR: &str = "/std-test/rg";
@@ -113,4 +114,10 @@ fn http(s: &Startup) -> TestResult {
         Duration::from_secs(120),
     )?;
     run.expect("std-http", &["hello", "echo", "parallel"])
+}
+
+/// Backend `getrandom` pro MagnumOpus (patch v `third_party/ports`).
+fn getrandom(s: &Startup) -> TestResult {
+    let run = run_std_app(s, "getrandom-probe", &[], &[], vec![], Duration::from_secs(60))?;
+    run.expect("getrandom-probe", &["fill", "fill_big", "u64"])
 }

@@ -359,6 +359,19 @@ Ověření v praxi (x86_64 i aarch64, sada `std porty`):
 |---|---|---|---|
 | ripgrep 15.2.0 (`rg`) | crates.io, `cargo install --locked` (`xtask/src/ports.rs`) | patch `ignore` 0.4.29 (7 řádků, `third_party/ports`) | **[ověřeno v QEMU]** test `ripgrep: hledani ve strome souboru` |
 | `std-http` nad ureq 3.5.2 | knihovna z crates.io bez TLS | žádné | **[ověřeno v QEMU]** test `ureq: HTTP klient, 4 vlakna soubezne` |
+| `getrandom-probe` (`user/port-tests`) | getrandom 0.4.3 z crates.io | patch `getrandom` (backend `RANDOM_GET`) | **[ověřeno v QEMU]** test `getrandom: backend RANDOM_GET` |
+
+### Patche pro upstream
+
+Opravy závislostí jsou v `third_party/ports/` a xtask je použije pro
+všechny porty (`xtask/src/ports.rs`, `PATCHES`: kopie zdroje z mezipaměti
+cargo + `[patch.crates-io]`). Jednou je pošleme autorům (až bude cíl
+`*-unknown-magnumopus` veřejný, ideálně jako tier 3):
+
+| Crate | Patch | Co mění | Stav upstream |
+|---|---|---|---|
+| `ignore` 0.4.29 | `ignore-0.4.29.patch` | obecná větev paralelního průchodu adresářů vytvoří záznam bez čísla inode místo chyby „unsupported platform“ (pomůže i jiným platformám) | neodesláno |
+| `getrandom` 0.4.3 | `getrandom-0.4.3.patch` | backend pro `target_os = "magnumopus"`: syscall `RANDOM_GET` s `REQUIRE_SEEDED`, dokud generátor není nasazený, vlákno ustoupí a zkusí znovu | neodesláno (předpoklad: cíl v upstream rustc) |
 
 Co chybělo (zjištěno překladem pro náš cíl, mimo testy):
 
@@ -371,7 +384,7 @@ Co chybělo (zjištěno překladem pro náš cíl, mimo testy):
   `mio` pro MagnumOpus a podpora v `socket2` **[navrženo]**. tokio bez
   `net` (jen běhové prostředí) by mělo jít.
 - **gix 0.90 (`sha1`, bez výchozích features):** `getrandom` 0.4 náš cíl
-  nezná (potřeba backend, který volá `RANDOM_GET`); po něm `gix-sec`
+  neznal (vyřešeno patchem výše); dál `gix-sec`
   (kontrola vlastníka souboru přes `libc::geteuid` a `os::unix`, větev
   pro „ne Windows“ předpokládá unix). Další chyby se ukážou až po nich.
 - **Cílová rodina:** obecně platí, že crates s větvemi jen `unix`/`windows`

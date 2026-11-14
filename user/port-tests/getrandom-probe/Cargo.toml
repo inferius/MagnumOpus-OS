@@ -1,0 +1,14 @@
+[package]
+name = "getrandom-probe"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Test backendu getrandom pro MagnumOpus (patch third_party/ports/getrandom-0.4.3.patch)"
+
+# Mimo pracovni prostor MagnumOpus: sestavuje ho xtask jako port
+# (xtask/src/ports.rs, cargo install --path --locked s patchi zavislosti).
+[workspace]
+
+[dependencies]
+getrandom = "=0.4.3"

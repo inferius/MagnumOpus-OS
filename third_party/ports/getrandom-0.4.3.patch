@@ -1,0 +1,99 @@
+diff --git a/src/backends.rs b/src/backends.rs
+index 86ffd75..c9add22 100644
+--- a/src/backends.rs
++++ b/src/backends.rs
+@@ -146,6 +146,9 @@ cfg_if! {
+                 pub use wasi_p2_3::*;
+             }
+         }
++    } else if #[cfg(target_os = "magnumopus")] {
++        mod magnumopus;
++        pub use magnumopus::*;
+     } else if #[cfg(target_os = "hermit")] {
+         mod hermit;
+         pub use hermit::*;
+diff --git a/src/backends/magnumopus.rs b/src/backends/magnumopus.rs
+new file mode 100644
+index 0000000..d5775ed
+--- /dev/null
++++ b/src/backends/magnumopus.rs
+@@ -0,0 +1,79 @@
++//! Implementation for MagnumOpus OS: the `RANDOM_GET` system call
++//! (kernel ChaCha20 CSPRNG, see the MagnumOpus `docs/en/syscalls.md`).
++//!
++//! The call fills at most 4096 bytes. With `REQUIRE_SEEDED` it fails with
++//! `SHOULD_WAIT` until the generator has collected enough entropy; we yield
++//! and retry, so the output is never weak.
++use crate::Error;
++use core::mem::MaybeUninit;
++
++pub use crate::util::{inner_u32, inner_u64};
++
++/// System call numbers and constants (`abi::syscall` in MagnumOpus).
++const RANDOM_GET: u64 = 37;
++const THREAD_YIELD: u64 = 24;
++const REQUIRE_SEEDED: u64 = 1;
++const RANDOM_MAX: usize = 4096;
++/// `abi::Error::ShouldWait`.
++const SHOULD_WAIT: i64 = -12;
++
++#[cfg(target_arch = "x86_64")]
++unsafe fn syscall3(n: u64, a0: u64, a1: u64, a2: u64) -> i64 {
++    let ret: u64;
++    // SAFETY: the MagnumOpus syscall ABI: number in rax, arguments in rdi,
++    // rsi, rdx; the kernel clobbers only rax, rcx and r11.
++    unsafe {
++        core::arch::asm!(
++            "syscall",
++            inlateout("rax") n => ret,
++            in("rdi") a0,
++            in("rsi") a1,
++            in("rdx") a2,
++            lateout("rcx") _,
++            lateout("r11") _,
++            options(nostack)
++        );
++    }
++    ret as i64
++}
++
++#[cfg(target_arch = "aarch64")]
++unsafe fn syscall3(n: u64, a0: u64, a1: u64, a2: u64) -> i64 {
++    let ret: u64;
++    // SAFETY: the MagnumOpus syscall ABI: number in x8, arguments in x0-x2,
++    // result in x0; other registers are preserved.
++    unsafe {
++        core::arch::asm!(
++            "svc #0",
++            in("x8") n,
++            inlateout("x0") a0 => ret,
++            in("x1") a1,
++            in("x2") a2,
++            options(nostack)
++        );
++    }
++    ret as i64
++}
++
++#[inline]
++pub fn fill_inner(dest: &mut [MaybeUninit<u8>]) -> Result<(), Error> {
++    for chunk in dest.chunks_mut(RANDOM_MAX) {
++        loop {
++            // SAFETY: the kernel writes `chunk.len()` bytes into `chunk`.
++            let r = unsafe { syscall3(RANDOM_GET, chunk.as_mut_ptr() as u64, chunk.len() as u64, REQUIRE_SEEDED) };
++            if r >= 0 {
++                break;
++            }
++            if r == SHOULD_WAIT {
++                // Not seeded yet: let other threads (and the drivers that
++                // feed entropy) run, then retry.
++                // SAFETY: THREAD_YIELD takes no arguments.
++                unsafe { syscall3(THREAD_YIELD, 0, 0, 0) };
++                continue;
++            }
++            let code = i32::try_from(r).map_err(|_| Error::UNEXPECTED)?;
++            return Err(Error::from_neg_error_code(code));
++        }
++    }
++    Ok(())
++}

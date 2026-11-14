@@ -27,25 +27,42 @@ pub struct CratePatch {
     pub file: &'static str,
 }
 
-/// Prevzata aplikace.
-pub struct Port {
-    /// Crate na crates.io.
-    pub krate: &'static str,
-    /// Pevna verze.
-    pub version: &'static str,
-    /// Binarky, ktere jdou do initfs (jmeno = soubor v initfs).
-    pub bins: &'static [&'static str],
-    pub patches: &'static [CratePatch],
+/// Odkud port je.
+pub enum Source {
+    /// Crate z crates.io v pevne verzi (Cargo.lock z balicku).
+    Crate { krate: &'static str, version: &'static str },
+    /// Testovaci crate v repozitari (vlastni `[workspace]` a Cargo.lock).
+    Path(&'static str),
 }
 
-pub const PORTS: &[Port] = &[Port {
-    krate: "ripgrep",
-    version: "15.2.0",
-    bins: &["rg"],
+/// Prevzata aplikace.
+pub struct Port {
+    /// Jmeno (adresar v `target/ports/<arch>/`, vypis).
+    pub name: &'static str,
+    pub source: Source,
+    /// Binarky, ktere jdou do initfs (jmeno = soubor v initfs).
+    pub bins: &'static [&'static str],
+}
+
+pub const PORTS: &[Port] = &[
+    Port { name: "ripgrep", source: Source::Crate { krate: "ripgrep", version: "15.2.0" }, bins: &["rg"] },
+    Port {
+        name: "getrandom-probe",
+        source: Source::Path("user/port-tests/getrandom-probe"),
+        bins: &["getrandom-probe"],
+    },
+];
+
+/// Opravy zavislosti pro nas cil; plati pro vsechny porty (cargo pouzije
+/// jen ty, ktere v grafu jsou). Kandidati na upstream: docs/cs/rust-std.md,
+/// kapitola Porty.
+pub const PATCHES: &[CratePatch] = &[
     // Paralelni pruchod adresaru: obecna vetev vracela "unsupported
     // platform" misto zaznamu bez cisla inode.
-    patches: &[CratePatch { krate: "ignore", version: "0.4.29", file: "third_party/ports/ignore-0.4.29.patch" }],
-}];
+    CratePatch { krate: "ignore", version: "0.4.29", file: "third_party/ports/ignore-0.4.29.patch" },
+    // Backend pro MagnumOpus: syscall RANDOM_GET (s REQUIRE_SEEDED).
+    CratePatch { krate: "getrandom", version: "0.4.3", file: "third_party/ports/getrandom-0.4.3.patch" },
+];
 
 fn cargo_home() -> PathBuf {
     std::env::var_os("CARGO_HOME").map(PathBuf::from).unwrap_or_else(|| {
@@ -134,11 +151,26 @@ pub fn build(arch: &Arch) -> Result<Vec<(String, PathBuf)>> {
     let flags = stdsys::app_rustflags_locked(arch)?;
     let base = target_dir().join("ports");
     let mut out = Vec::new();
+    let mut patch_args = Vec::new();
+    for cp in PATCHES {
+        let dir = patched(cp)?.display().to_string().replace('\\', "/");
+        patch_args.push(format!("patch.crates-io.{}.path=\"{dir}\"", cp.krate));
+    }
     for p in PORTS {
-        let root = base.join(arch.name).join(p.krate);
-        println!("xtask: port {} {}", p.krate, p.version);
+        let root = base.join(arch.name).join(p.name);
         let mut cmd = stdsys::cargo_cmd();
-        cmd.args(["install", p.krate, "--version", p.version, "--locked", "--force", "--quiet"])
+        cmd.arg("install");
+        match &p.source {
+            Source::Crate { krate, version } => {
+                println!("xtask: port {krate} {version}");
+                cmd.args([*krate, "--version", *version]);
+            }
+            Source::Path(dir) => {
+                println!("xtask: port {}", p.name);
+                cmd.arg("--path").arg(workspace_root().join(dir));
+            }
+        }
+        cmd.args(["--locked", "--force", "--quiet"])
             .arg("--target")
             .arg(stdsys::target_json_path(arch))
             .arg("-Zjson-target-spec")
@@ -148,12 +180,11 @@ pub fn build(arch: &Arch) -> Result<Vec<(String, PathBuf)>> {
             .arg(base.join("build"))
             .env_remove("RUSTFLAGS")
             .env("CARGO_ENCODED_RUSTFLAGS", &flags);
-        for cp in p.patches {
-            let dir = patched(cp)?.display().to_string().replace('\\', "/");
-            cmd.arg("--config").arg(format!("patch.crates-io.{}.path=\"{dir}\"", cp.krate));
+        for a in &patch_args {
+            cmd.arg("--config").arg(a);
         }
         if !cmd.status()?.success() {
-            return Err(format!("port {} {} se nepodarilo prelozit", p.krate, p.version).into());
+            return Err(format!("port {} se nepodarilo prelozit", p.name).into());
         }
         for b in p.bins {
             out.push((String::from(*b), root.join("bin").join(b)));
