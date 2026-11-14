@@ -30,6 +30,12 @@ pub struct Client {
     pub open: bool,
     /// Bootstrap kanal od initu: smi pridavat ovladace.
     pub privileged: bool,
+    /// Stale cislo klienta (indexy se pri `reap` meni).
+    pub id: u64,
+    /// Relace aplikace (prava aplikace, `perm.rs`); `None` = systemova.
+    pub app: Option<audioproto::session::Recipe>,
+    /// Rozhodnuti o nahravani v teto relaci (`Some(true)` i "jen tentokrat").
+    pub granted: Option<bool>,
 }
 
 /// Zarizeni v seznamu. `chan` je `None`, kdyz je zarizeni prave otevrene
@@ -57,6 +63,12 @@ pub struct Service {
     pub mixer: Mixer,
     pub out: Vec<u8>,
     pub idle_since: Option<u64>,
+    /// Kanal ke sluzbe uctu pro povoleni nahravani (`perm.rs`).
+    pub perm: Option<Channel>,
+    /// `OPEN` vstupu cekajici na rozhodnuti uzivatele.
+    pub pending: Vec<crate::perm::PendingOpen>,
+    pub client_seq: u64,
+    pub ask_seq: u32,
 }
 
 impl Service {
@@ -215,6 +227,11 @@ impl Service {
                     running_period = Some(p.format.us_for_frames(p.period as u64 * 2));
                 }
             }
+            // Kanal ke sluzbe uctu az za zarizenim (indexy vyse jsou pevne).
+            let perm_idx = self.perm.as_ref().map(|p| {
+                items.push((p.handle(), Signals::READABLE | Signals::PEER_CLOSED));
+                items.len() - 1
+            });
             // Zaloha, kdyby udalost od ovladace neprisla: aspon jednou za
             // dve periody.
             let deadline = running_period.map(|us| time::deadline_after(Duration::from_micros(us)));
@@ -232,6 +249,9 @@ impl Service {
                 && observed.get(r).is_some_and(|s| s.intersects(Signals::PEER_CLOSED))
             {
                 self.rec_lost();
+            }
+            if perm_idx.is_some_and(|p| observed.get(p).is_some_and(|s| s.intersects(Signals::READABLE | Signals::PEER_CLOSED))) {
+                self.perm_answers();
             }
             if self.device.is_some() && observed.get(nc).is_some_and(|s| s.intersects(Signals::PEER_CLOSED)) {
                 self.device_lost();
@@ -264,7 +284,8 @@ impl Service {
                 i += 1;
                 continue;
             }
-            self.clients.remove(i);
+            let gone = self.clients.remove(i);
+            self.forget_client(gone.id);
             self.streams.retain(|s| s.owner != i);
             for s in &mut self.streams {
                 if s.owner > i {
@@ -284,6 +305,26 @@ impl Service {
                     return;
                 }
             };
+            // Kanal ke sluzbe uctu (povoleni nahravani), jen init.
+            if self.clients[i].privileged && m.data == b"perm" {
+                if let Some(h) = m.handles.into_iter().next() {
+                    self.perm = Some(Channel::from_handle(h));
+                }
+                continue;
+            }
+            // Nova relace aplikace (recept), jen init.
+            if self.clients[i].privileged && m.data.starts_with(crate::perm::APP_PREFIX) {
+                let r = if self.clients.len() >= MAX_CLIENTS { Err(Error::NoResources) } else { self.app_session(&m.data[crate::perm::APP_PREFIX.len()..]) };
+                let (reply, hs) = match r {
+                    Ok(hs) => (Ok(Vec::new()), hs),
+                    Err(e) => (Err(e), Vec::new()),
+                };
+                if self.clients[i].chan.write(&encode_reply(reply), hs).is_err() {
+                    self.clients[i].open = false;
+                    return;
+                }
+                continue;
+            }
             if self.clients[i].privileged && m.data == b"device" {
                 for h in m.handles {
                     self.add_device(Channel::from_handle(h));
@@ -298,6 +339,7 @@ impl Service {
                 continue;
             }
             let (reply, hs) = match Request::decode(&m.data) {
+                Ok(req) if self.check_rights(i, &req).is_some() => (Err(Error::AccessDenied), Vec::new()),
                 Ok(req) => match self.request(i, req) {
                     Some(r) => r,
                     None => continue, // odpoved pozdeji (DRAIN)
@@ -336,7 +378,7 @@ impl Service {
         let none = Vec::new;
         let ok = |r: Result<()>| (r.map(|_| Vec::new()), Vec::new());
         Some(match req {
-            Request::Open { dir, format, latency_us } => match self.open(client, dir, format, latency_us) {
+            Request::Open { dir, format, latency_us } => match self.open_checked(client, dir, format, latency_us)? {
                 Ok((r, hs)) => (Ok(r), hs),
                 Err(e) => (Err(e), none()),
             },
@@ -383,7 +425,10 @@ impl Service {
                 }
                 match Channel::create() {
                     Ok((ours, theirs)) => {
-                        self.clients.push(Client { chan: ours, open: true, privileged: false });
+                        // Novy kanal ma stejna prava jako volajici (aplikace
+                        // CONNECT nesmi, `check_rights`).
+                        let id = self.next_client_id();
+                        self.clients.push(Client { chan: ours, open: true, privileged: false, id, app: None, granted: None });
                         (Ok(Vec::new()), vec![theirs.into_handle()])
                     }
                     Err(e) => (Err(e), none()),
@@ -392,7 +437,7 @@ impl Service {
         })
     }
 
-    fn open(&mut self, client: usize, dir: Direction, format: Format, latency_us: u32) -> Result<(Vec<u8>, Vec<Handle>)> {
+    pub fn open(&mut self, client: usize, dir: Direction, format: Format, latency_us: u32) -> Result<(Vec<u8>, Vec<Handle>)> {
         if self.streams.iter().filter(|s| s.owner == client).count() >= MAX_STREAMS_PER_CLIENT {
             return Err(Error::NoResources);
         }
@@ -439,6 +484,7 @@ impl Service {
             period: d.map_or(0, |d| d.out.period),
             input: self.any_input(),
             device_index: self.active.unwrap_or(0) as u8,
+            capturing: self.capturing(),
         }
     }
 

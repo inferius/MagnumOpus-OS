@@ -196,3 +196,28 @@ fn synthetic_input_cannot_lock() {
     t.msg(a, ClientMsg::PointerLock { window: 1, lock: true, gesture: s });
     assert_eq!(lock_states(&t.out(), a), vec![false]);
 }
+
+#[test]
+fn recording_indicator_in_bar() {
+    use crate::input::SysKey;
+    use crate::tooltip::Tip;
+    let mut t = T::new();
+    t.c.set_volume(Some((60, false)));
+    t.frame();
+    let r = t.c.bar_layout().volume.expect("ikona zvuku");
+    let before: Vec<u32> = (r.y..r.y + r.h as i32).flat_map(|y| (r.x..r.x + r.w as i32).map(move |x| (x, y))).map(|(x, y)| t.px(x, y)).collect();
+    assert_eq!(t.c.tip_text(Tip::Bar(SysKey::BarIcon(1))), "Zvuk: hlasitost 60 %");
+    // Nahravani: mikrofon v barve nebezpeci a jmena aplikaci v bublince.
+    t.c.set_capturing(vec!["SDL test".into()]);
+    t.frame();
+    let danger = t.c.style.theme.color.danger;
+    let after: Vec<u32> = (r.y..r.y + r.h as i32).flat_map(|y| (r.x..r.x + r.w as i32).map(move |x| (x, y))).map(|(x, y)| t.px(x, y)).collect();
+    assert_ne!(before, after, "ikona se zmenila");
+    assert!(after.iter().any(|&p| p == danger), "mikrofon v barve nebezpeci");
+    assert_eq!(t.c.tip_text(Tip::Bar(SysKey::BarIcon(1))), "Nahrává zvuk: SDL test");
+    // Konec nahravani: zpet ikona hlasitosti.
+    t.c.set_capturing(Vec::new());
+    t.frame();
+    let back: Vec<u32> = (r.y..r.y + r.h as i32).flat_map(|y| (r.x..r.x + r.w as i32).map(move |x| (x, y))).map(|(x, y)| t.px(x, y)).collect();
+    assert_eq!(before, back);
+}

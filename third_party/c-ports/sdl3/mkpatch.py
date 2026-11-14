@@ -1,4 +1,4 @@
-"""Vyrobi zaplatu 0001-video-magnumopus.patch pro SDL 3.4.20.
+"""Vyrobi zaplatu 0001-magnumopus.patch pro SDL 3.4.20.
 
 Pouziti (adresare mimo repozitar, napr. target/c-ports/study):
   tar -xf SDL3-3.4.20.tar.gz -C pa && tar -xf SDL3-3.4.20.tar.gz -C pb
@@ -98,3 +98,25 @@ rep('src/events/SDL_scancode_tables.c',
 rep('test/CMakeLists.txt',
     'add_sdl_test_executable(checkkeys SOURCES checkkeys.c)\n',
     'add_sdl_test_executable(checkkeys SOURCES checkkeys.c)\nif(MAGNUMOPUS)\n  add_sdl_test_executable(testmagnumopus SOURCES testmagnumopus.c)\nendif()\n')
+# Ovladac zvuku magnumopus (overlay src/audio/magnumopus) nad libs/mosdl.
+rep('CMakeLists.txt', '''if(SDL_VIDEO AND MAGNUMOPUS)
+''', '''if(SDL_AUDIO AND MAGNUMOPUS)
+  set(SDL_AUDIO_DRIVER_MAGNUMOPUS 1)
+  sdl_glob_sources(
+    "${SDL3_SOURCE_DIR}/src/audio/magnumopus/*.c"
+  )
+  set(HAVE_SDL_AUDIO TRUE)
+endif()
+
+if(SDL_VIDEO AND MAGNUMOPUS)
+''')
+rep('include/build_config/SDL_build_config.h.cmake', '#cmakedefine SDL_AUDIO_DRIVER_DISK 1\n',
+    '#cmakedefine SDL_AUDIO_DRIVER_DISK 1\n#cmakedefine SDL_AUDIO_DRIVER_MAGNUMOPUS 1\n')
+rep('src/audio/SDL_sysaudio.h', 'extern AudioBootStrap PRIVATEAUDIO_bootstrap;\n',
+    'extern AudioBootStrap PRIVATEAUDIO_bootstrap;\nextern AudioBootStrap MAGNUMOPUS_AUDIO_bootstrap;\n')
+rep('src/audio/SDL_audio.c', '''static const AudioBootStrap *const bootstrap[] = {
+''', '''static const AudioBootStrap *const bootstrap[] = {
+#ifdef SDL_AUDIO_DRIVER_MAGNUMOPUS
+    &MAGNUMOPUS_AUDIO_bootstrap,
+#endif
+''')

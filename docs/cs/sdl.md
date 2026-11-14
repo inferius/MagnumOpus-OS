@@ -14,7 +14,7 @@ krok 6 pořadí převzetí software; staví na [knihovně C](cstd.md) a na
 | `libs/mosdl` | rozhraní C `mosdl_*` nad oknem z `libs/ui`, součást `libc.a` | **[ověřeno v QEMU]** x86_64 i aarch64; překlad událostí host testy |
 | ovladač videa `magnumopus` | jedno okno, softwarový framebuffer, klávesnice (kódy evdev), text, myš, kolečko, fokus, změna velikosti, čekání na události s probuzením | **[ověřeno v QEMU]** `testsprite` (pixely), `checkkeys` (umělý vstup) |
 | schránka, kurzor, relativní myš, celá obrazovka, škála displeje | etapa 6-2: text ve schránce, systémové tvary i vlastní kurzor 64 × 64, zámek ukazatele kompozitoru, celá obrazovka na žádost, škála jako `SDL_GetDisplayContentScale` ([Kurzor a zámek ukazatele](gui.md#kurzor-a-zámek-ukazatele)) | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `sdl`, fyzický vstup přes QMP) |
-| zvuk (přehrávání, nahrávání s povolením) | etapa 6-2 | **[navrženo]** |
+| zvuk | ovladač zvuku SDL `magnumopus` nad relací aplikace u `audiod` (štítek `AUDIO`): přehrávání; nahrávání jen s `[audio] capture = true` a po povolení uživatelem, rozhodnutí uložené po uživateli a aplikaci, odvolání příkazem `povoleni` ([Zvuk](zvuk.md#relace-aplikací-a-nahrávání)) | **[ověřeno v QEMU]** x86_64 i aarch64 (fyzický Enter v dialogu přes QMP) |
 | YUV bez kopie (`BUFFER_CREATE_DESC`) | odloženo do kroku FFmpeg (záplata vnitřků SDL, odhad ~300 řádků) | **[navrženo]** |
 | ukázkové hry SDL (`snake`, `woodeneye-008`), test se snímkem obrazovky | etapa 6-3 | **[navrženo]** |
 | gamepady | samostatný krok s vlastním návrhem (rozhodnutí Q6 B) | **[navrženo]** |
@@ -39,7 +39,7 @@ krok 6 pořadí převzetí software; staví na [knihovně C](cstd.md) a na
 
 - **Ovladač videa** (`third_party/c-ports/sdl3/overlay/src/video/magnumopus/`)
   je náš kód v C uvnitř SDL. Volá jen funkce `mosdl_*` z hlavičky `mosdl.h`
-  v sysrootu C. Záplata `0001-video-magnumopus.patch` ho v SDL zaregistruje
+  v sysrootu C. Záplata `0001-magnumopus.patch` ho v SDL zaregistruje
   a přidá makro `SDL_PLATFORM_MAGNUMOPUS`.
 - **`libs/mosdl`** je v Rustu a je součástí `libc.a`. Dvě statické knihovny
   v Rustu v jednom programu by měly každá vlastní kopii std (alokátor, TLS,
@@ -91,7 +91,7 @@ Funkce vracejí 0 nebo záporný kód chyby jádra ([chyby](chyby.md)). Rozlože
   je etapa 6-2.
 - **Softwarový renderer.** Vulkan pro SDL (render i GPU API) až s ovladači
   GPU pro aplikace ([render](render.md)).
-- **Bez zvuku** (ovladač zvuku SDL `dummy`): etapa 6-2.
+- **Zvuk**: jedno výchozí zařízení pro přehrávání a jedno pro nahrávání (výběr karty je věc systému); latence bufferu je konstanta ovladače `MOS_LATENCY_US`. Nahrávání jen po povolení (systémový dialog při prvním použití).
 - **HiDPI jen jako škála**: buffery okna jsou 1:1, kompozitor zatím
   škálu 100 % a škálování bufferů nemá; SDL dostane škálu jako
   `SDL_GetDisplayContentScale` (hustota pixelů 1).
@@ -130,6 +130,7 @@ jen typy) a `inttypes.h`, prázdné `libm.a`, `libpthread.a`, `librt.a`.
 | `sdl: testsprite ...` | QEMU, sada `sdl` | okno programu SDL v kompozitoru; deterministický snímek (`--iterations 0`): červený bod v rohu, zelená horní, modrá levá a červená dolní čára na obrazovce |
 | `sdl: checkkeys ...` | QEMU, sada `sdl` | umělý vstup přes inputd a kompozitor: klávesa A = scancode 4, text „a“, pravé tlačítko myši, dvakrát Esc ukončí program kódem 0 |
 | `sdl: kurzor, zámek ukazatele, schránka a celá obrazovka (QMP)` | QEMU, sada `sdl` | program `testmagnumopus` (náš test v SDL): displej a škála jako kompozitor, kurzor kříž na obrazovce; fyzický klik = zámek ukazatele, posun = relativní pohyb, Super = zrušení zámku, druhý klik = kopie, Ctrl+V = vložení, F = celá obrazovka |
+| `sdl: zvuk - přehrávání, nahrávání s povolením, odvolání (QMP)` | QEMU, sada `sdl` | `testmagnumopus audio`: tón dohraje přes ovladač `magnumopus`; bez klíče v manifestu nahrávání zamítnuto bez dotazu; s ním dialog Povolení (fyzický Enter = Povolit), nahraná data z kodeku HDA; další běh bez dialogu (uložené rozhodnutí); výpis a odvolání jako příkaz `povoleni` |
 | `sdl: měření cesty videa 1080p` | QEMU, sada `sdl` | `testmagnumopus bench`: I420 1920 × 1080 -> převod v SDL -> okno ([Výkon](#výkon)) |
 
 ```text

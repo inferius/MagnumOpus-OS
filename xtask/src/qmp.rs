@@ -304,7 +304,8 @@ fn sdl_steps(s: &mut Vec<Step>) {
         s.push(Step::Send(vec![key(name, d)]));
     }
     // F: cela obrazovka; Esc: konec programu.
-    for (marker, k) in [(sdl::FULL, "f"), (sdl::ESC, "esc")] {
+    // Dialog povoleni nahravani: Enter = Povolit (prvni volba).
+    for (marker, k) in [(sdl::FULL, "f"), (sdl::ESC, "esc"), (sdl::PERM, "ret")] {
         s.push(Step::WaitFor(marker));
         s.push(Step::Send(vec![key(k, true)]));
         s.push(Step::Send(vec![key(k, false)]));
@@ -320,6 +321,7 @@ mod sdl {
     pub const PASTE: &str = "init: test sdl: ceka na Ctrl+V";
     pub const FULL: &str = "init: test sdl: ceka na F";
     pub const ESC: &str = "init: test sdl: ceka na Esc";
+    pub const PERM: &str = "init: test sdl: dialog povoleni ceka na Enter";
 }
 
 /// GUI (`user/init/src/tests/gui.rs`): fyzicka klavesnice odpovi na

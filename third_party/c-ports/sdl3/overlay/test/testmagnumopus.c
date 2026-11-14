@@ -11,7 +11,8 @@
  *   copy                      druhy levy klik zkopiruje text
  *   paste <text>              Ctrl+V vlozi text ze schranky
  *   fullscreen <0|1>          klavesa F prepne celou obrazovku
- * Esc program ukonci (kod 0). Argument "bench" = mereni cesty videa 1080p.
+ * Esc program ukonci (kod 0). Argument "bench" = mereni cesty videa 1080p,
+ * "audio" = prehravani a nahravani (povoleni).
  */
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -73,6 +74,68 @@ static int bench(void)
     return 0;
 }
 
+/* Zvuk (argument "audio"): prehrani tonu pres SDL a pokus o nahravani.
+   Vypise: "audio-driver <jmeno>", "out ok" (ton dohral), "capture-ask"
+   (pred otevrenim nahravani, ktere muze cekat na dialog povoleni),
+   "capture 1|0" a pri povoleni "capture-data <bajty>". */
+static int audio_test(void)
+{
+    SDL_AudioSpec spec;
+    SDL_AudioStream *out, *in;
+    Sint16 buf[4800 * 2];
+    Uint64 end;
+    int i;
+
+    if (!SDL_Init(SDL_INIT_AUDIO)) {
+        say("chyba SDL_Init: %s", SDL_GetError());
+        return 1;
+    }
+    say("audio-driver %s", SDL_GetCurrentAudioDriver());
+    spec.format = SDL_AUDIO_S16;
+    spec.channels = 2;
+    spec.freq = 48000;
+    out = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
+    if (!out) {
+        say("out chyba %s", SDL_GetError());
+        return 1;
+    }
+    /* 0,3 s tonu 440 Hz (3 bloky po 0,1 s). */
+    for (i = 0; i < 4800; i++) {
+        Sint16 v = (Sint16)(SDL_sin(2.0 * SDL_PI_D * 440.0 * i / 48000.0) * 8000.0);
+        buf[2 * i] = v;
+        buf[2 * i + 1] = v;
+    }
+    for (i = 0; i < 3; i++) {
+        SDL_PutAudioStreamData(out, buf, sizeof(buf));
+    }
+    SDL_ResumeAudioStreamDevice(out);
+    end = SDL_GetTicks() + 5000;
+    while (SDL_GetAudioStreamQueued(out) > 0 && SDL_GetTicks() < end) {
+        SDL_Delay(20);
+    }
+    say(SDL_GetAudioStreamQueued(out) > 0 ? "out zaseknuto" : "out ok");
+    SDL_DestroyAudioStream(out);
+
+    say("capture-ask");
+    in = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_RECORDING, &spec, NULL, NULL);
+    if (!in) {
+        say("capture 0");
+    } else {
+        int got = 0;
+        say("capture 1");
+        SDL_ResumeAudioStreamDevice(in);
+        end = SDL_GetTicks() + 5000;
+        while (got == 0 && SDL_GetTicks() < end) {
+            got = SDL_GetAudioStreamAvailable(in);
+            SDL_Delay(20);
+        }
+        say("capture-data %d", got);
+        SDL_DestroyAudioStream(in);
+    }
+    SDL_Quit();
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     SDL_Window *win;
@@ -84,6 +147,9 @@ int main(int argc, char *argv[])
 
     if (argc > 1 && SDL_strcmp(argv[1], "bench") == 0) {
         return bench();
+    }
+    if (argc > 1 && SDL_strcmp(argv[1], "audio") == 0) {
+        return audio_test();
     }
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         say("chyba SDL_Init: %s", SDL_GetError());

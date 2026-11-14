@@ -446,11 +446,15 @@ impl Service {
         }
         if let Some(s) = self.audio_src.as_mut() {
             match s.read(status::volume) {
-                Ok(Some(v)) => c.set_volume(Some(v)),
+                Ok(Some((v, rec))) => {
+                    c.set_volume(Some(v));
+                    c.set_capturing(rec);
+                }
                 Ok(None) => {}
                 Err(()) => {
                     self.audio_src = None;
                     c.set_volume(None);
+                    c.set_capturing(alloc::vec::Vec::new());
                 }
             }
         }

@@ -148,6 +148,9 @@ pub struct BarStatus {
     pub net: Option<NetState>,
     /// Hlasitost v procentech a ztlumeni.
     pub volume: Option<(u8, bool)>,
+    /// Aplikace, ktere prave nahravaji zvuk (indikator mikrofonu v liste;
+    /// soukromi: uzivatel vzdy vidi, ze se nahrava).
+    pub capturing: Vec<String>,
 }
 
 /// Na co ukazuje mys (zvyrazneni pri najeti).
@@ -262,6 +265,14 @@ impl Comp {
     pub fn set_volume(&mut self, volume: Option<(u8, bool)>) {
         if self.status.volume != volume {
             self.status.volume = volume;
+            self.damage_panel();
+        }
+    }
+
+    /// Aplikace, ktere nahravaji (ze stavu `audiod`); prazdne = nikdo.
+    pub fn set_capturing(&mut self, apps: Vec<String>) {
+        if self.status.capturing != apps {
+            self.status.capturing = apps;
             self.damage_panel();
         }
     }
@@ -1110,13 +1121,21 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
             if info.status.net == Some(NetState::NoDevice) { "network" } else { "ethernet" },
             info.status.net.is_some_and(|n| n != NetState::Online),
         ),
-        (bar.volume, "volume", info.status.volume.is_some_and(|(v, m)| m || v == 0)),
+        // Pri nahravani mikrofon v barve nebezpeci (a text v bublince).
+        (bar.volume, if info.status.capturing.is_empty() { "volume" } else { "mic" }, info.status.volume.is_some_and(|(v, m)| m || v == 0) && info.status.capturing.is_empty()),
         (Some(bar.bell), if info.dnd { "bell-off" } else { "bell" }, false),
     ];
     for (k, (r, name, off)) in icons.into_iter().enumerate() {
         let Some(r) = r else { continue };
         state_bg(c, r, crate::input::SysKey::BarIcon(k as u8), false);
-        let ink = if off { col.ink_faint } else { col.ink };
+        let recording = k == 1 && !info.status.capturing.is_empty();
+        let ink = if off {
+            col.ink_faint
+        } else if recording {
+            col.danger
+        } else {
+            col.ink
+        };
         let (x, y) = (r.x + (r.w - im) as i32 / 2, r.y + (r.h - im) as i32 / 2);
         st.icons.draw(c, name, x, y, im, t.icon_stroke, ink);
         if off {

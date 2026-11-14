@@ -138,7 +138,7 @@ const PORTS: &[CPort] = &[
         top: "SDL3-3.4.20",
         // Ovladac videa `magnumopus` (overlay src/video/magnumopus) nad
         // libs/mosdl; docs/cs/sdl.md.
-        patches: &["0001-video-magnumopus.patch"],
+        patches: &["0001-magnumopus.patch"],
         data: &[
             ("testsprite.manifest.toml", "port:testsprite.manifest.toml"),
             ("checkkeys.manifest.toml", "port:checkkeys.manifest.toml"),

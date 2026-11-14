@@ -20,6 +20,7 @@ use ui::client::{Event as WinEvent, Link, Window};
 
 use crate::event::{MosdlEvent, copy_frame, from_input, kind};
 
+mod audio;
 mod clip;
 mod pointer;
 

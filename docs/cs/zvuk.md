@@ -248,6 +248,44 @@ ní zařízení smí a jinam ne. Pozice (`LPIB`) se převádí na monotónní
 počet snímků ve stránce stavu. Chyba FIFO nebo deskriptoru stream
 zastaví a nahlásí.
 
+## Relace aplikací a nahrávání
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (test `sdl: zvuk - prehravani,
+nahravani s povolenim, odvolani (QMP)`, host testy `cargo test -p
+audioproto session`, `-p accountproto perm`).
+
+Každá aplikace s oknem dostane při spuštění **relaci zvukové služby
+s právy aplikace**: init ji vytvoří přes supervisor
+(`Supervisor::session("audiod", recept)`) a předá jako handle se štítkem
+`abi::params::tag::AUDIO`, lístek k obnově jako `AUDIO_LEASE`. Recept
+(`audioproto::session::Recipe`) nese identitu a jméno z manifestu,
+uživatele relace a nahrávání podle manifestu; po restartu `audiod` ho
+supervisor pošle znovu, takže práva obnovu přežijí. Prázdný recept je
+systémová relace (lišta, shell, init) jako dosud.
+
+| Smí relace aplikace | Ne |
+|---|---|
+| `OPEN`, `START`, `STOP`, `CLOSE`, `DRAIN` vlastních streamů, `STREAM_VOLUME`, `STREAM_INFO`, `STATUS`, `DEVICES` | `MASTER_VOLUME`, `MUTE`, `SELECT`, `CONNECT` (`ACCESS_DENIED`; mění zvuk celého systému, patří liště a nastavení) |
+
+**Nahrávání** (`OPEN` vstupu):
+
+- bez `[audio] capture = true` v manifestu `ACCESS_DENIED` hned, bez
+  dotazu;
+- s ním se `audiod` při prvním `OPEN` vstupu v relaci zeptá služby účtů
+  (kanál `permissions`, zprávy `accountproto::perm`) a odpoví aplikaci,
+  až přijde rozhodnutí: uložené hned, jinak po systémovém dialogu
+  Povolení (Povolit / Jen tentokrát / Nepovolit, Esc = Nepovolit). Volání
+  aplikace do té doby čeká;
+- rozhodnutí platí po zbytek relace; „Povolit“ a „Nepovolit“ se ukládají
+  trvale po uživateli a aplikaci ([Účty](ucty.md#povolení-aplikací)),
+  odvolání příkazem shellu `povoleni odvolat <aplikace>`;
+- bez služby účtů (nebo bez kompozitoru pro dialog) nahrávání pro
+  aplikace není.
+
+Po dobu nahrávání ukazuje lišta místo ikony hlasitosti **mikrofon
+v barvě nebezpečí**; bublina vypíše, které aplikace nahrávají (`STATUS`
+pole `capturing`). Uživatel tak vždy vidí, že se nahrává.
+
 ## Služba `audiod`
 
 ### Takt a rozpočet latence

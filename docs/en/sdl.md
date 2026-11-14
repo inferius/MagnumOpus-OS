@@ -15,7 +15,7 @@ without changes to their code.
 | `libs/mosdl` | the C interface `mosdl_*` over the window from `libs/ui`, part of `libc.a` | **[verified in QEMU]** x86_64 and aarch64; event translation by host tests |
 | `magnumopus` video driver | one window, software framebuffer, keyboard (evdev codes), text, mouse, wheel, focus, resize, waiting for events with wake-up | **[verified in QEMU]** `testsprite` (pixels), `checkkeys` (injected input) |
 | clipboard, cursor, relative mouse, fullscreen, display scale | stage 6-2: text in the clipboard, system shapes and an own 64 × 64 cursor, compositor pointer lock, fullscreen on request, scale as `SDL_GetDisplayContentScale` ([Cursor and pointer lock](gui.md#cursor-and-pointer-lock)) | **[verified in QEMU]** x86_64 and aarch64 (suite `sdl`, physical input through QMP) |
-| audio (playback, capture with permission) | stage 6-2 | **[designed]** |
+| audio | SDL audio driver `magnumopus` over the application session at `audiod` (tag `AUDIO`): playback; capture only with `[audio] capture = true` and after the user allows it, the decision stored per user and application, revoked with the `povoleni` command ([Sound](audio.md#application-sessions-and-capture)) | **[verified in QEMU]** x86_64 and aarch64 (physical Enter in the dialog through QMP) |
 | zero-copy YUV (`BUFFER_CREATE_DESC`) | postponed to the FFmpeg step (a patch of SDL internals, estimated ~300 lines) | **[designed]** |
 | SDL example games (`snake`, `woodeneye-008`), a test with a screenshot | stage 6-3 | **[designed]** |
 | gamepads | a separate step with its own design (decision Q6 B) | **[designed]** |
@@ -40,7 +40,7 @@ without changes to their code.
 
 - **The video driver** (`third_party/c-ports/sdl3/overlay/src/video/magnumopus/`)
   is our C code inside SDL. It calls only the `mosdl_*` functions from the
-  `mosdl.h` header in the C sysroot. The patch `0001-video-magnumopus.patch`
+  `mosdl.h` header in the C sysroot. The patch `0001-magnumopus.patch`
   registers it in SDL and adds the `SDL_PLATFORM_MAGNUMOPUS` macro.
 - **`libs/mosdl`** is in Rust and is part of `libc.a`. Two static Rust
   libraries in one program would each have their own copy of std
@@ -95,7 +95,7 @@ The event time (ns since system start) is converted to SDL time.
   (`BUFFER_CREATE_DESC`) is stage 6-2.
 - **Software renderer.** Vulkan for SDL (render and the GPU API) comes with
   GPU drivers for applications ([render](render.md)).
-- **No audio** (SDL audio driver `dummy`): stage 6-2.
+- **Audio**: one default device for playback and one for capture (choosing the card is up to the system); the buffer latency is the driver constant `MOS_LATENCY_US`. Capture only after permission (a system dialog on first use).
 - **HiDPI only as a scale**: window buffers are 1:1, the compositor has no
   scale other than 100 % and no buffer scaling yet; SDL gets the scale as
   `SDL_GetDisplayContentScale` (pixel density 1).
@@ -134,6 +134,7 @@ only so far) and `inttypes.h`, empty `libm.a`, `libpthread.a`, `librt.a`.
 | `sdl: testsprite ...` | QEMU, suite `sdl` | an SDL program window in the compositor; a deterministic frame (`--iterations 0`): red corner point, green top, blue left and red bottom line on screen |
 | `sdl: checkkeys ...` | QEMU, suite `sdl` | injected input through inputd and the compositor: key A = scancode 4, text "a", right mouse button, Esc twice ends the program with code 0 |
 | `sdl: kurzor, zamek ukazatele, schranka a cela obrazovka (QMP)` | QEMU, suite `sdl` | the `testmagnumopus` program (our SDL test): display and scale as the compositor, crosshair cursor on screen; physical click = pointer lock, movement = relative motion, Super = lock cancelled, second click = copy, Ctrl+V = paste, F = fullscreen |
+| `sdl: zvuk - prehravani, nahravani s povolenim, odvolani (QMP)` | QEMU, suite `sdl` | `testmagnumopus audio`: a tone plays through the `magnumopus` driver; without the manifest key capture is denied without a question; with it the Permission dialog (physical Enter = Allow), captured data from the HDA codec; the next run without a dialog (stored decision); listing and revoking as the `povoleni` command |
 | `sdl: mereni cesty videa 1080p` | QEMU, suite `sdl` | `testmagnumopus bench`: I420 1920 × 1080 -> conversion in SDL -> window ([Performance](#performance)) |
 
 ```text

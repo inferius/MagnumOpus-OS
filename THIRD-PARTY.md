@@ -157,10 +157,10 @@ against the C sysroot (`xtask/src/cports/`).
 - **Licence / Licence:** zlib (Sam Lantinga a přispěvatelé / and
   contributors); zdroj / source:
   <https://github.com/libsdl-org/SDL/releases/tag/release-3.4.20>.
-- **Naše úpravy / Our changes:** `0001-video-magnumopus.patch` (registrace
-  ovladače, `SDL_PLATFORM_MAGNUMOPUS`, bez GTK a `misc/unix`) a ovladač
-  `overlay/src/video/magnumopus/SDL_mosvideo.c` (náš kód, licence zlib jako
-  SDL). Úpravy se neposílají do projektu SDL: ten nepřijímá kód
+- **Naše úpravy / Our changes:** `0001-magnumopus.patch` (registrace
+  ovladačů videa a zvuku, `SDL_PLATFORM_MAGNUMOPUS`, bez GTK a `misc/unix`,
+  test `testmagnumopus`) a ovladače `overlay/src/video/magnumopus/`
+  a `overlay/src/audio/magnumopus/` (náš kód, licence zlib jako SDL). Úpravy se neposílají do projektu SDL: ten nepřijímá kód
   generovaný AI. / Our changes stay here: the SDL project does not accept
   AI-generated contributions.
 - **Programy / programs:** `testsprite`, `checkkeys` (testy SDL / SDL tests).

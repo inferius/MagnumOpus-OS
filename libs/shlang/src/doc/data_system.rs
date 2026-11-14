@@ -204,6 +204,18 @@ pub const DOCS: &[Doc] = &[
         needs_en: "the sound service (audiod)",
     },
     Doc {
+        name: "povoleni",
+        short_en: "app permissions: list without arguments, `povoleni odvolat <app> [mikrofon]` revokes",
+        long_cs: "Bez argumentu vypíše uložená rozhodnutí uživatele o povoleních aplikací (dnes mikrofon). `povoleni odvolat <aplikace>` rozhodnutí smaže: aplikace se příště zeptá znovu.",
+        long_en: "Without arguments lists the user's stored decisions about app permissions (the microphone today). `povoleni odvolat <app>` deletes the decision: the app asks again next time.",
+        args: NONE,
+        examples: &[Ex { code: "povoleni odvolat org.libsdl.testaudio", cs: "Aplikace se znovu zeptá na mikrofon.", en: "The app asks for the microphone again.", check: Skip }],
+        related: &["audio"],
+        errors: &["SH_ARGS", "NOT_FOUND", "ACCESS_DENIED", "NOT_SUPPORTED"],
+        needs_cs: "přihlášená relace (rozhodnutí patří uživateli relace)",
+        needs_en: "a signed-in session (decisions belong to the session's user)",
+    },
+    Doc {
         name: "loglevel",
         short_en: "log level: list without arguments, `loglevel <module|process> <error|warn|info|debug|trace|default>`",
         long_cs: "Bez argumentu vypíše úrovně logu; s modulem nebo procesem a úrovní ji změní (do restartu).",

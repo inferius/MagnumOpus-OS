@@ -96,6 +96,7 @@ fn replies_roundtrip() {
         period: 256,
         input: true,
         device_index: 1,
+        capturing: alloc::vec![alloc::string::String::from("SDL testaudio")],
     };
     assert_eq!(Status::decode(&s.encode()), Ok(s));
     let list = vec![

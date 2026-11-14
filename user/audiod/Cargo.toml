@@ -13,5 +13,7 @@ bench = false
 [dependencies]
 libos = { path = "../../libs/libos" }
 audioproto = { path = "../../libs/audioproto" }
+# Povoleni nahravani (`perm.rs`): zpravy kanalu `permissions` sluzby uctu.
+accountproto = { path = "../../libs/accountproto" }
 audiomix = { path = "../../libs/audiomix" }
 wire = { path = "../../libs/wire" }

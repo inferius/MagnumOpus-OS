@@ -20,6 +20,9 @@ use inputproto::device::{self, RawEvent};
 use libos::abi::params::tag;
 use libos::initfs::Initfs;
 use libos::spawn::StartHandle;
+use accountproto::client::{Login, Setup};
+use accountproto::{Secret, ids};
+use audioproto::session::{Capture, Recipe};
 use libos::{Channel, Error, Startup, println, time};
 
 use super::gui::{self as gt, State, pixel, settle, wait_window};
@@ -33,6 +36,7 @@ pub const TESTS: &[Test] = &[
     ("sdl: checkkeys - klavesnice, text a mys pres kompozitor", checkkeys),
     ("sdl: kurzor, zamek ukazatele, schranka a cela obrazovka (QMP)", pointer_clip_fullscreen),
     ("sdl: mereni cesty videa 1080p (YUV v SDL, kopie do okna)", video_bench),
+    ("sdl: zvuk - prehravani, nahravani s povolenim, odvolani (QMP)", audio_permission),
 ];
 
 /// Znacky pro fyzicky vstup z QEMU (musi sedet s `xtask/src/qmp.rs`, `sdl`).
@@ -43,6 +47,7 @@ const QEMU_CLICK2: &str = "init: test sdl: druhy klik na ";
 const QEMU_PASTE: &str = "init: test sdl: ceka na Ctrl+V";
 const QEMU_FULL: &str = "init: test sdl: ceka na F";
 const QEMU_ESC: &str = "init: test sdl: ceka na Esc";
+const QEMU_PERM: &str = "init: test sdl: dialog povoleni ceka na Enter";
 
 const DIR: &str = "/std-test/sdl";
 
@@ -82,6 +87,12 @@ fn icon_to_fs(startup: &Startup) -> Result<String, String> {
 /// Spusti program SDL s oknem (kanal od kompozitoru, listek), relaci FS
 /// a stdout/stderr.
 fn launch(startup: &Startup, s: &State, name: &str, args: &[&str]) -> Result<Started, String> {
+    launch_audio(startup, s, name, args, None)
+}
+
+/// Jako [`launch`], navic relace zvuku s pravy aplikace (`tag::AUDIO`,
+/// bez listku).
+fn launch_audio(startup: &Startup, s: &State, name: &str, args: &[&str], audio: Option<&Recipe>) -> Result<Started, String> {
     let info = gui::recipe(startup, name).map_err(|e| fail("manifest", e))?;
     let window = s.gui.channel(&info.encode()).map_err(|e| fail("kanal okna", e))?;
     let (lease, _) = Channel::create().map_err(|e| fail("listek", e))?;
@@ -92,6 +103,11 @@ fn launch(startup: &Startup, s: &State, name: &str, args: &[&str]) -> Result<Sta
         StartHandle::user(lease.into_handle()),
         StartHandle::tagged(tag::FS, own.into_channel().into_handle()),
     ];
+    let mut extra = extra;
+    if let Some(r) = audio {
+        let ch = crate::audio::app_channel(r).map_err(|e| fail("relace zvuku", e))?;
+        extra.push(StartHandle::tagged(tag::AUDIO, ch.into_handle()));
+    }
     start_std_app(startup, name, args, &["SDL_VIDEO_DRIVER=magnumopus"], extra)
 }
 
@@ -275,4 +291,68 @@ fn video_bench(startup: &Startup) -> TestResult {
         check!(ms > 0.0, "mereni dalo cas");
         Ok(())
     })
+}
+
+/// Uzivatel pro rozhodnuti o povoleni: prvni clovek ve vypisu sluzby uctu,
+/// jinak zalozi prvni ucet (sada `ucty` bezi pred `sdl` a zalozi vlastni).
+fn test_uid() -> Result<u64, String> {
+    let login = Login(crate::accounts::channel("login").map_err(|e| fail("kanal login", e))?);
+    let list = login.list().map_err(|e| fail("vypis uctu", e))?;
+    if let Some(a) = list.iter().find(|a| a.uid >= ids::FIRST_USER) {
+        return Ok(a.uid);
+    }
+    let setup = Setup(crate::accounts::channel("setup").map_err(|e| fail("kanal setup", e))?);
+    setup.create_first("sdltest", "SDL test", Secret::from("Zvuk jen s povolenim 42")).map_err(|e| fail("zalozeni uctu", e))
+}
+
+const SDL_APP: &str = "org.magnumopus.sdltest";
+
+/// Zvuk pres SDL (ovladac `magnumopus`): ton dohraje; nahravani bez klice
+/// v manifestu zamitnuto hned, s nim systemovy dialog (fyzicky Enter z QMP
+/// = Povolit), pak ulozene rozhodnuti bez dialogu, vypis a odvolani
+/// (prikaz `povoleni`, cesta initu).
+fn audio_permission(startup: &Startup) -> TestResult {
+    ensure_gui(startup)?;
+    let uid = test_uid()?;
+    // Duveryhodny dialog kompozitoru pro sluzbu uctu (pri behu plochy ho
+    // preda init sam, v testu kompozitor spousti test).
+    gt::with(|s| {
+        let d = s.gui.channel(guiproto::control::DIALOG.as_bytes()).map_err(|e| fail("kanal dialogu", e))?;
+        crate::accounts::give_dialog(d).map_err(|e| fail("dialog pro sluzbu uctu", e))
+    })?;
+    let _ = crate::perms::for_uid(uid, SDL_APP, "mikrofon");
+    let recipe = |capture| Recipe { app_id: SDL_APP.into(), app_name: "SDL test MagnumOpus".into(), uid, capture };
+    let t = Duration::from_secs(20);
+    gt::with(|s| {
+        // 1) Bez nahravani v manifestu: ton ano, nahravani ne (bez dialogu).
+        let mut app = launch_audio(startup, s, "testmagnumopus", &["audio"], Some(&recipe(Capture::No)))?;
+        check_eq!(app.wait_line("audio-driver", t)?, "audio-driver magnumopus", "ovladac zvuku SDL");
+        check_eq!(app.wait_line("out", t)?, "out ok", "ton dohral pres audiod");
+        check_eq!(app.wait_line("capture ", t)?, "capture 0", "nahravani bez manifestu zamitnuto");
+        check_eq!(app.finish(t)?.code, 0, "konec programu");
+        // 2) S nahravanim: dialog povoleni, fyzicky Enter = Povolit.
+        let mut app = launch_audio(startup, s, "testmagnumopus", &["audio"], Some(&recipe(Capture::Ask)))?;
+        app.wait_line("capture-ask", t)?;
+        // Dialog prijima vstup az po zobrazeni a ochranne dobe.
+        time::sleep(Duration::from_millis(500));
+        settle(&s.inspect)?;
+        time::sleep(Duration::from_millis(400));
+        println!("{QEMU_PERM}");
+        check_eq!(app.wait_line("capture ", t)?, "capture 1", "nahravani po povoleni");
+        let data = app.wait_line("capture-data", t)?;
+        check!(data != "capture-data 0", format!("nahrana data: {data}"));
+        check_eq!(app.finish(t)?.code, 0, "konec programu");
+        // 3) Ulozene rozhodnuti: bez dialogu.
+        let mut app = launch_audio(startup, s, "testmagnumopus", &["audio"], Some(&recipe(Capture::Ask)))?;
+        check_eq!(app.wait_line("capture ", Duration::from_secs(10))?, "capture 1", "ulozene povoleni bez dialogu");
+        check_eq!(app.finish(t)?.code, 0, "konec programu");
+        Ok(())
+    })?;
+    // 4) Vypis a odvolani (jako prikaz `povoleni`).
+    let list = crate::perms::for_uid(uid, "", "").map_err(|e| fail("vypis povoleni", e))?;
+    check!(list.contains(&format!("{SDL_APP}\tmikrofon\tpovoleno")), format!("vypis: {list}"));
+    crate::perms::for_uid(uid, SDL_APP, "mikrofon").map_err(|e| fail("odvolani", e))?;
+    let list = crate::perms::for_uid(uid, "", "").map_err(|e| fail("vypis po odvolani", e))?;
+    check!(!list.contains(SDL_APP), format!("po odvolani: {list}"));
+    Ok(())
 }

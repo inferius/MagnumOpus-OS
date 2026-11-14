@@ -11,7 +11,7 @@
 - **Tasks:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Session and safety:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Help:** [`help`](#help), [`explain`](#explain)
-- **System:** [`audio`](#audio), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **System:** [`audio`](#audio), [`povoleni`](#povoleni), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Files
 
@@ -1808,6 +1808,31 @@ audio tone 440 -d 500ms
 **Needs:** the sound service (audiod)
 
 **Errors:** `NOT_FOUND`, `NOT_SUPPORTED`
+
+
+### `povoleni`
+
+app permissions: list without arguments, `povoleni odvolat <app> [mikrofon]` revokes
+
+Without arguments lists the user's stored decisions about app permissions (the microphone today). `povoleni odvolat <app>` deletes the decision: the app asks again next time.
+
+```shell
+povoleni
+```
+
+Full name `system-permissions` · input: nothing · output: nothing
+
+The app asks for the microphone again.
+
+```shell
+povoleni odvolat org.libsdl.testaudio
+```
+
+**Needs:** a signed-in session (decisions belong to the session's user)
+
+**Errors:** `SH_ARGS`, `NOT_FOUND`, `ACCESS_DENIED`, `NOT_SUPPORTED`
+
+**Related:** [`audio`](#audio)
 
 
 ### `loglevel`

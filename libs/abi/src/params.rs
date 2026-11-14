@@ -54,6 +54,10 @@ pub mod tag {
     pub const NET: u32 = 0x7FFF_0004;
     /// Kanal ke spousteci sluzbe launchd (`launchproto`).
     pub const LAUNCH: u32 = 0x7FFF_0005;
+    /// Relace zvukove sluzby s pravy aplikace (`audioproto::session`).
+    pub const AUDIO: u32 = 0x7FFF_0006;
+    /// Listek k obnove relace `AUDIO` po restartu `audiod`.
+    pub const AUDIO_LEASE: u32 = 0x7FFF_0007;
 }
 
 /// Precteny blok (odkazuje do bufferu).

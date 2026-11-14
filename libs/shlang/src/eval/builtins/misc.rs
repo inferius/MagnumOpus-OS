@@ -201,6 +201,24 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
                 Err(e) => Err(Flow::Err(ShError::sys(e, "nastavení úrovně logu se nepovedlo").at(a.span))),
             }
         }
+        "povoleni" => {
+            let text = |v: Option<&Value>| match v {
+                Some(Value::Str(s)) => Some(s.clone()),
+                _ => None,
+            };
+            let (app, perm) = match text(a.pos(0)).as_deref() {
+                None => (String::new(), String::new()),
+                Some("odvolat") => match text(a.pos(1)) {
+                    Some(app) => (app, text(a.pos(2)).unwrap_or_else(|| String::from("mikrofon"))),
+                    None => return Err(a.err(code::ARGS, "povoleni odvolat: chybí aplikace (identita z výpisu)")),
+                },
+                Some(_) => return Err(a.err(code::ARGS, "povoleni: bez argumentu výpis, nebo `povoleni odvolat <aplikace> [mikrofon]`")),
+            };
+            match host.permissions(&app, &perm) {
+                Ok(text) => Ok(Value::Str(text)),
+                Err(e) => Err(Flow::Err(ShError::sys(e, "povolení aplikací").at(a.span))),
+            }
+        }
         "report" => match host.report() {
             Ok(text) => Ok(Value::Str(text)),
             Err(e) => Err(Flow::Err(ShError::sys(e, "balíček pro vývojáře se nepovedl").at(a.span))),

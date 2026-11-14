@@ -156,6 +156,31 @@ int mosdl_clipboard_has_text(void);
 int64_t mosdl_clipboard_fetch(void);
 int64_t mosdl_clipboard_copy(char *buf, size_t cap);
 
+/* Zvuk: relace aplikace u audiod (stitek AUDIO ze startovni zpravy).
+   Vzorky (MOSDL_SAMPLE_*) prokladane po kanalech, little endian. */
+enum {
+    MOSDL_SAMPLE_U8 = 0,
+    MOSDL_SAMPLE_S16 = 1,
+    MOSDL_SAMPLE_S32 = 2,
+    MOSDL_SAMPLE_F32 = 3
+};
+
+/* Ma proces relaci zvuku? 1 ano, 0 ne (pak SDL zvoli ovladac dummy). */
+int mosdl_audio_available(void);
+/* Otevre stream (dir 0 vystup, 1 vstup); vrati id > 0, nebo zaporny kod
+   (ACCESS_DENIED = nahravani nepovoleno; OPEN vstupu muze cekat na
+   rozhodnuti uzivatele v systemovem dialogu). *period_frames = takt sluzby. */
+int mosdl_audio_open(int dir, uint32_t rate, uint32_t channels, uint32_t sample, uint32_t latency_us, uint32_t *period_frames);
+/* Zapise cele snimky; pri plnem bufferu ceka (nejdel timeout_ns, < 0 bez
+   limitu). Stream se spusti, jakmile se buffer poprve naplni. */
+int mosdl_audio_write(int id, const void *data, uint32_t bytes, int64_t timeout_ns);
+/* Precte dostupna nahrana data; vrati pocet bajtu. */
+int mosdl_audio_read(int id, void *data, uint32_t bytes);
+/* Ceka na udalost streamu (misto / nova data). */
+int mosdl_audio_wait(int id, int64_t timeout_ns);
+int mosdl_audio_start(int id);
+void mosdl_audio_close(int id);
+
 #ifdef __cplusplus
 }
 #endif
