@@ -73,11 +73,13 @@ pub fn wait_many(a: Args) -> Result<u64> {
     result.map(|(i, _)| i as u64)
 }
 
-/// `OBJECT_SIGNAL(handle, clear, set)`: meni signal SIGNALED eventu.
+/// `OBJECT_SIGNAL(handle, clear, set)`: meni signal SIGNALED a uzivatelske
+/// bity eventu (`USER_0..USER_7`).
 pub fn signal(a: Args) -> Result<u64> {
     let (clear, set) = (mask(a[1])?, mask(a[2])?);
-    // Uzivatel smi menit jen SIGNALED; ostatni signaly ridi jadro.
-    if !(Signals::SIGNALED).contains(clear | set) {
+    // Uzivatel smi menit jen SIGNALED a uzivatelske bity; ostatni signaly
+    // ridi jadro.
+    if !(Signals::SIGNALED | Signals::USER_ALL).contains(clear | set) {
         return Err(Error::InvalidArgs);
     }
     let p = current_process();

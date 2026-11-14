@@ -79,13 +79,10 @@ pub fn instant(ns: u64) -> Instant {
     Instant::from_micros((ns / 1000) as i64)
 }
 
-/// Termin z timeoutu na drate (ms; `FOREVER` = zadny).
-pub fn deadline(timeout_ms: u64) -> u64 {
-    if timeout_ms == netproto::FOREVER {
-        u64::MAX
-    } else {
-        now_ns().saturating_add(timeout_ms.saturating_mul(1_000_000))
-    }
+/// Chyba propadleho terminu: termin "jen zkusit" ([`netproto::TRY`]) =
+/// `SHOULD_WAIT` (neblokujici socket), jinak `TIMED_OUT`.
+pub fn expired(until: u64) -> Error {
+    if until == netproto::TRY { Error::ShouldWait } else { Error::TimedOut }
 }
 
 /// IPv4 z adresy protokolu; IPv6 zatim = `UNREACHABLE`.
@@ -288,6 +285,17 @@ impl Stack {
             return Err(Error::Unreachable);
         }
         self.iface.ipv4_addr().ok_or(Error::Unreachable)
+    }
+
+    /// Port pro naslouchani nebo socket UDP na mistni adrese `addr`:
+    /// `0.0.0.0` (vsechna rozhrani) nebo adresa rozhrani, jinak
+    /// `ADDRESS_NOT_AVAILABLE` (i 127.0.0.1 - loopback sluzba zatim nema).
+    pub fn bind_port(&self, addr: SocketAddr) -> Result<u16> {
+        match addr.ip() {
+            IpAddr::V4(ip) if ip.is_unspecified() => Ok(addr.port()),
+            IpAddr::V4(ip) if self.local_ip().ok() == Some(ip) => Ok(addr.port()),
+            _ => Err(Error::AddressNotAvailable),
+        }
     }
 
     /// Mistni adresa socketu na portu `port` podle aktualniho stavu

@@ -100,6 +100,7 @@ impl Session {
         let nonce: [u8; 16] = random().map_err(|_| nts::Error::Protocol("bez nahody"))?;
         let sock = net.udp_bind(0).map_err(|_| nts::Error::Protocol("socket"))?;
         let t1 = time::wall().ok_or(nts::Error::Protocol("cas neni znamy"))?;
+        let mono1 = time::now();
         let req = nts::build_request(t1, &uid, &cookie, placeholders, &self.c2s, &nonce);
         sock.send_to(&req, self.ntp).map_err(|_| nts::Error::Protocol("odeslani"))?;
         let deadline = time::now() + timeout.as_nanos() as u64;
@@ -122,6 +123,11 @@ impl Session {
                         if self.cookies.len() < nts::COOKIES {
                             self.cookies.push_back(c);
                         }
+                    }
+                    if netproto::ntp::clock_stepped(t1, t4, time::now() - mono1) {
+                        // Realne hodiny nekdo posunul behem mereni: t1 a t4
+                        // jsou z ruznych hodin, vzorek nejde pouzit.
+                        return Err(nts::Error::Protocol("hodiny se behem mereni posunuly"));
                     }
                     let (offset, delay) = netproto::ntp::offset_delay(t1, &r.ntp, t4);
                     return Ok(Measured {

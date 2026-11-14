@@ -100,7 +100,7 @@ pub fn start(startup: &Startup, net: &NetService, netd_end: Channel, devices: &D
     r.policy.connect = Some(rules);
     let session = net.root.restrict_with(&r)?;
     let mut handles = vec![
-        StartHandle::user(session.into_channel().into_handle()),
+        StartHandle::user(session.into_channel()?.into_handle()),
         StartHandle::user(netd_end.into_handle()),
     ];
     match crate::certs::session(devices) {

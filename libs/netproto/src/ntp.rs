@@ -131,10 +131,32 @@ pub struct Sample {
     pub delay_ns: i128,
 }
 
-/// Z davky mereni jednoho serveru vybere vzorek s nejmensim zpozdenim:
-/// u nej se nejmene projevi nesymetricka cesta a fronty (filtr hodin NTP).
+/// Nejvetsi rozdil mezi uplynulym realnym a monotonnim casem behem jednoho
+/// mereni (plynula korekce `timed` je radove ppm, tohle je skok hodin).
+pub const STEP_TOLERANCE_NS: i128 = 100_000_000;
+/// Nejdelsi verohodne zpozdeni cesty (limit dotazu je par sekund).
+pub const MAX_DELAY_NS: i128 = 16_000_000_000;
+
+/// Posunul nekdo realne hodiny mezi odeslanim (`t1`) a prijetim (`t4`)?
+/// `mono_elapsed_ns` = cas mezi nimi podle monotonnich hodin. Takove
+/// mereni nejde pouzit: `t1` a `t4` jsou z ruznych hodin (napr. test nebo
+/// uzivatel nastavil cas o den a vratil ho: posun -12 h, zpozdeni -24 h).
+pub fn clock_stepped(t1: WallTime, t4: WallTime, mono_elapsed_ns: u64) -> bool {
+    (ns(t4) - ns(t1) - mono_elapsed_ns as i128).abs() > STEP_TOLERANCE_NS
+}
+
+/// Je vzorek verohodny? Zaporne zpozdeni nebo delsi nez [`MAX_DELAY_NS`]
+/// = chyba v casovych znackach (serveru nebo vlastnich), vzorek zahodit.
+pub fn plausible(s: &Sample) -> bool {
+    (0..=MAX_DELAY_NS).contains(&s.delay_ns)
+}
+
+/// Z davky mereni jednoho serveru vybere verohodny vzorek s nejmensim
+/// zpozdenim: u nej se nejmene projevi nesymetricka cesta a fronty (filtr
+/// hodin NTP). Neverohodne vzorky se ignoruji - jinak by zaporne zpozdeni
+/// vzdy vyhralo.
 pub fn best_sample(samples: &[Sample]) -> Option<Sample> {
-    samples.iter().copied().min_by_key(|s| s.delay_ns)
+    samples.iter().copied().filter(plausible).min_by_key(|s| s.delay_ns)
 }
 
 /// Spoji posuny vic serveru: median (jeden spatny server vysledek nestahne).

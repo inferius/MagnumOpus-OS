@@ -65,8 +65,12 @@ impl Source {
     }
 }
 
+/// Dotaz `INFO` (netproto v2: hlavicka s cislem dotazu). Cislo je pevne:
+/// dalsi dotaz jde az po odpovedi nebo po `RETRY`; opakovany dotaz
+/// s cislem, ktere jeste ceka, sluzba odmitne a stav prijde z prvniho.
 pub fn net_request() -> Vec<u8> {
-    netproto::Writer::op(netproto::op::INFO).finish()
+    let h = netproto::Header { op: netproto::op::INFO, id: 1, deadline: netproto::NO_DEADLINE };
+    netproto::msg::request(h, &[])
 }
 
 pub fn audio_request() -> Vec<u8> {

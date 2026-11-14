@@ -1,5 +1,6 @@
 //! Port (cekani na libovolne mnozstvi objektu) a nahodna cisla jadra.
 
+use alloc::format;
 use alloc::vec::Vec;
 
 use libos::abi::syscall::{RANDOM_MAX, random_flags};
@@ -15,6 +16,7 @@ pub const TESTS: &[Test] = &[
     ("port: 500 objektu najednou (vic nez WAIT_MANY_MAX)", port_many),
     ("port: kanal ke cteni a zavreny kanal", port_channel),
     ("port: neplatne argumenty", port_invalid),
+    ("event: uzivatelske bity USER_0..7 a pravo SIGNAL", event_user_bits),
     ("port: zanikly objekt vrati rezervaci (bez uniku)", port_no_leak),
     ("port: 300 000 registraci (bez pevneho limitu)", port_unbounded),
     ("RANDOM_GET: data, nasazeni, limity", random_get),
@@ -270,5 +272,33 @@ fn random_add(s: &Startup) -> TestResult {
 fn virtio_rng_started(_: &Startup) -> TestResult {
     let d = devices().ok_or("zarizeni nebezi")?;
     check!(!d._rngs.is_empty(), "devmgr nenasel virtio-rng (QEMU -device virtio-rng-pci)");
+    Ok(())
+}
+
+fn event_user_bits(_: &Startup) -> TestResult {
+    let ev = Event::create().map_err(|e| fail("event", e))?;
+    let user = Signals::USER_0 | Signals::USER_3 | Signals::USER_7;
+    ev.update(Signals::NONE, user).map_err(|e| fail("nastaveni USER", e))?;
+    let got = libos::wait_one(ev.handle(), Signals::USER_3, no_wait()).map_err(|e| fail("cekani na USER_3", e))?;
+    check!(got.contains(user), format!("signaly {:#x}", got.0));
+    check!(!got.contains(Signals::SIGNALED), "SIGNALED se nenastavil");
+    // Port: registrace na uzivatelsky bit.
+    let port = Port::create().map_err(|e| fail("port", e))?;
+    port.wait_async(ev.handle(), 7, Signals::USER_1).map_err(|e| fail("wait_async", e))?;
+    check_eq!(port.wait(no_wait()).err(), Some(Error::TimedOut), "USER_1 neni nastaveny");
+    ev.update(Signals::USER_0, Signals::USER_1).map_err(|e| fail("zmena bitu", e))?;
+    let p = port.wait(no_wait()).map_err(|e| fail("port_wait", e))?;
+    check_eq!(p.key, 7, "klic");
+    check!(Signals(p.signals).contains(Signals::USER_1) && !Signals(p.signals).contains(Signals::USER_0), format!("signaly v paketu {:#x}", p.signals));
+    // Signaly, ktere ridi jadro, uzivatel menit nesmi.
+    for bad in [Signals::READABLE, Signals::PEER_CLOSED, Signals::TERMINATED, Signals(1 << 12)] {
+        check_eq!(ev.update(Signals::NONE, bad).err(), Some(Error::InvalidArgs), format!("bit {:#x}", bad.0));
+    }
+    // Klient s handlem jen pro cekani bity nezmeni (sluzba drzi SIGNAL).
+    let dup = ev.handle().duplicate(Some(Rights::WAIT)).map_err(|e| fail("duplikat", e))?;
+    let client = Event::from_handle(dup);
+    check_eq!(client.update(Signals::USER_ALL, Signals::NONE).err(), Some(Error::AccessDenied), "zmena bez SIGNAL");
+    let seen = libos::wait_one(client.handle(), Signals::USER_1, no_wait()).map_err(|e| fail("cekani klienta", e))?;
+    check!(seen.contains(Signals::USER_1), "klient vidi bity");
     Ok(())
 }

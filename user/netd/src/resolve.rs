@@ -26,7 +26,7 @@ use smoltcp::wire::IpAddress;
 use crate::forward::{Forward, Outcome, outcome};
 use crate::fw::app_name;
 use crate::obj::{AuthRef, Deferred, Gate, Pending, Step, ask_wait, gate};
-use crate::stack::{PortProto, Stack, deadline, now_ns, v4};
+use crate::stack::{PortProto, Stack, now_ns, v4};
 use crate::tcp::to_sa;
 
 /// Opakovani dotazu (a prechod na dalsi server).
@@ -97,7 +97,8 @@ pub struct ResolveReq {
     name: String,
     family: u8,
     server: SocketAddr,
-    timeout: u64,
+    /// Termin dotazu (absolutni ns).
+    pub until: u64,
 }
 
 impl Resolve {
@@ -272,14 +273,13 @@ impl Resolve {
 }
 
 /// `RESOLVE` na relaci.
-pub fn start(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
+pub fn start(stack: &mut Stack, auth: &AuthRef, until: u64, r: &mut Reader) -> Result<Step> {
     let name = r.str()?;
     let family = r.u8()?;
     let server = match r.u8()? {
         0 => None,
         _ => Some(r.socket_addr()?),
     };
-    let timeout = r.u64()?;
     auth.borrow().require(rights::RESOLVE)?;
     // Adresa misto jmena (IPv4 i IPv6): vratit hned, jako getaddrinfo.
     // Musi byt pred kontrolou jmena - `::1` neni platne jmeno hostitele.
@@ -313,7 +313,7 @@ pub fn start(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> 
                 name,
                 family,
                 server,
-                timeout,
+                until,
             },
             Vec::new(),
         ),
@@ -323,11 +323,11 @@ pub fn start(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> 
                     id,
                     name,
                     family,
-                    deadline: deadline(timeout).min(now_ns().saturating_add(RESOLVE_MAX_NS)),
-                    timeout,
+                    deadline: until.min(now_ns().saturating_add(RESOLVE_MAX_NS)),
+                    until,
                 })));
             }
-            fallback(stack, auth, name, family, timeout)
+            fallback(stack, auth, name, family, until)
         }
     }
 }
@@ -339,7 +339,7 @@ pub fn start_server(stack: &mut Stack, auth: &AuthRef, req: ResolveReq, granted:
     if let Gate::Ask(id, app) = gate(stack, &auth.borrow(), proto::UDP, server, &granted)? {
         return Ok(ask_wait(id, app, proto::UDP, server, granted, Deferred::Resolve(req)));
     }
-    begin(stack, auth, req.name, req.family, vec![server], false, req.timeout)
+    begin(stack, auth, req.name, req.family, vec![server], false, req.until)
 }
 
 fn begin(
@@ -349,7 +349,7 @@ fn begin(
     family: u8,
     servers: Vec<SocketAddr>,
     system: bool,
-    timeout: u64,
+    until: u64,
 ) -> Result<Step> {
     let qtypes: &[u16] = match family {
         0 => &[dns::TYPE_A, dns::TYPE_AAAA],
@@ -386,7 +386,7 @@ fn begin(
         servers,
         server: 0,
         next_retry: 0,
-        deadline: deadline(timeout).min(now_ns().saturating_add(RESOLVE_MAX_NS)),
+        deadline: until.min(now_ns().saturating_add(RESOLVE_MAX_NS)),
         addrs: Vec::new(),
         ttl: u32::MAX,
         not_found: 0,
@@ -403,12 +403,12 @@ fn begin(
 
 /// Neovereny systemovy resolver: bez dnsd vzdy, s dnsd jen kdyz to profil
 /// site dovoli (`unauthenticated = "fallback"`).
-fn fallback(stack: &mut Stack, auth: &AuthRef, name: String, family: u8, timeout: u64) -> Result<Step> {
+fn fallback(stack: &mut Stack, auth: &AuthRef, name: String, family: u8, until: u64) -> Result<Step> {
     if stack.resolver.configured && !stack.fw.unauthenticated_fallback {
         return Err(Error::Unreachable);
     }
     let servers = stack.dns_servers().to_vec();
-    begin(stack, auth, name, family, servers, true, timeout)
+    begin(stack, auth, name, family, servers, true, until)
 }
 
 /// Odpoved od dnsd, termin, nebo zaloha.
@@ -434,7 +434,7 @@ pub fn progress_forward(stack: &mut Stack, auth: &AuthRef, f: Forward, now: u64)
             Step::reply(Ok(w))
         }
         Outcome::Fail(e) => Step::reply(Err(e)),
-        Outcome::Fallback => match fallback(stack, auth, f.name, f.family, f.timeout) {
+        Outcome::Fallback => match fallback(stack, auth, f.name, f.family, f.until) {
             Ok(step) => step,
             Err(e) => Step::reply(Err(e)),
         },

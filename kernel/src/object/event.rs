@@ -1,4 +1,8 @@
-//! Event: objekt s jedinym signalem, ktery lze nastavit a shodit.
+//! Event: objekt se signalem SIGNALED a osmi uzivatelskymi bity
+//! (`USER_0..USER_7`), ktere lze nastavit a shodit (`OBJECT_SIGNAL`).
+//! Uzivatelske bity pouzivaji sluzby jako stav pro klienty (pripravenost
+//! socketu v `netd`): sluzba drzi handle s pravem `SIGNAL`, klient jen
+//! `WAIT`.
 
 use alloc::sync::Arc;
 

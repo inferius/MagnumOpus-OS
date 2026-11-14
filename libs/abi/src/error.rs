@@ -84,6 +84,8 @@ pub enum Error {
     /// Svazek, na kterem cil lezi, neni pripojeny (napr. aplikace
     /// nainstalovana na odpojenem disku).
     NotMounted = -35,
+    /// Mistni adresa nepatri zadnemu rozhrani (naslouchani, socket UDP).
+    AddressNotAvailable = -36,
 }
 
 /// Vsechny chyby (pro dokumentaci a testy).
@@ -123,6 +125,7 @@ pub const ALL: &[Error] = &[
     Error::ServiceRestarted,
     Error::ServiceUnavailable,
     Error::NotMounted,
+    Error::AddressNotAvailable,
 ];
 
 impl Error {
@@ -174,6 +177,7 @@ impl Error {
             Self::ServiceRestarted => "SERVICE_RESTARTED",
             Self::ServiceUnavailable => "SERVICE_UNAVAILABLE",
             Self::NotMounted => "NOT_MOUNTED",
+            Self::AddressNotAvailable => "ADDRESS_NOT_AVAILABLE",
         }
     }
 
@@ -215,6 +219,7 @@ impl Error {
             Self::ServiceRestarted => "sluzba se behem pozadavku restartovala, nevime, jestli ho provedla",
             Self::ServiceUnavailable => "sluzba nebezi (restart se nepovedl do lhuty nebo ho supervisor vzdal)",
             Self::NotMounted => "svazek s cilem neni pripojeny",
+            Self::AddressNotAvailable => "mistni adresa nepatri zadnemu rozhrani",
         }
     }
 }

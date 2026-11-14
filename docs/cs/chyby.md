@@ -51,6 +51,7 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -33 | `SERVICE_RESTARTED` | služba se během požadavku restartovala, nevíme, jestli ho provedla |
 | -34 | `SERVICE_UNAVAILABLE` | služba neběží (restart se nepovedl do lhůty nebo ho supervisor vzdal) |
 | -35 | `NOT_MOUNTED` | svazek s cílem není připojený |
+| -36 | `ADDRESS_NOT_AVAILABLE` | místní adresa nepatří žádnému rozhraní |
 
 ## Podrobně
 
@@ -445,6 +446,18 @@ existuje, jen jeho disk chybí.
 
 **Co dělat:** ukázat uživateli, který svazek připojit (text chyby od
 `launchd` ho jmenuje).
+
+### `ADDRESS_NOT_AVAILABLE` (-36)
+
+**Význam:** místní adresa naslouchání nebo socketu UDP nepatří žádnému
+rozhraní služby sítě.
+
+**Kdy vzniká:** `Net::tcp_listen_addr`, `udp_bind_addr` (a v `std::net`
+`TcpListener::bind`, `UdpSocket::bind`) s jinou adresou než `0.0.0.0` nebo
+adresou rozhraní. I `127.0.0.1`: `netd` zatím nemá loopback.
+
+**Co dělat:** naslouchat na `0.0.0.0` (všechna rozhraní) nebo na adrese
+z `Net::info`.
 
 ## Návratové kódy procesů
 

@@ -1071,6 +1071,7 @@ index 0000000..514403a
 +        E::ConnectionReset => K::ConnectionReset,
 +        E::Unreachable => K::HostUnreachable,
 +        E::AddressInUse => K::AddrInUse,
++        E::AddressNotAvailable => K::AddrNotAvailable,
 +        E::Canceled => K::Interrupted,
 +        E::NoResources => K::QuotaExceeded,
 +        E::BufferTooSmall

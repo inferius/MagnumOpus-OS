@@ -310,15 +310,28 @@ fn measure_nts(
         }
         let s = session.as_mut().expect("sezeni po NTS-KE");
         match s.query(net, Duration::from_secs(3)) {
-            Ok(m) => out.push(Sample {
+            Ok(m) => keep(&mut out, Sample {
                 offset_ns: m.offset_ns,
                 delay_ns: m.delay_ns,
-            }),
+            }, host),
             Err(netproto::nts::Error::CookieRejected) => *session = None,
             Err(e) => st.last_nts_error = format!("{host}: {e:?}"),
         }
     }
     out
+}
+
+/// Prida vzorek, kdyz je verohodny; jinak ho zahodi s hlaskou (do `timed`
+/// se nikdy nedostane).
+fn keep(out: &mut Vec<Sample>, s: Sample, server: &str) {
+    if netproto::ntp::plausible(&s) {
+        out.push(s);
+    } else {
+        println!(
+            "ntpd: {server}: neverohodny vzorek zahozen (posun {} ns, zpozdeni {} ns)",
+            s.offset_ns, s.delay_ns
+        );
+    }
 }
 
 fn measure_plain(net: &Net, server: &str, samples: usize, st: &mut State) -> Vec<Sample> {
@@ -332,10 +345,10 @@ fn measure_plain(net: &Net, server: &str, samples: usize, st: &mut State) -> Vec
     let mut out = Vec::new();
     for _ in 0..samples {
         match net.ntp_query(addr, Duration::from_secs(3)) {
-            Ok(s) => out.push(Sample {
+            Ok(s) => keep(&mut out, Sample {
                 offset_ns: s.offset_ns,
                 delay_ns: s.delay_ns,
-            }),
+            }, server),
             Err(e) => st.last_error = Some(e),
         }
     }

@@ -11,7 +11,7 @@ use abi::time::WallTime;
 
 use crate::auth::{Auth, Quota, Restriction, UserRules, Verdict, layer_flags};
 use crate::policy::{Policy, Rule, Target, host_matches, in_network, proto, rights};
-use crate::{Info, ReadAddr, Reader, WriteAddr, Writer, dns, link, ntp, parse_reply, reply};
+use crate::{Info, ReadAddr, Reader, WriteAddr, Writer, dns, link, ntp};
 
 fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
     IpAddr::V4(Ipv4Addr::new(a, b, c, d))
@@ -42,16 +42,6 @@ fn codec_roundtrip_addresses() {
     // Neplatna rodina adresy a zkracena zprava.
     assert_eq!(Reader::new(&[5, 1, 2, 3, 4]).ip(), Err(Error::InvalidArgs));
     assert_eq!(Reader::new(&[4, 1, 2]).ip(), Err(Error::InvalidArgs));
-}
-
-#[test]
-fn reply_status() {
-    let mut body = Writer::new();
-    body.u32(42);
-    let ok = reply(Ok(body));
-    assert_eq!(parse_reply(&ok).unwrap().u32().unwrap(), 42);
-    let err = reply(Err(Error::ConnectionRefused));
-    assert_eq!(parse_reply(&err).err(), Some(Error::ConnectionRefused));
 }
 
 #[test]
@@ -192,6 +182,7 @@ fn session_budget_is_hierarchical() {
     let root = Auth::root_with(Quota {
         sockets: 4,
         bytes: 1000 + session,
+        ops: 2,
     });
     let child = root
         .restrict_with(Restriction {
@@ -199,6 +190,7 @@ fn session_budget_is_hierarchical() {
             quota: Quota {
                 sockets: 10,
                 bytes: 600,
+                ops: 5,
             },
             ..Restriction::default()
         })
@@ -291,6 +283,7 @@ fn restriction_wire_roundtrip() {
         quota: Quota {
             sockets: 100,
             bytes: 1 << 20,
+            ops: 8,
         },
     };
     let mut w = Writer::new();
@@ -609,16 +602,6 @@ fn link_status_roundtrip() {
 }
 
 #[test]
-fn timeout_conversion() {
-    use core::time::Duration;
-    assert_eq!(crate::timeout_ms(None), crate::FOREVER);
-    assert_eq!(crate::timeout_ms(Some(Duration::ZERO)), 0);
-    assert_eq!(crate::timeout_ms(Some(Duration::from_micros(1))), 1);
-    assert_eq!(crate::timeout_ms(Some(Duration::from_secs(2))), 2000);
-    let _: Vec<u8> = Vec::new();
-}
-
-#[test]
 fn ntp_filter_and_discipline() {
     use crate::ntp::{Discipline, Sample, best_sample, combine};
     let s = [
@@ -660,4 +643,38 @@ fn resolver_messages() {
     let a = Answer { id: 7, status: status::OK, ttl: 300, addrs: vec![v4(10, 0, 2, 50)], secure: true };
     assert_eq!(Answer::decode(&a.encode()).unwrap(), a);
     assert!(Answer::decode(&a.encode()[..5]).is_err());
+}
+
+/// Plna sada na aarch64: test `cas` nastavil hodiny o den dopredu a vratil
+/// je, zatimco ntpd meril. t1 o 24 h napred proti t4 dava posun -12 h
+/// a zpozdeni -24 h; filtr ho vybral jako "nejlepsi" (nejmensi zpozdeni).
+#[test]
+fn ntp_clock_step_during_measurement_is_discarded() {
+    use crate::ntp::{self, MAX_DELAY_NS, Reply, Sample, best_sample, clock_stepped, plausible};
+    use abi::time::WallTime;
+    let day = 86_400i64;
+    let t = |secs: i64, nanos: u32| WallTime { secs, nanos };
+    let real_t1 = t(1_800_000_000, 0);
+    let t2 = t(1_800_000_000, 1_000_000);
+    let t3 = t(1_800_000_000, 2_000_000);
+    let t4 = t(1_800_000_000, 3_000_000);
+    let reply = Reply { receive: t2, transmit: t3, stratum: 2 };
+    // t1 zmereny v posunutem okne (o den dopredu).
+    let stepped_t1 = t(1_800_000_000 + day, 0);
+    let (offset, delay) = ntp::offset_delay(stepped_t1, &reply, t4);
+    assert_eq!(offset, -(day as i128) * 1_000_000_000 / 2, "posun -12 h");
+    assert!(delay < -(day as i128) * 1_000_000_000 + 10_000_000, "zpozdeni -24 h");
+    // Kontrola skoku: realne hodiny ubehly -24 h, monotonni 3 ms.
+    assert!(clock_stepped(stepped_t1, t4, 3_000_000));
+    assert!(!clock_stepped(real_t1, t4, 3_000_000), "bez skoku");
+    // Plynula korekce (rozdil pod 100 ms) neni skok.
+    assert!(!clock_stepped(real_t1, t4, 50_000_000));
+    // Verohodnost a vyber.
+    let bad = Sample { offset_ns: offset, delay_ns: delay };
+    let good = Sample { offset_ns: 500, delay_ns: 3_000_000 };
+    assert!(!plausible(&bad));
+    assert!(plausible(&good));
+    assert!(!plausible(&Sample { offset_ns: 0, delay_ns: MAX_DELAY_NS + 1 }));
+    assert_eq!(best_sample(&[bad, good]), Some(good), "zaporne zpozdeni nevyhraje");
+    assert_eq!(best_sample(&[bad]), None, "jen neverohodne = zadny vzorek");
 }

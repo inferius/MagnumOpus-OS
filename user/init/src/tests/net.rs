@@ -553,7 +553,7 @@ fn restricted(s: &Startup) -> TestResult {
         "DNS na vlastni server mimo omezeni"
     );
     // Socket lze predat jinam: kanal spojeni z jine relace funguje dal.
-    let stream = netproto::TcpStream::from_channel(s.into_channel()).map_err(|e| fail("predani", e))?;
+    let stream = netproto::TcpStream::from_channel(s.into_channel().map_err(|e| fail("kanal spojeni", e))?).map_err(|e| fail("predani", e))?;
     check_eq!(stream.peer_addr(), host(p.echo), "predane spojeni");
     Ok(())
 }

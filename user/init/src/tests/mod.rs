@@ -41,6 +41,8 @@ mod memory_regions;
 mod memory_cow;
 mod memory_wx;
 pub mod net;
+mod net_ready;
+mod net_v2;
 mod nic;
 pub mod power;
 mod process;
@@ -111,6 +113,8 @@ const SUITES: &[(&str, &[Test])] = &[
     ("std procesy", std_proc::TESTS),
     ("std porty", std_ports::TESTS),
     ("cstd", cstd::TESTS),
+    ("sit soubeh", net_v2::TESTS),
+    ("sit pripravenost", net_ready::TESTS),
     ("TLS a HTTP", web::TESTS),
     ("sifrovane DNS", dns::TESTS),
     ("supervisor", supervisor::TESTS),

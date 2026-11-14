@@ -251,6 +251,7 @@ invariant was broken (a kernel bug).
 | `ntpd: NTS-KE <server>: ...` | The NTS key exchange failed (connection, certificate, reply); the server is skipped this round. With an invalid certificate check the clock (RTC). |
 | `ntpd: neoverene servery: Never\|Fallback` | Init changed the rule ("unauthenticated servers") by network profile. |
 | `ntpd: zadny server neodpovedel (..., NTS: ...)` | No reply in this round (network, firewall, server). Next attempt after 2, 4, 8, ... s (at most `min_poll`), the same message is not repeated; the clock keeps running at the last frequency. |
+| `ntpd: <server>: neverohodny vzorek zahozen (posun N ns, zpozdeni N ns)` | A measurement with a negative or too long delay ("implausible sample dropped": a server timestamp error or a clock step during the measurement). The sample is not used; other samples and servers still count. |
 | `ntpd: konfigurace: ...` | The configuration from init is invalid; `ntpd` exits. Fix `ntpd.toml`. |
 | `timed: prvni synchronizace: skok o N ms` | The first correction from `ntpd` was large: the time was set with a jump (the only allowed jump). |
 | `timed: prvni synchronizace: dorovnani o N ms` | The first correction was small: it is applied smoothly. |

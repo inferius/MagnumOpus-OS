@@ -351,7 +351,7 @@ impl Fwd {
                 _ => {
                     let reply = self.agent_request(code, &mut r);
                     if let Some(agent) = &self.agent {
-                        let _ = agent.write(&netproto::reply(reply), Vec::new());
+                        let _ = agent.write(&netproto::fw::agent_reply(reply), Vec::new());
                     }
                 }
             }

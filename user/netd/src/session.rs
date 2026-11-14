@@ -8,33 +8,33 @@ use libos::{Error, Result, println};
 use netproto::{ReadAddr, Reader, Restriction, Writer, op, rights};
 
 use crate::obj::{AuthRef, Deferred, Kind, Pending, Step, ask_progress};
-use crate::stack::{Stack, deadline};
+use crate::stack::{Stack, now_ns};
 use crate::{ping, resolve, tcp, udp};
 
 /// Nejvic zaznamu auditu v jedne odpovedi (zprava kanalu = 64 KiB).
 const AUDIT_BATCH: usize = 256;
 
-pub fn request(stack: &mut Stack, auth: &AuthRef, code: u32, r: &mut Reader) -> Result<Step> {
+pub fn request(stack: &mut Stack, auth: &AuthRef, code: u32, until: u64, r: &mut Reader) -> Result<Step> {
     match code {
         op::INFO => {
             auth.borrow().require(rights::INFO)?;
             Ok(info_reply(stack, auth))
         }
         op::WAIT_CONFIGURED => {
-            let timeout = r.u64()?;
             auth.borrow().require(rights::INFO)?;
             if stack.configured {
                 return Ok(info_reply(stack, auth));
             }
-            Ok(Step::Wait(Pending::WaitConfigured {
-                deadline: deadline(timeout),
-            }))
+            if now_ns() >= until {
+                return Err(Error::TimedOut);
+            }
+            Ok(Step::Wait(Pending::WaitConfigured { deadline: until }))
         }
-        op::TCP_CONNECT => tcp::connect(stack, auth, r),
+        op::TCP_CONNECT => tcp::connect(stack, auth, until, r),
         op::TCP_LISTEN => tcp::listen(stack, auth, r),
         op::UDP_BIND => udp::bind(stack, auth, r),
-        op::RESOLVE => resolve::start(stack, auth, r),
-        op::PING => ping::start(stack, auth, r),
+        op::RESOLVE => resolve::start(stack, auth, until, r),
+        op::PING => ping::start(stack, auth, until, r),
         op::RESTRICT => {
             let restriction = Restriction::get(r)?;
             auth.borrow().require(rights::RESTRICT)?;

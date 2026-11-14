@@ -105,7 +105,7 @@ pub fn start(startup: &Startup, devices: &Devices, with_net: bool) -> Result<()>
         let initfs = libos::initfs::Initfs::open(startup)?;
         let m = crate::apps::manifest(&initfs, "agentd")?.ok_or(Error::NotFound)?;
         if let Some(net) = crate::apps::net_session(&n.root, &m)? {
-            handles.push(StartHandle::user(net.into_channel().into_handle()));
+            handles.push(StartHandle::user(net.into_channel()?.into_handle()));
             cfg.push_str(" net");
             if let Ok(c) = crate::certs::session(devices) {
                 handles.push(StartHandle::user(c.into_channel().into_handle()));

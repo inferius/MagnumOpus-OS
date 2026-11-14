@@ -55,8 +55,12 @@ Hlavní rozhodnutí:
 - **Socket je kanál.** Spojení TCP, naslouchání i socket UDP jsou
   samostatné kanály. Socket lze předat jinému procesu, například server
   předá přijaté spojení pracovnímu procesu. Zavření kanálu zavře socket.
-  Na jednom kanálu je vždy nejvýš jeden požadavek. Další zprávu služba
-  přečte až po odpovědi, a to funguje jako přirozený protitlak.
+  Na jednom kanálu může být víc dotazů najednou: každý nese číslo
+  a termín a odpověď patří k číslu (viz [Protokol](#protokol-netproto)).
+  Čtení a zápis jednoho spojení z různých vláken si nepřekáží, dlouhý
+  connect nebrzdí ostatní dotazy relace **[ověřeno v QEMU]** (sady
+  `sit soubeh` a `firewall`). Protitlak dávají fronty směrů a limit
+  dotazů relace.
 - **API není kopie BSD socketů.** Typy jsou ve stylu Rustu: `Net`,
   `TcpStream`, `TcpListener`, `UdpSocket`. Vrstva POSIX pro porty
   C programů je možná později nad nimi.
@@ -149,9 +153,9 @@ Pak v jednom vlákně dokola opakuje:
 1. `poll` stacku: přijaté rámce, časovače TCP, DHCP,
 2. posun rozpracovaných požadavků (spojení, čtení, dotazy DNS, ping),
 3. `PORT_WAIT` na **portu jádra** (viz [Porty](syscally.md#porty)),
-   s termínem podle nejbližšího časovače. Každý kanál má na portu dvě
-   jednorázové registrace: „ke čtení“ (obnoví se po přečtení zprávy, ale ne
-   během rozpracovaného požadavku) a „zavřeno“. Klíč paketu nese číslo
+   s termínem podle nejbližšího časovače a termínů dotazů. Každý kanál má
+   na portu dvě jednorázové registrace: „ke čtení“ (obnoví se po přečtení
+   dávky nejvýš 32 zpráv, i když jsou dotazy rozpracované) a „zavřeno“. Klíč paketu nese číslo
    slotu a jeho generaci, takže starý paket po uvolnění slotu nic nespletě.
    Práce v každém kole je úměrná aktivním objektům (rozpracované
    požadavky, přijaté pakety), ne počtu všech socketů.
@@ -164,6 +168,8 @@ Pak v jednom vlákně dokola opakuje:
 | zavření spojení | FIN, úklid po doběhnutí nebo nejpozději po 30 s |
 | fronta naslouchání | 1 až 4096 spojení (jako `SOMAXCONN`); 16 souběžných navázání mezi dvěma koly služby |
 | dočasné porty | 49152 až 65535, začátek náhodný; posledních 4096 uvolněných se znovu nepřidělí (stará relace v NAT/slirp) |
+| souběžné dotazy na socketu | v každém směru (příjem: `RECV`, `RECV_FROM`; odesílání: `SEND`, `SHUTDOWN`, `SEND_TO`; `ACCEPT`) rozpracovaný nejvýš jeden, další čekají ve frontě FIFO, dohromady nejvýš 8 (`DIRECTION_QUEUE`), další `NO_RESOURCES` |
+| souběžné dotazy na relaci | nejvýš `Quota::ops` (výchozí 32, meze 1 až 1024, v manifestu `ops`) jen pro tuto relaci. Další dotazy služba odloží (nejvýš 32 zpráv, FIFO) a spustí po uvolnění místa; pak relaci přestane číst a zprávy čekají v kanálu v jádře (protitlak, bez chyby). `CANCEL` platí i pro odložené dotazy |
 | datagram UDP | nejvýš 65 507 B (největší obsah datagramu IPv4; fragmentace a skládání IPv4) a nejvýš velikost fronty socketu (výchozí 64 KiB) |
 | DNS | dotaz A (a AAAA) s EDNS0 (1232 B), zkrácená odpověď přes TCP, opakování po 1 s se střídáním serverů, nejvýš 30 s |
 
@@ -301,13 +307,47 @@ let app_net = root.restrict(rights::INFO | rights::TCP_CONNECT | rights::RESOLVE
 Klientská knihovna je v `netproto` (feature `client`). Všechny metody
 blokují. Timeout `None` znamená bez limitu.
 
+**Vlákna** **[ověřeno v QEMU]**: `Net`, `TcpStream`, `TcpListener`
+a `UdpSocket` jsou `Send + Sync` a metody berou `&self`. Na jednom kanálu
+může čekat víc vláken najednou. `try_clone()` vrátí další handle na
+stejný socket (sdílí kanál i limity `set_read_timeout`
+a `set_write_timeout`, jako `SO_RCVTIMEO`), `Net` je `Clone`. Odpovědi
+rozděluje sdílený `Mux` podle čísla dotazu. Vlákno, které čeká a nikdo
+zrovna nečte, čte z kanálu samo, cizí odpovědi uloží a probudí jejich
+vlákna (futex). Jedno vlákno tedy nemá žádný syscall navíc.
+
+**Termín a zrušení** **[ověřeno v QEMU]**: varianty `*_ctx`
+(`Net::tcp_connect_ctx`, `resolve_ctx`, `TcpStream::recv_ctx`,
+`send_ctx`, `TcpListener::accept_ctx`, `UdpSocket::recv_from_ctx`) berou
+absolutní termín `Deadline` (`Deadline::after(Option<Duration>)`,
+`Deadline::NONE`, `Deadline::TRY` = jen zkusit) a volitelný
+`CancelToken`. `CancelToken::cancel()` z jiného vlákna zruší rozpracované
+dotazy s tímto tokenem (vrátí `CANCELED`) a každý další dotaz s ním vrátí
+`CANCELED` hned. U spojení se uvolní socket i port, u dotazu firewallu
+čekání na uživatele. Čas dotazu na uživatele se do termínu nepočítá.
+`Deadline::TRY` je neblokující režim: `recv_ctx`, `send_ctx`, `accept_ctx`
+a `recv_from_ctx` bez dat, místa nebo spojení vrátí `SHOULD_WAIT` (ne
+`TIMED_OUT`) **[ověřeno v QEMU]**. Kdy to zkusit znovu, řekne
+[připravenost socketu](#připravenost-socketů).
+
 **Pojistka v klientovi:** limity operací hlídá `netd`, klient má navíc
-vlastní: limit operace + 10 s, operace bez limitu (stav, relace, socket)
+vlastní: termín operace + 10 s, operace bez limitu (stav, relace, socket)
 30 s, operace s možným dotazem firewallu (spojení, datagram na nový cíl,
 ping, překlad vlastním serverem) navíc 300 s. Když `netd` neodpoví,
-program dostane `TIMED_OUT` a v logu je `netproto: sluzba site
-neodpovedela na pozadavek <op> do N s`. Kanál pak už nejde použít
-(`BAD_STATE`): pozdní odpověď by patřila jinému požadavku.
+program dostane `TIMED_OUT`, klient pošle `CANCEL` a v logu je
+`netproto: sluzba site neodpovedela na dotaz <op> (id N) vcas, rusim ho`.
+Kanál jde používat dál: pozdní odpověď má číslo, na které už nikdo
+nečeká, a zahodí se i s handly.
+
+> **Změna proti první verzi:** na kanálu byl nejvýš jeden požadavek
+> a odpověď neměla číslo. Dvě vlákna na jednom spojení si prohodila
+> odpovědi, zápis čekal za blokovaným `RECV` a connect čekající na dotaz
+> firewallu (až 300 s) zablokoval celou relaci. Kanál po vypršení
+> pojistky nešel použít. **Proč:** std (`TcpStream` je `Read` i `Write`,
+> `try_clone`, vlákno čtení a vlákno zápisu) a async runtimy potřebují
+> souběh. Hlavička s číslem, termínem a zrušením je zároveň kontext
+> operace budoucího IDL ([architektura](architektura.md)). Starý formát
+> zprávy se nečte: převedli se všichni klienti najednou.
 
 **Souběh:** odpovědi nemají číslo požadavku a netd má na jednom kanálu
 (relace, spojení, socket) rozpracovaný jen jeden požadavek. Dvě vlákna
@@ -346,6 +386,27 @@ fn main(startup: libos::Startup) -> i64 {
 }
 ```
 
+Čtení a zápis z různých vláken a zrušení:
+
+```rust
+use netproto::{CancelToken, Deadline};
+
+let s = net.tcp_connect(addr, Some(Duration::from_secs(5)))?;
+let reader = s.try_clone()?;
+let stop = CancelToken::new();
+let token = stop.clone();
+libos::thread::spawn("cteni", move || {
+    let mut buf = [0u8; 4096];
+    // Čeká bez limitu, dokud nepřijdou data nebo `stop.cancel()`.
+    while let Ok(n) = reader.recv_ctx(&mut buf, Deadline::NONE, Some(&token)) {
+        if n == 0 { break; }
+        // ...
+    }
+})?;
+s.write(b"ahoj")?;      // neblokuje se za čtením
+stop.cancel();          // čtení skončí s CANCELED
+```
+
 | Metoda | Právo | Chyby navíc |
 |---|---|---|
 | `Net::info`, `wait_configured` | `INFO` | `TIMED_OUT` |
@@ -357,6 +418,9 @@ fn main(startup: libos::Startup) -> i64 {
 | `Net::restrict`, `restrict_with` | `RESTRICT` | `INVALID_ARGS` (neplatná pravidla, `ask` bez identity), `NO_RESOURCES` |
 | `Net::audit`, `stats` | `AUDIT` | |
 | `Net::tcp_connect_with`, `tcp_listen_with`, `udp_bind_with` | jako bez `_with` | `NO_RESOURCES` (rozpočet relace) |
+| varianty `*_ctx` | jako bez `_ctx` | `CANCELED` (zrušeno tokenem), `TIMED_OUT` (termín) |
+| každý dotaz na socketu | | `NO_RESOURCES` (fronta směru plná, víc než 8 dotazů jednoho směru) |
+| `Net::tcp_listen_addr`, `udp_bind_addr` | jako `tcp_listen`, `udp_bind` | `ADDRESS_NOT_AVAILABLE` (adresa není `0.0.0.0` ani adresa rozhraní; i `127.0.0.1`, loopback zatím chybí) |
 | `Net::set_dns` | `CONFIGURE` | |
 | `Net::ntp_query` | `UDP` + cíl | `TIMED_OUT`, `BAD_STATE` (server nesynchronizovaný) |
 | `TcpStream::read`, `write` | | `CONNECTION_RESET`, `TIMED_OUT` |
@@ -373,38 +437,116 @@ vrátí hned bez dotazu.
 `TcpStream::read` vrací `Ok(0)` na konci proudu (druhá strana ukončila
 zápis). `CONNECTION_RESET` znamená, že spojení přerušil RST nebo že druhá
 strana přestala odpovídat. Spojení lze předat jinému procesu:
-`into_channel()` u odesílatele, `TcpStream::from_channel()` u příjemce.
+`into_channel()` u odesílatele (`BAD_STATE`, když spojení drží klon nebo
+na něm běží dotaz), `TcpStream::from_channel()` u příjemce.
+
+## Připravenost socketů
+
+Neblokující smyčky (backend mio, a nad ním tokio) potřebují čekat na mnoho
+socketů najednou a pak operaci zkusit bez čekání **[ověřeno v QEMU]**
+(sada „sit pripravenost“).
+
+- **`READINESS`** na kanálu socketu (spojení, naslouchání, UDP) vrátí
+  **event** v handlech odpovědi. Klient dostane duplikát jen s právem
+  `WAIT` (a `DUPLICATE`, `TRANSFER`), `netd` si drží `SIGNAL`. Bity jsou
+  uživatelské bity eventu ([`OBJECT_SIGNAL`](syscally.md#object_signal)),
+  takže na ně jde čekat portem jádra jako na jakýkoli jiný objekt.
+- **Bity** (`netproto::ready`):
+
+| Bit | Signál | Kdy |
+|---|---|---|
+| `READABLE` | `USER_0` | spojení: data, konec proudu nebo chyba (čtení neblokuje); naslouchání: spojení čeká na `accept`; UDP: datagram |
+| `WRITABLE` | `USER_1` | místo ve frontě odesílání (nebo chyba) |
+| `HUP` | `USER_2` | druhá strana ukončila zápis (FIN) nebo je spojení zavřené |
+| `ERROR` | `USER_3` | spojení přerušeno (RST, druhá strana přestala odpovídat) |
+
+- **Stav je úrovňový:** `netd` po každém kole přepočítá bity sledovaných
+  socketů (těch, pro které někdo zavolal `READINESS`) a do eventu zapíše
+  jen změnu. Práce navíc je úměrná počtu sledovaných socketů. Bit
+  nastavený už při registraci se na portu ohlásí hned.
+- **Smyčka jako v mio:** `Port::wait_async(readiness.handle(), token,
+  maska)` = `Registry::register`; `Port::wait` = `Poll::poll`; po události
+  operace s `Deadline::TRY` (`SHOULD_WAIT` = už není připravený, což se
+  může stát, protože stav platí k poslednímu kolu `netd`) a nová
+  registrace (jednorázová jako epoll s `ONESHOT`). Probuzení z jiného
+  vlákna (`Waker`) = event se `SIGNALED` na stejném portu.
+
+```rust
+use netproto::{Deadline, ready};
+
+let port = libos::Port::create()?;
+let r = stream.readiness()?;
+port.wait_async(r.handle(), TOKEN, ready::READABLE)?;
+loop {
+    let ev = port.wait(None)?;
+    let mut buf = [0u8; 4096];
+    match stream.recv_ctx(&mut buf, Deadline::TRY, None) {
+        Ok(n) => { /* data */ }
+        Err(libos::Error::ShouldWait) => {} // zkusit po další události
+        Err(e) => return Err(e),
+    }
+    port.wait_async(r.handle(), TOKEN, ready::READABLE)?;
+}
+```
+
+> **Změna proti první verzi:** připravenost neexistovala, neblokující
+> smyčku šlo udělat jen vláknem na socket. **Proč:** mio/tokio a servery
+> s tisíci spojení. Jádro na to dostalo uživatelské bity eventu (malá
+> změna `OBJECT_SIGNAL`), `netd` jimi stav ukazuje bez zpráv navíc.
 
 ## Protokol netproto
 
-Požadavek: `op` u32 a parametry. Odpověď: `status` i32 (0 nebo kód
-chyby), rezerva u32 a výsledek. Nový socket nebo relace jde v handlech
-odpovědi. Kódování: čísla little-endian, adresa IP = rodina u8 (4/6)
-+ 4/16 B, `socket_addr` = adresa + port u16, řetězec = délka u16 + UTF-8,
-data = zbytek zprávy. Timeout je u64 v ms: 0 = nečekat,
-`u64::MAX` = bez limitu.
+Verze 2 **[ověřeno v QEMU]**. Každá zpráva má hlavičku s kontextem
+operace (`netproto::msg`):
+
+| Zpráva | Hlavička | Tělo |
+|---|---|---|
+| dotaz | `op` u32, `id` u32, termín u64 (16 B) | parametry |
+| odpověď | `id` u32, `status` i32 (8 B) | výsledek (jen při `status` 0) |
+
+- **`id`** volí klient. Je jedinečné mezi rozpracovanými dotazy na kanálu
+  a nikdy není 0. Odpověď nese stejné `id`, pořadí odpovědí není dané.
+  Dotaz s `id`, které už čeká, dostane `ALREADY_EXISTS`.
+- **Termín** je absolutní čas monotónních hodin jádra v ns (stejné hodiny
+  ve všech procesech). `u64::MAX` = bez limitu, 0 (nebo minulost) = jen
+  zkusit. Vypršení = `TIMED_OUT`, u „jen zkusit“ (0) `SHOULD_WAIT`
+  (`RECV`, `SEND`, `ACCEPT`, `RECV_FROM`, `SEND_TO`). Doba čekání ve
+  frontě se tak nepočítá dvakrát.
+- **`CANCEL`** (op `0xFFFF_FFFF`, na každém kanálu): `id` v hlavičce je
+  číslo rušeného dotazu, tělo je prázdné a vlastní odpověď nemá. Rušený
+  dotaz (rozpracovaný i ve frontě) odpoví `CANCELED`; `SEND`, ze kterého
+  už část prošla, odpoví počtem přijatých bajtů. Neznámé nebo hotové
+  `id` služba ignoruje.
+- Zprávu bez platné hlavičky služba zahodí (nemá číslo, kam odpovědět).
+
+Nový socket nebo relace jde v handlech odpovědi. Kódování: čísla
+little-endian, adresa IP = rodina u8 (4/6) + 4/16 B, `socket_addr` =
+adresa + port u16, řetězec = délka u16 + UTF-8, data = zbytek zprávy.
+Kanál mezi `fwd` a agentem uživatele má vlastní formát odpovědi
+(`fw::agent_reply`), viz [firewall.md](firewall.md).
 
 | Kanál | Op | Parametry → výsledek |
 |---|---|---|
 | relace | `INFO` (1) | → Info |
-| relace | `WAIT_CONFIGURED` (2) | timeout → Info |
-| relace | `TCP_CONNECT` (3) | cíl, timeout, Buffers → místní adresa + kanál spojení |
-| relace | `TCP_LISTEN` (4) | port u16, fronta u16, Buffers → místní adresa + kanál naslouchání |
-| relace | `UDP_BIND` (5) | port u16, Buffers → místní adresa + kanál socketu |
-| relace | `RESOLVE` (6) | jméno, rodina u8 (0/4/6), má server u8 [server], timeout → počet u16, adresy, TTL u32 |
-| relace | `PING` (7) | adresa, pořadí u16, délka u16, timeout → odezva ns u64 |
+| relace | `WAIT_CONFIGURED` (2) | → Info (do termínu) |
+| relace | `TCP_CONNECT` (3) | cíl, Buffers → místní adresa + kanál spojení |
+| relace | `TCP_LISTEN` (4) | místní adresa (`0.0.0.0` nebo adresa rozhraní), fronta u16, Buffers → místní adresa + kanál naslouchání |
+| relace | `UDP_BIND` (5) | místní adresa, Buffers → místní adresa + kanál socketu |
+| relace | `RESOLVE` (6) | jméno, rodina u8 (0/4/6), má server u8 [server] → počet u16, adresy, TTL u32 |
+| relace | `PING` (7) | adresa, pořadí u16, délka u16 → odezva ns u64 |
 | relace | `RESTRICT` (8) | Restriction → kanál relace |
 | relace | `SET_DNS` (9) | počet u8, servery → () |
 | relace | `AUDIT` (10) | od u64, nejvíc u16 → další u64, počet u16, záznamy |
 | relace | `STATS` (11) | → profil, počet u16, provoz aplikací |
-| spojení | `SEND` (20) | timeout, data → přijato u32 |
-| spojení | `RECV` (21) | nejvýš u32, timeout → data (prázdná = konec proudu) |
+| spojení | `SEND` (20) | data → přijato u32 |
+| spojení | `RECV` (21) | nejvýš u32 → data (prázdná = konec proudu) |
 | spojení | `SHUTDOWN` (22) | → () (FIN, čtení pokračuje) |
 | spojení | `ADDRS` (23) | → místní, vzdálená adresa |
-| naslouchání | `ACCEPT` (30) | timeout → vzdálená adresa, místní adresa + kanál spojení |
+| naslouchání | `ACCEPT` (30) | → vzdálená adresa, místní adresa + kanál spojení |
 | naslouchání, UDP | `LOCAL_ADDR` (31) | → místní adresa (podle aktuální adresy rozhraní) |
-| UDP | `SEND_TO` (40) | cíl, data → () |
-| UDP | `RECV_FROM` (41) | nejvýš u32, timeout → odesílatel, data |
+| UDP | `SEND_TO` (40) | cíl, data → () (na místo ve frontě nejvýš 5 s) |
+| každý socket | `READINESS` (50) | → () + event připravenosti v handlech (viz [Připravenost socketů](#připravenost-socketů)) |
+| UDP | `RECV_FROM` (41) | nejvýš u32 → odesílatel, data |
 
 **Info:** MAC (6 B), MTU u16, příznaky u8 (bit 0 linka, bit 1 nastaveno),
 má adresu u8 [adresa, prefix u8], má bránu u8 [brána], počet DNS u8
@@ -415,7 +557,8 @@ má adresu u8 [adresa, prefix u8], má bránu u8 [brána], počet DNS u8
 
 **Restriction:** práva u32, Policy, příznaky u8 (bit 0 = `ask`), aplikace
 (řetězec, nejvýš 128 znaků `a-z A-Z 0-9 . - _`), sockety u32, bajty u64
-(`u32::MAX` / `u64::MAX` = bez limitu).
+(`u32::MAX` / `u64::MAX` = bez limitu), souběžné dotazy u32 (meze 1 až
+1024; init dává 32).
 
 **Policy:** má connect u8 [počet u32, pravidla], má bind u8 [počet u32,
 (od u16, do u16)...]. Pravidlo = protokoly u8, druh cíle u8
@@ -589,6 +732,9 @@ překládá adresu 10.0.2.2 na 127.0.0.1 hostitele.
 | oprávnění | chybějící práva, cíle mimo omezení, předání spojení jinému kanálu |
 | jméno hostitele | pravidlo `*.magnumopus` platí po systémovém překladu, ne po překladu vlastním serverem |
 | šifrované DNS | sada „sifrovane DNS“: ověřené A, CNAME, wildcard, AAAA; NXDOMAIN (NSEC i NSEC3), NODATA; nepodepsaná a podvržená zóna; přechod z nefunkčního resolveru, DoT, mezipaměť; pravidlo profilu |
+| souběh (sada „sit soubeh“) | čtení a zápis jednoho spojení ze dvou vláken (zápis nečeká za čtením), dva čtenáři jednoho spojení (fronta FIFO), „jen zkusit“ = `SHOULD_WAIT` a termín 300 ms, zrušení čtení z jiného vlákna a token zrušený předem, místní adresa naslouchání a UDP (`ADDRESS_NOT_AVAILABLE` pro cizí adresu a 127.0.0.1) |
+| plný limit relace (sada „firewall“) | relace s `ops = 1`: druhý dotaz se odloží (nečeká chybou), jeho zrušení přijde do 2 s, i když první dotaz dál čeká na uživatele |
+| zrušení connectu (sada „firewall“) | connect čeká na dotaz uživatele, relace mezitím odpovídá na `INFO`, `CancelToken` ho zruší do 2 s (`CANCELED`), pozdní odpověď uživatele nic nezmění |
 | NTP | `ntpd` proti serveru hostitele (sada „synchronizace casu“, viz [cas.md](cas.md#synchronizace-podle-sítě-ntpd)) |
 
 **DNS v testech jen lokálně:** všechny dotazy jdou na pomocný server
@@ -629,5 +775,10 @@ Formáty a oprávnění testuje i hostitel: `cargo test -p netproto
 - **IPv6:** SLAAC, ICMPv6, AAAA už resolver umí. Protokol je připravený
   (adresy `IpAddr`).
 - **Sdílená paměť pro data** místo kopírování zprávami (jako u disku).
+- **Další operace socketu** (kódy rezervované v `netproto::op`): `RECV`
+  s příznakem `PEEK` (i `RECV_FROM`), `SHUTDOWN_READ`, `SET_OPTION`
+  a `GET_OPTION` (nodelay, TTL, keep-alive, linger, broadcast), počet
+  bajtů k přečtení (`FIONREAD`) **[navrženo]**.
+- **Loopback** (127.0.0.1) ve službě **[navrženo]**.
 - **Víc karet**, statická konfigurace, mezipaměť DNS, servery NTP z DHCP
   (volba 42).

@@ -106,7 +106,7 @@ fn start_fetch(s: &Startup, p: &Ports) -> Result<Fetch, String> {
         s,
         "fetch",
         vec![
-            StartHandle::user(net.into_channel().into_handle()),
+            StartHandle::user(net.into_channel().map_err(|e| fail("kanal relace", e))?.into_handle()),
             StartHandle::user(certs.into_channel().into_handle()),
             StartHandle::user(revocation.into_handle()),
         ],

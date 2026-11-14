@@ -25,6 +25,7 @@ rights = ["info", "tcp", "dns"]
 ask = true
 sockets = 16
 buffers = "1M"
+ops = 64
 
 [[network.connect]]
 proto = ["tcp"]
@@ -53,6 +54,7 @@ fn full_manifest() {
     assert_eq!(n.app, "org.magnumopus.netprobe");
     assert_eq!(n.quota.sockets, 16);
     assert_eq!(n.quota.bytes, 1 << 20);
+    assert_eq!(n.quota.ops, 64);
     let rules = n.policy.connect.as_ref().unwrap();
     assert_eq!(rules.len(), 2);
     assert_eq!(rules[0].protos, proto::TCP);
@@ -93,6 +95,8 @@ fn bad_manifests() {
         "[app]\nid = \"a\"\n[network]\nrights = []\n[[network.connect]]\nto = \"*\"\nproto = \"sctp\"\n",
         "[app]\nid = \"a\"\n[limits]\nmemory = \"hodne\"\n",
         "[app]\nid = \"a\"\n[network]\nrights = []\nsockets = -1\n",
+        "[app]\nid = \"a\"\n[network]\nrights = []\nops = 0\n",
+        "[app]\nid = \"a\"\n[network]\nrights = []\nops = 5000\n",
     ];
     for c in cases {
         assert!(Manifest::parse(c).is_err(), "{c}");

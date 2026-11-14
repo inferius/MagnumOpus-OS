@@ -1,6 +1,7 @@
 //! Objekty sluzby: kazdy kanal od klienta je relace, spojeni TCP,
-//! naslouchani TCP nebo socket UDP. Na kanalu je nejvys jeden rozpracovany
-//! pozadavek (`Pending`); dalsi zpravu sluzba precte az po odpovedi.
+//! naslouchani TCP nebo socket UDP. Na kanalu muze byt vic rozpracovanych
+//! dotazu najednou ([`Op`], podle cisla dotazu z hlavicky); dotazy stejneho
+//! smeru na socketu ([`Dir`]) cekaji ve fronte FIFO (`ops.rs`).
 //!
 //! Kazdy socket drzi strzeni z rozpoctu sve relace ([`Usage`]); zanikem
 //! objektu se vrati.
@@ -13,7 +14,7 @@ use core::cell::RefCell;
 use core::net::SocketAddr;
 
 use libos::{Channel, Error, Result};
-use netproto::auth::Usage;
+use netproto::auth::{OpTicket, Usage};
 use netproto::{Auth, Reader, Verdict, Writer};
 use smoltcp::iface::SocketHandle;
 
@@ -29,7 +30,15 @@ pub type AuthRef = Rc<RefCell<Auth>>;
 pub struct Obj {
     pub ch: Channel,
     pub kind: Kind,
-    pub pending: Option<Pending>,
+    /// Rozpracovane a cekajici dotazy (poradi = poradi prijeti).
+    pub ops: Vec<Op>,
+    /// Relace s plnym limitem dotazu: odlozene zpravy (FIFO, nejvys
+    /// `ops::SESSION_BACKLOG`); pak se kanal prestane cist.
+    pub backlog: VecDeque<Vec<u8>>,
+    /// Cteni kanalu zastavene (plny `backlog`).
+    pub read_paused: bool,
+    /// Event pripravenosti socketu (az po `READINESS`).
+    pub ready: Option<crate::ready::Readiness>,
     /// Je na portu registrace "kanal je ke cteni"?
     pub read_armed: bool,
     /// Je na portu registrace "klient kanal zavrel"?
@@ -41,11 +50,56 @@ impl Obj {
         Self {
             ch,
             kind,
-            pending: None,
+            ops: Vec::new(),
+            backlog: VecDeque::new(),
+            read_paused: false,
+            ready: None,
             read_armed: false,
             close_armed: false,
         }
     }
+}
+
+/// Smer dotazu na socketu: dotazy stejneho smeru se vyrizuji postupne
+/// (data se neprolozi), ruzne smery soubezne. `Free` = bez fronty
+/// (dotazy relace, okamzite dotazy socketu).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dir {
+    Free,
+    /// RECV, RECV_FROM.
+    Recv,
+    /// SEND, SHUTDOWN (po drivejsich zapisech), SEND_TO.
+    Send,
+    /// ACCEPT.
+    Accept,
+}
+
+/// Smer dotazu `code` na objektu `kind`.
+pub fn dir_of(kind: &Kind, code: u32) -> Dir {
+    use netproto::op;
+    match (kind, code) {
+        (Kind::Session(_), _) => Dir::Free,
+        (_, op::RECV | op::RECV_FROM) => Dir::Recv,
+        (_, op::SEND | op::SHUTDOWN | op::SEND_TO) => Dir::Send,
+        (_, op::ACCEPT) => Dir::Accept,
+        _ => Dir::Free,
+    }
+}
+
+/// Jeden dotaz na kanalu.
+pub struct Op {
+    pub id: u32,
+    pub dir: Dir,
+    pub state: OpState,
+    /// Misto v limitu soubeznych dotazu relace (jen dotazy relace).
+    pub _ticket: Option<OpTicket>,
+}
+
+pub enum OpState {
+    /// Rozpracovany.
+    Active(Pending),
+    /// Ceka ve fronte smeru: cela zprava dotazu a jeho termin.
+    Queued { msg: Vec<u8>, until: u64 },
 }
 
 pub enum Kind {
@@ -107,7 +161,23 @@ pub enum Deferred {
     Connect(tcp::ConnectReq),
     Ping(PingReq),
     Resolve(ResolveReq),
-    SendTo { to: SocketAddr, data: Vec<u8> },
+    SendTo { to: SocketAddr, data: Vec<u8>, until: u64 },
+}
+
+impl Deferred {
+    /// Posune termin o dobu dotazu na uzivatele (ta se do terminu
+    /// operace nepocita); "bez limitu" zustava.
+    pub fn extend(&mut self, by: u64) {
+        let until = match self {
+            Deferred::Connect(r) => &mut r.until,
+            Deferred::Ping(r) => &mut r.until,
+            Deferred::Resolve(r) => &mut r.until,
+            Deferred::SendTo { until, .. } => until,
+        };
+        if *until != netproto::NO_DEADLINE {
+            *until = until.saturating_add(by).min(netproto::NO_DEADLINE - 1);
+        }
+    }
 }
 
 pub struct AskWait {
@@ -116,6 +186,8 @@ pub struct AskWait {
     pub proto: u8,
     pub dest: SocketAddr,
     pub deadline: u64,
+    /// Kdy dotaz na uzivatele zacal.
+    pub started: u64,
     /// Aplikace, kterym uz uzivatel tento pozadavek povolil (vic vrstev
     /// s dotazem).
     pub granted: Vec<String>,
@@ -240,6 +312,7 @@ pub fn ask_wait(id: u32, app: String, proto: u8, dest: SocketAddr, granted: Vec<
         proto,
         dest,
         deadline: now_ns().saturating_add(fw::ASK_WAIT_NS),
+        started: now_ns(),
         granted,
         then,
     }))
@@ -252,6 +325,7 @@ pub fn ask_progress(stack: &mut Stack, mut a: AskWait, now: u64) -> core::result
     match stack.fw.take_answer(a.id) {
         Some(true) => {
             a.granted.push(a.app);
+            a.then.extend(now.saturating_sub(a.started));
             Ok((a.granted, a.then))
         }
         Some(false) => {
@@ -266,17 +340,13 @@ pub fn ask_progress(stack: &mut Stack, mut a: AskWait, now: u64) -> core::result
     }
 }
 
-/// Novy pozadavek na objektu.
-pub fn request(stack: &mut Stack, kind: &mut Kind, data: &[u8]) -> Step {
-    let mut r = Reader::new(data);
-    let Ok(code) = r.u32() else {
-        return Step::err(Error::InvalidArgs);
-    };
+/// Novy dotaz `code` s terminem `until` na objektu.
+pub fn request(stack: &mut Stack, kind: &mut Kind, code: u32, until: u64, r: &mut Reader) -> Step {
     let step = match kind {
-        Kind::Session(auth) => session::request(stack, auth, code, &mut r),
-        Kind::Stream(s) => tcp::stream_request(stack, s, code, &mut r),
-        Kind::Listener(l) => tcp::listener_request(stack, l, code, &mut r),
-        Kind::Udp(u) => udp::request(stack, u, code, &mut r),
+        Kind::Session(auth) => session::request(stack, auth, code, until, r),
+        Kind::Stream(s) => tcp::stream_request(stack, s, code, until, r),
+        Kind::Listener(l) => tcp::listener_request(stack, l, code, until, r),
+        Kind::Udp(u) => udp::request(stack, u, code, until, r),
     };
     match step {
         Ok(s) => s,
@@ -298,19 +368,33 @@ pub fn progress(stack: &mut Stack, kind: &mut Kind, p: Pending) -> Step {
     }
 }
 
+/// Zrusi rozpracovany dotaz (uvolni sockety, porty a cekani). Vraci
+/// odpoved: `CANCELED`, u odesilani s uz prijatou casti jeji delku.
+pub fn cancel_pending(stack: &mut Stack, p: Pending) -> Result<Writer> {
+    match p {
+        Pending::Connect(c) => c.cancel(stack),
+        Pending::Resolve(r) => r.cancel(stack),
+        Pending::Forward(f) => stack.resolver.forget(f.id),
+        Pending::Ping(p) => p.cancel(stack),
+        Pending::Ask(a) => {
+            // Odpoved, ktera jeste prijde, uz nikdo nevyzvedne.
+            stack.fw.forget_answer(a.id);
+        }
+        Pending::Send { done, .. } if done > 0 => {
+            let mut w = Writer::new();
+            w.u32(done as u32);
+            return Ok(w);
+        }
+        _ => {}
+    }
+    Err(Error::Canceled)
+}
+
 /// Uklid po zavreni kanalu klientem.
-pub fn close(stack: &mut Stack, kind: Kind, pending: Option<Pending>) {
-    if let Some(p) = pending {
-        match p {
-            Pending::Connect(c) => c.cancel(stack),
-            Pending::Resolve(r) => r.cancel(stack),
-            Pending::Forward(f) => stack.resolver.forget(f.id),
-            Pending::Ping(p) => p.cancel(stack),
-            Pending::Ask(a) => {
-                // Odpoved, ktera jeste prijde, uz nikdo nevyzvedne.
-                stack.fw.forget_answer(a.id);
-            }
-            _ => {}
+pub fn close(stack: &mut Stack, kind: Kind, ops: Vec<Op>) {
+    for op in ops {
+        if let OpState::Active(p) = op.state {
+            let _ = cancel_pending(stack, p);
         }
     }
     match kind {

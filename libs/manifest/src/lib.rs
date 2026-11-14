@@ -187,12 +187,21 @@ fn network(n: &Table, id: &str) -> Result<Restriction, Error> {
         Some(v) => u32::try_from(v).map_err(|_| err("network.sockets: mimo rozsah"))?,
     };
     let bytes = size(n, "buffers")?.unwrap_or(netproto::auth::UNLIMITED_BYTES);
+    // Soubezne dotazy na relaci (vic vlaken aplikace, server s mnoha
+    // spojenimi); nad limit dotazy pockaji ve fronte.
+    let ops = match n.get_int("ops") {
+        None => netproto::auth::DEFAULT_OPS,
+        Some(v) => u32::try_from(v)
+            .ok()
+            .filter(|v| (1..=netproto::auth::MAX_OPS).contains(v))
+            .ok_or_else(|| err("network.ops: mimo rozsah 1 az 1024"))?,
+    };
     Ok(Restriction {
         rights: mask,
         policy,
         app: String::from(id),
         flags: if ask { layer_flags::ASK } else { 0 },
-        quota: Quota { sockets, bytes },
+        quota: Quota { sockets, bytes, ops },
     })
 }
 

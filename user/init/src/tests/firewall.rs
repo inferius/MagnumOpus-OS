@@ -33,6 +33,8 @@ pub const TESTS: &[Test] = &[
     ("dotaz: povolit vzdy (ulozi se na FS)", ask_allow_always),
     ("dotaz: zakazat vzdy", ask_deny_always),
     ("dotaz bez odpovedi vyprsi (vychozi odpoved)", ask_timeout),
+    ("connect cekajici na dotaz: relace dal odpovida, zruseni", ask_cancel),
+    ("plny limit dotazu relace: odlozeny dotaz jde zrusit hned", ask_backlog_cancel),
     ("blokovane domeny a site", blocklists),
     ("verejna sit nepusti prichozi spojeni", public_inbound),
     ("audit a provoz aplikaci", audit_and_stats),
@@ -128,7 +130,7 @@ impl Agent<'_> {
             let m = self.ch.read(deadline).map_err(|e| fail("odpoved fwd", e))?;
             let first = Reader::new(&m.data).i32().unwrap_or(1);
             if first <= 0 {
-                return netproto::parse_reply(&m.data)
+                return netproto::fw::parse_agent_reply(&m.data)
                     .map(|mut r| r.rest().to_vec())
                     .map_err(|e| fail("fwd", e));
             }
@@ -173,7 +175,7 @@ fn start_probe(s: &Startup) -> Result<Probe, String> {
     let session = crate::apps::net_session(root, &m)
         .map_err(|e| fail("relace podle manifestu", e))?
         .ok_or("manifest nechce sit")?;
-    let app = crate::apps::spawn(s, "netprobe", vec![StartHandle::user(session.into_channel().into_handle())])
+    let app = crate::apps::spawn(s, "netprobe", vec![StartHandle::user(session.into_channel().map_err(|e| fail("kanal relace", e))?.into_handle())])
         .map_err(|e| fail("spusteni netprobe", e))?;
     Ok(Probe {
         _process: app.process,
@@ -536,5 +538,117 @@ fn audit_and_stats(s: &Startup) -> TestResult {
         Some(Error::AccessDenied),
         "audit bez prava"
     );
+    Ok(())
+}
+
+/// netproto v2: connect, ktery ceka na rozhodnuti uzivatele, neblokuje
+/// dalsi dotazy na stejne relaci a jde zrusit (`CANCEL`) - driv cekal az
+/// do odpovedi nebo `ask_timeout`.
+fn ask_cancel(s: &Startup) -> TestResult {
+    use netproto::{Buffers, CancelToken, Deadline, Restriction, layer_flags, rights};
+    let Some(ports) = need_ports(s, "firewall")? else {
+        return Ok(());
+    };
+    let a = agent()?;
+    let root = net()?;
+    configured(root)?;
+    const ME: &str = "org.magnumopus.nettest";
+    let app = root
+        .restrict_with(&Restriction {
+            rights: rights::CLIENT,
+            policy: netproto::Policy::only(Vec::new()),
+            app: String::from(ME),
+            flags: layer_flags::ASK,
+            ..Restriction::default()
+        })
+        .map_err(|e| fail("relace s dotazem", e))?;
+    let token = CancelToken::new();
+    let dest = host(ports.echo);
+    let (session, tk) = (app.clone(), token.clone());
+    let out = alloc::sync::Arc::new(libos::sync::Mutex::new(None));
+    let o = out.clone();
+    let t = libos::thread::spawn("fw-cancel", move || {
+        let r = session.tcp_connect_ctx(dest, Deadline::after(Some(Duration::from_secs(60))), Buffers::DEFAULT, Some(&tk));
+        *o.lock() = Some(r.map(|_| ()));
+    })
+    .map_err(|e| fail("vlakno", e))?;
+    let q = a.question()?;
+    check_eq!(q.app.as_str(), ME, "aplikace v dotazu");
+    check_eq!(q.dest, dest, "cil v dotazu");
+    // Relace odpovida, i kdyz na ni ceka connect.
+    let start = time::now();
+    app.info().map_err(|e| fail("INFO behem connectu", e))?;
+    let ms = (time::now() - start) / 1_000_000;
+    check!(ms < 2_000, format!("INFO za connectem trvalo {ms} ms"));
+    let start = time::now();
+    token.cancel();
+    t.join(wait(20)).map_err(|e| fail("vlakno connectu nedobehlo", e))?;
+    let ms = (time::now() - start) / 1_000_000;
+    let r = out.lock().take().ok_or("vlakno nic nevratilo")?;
+    check_eq!(r.err(), Some(Error::Canceled), "zruseny connect");
+    check!(ms < 2_000, format!("zruseni trvalo {ms} ms"));
+    // Pozdni odpoved uzivatele uz nic nezmeni (netd dotaz zapomnel).
+    a.decide(q.id, choice::DENY_ONCE)?;
+    app.info().map_err(|e| fail("INFO po zruseni", e))?;
+    Ok(())
+}
+
+/// Relace s limitem 1 dotazu: connect ceka na uzivatele, dalsi dotaz se
+/// v netd odlozi (protitlak, ne chyba) a jeho zruseni prijde hned, i kdyz
+/// prvni dotaz dal ceka.
+fn ask_backlog_cancel(s: &Startup) -> TestResult {
+    use alloc::sync::Arc;
+    use libos::sync::Mutex;
+    use netproto::{Buffers, CancelToken, Deadline, Quota, Restriction, layer_flags, rights};
+    let Some(ports) = need_ports(s, "firewall")? else {
+        return Ok(());
+    };
+    let a = agent()?;
+    let root = net()?;
+    configured(root)?;
+    const ME: &str = "org.magnumopus.nettest";
+    let app = root
+        .restrict_with(&Restriction {
+            rights: rights::CLIENT,
+            policy: netproto::Policy::only(Vec::new()),
+            app: String::from(ME),
+            flags: layer_flags::ASK,
+            quota: Quota { ops: 1, ..Quota::UNLIMITED },
+        })
+        .map_err(|e| fail("relace s limitem 1", e))?;
+    let dest = host(ports.echo);
+    let connect = |token: CancelToken| {
+        let session = app.clone();
+        let out: Arc<Mutex<Option<libos::Result<()>>>> = Arc::new(Mutex::new(None));
+        let o = out.clone();
+        let t = libos::thread::spawn("fw-limit", move || {
+            let r = session.tcp_connect_ctx(dest, Deadline::after(Some(Duration::from_secs(60))), Buffers::DEFAULT, Some(&token));
+            *o.lock() = Some(r.map(|_| ()));
+        });
+        t.map(|t| (t, out)).map_err(|e| fail("vlakno", e))
+    };
+    let first = CancelToken::new();
+    let (t1, o1) = connect(first.clone())?;
+    let q = a.question()?;
+    check_eq!(q.app.as_str(), ME, "aplikace v dotazu");
+    // Druhy dotaz: limit relace je plny, netd ho odlozi.
+    let second = CancelToken::new();
+    let (t2, o2) = connect(second.clone())?;
+    time::sleep(Duration::from_millis(300));
+    check!(o2.lock().is_none(), "odlozeny dotaz skoncil sam (mel cekat)");
+    let start = time::now();
+    second.cancel();
+    t2.join(wait(10)).map_err(|e| fail("vlakno odlozeneho dotazu", e))?;
+    let ms = (time::now() - start) / 1_000_000;
+    let r2 = o2.lock().take().ok_or("vlakno nic nevratilo")?;
+    check_eq!(r2.err(), Some(Error::Canceled), "zruseny odlozeny dotaz");
+    check!(ms < 2_000, format!("zruseni odlozeneho dotazu trvalo {ms} ms"));
+    check!(o1.lock().is_none(), "prvni dotaz mel dal cekat na uzivatele");
+    first.cancel();
+    t1.join(wait(20)).map_err(|e| fail("vlakno prvniho dotazu", e))?;
+    check_eq!(o1.lock().take().ok_or("prvni nic nevratil")?.err(), Some(Error::Canceled), "zruseny prvni dotaz");
+    a.decide(q.id, choice::DENY_ONCE)?;
+    // Misto se uvolnilo: relace odpovida.
+    app.info().map_err(|e| fail("INFO po uvolneni limitu", e))?;
     Ok(())
 }
