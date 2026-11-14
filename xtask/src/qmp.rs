@@ -76,7 +76,7 @@ pub fn spawn_injector(log: PathBuf, port: Arc<AtomicU16>, ps2: bool) {
 
 /// Zacatky testu, ktere vstup z QEMU potrebuji: podle nich se skript deli
 /// na useky (kazdy test zvlast, aby sel spustit i sam).
-const STARTS: [&str; 11] = [
+const STARTS: &[&str] = &[
     MARKER,
     MARKER_PS2,
     usb::KEYS,
@@ -240,6 +240,19 @@ fn gui_steps(s: &mut Vec<Step>) {
             s.push(Step::Send(vec![key(q, d)]));
         }
     }
+    // Nabidka doplnovani: Ctrl+U smaze radek, "e" + Tab ji otevre; sipka
+    // dolu az po druhe znacce (odpoved s navrhy prijde od relace pozdeji).
+    s.push(Step::WaitFor(gui::TERM_TAB));
+    for (q, d) in [("ctrl", true), ("u", true), ("u", false), ("ctrl", false)] {
+        s.push(Step::Send(vec![key(q, d)]));
+    }
+    for k in ["e", "tab"] {
+        s.push(Step::Send(vec![key(k, true)]));
+        s.push(Step::Send(vec![key(k, false)]));
+    }
+    s.push(Step::WaitFor(gui::TERM_DOWN));
+    s.push(Step::Send(vec![key("down", true)]));
+    s.push(Step::Send(vec![key("down", false)]));
     // Spravce uloh: fyzicky klik na zaskrtavaci pole (test `task_manager`).
     s.push(Step::ClickAt(gui::CLICK));
     // Diagnosticky snimek (test `diag_snapshot`): Print Screen.
@@ -291,6 +304,8 @@ mod gui {
     /// `user/init/src/tests/gui_term.rs`.
     pub const TERM_DRAG: &str = "init: test gui: terminal tah mysi ";
     pub const TERM_KEYS: &str = "init: test gui: terminal ceka na Ctrl+C a Ctrl+V";
+    pub const TERM_TAB: &str = "init: test gui: terminal ceka na doplneni Tab";
+    pub const TERM_DOWN: &str = "init: test gui: terminal ceka na sipku v seznamu navrhu";
     pub const SNAPSHOT: &str = "init: test gui: diagnosticky snimek ceka na Print Screen";
     pub const PALETTE_SWITCH: &str = "init: test gui: paleta prepne na Ukazku";
     pub const PALETTE_ACTION: &str = "init: test gui: paleta pricte v Ukazce";

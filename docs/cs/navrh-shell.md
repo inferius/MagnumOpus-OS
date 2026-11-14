@@ -706,7 +706,11 @@ změní hned) a `Fail`.
 z doplňování podle typu argumentu (`cd` jen adresáře, cesty, pole tabulky)
 - okno si ho samo vyžádá (`Complete` s příznakem `seq` 0x8000_0000).
 Tab: jedna shoda se doplní rovnou, víc shod otevře nabídku, kterou psaní
-zužuje (šipky/Tab výběr, Enter potvrdí, Esc zavře). Výstup se posouvá
+zužuje (šipky/Tab výběr, Enter potvrdí, Esc zavře). V okně GUI je
+nabídka sdílený seznam návrhů (`ui::complete`, vzhled `#compl`) ve vrstvě
+popoveru nad řádkem vstupu, u začátku doplňovaného slova. Řádek si fokus
+nechá: šipky, PgUp/PgDn a Home/End mění výběr, Enter nebo Tab doplní,
+Esc nebo klik mimo zavře, klik na položku ji doplní. Výstup se posouvá
 kolečkem a Shift+PgUp/PgDn (samotné PgUp je tabulka); když nejsem dole,
 ukazuje to pruh „níže N řádků“, nový blok nebo psaní vrátí dolů. `help`
 je přehled po skupinách (jméno a popis), podrobnosti v `help <příkaz>`;
@@ -1002,7 +1006,7 @@ a podle rolí řádků (`term::ui::draw::Role`) nad ní dokreslí prvky návrhu
 | výběr textu myší (jako Windows Terminal): tah vybere znaky, dvojklik slovo (`ui::text::word_at`), trojklik řádky, Shift+klik rozšíří; barva `accent_soft`. Výběr drží buňky obrazovky a s novým výstupem se posune s textem, když se text vybraných řádků změní, zruší se (`libs/term/src/select.rs`). Psaní výběr zruší | **[ověřeno v QEMU]** (tah myší fyzickým vstupem, test `gui_term.rs`; dvojklik a trojklik testy na hostiteli `tests_select.rs`) |
 | schránka: Ctrl+C při výběru a Ctrl+Shift+C kopírují (výběr pak zmizí), bez výběru Ctrl+C přeruší příkaz; Ctrl+V a Ctrl+Shift+V vloží na kurzor řádku vstupu. Vložení nic nespustí: poslední konec řádku se zahodí, vnitřní zůstanou (řádek je ukáže znakem ↵, Enter spustí vše jako jeden skript), tabulátor = mezera, řídicí znaky pryč, nejvýš 64 Ki znaků | **[ověřeno v QEMU]** (Ctrl+C a Ctrl+V z fyzické klávesnice, test `gui_term.rs`; schránka chce fyzické gesto) |
 | klik do řádku vstupu posune kurzor na znak pod ukazatelem | **[implementováno]** (test na hostiteli) |
-| doplňování jako nabídka nad řádkem (combobox bez převzetí fokusu, myš) | **[navrženo]** (čeká na komponentu „seznam návrhů“ v `libs/ui` od 6c) |
+| doplňování jako nabídka nad řádkem: seznam návrhů `ui::complete::Completion` ve vrstvě popoveru (smí přesahovat okno do pracovní plochy), kotva = buňka začátku slova, záhlaví podle typu položek („Cesty“, „Příkazy“, ...), ikona a typ u položky. Řádek vstupu si drží fokus (combobox); v přístupnosti má stav `AUTOCOMPLETE`, s otevřeným seznamem `EXPANDED`, seznam je `ListBox` s položkami `ListOption` (ACTIVATE doplní). Položky a výběr drží `term::ui` (`App::menu`, `float_menu` vypne textové řádky nabídky) | **[ověřeno v QEMU]** (Tab a šipka z fyzické klávesnice, seznam nad řádkem, doplnění přes přístupnost: test `gui_term.rs`; klik myší jen test komponenty) |
 | přepínač zápisu B / C v titulku (stav `App::notation_c`; klik, Ctrl+F i přístupnost převedou rozepsaný řádek) | **[ověřeno v QEMU]** |
 | nový blok se prolne (`motion.base`, křivka `ease_enter`); bloky přehrané po připojení ne. Posun o 6 px z návrhu mřížka nedělá (prolnutí je zároveň náhrada pro „Omezit pohyb“) | **[implementováno]** |
 | panel úloh vpravo (šířka `size.side_panel`): karty úloh se stavem, pruhem průběhu a tlačítkem Zrušit, v přístupnosti seznam. Sám se ukáže jen na obrazovce širší než 1280 px a v okně aspoň 900 px, jinak úlohy ukáže Ctrl-T. Výchozí okno 1040 px, nejvýš 85 % šířky pracovní plochy (`Window::request_size` před prvním vykreslením) | **[implementováno]** (testy v QEMU mají obrazovku 1280 px, panel ověřen jednorázově se sníženou hranicí) |

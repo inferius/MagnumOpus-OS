@@ -1,6 +1,6 @@
 # libs/term
 
-Chytrý terminál (milník 6b), `no_std` + `alloc`. Moduly: `proto` (nativní protokol okno <-> služba relací: typované hodnoty, tabulky se schématem, odkazy, průběh, výzvy, bloky výstupu; žádné escape sekvence), `session` (služba relací), `broker` (prostředník `termd`), `ctl` (řídicí zprávy termd <-> relace, registr relací), `vt` (adaptér na VT100 pro sériovou linku a převzaté programy), `screen` (textová obrazovka a vlastní písmo do framebufferu, záchranná konzole), `theme` + `render` (motiv terminálu, `theme.toml`, ANSI), `perm` (oprávnění programů z manifestu na cesty relace fsd), `select` (výběr textu myší v mřížce okna GUI), `ui/` (okno terminálu; vložení a klik do řádku `ui/pointer.rs`), `tasks`, `taskboard`, `activity`. Interpret je v `libs/shlang`, ne tady. Popis: `docs/cs/navrh-shell.md`, `docs/cs/prikazy-shellu.md`.
+Chytrý terminál (milník 6b), `no_std` + `alloc`. Moduly: `proto` (nativní protokol okno <-> služba relací: typované hodnoty, tabulky se schématem, odkazy, průběh, výzvy, bloky výstupu; žádné escape sekvence), `session` (služba relací), `broker` (prostředník `termd`), `ctl` (řídicí zprávy termd <-> relace, registr relací), `vt` (adaptér na VT100 pro sériovou linku a převzaté programy), `screen` (textová obrazovka a vlastní písmo do framebufferu, záchranná konzole), `theme` + `render` (motiv terminálu, `theme.toml`, ANSI), `perm` (oprávnění programů z manifestu na cesty relace fsd), `select` (výběr textu myší v mřížce okna GUI), `ui/` (okno terminálu; vložení a klik do řádku `ui/pointer.rs`, nabídka doplňování kreslená oknem `ui/menu.rs`), `tasks`, `taskboard`, `activity`. Interpret je v `libs/shlang`, ne tady. Popis: `docs/cs/navrh-shell.md`, `docs/cs/prikazy-shellu.md`.
 
 ## Invarianty
 
@@ -9,6 +9,7 @@ Chytrý terminál (milník 6b), `no_std` + `alloc`. Moduly: `proto` (nativní pr
 - Prostřednictvím `perm` dostane program jen cesty povolené manifestem (capability, ne identita).
 - Protokol je nativní a typovaný; escape sekvence jen v adaptéru `vt`.
 - Dotaz na text (`ServerMsg::Ask`, odpověď `ClientMsg::Text`, `Host::ask`): `secret = true` okno maskuje a do výpisu bloku jde jen `***` (heslo v průvodci `install`). Řádek ve vlákně jde přes `fg.rs` (`LinePrompt.text`, `Answer::Text`, `answer_of`); `ClientMsg::Text` má tag 14.
+- Nabídka doplňování: položky a výběr drží vždy `App::menu`. Okno GUI nastaví `float_menu` (snímek pak nabídku nekreslí) a kreslí ji komponentou `ui::complete` (`user/gui-term/src/compl.rs`); výběr, přijetí a zavření hlásí `menu_select` / `menu_accept` / `menu_close`, kotvu dá `menu_col` (`input_col`). Konzole kreslí nabídku řádky jako dřív.
 - Instalátor přes `Env::installer_send` / `installer_recv` (krátké čekání): řádek ve vlákně volá hlavní vlákno opakovaně, to mezi voláními obsluhuje okno.
 
 ## Testy

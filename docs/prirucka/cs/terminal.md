@@ -52,6 +52,10 @@ ls ~/Dokumenty -r | where size > 100MB | sort size -d
 | `Ctrl+L` | sbalí staré bloky výstupu |
 | `Ctrl+T` | panel úloh |
 
+Když je možností víc, Tab otevře nad řádkem seznam návrhů. Psaním ho
+zúžíte, šipkami vyberete, Enter nebo Tab položku doplní, Esc seznam
+zavře. Položku můžete i kliknout.
+
 Myší: tažením vyberete text, dvojklikem slovo, trojklikem celý řádek.
 Klik do řádku příkazu posune kurzor. Tlačítko „Kopírovat výstup“
 v záhlaví bloku zkopíruje celý výstup příkazu.
