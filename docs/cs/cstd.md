@@ -21,9 +21,10 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
 > `mseal`. Část 2g **[ověřeno v QEMU]** (krok `signal`): signály,
 > `setjmp`. Zámky souborů **[ověřeno v QEMU]** (test `ctest lock`: dva
 > procesy, `EDEADLK`). Část 2i **[ověřeno v QEMU]** (sada `cstd porty`):
-> `libc.a`, sysroot C a porty zlib a sqlite. Další části (
-> `libc.so`, porty) **[navrženo]**, viz
-> [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
+> `libc.a`, sysroot C a porty zlib a sqlite. `libc.so` **[ověřeno v QEMU]**
+> (sada `cstd dyn`: program PIE v C, vlákna, TLS, `dlopen` pluginu). Další
+> části (`posix_spawn`, signály od jiných procesů, `iconv`, široké proudy)
+> **[navrženo]**, viz [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
 
 ## Vrstvy
 
@@ -309,15 +310,47 @@ fsd přitom hlídá cyklus čekání (`EDEADLK`). `l_pid` z `F_GETLK` je -1
   (`ENOTTY`), `setlocale`/`localeconv` (C, C.UTF-8), `uname`,
   `getrusage`/`getrlimit`, `system` (`ENOSYS`; spouštění procesů
   `posix_spawn` **[navrženo]**).
-- **`libc.so`** (sdílená) **[navrženo]**, další krok hned po této části
-  (samostatná větev před SDL a FFmpegem, které na ní budou stavět):
-  druhý sysroot std přeložený jako PIC (nový JSON cíl s
-  `relocation-model: pic`, TLS přes zavaděč - initial-exec/TLSDESC místo
-  `local-exec`, `osrt` pod `ld.so` bez vlastního bloku TLS), `libc.so` jako
-  `cdylib` cstd + std + osrt v `/system/lib`, programy PIE s `PT_INTERP`.
-  Odhad času sestavení: druhý překlad std pro každou architekturu, tedy
-  zhruba stejně dlouho jako dnešní sysroot std navíc (inkrementálně jen
-  při změně std nebo osrt).
+- **`libc.so`**: viz kapitola [libc.so](#libcso) níže.
+
+## libc.so
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (sada `cstd dyn`).
+
+- **Druhý cíl std** `*-unknown-magnumopus-dyn`
+  (`third_party/rust-std/targets/*-dyn.json`): `relocation-model: pic`,
+  `tls-model: initial-exec`, `dynamic-linking`, `env: dyn`. Vlastní sysroot
+  vedle statického (`stdsys::build_sysroot_dyn_locked`).
+- **`osrt` pod zavaděčem** (`cfg(target_env = "dyn")`): bez `_start`
+  a bez vlastního bloku TLS (bloky TLS všech modulů včetně `libc.so` dělá
+  `ld.so`); start je `__libc_start(main, bootstrap, sp, magic)`, který
+  zavolá `_start` programu z `crt1.o`; `exit` po funkcích `atexit` spustí
+  finalizátory modulů (`run_fini`).
+- **`libc.so`** (crate `libs/cstd-so`, `cdylib`, `SONAME libc.so`): cstd +
+  std + osrt, `BIND_NOW`, plné RELRO, bez TEXTREL, segmenty 64 KiB; TLS
+  initial-exec (knihovna je ve statickém TLS od startu). Žádné nedefinované
+  symboly, `dlopen` a spol. jdou přes tabulku zavaděče (`dlfcn.h`).
+- **Sysroot C pro dynamické linkování:** `lib/libc.so`, `lib/crt1.o`
+  (`libs/cstd/crt/crt1.c`) a `clang-dyn.cfg` (`-fPIE`, `-pie`,
+  `PT_INTERP /system/lib/ld.so`, `-Wl,-Bdynamic -l:libc.so` - ovladač clangu
+  pro baremetal by jinak linkoval staticky). Statický `clang.cfg` zůstává.
+- **Test** (sada `cstd dyn`): `cdyn` (PIE přes cbuild) - start přes
+  `crt1.o`, stdio, matematika, 4 vlákna s vlastním TLS a `errno`,
+  `dlopen("libcplug.so")` s TLS pluginu po vláknech (dynamické TLS přes
+  DTV), `malloc` v pluginu a `free` v programu (jeden heap), soubory,
+  `atexit`; `cdyn-hello` přeložený jen přes `clang --config=clang-dyn.cfg`
+  (cesta pro cizí build systémy).
+- Programy v Rustu zůstávají statické; procesy v C jsou buď statické
+  (`libc.a`), nebo dynamické (`libc.so`), vždy s jedním runtime.
+
+Čas sestavení std (čistý překlad, x86_64, hostitel s 32 vlákny; druhý
+sysroot se staví jen při změně std nebo osrt):
+
+| Co | Čas | Revize |
+|---|---|---|
+| std statický, stav před `libc.so` | 20 s | `eade6bf` |
+| std statický | 19 s | `fcbc153` |
+| std jako PIC (druhý cíl) | 17 s | `fcbc153` |
+| `libc.so` nad sysrootem PIC | 3 s | `fcbc153` |
 
 ### Čísla fd
 

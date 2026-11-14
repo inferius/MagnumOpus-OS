@@ -23,8 +23,10 @@ Compiling C (clang, flags, protections) is described in
 > signals, `setjmp`. File locks **[verified in QEMU]** (test `ctest lock`:
 > two processes, `EDEADLK`). Part 2i **[verified in QEMU]** (suite
 > `cstd porty`): `libc.a`, the C sysroot and the zlib and sqlite ports.
-> Further parts (
-> signals, file locks, `libc.so`, ports) **[designed]**, see [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
+> `libc.so` **[verified in QEMU]** (suite `cstd dyn`: a PIE program in C,
+> threads, TLS, `dlopen` of a plugin). Further parts (`posix_spawn`, signals
+> from other processes, `iconv`, wide streams) **[designed]**, see
+> [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
 
 ## Layers
 
@@ -321,15 +323,49 @@ numbers).
   `ioctl` (`ENOTTY`), `setlocale`/`localeconv` (C, C.UTF-8), `uname`,
   `getrusage`/`getrlimit`, `system` (`ENOSYS`; starting processes via
   `posix_spawn` **[designed]**).
-- **`libc.so`** (shared) **[designed]**, the next step right after this
-  part (a separate branch before SDL and FFmpeg, which will build on it): a
-  second std sysroot built as PIC (a new JSON target with
-  `relocation-model: pic`, TLS via the loader - initial-exec/TLSDESC instead
-  of `local-exec`, `osrt` under `ld.so` without its own TLS block), `libc.so`
-  as a `cdylib` of cstd + std + osrt in `/system/lib`, PIE programs with
-  `PT_INTERP`. Build time estimate: a second std build per architecture,
-  i.e. roughly as long again as today's std sysroot (incremental, only when
-  std or osrt changes).
+- **`libc.so`**: see the [libc.so](#libcso) chapter below.
+
+## libc.so
+
+**[verified in QEMU]** x86_64 and aarch64 (suite `cstd dyn`).
+
+- **A second std target** `*-unknown-magnumopus-dyn`
+  (`third_party/rust-std/targets/*-dyn.json`): `relocation-model: pic`,
+  `tls-model: initial-exec`, `dynamic-linking`, `env: dyn`. Its own sysroot
+  next to the static one (`stdsys::build_sysroot_dyn_locked`).
+- **`osrt` under the loader** (`cfg(target_env = "dyn")`): no `_start` and
+  no own TLS block (`ld.so` builds the TLS blocks of all modules including
+  `libc.so`); the start is `__libc_start(main, bootstrap, sp, magic)`, called
+  by the program's `_start` from `crt1.o`; after the `atexit` functions
+  `exit` runs the module finalisers (`run_fini`).
+- **`libc.so`** (crate `libs/cstd-so`, `cdylib`, `SONAME libc.so`): cstd +
+  std + osrt, `BIND_NOW`, full RELRO, no TEXTREL, 64 KiB segments;
+  initial-exec TLS (the library is in the static TLS from start-up). No
+  undefined symbols; `dlopen` and friends go through the loader table
+  (`dlfcn.h`).
+- **C sysroot for dynamic linking:** `lib/libc.so`, `lib/crt1.o`
+  (`libs/cstd/crt/crt1.c`) and `clang-dyn.cfg` (`-fPIE`, `-pie`,
+  `PT_INTERP /system/lib/ld.so`, `-Wl,-Bdynamic -l:libc.so` - the clang
+  baremetal driver would otherwise link statically). The static
+  `clang.cfg` stays.
+- **Test** (suite `cstd dyn`): `cdyn` (PIE via cbuild) - start via `crt1.o`,
+  stdio, maths, 4 threads with their own TLS and `errno`,
+  `dlopen("libcplug.so")` with per-thread plugin TLS (dynamic TLS via the
+  DTV), `malloc` in the plugin and `free` in the program (one heap), files,
+  `atexit`; `cdyn-hello` built only via `clang --config=clang-dyn.cfg` (the
+  path for foreign build systems).
+- Rust programs stay static; C processes are either static (`libc.a`) or
+  dynamic (`libc.so`), always with one runtime.
+
+std build time (clean build, x86_64, host with 32 threads; the second
+sysroot is built only when std or osrt changes):
+
+| What | Time | Revision |
+|---|---|---|
+| static std, state before `libc.so` | 20 s | `eade6bf` |
+| static std | 19 s | `fcbc153` |
+| std as PIC (second target) | 17 s | `fcbc153` |
+| `libc.so` on top of the PIC sysroot | 3 s | `fcbc153` |
 
 ### fd numbers
 
