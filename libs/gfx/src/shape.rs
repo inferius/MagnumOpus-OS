@@ -40,6 +40,27 @@ pub fn coverage(d: f32) -> u32 {
     }
 }
 
+/// Pokryti pixelu (`x`, `y`) zaoblenym obdelnikem `r` s polomerem `rad`
+/// (uz omezenym na polovinu stran). Stejne jako
+/// `coverage(round_rect_distance(..))`, ale vzdalenost v `f32` se pocita
+/// jen v rohovych ctvercich: obdelnik ma celociselne hrany a stredy pixelu
+/// lezi na polovinach, takze jinde je pokryti presne 0 nebo 255. Programy
+/// v OS nemaji FPU (soft-float), kazda operace `f32` je volani funkce.
+#[inline]
+pub fn round_rect_coverage(x: i32, y: i32, r: Rect, rad: u32) -> u32 {
+    if !r.contains(x, y) {
+        return 0;
+    }
+    let rad_i = rad as i32;
+    let corner_x = x < r.x + rad_i || (x as i64) >= r.right() - rad as i64;
+    let corner_y = y < r.y + rad_i || (y as i64) >= r.bottom() - rad as i64;
+    if corner_x && corner_y {
+        coverage(round_rect_distance(x as f32 + 0.5, y as f32 + 0.5, r, rad as f32))
+    } else {
+        255
+    }
+}
+
 /// Je radek `y` v pasu, kde zaobleni nehraje roli (cely radek je uvnitr)?
 #[inline]
 fn straight_row(r: Rect, rad: i32, y: i32) -> bool {
@@ -65,15 +86,8 @@ impl Canvas<'_> {
                 }
                 return;
             }
-            let fy = y as f32 + 0.5;
             for (i, p) in row.iter_mut().enumerate() {
-                let x = rx + i as i32;
-                // Mimo rohove ctverce je radek uvnitr.
-                let k = if x >= r.x + rad && x < r.x + r.w as i32 - rad {
-                    255
-                } else {
-                    coverage(round_rect_distance(x as f32 + 0.5, fy, r, rad as f32))
-                };
+                let k = round_rect_coverage(rx + i as i32, y, r, rad as u32);
                 if k == 255 && opaque {
                     *p = c;
                 } else if k > 0 {
@@ -89,12 +103,12 @@ impl Canvas<'_> {
         if img.len() < (r.w * r.h) as usize {
             return;
         }
-        let rad = radius.min(r.w / 2).min(r.h / 2) as f32;
+        let rad = radius.min(r.w / 2).min(r.h / 2);
         self.rows(r, |row, rx, y| {
             let ly = (y - r.y) as u32;
             for (i, p) in row.iter_mut().enumerate() {
                 let x = rx + i as i32;
-                let k = coverage(round_rect_distance(x as f32 + 0.5, y as f32 + 0.5, r, rad));
+                let k = round_rect_coverage(x, y, r, rad);
                 if k > 0 {
                     let s = img[(ly * r.w + (x - r.x) as u32) as usize];
                     *p = over(*p, scale(s, k));
@@ -108,13 +122,11 @@ impl Canvas<'_> {
         if r.is_empty() || width == 0 {
             return;
         }
-        let rad = radius.min(r.w / 2).min(r.h / 2) as f32;
-        let wf = width as f32;
+        let rad = radius.min(r.w / 2).min(r.h / 2);
         let inner = Rect::new(r.x + width as i32, r.y + width as i32, r.w.saturating_sub(2 * width), r.h.saturating_sub(2 * width));
-        let irad = (rad - wf).max(0.0);
+        let irad = rad.saturating_sub(width);
         let band = rad as i32 + width as i32 + 1;
         self.rows(r, |row, rx, y| {
-            let fy = y as f32 + 0.5;
             let edge_row = y < r.y + band || y >= r.y + r.h as i32 - band;
             for (i, p) in row.iter_mut().enumerate() {
                 let x = rx + i as i32;
@@ -122,9 +134,8 @@ impl Canvas<'_> {
                 if !edge_row && x >= r.x + width as i32 && x < r.x + r.w as i32 - width as i32 {
                     continue;
                 }
-                let fx = x as f32 + 0.5;
-                let outer = coverage(round_rect_distance(fx, fy, r, rad));
-                let inn = if inner.is_empty() { 0 } else { coverage(round_rect_distance(fx, fy, inner, irad)) };
+                let outer = round_rect_coverage(x, y, r, rad);
+                let inn = if inner.is_empty() { 0 } else { round_rect_coverage(x, y, inner, irad) };
                 let k = outer.saturating_sub(inn);
                 if k > 0 {
                     *p = over(*p, scale(c, k));
@@ -141,18 +152,17 @@ impl Canvas<'_> {
         if r.is_empty() {
             return;
         }
-        let rad = radius.min(r.w / 2).min(r.h / 2) as f32;
+        let rad = radius.min(r.w / 2).min(r.h / 2);
         let inner = Rect::new(r.x + width as i32, r.y + width as i32, r.w.saturating_sub(2 * width), r.h.saturating_sub(2 * width));
-        let irad = (rad - width as f32).max(0.0);
+        let irad = rad.saturating_sub(width);
         self.rows(r, |row, rx, y| {
-            let fy = y as f32 + 0.5;
             for (i, p) in row.iter_mut().enumerate() {
-                let fx = (rx + i as i32) as f32 + 0.5;
-                let ko = coverage(round_rect_distance(fx, fy, r, rad));
+                let x = rx + i as i32;
+                let ko = round_rect_coverage(x, y, r, rad);
                 if ko == 0 {
                     continue;
                 }
-                let ki = if inner.is_empty() { 0 } else { coverage(round_rect_distance(fx, fy, inner, irad)).min(ko) };
+                let ki = if inner.is_empty() { 0 } else { round_rect_coverage(x, y, inner, irad).min(ko) };
                 let s = add_sat(scale(fill, ki), scale(border, ko - ki));
                 *p = over(*p, s);
             }
@@ -166,19 +176,18 @@ impl Canvas<'_> {
         if r.is_empty() || width == 0 {
             return;
         }
-        let rad = radius.min(r.w / 2).min(r.h / 2) as f32;
+        let rad = radius.min(r.w / 2).min(r.h / 2);
         let inner = Rect::new(r.x + width as i32, r.y + width as i32, r.w.saturating_sub(2 * width), r.h.saturating_sub(2 * width));
-        let irad = (rad - width as f32).max(0.0);
+        let irad = rad.saturating_sub(width);
         let band = rad as i32 + width as i32 + 1;
         self.rows(r, |row, rx, y| {
-            let fy = y as f32 + 0.5;
             let edge_row = y < r.y + band || y >= r.y + r.h as i32 - band;
             for (i, p) in row.iter_mut().enumerate() {
                 let x = rx + i as i32;
                 if !edge_row && x >= r.x + width as i32 && x < r.x + r.w as i32 - width as i32 {
                     continue;
                 }
-                let ki = if inner.is_empty() { 0 } else { coverage(round_rect_distance(x as f32 + 0.5, fy, inner, irad)) };
+                let ki = if inner.is_empty() { 0 } else { round_rect_coverage(x, y, inner, irad) };
                 let k = 255 - ki;
                 if k > 0 {
                     *p = over(*p, scale(c, k));
