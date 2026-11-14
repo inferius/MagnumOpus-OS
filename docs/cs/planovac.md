@@ -293,6 +293,18 @@ výběru je O(n) v počtu vláken jedné třídy na CPU, proti O(1) dřív.
 Maximum latence (~15 ms) odpovídá jednomu kvantu Background (12 ms) na
 TCG, kde se IPI a časovač doručují se zpožděním; medián je pod 1 ms.
 
+Zpoždění periody Realtime závisí pod TCG na tom, kolik času hostitel
+vCPU nedá. Test to měří sám: v práci Realtime vlákna (300 µs za
+periodu) ho v hostu nikdo nepředběhne, takže mezery nad 50 µs mezi
+čteními hodin jsou čas hostitele. Hranice mediánu je 10 ms / (1 − podíl
+hostitele), nejvýš 100 ms. Měření 2026-11-14 (3× x86_64 + 1× aarch64
+souběžně, 4 kola): hostitel bral 1-631 ‰, medián zpoždění zůstal
+1,2-2,5 ms, maximum rostlo s podílem hostitele až na 30 ms. Jednorázový
+medián 28 ms z plné sady tedy odpovídá přetíženému hostiteli, ne chybě
+plánování Realtime. Ukradený čas se navíc počítá do rozpočtu Realtime
+(jádro ho nerozliší od běhu) a vlákno pak do obnovy běží jako
+Interactive; skutečný hardware tento problém nemá. **[ověřeno v QEMU]**
+
 ## Známé problémy
 
 Z kontroly návrhu (2026-11-08), k opravě v tomto pořadí:

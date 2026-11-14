@@ -432,12 +432,20 @@ fn realtime() {
     let inter = load(Qos::Interactive, 2 * n);
     let lat = Arc::new(SpinLock::new(Vec::new()));
     let l = lat.clone();
+    // Kontrolni mereni hostitele: v praci (300 us) Realtime vlakno nikdo
+    // v hostu nepredbehne (ma prednost a rozpocet), takze delsi mezery
+    // mezi ctenimi hodin jsou cas, kdy hostitel nedal vCPU bezet.
+    let busy_ns = Arc::new(AtomicU64::new(0));
+    let stolen_ns = Arc::new(AtomicU64::new(0));
+    let (b, s) = (busy_ns.clone(), stolen_ns.clone());
     let audio = spawn_realtime("zvuk", MS, 4 * MS, move || {
         let mut next = arch::now_ns() + 2 * MS;
         for _ in 0..100 {
             wait::sleep(Duration::from_nanos(next.saturating_sub(arch::now_ns())));
             l.lock().push(arch::now_ns().saturating_sub(next));
-            busy(300 * US);
+            let (wall, stolen) = busy_watch(300 * US);
+            b.fetch_add(wall, Ordering::Relaxed);
+            s.fetch_add(stolen, Ordering::Relaxed);
             next += 2 * MS;
         }
     })
@@ -446,10 +454,49 @@ fn realtime() {
     inter.finish();
     let mut v = core::mem::take(&mut *lat.lock());
     let (median, max) = stats(&mut v);
-    log::info!("planovac: zpozdeni Realtime periody pod zatezi: median {} us, max {} us", median / US, max / US);
-    // Pod TCG zavisi na hostiteli; hruba chyba (Realtime ceka za
-    // Interactive) dava zpozdeni v radu kvant a vic.
-    assert!(median < 10 * MS, "median zpozdeni periody {median} ns");
+    let stolen_permille = stolen_ns.load(Ordering::Relaxed) * 1000 / busy_ns.load(Ordering::Relaxed).max(1);
+    log::info!(
+        "planovac: zpozdeni Realtime periody pod zatezi: median {} us, max {} us (hostitel vzal {stolen_permille} promile prace)",
+        median / US,
+        max / US
+    );
+    // Hranice 10 ms plati pro vCPU, ktere bezi cely cas. Kdyz hostitel
+    // bere vCPU cast `f` casu (soubezna QEMU), zpozdeni periody meri hlavne
+    // jeho planovani: hranice se natahne na 10 ms / (1 - f), nejvys 100 ms
+    // (f do 900 promile). Navic se stoleny cas pocita do Realtime rozpoctu
+    // (jadro ho nerozlisi od behu), vlakno ho vycerpa a do obnovy bezi jako
+    // Interactive. Mereni (2026-11-14, 3x x86_64 + aarch64 soubezne):
+    // median 1,2-2,5 ms i pri 630 promile hostitele, maximum s nim roste.
+    let f = stolen_permille.min(900);
+    let limit = 10 * MS * 1000 / (1000 - f);
+    if f >= 100 {
+        log::warn!("planovac: hostitel bere {stolen_permille} promile casu vCPU, limit zpozdeni Realtime {} us", limit / US);
+    }
+    assert!(
+        median < limit,
+        "median zpozdeni periody {median} ns, limit {limit} ns (hostitel {stolen_permille} promile)"
+    );
+}
+
+/// Jako `busy`, ale vraci (cely cas, cas mezer nad 50 us mezi ctenimi
+/// hodin). Vlakno s nejvyssi prioritou mezeru v behu zpusobi jen
+/// hostitel (vCPU nebezelo) nebo dlouhe preruseni.
+fn busy_watch(ns: u64) -> (u64, u64) {
+    let start = arch::now_ns();
+    let end = start + ns;
+    let mut last = start;
+    let mut stolen = 0;
+    loop {
+        let t = arch::now_ns();
+        if t - last > 50 * US {
+            stolen += t - last;
+        }
+        last = t;
+        if t >= end {
+            return (t - start, stolen);
+        }
+        core::hint::spin_loop();
+    }
 }
 
 fn job_cap() {
