@@ -211,6 +211,9 @@ pub struct Ui<M> {
     /// `rebuild` ho prevede pres klice.
     pub(crate) focus: Option<usize>,
     pub(crate) hover: Option<usize>,
+    /// Cast prvku pod ukazatelem (zalozka, radek nebo posuvnik tabulky,
+    /// Ui::hover_part): zvyrazneni zavisi na ni, jeji zmena = prekresleni.
+    pub(crate) hover_part: Option<u32>,
     pub(crate) pressed: Option<usize>,
     /// Text, kurzor, vyber a historie textovych poli podle klice prvku.
     pub(crate) edits: BTreeMap<Key, text::TextEdit>,
@@ -293,6 +296,7 @@ impl<M: Clone> Ui<M> {
             elem_ids: Vec::new(),
             focus: None,
             hover: None,
+            hover_part: None,
             pressed: None,
             edits: BTreeMap::new(),
             tscroll: BTreeMap::new(),
@@ -430,7 +434,7 @@ impl<M: Clone> Ui<M> {
             self.tip_shown = None;
         }
         // Najeti podle ukazatele (prvky se mohly posunout).
-        self.hover = if self.pointer.0 >= 0 { self.hit(self.pointer.0, self.pointer.1) } else { None };
+        self.update_hover();
         self.sync_suggest();
     }
 

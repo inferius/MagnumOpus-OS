@@ -169,6 +169,16 @@ impl<M: Clone> Ui<M> {
         (k < self.spec(i)?.count).then_some(k)
     }
 
+    /// Cast tabulky pod bodem prostoru (pro `Ui::hover_part`): posuvnik
+    /// (`u32::MAX`), jinak radek tela.
+    pub(crate) fn table_part(&self, i: usize, sx: i32, sy: i32) -> Option<u32> {
+        if self.scrollbar(i).is_some_and(|sb| sb.hit(sx, sy).is_some()) {
+            return Some(u32::MAX);
+        }
+        let g = self.geo(i);
+        g.body.contains(sx, sy).then(|| self.row_at(i, sy)).flatten().map(|k| k as u32)
+    }
+
     fn scrollbar(&self, i: usize) -> Option<Scrollbar> {
         let scroll = self.tables.get(&self.elems[i].key).map_or(0, |s| s.scroll);
         Scrollbar::new(self.geo(i).body, self.content_h(i), scroll, &self.look.theme)
