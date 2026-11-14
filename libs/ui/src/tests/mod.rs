@@ -323,6 +323,7 @@ mod context;
 mod controls;
 mod field;
 mod field_behavior;
+mod groups;
 mod hover;
 mod keys;
 mod layout;

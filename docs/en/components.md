@@ -197,8 +197,10 @@ as of 2026-11-14. Ordered by impact.
    - *busy* state.
 2. The checkbox has no indeterminate state, no hover, and no disabled
    look (`st.disabled` is ignored).
-3. The radio does not fade its surface when disabled. The application
-   builds the radio group itself, and arrows between radios do not work.
+3. The radio does not fade its surface when disabled. ~~The application
+   builds the radio group itself, and arrows between radios do not
+   work.~~ Sibling radios are a group with one Tab stop and arrows.
+   **[implemented]**
 4. The error state exists only on text fields. It is missing on:
    - select;
    - checkbox;
@@ -216,15 +218,17 @@ as of 2026-11-14. Ordered by impact.
 
    The table already does all of this, so the list should share its
    selection logic.
-7. The menu has no submenus, group headings, danger item or type-ahead.
-8. Select: Tab in the open list closes it without a change. I propose
-   picking the active item, as other systems do.
+7. The menu has no ~~submenus~~, group headings, danger item ~~or
+   type-ahead~~. Submenus and mnemonics are done. **[implemented]**
+8. ~~Select: Tab in the open list closes it without a change.~~ Tab picks
+   the active item and moves on; a closed select has type-ahead and
+   Home, End. **[implemented]**
 9. Tabs: the selected tab is only a `surface_2` surface. In the light
    theme it has less than 3 : 1 contrast against `surface`. I propose a
    3 px `accent` underline. Disabled tabs are not skipped by the arrows.
-10. The slider changes value on the mouse wheel even without focus, so
-    scrolling the page changes the volume by accident. The track is
-    2 px; I propose 4.
+10. ~~The slider changes value on the mouse wheel even without focus.~~
+    The wheel needs focus. **[implemented]** The track is 2 px; I
+    propose 4.
 
 **Density:**
 

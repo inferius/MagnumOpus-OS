@@ -1430,26 +1430,31 @@ centred).
 | Element | Mouse | Keyboard | Accessibility |
 |---|---|---|---|
 | `label` | - | - | `label` |
-| `button` | click | Enter, space | `button`, `activate` |
+| `button` | click (action on release; leaving with the button held cancels it) | Enter, space on release; Esc while the key is held cancels | `button`, `activate` |
 | `text_input`, `text_area` | click, drag, double and triple click | see [Text fields and the clipboard](#text-fields-and-the-clipboard) | `text-input`, `set-value` |
 | `password_input` | like `text_input` | like `text_input` | `password-input` without a value |
 | `checkbox` | click | space, Enter | `checkbox`, `toggle` |
-| `list` | click an item | up and down arrows | `list` and `list-item` |
+| `list` | click an item | arrows, Home, End, PgUp, PgDn, type-ahead (multi-row selection is in `table`) | `list` and `list-item` |
 | `table` | selection, sorting, dragging, scrollbar | see [Table and list](#table-and-list-virtualization) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (value in percent) |
 | `busy` | - | - | `progress` with the `busy` state (indeterminate, animated per frame) |
-| `select` | click, pick from the list | Enter, space, Alt+down, F4; closed: arrows | `combo-box`, `menu`, `menu-item` |
+| `select` | click, pick from the list | Enter, space, Alt+down, F4; closed: arrows, Home, End, type-ahead; open: Tab picks the active item and moves on | `combo-box`, `menu`, `menu-item` |
 | `image` | - | - | `image` with an `alt` description (pixels shared via `Rc`, scaled down keeping the aspect ratio, never up) |
 | `segments` | - | - | `list` with `list-item` children (full label of each segment) |
 | `switch` | click | space, Enter (on release) | `switch`, `checked`, `toggle` |
-| `radio` | click | space, Enter | `radio`, `checked` |
-| `slider` | click the track, drag, wheel | arrows (step `.step`), PgUp, PgDn (10 steps), Home, End | `slider`, value "40 (0-100)", `set-value` |
+| `radio` | click | siblings form a group and one Tab stop (the checked option); arrows pick the next and previous one, wrapping | `radio`, `checked` |
+| `slider` | click the track, drag, wheel only with focus | arrows (step `.step`), PgUp, PgDn (10 steps), Home, End | `slider`, value "40 (0-100)", `set-value` |
 | `segmented` | click a segment | left and right arrows, Home, End | `segmented` with child `radio` nodes |
-| `tabs` | click; the cross or the middle button closes (`on_close`) | arrows; Ctrl+Tab and Ctrl+Shift+Tab from anywhere in the window | `tab-list` with child `tab` nodes |
+| `tabs` | click; the cross or the middle button closes (`on_close`) | arrows; Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgDn, Ctrl+PgUp (the focused tabs, else the first in the window) | `tab-list` with child `tab` nodes |
 | `column`, `row`, `spacer` | - | - | `group` |
 | `scroll` | wheel | - | `scroll-area`, `scroll` |
 
-Tab moves the focus (Shift+Tab back). A **scroll area** (`scroll`) is a
+Tab moves the focus (Shift+Tab back). The focus ring is drawn only after
+keyboard use (not after a mouse click). **Menus** (`context_menu`) have
+submenus `submenu("Sort", items)` (right arrow, Enter or hover opens, left
+arrow and Esc close) and mnemonics `menu_item("&Copy", ..)` (underlined
+letter, pressing it picks the item; `&&` is the `&` character).
+**[implemented]** A **scroll area** (`scroll`) is a
 layer of its own: the wheel changes only the layer property `scroll` and
 the compositor moves the content; the application redraws nothing.
 

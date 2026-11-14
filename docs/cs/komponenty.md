@@ -165,8 +165,9 @@ Zjištěno z kódu `libs/ui/src/` a ukázky `user/gui-komponenty` (stav
    přepínací (`pressed`) a stav *probíhá*.
 2. Zaškrtávátko nemá neurčitý stav, hover ani vypnutý vzhled
    (`st.disabled` se ignoruje).
-3. Radio při vypnutí neztlumí plochu. Skupinu radio skládá aplikace
-   sama a šipky mezi radio nefungují.
+3. Radio při vypnutí neztlumí plochu. ~~Skupinu radio skládá aplikace
+   sama a šipky mezi radio nefungují.~~ Sourozenci radio jsou skupina
+   s jednou zastávkou Tab a šipkami. **[implementováno]**
 4. Stav chyba je jen u textových polí. Chybí u výběru, zaškrtávátka,
    posuvníku, záložky a segmentu.
 5. ~~Pole nemají hover. Heslo nemá oko ani varování Caps Lock.~~ Hotovo
@@ -174,15 +175,17 @@ Zjištěno z kódu `libs/ui/src/` a ukázky `user/gui-komponenty` (stav
 6. Seznam má jen šipky. Chybí Ctrl+Mezerník, Shift+šipky, Ctrl+A
    a hledání psaním. Tabulka to všechno už umí, ať seznam sdílí její
    logiku výběru.
-7. Nabídka nemá podnabídky, nadpis skupiny, nebezpečnou položku ani
-   hledání psaním.
-8. Výběr: Tab v otevřeném seznamu zavře beze změny. Navrhuji zvolit
-   aktivní položku, jako na ostatních systémech.
+7. Nabídka nemá ~~podnabídky~~, nadpis skupiny, nebezpečnou položku
+   ~~ani hledání psaním~~. Podnabídky a mnemoniky jsou hotové.
+   **[implementováno]**
+8. ~~Výběr: Tab v otevřeném seznamu zavře beze změny.~~ Tab zvolí
+   aktivní položku a jde dál; zavřený výběr umí hledání psaním a Home,
+   End. **[implementováno]**
 9. Záložky: vybraná záložka je jen plocha `surface_2`, která má ve
    světlém motivu proti `surface` kontrast pod 3 : 1. Navrhuji podtržení
    3 px `accent`. Vypnuté záložky se šipkami nepřeskakují.
-10. Posuvník mění hodnotu kolečkem i bez fokusu (posouvání stránky pak
-    nechtěně mění hlasitost). Dráha má 2 px, navrhuji 4.
+10. ~~Posuvník mění hodnotu kolečkem i bez fokusu.~~ Kolečko jen
+    s fokusem. **[implementováno]** Dráha má 2 px, navrhuji 4.
 
 **Hustota:**
 

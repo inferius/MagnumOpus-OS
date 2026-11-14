@@ -1372,26 +1372,31 @@ středu; pevná výška `.height(h)` má přednost (prvek je na středu).
 | Prvek | Myš | Klávesnice | Přístupnost |
 |---|---|---|---|
 | `label` | - | - | `label` |
-| `button` | klik | Enter, mezerník | `button`, `activate` |
+| `button` | klik (akce při puštění; odjetí se stisknutým tlačítkem ji zruší) | Enter, mezerník při puštění; Esc při držené klávese stisk zruší | `button`, `activate` |
 | `text_input`, `text_area` | klik, tah, dvojklik, trojklik | viz [Textová pole a schránka](#textová-pole-a-schránka) | `text-input`, `set-value` |
 | `password_input` | jako `text_input` | jako `text_input` | `password-input` bez hodnoty |
 | `checkbox` | klik | mezerník, Enter | `checkbox`, `toggle` |
-| `list` | klik na položku | šipky nahoru a dolů | `list` a `list-item` |
+| `list` | klik na položku | šipky, Home, End, PgUp, PgDn, hledání psaním (výběr více řádků umí `table`) | `list` a `list-item` |
 | `table` | výběr, řazení, tažení, posuvník | viz [Tabulka a seznam](#tabulka-a-seznam-virtualizace) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (hodnota v procentech) |
 | `busy` | - | - | `progress` se stavem `busy` (neurčitý průběh, animace po snímcích) |
-| `select` | klik, výběr ze seznamu | Enter, mezerník, Alt+dolů, F4; zavřený šipky | `combo-box`, `menu`, `menu-item` |
+| `select` | klik, výběr ze seznamu | Enter, mezerník, Alt+dolů, F4; zavřený šipky, Home, End, hledání psaním; v otevřeném Tab zvolí aktivní položku a jde dál | `combo-box`, `menu`, `menu-item` |
 | `image` | - | - | `image` s popisem `alt` (pixely sdílené přes `Rc`, zmenšení se zachováním poměru stran, nezvětšuje se) |
 | `segments` | - | - | `list` s položkami `list-item` (celý popisek každého úseku) |
 | `switch` | klik | mezerník, Enter (při puštění) | `switch`, `checked`, `toggle` |
-| `radio` | klik | mezerník, Enter | `radio`, `checked` |
-| `slider` | klik do dráhy, tah, kolečko | šipky (krok `.step`), PgUp, PgDn (10 kroků), Home, End | `slider`, hodnota „40 (0-100)“, `set-value` |
+| `radio` | klik | sourozenci jsou skupina a jedna zastávka Tab (vybraná volba); šipky vyberou další a předchozí dokola | `radio`, `checked` |
+| `slider` | klik do dráhy, tah, kolečko jen s fokusem | šipky (krok `.step`), PgUp, PgDn (10 kroků), Home, End | `slider`, hodnota „40 (0-100)“, `set-value` |
 | `segmented` | klik na segment | šipky vlevo a vpravo, Home, End | `segmented` s podřízenými `radio` |
-| `tabs` | klik, křížek nebo prostřední tlačítko zavře (`on_close`) | šipky; Ctrl+Tab a Ctrl+Shift+Tab odkudkoli v okně | `tab-list` s podřízenými `tab` |
+| `tabs` | klik, křížek nebo prostřední tlačítko zavře (`on_close`) | šipky; Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgDn, Ctrl+PgUp (záložky s fokusem, jinak první v okně) | `tab-list` s podřízenými `tab` |
 | `column`, `row`, `spacer` | - | - | `group` |
 | `scroll` | kolečko | - | `scroll-area`, `scroll` |
 
-Fokus se posouvá klávesou Tab (Shift+Tab zpět). **Posouvaná oblast**
+Fokus se posouvá klávesou Tab (Shift+Tab zpět). Prstenec fokusu se kreslí
+jen po ovládání klávesnicí (po kliknutí myší ne). **Nabídky**
+(`context_menu`) umí podnabídky `submenu("Seřadit", položky)` (šipka
+vpravo, Enter nebo najetí otevře, šipka vlevo a Esc zavře) a mnemoniky
+`menu_item("&Kopírovat", ..)` (podtržené písmeno, jeho stisk položku
+vybere; `&&` je znak `&`). **[implementováno]** **Posouvaná oblast**
 (`scroll`) je vlastní vrstva: kolečko změní jen vlastnost vrstvy
 `scroll` a obsah posune kompozitor, aplikace nic nepřekresluje.
 

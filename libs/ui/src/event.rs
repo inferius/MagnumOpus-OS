@@ -225,6 +225,12 @@ impl<M: Clone> Ui<M> {
             }
             // Enter / mezernik na tlacitku a zaskrtavacim poli: stisk = jen
             // stav "stisknuto", akce az pri pusteni (jako mys).
+            // Esc pri drzenem Enter / mezerniku stisk zrusi (akce nebude).
+            InputEvent::Key { code: KEY_ESC, action: 1, .. } if self.key_pressed.is_some() => {
+                self.key_pressed = None;
+                r.trace.push(String::from("stisk zrusen klavesou Esc"));
+                r.redraw = true;
+            }
             InputEvent::Key { code, action, .. } if action != 0 && (code == KEY_ENTER || code == KEY_KPENTER || code == KEY_SPACE) && self.activates_on_release() => {
                 if action == 1 {
                     self.key_pressed = self.focus;
@@ -330,6 +336,12 @@ impl<M: Clone> Ui<M> {
         if self.control_key(f, code, r) {
             return true;
         }
+        if matches!(self.elems[f].kind, ElemKind::Radio { .. }) && self.mods & (mods::CTRL | mods::ALT | mods::META) == 0 && self.radio_key(f, code, r) {
+            return true;
+        }
+        if matches!(self.elems[f].kind, ElemKind::List { .. }) && self.mods & (mods::CTRL | mods::ALT | mods::META) == 0 && self.list_key(f, code, ch, r) {
+            return true;
+        }
         match &self.elems[f].kind {
             ElemKind::Button { .. } if code == KEY_ENTER || code == KEY_KPENTER || code == KEY_SPACE => self.activate(f, r),
             ElemKind::Checkbox { .. } if code == KEY_SPACE || code == KEY_ENTER => self.activate(f, r),
@@ -360,7 +372,8 @@ impl<M: Clone> Ui<M> {
     /// Dalsi (`back` = predchozi) zastavka poradi Tab.
     pub(crate) fn focus_step(&mut self, back: bool, r: &mut Response<M>) -> bool {
         let n = self.elems.len();
-        let order: Vec<usize> = (0..n).filter(|&i| self.elems[i].focusable() && !self.elems[i].skip_tab).collect();
+        // Skupina radio je jedna zastavka (`groups.rs`).
+        let order: Vec<usize> = (0..n).filter(|&i| self.tab_stop(i)).collect();
         if order.is_empty() {
             return false;
         }

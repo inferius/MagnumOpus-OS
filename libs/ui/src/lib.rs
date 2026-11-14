@@ -22,6 +22,8 @@ mod field_draw;
 mod field_menu;
 pub mod fieldopts;
 mod caret;
+mod groups;
+mod submenu;
 pub mod layout;
 pub mod look;
 pub mod node;
@@ -238,8 +240,10 @@ pub struct Ui<M> {
     pub(crate) dragging: Option<table::Dragging>,
     /// Faze animace neurciteho prubehu (px, roste po snimcich).
     pub(crate) busy_phase: u32,
-    /// Otevrena nabidka (vyber, kontextova).
+    /// Otevrena nabidka (vyber, kontextova); s podnabidkou ta nejhlubsi.
     pub(crate) popup: Option<popup::Popup<M>>,
+    /// Rodicovske nabidky otevrene podnabidky (od korene).
+    pub(crate) popup_stack: Vec<popup::Popup<M>>,
     /// Seznam navrhu pole s fokusem (`ui::suggest`).
     pub(crate) suggest: Option<suggest::SuggestState>,
     /// Pismo jmen v seznamu navrhu (`Ui::set_mono_fonts`).
@@ -281,6 +285,8 @@ pub struct Ui<M> {
     pub(crate) search_due: Option<(Key, u64)>,
     /// Zpravy vznikle v `Ui::timer` (hledani s prodlevou), `Ui::take_msgs`.
     pub(crate) timer_msgs: Vec<M>,
+    /// Hledani psanim (vyber, seznam): napsany text a cas posledniho znaku.
+    pub(crate) typed: (String, u64),
 }
 
 /// Posouvana oblast: index prvku (prostor `index + 1` pro `Ui::draw`),
@@ -325,6 +331,7 @@ impl<M: Clone> Ui<M> {
             dragging: None,
             busy_phase: 0,
             popup: None,
+            popup_stack: Vec::new(),
             suggest: None,
             mono: None,
             tip: None,
@@ -347,6 +354,7 @@ impl<M: Clone> Ui<M> {
             caret_on: true,
             search_due: None,
             timer_msgs: Vec::new(),
+            typed: (String::new(), 0),
         }
     }
 
@@ -451,6 +459,7 @@ impl<M: Clone> Ui<M> {
         // Nabidka a bublina zmizelych prvku pryc.
         if self.popup.as_ref().is_some_and(|p| self.index_of(p.owner()).is_none()) {
             self.popup = None;
+            self.popup_stack.clear();
         }
         if self.tip.is_some_and(|(k, _)| self.index_of(k).is_none()) {
             self.tip = None;

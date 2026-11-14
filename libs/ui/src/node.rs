@@ -163,6 +163,8 @@ pub enum MenuAct<M> {
     Msg(M),
     /// Akce z manifestu (`App::action`), napr. polozka z `App::menu`.
     Action(String, Vec<guiproto::action::Arg>),
+    /// Podnabidka (sipka vpravo, Enter nebo najeti ji otevre).
+    Sub(Vec<MenuEntry<M>>),
 }
 
 /// Polozka nabidky (kontextove i rozbalovaci).
@@ -183,6 +185,12 @@ pub struct MenuEntry<M> {
 /// Polozka nabidky, ktera posle zpravu `m`.
 pub fn menu_item<M>(label: &str, m: M) -> MenuEntry<M> {
     MenuEntry { label: label.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: Some(MenuAct::Msg(m)) }
+}
+
+/// Podnabidka s polozkami `items`. `&` v textu polozky oznaci mnemoniku
+/// (`"&Soubor"`: pismeno S podtrzene, stisk S polozku vybere; `&&` = `&`).
+pub fn submenu<M>(label: &str, items: Vec<MenuEntry<M>>) -> MenuEntry<M> {
+    MenuEntry { label: label.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: Some(MenuAct::Sub(items)) }
 }
 
 /// Oddelovac skupin v nabidce.
