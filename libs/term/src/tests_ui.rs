@@ -462,7 +462,30 @@ fn long_lines_wrap_and_bars_end_with_ellipsis() {
     let l = crate::ui::draw::Line::new().text(None, "0123456789");
     assert_eq!(crate::vt::strip(&l.ansi(5)), "0123\u{2026}");
     assert_eq!(crate::ui::short_path("/home/u", 20), "~");
-    assert_eq!(crate::ui::short_path("/a/bbbbbbbb/cccccccc/dddd", 15), "\u{2026}/cccccccc/dddd");
+    assert_eq!(crate::ui::short_path("/a/bbbbbbbb/cccccccc/dddd", 15), "/a/\u{2026}/dddd");
+}
+
+/// Slozka ve vyzve: cela cesta, `~` pro domov; pri nedostatku mista
+/// zkraceni zprostredka po celych slozkach (zacatek zustane), az pak
+/// jmeno posledni slozky.
+#[test]
+fn short_path_cuts_whole_folders_in_the_middle() {
+    let sp = crate::ui::short_path;
+    assert_eq!(sp("/", 12), "/");
+    assert_eq!(sp("/home", 12), "/home");
+    assert_eq!(sp("/home/u/projekt/src", 26), "~/projekt/src");
+    assert_eq!(sp("/system/config/sit", 26), "/system/config/sit");
+    assert_eq!(sp("/home/u/projekt/os/kernel/src/arch", 20), "~/\u{2026}/kernel/src/arch");
+    assert_eq!(sp("/home/u/projekt/os/kernel/src/arch", 14), "~/\u{2026}/src/arch");
+    assert_eq!(sp("/data/a/b/c/hluboko", 16), "/data/\u{2026}/hluboko");
+    assert_eq!(sp("/home/u/aaaa/bbbb", 10), "~/\u{2026}/bbbb");
+    // Zacatek s posledni slozkou se nevejde: bez zacatku.
+    assert_eq!(sp("/data/a/b/c/hluboko", 14), "\u{2026}/b/c/hluboko");
+    // Posledni slozka delsi nez misto: zkracena na konci.
+    assert_eq!(sp("/home/u/velmi-dlouhe-jmeno-slozky", 12), "\u{2026}/velmi-dlo\u{2026}");
+    for (p, max) in [("/home/u/projekt/os/kernel/src/arch", 12), ("/a/b/c/d/e/f/g/h", 12), ("/xxxxxxxxxxxxxxxxxxxxxxxxxx", 12)] {
+        assert!(sp(p, max).chars().count() <= max, "{p} {max}: {}", sp(p, max));
+    }
 }
 
 /// Radek tabulky (help) se lame jen v bunce popisu, pokracovani pod ni.

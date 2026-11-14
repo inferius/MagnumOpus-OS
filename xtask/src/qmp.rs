@@ -253,6 +253,10 @@ fn gui_steps(s: &mut Vec<Step>) {
     s.push(Step::WaitFor(gui::TERM_DOWN));
     s.push(Step::Send(vec![key("down", true)]));
     s.push(Step::Send(vec![key("down", false)]));
+    // Tah za volne misto vlastniho titulku: vpravo od karet, pak vlevo
+    // mezi odznakem a kartou zpet.
+    s.push(Step::DragAt(gui::TERM_TITLE_RIGHT));
+    s.push(Step::DragAt(gui::TERM_TITLE_LEFT));
     // Spravce uloh: fyzicky klik na zaskrtavaci pole (test `task_manager`).
     s.push(Step::ClickAt(gui::CLICK));
     // Diagnosticky snimek (test `diag_snapshot`): Print Screen.
@@ -306,6 +310,8 @@ mod gui {
     pub const TERM_KEYS: &str = "init: test gui: terminal ceka na Ctrl+C a Ctrl+V";
     pub const TERM_TAB: &str = "init: test gui: terminal ceka na doplneni Tab";
     pub const TERM_DOWN: &str = "init: test gui: terminal ceka na sipku v seznamu navrhu";
+    pub const TERM_TITLE_RIGHT: &str = "init: test gui: terminal tah titulku vpravo ";
+    pub const TERM_TITLE_LEFT: &str = "init: test gui: terminal tah titulku vlevo ";
     pub const SNAPSHOT: &str = "init: test gui: diagnosticky snimek ceka na Print Screen";
     pub const PALETTE_SWITCH: &str = "init: test gui: paleta prepne na Ukazku";
     pub const PALETTE_ACTION: &str = "init: test gui: paleta pricte v Ukazce";

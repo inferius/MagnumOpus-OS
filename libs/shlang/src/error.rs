@@ -92,16 +92,54 @@ impl ShError {
         self
     }
 
+    /// Chyba systemu s vlastnim vysvetlenim pro cloveka (`"nemate pravo
+    /// vypisu"`) misto obecneho vyznamu kodu z katalogu.
+    pub fn sys_because(e: abi::Error, what: impl Into<String>, because: impl Into<String>) -> Self {
+        let mut s = Self::new(e.name(), what);
+        s.cause = Some(Box::new(Self::new(e.name(), because)));
+        s
+    }
+
+    /// Ma smysl ukazat misto ve zdroji? U chyby syntaxe vzdy; jinak jen
+    /// kdyz chyba patri k casti delsiho radku (ne k celemu prikazu nebo
+    /// cele rourze, napr. `ls` -> ACCESS_DENIED).
+    fn shows_place(&self, src: &str, span: Span) -> bool {
+        if self.code == code::PARSE {
+            return true;
+        }
+        let (start, end) = (span.start as usize, (span.end as usize).min(src.len()));
+        let before = src.get(..start).unwrap_or("");
+        let after = src.get(end..).unwrap_or("");
+        !(before.trim().is_empty() && after.trim().is_empty())
+    }
+
     /// Hlaseni pro cloveka: kod, popis, misto ve zdroji s ukazatelem,
-    /// rada a pricina.
+    /// rada a pricina. Chyba systemu se stejnym kodem jako pricina je
+    /// jedna veta: "Slozku /x nejde vypsat: nemate pravo vypisu
+    /// (ACCESS_DENIED)".
     pub fn report(&self, src: &str) -> String {
         let mut out = String::new();
-        out.push_str("chyba ");
-        out.push_str(&self.code);
-        out.push_str(": ");
-        out.push_str(&self.message);
+        let mut cause = self.cause.as_deref();
+        match cause {
+            Some(c) if c.code == self.code => {
+                let mut m = self.message.chars();
+                if let Some(first) = m.next() {
+                    out.extend(first.to_uppercase());
+                    out.push_str(m.as_str());
+                }
+                out.push_str(&alloc::format!(": {} ({})", c.message, self.code));
+                cause = c.cause.as_deref();
+            }
+            _ => {
+                out.push_str("chyba ");
+                out.push_str(&self.code);
+                out.push_str(": ");
+                out.push_str(&self.message);
+            }
+        }
         if let Some(span) = self.span
             && (span.start as usize) <= src.len()
+            && self.shows_place(src, span)
         {
             let (line, col) = span.line_col(src);
             out.push_str(&alloc::format!("\n  na řádku {line}, sloupec {col}:\n"));
@@ -121,7 +159,6 @@ impl ShError {
             out.push_str("\n  rada: ");
             out.push_str(h);
         }
-        let mut cause = self.cause.as_deref();
         while let Some(c) = cause {
             out.push_str("\n  příčina: ");
             out.push_str(&c.code);

@@ -433,10 +433,17 @@ zahodí; poznámku vypíše `log`.
 - Chyba nese kód, popis, místo ve zdroji (řádek, sloupec, podtržení),
   radu a příčinu. `explain kód` ukáže vysvětlení z [Kódů chyb](chyby.md)
   a z [kapitoly Chyby shellu](#chyby-shellu).
-- Příčina z chyby systému se ukáže česky z téhož katalogu (věta
-  **Význam** v [Kódech chyb](chyby.md)), např. `příčina: NOT_FOUND:
-  požadovaná věc neexistuje`. Popisy v `abi` zůstávají ASCII a slouží jen
-  jako náhrada **[implementováno]**.
+- Chyba systému je v hlášení **jedna věta** s kódem jednou na konci:
+  „Složku /x nejde vypsat: nemáte právo výpisu (ACCESS_DENIED)“. Důvod
+  u běžných kódů operací se soubory dává shell vlastní větou (výpis, čtení,
+  zápis; `NOT_FOUND`, `ALREADY_EXISTS`, `NOT_EMPTY`), jinak česky z katalogu
+  (věta **Význam** v [Kódech chyb](chyby.md)). Popisy v `abi` zůstávají
+  ASCII a slouží jen jako náhrada **[implementováno]** (testy na hostiteli
+  `tests/misc.rs`).
+- Místo ve zdroji (řádek, sloupec, podtržení `^^`) hlášení ukáže jen
+  u chyby syntaxe a u chyby, která patří k části delšího řádku. U chyby
+  celého příkazu nebo celé roury (`ls` -> `ACCESS_DENIED`) by nic
+  neříkalo, proto chybí **[implementováno]**.
 
 ### Funkce, closure, úlohy
 
@@ -999,9 +1006,10 @@ a podle rolí řádků (`term::ui::draw::Role`) nad ní dokreslí prvky návrhu
 |---|---|
 | levý pruh bloku podle stavu (běží, hotovo, chyba), příkaz tučně, čas a výsledek vpravo písmem UI | **[implementováno]** |
 | rámeček chyby (danger-soft, okraj danger) | **[implementováno]** |
-| řádek vstupu: linka nad ním, pilulka s ikonou a složkou | **[implementováno]** |
+| patička okna (`.input-wrap`): řádek vstupu s nápovědou kláves sedí u spodního okraje (zbytek výšky okna po celých řádcích mřížky jde nahoru, dole jen okraj `s3`), nad ní linka přes celou šířku | **[implementováno]** |
+| pilulka složky ve výzvě: ikona a celá cesta (domov jako `~`), šířka podle textu; řádek pro ni nechává buňky podle tokenů (`App::cwd_lead`). Delší cesta než třetina šířky se zkrátí zprostředka po celých složkách (`~/…/src/arch`), pak bez začátku (`…/b/c`), nakonec jméno poslední složky (`short_path`) | **[implementováno]** (zkracování: testy na hostiteli `tests_ui.rs`) |
 | náhled změn (zámek nebezpečných operací, `preview`): rámeček se seznamem změn (nejvýš 6, pak „… a N dalších“) a tlačítky „Převzít N změn“ / „Zahodit“; tlačítka jsou i v přístupnosti, seznam změn ukazuje i konzole | **[ověřeno v QEMU]** |
-| nápověda kláves jako štítky | **[implementováno]** |
+| nápověda kláves jako štítky (`.kbd`): každá klávesa kombinace zvlášť (`Ctrl` `C`), plocha `surface`, okraj `border_strong` se silnější spodní hranou, písmo `caption`, mezi položkami `s4` | **[implementováno]** |
 | linka pod záhlavím tabulky | **[implementováno]** (typ sloupce pod jménem zatím ne) |
 | výběr textu myší (jako Windows Terminal): tah vybere znaky, dvojklik slovo (`ui::text::word_at`), trojklik řádky, Shift+klik rozšíří; barva `accent_soft`. Výběr drží buňky obrazovky a s novým výstupem se posune s textem, když se text vybraných řádků změní, zruší se (`libs/term/src/select.rs`). Psaní výběr zruší | **[ověřeno v QEMU]** (tah myší fyzickým vstupem, test `gui_term.rs`; dvojklik a trojklik testy na hostiteli `tests_select.rs`) |
 | schránka: Ctrl+C při výběru a Ctrl+Shift+C kopírují (výběr pak zmizí), bez výběru Ctrl+C přeruší příkaz; Ctrl+V a Ctrl+Shift+V vloží na kurzor řádku vstupu. Vložení nic nespustí: poslední konec řádku se zahodí, vnitřní zůstanou (řádek je ukáže znakem ↵, Enter spustí vše jako jeden skript), tabulátor = mezera, řídicí znaky pryč, nejvýš 64 Ki znaků | **[ověřeno v QEMU]** (Ctrl+C a Ctrl+V z fyzické klávesnice, test `gui_term.rs`; schránka chce fyzické gesto) |
