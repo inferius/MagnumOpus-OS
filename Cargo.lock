@@ -427,6 +427,9 @@ dependencies = [
 [[package]]
 name = "cbuild"
 version = "0.1.0"
+dependencies = [
+ "elf",
+]
 
 [[package]]
 name = "cc"

@@ -241,10 +241,16 @@ impl Build {
         self
     }
 
-    /// Vsechny priznaky prekladace pro cil.
+    /// Vsechny priznaky prekladace pro cil (staticka knihovna, bez PIC).
     fn command_flags(&self, target: &str) -> Result<Vec<String>, String> {
+        self.flags_for(target, false)
+    }
+
+    /// Priznaky prekladace; `pic` = kod pro sdilenou knihovnu nebo PIE
+    /// (`-fPIC` misto `-fno-pic`, `docs/cs/dynamicke-linkovani.md`).
+    pub(crate) fn flags_for(&self, target: &str, pic: bool) -> Result<Vec<String>, String> {
         let mut f: Vec<String> = target_flags(target)?.iter().map(|s| s.to_string()).collect();
-        f.extend(COMMON_FLAGS.iter().map(|s| s.to_string()));
+        f.extend(COMMON_FLAGS.iter().map(|s| if pic && *s == "-fno-pic" { String::from("-fPIC") } else { s.to_string() }));
         match self.trust {
             Trust::Own => f.extend(["-Wall", "-Wextra", "-Werror"].map(String::from)),
             Trust::Vendored => f.push("-w".into()),
@@ -281,8 +287,6 @@ impl Build {
     fn try_compile(&self) -> Result<(), String> {
         let target = env::var("TARGET").map_err(|_| "cbuild: chybi TARGET (volat z build.rs)")?;
         let out = PathBuf::from(env::var_os("OUT_DIR").ok_or("cbuild: chybi OUT_DIR")?);
-        let clang = find_clang()?;
-        let flags = self.command_flags(&target)?;
         println!("cargo:rerun-if-env-changed=CLANG");
         for f in &self.files {
             println!("cargo:rerun-if-changed={}", f.display());
@@ -290,7 +294,31 @@ impl Build {
         for i in self.includes.iter().chain(&self.system_includes) {
             println!("cargo:rerun-if-changed={}", i.display());
         }
+        let clang = find_clang()?;
+        let (obj_dir, objects) = self.compile_objects(&clang, &target, &out, false)?;
 
+        let lib = out.join(format!("lib{}.a", self.name));
+        let _ = std::fs::remove_file(&lib);
+        let ar = find_ar(&clang);
+        let rsp = write_rsp(&obj_dir, &objects)?;
+        let o = Command::new(&ar)
+            .arg("rcs")
+            .arg(&lib)
+            .arg(format!("@{}", rsp.display()))
+            .output()
+            .map_err(|e| format!("{} nejde spustit: {e}", ar.display()))?;
+        if !o.status.success() {
+            return Err(format!("llvm-ar selhal: {}", String::from_utf8_lossy(&o.stderr)));
+        }
+        println!("cargo:rustc-link-search=native={}", out.display());
+        println!("cargo:rustc-link-lib=static={}", self.name);
+        Ok(())
+    }
+
+    /// Prelozi zdroje do objektu v `out/obj-<jmeno>[-pic]` (jen zmenene;
+    /// zmena priznaku nebo hlavicky = vse). Vraci adresar a objekty.
+    pub(crate) fn compile_objects(&self, clang: &Path, target: &str, out: &Path, pic: bool) -> Result<(PathBuf, Vec<PathBuf>), String> {
+        let flags = self.flags_for(target, pic)?;
         // Klic predchoziho buildu: priznaky + prekladac + nejnovejsi
         // hlavicka. Jiny klic = vse znovu; jinak jen zmenene zdroje.
         let mut newest = None;
@@ -302,7 +330,7 @@ impl Build {
         clang.hash(&mut h);
         newest.hash(&mut h);
         let key = format!("{:016x}", h.finish());
-        let obj_dir = out.join(format!("obj-{}", self.name));
+        let obj_dir = out.join(format!("obj-{}{}", self.name, if pic { "-pic" } else { "" }));
         std::fs::create_dir_all(&obj_dir).map_err(|e| e.to_string())?;
         let stamp = obj_dir.join("stamp");
         let fresh = std::fs::read_to_string(&stamp).is_ok_and(|s| s == key);
@@ -336,7 +364,7 @@ impl Build {
                     loop {
                         let k = next.fetch_add(1, Ordering::Relaxed);
                         let Some(&i) = todo.get(k) else { break };
-                        let r = Command::new(&clang)
+                        let r = Command::new(clang)
                             .args(&flags)
                             .arg("-c")
                             .arg(&self.files[i])
@@ -364,29 +392,21 @@ impl Build {
             return Err(errors.join("\n"));
         }
         std::fs::write(&stamp, &key).map_err(|e| e.to_string())?;
-
-        let lib = out.join(format!("lib{}.a", self.name));
-        let _ = std::fs::remove_file(&lib);
-        let ar = find_ar(&clang);
-        // Seznam objektu v souboru odpovedi: stovky dlouhych cest by na
-        // Windows prekrocily delku prikazove radky (32 KiB).
-        let rsp = obj_dir.join("objects.rsp");
-        let list: Vec<String> = objects.iter().map(|o| format!("\"{}\"", o.display().to_string().replace('\\', "/"))).collect();
-        std::fs::write(&rsp, list.join("\n")).map_err(|e| e.to_string())?;
-        let o = Command::new(&ar)
-            .arg("rcs")
-            .arg(&lib)
-            .arg(format!("@{}", rsp.display()))
-            .output()
-            .map_err(|e| format!("{} nejde spustit: {e}", ar.display()))?;
-        if !o.status.success() {
-            return Err(format!("llvm-ar selhal: {}", String::from_utf8_lossy(&o.stderr)));
-        }
-        println!("cargo:rustc-link-search=native={}", out.display());
-        println!("cargo:rustc-link-lib=static={}", self.name);
-        Ok(())
+        Ok((obj_dir, objects))
     }
 }
+
+/// Seznam objektu v souboru odpovedi: stovky dlouhych cest by na Windows
+/// prekrocily delku prikazove radky (32 KiB).
+pub(crate) fn write_rsp(dir: &Path, objects: &[PathBuf]) -> Result<PathBuf, String> {
+    let rsp = dir.join("objects.rsp");
+    let list: Vec<String> = objects.iter().map(|o| format!("\"{}\"", o.display().to_string().replace('\\', "/"))).collect();
+    std::fs::write(&rsp, list.join("\n")).map_err(|e| e.to_string())?;
+    Ok(rsp)
+}
+
+mod link;
+pub use link::{INTERP, Link, LinkKind, find_lld, link_flags};
 
 #[cfg(test)]
 mod tests;

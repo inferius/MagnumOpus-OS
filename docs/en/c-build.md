@@ -94,6 +94,22 @@ changed), and vendored headers included from own code via
 | `-O2` | an AML interpreter and similar code is many times slower unoptimised |
 | `-std=c11` | the language of ACPICA and Linux |
 
+## Shared libraries and PIE programs
+
+**[implemented]** (`cbuild` host test `link_skutecne_moduly`, both
+architectures) `Build::link(target, dir, output, &Link)` compiles the
+sources with `-fPIC` and links them **directly with `ld.lld`** (the clang
+driver ignores `-shared` for `*-none-elf` targets and a Linux target would
+drag in host assumptions). `Link::shared("libx.so.1")` = a library with a
+`SONAME` (the file has the same name), `Link::pie()` = a program with the
+`/system/lib/ld.so` loader; `.needs(library)` adds `DT_NEEDED`,
+`.runpath("$ORIGIN")` `DT_RUNPATH`. Linker flags (`link_flags`): `-z now -z
+relro` (everything at once, GOT read-only afterwards), `-z text`
+(relocations in code = an error, W^X), `-z max-page-size=65536`,
+`--hash-style=both`, `-z pack-relative-relocs` (RELR), `--gc-sections`.
+xtask calls it, not `build.rs`. Loader and design:
+[dynamic-linking.md](dynamic-linking.md).
+
 ## How safety is guarded
 
 C code has none of Rust's memory checks. Therefore:

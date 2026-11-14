@@ -7,3 +7,7 @@ publish = false
 description = "Preklad kodu v C clangem z build.rs (freestanding, s ochranami)"
 
 [dependencies]
+
+[dev-dependencies]
+# Kontrola slinkovanych knihoven a PIE v testech.
+elf = { path = "../elf" }
