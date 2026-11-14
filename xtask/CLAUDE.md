@@ -9,7 +9,7 @@
 - `src/boottest.rs`, `crashtest.rs`, `powertest.rs` - zvláštní testovací běhy (`--only release|zaznam-padu|opakovany-start|napajeni|zive-usb`).
 - `src/docs.rs`, `docs_books.rs`, `docs_check.rs`, `docs_tests.rs`, `highlight.rs` - generátor webu dokumentace a kontrola odkazů, kotev a značek stavu.
 - `src/usb/install_test.rs` - test instalátoru (`--only instalace`): instalace ze živého USB na prázdný NVMe a vedle "Windows", start bez flashky, kontrola disku na hostiteli (`image::open_fs`); `--only instalace-gui` totéž přes grafický instalátor se snímkem každého kroku (QMP `screendump`, háček `usb::boot::boot_with`).
-- `src/csysroot.rs` - sysroot C `target/c-sysroot/<arch>` (hlavičky cstd, `libc.a`, linker skript, `clang.cfg`); `src/cports.rs` - porty v C (zlib, sqlite): stažení HTTPS + SHA-256, `tar`, překlad proti sysrootu, do initfs.
+- `src/csysroot.rs` - sysroot C `target/c-sysroot/<arch>` (hlavičky cstd, `libc.a`, linker skript, `clang.cfg`); `src/cports/` - obecný mechanismus portů v C (`docs/cs/porty-c.md`): `fetch.rs` stažení HTTPS + SHA-256, `tar`, záplaty a overlay z `third_party/c-ports/<port>/`; způsoby `sources.rs` (seznam zdrojů: zlib, sqlite), `cmake.rs` (CMake + Ninja, soubor nástrojů ze sysrootu: SDL), `configure.rs` (autotools, FFmpeg); `tools.rs` hledání nástrojů s radou k instalaci. Knihovny do `target/c-ports/<arch>/prefix`, programy do initfs.
 - `src/drivers.rs` - `new-driver` a hledání ovladačů z manifestů; `src/usb/`, `src/venus/`, `*helper.rs` - USB obraz, generátor Venus, pomocné servery pro testy sítě.
 
 ## Invarianty
@@ -28,6 +28,7 @@
 ## Pasti
 
 - Nový crate s host testy se musí přidat do seznamu `--package` ve `host_tests` (`src/main.rs`) a do `members` kořenového `Cargo.toml`; jinak ho `cargo xtask test` nespustí.
+- `git apply` záplat portů běží v `target/` uvnitř repozitáře: bez `GIT_CEILING_DIRECTORIES` by git našel náš repozitář a záplatu tiše přeskočil (`cports/fetch.rs`).
 - Běžící `cargo xtask run` zamyká `xtask.exe`; jiný xtask se nepřeloží, nejdřív zavři QEMU.
 - Restart v okně QEMU s WHPX se zasekne (chyba QEMU/WHPX).
 - QMP (`qmp.rs`): značky testů se v logu hledají jen za poslední nalezenou (`Log::pos`), jinak by `--repeat` v dalších kolech spouštěl úseky hned nebo vůbec. Nová značka začátku úseku patří do `STARTS` a nesmí být podřetězcem jiné (test `qmp_tests.rs`); chybějící značka uvnitř úseku úsek vzdá, ne celé vkládání.

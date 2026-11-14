@@ -675,6 +675,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "cstd",
             "--package",
+            "mosdl",
+            "--package",
             "netfilter",
             "--package",
             "guiproto",

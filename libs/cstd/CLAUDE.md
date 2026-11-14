@@ -14,7 +14,7 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 - `src/mman.rs` - `mmap` a spol. nad `sys::vm_*` (`osrt::vm` = obálka `libos::vm`); `check` = čistá kontrola argumentů.
 - `src/signal.rs` - signály (6A): synchronní z obsluhy výjimek (`osrt::exception`), `raise`/`kill` hned, časovač ve vlákně signálů; `src/setjmp.rs` - nahé funkce `setjmp`/`longjmp` pro obě architektury (`jmp_buf` 320 B, maska od offsetu 176).
 - `src/misc.rs` - další funkce pro porty (řetězce, `qsort`, `rand`, `pwd.h`, `ioctl`, `locale.h`, `uname`, `getrusage`); `src/scanf.rs` - rodina `scanf` (motor `scan` nad `Input`/`Sink`).
-- `libs/cstd-libc` - `libc.a` (staticlib cstd + std + osrt) pro sysroot C (`xtask/src/csysroot.rs`), porty v C `xtask/src/cports.rs`.
+- `libs/cstd-libc` - `libc.a` (staticlib cstd + std + osrt + rozhraní SDL `libs/mosdl`) pro sysroot C (`xtask/src/csysroot.rs`), porty v C `xtask/src/cports.rs`.
 - `src/stdio.rs` - `FILE` nad číslem fd (zámek, buffery: stdout po řádcích, stderr bez, soubory 4 KiB), `fdopen`/`fileno`, `getline`, seznam otevřených proudů, vyprázdnění při konci (`ensure_exit_hook`).
 - `src/stdlib.rs` - `exit`, `_Exit`, `atexit`, `getenv` (cache řetězců C), `abort`, `__cstd_assert_fail`.
 - `include/` - hlavičky POSIX; `stdio.h`, `stdlib.h`, `string.h` doplňují cstd-core přes `#include_next`.

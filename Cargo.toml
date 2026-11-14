@@ -22,6 +22,7 @@ members = [
     "libs/cstd",
     "libs/cstd-core",
     "libs/cstd-libc",
+    "libs/mosdl",
     "libs/conf",
     "libs/theme",
     "libs/dns",

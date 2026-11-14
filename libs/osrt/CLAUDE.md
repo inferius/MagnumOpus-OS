@@ -4,7 +4,7 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 
 ## Klíčové soubory
 
-- `src/start.rs` - `_start`, startovní zpráva, rozdělení handlů podle štítků `abi::params::tag`; volá `main(argc, argv)` (z rustc nebo z programu v C, `c_argv`).
+- `src/start.rs` - `_start`, startovní zpráva, rozdělení handlů podle štítků `abi::params::tag`; volá `main(argc, argv)` (z rustc nebo z programu v C, `c_argv`). Netagované handly (okno aplikace) drží pro `take_handles` (jednou; bere je `libs/mosdl`), `self_process` pro další kopii libos.
 - `src/lib.rs` - `exit` (nejdřív funkce `at_exit` v obráceném pořadí), `exit_now` (bez nich, C `_Exit`), `at_exit` (max 1024; C `atexit` a vyprázdnění stdio knihovny `cstd`, v std `os::magnumopus::rt`).
 - `src/tls.rs` - bloky TLS (local-exec, varianta II x86_64 / I aarch64; posuny musí sedět s lld).
 - `src/fd.rs` - tabulka čísel fd pro cstd (popis otevření: soubor, stdio, roura; `dup` sdílí popis); std ji vystavuje jako `std::os::magnumopus::runtime` (re-export celého crate, nestabilní).

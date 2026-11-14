@@ -297,7 +297,7 @@ numbers).
   with compile and link flags for `clang --config=...` - foreign build
   systems (`configure`, CMake, Meson) use it as a cross build
   **[implemented]** (the ports below use the same flags).
-- **Ports** (`xtask/src/cports.rs`): sources from the official places over
+- **Ports** (`xtask/src/cports/`, the mechanism is described in [C ports](c-ports.md)): sources from the official places over
   HTTPS (`curl`), verified SHA-256 (zlib matches the release hash; sqlite
   pinned from the first download from sqlite.org), unpacked with `tar`,
   compiled by clang with `-w` and linked with `libc.a`. Objects are

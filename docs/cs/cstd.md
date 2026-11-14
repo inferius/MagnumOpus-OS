@@ -286,7 +286,7 @@ fsd přitom hlídá cyklus čekání (`EDEADLK`). `l_pid` z `F_GETLK` je -1
   s příznaky překladu i linku pro `clang --config=...` - cizí build
   systémy (`configure`, CMake, Meson) ho použijí jako křížový překlad
   **[implementováno]** (porty níže ho používají přes stejné příznaky).
-- **Porty** (`xtask/src/cports.rs`): zdroje z oficiálních míst přes HTTPS
+- **Porty** (`xtask/src/cports/`, mechanismus popisuje [Porty v C](porty-c.md)): zdroje z oficiálních míst přes HTTPS
   (`curl`), ověřený SHA-256 (zlib shodný s hashem vydání; sqlite připnutý
   z prvního stažení ze sqlite.org), rozbalení `tar`, překlad clangem
   s `-w` a link s `libc.a`. Objekty se překládají znovu jen při změně.

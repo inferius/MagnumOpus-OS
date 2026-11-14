@@ -1,7 +1,7 @@
 //! Sysroot C pro cizi build systemy a porty (docs/cs/cstd.md, kapitola
 //! Sysroot C): `target/c-sysroot/<arch>/`
 //!
-//! - `include/` (hlavicky cstd) a `include-core/` (zaklad cstd-core;
+//! - `include/` (hlavicky cstd a `mosdl.h`) a `include-core/` (zaklad cstd-core;
 //!   `stdio.h` apod. z cstd ho doplnuji pres `#include_next`),
 //! - `lib/libc.a` (cstd + std + osrt vcetne `_start`), `lib/magnumopus.ld`
 //!   (linker skript programu se std),
@@ -101,6 +101,8 @@ pub fn assemble(arch: &Arch, std_bin: &Path) -> Result<PathBuf> {
     let root = dir(arch);
     copy_tree(&workspace_root().join("libs/cstd/include"), &root.join("include"))?;
     copy_tree(&workspace_root().join("libs/cstd-core/include"), &root.join("include-core"))?;
+    // Rozhrani pro port SDL (symboly v libc.a).
+    copy_tree(&workspace_root().join("libs/mosdl/include"), &root.join("include"))?;
     let libc = std::fs::read(std_bin.join("libc.a")).map_err(|e| format!("libc.a: {e}"))?;
     write_if_changed(&root.join("lib/libc.a"), &libc)?;
     write_if_changed(&root.join("lib/magnumopus.ld"), &std::fs::read(workspace_root().join("user/user-std.ld"))?)?;

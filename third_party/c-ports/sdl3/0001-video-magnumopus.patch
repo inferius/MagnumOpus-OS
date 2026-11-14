@@ -1,0 +1,59 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f7c1528..9861cb6 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -3536,6 +3536,16 @@ endif()
+ 
+ # Platform-independent options
+ 
++# MagnumOpus: okno kompozitoru pres libs/mosdl (modul platformy z xtasku
++# nastavi MAGNUMOPUS).
++if(SDL_VIDEO AND MAGNUMOPUS)
++  set(SDL_VIDEO_DRIVER_MAGNUMOPUS 1)
++  sdl_glob_sources(
++    "${SDL3_SOURCE_DIR}/src/video/magnumopus/*.c"
++  )
++  set(HAVE_SDL_VIDEO TRUE)
++endif()
++
+ if(SDL_VIDEO)
+   if(SDL_OFFSCREEN)
+     set(SDL_VIDEO_DRIVER_OFFSCREEN 1)
+diff --git a/include/build_config/SDL_build_config.h.cmake b/include/build_config/SDL_build_config.h.cmake
+index d7bb97b..d214211 100644
+--- a/include/build_config/SDL_build_config.h.cmake
++++ b/include/build_config/SDL_build_config.h.cmake
+@@ -404,6 +404,7 @@
+ #cmakedefine SDL_VIDEO_DRIVER_EMSCRIPTEN 1
+ #cmakedefine SDL_VIDEO_DRIVER_HAIKU 1
+ #cmakedefine SDL_VIDEO_DRIVER_KMSDRM 1
++#cmakedefine SDL_VIDEO_DRIVER_MAGNUMOPUS 1
+ #cmakedefine SDL_VIDEO_DRIVER_KMSDRM_DYNAMIC @SDL_VIDEO_DRIVER_KMSDRM_DYNAMIC@
+ #cmakedefine SDL_VIDEO_DRIVER_KMSDRM_DYNAMIC_GBM @SDL_VIDEO_DRIVER_KMSDRM_DYNAMIC_GBM@
+ #cmakedefine SDL_VIDEO_DRIVER_N3DS 1
+diff --git a/src/video/SDL_sysvideo.h b/src/video/SDL_sysvideo.h
+index 4cd1ee5..ab15d93 100644
+--- a/src/video/SDL_sysvideo.h
++++ b/src/video/SDL_sysvideo.h
+@@ -544,6 +544,7 @@ extern VideoBootStrap Wayland_preferred_bootstrap;
+ extern VideoBootStrap Wayland_bootstrap;
+ extern VideoBootStrap VIVANTE_bootstrap;
+ extern VideoBootStrap Emscripten_bootstrap;
++extern VideoBootStrap MAGNUMOPUS_bootstrap;
+ extern VideoBootStrap OFFSCREEN_bootstrap;
+ extern VideoBootStrap QNX_bootstrap;
+ extern VideoBootStrap OPENVR_bootstrap;
+diff --git a/src/video/SDL_video.c b/src/video/SDL_video.c
+index 8d8002f..673c50f 100644
+--- a/src/video/SDL_video.c
++++ b/src/video/SDL_video.c
+@@ -146,6 +146,9 @@ static VideoBootStrap *bootstrap[] = {
+ #ifdef SDL_VIDEO_DRIVER_QNX
+     &QNX_bootstrap,
+ #endif
++#ifdef SDL_VIDEO_DRIVER_MAGNUMOPUS
++    &MAGNUMOPUS_bootstrap,
++#endif
+ #ifdef SDL_VIDEO_DRIVER_OFFSCREEN
+     &OFFSCREEN_bootstrap,
+ #endif
