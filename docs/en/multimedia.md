@@ -14,9 +14,9 @@ test decoder do not depend on it.
 
 | Part | What | Status |
 |---|---|---|
-| F1 | FFmpeg built as a C port (LGPL, shared libraries over `libc.so`), test of an `ffprobe`-like program in QEMU | **[designed]** |
+| F1 | FFmpeg 9.0.2 and dav1d 1.5.4 as C ports (LGPL, shared libraries over `libc.so`, dav1d inside `libavcodec.so`), licence check in `config.h`, switch without patent-encumbered codecs | **[verified in QEMU]** x86_64 and aarch64 (suite `media ffmpeg`) |
 | F2a | `libs/mediaproto` protocol (host tests), `mediad` service, `mediatest` test decoder (NV12 frames into the pool with a fence, tone into the `audiod` ring), VMO and channel sources, `SEEK`, decoder crash and recovery | **[verified in QEMU]** x86_64 and aarch64 (suite `media`) |
-| F2b | `ffdec` process with FFmpeg instead of `mediatest` (waits for the C port mechanism) | **[designed]** |
+| F2b | `ffdec` process (C, PIE over `libc.so` and `libav*.so`): AV1 and VP9 bit-exact against test vector MD5s, WAV audio over a source channel into `audiod`, seek, corrupted input | **[verified in QEMU]** x86_64 and aarch64 (suite `media ffmpeg`) |
 | F3 | video into shared buffers (`bufdesc` NV12/I420/P010) with fences, A/V sync | **[designed]** |
 | F4a | video area in `libs/ui` (`node::video`, a layer from buffers with fences), Player application with a built-in sample: play/pause, slider (seek), time, A/V sync by audio | **[verified in QEMU]** x86_64 and aarch64 (suite `gui`, player test) |
 | F4b | file choice, libass subtitles, volume and track selection, fullscreen, system media session | **[designed]** |
@@ -156,7 +156,7 @@ protocol yet.
 cannot yet hand over one open file as a transferable handle (file handles
 are valid only within an fsd session). The source is therefore either a
 **read-only VMO** (small files, tests) or a **source channel** on which the
-application answers `READ_AT { offset u64, length u32 }` (at most 64 KiB)
+application answers `READ_AT { offset u64, length u32 }` (at most 60 KiB so the reply fits a 64 KiB channel message)
 and `SIZE`. The decoder always reads through its source channel from
 `mediad` and never gets the VMO handle or the application channel. A
 narrow single-file handle in fsd is a separate step.
@@ -197,9 +197,11 @@ Video output is buffers described by `bufdesc` (fourcc `NV12` / `YU12`
 a frame and advances the **acquire fence**; the compositor shows the frame
 once the fence is reached and after the swap advances the **release
 fence**; only then may the decoder reuse the buffer. FFmpeg software
-decoders write into their own frames: `ffdec` uses `get_buffer2` so that
-dav1d/libvpx/h264 decode **directly into pool VMOs** (no copy) with the
-alignment FFmpeg requires (64 B stride and borders).
+decoders write into their own frames (I420, 10-bit formats); for now `ffdec`
+**copies** them into an NV12 pool buffer with libswscale (at the same size a
+lossless chroma interleave, verified by MD5). Decoding **directly into pool
+VMOs** (`get_buffer2` with an I420 pool and 64 B alignment, no copy) is the
+next step together with F3.
 
 Note the dependency state:
 
@@ -302,14 +304,23 @@ under the LGPL**; no GPL libraries (x264, x265) and no nonfree ones
 > system must assess this themselves; the text is also in
 > `THIRD-PARTY.md`.
 
-An **xtask switch** stays for building without them (working name
-`--bez-patentovych-kodeku`): configure gets `--disable-decoder=` for h264,
-hevc, aac, aac_latm, eac3 (and the matching parsers), `xtask` checks in
-`config.h` after the build that they are off, and `mediad` then reports
-them as unavailable (the application gets `INFO` with the codec and a
-"codec unavailable" error, not a crash).
+The **xtask switch** for building without them is
+`XTASK_BEZ_PATENTOVYCH_KODEKU=1` (environment variable of `cargo xtask
+build` / `test`): configure gets `--disable-decoder=` for h264, hevc, aac,
+aac_fixed, aac_latm, eac3, vvc and `--disable-parser=` for the matching
+parsers, `xtask` checks in `config_components.h` after the build that they
+are off (otherwise the build fails). `ffdec` then reports them in `INFO`
+with `available = 0` (the application gets the stream description, not a
+crash).
 
 ## Subtitles
+
+> **Not shown yet.** HarfBuzz is written in C++ and needs the C++ standard
+> library (libc++ headers); libass has required HarfBuzz since 0.17. The
+> C++ runtime (step 7a: libc++, libunwind) is not in the system yet, so the
+> libass, HarfBuzz, FriBidi and FreeType ports are built only after it
+> (coordinator decision 2026-11-15). Until then the player only lists
+> subtitle streams in `INFO` and does not select them.
 
 Decision 9 = B: **libass** (ISC) with **HarfBuzz** (MIT, text shaping),
 **FriBidi** (LGPL-2.1-or-later, bidirectional text) and **FreeType** (under
@@ -354,91 +365,107 @@ the device), the output is the same `bufdesc` buffers with fences, so
 neither the player nor compd changes. An application never gets a
 capability to a driver.
 
-## Building FFmpeg
+## Building FFmpeg [verified in QEMU]
 
-### C port in xtask
+FFmpeg and dav1d are built by the generic C port mechanism in xtask
+([C ports](c-ports.md)) - a tarball from the official site with SHA-256,
+no source patches:
 
-The generic C port mechanism (tarball + SHA-256 + patches + CMake/Ninja/
-autotools) is being designed by the SDL thread (`navrh-sdl.md`, its question
-2 = C). FFmpeg **uses it rather than duplicating it**. What it needs beyond
-CMake/autotools:
+- **dav1d 1.5.4** with the `Meson` method: a static library with `-fPIC`
+  (`b_staticpic`), x86_64 with hand-written SIMD in nasm, aarch64 NEON via
+  clang. FFmpeg finds it through `dav1d.pc` in the port prefix and puts it
+  into `libavcodec.so`.
+- **FFmpeg 9.0.2** with the `Configure` method and shared libraries:
+  `--enable-cross-compile --target-os=none --arch=<arch> --cc=clang` (LLVM
+  tools by name), flags of the dynamic C sysroot (`-fPIC`, link
+  `-Wl,-Bdynamic`, `-Wl,-shared` for libraries, `crt1.o` and the loader only
+  for configure's test programs), `--pkg-config=pkgconf`. No `target-os` or
+  CPU detection patch was needed: `none` is a generic POSIX target and the
+  CPU count comes from `sysconf` in cstd.
+- **Decoding only**: `--disable-encoders --disable-muxers
+  --disable-filters --disable-avfilter --disable-avdevice --disable-devices
+  --disable-hwaccels --disable-protocols --disable-network
+  --disable-autodetect --disable-programs`; demuxers, parsers, decoders and
+  bsfs stay (the `FFMPEG_ARGS` list in `xtask/src/cports/mod.rs`).
+- **Licence hard-coded**: `--disable-gpl --disable-version3
+  --disable-nonfree`; after the build xtask checks `config.h` for
+  `CONFIG_GPL 0`, `CONFIG_NONFREE 0`, `CONFIG_VERSION3 0` and
+  `CONFIG_SHARED 1`, otherwise the build fails (host test
+  `ffmpeg_config_check`).
+- **Output**: `lib/libavutil.so.61`, `lib/libswresample.so.7`,
+  `lib/libswscale.so.10`, `lib/libavcodec.so.63` (with dav1d),
+  `lib/libavformat.so.63` in the initfs (no TEXTREL, BIND_NOW, symbol
+  versions `LIBAVCODEC_63` ...). They add about 20 MiB per architecture, so
+  the disk image is now 256 MiB (`xtask/src/image.rs`).
+- **Tools**: `sh`, `make`, nasm, Meson, Ninja and pkgconf from MSYS2
+  (decision 8 = A); a missing one = an error with install advice
+  ([Building](building.md#tools)).
 
-1. **A custom `configure`** (shell script, not autoconf): run under `sh`
-   (Git Bash / MSYS2 on a Windows host), `make` (GNU make) for the build.
-   The mechanism must support a "different kind" of build: a configure
-   command with switches, then `make -jN install`.
-2. **Cross compilation**: `--enable-cross-compile --target-os=none` (or a
-   patch adding `magnumopus`), `--arch=x86_64|aarch64`,
-   `--cc=clang --cfg=...` with `clang-dyn.cfg` from the C sysroot,
-   `--ar=llvm-ar`, `--nm=llvm-nm`, `--ranlib=llvm-ranlib`, `--pkg-config`
-   pointing at `.pc` files in the sysroot (for dav1d).
-3. **Assembler**: on x86_64 **nasm** (>= 2.13) for hand-written SIMD; the
-   mechanism finds it and, if missing, gives install advice (decision 7).
-   On aarch64 clang as the assembler is enough (GNU `.S` syntax, NEON).
-4. **Patches**: `target-os` for our system, CPU count detection through
-   `sysconf(_SC_NPROCESSORS_ONLN)` (cstd), switches
-   `--disable-network`, `--disable-autodetect`; FFmpeg must not reach for
-   `fork` (cstd does not have it, only `posix_spawn`).
-5. **Out-of-tree and per-arch**: build into `target/cports/<arch>/ffmpeg/`,
-   install headers, `.so` and `.pc` into the C sysroot, fingerprint
-   (version + patches + switches) to skip repeated builds.
-6. **Dependencies between ports**: dav1d (Meson + Ninja) before FFmpeg;
-   for subtitles FreeType (CMake), FriBidi and HarfBuzz (Meson) and libass
-   (autotools) before `ffdec`. Meson is another build system the SDL
-   mechanism does not cover yet; the mechanism must support it (or at
-   least "own configure command + build", as for FFmpeg).
-7. **Tool check** (decision 8 = A): before the build xtask checks `sh`,
-   `make`, `nasm` (x86_64), `meson`, `ninja`, `pkg-config` from Git Bash /
-   MSYS2 and, if a tool is missing, stops with exact advice on how to
-   install it (no silent skipping of the port).
+What it builds on in the system:
 
-Licence switches hard-coded: `--disable-gpl --disable-nonfree
---disable-version3` (LGPL 2.1+), `--enable-shared --disable-static`,
-`--disable-programs` (own `ffdec` instead of `ffmpeg`), `--disable-doc`.
-After configure `xtask` checks `config.h` for `CONFIG_GPL 0` and
-`CONFIG_NONFREE 0`, otherwise the build fails.
+- `libc.so` and the `ld.so` loader (libraries from `/system/lib` via libd),
+- `cstd`: pthreads (FFmpeg decodes in threads), `clock_gettime`, `sysconf`,
+  new `posix_memalign` / `aligned_alloc` / `memalign` (SIMD alignment) and
+  the `static_assert` macro (C11),
+- `magnumopus/sys.h` (`libs/mosys` in `libc.so`): channels, VMOs, fences
+  and waiting for `ffdec` in C,
+- W^X: neither FFmpeg nor dav1d needs a JIT,
+- AVX/XSAVE: FFmpeg detects AVX2/AVX-512 at runtime ([cstd.md](cstd.md)).
 
-### What it builds on in the system
+### The `ffdec` process [verified in QEMU]
 
-- `libc.so` (merged) and the dynamic loader `ld.so`: FFmpeg is a set of `.so` files
-  (`libavformat.so.61`, `libavcodec.so.61`, `libavutil.so.59`,
-  `libswresample.so.5`, `libswscale.so.8`) linked against `libc.so`.
-- `cstd` with the POSIX layer (merged): pthreads
-  (FFmpeg decodes in threads), `clock_gettime`, `sysconf`,
-  `posix_memalign` for aligned allocations.
-- W^X: neither FFmpeg nor dav1d needs a JIT; hand-written SIMD is
-  precompiled.
-- AVX/XSAVE: the requirement is already described in [cstd.md](cstd.md)
-  (FFmpeg detects AVX2/AVX-512 at runtime through `cpuid` + `xgetbv`; the
-  kernel must save the state).
+`user/ffdec` is a C program (PIE over `libc.so` and `libav*.so`) speaking
+the `mediaproto` protocol over the bootstrap channel (message encoding in
+`proto.c`, kept in sync with Rust by the host test `c_header_tests`).
+`mediad` starts it once per session in its own job (256 MiB of user
+memory) **without any handles** except the control channel; it picks the
+decoder by the first bytes of the source (`MTM1` = `mediatest`, otherwise
+`ffdec`).
+
+- **Input**: libavformat with its own `AVIOContext` over the source channel
+  (`READ_AT` of 60 KiB, `SIZE`); no files, network or FFmpeg protocols.
+- **Video**: libavcodec (threads per CPU count) -> libswscale into an NV12
+  pool buffer -> frame fence -> `FRAME`.
+- **Audio**: libswresample to s16 stereo at the ring rate -> directly into
+  the `audiod` ring; `AUDIO_BASE` with the position and pts of the first
+  sample after start and seek.
+- **Pace**: decodes ahead while it has a free buffer and room in the ring.
+- **Seek**: `avformat_seek_file` backwards to a keyframe; an exact seek
+  drops frames before the target.
+
+Suite `media ffmpeg` (`user/init/src/tests/media_ffmpeg.rs`): stream
+description of AV1 and VP9, **bit-exact picture** (I420 rebuilt from NV12
+against the MD5 of every frame from the AOM and libvpx test vectors), seek
+to the start after the end, WAV audio over a source channel into `audiod`,
+random and truncated inputs (`mediad` survives).
 
 ## LGPL obligations
 
 LGPL 2.1+ allows using FFmpeg in a closed system as long as the user can
-replace the library with their own modified version. The design:
+replace the library with their own modified version:
 
 - FFmpeg is **dynamically linked** (`.so` over `libc.so`), the `ffdec`
   process is only a thin layer; replacing the library = replacing files in
-  `/lib` (decision 6),
-- **sources**: the exact tarball (SHA-256), all patches and configure
-  switches are in the repository (`third_party/ffmpeg/`); the system image
-  carries a file pointing to them and the licence text,
-- **rebuild script**: `cargo xtask cport ffmpeg` builds the same library
-  from the same sources; described in the user manual,
-- `THIRD-PARTY.md` gets rows for FFmpeg (LGPL-2.1-or-later), dav1d
-  (BSD-2-Clause), libass (ISC), HarfBuzz (MIT), FriBidi
-  (LGPL-2.1-or-later) and FreeType (FTL) with version and hash,
-- FriBidi is under the LGPL like FFmpeg: a shared `.so`, sources and a
+  `/system/lib` (decision 6),
+- **sources**: the pinned tarball (SHA-256, signature by the FFmpeg key
+  checked when pinned), configure switches in `xtask/src/cports/mod.rs`
+  (`FFMPEG_ARGS`), no patches,
+- **rebuild script**: `cargo xtask build` builds the same libraries from
+  the same sources (described in [C ports](c-ports.md)),
+- `THIRD-PARTY.md` has rows for FFmpeg (LGPL-2.1-or-later) and dav1d
+  (BSD-2-Clause) with version and hash; libass (ISC), HarfBuzz (MIT),
+  FriBidi (LGPL-2.1-or-later) and FreeType (FTL) come with subtitles,
+- FriBidi will be under the LGPL like FFmpeg: a shared `.so`, sources and a
   rebuild script the same way,
 - the player's About states that it uses FFmpeg under the LGPL, with a link
-  to the sources.
+  to the sources (with file choice in F4b).
 
 ## Stages
 
-1. **F1 port**: dav1d + FFmpeg (and FreeType, FriBidi, HarfBuzz, libass)
-   through the port mechanism, QEMU test: a
-   program over `libavformat` lists the streams of a test WebM file
-   (Opus + VP9) and decodes 10 frames with a checksum, both architectures.
+1. **F1 port** (done): dav1d + FFmpeg through the port mechanism; the QEMU
+   test decodes the AV1 and VP9 test vectors through `ffdec` bit-exact
+   against their MD5s, both architectures. FreeType, FriBidi, HarfBuzz and
+   libass only after step 7a (C++ runtime).
 2. **F2 service and audio**: `mediaproto`, `mediad`, `ffdec`; playing
    Opus/FLAC into `audiod`; decoder crash test (the session reports an
    error, `mediad` survives). The protocol, service and isolation are built

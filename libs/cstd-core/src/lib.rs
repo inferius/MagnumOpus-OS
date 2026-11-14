@@ -66,3 +66,5 @@ mod format_tests;
 mod string_tests;
 #[cfg(test)]
 mod stdlib_tests;
+#[cfg(test)]
+mod alloc_tests;

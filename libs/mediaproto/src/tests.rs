@@ -97,6 +97,13 @@ fn info_roundtrip_and_limits() {
 }
 
 #[test]
+fn source_reply_fits_channel() {
+    // Odpoved na nejvetsi cteni (status i32 + data) i s rezervou.
+    let full = alloc::vec![0u8; source::MAX_READ as usize];
+    assert!(source::encode_reply(Ok(&full)).len() + 64 <= abi::syscall::CHANNEL_MAX_DATA);
+}
+
+#[test]
 fn source_requests() {
     let r = SourceRequest::ReadAt { offset: 10, len: 100 };
     assert_eq!(SourceRequest::decode(&r.encode()).unwrap(), r);

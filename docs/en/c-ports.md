@@ -14,7 +14,8 @@ the repository.
 | port source | HTTPS (`curl`), SHA-256, `tar` (zip too), patches with `git apply`, own files (overlay) | **[verified in QEMU]** zlib and sqlite (suite `cstd porty`), patches and overlay with SDL (suite `sdl`) |
 | `Sources` | a list of sources compiled directly with clang | **[verified in QEMU]** zlib 1.3.1, sqlite 3.46.1 |
 | `CMake` | CMake + Ninja, toolchain file and the `MagnumOpus` platform module from the sysroot | **[verified in QEMU]** SDL 3.4.20 ([SDL](sdl.md), suite `sdl`) |
-| `Configure` | a `configure` script (autotools, FFmpeg) + `make` | **[implemented]**, verified with FFmpeg |
+| `Configure` | a `configure` script (autotools, FFmpeg) + `make`, also with shared libraries over `libc.so` | **[verified in QEMU]** FFmpeg 9.0.2 ([Multimedia](multimedia.md), suite `media ffmpeg`) |
+| `Meson` | Meson + Ninja, cross file from the sysroot, static library with `-fPIC` | **[verified in QEMU]** dav1d 1.5.4 (inside `libavcodec.so`, suite `media ffmpeg`) |
 | missing tool | an error with the tool name and install advice for the host | **[implemented]** host test `cargo test -p xtask cports` |
 
 ## A port
@@ -55,7 +56,8 @@ made again only when the archive, a patch or an overlay file changes.
 |---|---|---|
 | `Sources` | small libraries with a simple source list (zlib, sqlite) | clang only |
 | `CMake` | projects with CMake (SDL) | CMake, Ninja |
-| `Configure` | projects with a `configure` script (autotools, FFmpeg) | `sh`, `make` |
+| `Configure` | projects with a `configure` script (autotools, FFmpeg) | `sh`, `make`, pkgconf (nasm for FFmpeg on x86_64) |
+| `Meson` | Meson projects (dav1d) | `sh`, Meson, Ninja, pkgconf (nasm on x86_64) |
 
 - **`CMake`:** xtask generates `target/c-ports/<arch>/cmake/toolchain.cmake`
   and the platform module `Platform/MagnumOpus.cmake` (`UNIX`, `MAGNUMOPUS`,
@@ -66,12 +68,29 @@ made again only when the archive, a patch or an overlay file changes.
   or Linux libraries). Configuration is repeated only when the options, the
   toolchain file or the source change.
 - **`Configure`:** the arguments have placeholders `{prefix}`, `{host}`,
-  `{arch}`, `{cc}`, `{ar}`, `{cflags}`, `{ldflags}`, because every script
-  wants the target differently (autotools `--host=`, FFmpeg `--target-os=
-  --arch= --cc=`). The build runs outside the source tree.
+  `{arch}`, `{cc}`, `{ar}`, `{nm}`, `{ranlib}`, `{strip}`, `{cflags}`,
+  `{ldflags}`, because every script wants the target differently (autotools
+  `--host=`, FFmpeg `--target-os= --arch= --cc=`). LLVM tools are passed by
+  name only (the clang directory is in `PATH`; FFmpeg's configure cannot
+  handle paths with a space). A port with **shared libraries**
+  (`libraries`, FFmpeg) takes the flags of the dynamic sysroot plus
+  `{ldexeflags}` (PIE programs only: `crt1.o`, loader), `{ldsoflags}`
+  (`-Wl,-shared`) and `{libs}` (`libc.so`, `libbuiltins.a`); the clang
+  baremetal driver links `-Bstatic` by itself and does not pass `-shared`,
+  hence `-Wl,-Bdynamic` and `-Wl,-shared` explicitly. The build runs outside
+  the source tree.
+- **`Meson`:** xtask generates `target/c-ports/<arch>/<port>/cross.txt`
+  (`system = 'magnumopus'`, shared-library flags from the sysroot) and builds
+  a static library with `-fPIC` (`b_staticpic`) for another port's shared
+  library. Meson from MSYS2 is a Python script: it runs through `sh` and gets
+  paths as `/j/...`; after install xtask rewrites the prefix in `.pc` files
+  to `J:/...` (clang does not know MSYS2 paths).
+- **Ports over `libc.so`** (`dynamic`: dav1d, FFmpeg) are built only after
+  the dynamic part of the C sysroot (`libc.so`, `crt1.o`); their test
+  programs are linked as PIE.
 - **Output:** libraries and headers into the prefix
   `target/c-ports/<arch>/prefix` (the next port finds them), programs into
-  the initfs.
+  the initfs, shared libraries into initfs `lib/<soname>`.
 
 ## Host tools
 
@@ -84,8 +103,15 @@ tools and advice for the host:
 | Ninja | `winget install Ninja-build.Ninja` | `apt install ninja-build` / `brew install ninja` |
 | `sh` | Git for Windows | part of the system |
 | `make` | MSYS2 (`pacman -S make`) or WSL | `apt install make` |
+| nasm (2.14+, x86_64 only) | MSYS2 (`pacman -S nasm`) | `apt install nasm` / `brew install nasm` |
+| Meson | MSYS2 (`pacman -S meson`) | `apt install meson` / `brew install meson` |
+| pkgconf | MSYS2 (with Meson) | `apt install pkgconf` / `brew install pkgconf` |
 
-The path can also be given in a variable (`CMAKE`, `NINJA`, `SH`, `MAKE`).
+On Windows `sh`, `make`, nasm, Meson and pkgconf are taken from MSYS2 first
+(`C:\msys64\usr\bin`, the `MSYS2_ROOT` variable): one environment instead
+of a mix of Git and MSYS2, run in `MSYSTEM=MSYS` mode (Meson from MSYS2
+refuses to run under MINGW64 from Git Bash). The path can also be given in
+a variable (`CMAKE`, `NINJA`, `SH`, `MAKE`, `NASM`, `MESON`, `PKG_CONFIG`).
 On Windows the usual install locations outside `PATH` are searched too (the
 installer may not have refreshed `PATH` in an open terminal).
 
@@ -100,6 +126,8 @@ installer may not have refreshed `PATH` in an open terminal).
 | zlib | 1.3.1 | zlib | `Sources` | `zlib-example`, `minigzip` |
 | sqlite | 3.46.1 | public domain | `Sources` | `sqlite3`, `sqltest` |
 | SDL | 3.4.20 | zlib | `CMake` | `testsprite`, `checkkeys` ([SDL](sdl.md)) |
+| dav1d | 1.5.4 | BSD-2-Clause | `Meson` | - (inside `libavcodec.so`) |
+| FFmpeg | 9.0.2 | LGPL-2.1-or-later | `Configure` (shared libraries) | `lib/libav*.so`, `libsw*.so`; the `ffdec` process ([Multimedia](multimedia.md)) |
 
 Port tests and limitations (sqlite without WAL and mmap I/O) are described
 in [cstd](cstd.md#c-sysroot-and-ports-part-2i).

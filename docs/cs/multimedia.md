@@ -14,9 +14,9 @@ nezávisí.
 
 | Část | Co | Stav |
 |---|---|---|
-| F1 | sestavení FFmpeg jako port C (LGPL, sdílené knihovny nad `libc.so`), test `ffprobe`-like programu v QEMU | **[navrženo]** |
+| F1 | FFmpeg 9.0.2 a dav1d 1.5.4 jako porty C (LGPL, sdílené knihovny nad `libc.so`, dav1d v `libavcodec.so`), ověření licence v `config.h`, přepínač bez patentových kodeků | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `media ffmpeg`) |
 | F2a | protokol `libs/mediaproto` (host testy), služba `mediad`, testovací dekodér `mediatest` (obraz NV12 do poolu s plotem, tón do kruhu `audiod`), zdroj VMO i kanálem, `SEEK`, pád a obnova dekodéru | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `media`) |
-| F2b | proces `ffdec` s FFmpeg místo `mediatest` (čeká na mechanismus portů C) | **[navrženo]** |
+| F2b | proces `ffdec` (C, PIE nad `libc.so` a `libav*.so`): AV1 a VP9 bit po bitu podle MD5 testovacích vektorů, zvuk WAV kanálem zdroje do `audiod`, skok, poškozený vstup | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `media ffmpeg`) |
 | F3 | video do sdílených bufferů (`bufdesc` NV12/I420/P010) s ploty, A/V synchronizace | **[navrženo]** |
 | F4a | plocha videa v `libs/ui` (`node::video`, vrstva z bufferů s ploty), aplikace Přehrávač s vestavěnou ukázkou: přehrát/pozastavit, posuvník (skok), čas, A/V synchronizace podle zvuku | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `gui`, test přehrávače) |
 | F4b | výběr souboru, titulky libass, hlasitost a výběr stop, celá obrazovka, mediální relace systému | **[navrženo]** |
@@ -154,7 +154,7 @@ frekvence, kanály, jazyk, kodek dostupný). Titulky (`SUBTITLE_SIZE`,
 neumí předat jeden otevřený soubor jako přenositelný handle (handly
 souborů platí jen v relaci fsd). Zdroj je proto buď **VMO jen pro čtení**
 (malé soubory, testy), nebo **kanál zdroje**, na kterém aplikace odpovídá
-na `READ_AT { posun u64, délka u32 }` (nejvýš 64 KiB) a `SIZE`. Dekodér
+na `READ_AT { posun u64, délka u32 }` (nejvýš 60 KiB, aby se odpověď vešla do zprávy kanálu 64 KiB) a `SIZE`. Dekodér
 čte vždy přes svůj kanál zdroje od `mediad`, nikdy nedostane handle VMO
 ani kanál aplikace. Úzký handle jednoho souboru ve fsd je samostatný
 krok.
@@ -193,10 +193,11 @@ Výstup videa jsou buffery popsané `bufdesc` (fourcc `NV12` / `YU12` (I420) /
 `P010` pro 10 bit, roviny, rozteče, zarovnání). Dekodér zapíše snímek
 a posune **acquire plot**; kompozitor snímek zobrazí, až plot nastane,
 a po výměně posune **release plot**, teprve pak smí dekodér buffer znovu
-použít. Software dekodéry FFmpeg píší do vlastních rámců: `ffdec` použije
-`get_buffer2` tak, aby dav1d/libvpx/h264 dekódovaly **přímo do VMO
-z poolu** (bez kopie) se zarovnáním, které FFmpeg vyžaduje (64 B rozteč
-a okraje).
+použít. Software dekodéry FFmpeg píší do vlastních rámců (I420, 10bitové
+formáty); `ffdec` je zatím **kopíruje** do bufferu NV12 z poolu přes
+libswscale (u stejného rozměru bezztrátové proložení chroma, ověřené MD5).
+Dekódování **přímo do VMO z poolu** (`get_buffer2` s poolem I420 a
+zarovnáním 64 B, bez kopie) je další krok spolu s F3.
 
 Pozor na stav závislostí:
 
@@ -294,14 +295,22 @@ FFmpeg pod LGPL**; žádné knihovny pod GPL (x264, x265) ani nonfree
 > FFmpeg (LGPL) patenty nepokrývá. Kdo systém šíří, musí to posoudit
 > sám; text je i v `THIRD-PARTY.md`.
 
-Pro sestavení bez nich zůstává **přepínač xtasku** (pracovně
-`--bez-patentovych-kodeku`): configure dostane `--disable-decoder=` pro
-h264, hevc, aac, aac_latm, eac3 (a odpovídající parsery), `xtask` po
-sestavení ověří v `config.h`, že jsou vypnuté, a `mediad` je pak hlásí
-jako nedostupné (aplikace dostane `INFO` s kodekem a chybou "kodek
-nedostupný", ne pád).
+Pro sestavení bez nich je **přepínač xtasku**
+`XTASK_BEZ_PATENTOVYCH_KODEKU=1` (proměnná prostředí `cargo xtask build`
+/ `test`): configure dostane `--disable-decoder=` pro h264, hevc, aac,
+aac_fixed, aac_latm, eac3, vvc a `--disable-parser=` pro odpovídající
+parsery, `xtask` po sestavení ověří v `config_components.h`, že jsou
+vypnuté (jinak sestavení selže). `ffdec` je pak v `INFO` hlásí s příznakem
+`available = 0` (aplikace dostane popis proudu, ne pád).
 
 ## Titulky
+
+> **Zatím se nezobrazují.** HarfBuzz je napsaný v C++ a potřebuje
+> standardní knihovnu C++ (hlavičky libc++); libass od verze 0.17 má
+> HarfBuzz povinný. Běhové prostředí C++ (krok 7a: libc++, libunwind)
+> v systému ještě není, proto se porty libass, HarfBuzz, FriBidi
+> a FreeType staví až po něm (rozhodnutí koordinátora 2026-11-15).
+> Do té doby přehrávač proudy titulků jen vypíše v `INFO` a nevybírá je.
 
 Rozhodnutí 9 = B: **libass** (ISC) s **HarfBuzz** (MIT, tvarování písma),
 **FriBidi** (LGPL-2.1-or-later, obousměrný text) a **FreeType** (pod
@@ -345,87 +354,107 @@ teď: `ffdec` dostane od služby GPU **frontu video dekódování** (ne zaříze
 výstup jsou tytéž buffery `bufdesc` s ploty, takže přehrávač ani compd se
 nemění. Aplikace capability k ovladači nikdy nedostane.
 
-## Sestavení FFmpeg
+## Sestavení FFmpeg [ověřeno v QEMU]
 
-### Port C ve xtasku
+FFmpeg a dav1d staví obecný mechanismus portů C v xtasku
+([Porty v C](porty-c.md)) - tarball z oficiálního místa s SHA-256, žádné
+záplaty zdrojů:
 
-Obecný mechanismus portů C (tarball + SHA-256 + záplaty + CMake/Ninja/
-autotools) navrhuje vlákno SDL (`navrh-sdl.md`, jeho otázka 2 = C). FFmpeg ho
-**použije, ne zdvojí**. Co od něj potřebuje navíc proti CMake/autotools:
+- **dav1d 1.5.4** způsobem `Meson`: statická knihovna s `-fPIC`
+  (`b_staticpic`), x86_64 s ručním SIMD v nasm, aarch64 NEON přes clang.
+  FFmpeg ji najde přes `dav1d.pc` v předponě portů a vloží do
+  `libavcodec.so`.
+- **FFmpeg 9.0.2** způsobem `Configure` se sdílenými knihovnami:
+  `--enable-cross-compile --target-os=none --arch=<arch> --cc=clang`
+  (nástroje LLVM jménem), příznaky dynamického sysrootu C (`-fPIC`, link
+  `-Wl,-Bdynamic`, `-Wl,-shared` pro knihovny, `crt1.o` a zavaděč jen pro
+  zkušební programy configure), `--pkg-config=pkgconf`. Záplata
+  `target-os` ani detekce CPU potřeba nebyla: `none` je obecný POSIX cíl
+  a počet CPU dává `sysconf` z cstd.
+- **Jen dekódování**: `--disable-encoders --disable-muxers
+  --disable-filters --disable-avfilter --disable-avdevice
+  --disable-devices --disable-hwaccels --disable-protocols
+  --disable-network --disable-autodetect --disable-programs`; demuxery,
+  parsery, dekodéry a bsf zůstávají (seznam `FFMPEG_ARGS` v
+  `xtask/src/cports/mod.rs`).
+- **Licence natvrdo**: `--disable-gpl --disable-version3
+  --disable-nonfree`; xtask po sestavení ověří v `config.h`
+  `CONFIG_GPL 0`, `CONFIG_NONFREE 0`, `CONFIG_VERSION3 0`
+  a `CONFIG_SHARED 1`, jinak sestavení selže (host test
+  `ffmpeg_config_check`).
+- **Výstup**: `lib/libavutil.so.61`, `lib/libswresample.so.7`,
+  `lib/libswscale.so.10`, `lib/libavcodec.so.63` (s dav1d),
+  `lib/libavformat.so.63` v initfs (bez TEXTREL, BIND_NOW, verze symbolů
+  `LIBAVCODEC_63` ...). Přidávají zhruba 20 MiB na architekturu, proto má
+  obraz disku nově 256 MiB (`xtask/src/image.rs`).
+- **Nástroje**: `sh`, `make`, nasm, Meson, Ninja a pkgconf z MSYS2
+  (rozhodnutí 8 = A); chybějící = chyba s radou k instalaci
+  ([Sestavení](sestaveni.md#nástroje)).
 
-1. **Vlastní `configure`** (shell skript, ne autoconf): běh pod `sh`
-   (Git Bash / MSYS2 na Windows hostiteli), `make` (GNU make) pro build.
-   Mechanismus musí umět "jiný druh" sestavení: příkaz configure s přepínači
-   a pak `make -jN install`.
-2. **Křížový překlad**: `--enable-cross-compile --target-os=none` (nebo
-   záplata přidávající `magnumopus`), `--arch=x86_64|aarch64`,
-   `--cc=clang --cfg=...` se `clang-dyn.cfg` ze C sysrootu, `--ar=llvm-ar`,
-   `--nm=llvm-nm`, `--ranlib=llvm-ranlib`, `--pkg-config` mířící na `.pc`
-   v sysrootu (pro dav1d).
-3. **Assembler**: na x86_64 **nasm** (>= 2.13) pro ruční SIMD; mechanismus
-   ho najde a při chybějícím dá radu k instalaci (rozhodnutí 7). Na aarch64
-   stačí clang jako assembler (GNU syntaxe `.S`, NEON), nic navíc.
-4. **Záplaty**: `target-os` pro náš systém, detekce počtu CPU přes
-   `sysconf(_SC_NPROCESSORS_ONLN)` (cstd), přepínače
-   `--disable-network`, `--disable-autodetect`; FFmpeg nesmí sáhnout po
-   `fork` (cstd ho nemá, jen `posix_spawn`).
-5. **Out-of-tree a per-arch**: build do `target/cports/<arch>/ffmpeg/`,
-   instalace hlaviček, `.so` a `.pc` do C sysrootu, otisk (verze + záplaty
-   + přepínače) pro přeskočení opakovaného buildu.
-6. **Závislosti mezi porty**: dav1d (Meson + Ninja) před FFmpeg; pro
-   titulky FreeType (CMake), FriBidi a HarfBuzz (Meson) a libass
-   (autotools) před `ffdec`. Meson je další systém sestavení, který
-   mechanismus SDL zatím nepokrývá; mechanismus ho musí umět (nebo
-   alespoň "vlastní příkaz configure + build", jako pro FFmpeg).
-7. **Kontrola nástrojů** (rozhodnutí 8 = A): xtask před buildem ověří
-   `sh`, `make`, `nasm` (x86_64), `meson`, `ninja`, `pkg-config` z Git
-   Bash / MSYS2 a při chybějícím nástroji skončí s přesnou radou, jak ho
-   doinstalovat (bez tichého přeskočení portu).
+Na čem to stojí v systému:
 
-Licenční přepínače natvrdo: `--disable-gpl --disable-nonfree
---disable-version3` (LGPL 2.1+), `--enable-shared --disable-static`,
-`--disable-programs` (vlastní `ffdec` místo `ffmpeg`), `--disable-doc`.
-`xtask` po configure ověří v `config.h`, že `CONFIG_GPL 0` a
-`CONFIG_NONFREE 0`, jinak build selže.
+- `libc.so` a zavaděč `ld.so` (knihovny z `/system/lib` přes libd),
+- `cstd`: pthreads (FFmpeg dekóduje ve vláknech), `clock_gettime`,
+  `sysconf`, nově `posix_memalign` / `aligned_alloc` / `memalign`
+  (zarovnání pro SIMD) a makro `static_assert` (C11),
+- `magnumopus/sys.h` (`libs/mosys` v `libc.so`): kanály, VMO, ploty
+  a čekání pro `ffdec` v C,
+- W^X: FFmpeg ani dav1d nepotřebují JIT,
+- AVX/XSAVE: FFmpeg detekuje AVX2/AVX-512 za běhu ([cstd.md](cstd.md)).
 
-### Na čem stojí v systému
+### Proces `ffdec` [ověřeno v QEMU]
 
-- `libc.so` (sloučeno) a dynamický zavaděč `ld.so`: FFmpeg je sada `.so`
-  (`libavformat.so.61`, `libavcodec.so.61`, `libavutil.so.59`,
-  `libswresample.so.5`, `libswscale.so.8`) linkovaná proti `libc.so`.
-- `cstd` s POSIX vrstvou (sloučeno): pthreads
-  (FFmpeg dekóduje ve vláknech), `clock_gettime`, `sysconf`, `mmap` pro
-  zarovnané alokace (`posix_memalign` stačí).
-- W^X: FFmpeg ani dav1d nepotřebují JIT, ruční SIMD je předpřeložený.
-- AVX/XSAVE: požadavek už popsaný v [cstd.md](cstd.md) (FFmpeg detekuje
-  AVX2/AVX-512 za běhu přes `cpuid` + `xgetbv`, jádro musí ukládat stav).
+`user/ffdec` je program v C (PIE nad `libc.so` a `libav*.so`), který
+mluví protokolem `mediaproto` přes bootstrap kanál (kódování zpráv
+v `proto.c`, shoda s Rustem host testem `c_header_tests`). `mediad` ho
+spouští jednou na relaci ve vlastním jobu (256 MiB uživatelské paměti)
+**bez jakýchkoli handlů** kromě řídicího kanálu; dekodér volí podle
+prvních bajtů zdroje (`MTM1` = `mediatest`, jinak `ffdec`).
+
+- **Vstup**: libavformat s vlastním `AVIOContext` nad kanálem zdroje
+  (`READ_AT` po 60 KiB, `SIZE`); žádné soubory, síť ani protokoly FFmpeg.
+- **Video**: libavcodec (vlákna podle počtu CPU) -> libswscale do NV12
+  bufferu z poolu -> plot snímku -> `FRAME`.
+- **Zvuk**: libswresample na s16 stereo ve frekvenci kruhu -> přímo do
+  kruhu `audiod`; `AUDIO_BASE` s pozicí a pts prvního vzorku po startu
+  a skoku.
+- **Tempo**: dekóduje dopředu, dokud má volný buffer a místo v kruhu.
+- **Skok**: `avformat_seek_file` dozadu na klíčový snímek; přesný skok
+  zahodí snímky před cílem.
+
+Sada `media ffmpeg` (`user/init/src/tests/media_ffmpeg.rs`): popis proudů
+AV1 a VP9, **obraz bit po bitu** (I420 složené zpět z NV12 proti MD5
+každého snímku z testovacích vektorů AOM a libvpx), skok na začátek po
+konci, zvuk WAV kanálem zdroje do `audiod`, náhodné a useknuté vstupy
+(`mediad` žije).
 
 ## Povinnosti LGPL
 
 LGPL 2.1+ dovoluje FFmpeg použít v uzavřeném systému, pokud uživatel může
-knihovnu nahradit vlastní upravenou verzí. Návrh:
+knihovnu nahradit vlastní upravenou verzí:
 
 - FFmpeg je **dynamicky linkovaný** (`.so` nad `libc.so`), proces `ffdec`
-  je jen tenká vrstva; nahrazení knihovny = nahrazení souborů v `/lib`
-  (rozhodnutí 6),
-- **zdroje**: přesný tarball (SHA-256), všechny záplaty a přepínače
-  configure jsou v repozitáři (`third_party/ffmpeg/`); obraz systému nese
-  soubor s odkazem na ně a text licence,
-- **skript pro opětovné sestavení**: `cargo xtask cport ffmpeg` sestaví
-  stejnou knihovnu z týchž zdrojů; popis v uživatelské příručce,
-- `THIRD-PARTY.md` doplní řádky FFmpeg (LGPL-2.1-or-later), dav1d
-  (BSD-2-Clause), libass (ISC), HarfBuzz (MIT), FriBidi
-  (LGPL-2.1-or-later) a FreeType (FTL) s verzí a hashem,
-- FriBidi je pod LGPL stejně jako FFmpeg: sdílená `.so`, zdroje
+  je jen tenká vrstva; nahrazení knihovny = nahrazení souborů
+  v `/system/lib` (rozhodnutí 6),
+- **zdroje**: připnutý tarball (SHA-256, podpis klíčem FFmpeg ověřen při
+  připnutí), přepínače configure v `xtask/src/cports/mod.rs`
+  (`FFMPEG_ARGS`), záplaty žádné,
+- **skript pro opětovné sestavení**: `cargo xtask build` sestaví stejné
+  knihovny z týchž zdrojů (popis v [Porty v C](porty-c.md)),
+- `THIRD-PARTY.md` má řádky FFmpeg (LGPL-2.1-or-later) a dav1d
+  (BSD-2-Clause) s verzí a otiskem; libass (ISC), HarfBuzz (MIT), FriBidi
+  (LGPL-2.1-or-later) a FreeType (FTL) přibudou s titulky,
+- FriBidi bude pod LGPL stejně jako FFmpeg: sdílená `.so`, zdroje
   a skript pro opětovné sestavení stejně,
-- `About` přehrávače uvede, že používá FFmpeg pod LGPL, s odkazem na zdroje.
+- `About` přehrávače uvede, že používá FFmpeg pod LGPL, s odkazem na zdroje
+  (s výběrem souboru v F4b).
 
 ## Etapy
 
-1. **F1 port**: dav1d + FFmpeg (a FreeType, FriBidi, HarfBuzz, libass)
-   přes mechanismus portů, test v QEMU:
-   program nad `libavformat` vypíše proudy testovacího souboru WebM
-   (Opus + VP9) a dekóduje 10 snímků s kontrolním součtem, obě architektury.
+1. **F1 port** (hotovo): dav1d + FFmpeg přes mechanismus portů; test
+   v QEMU dekóduje testovací vektory AV1 a VP9 přes `ffdec` bit po bitu
+   podle MD5, obě architektury. FreeType, FriBidi, HarfBuzz a libass až po
+   kroku 7a (běhové prostředí C++).
 2. **F2 služba a zvuk**: `mediaproto`, `mediad`, `ffdec`; přehrání Opus/FLAC
    do `audiod`; test pádu dekodéru (relace hlásí chybu, `mediad` žije).
    Protokol, služba a izolace se staví **nejdřív s testovacím dekodérem**

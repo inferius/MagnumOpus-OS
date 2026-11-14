@@ -5,6 +5,7 @@
 
 mod audio;
 mod media;
+mod media_ffmpeg;
 mod audio_recovery;
 mod accounts;
 mod agent;
@@ -117,6 +118,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("usb", usb::TESTS),
     ("zvuk", audio::TESTS),
     ("media", media::TESTS),
+    ("media ffmpeg", media_ffmpeg::TESTS),
     ("historie FS", fs_hist::TESTS),
     // Pri bezne sade jeden start (pocitadlo 1); xtask boottest ji pousti
     // opakovane nad stejnym diskem.

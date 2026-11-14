@@ -15,3 +15,5 @@ test = false
 
 [dependencies]
 cstd = { path = "../cstd" }
+# Objekty jadra pro programy v C (magnumopus/sys.h): ffdec nad libc.so.
+mosys = { path = "../mosys" }

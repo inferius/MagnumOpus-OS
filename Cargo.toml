@@ -24,6 +24,7 @@ members = [
     "libs/cstd-libc",
     "libs/cstd-so",
     "libs/mosdl",
+    "libs/mosys",
     "libs/conf",
     "libs/theme",
     "libs/dns",

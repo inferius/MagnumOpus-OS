@@ -1,6 +1,6 @@
 # user/mediad
 
-Služba médií (`docs/cs/multimedia.md`). Řídicí kanál od initu (`media.rs` v initu): jen `CONNECT`. Každá relace běží ve vlastním vlákně (`session.rs`), spouští proces dekodéru (obraz `mediatest` z initfs) ve vlastním jobu s limity a obsluhuje jeho čtení zdroje (`source.rs`: VMO nebo kanál aplikace).
+Služba médií (`docs/cs/multimedia.md`). Řídicí kanál od initu (`media.rs` v initu): jen `CONNECT`. Každá relace běží ve vlastním vlákně (`session.rs`), spouští proces dekodéru ve vlastním jobu s limity (podle prvních bajtů zdroje: `MTM1` = `mediatest` 64 MiB, jinak `ffdec` nad FFmpeg 256 MiB; `ffdec` je PIE, `mediad` má od initu relaci s libd) a obsluhuje jeho čtení zdroje (`source.rs`: VMO nebo kanál aplikace).
 
 ## Invarianty
 
@@ -11,7 +11,7 @@ Služba médií (`docs/cs/multimedia.md`). Řídicí kanál od initu (`media.rs`
 
 ## Testy
 
-- QEMU: `cargo xtask test --only media` (`user/init/src/tests/media.rs`).
+- QEMU: `cargo xtask test --only "media,media ffmpeg"` (`user/init/src/tests/media.rs`, `media_ffmpeg.rs`).
 
 ## Pasti
 

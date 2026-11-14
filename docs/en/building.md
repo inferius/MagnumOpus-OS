@@ -24,6 +24,17 @@
   (`cmake --version`, `ninja --version`) and stops with install advice when
   a tool is missing or too old. Verified with CMake 4.4.4 and Ninja 1.13.2
   (Windows, winget). Elsewhere: the `CMAKE`, `NINJA` variables.
+- **sh, make, nasm 2.14+, Meson and pkgconf** for the FFmpeg and dav1d ports
+  ([Multimedia](multimedia.md), [C ports](c-ports.md)): on Windows from
+  **MSYS2** (`winget install MSYS2.MSYS2`, then in MSYS2 `pacman -S make
+  nasm meson`; pkgconf, ninja and python come as dependencies), only from
+  the official MSYS2 repositories. xtask prefers the MSYS2 tools
+  (`C:\msys64\usr\bin`, elsewhere the `MSYS2_ROOT` variable) and runs them in
+  `MSYSTEM=MSYS` mode; a missing tool = an error with install advice.
+  Debian/Ubuntu `apt install make nasm meson pkgconf`, macOS `brew install
+  nasm meson pkgconf`. Verified with MSYS2 2026-09-27 (nasm 3.02, Meson
+  1.12.1, Ninja 1.13.2). The `SH`, `MAKE`, `NASM`, `MESON`, `PKG_CONFIG`
+  variables set a tool directly.
 - Optionally **GDB** for debugging.
 
 xtask looks for QEMU in `PATH` and common install locations, and for the

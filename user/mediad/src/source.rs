@@ -44,6 +44,21 @@ impl Source {
         Ok(d.to_vec())
     }
 
+    /// Prvnich az `n` bajtu zdroje (volba dekoderu podle magie).
+    pub fn peek(&self, n: u32) -> Result<Vec<u8>> {
+        match self {
+            Source::Vmo { vmo, size } => {
+                let (_, len) = source::clamp(0, n, *size);
+                let mut buf = vec![0u8; len];
+                if len > 0 {
+                    vmo.read(0, &mut buf)?;
+                }
+                Ok(buf)
+            }
+            Source::App(ch) => self.ask(ch, SourceRequest::ReadAt { offset: 0, len: n }),
+        }
+    }
+
     /// Odpovi na pozadavek dekoderu.
     pub fn serve(&self, msg: &[u8]) -> Vec<u8> {
         let req = match SourceRequest::decode(msg) {

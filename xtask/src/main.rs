@@ -693,6 +693,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "mediaproto",
             "--package",
+            "mosys",
+            "--package",
             "iova",
             "--package",
             "yuv",
@@ -1080,13 +1082,18 @@ fn build(opts: &Options) -> Result<Artifacts> {
     let std_bin = stdsys::build_apps(&std_list, opts)?;
     // Sysroot C (libc.a, hlavicky, clang.cfg) a porty v C proti nemu.
     let c_sysroot = csysroot::assemble(a, &std_bin)?;
-    let c_ports = cports::build(a, &c_sysroot)?;
+    let mut c_ports = cports::build(a, &c_sysroot, false)?;
     // libc.so (std jako PIC) a dynamicka cast sysrootu C, program PIE cdyn.
     let libc_so = {
         let _lock = stdsys::lock_std()?;
         stdsys::build_libc_so_locked(a, opts)?
     };
     csysroot::add_dynamic(a, &c_sysroot, &libc_so)?;
+    // Porty nad libc.so (dav1d, FFmpeg): az s dynamickou casti sysrootu.
+    c_ports.extend(cports::build(a, &c_sysroot, true)?);
+    c_ports.extend(cports::test_media()?);
+    // Proces dekoderu medii nad FFmpeg (libav*.so z predpony portu).
+    let ffdec = dynlink::build_ffdec(opts, &libc_so, &c_sysroot, &cports::prefix(a))?;
     let mut cdyn = dynlink::build_cdyn(opts, &libc_so, &c_sysroot)?;
     cdyn.push((String::from("cdyn-hello"), csysroot::build_with_cfg(&c_sysroot, "user/cdyn/hello.c", "cdyn-hello")?));
     // Zavadec sdilenych knihoven a testovaci moduly v C.
@@ -1117,6 +1124,11 @@ fn build(opts: &Options) -> Result<Artifacts> {
                 let data = std::fs::read(&path).map_err(|e| format!("nelze cist soubor portu C {name}: {e}"))?;
                 files.push((name, data));
             }
+            // ET_DYN cela (zavadec cte dynamickou cast pres segmenty).
+            cports::Output::Library(name, path) => {
+                let data = std::fs::read(&path).map_err(|e| format!("nelze cist knihovnu portu C {name}: {e}"))?;
+                files.push((format!("lib/{name}"), data));
+            }
         }
     }
     for name in stdsys::STD_PROGRAMS {
@@ -1128,6 +1140,7 @@ fn build(opts: &Options) -> Result<Artifacts> {
     // segmenty; `loadable_only` je jen pro ET_EXEC).
     files.push((String::from("lib/ld.so"), std::fs::read(&ld).map_err(|e| format!("nelze cist zavadec: {e}"))?));
     files.extend(dl_tests);
+    files.push(ffdec);
     files.extend(cdyn);
     for (name, path) in INITFS_FILES {
         let data = std::fs::read(workspace_root().join(path))

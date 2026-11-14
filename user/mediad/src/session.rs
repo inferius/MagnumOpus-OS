@@ -17,10 +17,14 @@ use mediaproto::{AudioRing, Event, Incoming, Info, Request, decode_incoming, enc
 use crate::source::Source;
 
 /// Limit uzivatelske pameti procesu dekoderu (buffery videa a kruh zvuku
-/// patri aplikaci, dekoder je jen mapuje).
-const DECODER_MEMORY: u64 = 64 << 20;
+/// patri aplikaci, dekoder je jen mapuje). FFmpeg drzi referencni snimky
+/// a dekoduje ve vlaknech (1080p ~ desitky MiB), testovaci dekoder malo.
+const FFMPEG_MEMORY: u64 = 256 << 20;
+const TEST_MEMORY: u64 = 64 << 20;
 /// Limit pameti jadra dekoderu.
-const DECODER_KERNEL: u64 = 4 << 20;
+const DECODER_KERNEL: u64 = 8 << 20;
+/// Magie testovaciho formatu (`mediaproto::testmedia`).
+const TEST_MAGIC: &[u8; 4] = mediaproto::testmedia::MAGIC;
 /// Nejdelsi odpoved dekoderu (otevreni cte hlavicku pres zdroj).
 const DECODER_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -46,7 +50,9 @@ struct SavedPool {
 
 struct Session {
     client: Channel,
-    image: &'static [u8],
+    images: crate::Images,
+    /// Obraz dekoderu zvoleny pri `OPEN` (jmeno, obraz, limit pameti).
+    decoder: Option<(&'static str, &'static [u8], u64)>,
     source: Option<Source>,
     size: u64,
     dec: Option<Decoder>,
@@ -56,8 +62,8 @@ struct Session {
     audio: Option<(AudioRing, Handle, Handle)>,
 }
 
-pub fn run(client: Channel, image: &'static [u8]) {
-    let mut s = Session { client, image, source: None, size: 0, dec: None, info: None, select: None, pool: None, audio: None };
+pub fn run(client: Channel, images: crate::Images) {
+    let mut s = Session { client, images, decoder: None, source: None, size: 0, dec: None, info: None, select: None, pool: None, audio: None };
     loop {
         let mut items: Vec<(&Handle, Signals)> = Vec::new();
         items.push((s.client.handle(), Signals::READABLE | Signals::PEER_CLOSED));
@@ -194,20 +200,32 @@ impl Session {
             _ => return Err(Error::InvalidArgs),
         };
         self.size = source.size()?;
+        // Dekoder podle prvnich bajtu: testovaci format, jinak FFmpeg.
+        let head = source.peek(TEST_MAGIC.len() as u32)?;
+        self.decoder = Some(if head == TEST_MAGIC {
+            ("mediatest", self.images.test, TEST_MEMORY)
+        } else {
+            ("ffdec", self.images.ffmpeg.ok_or(Error::NotSupported)?, FFMPEG_MEMORY)
+        });
         self.source = Some(source);
         let r = self.start_decoder();
         if r.is_err() {
             self.source = None;
+            self.dec = None;
         }
         r
     }
 
     /// Spusti dekoder, preda mu zdroj a vrati `Info`.
     fn start_decoder(&mut self) -> Result<Vec<u8>> {
+        let (name, image, memory) = self.decoder.ok_or(Error::BadState)?;
         let job = Job::create(&libos::job::current()?)?;
-        job.set_limit(pool::USER, DECODER_MEMORY)?;
+        job.set_limit(pool::USER, memory)?;
         job.set_limit(pool::KERNEL, DECODER_KERNEL)?;
-        let (process, ctl) = spawn_with(&job, "mediatest", self.image, Vec::new(), Options::default())?;
+        // ffdec je PIE se zavadecem: knihovny (libc.so, libav*.so) nahraje
+        // ld.so pres relaci s libd, kterou spawn da diteti (mediad ji ma
+        // od initu). Zadne dalsi handly.
+        let (process, ctl) = spawn_with(&job, name, image, Vec::new(), Options::default())?;
         let (src, theirs) = Channel::create()?;
         self.dec = Some(Decoder { ctl, src, process, job });
         let d = self.call(&Request::Probe { size: self.size }, alloc::vec![theirs.into_handle()])?;

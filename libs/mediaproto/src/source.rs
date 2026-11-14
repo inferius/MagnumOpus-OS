@@ -10,8 +10,9 @@ use alloc::vec::Vec;
 use crate::{Error, Result};
 use wire::{Reader, Writer};
 
-/// Nejvic bajtu v jednom cteni.
-pub const MAX_READ: u32 = 64 * 1024;
+/// Nejvic bajtu v jednom cteni: odpoved (status + data) se musi vejit do
+/// zpravy kanalu (`abi::syscall::CHANNEL_MAX_DATA` = 64 KiB).
+pub const MAX_READ: u32 = 60 * 1024;
 
 pub mod op {
     /// Posun u64, delka u32 -> data (kratsi jen na konci zdroje).

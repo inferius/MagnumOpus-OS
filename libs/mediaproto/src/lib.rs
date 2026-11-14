@@ -24,6 +24,8 @@ extern crate alloc;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod c_header_tests;
 
 pub mod clock;
 pub mod source;

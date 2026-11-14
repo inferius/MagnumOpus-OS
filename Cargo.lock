@@ -687,6 +687,7 @@ version = "0.1.0"
 dependencies = [
  "cstd",
  "mosdl",
+ "mosys",
 ]
 
 [[package]]
@@ -694,6 +695,7 @@ name = "cstd-so"
 version = "0.1.0"
 dependencies = [
  "cstd",
+ "mosys",
 ]
 
 [[package]]
@@ -2014,6 +2016,14 @@ dependencies = [
  "inputproto",
  "libos",
  "ui",
+]
+
+[[package]]
+name = "mosys"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "libos",
 ]
 
 [[package]]

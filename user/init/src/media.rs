@@ -45,7 +45,8 @@ pub fn connect() -> Result<Channel> {
 fn spawn(startup: &Startup) -> Result<(Process, Channel)> {
     let vmo = startup.initfs.as_ref().ok_or(Error::NotFound)?;
     let handles = alloc::vec![StartHandle::new(kind::INITFS, 0, vmo.handle().duplicate(None)?)];
-    let app = crate::apps::spawn(startup, "mediad", handles)?;
+    // Relace s libd: mediad spousti `ffdec` (PIE se zavadecem a FFmpeg .so).
+    let app = crate::apps::spawn_with_libd(startup, "mediad", handles, None, true)?;
     Ok((app.process, app.control))
 }
 
