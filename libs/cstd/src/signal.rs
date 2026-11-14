@@ -43,6 +43,10 @@ pub const SIGTSTP: c_int = 20;
 pub const SIGTTIN: c_int = 21;
 pub const SIGTTOU: c_int = 22;
 pub const SIGURG: c_int = 23;
+/// Casovace virtualniho a profilovaciho casu (`setitimer`) zatim nejsou;
+/// cisla jsou kvuli maskam signalu v portech (SDL). Vychozi akce = konec.
+pub const SIGVTALRM: c_int = 26;
+pub const SIGPROF: c_int = 27;
 pub const SIGWINCH: c_int = 28;
 
 pub const SA_SIGINFO: c_int = 4;

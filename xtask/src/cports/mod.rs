@@ -49,6 +49,8 @@ pub enum Build {
         /// Programy do initfs: (jmeno v initfs, cesta v adresari sestaveni).
         programs: &'static [(&'static str, &'static str)],
     },
+    // Prvni port tohoto druhu bude FFmpeg (krok 7).
+    #[allow(dead_code)]
     Configure {
         /// Argumenty `configure`; zastupne `{prefix}`, `{host}`, `{arch}`,
         /// `{cc}`, `{ar}`, `{cflags}`, `{ldflags}`.
@@ -67,6 +69,17 @@ pub struct CPort {
     /// Zaplaty v `third_party/c-ports/<name>/` (poradi pouziti).
     pub patches: &'static [&'static str],
     pub build: Build,
+    /// Dalsi soubory do initfs: (jmeno v initfs, cesta). `port:` = cesta
+    /// v `third_party/c-ports/<name>/` (manifesty), jinak ve zdroji portu.
+    pub data: &'static [(&'static str, &'static str)],
+}
+
+/// Vystup portu do initfs.
+pub enum Output {
+    /// Program (ET_EXEC; do initfs jen nahravane segmenty).
+    Program(String, PathBuf),
+    /// Soubor beze zmeny (manifest, data testu).
+    Data(String, PathBuf),
 }
 
 const PORTS: &[CPort] = &[
@@ -77,6 +90,7 @@ const PORTS: &[CPort] = &[
         sha256: "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23",
         top: "zlib-1.3.1",
         patches: &[],
+        data: &[],
         build: Build::Sources {
             lib: &[
                 "adler32.c", "compress.c", "crc32.c", "deflate.c", "gzclose.c", "gzlib.c", "gzread.c", "gzwrite.c",
@@ -96,6 +110,7 @@ const PORTS: &[CPort] = &[
         sha256: "77823cb110929c2bcb0f5d48e4833b5c59a8a6e40cdea3936b99e199dbbe5784",
         top: "sqlite-amalgamation-3460100",
         patches: &[],
+        data: &[],
         build: Build::Sources {
             lib: &["sqlite3.c"],
             defines: &[
@@ -115,6 +130,67 @@ const PORTS: &[CPort] = &[
             ],
         },
     },
+    CPort {
+        name: "sdl3",
+        url: "https://github.com/libsdl-org/SDL/releases/download/release-3.4.20/SDL3-3.4.20.tar.gz",
+        file: "SDL3-3.4.20.tar.gz",
+        sha256: "f3bb06f55bed9557227a700af2ea62e49497ebdf58037732a731a5fb3ef8581f",
+        top: "SDL3-3.4.20",
+        // Ovladac videa `magnumopus` (overlay src/video/magnumopus) nad
+        // libs/mosdl; docs/cs/sdl.md.
+        patches: &["0001-video-magnumopus.patch"],
+        data: &[
+            ("testsprite.manifest.toml", "port:testsprite.manifest.toml"),
+            ("checkkeys.manifest.toml", "port:checkkeys.manifest.toml"),
+            ("sdl-icon.png", "test/icon.png"),
+        ],
+        build: Build::CMake {
+            options: &[
+                // Staticka knihovna (Q8 A); sdilena az s libc.so.
+                "-DSDL_SHARED=OFF",
+                "-DSDL_STATIC=ON",
+                "-DSDL_TESTS=ON",
+                "-DSDL_INSTALL_TESTS=OFF",
+                "-DSDL_EXAMPLES=ON",
+                // Zadne ovladace Linuxu / X11 / Waylandu ani dlopen knihoven.
+                "-DSDL_X11=OFF",
+                "-DSDL_WAYLAND=OFF",
+                "-DSDL_KMSDRM=OFF",
+                "-DSDL_OFFSCREEN=OFF",
+                "-DSDL_OPENGL=OFF",
+                "-DSDL_OPENGLES=OFF",
+                "-DSDL_VULKAN=OFF",
+                "-DSDL_GPU=OFF",
+                "-DSDL_RENDER_GPU=OFF",
+                "-DSDL_ALSA=OFF",
+                "-DSDL_PULSEAUDIO=OFF",
+                "-DSDL_PIPEWIRE=OFF",
+                "-DSDL_JACK=OFF",
+                "-DSDL_SNDIO=OFF",
+                "-DSDL_OSS=OFF",
+                "-DSDL_DBUS=OFF",
+                "-DSDL_IBUS=OFF",
+                "-DSDL_LIBUDEV=OFF",
+                "-DSDL_LIBURING=OFF",
+                "-DSDL_SYSTEM_ICONV=OFF",
+                "-DSDL_LIBICONV=OFF",
+                "-DSDL_RPATH=OFF",
+                "-DSDL_DEPS_SHARED=OFF",
+                "-DSDL_DLOPEN_NOTES=OFF",
+                // Okna dava ovladac magnumopus, ne X11 / Wayland (jinak by
+                // konfigurace na "unixu" bez nich skoncila chybou).
+                "-DSDL_UNIX_CONSOLE_BUILD=ON",
+                // Gamepady samostatny krok (Q6 B), kamera a dialogy nejsou (Q7 A).
+                "-DSDL_HIDAPI=OFF",
+                "-DSDL_JOYSTICK=OFF",
+                "-DSDL_HAPTIC=OFF",
+                "-DSDL_CAMERA=OFF",
+                "-DSDL_DIALOG=OFF",
+                "-DSDL_TRAY=OFF",
+            ],
+            programs: &[("testsprite", "test/testsprite"), ("checkkeys", "test/checkkeys")],
+        },
+    },
 ];
 
 /// Predpona instalace knihoven portu pro architekturu.
@@ -127,9 +203,9 @@ fn work_dir(arch: &Arch, p: &CPort) -> PathBuf {
     target_dir().join("c-ports").join(arch.name).join(p.name)
 }
 
-/// Prelozi porty v C pro architekturu proti sysrootu; vraci (jmeno v
-/// initfs, binarka).
-pub fn build(arch: &Arch, sysroot: &Path) -> Result<Vec<(String, PathBuf)>> {
+/// Prelozi porty v C pro architekturu proti sysrootu; vraci programy
+/// a soubory do initfs.
+pub fn build(arch: &Arch, sysroot: &Path) -> Result<Vec<Output>> {
     let mut out = Vec::new();
     for p in PORTS {
         let src = fetch::prepare(p)?;
@@ -141,7 +217,14 @@ pub fn build(arch: &Arch, sysroot: &Path) -> Result<Vec<(String, PathBuf)>> {
             Build::CMake { options, programs } => cmake::build(arch, sysroot, p, &src, &work, options, programs)?,
             Build::Configure { args, programs } => configure::build(arch, sysroot, p, &src, &work, args, programs)?,
         };
-        out.extend(progs);
+        out.extend(progs.into_iter().map(|(n, p)| Output::Program(n, p)));
+        for (name, path) in p.data {
+            let file = match path.strip_prefix("port:") {
+                Some(rel) => fetch::port_dir(p).join(rel),
+                None => src.join(path),
+            };
+            out.push(Output::Data(name.to_string(), file));
+        }
     }
     Ok(out)
 }

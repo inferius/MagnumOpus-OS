@@ -29,3 +29,14 @@ fn ports_are_pinned() {
         }
     }
 }
+
+#[test]
+fn tool_versions_parse() {
+    use super::tools::parse_version;
+    assert_eq!(parse_version("cmake version 4.4.4\n\nCMake suite maintained"), Some((4, 4)));
+    assert_eq!(parse_version("1.13.2\n"), Some((1, 13)));
+    assert_eq!(parse_version("cmake version 3.24.0-rc1"), Some((3, 24)));
+    assert_eq!(parse_version("bez verze"), None);
+    assert!(Some((4, 4)) >= Tool::CMake.min_version());
+    assert!(Some((3, 22)) < Tool::CMake.min_version());
+}

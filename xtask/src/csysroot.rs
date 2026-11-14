@@ -3,7 +3,8 @@
 //!
 //! - `include/` (hlavicky cstd a `mosdl.h`) a `include-core/` (zaklad cstd-core;
 //!   `stdio.h` apod. z cstd ho doplnuji pres `#include_next`),
-//! - `lib/libc.a` (cstd + std + osrt vcetne `_start`), `lib/magnumopus.ld`
+//! - `lib/libc.a` (cstd + std + osrt vcetne `_start`), prazdne `libm.a`,
+//!   `libpthread.a`, `librt.a` (vse je v libc.a), `lib/magnumopus.ld`
 //!   (linker skript programu se std),
 //! - `clang.cfg` - priznaky pro `clang --config=...` (preklad i link).
 //!
@@ -14,6 +15,9 @@ use std::path::{Path, PathBuf};
 
 use crate::arch::Arch;
 use crate::{Result, target_dir, workspace_root};
+
+/// Knihovny, ktere jsou soucasti `libc.a` (prazdne archivy pro `-l...`).
+const EMPTY_LIBS: &[&str] = &["libm.a", "libpthread.a", "librt.a"];
 
 /// Adresar sysrootu C pro architekturu.
 pub fn dir(arch: &Arch) -> PathBuf {
@@ -105,6 +109,12 @@ pub fn assemble(arch: &Arch, std_bin: &Path) -> Result<PathBuf> {
     copy_tree(&workspace_root().join("libs/mosdl/include"), &root.join("include"))?;
     let libc = std::fs::read(std_bin.join("libc.a")).map_err(|e| format!("libc.a: {e}"))?;
     write_if_changed(&root.join("lib/libc.a"), &libc)?;
+    // Jako musl: matematika, vlakna a hodiny jsou v libc.a, ale build
+    // systemy linkuji `-lm -lpthread -lrt` (CMake SDL, configure). Prazdne
+    // archivy, aby link prosel.
+    for name in EMPTY_LIBS {
+        write_if_changed(&root.join("lib").join(name), b"!<arch>\n")?;
+    }
     write_if_changed(&root.join("lib/magnumopus.ld"), &std::fs::read(workspace_root().join("user/user-std.ld"))?)?;
     let mut cfg = String::from("# Sysroot C MagnumOpus: clang --config=<tento soubor> (preklad i link).\n");
     for f in cflags(arch, &root)?.into_iter().chain(ldflags(&root)) {

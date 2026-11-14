@@ -1,9 +1,11 @@
 /*
  * Test casti 2d knihovny cstd: math.h (libm), long double (presnost
- * double), plovouci carka v printf a strtod.
+ * double), plovouci carka v printf a strtod; fenv.h (zaokrouhleni,
+ * priznaky vyjimek, ulozeni prostredi).
  * Vraci 0 = ok, jinak cislo kroku.
  */
 #include <errno.h>
+#include <fenv.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,5 +53,30 @@ int math_test(void) {
     errno = 0;
     if (strtod("nic", &end) != 0.0 || strcmp(end, "nic") != 0 || errno != 0) return 33;
     if (strtof("0.1", NULL) != 0.1f) return 34;
+    /* fenv.h: zaokrouhleni meni vysledek deleni, priznaky se nastavi
+       a smazou, feholdexcept/feupdateenv je zachova. */
+    fenv_t saved;
+    if (fegetenv(&saved) != 0 || fegetround() != FE_TONEAREST) return 40;
+    volatile double one = 1.0, three = 3.0, zero = 0.0;
+    if (fesetround(FE_UPWARD) != 0 || fegetround() != FE_UPWARD) return 41;
+    double up = one / three;
+    fesetround(FE_DOWNWARD);
+    double down = one / three;
+    if (!(up > down) || fesetround(12345) == 0) return 42;
+    fesetround(FE_TONEAREST);
+    feclearexcept(FE_ALL_EXCEPT);
+    volatile double inf = one / zero;
+    if (!isinf(inf) || !fetestexcept(FE_DIVBYZERO)) return 43;
+    feclearexcept(FE_DIVBYZERO);
+    if (fetestexcept(FE_DIVBYZERO)) return 44;
+    fenv_t held;
+    feraiseexcept(FE_OVERFLOW);
+    if (feholdexcept(&held) != 0 || fetestexcept(FE_ALL_EXCEPT)) return 45;
+    feraiseexcept(FE_INEXACT);
+    feupdateenv(&held);
+    if (!fetestexcept(FE_OVERFLOW) || !fetestexcept(FE_INEXACT)) return 46;
+    fesetenv(FE_DFL_ENV);
+    if (fegetround() != FE_TONEAREST || fetestexcept(FE_ALL_EXCEPT)) return 47;
+    fesetenv(&saved);
     return 0;
 }

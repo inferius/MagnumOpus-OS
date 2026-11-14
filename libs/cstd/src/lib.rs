@@ -27,6 +27,7 @@ extern crate cstd_core;
 
 pub mod dirent;
 pub mod errno;
+pub mod fenv;
 pub mod flock;
 pub mod math;
 pub mod misc;
@@ -60,6 +61,8 @@ mod mman_tests;
 mod signal_tests;
 #[cfg(test)]
 mod scanf_tests;
+#[cfg(test)]
+mod fenv_tests;
 
 pub use cstd_core::ctypes::{c_char, c_int, c_long, c_uint, c_ulong, size_t};
 

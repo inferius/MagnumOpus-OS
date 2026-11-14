@@ -1,0 +1,8 @@
+# Test SDL (port SDL 3, docs/cs/sdl.md): klavesy, text a mys v okne
+# kompozitoru (vypis udalosti). Sada testu `sdl`.
+[app]
+id = "org.libsdl.checkkeys"
+name = "SDL checkkeys"
+
+[limits]
+memory = "128M"

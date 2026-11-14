@@ -42,6 +42,8 @@ typedef struct {
 #define SIGTTIN 21
 #define SIGTTOU 22
 #define SIGURG 23
+#define SIGVTALRM 26
+#define SIGPROF 27
 #define SIGWINCH 28
 
 #define SIG_DFL ((sighandler_t)0)

@@ -10,9 +10,10 @@ the repository.
 
 | Part | What | Status |
 |---|---|---|
-| port source | HTTPS (`curl`), SHA-256, `tar` (zip too), patches with `git apply`, own files (overlay) | **[verified in QEMU]** zlib and sqlite (suite `cstd porty`, no patches); patches and overlay **[implemented]**, verified with SDL |
+| tool versions | CMake 3.24+, Ninja 1.10+ (`--version`), advice on an old version | **[implemented]** host test; [Building](building.md#tools) |
+| port source | HTTPS (`curl`), SHA-256, `tar` (zip too), patches with `git apply`, own files (overlay) | **[verified in QEMU]** zlib and sqlite (suite `cstd porty`), patches and overlay with SDL (suite `sdl`) |
 | `Sources` | a list of sources compiled directly with clang | **[verified in QEMU]** zlib 1.3.1, sqlite 3.46.1 |
-| `CMake` | CMake + Ninja, toolchain file and the `MagnumOpus` platform module from the sysroot | **[implemented]** (SDL, step 6) |
+| `CMake` | CMake + Ninja, toolchain file and the `MagnumOpus` platform module from the sysroot | **[verified in QEMU]** SDL 3.4.20 ([SDL](sdl.md), suite `sdl`) |
 | `Configure` | a `configure` script (autotools, FFmpeg) + `make` | **[implemented]**, verified with FFmpeg |
 | missing tool | an error with the tool name and install advice for the host | **[implemented]** host test `cargo test -p xtask cports` |
 
@@ -79,7 +80,7 @@ tools and advice for the host:
 
 | Tool | Windows | Linux / macOS |
 |---|---|---|
-| CMake | `winget install Kitware.CMake` | `apt install cmake` / `brew install cmake` |
+| CMake (3.24+) | `winget install Kitware.CMake` | `apt install cmake` / `brew install cmake` |
 | Ninja | `winget install Ninja-build.Ninja` | `apt install ninja-build` / `brew install ninja` |
 | `sh` | Git for Windows | part of the system |
 | `make` | MSYS2 (`pacman -S make`) or WSL | `apt install make` |
@@ -98,6 +99,7 @@ installer may not have refreshed `PATH` in an open terminal).
 |---|---|---|---|---|
 | zlib | 1.3.1 | zlib | `Sources` | `zlib-example`, `minigzip` |
 | sqlite | 3.46.1 | public domain | `Sources` | `sqlite3`, `sqltest` |
+| SDL | 3.4.20 | zlib | `CMake` | `testsprite`, `checkkeys` ([SDL](sdl.md)) |
 
 Port tests and limitations (sqlite without WAL and mmap I/O) are described
 in [cstd](cstd.md#c-sysroot-and-ports-part-2i).

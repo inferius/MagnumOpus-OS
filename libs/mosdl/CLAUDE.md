@@ -19,7 +19,7 @@ Rozhraní C pro port SDL (`mosdl_*`, hlavička `include/mosdl.h`, v sysrootu C `
 ## Testy
 
 - `cargo test -p mosdl` (překlad událostí, kopie snímku vč. nepřátelských rozměrů, shoda s hlavičkou).
-- QEMU: `cargo xtask test --only sdl` (etapa 6-3).
+- QEMU: `cargo xtask test --only sdl` (`user/init/src/tests/sdl.rs`: `testsprite` pixely, `checkkeys` umělý vstup).
 
 ## Pasti
 

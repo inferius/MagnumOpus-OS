@@ -10,9 +10,10 @@ v repozitáři.
 
 | Část | Co | Stav |
 |---|---|---|
-| zdroj portu | HTTPS (`curl`), SHA-256, `tar` (i zip), záplaty `git apply`, vlastní soubory (overlay) | **[ověřeno v QEMU]** zlib a sqlite (sada `cstd porty`, bez záplat); záplaty a overlay **[implementováno]**, ověří se s SDL |
+| verze nástrojů | CMake 3.24+, Ninja 1.10+ (`--version`), rada při staré verzi | **[implementováno]** host test; [Sestavení](sestaveni.md#nástroje) |
+| zdroj portu | HTTPS (`curl`), SHA-256, `tar` (i zip), záplaty `git apply`, vlastní soubory (overlay) | **[ověřeno v QEMU]** zlib a sqlite (sada `cstd porty`), záplaty a overlay se SDL (sada `sdl`) |
 | `Sources` | seznam zdrojů přeložený clangem přímo | **[ověřeno v QEMU]** zlib 1.3.1, sqlite 3.46.1 |
-| `CMake` | CMake + Ninja, soubor nástrojů a modul platformy `MagnumOpus` ze sysrootu | **[implementováno]** (SDL, krok 6) |
+| `CMake` | CMake + Ninja, soubor nástrojů a modul platformy `MagnumOpus` ze sysrootu | **[ověřeno v QEMU]** SDL 3.4.20 ([SDL](sdl.md), sada `sdl`) |
 | `Configure` | skript `configure` (autotools, FFmpeg) + `make` | **[implementováno]**, ověří se s FFmpegem |
 | chybějící nástroj | chyba se jménem nástroje a radou k instalaci podle hostitele | **[implementováno]** host test `cargo test -p xtask cports` |
 
@@ -77,7 +78,7 @@ nástroji a radou podle hostitele:
 
 | Nástroj | Windows | Linux / macOS |
 |---|---|---|
-| CMake | `winget install Kitware.CMake` | `apt install cmake` / `brew install cmake` |
+| CMake (3.24+) | `winget install Kitware.CMake` | `apt install cmake` / `brew install cmake` |
 | Ninja | `winget install Ninja-build.Ninja` | `apt install ninja-build` / `brew install ninja` |
 | `sh` | Git for Windows | součást systému |
 | `make` | MSYS2 (`pacman -S make`) nebo WSL | `apt install make` |
@@ -96,6 +97,7 @@ v otevřeném terminálu obnovit).
 |---|---|---|---|---|
 | zlib | 1.3.1 | zlib | `Sources` | `zlib-example`, `minigzip` |
 | sqlite | 3.46.1 | public domain | `Sources` | `sqlite3`, `sqltest` |
+| SDL | 3.4.20 | zlib | `CMake` | `testsprite`, `checkkeys` ([SDL](sdl.md)) |
 
 Testy portů a omezení (sqlite bez WAL a mmap I/O) popisuje
 [cstd](cstd.md#sysroot-c-a-porty-část-2i).

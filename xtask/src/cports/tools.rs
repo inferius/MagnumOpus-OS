@@ -27,6 +27,18 @@ impl Tool {
         }
     }
 
+    /// Nejnizsi podporovana verze (docs/cs/sestaveni.md, pozadavky na
+    /// hostitele); `None` = verze se nekontroluje.
+    pub fn min_version(self) -> Option<(u32, u32)> {
+        match self {
+            // SDL 3.4 chce 3.16; 3.24 kvuli souboru nastroju (hledani
+            // v CMAKE_FIND_ROOT_PATH, CMAKE_TRY_COMPILE_TARGET_TYPE).
+            Tool::CMake => Some((3, 24)),
+            Tool::Ninja => Some((1, 10)),
+            Tool::Sh | Tool::Make => None,
+        }
+    }
+
     /// Rada k instalaci podle hostitele.
     pub fn advice(self) -> &'static str {
         match (self, cfg!(windows)) {
@@ -50,7 +62,12 @@ fn known_dirs(t: Tool) -> Vec<PathBuf> {
     let pf = env::var_os("ProgramFiles").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("C:\\Program Files"));
     let local = env::var_os("LOCALAPPDATA").map(PathBuf::from);
     match t {
-        Tool::CMake => vec![pf.join("CMake").join("bin")],
+        // winget dava CMake i Ninja jako balik s odkazem ve WinGet\Links.
+        Tool::CMake => {
+            let mut v = vec![pf.join("CMake").join("bin")];
+            v.extend(local.map(|l| l.join("Microsoft").join("WinGet").join("Links")));
+            v
+        }
         Tool::Ninja => local.map(|l| vec![l.join("Microsoft").join("WinGet").join("Links")]).unwrap_or_default(),
         Tool::Sh => vec![pf.join("Git").join("bin"), pf.join("Git").join("usr").join("bin")],
         Tool::Make => vec![PathBuf::from("C:\\msys64\\usr\\bin")],
@@ -70,24 +87,53 @@ pub fn find(t: Tool) -> Option<PathBuf> {
     path_dirs.into_iter().chain(known_dirs(t)).map(|d| d.join(&exe)).find(|p| p.is_file())
 }
 
-/// Najde vsechny nastroje portu, nebo vrati jednu chybu se vsemi, ktere
-/// chybi, a radou k instalaci.
+/// Prvni "X.Y" ve vystupu `--version` (`cmake version 4.4.4`, `1.13.2`).
+pub fn parse_version(out: &str) -> Option<(u32, u32)> {
+    out.split(|c: char| !(c.is_ascii_digit() || c == '.')).find_map(|w| {
+        let mut it = w.split('.');
+        let major = it.next()?.parse().ok()?;
+        let minor = it.next()?.parse().ok()?;
+        Some((major, minor))
+    })
+}
+
+/// Verze nastroje (`--version`), nebo `None`, kdyz nejde zjistit.
+fn version(path: &std::path::Path) -> Option<(u32, u32)> {
+    let out = std::process::Command::new(path).arg("--version").output().ok()?;
+    parse_version(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// Najde vsechny nastroje portu a overi jejich verzi, nebo vrati jednu
+/// chybu se vsemi, ktere chybi nebo jsou stare, a radou k instalaci.
 pub fn require(port: &str, tools: &[Tool]) -> Result<Vec<PathBuf>> {
     let mut found = Vec::new();
     let mut missing = Vec::new();
+    let mut old = Vec::new();
     for &t in tools {
         match find(t) {
-            Some(p) => found.push(p),
+            Some(p) => {
+                if let Some(min) = t.min_version() {
+                    match version(&p) {
+                        Some(v) if v >= min => {}
+                        v => old.push((t, v, min)),
+                    }
+                }
+                found.push(p);
+            }
             None => missing.push(t),
         }
     }
-    if missing.is_empty() {
+    if missing.is_empty() && old.is_empty() {
         return Ok(found);
     }
-    let mut msg = format!("port C {port} potrebuje nastroje, ktere na hostiteli chybi:\n");
+    let mut msg = format!("port C {port} potrebuje nastroje, ktere na hostiteli chybi nebo jsou stare:\n");
     for t in &missing {
         let (name, var) = t.names();
-        msg.push_str(&format!("  - {name}: {} (nebo promenna {var} s cestou)\n", t.advice()));
+        msg.push_str(&format!("  - {name}: chybi; {} (nebo promenna {var} s cestou)\n", t.advice()));
+    }
+    for (t, v, (a, b)) in &old {
+        let have = v.map_or(String::from("neznama verze"), |(x, y)| format!("{x}.{y}"));
+        msg.push_str(&format!("  - {}: {have}, potreba aspon {a}.{b}; {}\n", t.names().0, t.advice()));
     }
     msg.push_str("Po instalaci otevrete novy terminal (PATH) a spustte xtask znovu.");
     Err(msg.into())

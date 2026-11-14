@@ -629,6 +629,25 @@ SSE, AVX and AVX-512 per CPUID, FXSAVE without XSAVE), see
 NEON, [hardware-requirements.md](hardware-requirements.md)); libraries
 (FFmpeg, codecs) pick AVX/AVX2 and higher at run time via CPUID.
 
+## SDL (step 6)
+
+**[verified in QEMU]** x86_64 and aarch64 (suite `sdl`, [SDL](sdl.md)).
+What the SDL port needed and was added:
+
+| What | How |
+|---|---|
+| `environ` | a NULL-terminated array of `NAME=VALUE` in `osrt` (`env.rs`); rebuilt at startup and on every `setenv`/`unsetenv` (also from Rust `std::env::set_var`). Old arrays are not freed (other code may hold pointers into them, as in glibc) |
+| `nl_langinfo` (`langinfo.h`) | C locale texts (date and time formats, days, months); `CODESET` is `UTF-8` in `C.UTF-8`, otherwise `ANSI_X3.4-1968` |
+| `sched.h`, `pthread_getschedparam`/`setschedparam` | only `SCHED_OTHER` with priority 0; `SCHED_FIFO`/`SCHED_RR` = `EPERM` (like Linux without privileges), nonsense = `EINVAL` |
+| `fenv.h` | exceptions, rounding, `fegetenv`/`feholdexcept`/`fesetenv`/`feupdateenv`, `FE_DFL_ENV`; x86_64 over x87 and MXCSR, aarch64 over FPCR and FPSR (`src/fenv.rs`), values and `fenv_t` as in glibc. Exception traps are never enabled. Test: step `math` (`ctest`) on both architectures, host test on x86_64 (SDL converts audio with NEON under `feholdexcept`) |
+| `SIGVTALRM`, `SIGPROF` | numbers as in Linux (26, 27) for signal masks; `setitimer` timers do not exist yet |
+| `wchar.h` | types and constants only so far (`wint_t`, `mbstate_t`, `WEOF`); `wcs*` functions and conversions come with full wchar support (below) |
+| `inttypes.h` | `PRI*`/`SCN*` macros (LP64), `imaxabs`, `imaxdiv`, `strtoimax`, `strtoumax` |
+| `libm.a`, `libpthread.a`, `librt.a` | empty archives in the sysroot (everything is in `libc.a`, as in musl); build systems link `-lm -lpthread` |
+
+`dlfcn.h` comes with `libc.so` (a separate branch); SDL does not need it
+yet (our patch switches off GTK and `dlopen` for MagnumOpus).
+
 ## FFmpeg and licences
 
 FFmpeg will run as a **separate isolated process** (the playback and
