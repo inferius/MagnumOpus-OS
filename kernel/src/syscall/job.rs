@@ -20,6 +20,10 @@ pub fn create(a: Args) -> Result<u64> {
 pub fn set_limit(a: Args) -> Result<u64> {
     let p = current_process();
     let job = p.handles().get_as::<Job>(arg_handle(a[0])?, Rights::WRITE)?;
+    if a[1] == abi::job::policy::JIT as u64 {
+        job.set_jit(a[2])?;
+        return Ok(0);
+    }
     let pool = Pool::from_raw(a[1]).ok_or(Error::InvalidArgs)?;
     job.set_limit(pool, a[2]);
     Ok(0)
@@ -79,7 +83,8 @@ pub fn processes(a: Args) -> Result<u64> {
                 cpu_ns: proc.cpu_ns.load(core::sync::atomic::Ordering::Relaxed)
                     + crate::sched::running_ns(proc.id),
                 threads,
-                flags: if finished { abi::job::proc_flags::FINISHED } else { 0 },
+                flags: if finished { abi::job::proc_flags::FINISHED } else { 0 }
+                    | if proc.jit_used() { abi::job::proc_flags::JIT_USED } else { 0 },
                 name: abi::job::ProcEntry::name_bytes(&proc.name),
             };
             user::write_bytes(&p, a[1] + off, &e.encode())?;

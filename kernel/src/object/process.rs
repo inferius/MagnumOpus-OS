@@ -54,6 +54,8 @@ pub struct Process {
     job: Arc<Job>,
     /// Cas na CPU vsech vlaken (ns; pricita scheduler pri prepnuti).
     pub cpu_ns: AtomicU64,
+    /// Audit JIT: kolikrat proces dostal spustitelnou pamet bez pecete.
+    jit_events: AtomicU64,
     /// Trida QoS novych vlaken a Realtime parametry (ns) z `PROCESS_SET`.
     qos: SpinLock<(schedcore::Class, Option<(u64, u64)>)>,
     /// Fronty futexu (`FUTEX`): virtualni adresa ->
@@ -102,6 +104,7 @@ impl Process {
             }),
             job,
             cpu_ns: AtomicU64::new(0),
+            jit_events: AtomicU64::new(0),
             qos: SpinLock::new((schedcore::Class::Normal, None)),
             futex: SpinLock::new(BTreeMap::new()),
             parked: SpinLock::new(Vec::new()),
@@ -123,6 +126,23 @@ impl Process {
         }
         log::debug!("proces {} ({}) vytvoren", p.id, p.name);
         Ok(p)
+    }
+
+    /// Audit JIT: proces prave dostal spustitelnou pamet bez pecete
+    /// (`VM_MAP` nebo `VM_PROTECT`). Prvni udalost se zaloguje.
+    pub fn note_jit(&self, addr: u64, len: u64) {
+        if self.jit_events.fetch_add(1, Ordering::Relaxed) == 0 {
+            log::warn!(
+                "proces {} ({}): JIT - spustitelna pamet bez pecete na {addr:#x} ({len} B)",
+                self.id,
+                self.name
+            );
+        }
+    }
+
+    /// Pouzil proces JIT (audit, `JOB_PROCESSES`)?
+    pub fn jit_used(&self) -> bool {
+        self.jit_events.load(Ordering::Relaxed) != 0
     }
 
     /// Trida QoS pro nova vlakna procesu (a jejich Realtime parametry).

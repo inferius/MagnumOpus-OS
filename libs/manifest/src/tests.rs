@@ -76,6 +76,9 @@ fn minimal_manifest_has_no_network() {
     assert_eq!(m.name, "org.x");
     assert!(m.network.is_none());
     assert_eq!(m.limits.memory, None);
+    assert!(!m.jit, "JIT jen kdyz ho manifest vyslovne chce");
+    let j = Manifest::parse("[app]\nid = \"org.x\"\njit = true\n").unwrap();
+    assert!(j.jit);
 }
 
 #[test]

@@ -223,6 +223,8 @@ pub(crate) fn handle(fs: &FsClient, m: ToInit, handles: Vec<Handle>) -> Result<V
             let name = String::from(name);
             let (_, user_fs) = fs.connect_as(uid, &groups, &Profile::Standard.user_mounts())?;
             let job = Job::create(&libos::job::current()?)?;
+            // Procesy relace samy JIT nesmi; aplikacim ho udeli manifest.
+            job.set_jit(libos::abi::job::jit::GRANT)?;
             let id = NEXT.fetch_add(1, Ordering::Relaxed);
             let own = handles.into_iter().next().map(Channel::from_handle);
             println!("init: relace {id} uzivatele {uid}");

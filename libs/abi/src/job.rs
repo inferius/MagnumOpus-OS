@@ -106,6 +106,25 @@ pub struct ProcEntry {
 pub mod proc_flags {
     /// Proces uz skoncil (ceka jen na uklid handlu).
     pub const FINISHED: u32 = 1;
+    /// Proces pouzil JIT: spustitelnou pamet bez pecete (audit).
+    pub const JIT_USED: u32 = 2;
+}
+
+/// Politiky jobu nastavovane pres `JOB_SET_LIMIT(job, policy, hodnota)`
+/// (cisla navazuji na `pool`).
+pub mod policy {
+    /// Opravneni JIT: hodnota = bity [`super::jit`].
+    pub const JIT: u32 = 2;
+}
+
+/// Bity politiky JIT jobu. Plati jen, kdyz vsichni predci smi udelovat
+/// (`GRANT`); nastavit je smi jen ten, jehoz rodicovsky job udelovat smi.
+/// Novy job nema nic, korenovy jen `GRANT`.
+pub mod jit {
+    /// Procesy jobu smi mapovat spustitelnou pamet bez pecete (JIT).
+    pub const RUN: u64 = 1;
+    /// Job smi JIT udelit podrizenym jobum.
+    pub const GRANT: u64 = 2;
 }
 
 impl ProcEntry {

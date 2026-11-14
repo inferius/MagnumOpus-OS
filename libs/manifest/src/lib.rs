@@ -8,6 +8,7 @@
 //! [app]
 //! id = "org.magnumopus.netprobe"   # povinne: a-z A-Z 0-9 . - _
 //! name = "Sitova sonda"            # pro dotazy uzivateli
+//! jit = true                       # smi spoustet pamet bez pecete (JIT); vychozi ne
 //!
 //! [limits]                         # rozpocet jobu (bez sekce = bez limitu)
 //! memory = "64M"                   # uzivatelska pamet
@@ -78,6 +79,9 @@ pub struct Manifest {
     pub limits: Limits,
     /// Relace site pro program (`None` = bez site).
     pub network: Option<Restriction>,
+    /// `[app] jit = true`: program smi spoustet pamet bez pecete (JIT,
+    /// napr. prohlizec, .NET). Vychozi ne.
+    pub jit: bool,
 }
 
 impl Manifest {
@@ -105,6 +109,7 @@ impl Manifest {
             name: String::from(name),
             limits,
             network,
+            jit: t.get_bool("app.jit").unwrap_or(false),
         })
     }
 }

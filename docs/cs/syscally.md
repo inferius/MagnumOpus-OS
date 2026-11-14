@@ -300,6 +300,18 @@ zdroj `READ`; klon má plná práva objektu. Jen běžné objekty. Chyby:
 `OUT_OF_RANGE`, `NOT_SUPPORTED` (souvislý, DMA nebo fyzický objekt),
 `NO_MEMORY`, `NO_RESOURCES`, `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
 
+### `VMO_SEAL`
+
+`(vmo) -> 0`. Zapečetí objekt paměti: jeho obsah se už nikdy nezmění.
+`VMO_WRITE`, mapování pro zápis a `VMO_PHYS_ADDR` pak vrátí
+`ACCESS_DENIED`; mapování má nejvyšší práva bez zápisu. Klon
+(`VMO_CLONE`) zapečetěného objektu je obyčejný objekt. Nevratné; opakovaná
+pečeť nic nedělá. Bez oprávnění JIT jde spouštět jen zapečetěná paměť
+(viz [sprava-pameti.md](sprava-pameti.md)). Vyžaduje `WRITE`. Chyby:
+`BAD_STATE` (objekt má mapování, které smí zapisovat - i jen jako nejvyšší
+právo), `NOT_SUPPORTED` (souvislý, DMA nebo fyzický objekt),
+`BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+
 ### `VMO_READ`
 
 `(handle, offset, buf_ptr, len) -> 0`. Přečte data objektu (max. 1 MiB na
@@ -545,8 +557,13 @@ předků). `parent` potřebuje `MANAGE`. Objekt se strhne z rozpočtu jádra
 
 `(job, pool, bytes) -> 0`. Nastaví vlastní limit rozpočtu `pool`
 (`KERNEL` = 0, `USER` = 1) v bajtech; `u64::MAX` (`job::UNLIMITED`) =
-bez vlastního limitu. Vyžaduje `WRITE`. Chyby: `INVALID_ARGS` (neznámý
-`pool`), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+bez vlastního limitu. S `pool` = `policy::JIT` (2) nastaví politiku JIT:
+hodnota = bity `jit::RUN` (procesy jobu smí spouštět paměť bez pečeti)
+a `jit::GRANT` (job smí JIT udělit podřízeným); zapnout smí jen ten, jehož
+rodičovský job udělovat smí, vypnout vždy (platí hned i pro potomky).
+Nový job nemá nic, kořenový jen `GRANT`. Vyžaduje `WRITE`. Chyby: `INVALID_ARGS`
+(neznámý `pool`, neznámý bit), `ACCESS_DENIED` (rodič JIT neudělí),
+`BAD_HANDLE`, `WRONG_TYPE`.
 
 ### `JOB_INFO`
 
@@ -566,7 +583,8 @@ nejvýš `max` (do 4096) záznamů `abi::job::ProcEntry` (64 B, little
 endian): `pid`, `job` (číslo jobu procesu), `cpu_ns` (čas na CPU všech
 vláken, přičítá scheduler při přepnutí), `threads` (živá vlákna), `flags`
 (`proc_flags::FINISHED` = skončil; zbývá jen náhrobek bez paměti, dokud
-někdo drží handle), `name` (32 B UTF-8,
+někdo drží handle; `proc_flags::JIT_USED` = proces dostal spustitelnou
+paměť bez pečeti - audit JIT), `name` (32 B UTF-8,
 doplněno nulami). Vrátí celkový počet (i nad `max`). Vyžaduje `READ`.
 Chyby: `INVALID_ARGS` (`max` > 4096), `BAD_HANDLE`, `ACCESS_DENIED`,
 `WRONG_TYPE`, `BAD_ADDRESS`.

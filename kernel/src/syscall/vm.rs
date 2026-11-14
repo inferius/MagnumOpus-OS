@@ -89,19 +89,40 @@ pub fn map(a: Args) -> Result<u64> {
     if flags & MAP_EXECUTE != 0 {
         needed = needed | Rights::EXECUTE;
     }
-    let (target, vmo) = {
+    let (target, vmo, rights) = {
         let table = p.handles();
+        let h = arg_handle(a[1])?;
         (
             table.get_as::<Process>(arg_handle(a[0])?, Rights::WRITE)?,
-            table.get_as::<MemoryObject>(arg_handle(a[1])?, needed)?,
+            table.get_as::<MemoryObject>(h, needed)?,
+            table.rights(h)?,
         )
     };
-    let addr = target.address_space().map(vmo.clone(), a[2], a[3], flags, a[5])?;
-    // Fyzicky objekt si pamatuje, kde je namapovany (odvolani); kdyz byl
-    // mezitim odvolan, mapovani se vrati.
-    if let Err(e) = vmo.register_mapper(&target) {
-        let _ = target.address_space().unmap(addr, a[3], 0);
-        return Err(e);
+    // W+X nikdy (chyba argumentu, pred kontrolou opravneni).
+    if flags & MAP_WRITE != 0 && flags & MAP_EXECUTE != 0 {
+        return Err(Error::InvalidArgs);
+    }
+    // W^X: spustit jde zapecetena pamet, nezapecetena jen s opravnenim JIT
+    // jobu ciloveho procesu (audit).
+    let jit = target.job().may_jit();
+    let mut max = MAP_READ;
+    if rights.contains(Rights::WRITE) {
+        max |= MAP_WRITE;
+    }
+    if rights.contains(Rights::EXECUTE) && (vmo.is_sealed() || jit) {
+        max |= MAP_EXECUTE;
+    }
+    if flags & MAP_EXECUTE != 0 && max & MAP_EXECUTE == 0 {
+        return Err(Error::AccessDenied);
+    }
+    // Objekt si pamatuje, kde je namapovany (odvolani, nulova stranka, CoW,
+    // pecet) - pred mapovanim, aby soubezna pecet mapovani nepreskocila.
+    vmo.register_mapper(&target)?;
+    let addr = target
+        .address_space()
+        .map_with_max(vmo.clone(), a[2], a[3], flags, a[5], max)?;
+    if flags & MAP_EXECUTE != 0 && !vmo.is_sealed() {
+        target.note_jit(addr, a[3]);
     }
     Ok(addr)
 }
@@ -127,10 +148,24 @@ pub fn reserve(a: Args) -> Result<u64> {
     target(a[0], Rights::WRITE)?.address_space().reserve(a[1], a[2], flags)
 }
 
-/// `VM_PROTECT(process, addr, len, prot)`.
+/// `VM_PROTECT(process, addr, len, prot)`. Spusteni nezapecetene pameti
+/// jen s opravnenim JIT jobu procesu (audit).
 pub fn protect(a: Args) -> Result<u64> {
     let prot = u32::try_from(a[3]).map_err(|_| Error::InvalidArgs)?;
-    target(a[0], Rights::WRITE)?.address_space().protect(a[1], a[2], prot)?;
+    let target = target(a[0], Rights::WRITE)?;
+    if target.address_space().protect(a[1], a[2], prot, target.job().may_jit())? {
+        target.note_jit(a[1], a[2]);
+    }
+    Ok(0)
+}
+
+/// `VMO_SEAL(vmo)`: pecet (obsah se uz nezmeni). Pravo `WRITE`.
+pub fn seal(a: Args) -> Result<u64> {
+    let p = current_process();
+    let vmo = p
+        .handles()
+        .get_as::<MemoryObject>(arg_handle(a[0])?, Rights::WRITE)?;
+    vmo.seal()?;
     Ok(0)
 }
 

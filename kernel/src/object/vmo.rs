@@ -117,6 +117,8 @@ pub struct MemoryObject {
     /// a jadro pri pristupu pres primou mapu udrzuje cache (na nekoherentni
     /// platforme; na koherentni jsou `arch::dma_sync_*` prazdne).
     for_dma: bool,
+    /// Zapeceteny objekt (`VMO_SEAL`): obsah se uz nikdy nezmeni.
+    sealed: AtomicBool,
     /// Jen fyzicke objekty jdou odvolat (`revoke`).
     revocable: bool,
     revoked: AtomicBool,
@@ -134,6 +136,7 @@ impl MemoryObject {
             zero_mapped: AtomicBool::new(false),
             mappers: SpinLock::new(Vec::new()),
             cow_lock: SpinLock::new(()),
+            sealed: AtomicBool::new(false),
             kind,
             dma: None,
             for_dma: false,
@@ -337,6 +340,33 @@ impl MemoryObject {
         Ok(core::mem::take(&mut *m).into_iter().filter_map(|w| w.upgrade()).collect())
     }
 
+    /// Je objekt zapeceteny?
+    pub fn is_sealed(&self) -> bool {
+        self.sealed.load(Ordering::SeqCst)
+    }
+
+    /// Zapeceti objekt: obsah se uz nikdy nezmeni (zapis jadrem, mapovani
+    /// pro zapis i pripnuti pro zarizeni selzou). Jen bezne objekty. Kdyz
+    /// nektere mapovani smi zapisovat (i pres `VM_PROTECT`), `BadState`.
+    ///
+    /// Soubeh s `VM_MAP`: mapovani se nejdriv zapise mezi mappery a pak pod
+    /// zamkem prostoru overi pecet; pecet se nastavi pred prohledanim
+    /// mapperu (oboji SeqCst) - bud pecet mapovani najde, nebo mapovani
+    /// uvidi pecet.
+    pub fn seal(&self) -> Result<(), Error> {
+        if !matches!(self.kind, Kind::Pages) || self.for_dma {
+            return Err(Error::NotSupported);
+        }
+        if self.sealed.swap(true, Ordering::SeqCst) {
+            return Ok(());
+        }
+        if self.mapper_processes().iter().any(|p| p.address_space().maps_writable(self)) {
+            self.sealed.store(false, Ordering::SeqCst);
+            return Err(Error::BadState);
+        }
+        Ok(())
+    }
+
     /// Zive procesy s mapovanim objektu.
     fn mapper_processes(&self) -> Vec<Arc<Process>> {
         self.mappers.lock().iter().filter_map(Weak::upgrade).collect()
@@ -433,6 +463,10 @@ impl MemoryObject {
     pub fn expose_phys(&self, offset: u64) -> Result<PhysAddr, Error> {
         if !matches!(self.kind, Kind::Pages) {
             return self.page(offset).ok_or(Error::OutOfRange);
+        }
+        // Zarizeni by do zapeceteneho obsahu mohlo zapisovat.
+        if self.is_sealed() {
+            return Err(Error::AccessDenied);
         }
         let slot = self.pages.get((offset / PAGE) as usize).ok_or(Error::OutOfRange)?;
         loop {
@@ -533,6 +567,9 @@ impl MemoryObject {
 
     pub fn write(&self, offset: u64, data: &[u8]) -> Result<(), Error> {
         self.check_access()?;
+        if self.is_sealed() {
+            return Err(Error::AccessDenied);
+        }
         self.check_range(offset, data.len() as u64)?;
         self.commit_range(offset, data.len() as u64)?;
         self.for_each_chunk(offset, data.len(), |ptr, at, n| {

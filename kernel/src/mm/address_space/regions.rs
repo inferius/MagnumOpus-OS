@@ -173,20 +173,29 @@ impl AddressSpace {
     /// a nikdy nad prava pri `VM_MAP` (`AccessDenied`). Rozsah musi byt cely
     /// v mapovanich (diry `NotFound`, rezervace `BadState`). Namapovane
     /// stranky se odmapuji a vypadek je doplni s novymi pravy.
-    pub fn protect(&self, addr: u64, len: u64, prot: u32) -> Result<(), Error> {
+    /// Spusteni na nezapecetenem objektu jen s `jit` (opravneni procesu);
+    /// vraci, zda k tomu doslo (audit).
+    pub fn protect(&self, addr: u64, len: u64, prot: u32, jit: bool) -> Result<bool, Error> {
         if prot & !PROT != 0 || (prot & abi::vm::MAP_WRITE != 0 && prot & abi::vm::MAP_EXECUTE != 0) {
             return Err(Error::InvalidArgs);
         }
         let end = user_range(addr, len)?;
         let mut inner = self.inner.lock();
         let starts = inner.covering(addr, end).ok_or(Error::NotFound)?;
+        let mut jit_used = false;
         for s in &starts {
             let m = &inner.mappings[s];
-            if m.vmo.is_none() {
+            let Some(vmo) = &m.vmo else {
                 return Err(Error::BadState);
-            }
+            };
             if prot & !m.max_flags != 0 {
                 return Err(Error::AccessDenied);
+            }
+            if prot & abi::vm::MAP_EXECUTE != 0 && !vmo.is_sealed() {
+                if !jit {
+                    return Err(Error::AccessDenied);
+                }
+                jit_used = true;
             }
         }
         inner.split(addr, &self.job)?;
@@ -203,7 +212,7 @@ impl AddressSpace {
         }
         drop(inner);
         tlb::shootdown();
-        Ok(())
+        Ok(jit_used)
     }
 
     /// Oblast na adrese `addr`: mapovani, rezervace, nebo volne misto mezi

@@ -118,27 +118,27 @@ fn protect() {
     let addr = space.map(vmo.clone(), 0, 4 * PAGE_SIZE, RW, 0).unwrap();
     space.resolve_fault(addr + PAGE_SIZE, Access::Write).unwrap();
     // Jen pro cteni ve strance 1: zapis se odmitne, stranka odmapovana.
-    space.protect(addr + PAGE_SIZE, PAGE_SIZE, MAP_READ).unwrap();
+    space.protect(addr + PAGE_SIZE, PAGE_SIZE, MAP_READ, false).unwrap();
     assert_eq!(space.mapping_count(), 3);
     assert!(space.translate(VirtAddr::new(addr + PAGE_SIZE)).is_none());
     assert_eq!(space.resolve_fault(addr + PAGE_SIZE, Access::Write), Err(Error::AccessDenied));
     space.resolve_fault(addr + PAGE_SIZE, Access::Read).unwrap();
     assert_eq!(space.copy_to_user(addr + PAGE_SIZE, b"x"), Err(Error::BadAddress));
     // Bez pristupu: ani cteni.
-    space.protect(addr, PAGE_SIZE, 0).unwrap();
+    space.protect(addr, PAGE_SIZE, 0, false).unwrap();
     assert_eq!(space.resolve_fault(addr, Access::Read), Err(Error::AccessDenied));
     let mut b = [0u8];
     assert_eq!(space.copy_from_user(addr, &mut b), Err(Error::BadAddress));
     // Zpet na RW jde (max. prava), spusteni ne a W+X nikdy.
-    space.protect(addr, 4 * PAGE_SIZE, RW).unwrap();
+    space.protect(addr, 4 * PAGE_SIZE, RW, false).unwrap();
     space.resolve_fault(addr + PAGE_SIZE, Access::Write).unwrap();
-    assert_eq!(space.protect(addr, PAGE_SIZE, MAP_READ | MAP_EXECUTE), Err(Error::AccessDenied));
-    assert_eq!(space.protect(addr, PAGE_SIZE, RW | MAP_EXECUTE), Err(Error::InvalidArgs));
+    assert_eq!(space.protect(addr, PAGE_SIZE, MAP_READ | MAP_EXECUTE, false), Err(Error::AccessDenied));
+    assert_eq!(space.protect(addr, PAGE_SIZE, RW | MAP_EXECUTE, false), Err(Error::InvalidArgs));
     // Rezervace a diry.
     let res = space.reserve(0, PAGE_SIZE, 0).unwrap();
-    assert_eq!(space.protect(res, PAGE_SIZE, MAP_READ), Err(Error::BadState));
+    assert_eq!(space.protect(res, PAGE_SIZE, MAP_READ, false), Err(Error::BadState));
     // Za rezervaci (lezi hned za mapovanim) je volne misto.
-    assert_eq!(space.protect(res + PAGE_SIZE, PAGE_SIZE, MAP_READ), Err(Error::NotFound));
+    assert_eq!(space.protect(res + PAGE_SIZE, PAGE_SIZE, MAP_READ, false), Err(Error::NotFound));
 }
 
 fn query() {
