@@ -789,6 +789,39 @@ sebou mluví jen přes úzké rozhraní: spodní část `ntdll` a službu
 FEX nebo box64 - až výrazně později, výslovně jako omezení podle pravidla
 dvou architektur); 32bitové aplikace až přes režim WoW64 nového Wine.
 
+### Proton
+
+Proton (Valve) není jiná vrstva než Wine, je to **distribuce Wine pro hry**:
+vlastní větev Wine se záplatami, DXVK (Direct3D 9-11 na Vulkan),
+VKD3D-Proton (Direct3D 12 na Vulkan) a rychlejší synchronizace (fsync nad
+futexy). Pro nás: horní patro jde brát z běžného Wine (aplikace) i z Wine
+od Protonu (hry), spodní patro je stejné. DXVK a VKD3D-Proton převezmeme
+v obou případech, synchronizaci mapujeme na `wait_many` a futex. Steam by
+běžel jako windowsový klient ve Wine. **Riziko:** hry s anti-cheatem
+(EasyAntiCheat, BattlEye) na neznámém systému často nepoběží - je to
+politika výrobců, ne technika.
+
+## Převzetí cizího software: pořadí
+
+**Stav: [navrženo]** (rozhodnuto 2026-11-14). Co musí být hotové, aby šlo
+převzít hotové programy (FFmpeg, Wine/Proton, SDL, prohlížeč). Každý krok
+stojí na předchozím:
+
+| # | Krok | Proč | Stav |
+|---|---|---|---|
+| 1 | Rust std fáze 2: procesy, roury, síť ([Rust std](rust-std.md)) | aplikace v Rustu bez úprav, ověření na hotových crates | rozpracováno |
+| 2 | C knihovna `cstd` a vrstva POSIX: `malloc`, `pthread`, soubory, sockety, čas, `stdio`, matematika | bez ní nic v C/C++ | [navrženo] |
+| 3 | Správa paměti: `mmap`, rezervace adresního prostoru na pevné adresy, stránky na požádání, CoW, W^X s oprávněním „smí JIT“ | Wine, prohlížeče, .NET | [navrženo] |
+| 4 | Dynamické linkování: zavádění sdílených knihoven (ELF `ET_DYN`) | Wine a většina C/C++ projektů | [navrženo] |
+| 5 | Doručení výjimek (SEH, signály) a pozastavení vlákna se čtením a zápisem kontextu | Wine, ladicí nástroje | [navrženo] |
+| 6 | SDL2/3 nad kompozitorem a `audiod` | jeden port otevře hry a multimediální aplikace | [navrženo] |
+| 7 | FFmpeg jako izolovaný proces (LGPL), pak přehrávač | multimédia | [navrženo] |
+| 8 | Windows vrstva (Wine/Proton nad naším spodním patrem, viz výše) | aplikace a hry pro Windows | [navrženo] |
+| 9 | Vulkan na skutečném HW: Intel nativně, AMD/NVIDIA přes LinuxKPI | DXVK/VKD3D a hry na železe (v QEMU zatím Venus) | [navrženo] |
+
+Kroky 2-5 se dají částečně souběžně (paměť je jádro, `cstd` userspace),
+ale `cstd` potřebuje `mmap` z kroku 3 pro většinu reálných programů.
+
 ## Chyby a logování
 
 Cíl: každou chybu jde dohledat - co se stalo, kde, na kterém CPU a kdy.

@@ -832,6 +832,39 @@ box64 - much later, stated explicitly as a limitation per the
 two-architecture rule); 32-bit applications only through the WoW64 mode
 of new Wine.
 
+### Proton
+
+Proton (Valve) is not a different layer than Wine, it is **a Wine
+distribution for games**: its own Wine branch with patches, DXVK
+(Direct3D 9-11 on Vulkan), VKD3D-Proton (Direct3D 12 on Vulkan) and faster
+synchronization (fsync on futexes). For us: the upper tier can come from
+plain Wine (applications) or from Proton's Wine (games), the lower tier is
+the same. We adopt DXVK and VKD3D-Proton either way and map
+synchronization to `wait_many` and the futex. Steam would run as the
+Windows client in Wine. **Risk:** games with anti-cheat (EasyAntiCheat,
+BattlEye) often refuse unknown systems - vendor policy, not technology.
+
+## Adopting existing software: order
+
+**Status: [designed]** (decided 2026-11-14). What must be done to adopt
+existing programs (FFmpeg, Wine/Proton, SDL, a browser). Each step builds
+on the previous one:
+
+| # | Step | Why | Status |
+|---|---|---|---|
+| 1 | Rust std phase 2: processes, pipes, network ([Rust std](rust-std.md)) | Rust applications unchanged, verified on existing crates | in progress |
+| 2 | C library `cstd` and a POSIX layer: `malloc`, `pthread`, files, sockets, time, `stdio`, math | nothing in C/C++ without it | [designed] |
+| 3 | Memory management: `mmap`, reserving address space at fixed addresses, demand paging, CoW, W^X with a "may JIT" permission | Wine, browsers, .NET | [designed] |
+| 4 | Dynamic linking: loading shared libraries (ELF `ET_DYN`) | Wine and most C/C++ projects | [designed] |
+| 5 | Exception delivery (SEH, signals) and suspending a thread with reading and writing its context | Wine, debuggers | [designed] |
+| 6 | SDL2/3 on top of the compositor and `audiod` | one port opens games and multimedia apps | [designed] |
+| 7 | FFmpeg as an isolated process (LGPL), then a player | multimedia | [designed] |
+| 8 | Windows layer (Wine/Proton on our lower tier, see above) | Windows applications and games | [designed] |
+| 9 | Vulkan on real hardware: Intel natively, AMD/NVIDIA through LinuxKPI | DXVK/VKD3D and games on hardware (Venus in QEMU for now) | [designed] |
+
+Steps 2-5 can partly run in parallel (memory is kernel, `cstd` is
+userspace), but `cstd` needs `mmap` from step 3 for most real programs.
+
 ## Errors and logging
 
 Goal: every error can be traced - what happened, where, on which CPU and when.
