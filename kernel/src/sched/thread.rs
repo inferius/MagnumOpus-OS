@@ -87,6 +87,10 @@ pub struct Thread {
     /// jeho CPU ho jeste neprepnulo pryc (`on_cpu`). Do fronty ho zaradi
     /// to CPU v `finish_switch` (viz `sched::wake`).
     pub(super) wake_pending: AtomicBool,
+    /// Vlakno konci (`sched::exit`): planovac mu uz nenahraje adresni
+    /// prostor procesu (bezi s korenem jadra), aby ho proces mohl zrusit
+    /// hned po konci posledniho vlakna.
+    pub(super) user_gone: AtomicBool,
 }
 
 // SAFETY: `context` cte a zapisuje jen planovac na CPU, ktere vlakno prave
@@ -130,6 +134,7 @@ impl Thread {
             started: AtomicBool::new(false),
             user_tp: AtomicU64::new(0),
             wake_pending: AtomicBool::new(false),
+            user_gone: AtomicBool::new(false),
         }
     }
 

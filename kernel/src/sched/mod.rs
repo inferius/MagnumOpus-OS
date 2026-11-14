@@ -136,6 +136,17 @@ extern "C" fn thread_start() -> ! {
 pub fn exit() -> ! {
     let me = current();
     if let Some(process) = &me.process {
+        // Nejdriv pryc z adresniho prostoru procesu: po `thread_exited`
+        // posledniho vlakna ho `Process::finish` hned zrusi. Priznak plati
+        // drive nez prepnuti, takze ani preruseni mezi nimi koren procesu
+        // znovu nenahraje.
+        me.user_gone.store(true, Ordering::Release);
+        let irq = interrupts::disable();
+        // SAFETY: vlastni CPU, preruseni zakazana; koren jadra obsahuje
+        // celou horni polovinu (bezici kod a zasobnik), spodni polovinu
+        // vlakno uz nepotrebuje.
+        unsafe { arch::switch_user_space(None) };
+        interrupts::restore(irq);
         process.thread_exited();
     }
     qos::on_exit(&me);
@@ -401,10 +412,16 @@ fn switch_away(reason: Reason) {
     // Adresni prostor a zasobnik jadra pro vstup z userspace noveho vlakna.
     // Vlakna jadra nemaji spodni polovinu (`None`), aby zadne CPU nedrzelo
     // aktivni tabulky procesu, ktery uz mozna zanikl.
-    let root = next.process.as_ref().map(|p| p.address_space().root());
+    // Konci-li vlakno (`user_gone`), koren procesu uz nepouzit: proces ho
+    // muze prave rusit (`Process::finish`).
+    let root = match &next.process {
+        Some(p) if !next.user_gone.load(Ordering::Acquire) => p.address_space().root(),
+        _ => None,
+    };
     // SAFETY: vlastni CPU, preruseni zakazana; root je platna korenova
     // tabulka se sdilenou polovinou jadra (bezici kod a zasobnik jsou v ni)
-    // a proces ji drzi, dokud ma vlakna.
+    // a proces ji drzi, dokud ma ziva vlakna (vlakno bez `user_gone`
+    // znamena `live > 0`, takze `teardown` jeste neprobehl).
     unsafe {
         arch::switch_user_space(root);
         if let Some(top) = next.kernel_stack_top() {

@@ -71,8 +71,8 @@ Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
 - **Probuzení**: každé čekání má pořadové číslo; probuzení se starým číslem
   se ignoruje. Plané probuzení je dovolené, čekající kód podmínku ověří znovu.
 - **Přepnutí na vlákno procesu** nastaví jeho adresní prostor (CR3)
-  a zásobník jádra pro vstup z userspace (TSS.RSP0); vlákna jádra běží
-  v adresním prostoru jádra.
+  a zásobník jádra pro vstup z userspace (TSS.RSP0); vlákna jádra a končící
+  vlákna procesu běží v adresním prostoru jádra.
 
 ## Objekty, handly, práva
 
@@ -108,9 +108,31 @@ Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
 - **Konec procesu**: `PROCESS_EXIT`, `PROCESS_KILL`, pád (výjimka CPU) nebo
   konec posledního vlákna. Všechna vlákna dostanou požadavek na ukončení
   (čekající skončí s `CANCELED`, běžící jinde se přeruší IPI), skončí při
-  návratu do userspace. Poslední vlákno proces dokončí: zavřou se handly
-  (uvolní objekty) a proces dostane signál `TERMINATED`. Adresní prostor
-  zanikne s poslední referencí na proces.
+  návratu do userspace. Poslední vlákno proces dokončí.
+- **Paměť skončeného procesu se vrací hned** **[ověřeno v QEMU]** (test
+  `job: pamet skonceneho procesu se vrati hned`, x86_64 i aarch64): při
+  dokončení se zruší adresní prostor (mapování, objekty paměti, které
+  drželo jen mapování, tabulky stránek včetně kořenové), zavřou se handly
+  (kanály a další objekty) a vyprázdní fronty futexů; rozpočty jobu se
+  vrátí. Teprve potom proces dostane signál `TERMINATED`, takže kdo na něj
+  čeká, už paměť vidí vrácenou. Kdo drží handle skončeného procesu (rodič,
+  supervisor), drží jen malý **náhrobek**: číslo, jméno, kód ukončení, čas
+  CPU a signály pro `PROCESS_EXIT_CODE`, `JOB_PROCESSES` a čekání. Ten
+  zanikne s posledním handlem.
+- **Pořadí kvůli souběhům:** vlákno při konci nejdřív přepne CPU na
+  adresní prostor jádra a plánovač mu prostor procesu už nenahraje; teprve
+  pak sníží počet živých vláken. Když poslední vlákno skončí, žádné CPU
+  prostor procesu aktivní nemá a jádro ho smí zrušit (po vyprázdnění TLB
+  na všech CPU). Syscall jiného vlákna konec nepředběhne: proces se
+  dokončí, až všechna jeho vlákna syscall opustila. Operace jiných procesů
+  přes handle (`VM_MAP` -> `BAD_STATE`, `VM_UNMAP` -> `NOT_FOUND`,
+  `THREAD_CREATE` -> `BAD_STATE`) se serializují zámkem prostoru.
+- **Paměť pro DMA bez IOMMU** (`VMO_CREATE_CONTIGUOUS` bez domény zařízení)
+  se při konci procesu nevrací: zařízení do ní může dál zapisovat podle
+  deskriptorů mrtvého ovladače. Drží ji náhrobek a vrátí se až s posledním
+  handlem procesu (v logu varování). S IOMMU se vrací hned, protože se
+  stránky nejdřív odmapují z domény zařízení. Úplné řešení (zastavit
+  zařízení, vypnout bus master, a pak paměť vrátit) je **[navrženo]**.
 - **Výjimka v programu** (page fault, neplatná instrukce, ...) ukončí jen
   proces, ne jádro: kód -1 000 100 - vektor, v logu adresa a typ chyby.
 - **Vstup do userspace:** vstupní bod a zásobník vlákna musí ležet v paměti
@@ -174,6 +196,15 @@ ACPI DMAR) nebo **AMD-Vi** (tabulka ACPI IVRS), na aarch64 **SMMUv3**
 - **Bez IOMMU** (stroj ji nemá, má ji vypnutou ve firmwaru, nebo
   `cargo xtask run --iommu none`) jádro zaloguje varování a DMA není
   omezené.
+- **Známé riziko bez IOMMU: zařízení po smrti ovladače.** Jádro dnes
+  zařízení nezastaví, když jeho ovladač skončí; zařízení může dál
+  zapisovat podle deskriptorů mrtvého ovladače. Paměť pro DMA proto drží
+  náhrobek procesu ovladače (viz [Procesy a vlákna](#procesy-a-vlákna)).
+  Jakmile ale zanikne poslední handle procesu (např. devmgr ho zahodí při
+  restartu), paměť se vrátí alokátoru a zápis zařízení může poškodit data
+  jiného procesu nebo jádra. Oprava **[navrženo]**: při zániku posledního
+  prostředku zařízení (nebo konci ovladače) vypnout bus master v konfiguraci
+  PCI, počkat na dokončení rozběhnutých přenosů, a teprve pak paměť vrátit.
 - Ovladač virtio musí přijmout vlastnost `VIRTIO_F_ACCESS_PLATFORM`
   (zařízení pak používá překlad); virtio-blk to dělá.
 

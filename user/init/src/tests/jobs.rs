@@ -21,6 +21,7 @@ pub const TESTS: &[Test] = &[
     ("job: JOB_KILL vlastniho jobu ukonci i volajiciho", kill_own_job),
     ("job: JOB_KILL behem spousteni nic neproklouzne", kill_races_spawn),
     ("handly: 140 000 handlu v procesu", many_handles),
+    ("job: pamet skonceneho procesu se vrati hned (32 MiB, exit i kill)", memory_back_at_exit),
 ];
 
 const KIB: u64 = 1024;
@@ -308,6 +309,63 @@ fn kill_races_spawn(s: &Startup) -> TestResult {
     let left = job.processes().map_err(|e| fail("JOB_PROCESSES", e))?;
     check!(left.iter().all(|e| e.flags & libos::abi::job::proc_flags::FINISHED != 0), "v jobu nic nebezi");
     check_eq!(Job::create(&job).err(), Some(Error::BadState), "podjob po JOB_KILL");
+    Ok(())
+}
+
+/// Proces s 32 MiB skonci, rodic drzi jeho handle: pamet i rozpocet jobu
+/// se vrati hned pri konci, ne az se zavrenim handlu. Jednou koncem
+/// programu (`exit:0`), jednou `PROCESS_KILL`.
+fn memory_back_at_exit(s: &Startup) -> TestResult {
+    const SIZE: u64 = 32 * 1024 * KIB;
+    let fs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
+    let image = fs.find("echo").ok_or("echo neni v initfs")?;
+    // Limit pusti jen jeden takovy objekt naraz.
+    let job = limited_job(SIZE + 8 * 1024 * KIB, UNLIMITED)?;
+    let flags = libos::abi::vm::MAP_READ | libos::abi::vm::MAP_WRITE;
+    for kill in [false, true] {
+        let (p, ch) = libos::spawn_in(&job, "pamet-32m", image, Vec::new()).map_err(|e| fail("spusteni", e))?;
+        // Objekt na ucet potomka, namapovany jen v nem (rodic svuj handle
+        // zavre): drzi ho jen adresni prostor potomka.
+        let vmo = Vmo::create_for(SIZE, &p).map_err(|e| fail("32 MiB", e))?;
+        let addr = p.map(&vmo, 0, SIZE, flags, 0).map_err(|e| fail("mapovani do potomka", e))?;
+        drop(vmo);
+        let during = job.info().map_err(|e| fail("JOB_INFO", e))?;
+        check!(during.user.used >= SIZE, "32 MiB na uctu jobu");
+        if kill {
+            p.kill().map_err(|e| fail("PROCESS_KILL", e))?;
+            check!(p.wait_exit(deadline()).is_ok(), "konec po kill");
+        } else {
+            ch.write(b"exit:0", Vec::new()).map_err(|e| fail("exit", e))?;
+            check_eq!(p.wait_exit(deadline()), Ok(0), "konec programu");
+        }
+        // Handle `p` stale drzime: pamet uz musi byt zpet.
+        let after = job.info().map_err(|e| fail("JOB_INFO", e))?;
+        check_eq!(after.user.used, 0, "uzivatelska pamet po konci (handle drzen)");
+        // Zbyva jen nahrobek procesu (struktura v jadre), zadne mapovani
+        // ani tabulky stranek.
+        if after.kernel.used >= 8 * KIB {
+            return Err(alloc::format!("pamet jadra po konci: {} B (ocekavan jen nahrobek)", after.kernel.used));
+        }
+        // Do skonceneho procesu uz nic namapovat nejde a odmapovat neni co.
+        let probe = Vmo::create(4 * KIB).map_err(|e| fail("maly objekt", e))?;
+        check_eq!(p.map(&probe, 0, 4 * KIB, flags, 0).err(), Some(Error::BadState), "VM_MAP do skonceneho procesu");
+        check_eq!(p.unmap(addr, SIZE).err(), Some(Error::NotFound), "VM_UNMAP ve skoncenem procesu");
+        // Stejne 32 MiB jde v tomtez jobu hned znovu (pred zmenou by limit
+        // jobu nepustil, dokud handle `p` zije).
+        let other = Process::create(&job, "pamet-znovu").map_err(|e| fail("proces", e))?;
+        let again = Vmo::create_for(SIZE, &other).map_err(|e| fail("32 MiB znovu (handle skonceneho drzen)", e))?;
+        drop(again);
+        drop(other);
+        // Proces se v JOB_PROCESSES dal ukazuje jako skonceny.
+        let list = job.processes().map_err(|e| fail("JOB_PROCESSES", e))?;
+        check!(
+            list.iter().any(|e| e.name() == "pamet-32m" && e.flags & libos::abi::job::proc_flags::FINISHED != 0),
+            "nahrobek v JOB_PROCESSES"
+        );
+        drop(ch);
+        drop(p);
+    }
+    check_eq!(job.info().map_err(|e| fail("JOB_INFO", e))?.kernel.used, 0, "po zaniku nahrobku");
     Ok(())
 }
 

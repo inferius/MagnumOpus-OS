@@ -73,6 +73,11 @@ impl HandleTable {
         }
     }
 
+    /// Objekty za vsemi platnymi handly.
+    pub fn objects(&self) -> impl Iterator<Item = &Arc<dyn KernelObject>> {
+        self.slots.iter().filter_map(|s| s.entry.as_ref().map(|e| &e.object))
+    }
+
     /// Pocet slotu (obsazenych i volnych), pro testy.
     pub fn slot_count(&self) -> usize {
         self.slots.len()

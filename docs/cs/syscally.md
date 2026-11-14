@@ -305,7 +305,8 @@ procesu (`VM_PAGE_SIZE`, dnes 4 KiB), rozsah v
 spodní poloviny zůstává vždy nenamapovaná). Práva: proces `WRITE`; objekt `MAP` + `READ`,
 případně `WRITE`/`EXECUTE` podle příznaků. Mapování drží objekt naživu i po
 zavření handlu. Chyby: `INVALID_ARGS`, `OUT_OF_RANGE`, `BAD_STATE`
-(`MAP_FIXED` přes existující mapování), `NO_RESOURCES` (není volné místo),
+(`MAP_FIXED` přes existující mapování; proces už skončil a jeho prostor je
+zrušený), `NO_RESOURCES` (není volné místo),
 `NO_MEMORY`, `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
 
 ### `VM_UNMAP`
@@ -357,13 +358,16 @@ procesu (`USER_MIN` až `USER_MAX`), `stack` nejvýš na `USER_MAX`, jinak
 ### `PROCESS_EXIT`
 
 `(code)` - nevrací se. Ukončí aktuální proces s kódem `code`: všechna jeho
-vlákna skončí (čekající s `CANCELED`), handly se zavřou, proces dostane
-signál `TERMINATED`.
+vlákna skončí (čekající s `CANCELED`), adresní prostor se zruší a handly se
+zavřou (paměť a rozpočty jobu zpět hned, ne až se zavřením handlu procesu),
+potom proces dostane signál `TERMINATED`. Handle skončeného procesu drží jen
+náhrobek (kód, čas CPU, jméno) - viz [jadro.md](jadro.md#procesy-a-vlákna).
 
 ### `PROCESS_KILL`
 
 `(process) -> 0`. Ukončí jiný proces s kódem -1 000 000. Vlákna, která
-právě běží na jiném CPU, jádro přeruší. Vyžaduje `MANAGE`.
+právě běží na jiném CPU, jádro přeruší. Paměť a handly procesu se uvolní
+jako u `PROCESS_EXIT`, jakmile poslední vlákno skončí. Vyžaduje `MANAGE`.
 
 ### `PROCESS_EXIT_CODE`
 
@@ -503,7 +507,8 @@ Vyžaduje `READ`. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`,
 nejvýš `max` (do 4096) záznamů `abi::job::ProcEntry` (64 B, little
 endian): `pid`, `job` (číslo jobu procesu), `cpu_ns` (čas na CPU všech
 vláken, přičítá scheduler při přepnutí), `threads` (živá vlákna), `flags`
-(`proc_flags::FINISHED` = skončil, čeká na úklid), `name` (32 B UTF-8,
+(`proc_flags::FINISHED` = skončil; zbývá jen náhrobek bez paměti, dokud
+někdo drží handle), `name` (32 B UTF-8,
 doplněno nulami). Vrátí celkový počet (i nad `max`). Vyžaduje `READ`.
 Chyby: `INVALID_ARGS` (`max` > 4096), `BAD_HANDLE`, `ACCESS_DENIED`,
 `WRONG_TYPE`, `BAD_ADDRESS`.

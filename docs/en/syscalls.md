@@ -311,8 +311,8 @@ within `0x10000..0x7FFF_FFFF_F000` (`USER_MIN`..`USER_MAX`; the last page
 of the lower half always stays unmapped). Rights: process `WRITE`; object `MAP` +
 `READ`, plus `WRITE`/`EXECUTE` per flags. A mapping keeps the object alive
 after its handle is closed. Errors: `INVALID_ARGS`, `OUT_OF_RANGE`,
-`BAD_STATE` (`MAP_FIXED` over an existing mapping), `NO_RESOURCES` (no free
-range), `NO_MEMORY`, `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+`BAD_STATE` (`MAP_FIXED` over an existing mapping; the process has finished
+and its address space is gone), `NO_RESOURCES` (no free range), `NO_MEMORY`, `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
 
 ### `VM_UNMAP`
 
@@ -364,13 +364,18 @@ at most at `USER_MAX`, otherwise `INVALID_ARGS`. Errors: `BAD_STATE`,
 ### `PROCESS_EXIT`
 
 `(code)` - does not return. Terminates the current process with `code`: all
-its threads end (waiting ones with `CANCELED`), handles are closed, the
-process gets the `TERMINATED` signal.
+its threads end (waiting ones with `CANCELED`), the address space is torn
+down and handles are closed (memory and job budgets come back at once, not
+when the process handle is closed), then the process gets the `TERMINATED`
+signal. A handle to a finished process holds only a tombstone (code, CPU
+time, name) - see [kernel.md](kernel.md#processes-and-threads).
 
 ### `PROCESS_KILL`
 
 `(process) -> 0`. Terminates another process with code -1,000,000. Threads
-running on other CPUs are interrupted. Requires `MANAGE`.
+running on other CPUs are interrupted. The process's memory and handles are
+released as with `PROCESS_EXIT` once the last thread ends. Requires
+`MANAGE`.
 
 ### `PROCESS_EXIT_CODE`
 
@@ -515,8 +520,8 @@ descendants (task overview: also a process that did not register itself).
 Writes at most `max` (up to 4096) `abi::job::ProcEntry` records (64 B,
 little endian) to `out_ptr`: `pid`, `job` (the process's job number),
 `cpu_ns` (CPU time of all threads, added by the scheduler on a switch),
-`threads` (live threads), `flags` (`proc_flags::FINISHED` = exited,
-waiting for cleanup), `name` (32 B UTF-8, zero padded). Returns the total
+`threads` (live threads), `flags` (`proc_flags::FINISHED` = exited; only a
+tombstone without memory remains while someone holds a handle), `name` (32 B UTF-8, zero padded). Returns the total
 count (also above `max`). Requires `READ`. Errors: `INVALID_ARGS` (`max`
 > 4096), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
 
