@@ -123,8 +123,25 @@ Not in the repository yet; the rules apply from the first vendored code.
   (patches) and the build script for the process, so users can rebuild it
   with their own version of the library; later dynamic linking (replacing
   the shared library is enough).
-- **Popis / Description:** `docs/cs/cstd.md` (kapitola FFmpeg a licence),
-  `docs/en/cstd.md`.
+- **Patentové kodeky / Patent-encumbered codecs:** výchozí obraz obsahuje
+  nativní dekodéry FFmpeg pro H.264, HEVC a AAC (LGPL, žádné x264/x265,
+  fdk-aac). **Riziko:** při šíření systému (hlavně v USA) mohou patentové
+  pooly (MPEG LA / Via LA, Access Advance) uplatnit licenční nároky; licence
+  FFmpeg patenty nepokrývá. Přepínač xtasku sestaví obraz bez těchto
+  dekodérů. / The default image contains FFmpeg's native H.264, HEVC and
+  AAC decoders (LGPL, no x264/x265, fdk-aac). **Risk:** when distributing
+  the system (mainly in the USA) patent pools (MPEG LA / Via LA, Access
+  Advance) may raise licence claims; the FFmpeg licence does not cover
+  patents. An xtask switch builds an image without these decoders.
+- **Související knihovny / Related libraries (plánováno / planned):**
+  dav1d (BSD-2-Clause), libass (ISC), HarfBuzz (MIT), FriBidi
+  (LGPL-2.1-or-later, dynamicky / dynamically), FreeType (zvolena licence
+  FTL, ne GPL; vyžaduje zmínku "Portions of this software are copyright
+  The FreeType Project" / FTL chosen, not the GPL; requires the credit
+  above). Všechny jen v procesu dekodéru `ffdec`. / All only inside the
+  `ffdec` decoder process.
+- **Popis / Description:** `docs/cs/multimedia.md`, `docs/en/multimedia.md`;
+  `docs/cs/cstd.md` (kapitola FFmpeg a licence), `docs/en/cstd.md`.
 
 ## zlib 1.3.1 a SQLite 3.46.1 (porty v C / C ports)
 

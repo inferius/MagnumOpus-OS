@@ -3,18 +3,20 @@
 Design of step 7 of the order in [architecture.md](architecture.md):
 decoding audio and video with the third-party FFmpeg library in an
 **isolated process**, with a player on top. The whole page is
-**[designed]**; no code exists yet. Open questions are in
-[Questions to decide](#questions-to-decide); nothing is implemented until
-they are answered.
+**[designed]**; no code exists yet. The user's decisions (2026-11-14) are
+in [Decisions](#decisions). Parts depending on C ports (F1, building
+FFmpeg and the subtitle libraries) wait until the C port mechanism from the
+SDL thread is on `main`; the service, the protocol and the player with a
+test decoder do not depend on it.
 
 ## Status
 
 | Part | What | Status |
 |---|---|---|
 | F1 | FFmpeg built as a C port (LGPL, shared libraries over `libc.so`), test of an `ffprobe`-like program in QEMU | **[designed]** |
-| F2 | `mediad` service + `ffdec` decoder process, `mediaproto` protocol, audio into `audiod` | **[designed]** |
+| F2 | `mediad` service + `ffdec` decoder process, `mediaproto` protocol, audio into `audiod`; first with a test decoder without FFmpeg | **[designed]** |
 | F3 | video into shared buffers (`bufdesc` NV12/I420/P010) with fences, A/V sync | **[designed]** |
-| F4 | Player application over `libs/ui` (video layer, controls, subtitles, media session) | **[designed]** |
+| F4 | Player application over `libs/ui` (video layer, controls, libass subtitles, media session) | **[designed]** |
 | F5 | hardware-accelerated decoding (VA-API/Vulkan Video through the GPU driver) | **[designed]** |
 
 ## Why an isolated process
@@ -25,7 +27,7 @@ files; FFmpeg fixes dozens of memory bugs every year. Therefore:
 - the decoder runs in a **separate process with no rights**: no access to
   the FS, the network, launchd or drivers; it gets only a channel to
   `mediad` and shared buffers,
-- one decoder process **per playback session** (question 1); a crash or
+- one decoder process **per playback session** (decision 1); a crash or
   exploit of one session does not affect another one or the application,
 - input is **bytes only** (a stream or file blocks), output only decoded
   frames and samples in shared memory,
@@ -94,12 +96,12 @@ process output (only into shared memory someone handed to it).
 ### Roles
 
 - **Player** (application) opens a session at `mediad`, hands it the input
-  (question 2), allocates or receives a buffer pool (question 3), controls
+  (decision 2), allocates or receives a buffer pool (decision 3), controls
   playback and composes the video into its window.
 - **mediad** (service, trusted) holds sessions, reads input on behalf of the
   application (from a file or stream handle, not by path), starts `ffdec`
   through launchd with an empty namespace and passes it bytes only. It
-  decides which codecs are allowed (question 5).
+  decides which codecs are allowed (decision 5).
 - **ffdec** is the only process running FFmpeg code: libavformat (demux),
   libavcodec (decoding), libswresample (sample format conversion), libswscale
   when needed. It has no capabilities except the channel to `mediad`, buffer
@@ -114,15 +116,16 @@ layout will live in the `libs/mediaproto` crate with host tests (like
 
 | Operation | Who | Meaning |
 |---|---|---|
-| `OPEN { source, flags }` | application | new session; source = file / stream handle (question 2) |
+| `OPEN { source, flags }` | application | new session; source = file / stream handle (decision 2) |
 | `INFO -> { duration, streams[] }` | application | streams: type, codec, size, fps, channels, rate, language |
 | `SELECT { video, audio, subtitles }` | application | stream selection (-1 = none) |
 | `POOL { buffers[], fences }` | application | hands over the output buffer pool (VMO + `bufdesc`) |
-| `AUDIO { ring }` | application | hands over the `audiod` stream ring (question 4) |
+| `AUDIO { ring }` | application | hands over the `audiod` stream ring (decision 4) |
 | `PLAY` / `PAUSE` / `SEEK { time, exact }` | application | control; `SEEK` returns the actual keyframe time |
 | `FRAME { buffer, pts, duration, fence }` | `mediad` -> application | the frame is in the buffer once the fence reaches the value |
 | `RELEASE { buffer, fence }` | application | the buffer is free once compd signals the release fence |
 | `CLOCK { audio pts, monotonic time }` | `mediad` -> application | clock for A/V sync |
+| `SUBTITLE_SIZE { width, height, pixel aspect }` + `SUBTITLE { buffer, pts, duration, fence }` | application / `mediad` -> application | subtitle layer size; finished subtitle bitmap (RGBA, premultiplied alpha) |
 | `EVENT { end, error, format change }` | `mediad` -> application | including a decoder crash (the session can be recovered) |
 
 ### Video: buffers and fences
@@ -179,7 +182,9 @@ An application over `libs/ui`. It needs `libs/ui` extensions:
   has a CPU image,
 - controls: play/pause, seek bar with keyframe previews, volume, track
   selection, fullscreen, keyboard shortcuts and media keys,
-- subtitles: own SRT/WebVTT rendering through `libs/font` (question 9),
+- subtitles: full ASS/SSA, SRT and WebVTT through libass (see
+  [Subtitles](#subtitles)); the player only composes finished bitmaps over
+  the video,
 - a **media session** for the system (now playing, controls from the panel,
   pause when headphones are unplugged) per
   [device-interfaces.md](device-interfaces.md).
@@ -192,8 +197,8 @@ external libraries under compatible licences.
 | Group | Codecs / containers | Source | Default |
 |---|---|---|---|
 | royalty-free | AV1 (dav1d, BSD-2), VP8/VP9 (built into FFmpeg), Opus, Vorbis, FLAC, Theora; WebM/Matroska, Ogg, MP4/ISOBMFF (container), WAV | FFmpeg + dav1d | on |
-| patents expired | MP3, AC-3, MPEG-1/2 video | FFmpeg | on (question 5) |
-| patent-encumbered | H.264, HEVC, AAC, E-AC-3 | FFmpeg | **user decides** (question 5) |
+| patents expired | MP3, AC-3, MPEG-1/2 video | FFmpeg | always on |
+| patent-encumbered | H.264, HEVC, AAC, E-AC-3 | native FFmpeg decoders only (LGPL) | **on in the default image**; an xtask switch builds an image without them |
 | never | anything requiring `--enable-gpl`, `--enable-nonfree` (x264, x265, fdk-aac, GPL libpostproc) | - | hard off |
 
 dav1d is faster than FFmpeg's built-in AV1 decoder and is BSD, so FFmpeg
@@ -201,11 +206,61 @@ uses it as an external library (its own C port via the same mechanism).
 Encoders are not needed in F1-F4; screen recording is a separate later
 step.
 
-**Warning:** patent licences (H.264, HEVC, AAC) are a legal question, not a
-technical one. FFmpeg can decode them without the GPL; distributing a binary
-with them may require a licence in some countries (MPEG LA / Access Advance
-/ Via LA). The design therefore makes them an **optional component** built
-separately (`ffdec-ext`) that can be left out of the image.
+**Patent-encumbered codecs (decision 5 = B).** H.264, HEVC, AAC and
+E-AC-3 are on in the default image, but **only FFmpeg's native decoders
+under the LGPL**; no GPL libraries (x264, x265) and no nonfree ones
+(fdk-aac). Encoders for these formats are not built.
+
+> **Risk (knowingly accepted):** distributing the system with H.264, HEVC
+> and AAC decoders may lead to **licence claims by patent pools** (MPEG LA
+> / Via LA for H.264 and AAC, Access Advance and Via LA for HEVC), mainly
+> in the USA and other countries where software patents are enforceable.
+> The FFmpeg licence (LGPL) does not cover patents. Whoever distributes the
+> system must assess this themselves; the text is also in
+> `THIRD-PARTY.md`.
+
+An **xtask switch** stays for building without them (working name
+`--bez-patentovych-kodeku`): configure gets `--disable-decoder=` for h264,
+hevc, aac, aac_latm, eac3 (and the matching parsers), `xtask` checks in
+`config.h` after the build that they are off, and `mediad` then reports
+them as unavailable (the application gets `INFO` with the codec and a
+"codec unavailable" error, not a crash).
+
+## Subtitles
+
+Decision 9 = B: **libass** (ISC) with **HarfBuzz** (MIT, text shaping),
+**FriBidi** (LGPL-2.1-or-later, bidirectional text) and **FreeType** (under
+the FTL, not the GPL - FreeType is dual FTL/GPL-2 and we choose the FTL).
+
+- **Why FreeType, not `libs/font`**: libass calls the FreeType API directly
+  (`FT_Face`, `FT_Outline`, ...) and has no layer for another rasteriser.
+  Replacing it would mean patching a large part of libass or wrapping the
+  FreeType API over `libs/font`; both are costlier and more fragile than
+  taking FreeType. `libs/font` stays the system font engine; FreeType lives
+  only in the decoder process.
+- **The FTL** requires a mention in the product documentation ("Portions of
+  this software are copyright The FreeType Project"); it goes into the
+  player's About and `THIRD-PARTY.md`.
+- **Where it runs**: ASS subtitles are untrusted data (scripts with
+  thousands of tags, embedded fonts), so libass runs **in the `ffdec`
+  process** with the same isolation as the decoder. The output is bitmaps
+  (`ASS_Image`: alpha mask + colour + position) that `ffdec` writes into a
+  shared subtitle buffer (RGBA with premultiplied alpha) with a fence; the
+  player only composes them over the video.
+- **Fonts**: `ffdec` has no FS, so fontconfig is not built
+  (`--disable-fontconfig`). `mediad` supplies fonts: embedded fonts from
+  the container (Matroska attachments) and system fonts the script asks
+  for are passed as bytes (`ass_add_font`); the default font is the system
+  font from `design/tokens.toml`.
+- **Size and time**: the player sends the video layer size and pixel
+  aspect (`SUBTITLE_SIZE`), `ffdec` renders for the pts of the frame it is
+  delivering; a window resize = a new render.
+- SRT and WebVTT take the same path (FFmpeg converts them to ASS), so there
+  is one renderer.
+
+Subtitle library licences: ISC, MIT and the FTL are permissive; FriBidi
+under the LGPL is linked dynamically like FFmpeg (same obligations, see
+[LGPL obligations](#lgpl-obligations)).
 
 ## Hardware acceleration (later, F5)
 
@@ -221,7 +276,7 @@ capability to a driver.
 ### C port in xtask
 
 The generic C port mechanism (tarball + SHA-256 + patches + CMake/Ninja/
-autotools) is being designed by the SDL thread (`navrh-sdl.md`, question
+autotools) is being designed by the SDL thread (`navrh-sdl.md`, its question
 2 = C). FFmpeg **uses it rather than duplicating it**. What it needs beyond
 CMake/autotools:
 
@@ -235,7 +290,7 @@ CMake/autotools:
    `--ar=llvm-ar`, `--nm=llvm-nm`, `--ranlib=llvm-ranlib`, `--pkg-config`
    pointing at `.pc` files in the sysroot (for dav1d).
 3. **Assembler**: on x86_64 **nasm** (>= 2.13) for hand-written SIMD; the
-   mechanism finds it and, if missing, gives install advice (question 7).
+   mechanism finds it and, if missing, gives install advice (decision 7).
    On aarch64 clang as the assembler is enough (GNU `.S` syntax, NEON).
 4. **Patches**: `target-os` for our system, CPU count detection through
    `sysconf(_SC_NPROCESSORS_ONLN)` (on the cstd-posix branch), switches
@@ -244,9 +299,15 @@ CMake/autotools:
 5. **Out-of-tree and per-arch**: build into `target/cports/<arch>/ffmpeg/`,
    install headers, `.so` and `.pc` into the C sysroot, fingerprint
    (version + patches + switches) to skip repeated builds.
-6. **Dependencies between ports**: dav1d (Meson + Ninja!) before FFmpeg.
-   Meson is another build system the SDL mechanism does not cover
-   (question 8).
+6. **Dependencies between ports**: dav1d (Meson + Ninja) before FFmpeg;
+   for subtitles FreeType (CMake), FriBidi and HarfBuzz (Meson) and libass
+   (autotools) before `ffdec`. Meson is another build system the SDL
+   mechanism does not cover yet; the mechanism must support it (or at
+   least "own configure command + build", as for FFmpeg).
+7. **Tool check** (decision 8 = A): before the build xtask checks `sh`,
+   `make`, `nasm` (x86_64), `meson`, `ninja`, `pkg-config` from Git Bash /
+   MSYS2 and, if a tool is missing, stops with exact advice on how to
+   install it (no silent skipping of the port).
 
 Licence switches hard-coded: `--disable-gpl --disable-nonfree
 --disable-version3` (LGPL 2.1+), `--enable-shared --disable-static`,
@@ -276,80 +337,52 @@ replace the library with their own modified version. The design:
 
 - FFmpeg is **dynamically linked** (`.so` over `libc.so`), the `ffdec`
   process is only a thin layer; replacing the library = replacing files in
-  `/lib` (question 6),
+  `/lib` (decision 6),
 - **sources**: the exact tarball (SHA-256), all patches and configure
   switches are in the repository (`third_party/ffmpeg/`); the system image
   carries a file pointing to them and the licence text,
 - **rebuild script**: `cargo xtask cport ffmpeg` builds the same library
   from the same sources; described in the user manual,
-- `THIRD-PARTY.md` gets rows for FFmpeg (LGPL-2.1-or-later) and dav1d
-  (BSD-2-Clause) with version and hash,
+- `THIRD-PARTY.md` gets rows for FFmpeg (LGPL-2.1-or-later), dav1d
+  (BSD-2-Clause), libass (ISC), HarfBuzz (MIT), FriBidi
+  (LGPL-2.1-or-later) and FreeType (FTL) with version and hash,
+- FriBidi is under the LGPL like FFmpeg: a shared `.so`, sources and a
+  rebuild script the same way,
 - the player's About states that it uses FFmpeg under the LGPL, with a link
   to the sources.
 
 ## Stages
 
-1. **F1 port**: dav1d + FFmpeg through the port mechanism, QEMU test: a
+1. **F1 port**: dav1d + FFmpeg (and FreeType, FriBidi, HarfBuzz, libass)
+   through the port mechanism, QEMU test: a
    program over `libavformat` lists the streams of a test WebM file
    (Opus + VP9) and decodes 10 frames with a checksum, both architectures.
 2. **F2 service and audio**: `mediaproto`, `mediad`, `ffdec`; playing
    Opus/FLAC into `audiod`; decoder crash test (the session reports an
-   error, `mediad` survives).
+   error, `mediad` survives). The protocol, service and isolation are built
+   **first with a test decoder** (a process with the same interface as
+   `ffdec` that generates a tone and test patterns without FFmpeg), so they
+   do not wait for C ports.
 3. **F3 video**: `bufdesc` buffers with fences (after 6a-3/6a-4 are merged),
    A/V sync, measuring latency and dropped frames.
 4. **F4 player**: application, video layer widget in `libs/ui`, subtitles,
    media session.
 5. **F5 HW acceleration**: after the GPU drivers.
 
-## Questions to decide
+## Decisions
 
-Each question has recommendation **A**.
+Decided by the user on 2026-11-14 (original A/B/C questions; the
+recommendation was always A).
 
-1. **Decoder isolation.**
-   A) one `ffdec` process per session (strong isolation, a few MB of extra
-   memory per session); B) one shared process for all sessions of a user;
-   C) decoder inside the application process (no isolation).
-2. **How input reaches the decoder.**
-   A) the application gives `mediad` a file / stream handle, `mediad` reads
-   and sends bytes to `ffdec` (the decoder never gets a handle);
-   B) `ffdec` gets a read-only file handle directly;
-   C) the application sends the bytes itself. Network streams (HTTP,
-   HLS/DASH) are read in all variants by `mediad` through `netd`, not by
-   FFmpeg (`--disable-network`).
-3. **Video path.**
-   A) the application allocates the buffer pool, `ffdec` decodes into it,
-   the application commits into its window (the application controls
-   presentation, subtitles over video);
-   B) the application delegates a window layer directly to `mediad`, which
-   commits to compd itself (fewer hops, but `mediad` needs window access);
-   C) `ffdec` returns RGB through a CPU image (simple, slow).
-4. **Audio ring.**
-   A) the application opens the stream in `audiod` (volume and media
-   session belong to the application) and passes the ring through `mediad`
-   to `ffdec`;
-   B) `mediad` opens the stream on behalf of the application.
-5. **Patent-encumbered codecs (H.264, HEVC, AAC).**
-   A) optional component `ffdec-ext`, off in the default image, enabled by
-   one xtask switch (the distribution decision is the user's);
-   B) on in the default image; C) never built. Should MP3, AC-3 and MPEG-2
-   (patents expired) always be on?
-6. **Linking FFmpeg.**
-   A) shared `.so` over `libc.so` (LGPL replaceability for free);
-   B) static `.a` + relink kit (`ffdec` objects in the image/SDK);
-   C) both.
-7. **nasm on x86_64.**
-   A) required (without it the build fails with install advice; without
-   SIMD decoding is 2-5x slower); B) optional with `--disable-x86asm` and
-   a warning.
-8. **Host for configure/make/Meson.**
-   A) Git Bash / MSYS2 on Windows (sh, make; Meson and Ninja via
-   pip/MSYS2), with a tool check in xtask before the build; B) WSL
-   (`tools/wsl`); C) build dav1d without Meson using an own xtask script
-   (no Meson).
-9. **Subtitles.**
-   A) own SRT/WebVTT parser and rendering through `libs/font` (ASS as plain
-   text only); B) take libass (ISC) + FriBidi/HarfBuzz for full ASS.
-10. **Stage order.**
-    A) F1 -> F2 (audio) -> F3 -> F4, F3 only after 6a-3/6a-4 are merged;
-    B) first a simple player with a CPU image (C in question 3), then
-    buffers.
+| # | Question | Decision |
+|---|---|---|
+| 1 | decoder isolation | **A** one `ffdec` process per session |
+| 2 | input to the decoder | **A** the application gives a handle to `mediad`, which sends bytes; network streams are read by `mediad` through `netd`, FFmpeg has `--disable-network` |
+| 3 | video path | **A** the application allocates the buffer pool, `ffdec` decodes into it, the application commits into its window |
+| 4 | audio ring | **A** the application opens the `audiod` stream and passes the ring through `mediad` |
+| 5 | patent codecs | **B** H.264, HEVC, AAC on in the default image (native LGPL FFmpeg decoders only); MP3, AC-3, MPEG-2 always; an xtask switch for an image without them; the patent pool risk stated explicitly in the docs and `THIRD-PARTY.md` |
+| 6 | linking | **A** shared `.so` over `libc.so` |
+| 7 | nasm | **A** required on x86_64 |
+| 8 | host | **A** Git Bash / MSYS2, tool check in xtask |
+| 9 | subtitles | **B** libass + HarfBuzz + FriBidi + FreeType (FTL) right away, inside the `ffdec` process |
+| 10 | order | **A** F1 -> F2 -> F3 -> F4; parts without C ports (protocol, `mediad`, player with a test decoder) may start earlier |
