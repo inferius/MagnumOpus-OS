@@ -15,7 +15,7 @@ Wine a FFmpeg (LGPL, dynamicky). Programy v Rustu zůstávají statické
 | DL-2 | zavaděč `user/ld` + `libs/dynload`: `PT_INTERP` ve `spawn`, ASLR, `DT_NEEDED`, `BIND_NOW`, relokace, statické TLS hlavního vlákna, RELRO jen pro čtení; PIC a link přes `ld.lld` v `cbuild`, knihovny v initfs (`lib/`) | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `procesy`, testy `dynamicke linkovani: ...`) |
 | DL-3 | tabulka zavaděče (`abi::loader`, `dl*` v ABI už teď), TLS nových vláken (libos, osrt), DTV a generace, statická rezerva TLS, `fini`, `dl_iterate_phdr`, `dladdr`, `r_debug` | **[ověřeno v QEMU]** x86_64 i aarch64 (test `dynamicke linkovani: vlakna libos ...`) |
 | DL-4a | služba knihoven `libd` (zapečetěné šablony, sdílení kódu knihoven mezi procesy), spojení s libd pro každý proces (program se zavaděčem spustí kdokoli), pečeť oblastí (`PROT_SEAL`, jako `mseal`) pro kód a RELRO | **[ověřeno v QEMU]** x86_64 i aarch64 (sady `pamet`, `procesy`) |
-| DL-4b | `dlopen`/`dlsym`/`dlclose` přes libd (dynamické TLS: líná alokace přes DTV, dynamický TLSDESC), rezerva statického TLS z manifestu (`[app] static_tls_reserve`) a měření | **[navrženo]** |
+| DL-4b | `dlopen`/`dlsym`/`dlclose` přes libd (dynamické TLS: líná alokace přes DTV, dynamický TLSDESC), rezerva statického TLS z manifestu (`[app] static_tls_reserve`) a měření | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `procesy`) |
 | DL-4c | knihovny z disku a `$ORIGIN` (až budou aplikace z disku `/apps/<id>/`) | **[navrženo]** |
 
 ## Návrh (schválené volby)
@@ -46,7 +46,7 @@ Wine a FFmpeg (LGPL, dynamicky). Programy v Rustu zůstávají statické
 <text class="m" x="5" y="130">Kód knihoven ze zapečetěných šablon (libd, sdílené stránky), data a GOT jako kopie při zápisu.</text>
 <text class="m" x="5" y="150">DL-1 (tato část): parser libs/elf, ze kterého ld.so čte hlavičky, symboly a relokace.</text>
 </svg>
-<figcaption>Spuštění programu PIE se sdílenými knihovnami (DL-2 až DL-4 navrženo).</figcaption>
+<figcaption>Spuštění programu PIE se sdílenými knihovnami (DL-2 až DL-4b; knihovny z disku a <code>$ORIGIN</code> v DL-4c).</figcaption>
 </figure>
 
 - **Zavaděč:** samostatný `ld.so` (zároveň `libc.so` ve stylu musl),
@@ -150,14 +150,11 @@ moduly jsou v `user/dltest` (minimální `crt.c`: `_start` -> `program_main`
   i nuly do `mem_size`). Šablona se hledá podle jména a obsahu (BLAKE3).
   Klient dostane handly kódu `READ | MAP | EXECUTE` a dat `READ | MAP`,
   nikdy zápis.
-- **Spojení:** init spustí libd hned po službě času (jen initfs) a jeho
-  bootstrap kanál je první spojení. `spawn` (libos) vytvoří každému
-  potomkovi vlastní spojení (`Connect`, `bootstrap::kind::LIBD`), takže
-  program se zavaděčem může spustit **kdokoli** se spojením, ne jen init.
-  Zavaděč dostane ve zprávě zavaděče další spojení (místo initfs) a nechá
-  si ho (`dlopen` v DL-4b). Sestavení libos pro Rust std spojení zatím
-  nemá (zavře ho): aplikace se std programy se zavaděčem nespouštějí.
-- **`ld.so`** samotný dává `spawn` také od libd (sdílený kód zavaděče).
+- **Relace a lístky:** viz [Relace s libd a obnova](#relace-s-libd-a-obnova-dl-4b)
+  (DL-4b): relaci s libd a lístek k ní dostane jen zavaděč programu se
+  zavaděčem a spouštěč (statický program se `spawn::Options::libd`).
+- **`ld.so`** samotný dává `spawn` také od libd (sdílený kód zavaděče);
+  šablonu si proces drží v mezipaměti (VMO jsou neměnné).
 - **Pečeť** (`PROT_SEAL` ve `VM_PROTECT`, jako Linux `mseal`,
   [syscally.md](syscally.md#vm_protect)): zapečetěnou oblast nejde
   odmapovat, uvolnit, změnit její práva ani přes ni mapovat, do konce
@@ -167,11 +164,156 @@ moduly jsou v `user/dltest` (minimální `crt.c`: `_start` -> `program_main`
 - **Nedůvěryhodný vstup:** jména jen `A-Z a-z 0-9 . _ + -` bez tečky na
   začátku, nejvýš 255 B (`libdproto::valid_name`, fuzz test dekodéru);
   soubor nejvýš 256 MiB, nejvýš 16 segmentů, ELF přes `libs/elf` (TEXTREL,
-  REL odmítnuty, hlavičky v prvním segmentu). Spojení: nejvýš 256 živých
-  vytvořených z jednoho spojení (na proces) a 4096 celkem.
-- ⚠️ **Restart libd:** procesy spuštěné dřív mají spojení se starou
-  instancí (zavřené) a program se zavaděčem už nespustí; init dostane nové
-  spojení. Obnova spojení lístkem (`svcclient`) zatím není.
+  REL odmítnuty, hlavičky v prvním segmentu). Relace: nejvýš 256 živých
+  vytvořených z jedné relace (na proces, kořen initu bez meze) a 4096
+  celkem.
+
+## Relace s libd a obnova (DL-4b)
+
+**[ověřeno v QEMU]** x86_64 i aarch64.
+
+- **libd je služba supervisoru** (`user/init/src/libd.rs`, adaptér
+  `LibdService`, [Obnova služeb](obnova-sluzeb.md)): po pádu ji supervisor
+  spustí znovu (backoff, limit pokusů) a klienti se připojí přes lístky.
+  Recept je prázdný (relace libd nemá identitu ani práva navíc).
+- **Kdo má relaci** (`bootstrap::kind::LIBD`: arg 0 relace, arg 1 lístek):
+  - **zavaděč** každého programu se zavaděčem (ve zprávě zavaděče),
+  - **spouštěč**: statický program spuštěný se `spawn::Options::libd`
+    (init ji dá `launchd` a `termd`),
+  - **program pod zavaděčem** až při prvním spawnu programu se zavaděčem
+    (`abi::loader::Interface::libd_session`: zavaděč mu udělá další),
+  - **init** drží kořenové spojení (bootstrap kanál libd).
+  - **Statický program bez volby nemá nic** a jeho spawn s libd ani initem
+    nemluví. Aplikace se std spouštějí programy přes `launchd`
+    (`osrt::process`), libd tedy nepotřebují.
+- **Relace a lístek pro dítě bez čekání** (`libos::libd::child`): rodič
+  pošle `Connect` na svou relaci (libd vytvoří relaci dítěte, bez odpovědi)
+  a `ADOPT` na svůj lístek (supervisor převezme nový lístek se stejným
+  receptem, bez odpovědi; [protokol](obnova-sluzeb.md#protokol-lístku)).
+  Dítě může obojí použít hned: zpráva na lístku počká v kanálu, než ho
+  supervisor převezme. Init dává dětem relaci z kořene a lístek zapíše
+  supervisoru přímo (`supervisor::queue_lease`, i uvnitř jeho kola).
+- **Obnova:** `PEER_CLOSED` na relaci = `RECONNECT` na lístku a opakování
+  požadavku (`Open`, `Stats` jsou idempotentní). Platí pro `spawn` i pro
+  `dlopen` v zavaděči (tentýž klient `libos::libd`). Test pořadí: libd
+  spadne po spawnu, **dřív než supervisor zpracuje `ADOPT`**, a dítě přesto
+  `dlopen` obnoví.
+- **Odmítnutí bez odpovědi se ukáže při prvním použití**, nikdy visením:
+  - libd relaci zavře (víc než 256 relací z jedné relace = na proces, nebo
+    4096 celkem): `RECONNECT` vrátí do 0,2 s `PEER_CLOSED` (instance běží
+    dál = úmyslné zavření), lístek zanikne, `dlopen`/spawn vrátí důvod
+    („libd relaci odmítla (limit relací procesu)“),
+  - supervisor `ADOPT` odmítne (víc než 256 živých převzatých lístků
+    z jednoho lístku nebo víc než 128 za sekundu, dávka 128;
+    `leaseproto::adopt`): konec lístku zavře a zaloguje
+    `init: listek libd: ADOPT odmitnut (...)`; dítě dostane
+    `SERVICE_UNAVAILABLE`, až když lístek bude potřebovat.
+- **Měření** (test `rezie spawnu a propustnost initu`, program
+  `user/dlspawn`; **QEMU TCG** na Windows, 4 vCPU, debug - na skutečném
+  stroji jsou časy řádově menší, poměry podobné). Průměr na jeden spawn:
+
+  | | x86_64 | aarch64 | revize |
+  |---|---|---|---|
+  | spawn programu se zavaděčem, 1 spouštěč × 200 | 5975 µs | 6112 µs | `bd7e656` |
+  | z toho relace a lístek pro dítě (`Connect` + `ADOPT`) | 659 µs | 595 µs | `bd7e656` |
+  | totéž 4 spouštěče × 50 souběžně | 5473 µs | 7170 µs | `bd7e656` |
+  | statický spawn (bez libd) | 1952 µs | 1861 µs | `bd7e656` |
+  | oběh k libd (co DL-4a přidával každému spawnu) | 1342 µs | 1301 µs | `bd7e656` |
+
+  Varianta s `NARROW` (rodič čeká na odpověď initu, necommitovaná
+  mezifáze na základě `df51756`) byla výrazně dražší - proto `ADOPT` bez
+  odpovědi:
+
+  | `NARROW` | x86_64 | aarch64 | revize |
+  |---|---|---|---|
+  | spawn programu se zavaděčem, 1 × 200 | 6911 µs | 7639 µs | `df51756` + A |
+  | z toho `NARROW` | 1830 µs (26 %) | 1785 µs (23 %) | `df51756` + A |
+  | podíl `NARROW` při 4 × 50 souběžně | 35 % | 31 % | `df51756` + A |
+
+  Zbytek po `ADOPT` (`Connect` + `ADOPT`, asi desetina spawnu) jsou dvě
+  vytvoření kanálu a dva zápisy v procesu rodiče; init ani libd se na nich
+  nečeká. Čísla kolísají mezi běhy asi o pětinu (TCG). DL-4a (spojení pro každé dítě) přidávala
+  každému statickému spawnu jeden oběh k libd.
+
+## dlopen a dynamické TLS (DL-4b)
+
+**[ověřeno v QEMU]** x86_64 i aarch64.
+
+- **`dlopen(cesta, příznaky)`**: cesta jen `/system/lib/<jméno>` nebo
+  `<jméno>` (knihovny od `libd`; disk a `$ORIGIN` až DL-4c), null = program
+  (globální rozsah). Už nahraný modul (jméno nebo `SONAME`) vrátí tentýž
+  handle a zvýší počítadlo. Nový modul a jeho chybějící závislosti se
+  nahrají od libd, **relokují hned** (`LAZY` = `NOW`) v rozsahu globální
+  rozsah (program, knihovny ze startu, moduly s `RTLD_GLOBAL`) + lokální
+  skupina knihovny (ona a závislosti do šířky), kód a RELRO se zapečetí
+  a zavolají se inicializátory (závislosti napřed). `RTLD_NOLOAD` jen
+  vrátí handle nahraného modulu. **Chyba kdekoli** (chybějící knihovna,
+  nedefinovaný symbol, málo rezervy TLS) = nic se nezmění: nové moduly se
+  zahodí (ještě nejsou zapečetěné), rezerva TLS se vrátí, důvod jde do
+  `dlerror`.
+- **`dlsym(handle, jméno)`**: hledá v lokální skupině modulu,
+  `RTLD_DEFAULT` (0) a handle programu v globálním rozsahu; proměnná TLS
+  = adresa ve volajícím vlákně (líný blok se případně založí), IFUNC =
+  výsledek resolveru. `RTLD_NEXT` zatím není (chyba).
+- **`dlclose`** sníží počítadlo; modul zůstává nahraný (kód je zapečetěný,
+  čísla modulů TLS se neopakují) - jako `RTLD_NODELETE` u všech.
+- **`dlerror`** je pro každé vlákno zvlášť (podle TP); řetězec platí do
+  dalšího `dl*` ve vlákně, čtení chybu vymaže. Volání `dl*` jsou
+  serializovaná **rekurzivním** zámkem: inicializátor smí volat `dlopen`.
+- **TLS modulu z `dlopen`:**
+  - **initial-exec** (`DF_STATIC_TLS` nebo relokace posunu od TP): kus
+    **rezervy statického TLS** (`dynload::Surplus`) - stejný posun od TP
+    ve všech vláknech. Zavaděč šablonu zkopíruje do bloků všech žijících
+    vláken (seznam bloků) a doplní jejich DTV; nová vlákna ji dostanou
+    v `thread_tls_new`. Zarovnání víc než zarovnání TP nejde.
+  - **ostatní** (general-dynamic, TLSDESC): **líný blok** přes DTV. Položka
+    je prázdná, dokud vlákno k TLS modulu nesáhne: pomalá cesta
+    `__tls_get_addr` (x86_64 GD) nebo **dynamického resolveru TLSDESC**
+    (aarch64 vždy, x86_64 `-mtls-dialect=gnu2`) alokuje blok (šablona,
+    nuly do konce), zapíše ho do DTV a při konci vlákna ho uvolní.
+    Resolver na rychlé cestě jen čte DTV; na pomalé uloží všechny registry,
+    které smí měnit volaná funkce v Rustu - x86_64 `rcx rdx rsi rdi r8-r11`
+    a `xmm0-15` (zavaděč je přeložený bez AVX, horní poloviny `ymm`/`zmm`
+    nemění), aarch64 `x1-x18` a `q0-q31`. ABI deskriptoru mění jen `rax`/`x0`
+    (a příznaky).
+  - DTV má pevnou velikost (256 modulů s TLS) a čísla se neopakují, takže
+    prázdná položka vždy znamená „blok ještě není“ (glibc navíc porovnává
+    generaci, protože čísla po `dlclose` recykluje).
+  - Přístup k TLS bez možnosti vrátit chybu (málo paměti pro líný blok,
+    neznámý modul) ukončí proces, jako glibc.
+- **Rezerva statického TLS** pro proces: manifest `[app] static_tls_reserve`
+  (např. `"8K"`, nejvýš 64 KiB, viz [manifest](firewall.md#manifest-aplikace))
+  -> init `spawn::Options::static_tls_reserve` -> auxv
+  `abi::loader::AT_MO_TLS_RESERVE` -> zavaděč (`dynload::tls_reserve`; bez
+  hodnoty výchozí 2 KiB). Rezerva je v bloku **každého** vlákna, proto
+  horní mez.
+- **Měření rezervy:** zavaděč zapíše do logu spotřebu při každém `dlopen`
+  modulu, který rezervu použil, a při konci procesu (jen když se použila):
+
+  ```text
+  ld.so: dlopen libdlstatic.so.1 (statické TLS 4 B): rezerva statickeho TLS pouzito 4 z 2048 B
+  ld.so: konec procesu: rezerva statickeho TLS pouzito 4 z 2048 B
+  ```
+
+- **Vyčerpání rezervy** = `dlopen` selže a `dlerror` řekne, co dělat:
+
+  ```text
+  dlopen: libdlbig.so.1: staticke TLS (initial-exec) potrebuje 4096 B (zarovnani 1), v rezerve zbyva 2048 z 2048 B; zvyste [app] static_tls_reserve v manifestu aplikace (nejvys 64 KiB)
+  ```
+
+- **libos:** `libos::loader::{dlopen, dlsym, dlclose}` (chyba jako text
+  z `dlerror`), `Library` = handle.
+- **Alokátor zavaděče** (`user/ld/src/heap.rs`) uvolňuje
+  (`linked_list_allocator` nad rezervací adres, kterou vybere jádro).
+- `r_debug` se při `dlopen` doplní (`RT_ADD`, `_dl_debug_state`,
+  `RT_CONSISTENT`, `_dl_debug_state`); `dl_iterate_phdr` vidí nové moduly
+  (`adds`).
+- ⚠️ **Omezení:** `RTLD_NEXT` není; moduly se neodstraňují (paměť
+  knihovny zůstane do konce procesu); finalizátory modulů z `dlopen`
+  běží až na konci procesu a v pořadí nahrání (ne podle závislostí na
+  starších modulech); kód v C, který volá `__tls_get_addr` se zásobníkem
+  nezarovnaným na 16 B (starý GCC), by na pomalé cestě mohl spadnout
+  (clang je v pořádku).
 
 ## Vlákna, fini a debugger (DL-3)
 
@@ -188,34 +330,32 @@ moduly jsou v `user/dltest` (minimální `crt.c`: `_start` -> `program_main`
   (`thread_tls_new`: kopie šablon všech modulů, rezerva, na x86_64 TCB)
   a ukazatel vlákna nastaví v trampolíně dřív než kód vlákna; `join` blok
   vrátí. `osrt` (Rust std) pod zavaděčem vlastní blok nevytváří.
-- **Statická rezerva TLS** `dynload::STATIC_TLS_SURPLUS` = 2 KiB za moduly
-  ze startu: pro pozdější `dlopen` modulů s initial-exec TLS (ovladače
-  Vulkan/GL z Mesy). glibc má pevnou rezervu 1664 B, dnes 512 B + 144 B na
-  jmenný prostor (1520 B); 2 KiB pokryje obojí.
+- **Statická rezerva TLS** (výchozí `dynload::STATIC_TLS_SURPLUS` = 2 KiB,
+  od DL-4b nastavitelná, viz níže) za moduly ze startu: pro pozdější
+  `dlopen` modulů s initial-exec TLS (ovladače Vulkan/GL z Mesy). glibc má
+  pevnou rezervu 1664 B, dnes 512 B + 144 B na jmenný prostor (1520 B);
+  2 KiB pokryje obojí.
 - **fini:** normální konec programu (`rt_own` po `main`, crt po
   `program_main`) zavolá `run_fini`: program první, závislosti poslední,
   `DT_FINI_ARRAY` pozpátku, pak `DT_FINI`; podruhé nic. Kill a pád fini
   nevolají; přímý `PROCESS_EXIT` také ne.
 - **`dl_iterate_phdr`** (rozložení `struct dl_phdr_info` jako glibc, pro
   unwinder a převzatý kód): v tabulce a jako vestavěný symbol pro C;
-  bez alokace (alokátor zavaděče neuvolňuje). Moduly: program a knihovny
-  (zavaděč sám ne).
+  bez alokace, callback běží bez zámku (smí volat `dlopen`). Moduly:
+  program, knihovny ze startu a z `dlopen` (zavaděč sám ne).
 - **`r_debug`** (SVR4, `link_map` program a knihovny, `r_brk` =
   `_dl_debug_state`): adresa v `DT_DEBUG` programu (zapsaná před RELRO).
 - **DTV a generace** (model glibc, příprava na `dlopen`): každé vlákno má
   v bloku TLS vektor `[generace, blok modulu 1, 2, ...]`, ukazatel na něj
   v TCB (x86_64 `TP + 8`, aarch64 `TP + 0`). `__tls_get_addr` čte blok
   z DTV; moduly ze startu ho mají ve statickém TLS. Líná alokace bloku
-  modulu z `dlopen` (vyšší generace, prázdná položka) přijde s DL-4.
+  modulu z `dlopen` viz DL-4b.
 - **`dlopen`, `dlsym`, `dlclose`, `dlerror`, `dladdr`** jsou v tabulce
-  i jako vestavěné symboly pro C už teď (ABI se v DL-4 nezmění): `dlopen`
-  vrací null a `dlerror` „zatím nepodporováno“. `dladdr` funguje (modul
-  podle adresy; symbol zatím ne). **`dlopen` až v DL-4** se službou `libd`:
-  zavaděč je ve stejném procesu jako program a cokoli si nechá (initfs),
-  dostal by i program - rozhodnutí uživatele.
-- Zavaděč si **ponechá handle vlastního procesu** (bloky TLS vláken); program
-  má handle na tentýž proces stejně, práva navíc nedostane. Initfs zavírá
-  a odmapuje.
+  i jako vestavěné symboly pro C (ABI se v DL-4b nezměnilo). `dladdr`
+  najde modul podle adresy (symbol zatím ne).
+- Zavaděč si **ponechá handle vlastního procesu** (bloky TLS vláken,
+  `dlopen`); program má handle na tentýž proces stejně, práva navíc
+  nedostane.
 
 ## Parser `libs/elf` (DL-1)
 
@@ -258,8 +398,15 @@ a commitují se, testy clang nepotřebují.
 | QEMU `procesy`: `dynamicke linkovani: PIE s knihovnami` | `dltest`: volání přes dvě knihovny, ukazatel na funkci (ABS64), inicializátor po relokaci závislostí, TLS knihoven (GD/TLSDESC), TLS knihovny z programu (initial-exec), TLS programu (local-exec) |
 | QEMU `procesy`: `ASLR - dva behy, ruzne baze` | dva běhy `dltest` mají různou bázi programu |
 | QEMU `procesy`: `chybejici knihovna -> kod 127` | `dltest-missing`: `ld.so: knihovna ... nenalezena`, kód 127 |
-| QEMU `procesy`: `vlakna libos s TLS knihoven, dl_iterate_phdr, r_debug, fini` | `dltest-rs` (Rust + libos jako PIE, jen test): 4 vlákna mají vlastní čerstvou kopii TLS knihovny (přes DTV), hlavní vlákno beze změny; tabulka zavaděče; `dl_iterate_phdr` (3 moduly, jména, TLS); `r_debug` přes `DT_DEBUG` (verze 1, 3 uzly); finalizátor knihovny; `dlopen` = null + `dlerror`, `dladdr` funkce knihovny |
+| QEMU `procesy`: `vlakna libos s TLS knihoven, dl_iterate_phdr, r_debug, fini` | `dltest-rs` (Rust + libos jako PIE, jen test): 4 vlákna mají vlastní čerstvou kopii TLS knihovny (přes DTV), hlavní vlákno beze změny; tabulka zavaděče; `dl_iterate_phdr` (3 moduly, jména, TLS); `r_debug` přes `DT_DEBUG` (verze 1, 3 uzly); finalizátor knihovny; `dladdr` funkce knihovny; `dl*`: vadné jméno a cesta mimo `/system/lib` = chyba, nahraná knihovna = handle a `dlsym`, `RTLD_NOLOAD`; `dlopen` knihoven s TLS (TLSDESC i `__tls_get_addr`, zarovnaný blok, initial-exec v rezervě, inicializátor, `dlsym` proměnné TLS) v hlavním vlákně, ve vlákně založeném před `dlopen` i po něm; 4 KiB initial-exec = chyba s radou `static_tls_reserve` |
 | `cargo test -p dynload` (`tls_surplus_after_modules`) | rezerva TLS za moduly nemění jejich posuny |
+| QEMU `procesy`: `obnova po padu libd pres listky (spawn i dlopen)` | spouštěč běžící před pádem libd spustí po restartu další programy (`RECONNECT`), init spouští z nového kořene, `dltest-rs` (`dlopen`) projde |
+| QEMU `procesy`: `pad libd pred prevzetim listku (ADOPT)` | dítě spouštěče nahraje knihovny, libd spadne dřív, než supervisor zpracuje `ADOPT`; `dlopen` dítěte počká na lístek a po restartu projde |
+| QEMU `procesy`: `rezie spawnu a propustnost initu` | 200 spawnů z jednoho spouštěče a 4 × 50 souběžně bez chyby, čísla do logu (tabulka výše) |
+| `cargo test -p svcclient` (`adopt_*`) | `ADOPT` = op 4 bez dat; omezovač: dávka, doplňování za sekundu, živé lístky |
+| QEMU `procesy`: `rezerva statickeho TLS z voleb spusteni (manifest)` | `dltest-dl`: `dlopen` knihovny se 4 KiB initial-exec s výchozí rezervou selže s radou v `dlerror`, s `static_tls_reserve` 8 KiB uspěje a TLS sedí |
+| `cargo test -p dynload` (`surplus_*`, `tls_reserve_bounds`) | místo v rezervě pod moduly (x86_64) a nad nimi (aarch64), zarovnání, vyčerpání; mez rezervy |
+| `cargo test -p manifest` (`static_tls_reserve`) | `[app] static_tls_reserve`: velikost, nejvýš 64K |
 | `cargo test -p libdproto` | jména knihoven, zprávy a meze; fuzz dekodéru (20 000 poškozených zpráv bez paniky) |
 | QEMU `pamet`: `pecet: ...` | zapečetěné mapování a rezervace: `VM_PROTECT`, `VM_UNMAP`, decommit, mapování přes ni a obsazení rezervace selžou, sousední oblasti fungují |
 | QEMU `procesy`: `libd sdili sablony knihoven mezi procesy` | druhý běh `dltest` nevytvoří novou šablonu, jen zásahy mezipaměti libd |

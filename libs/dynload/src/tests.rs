@@ -51,11 +51,12 @@ fn relocation_values() {
 
 #[test]
 fn library_paths() {
-    assert_eq!(initfs_path("libdltest.so.1").as_deref(), Some("lib/libdltest.so.1"));
-    assert_eq!(initfs_path("/system/lib/libx.so.2").as_deref(), Some("lib/libx.so.2"));
-    assert_eq!(initfs_path("/home/a/libx.so"), None);
-    assert_eq!(initfs_path("../libx.so"), None);
-    assert_eq!(initfs_path(""), None);
+    assert_eq!(system_name("libdltest.so.1"), Some("libdltest.so.1"));
+    assert_eq!(system_name("/system/lib/libx.so.2"), Some("libx.so.2"));
+    assert_eq!(system_name("/home/a/libx.so"), None);
+    assert_eq!(system_name("../libx.so"), None);
+    assert_eq!(system_name(""), None);
+    assert_eq!(system_name("/system/lib/"), None);
 }
 
 #[test]
@@ -71,4 +72,45 @@ fn tls_surplus_after_modules() {
     assert_eq!(a.offsets, [Some(16)]);
     assert!(a.surplus.0 >= 20 && a.surplus.0 % 64 == 0);
     assert!(a.size >= a.surplus.0 as u64 + STATIC_TLS_SURPLUS);
+}
+
+#[test]
+fn surplus_x86_64_below_modules() {
+    let l = tls_layout(Machine::X86_64, &[M4], 256);
+    let mut s = Surplus::new(Machine::X86_64, &l, 64);
+    let a = s.alloc(4, 4).unwrap();
+    // Pod modulem programu (-4) a v rezerve.
+    assert!(a < -4 && a >= l.surplus.0);
+    let b = s.alloc(16, 16).unwrap();
+    assert!(b + 16 <= a && b % 16 == 0);
+    assert_eq!(s.used(), (l.surplus.0 + 256 - b) as u64);
+    // Zbytek nestaci, zarovnani vetsi nez TP nejde.
+    assert_eq!(s.alloc(512, 8), None);
+    assert_eq!(s.alloc(4, 128), None);
+    // Rezervu jde vycerpat presne.
+    let free = 256 - s.used();
+    assert!(s.alloc(free, 1).is_some());
+    assert_eq!(s.used(), 256);
+    assert_eq!(s.alloc(1, 1), None);
+}
+
+#[test]
+fn surplus_aarch64_above_modules() {
+    let l = tls_layout(Machine::Aarch64, &[M4], 128);
+    let mut s = Surplus::new(Machine::Aarch64, &l, 4096);
+    let a = s.alloc(8, 8).unwrap();
+    assert!(a >= 16 + 4 && a == l.surplus.0);
+    let b = s.alloc(64, 64).unwrap();
+    assert!(b >= a + 8 && b % 64 == 0);
+    assert!(b as u64 + 64 <= l.size);
+    assert_eq!(s.alloc(128, 1), None);
+    assert_eq!(s.used(), (b + 64 - l.surplus.0) as u64);
+}
+
+#[test]
+fn tls_reserve_bounds() {
+    assert_eq!(tls_reserve(None), STATIC_TLS_SURPLUS);
+    assert_eq!(tls_reserve(Some(8192)), 8192);
+    assert_eq!(tls_reserve(Some(1 << 30)), MAX_STATIC_TLS_RESERVE);
+    assert_eq!(tls_reserve(Some(0)), 0);
 }

@@ -7,6 +7,14 @@
 //! `id` je pozdni odpoved (klient ji zahodi, nebo prevezme relaci z ni).
 //!
 //! Cteni neplatne zpravy vrati `INVALID_ARGS`, nikdy paniku.
+//!
+//! Samostatny crate (ne jen `svcclient::proto`): pouziva ho i libos (obnova
+//! spojeni s libd), na kterem `svcclient` sam zavisi. Testy jsou
+//! v `libs/svcclient` (`svcclient::proto` je tento crate).
+
+#![cfg_attr(not(test), no_std)]
+
+extern crate alloc;
 
 use alloc::vec::Vec;
 
@@ -24,6 +32,24 @@ pub mod op {
     pub const NARROW: u32 = 2;
     /// Stav sluzby a generace (bez handlu).
     pub const STATUS: u32 = 3;
+    /// Prevzit novy listek se stejnym receptem **bez odpovedi**: handle
+    /// pozadavku = konec supervisoru noveho listku (klient si nechal druhy
+    /// a preda ho diteti spolu s relaci, kterou mu dala sama sluzba).
+    /// Rodic na nic neceka; dite muze listek pouzit hned (pozadavek pocka
+    /// v kanalu, dokud ho supervisor neprevezme). Odmitnuti (limit, recept
+    /// nejde zuzit prazdnym zuzenim) = supervisor konec zavre, dite dostane
+    /// `SERVICE_UNAVAILABLE` az pri pouziti, rodic se to dozvi logem initu.
+    pub const ADOPT: u32 = 4;
+}
+
+/// Limity `ADOPT` na jeden listek: nejvic zijicich prevzatych listku
+/// a rychlost (tokeny: davka a doplneni za sekundu), aby proces nezahltil
+/// supervisor. 128/s staci i na sestaveni s mnoha prekladaci (kazdy spawn
+/// programu se zavadecem = jeden `ADOPT`); nad mez dite jen nema obnovu.
+pub mod adopt {
+    pub const MAX_LIVE: u32 = 256;
+    pub const BURST: u32 = 128;
+    pub const PER_SEC: u32 = 128;
 }
 
 /// Nejdel, kolik smi klient chtit cekat na novou instanci (10 min).
@@ -78,12 +104,14 @@ pub enum Request {
     Reconnect { id: u32, wait_ms: u32 },
     Narrow { id: u32, narrowing: Vec<u8> },
     Status { id: u32 },
+    /// [`op::ADOPT`]: zprava ma jeden handle (konec noveho listku).
+    Adopt { id: u32 },
 }
 
 impl Request {
     pub fn id(&self) -> u32 {
         match self {
-            Request::Reconnect { id, .. } | Request::Narrow { id, .. } | Request::Status { id } => *id,
+            Request::Reconnect { id, .. } | Request::Narrow { id, .. } | Request::Status { id } | Request::Adopt { id } => *id,
         }
     }
 
@@ -92,6 +120,7 @@ impl Request {
             Request::Reconnect { .. } => op::RECONNECT,
             Request::Narrow { .. } => op::NARROW,
             Request::Status { .. } => op::STATUS,
+            Request::Adopt { .. } => op::ADOPT,
         }
     }
 
@@ -105,7 +134,7 @@ impl Request {
             Request::Narrow { narrowing, .. } => {
                 w.bytes(narrowing);
             }
-            Request::Status { .. } => {}
+            Request::Status { .. } | Request::Adopt { .. } => {}
         }
         w.finish()
     }
@@ -124,6 +153,7 @@ impl Request {
                 narrowing: r.rest().to_vec(),
             },
             op::STATUS => Request::Status { id },
+            op::ADOPT => Request::Adopt { id },
             _ => return Err(Error::InvalidArgs),
         };
         if !r.is_empty() {

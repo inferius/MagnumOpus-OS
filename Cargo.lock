@@ -825,6 +825,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dlspawn"
+version = "0.1.0"
+dependencies = [
+ "libos",
+]
+
+[[package]]
 name = "dltest-rs"
 version = "0.1.0"
 dependencies = [
@@ -1756,6 +1763,17 @@ dependencies = [
  "elf",
  "libdproto",
  "libos",
+ "linked_list_allocator",
+]
+
+[[package]]
+name = "leaseproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "rustc-std-workspace-alloc",
+ "rustc-std-workspace-core",
+ "wire",
 ]
 
 [[package]]
@@ -1778,6 +1796,10 @@ dependencies = [
 [[package]]
 name = "libdproto"
 version = "0.1.0"
+dependencies = [
+ "rustc-std-workspace-alloc",
+ "rustc-std-workspace-core",
+]
 
 [[package]]
 name = "libm"
@@ -1792,6 +1814,7 @@ dependencies = [
  "abi",
  "elf",
  "initfs",
+ "leaseproto",
  "libdproto",
  "linked_list_allocator",
  "rustc-std-workspace-alloc",
@@ -2809,6 +2832,7 @@ name = "svcclient"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "leaseproto",
  "libos",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",

@@ -6,7 +6,10 @@
 //!   a jak to predpoklada linker pro local-exec v programu),
 //! - [`compute`]: hodnotu, kterou relokace zapise (z `elf::reloc::Kind`,
 //!   baze modulu, addendu a definice symbolu),
-//! - [`initfs_path`]: kde lezi knihovna (`/system/lib` = `lib/` v initfs).
+//! - [`Surplus`]: misto pro staticke TLS modulu z `dlopen` (initial-exec)
+//!   v rezerve za moduly ze startu,
+//! - [`system_name`]: jmeno knihovny v `/system/lib` z `DT_NEEDED` nebo
+//!   cesty `dlopen`.
 //!
 //! Popis: `docs/cs/dynamicke-linkovani.md`.
 
@@ -14,7 +17,6 @@
 
 extern crate alloc;
 
-use alloc::string::String;
 use alloc::vec::Vec;
 
 use elf::Machine;
@@ -35,6 +37,17 @@ pub const TCB_SIZE: u64 = 16;
 /// (512 B) + 144 B na jmenny prostor (vychozi 4 -> 1520 B). Bereme 2 KiB:
 /// pokryje obe hodnoty glibc a je to nasobek zarovnani 64 B.
 pub const STATIC_TLS_SURPLUS: u64 = 2048;
+
+/// Horni mez rezervy z manifestu (`[app] static_tls_reserve`): rezerva je
+/// v bloku TLS kazdeho vlakna, 64 KiB uz je vic nez cokoli, co znamy
+/// modul s initial-exec potrebuje.
+pub const MAX_STATIC_TLS_RESERVE: u64 = 64 * 1024;
+
+/// Rezerva pro proces: z manifestu (auxv) nebo vychozi, nejvys
+/// [`MAX_STATIC_TLS_RESERVE`].
+pub fn tls_reserve(requested: Option<u64>) -> u64 {
+    requested.unwrap_or(STATIC_TLS_SURPLUS).min(MAX_STATIC_TLS_RESERVE)
+}
 
 /// Sablona TLS modulu (`PT_TLS`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,15 +169,77 @@ pub fn compute(kind: Kind, base: u64, addend: i64, def: Option<Def>, own_tls: Op
     })
 }
 
-/// Jmeno knihovny z `DT_NEEDED` -> soubor v initfs: `/system/lib/x` nebo
-/// holé `x` = `lib/x`. Jine absolutni cesty a `..` = `None` (knihovny jen
-/// ze systemu; disk a `$ORIGIN` aplikaci prijdou se sluzbou `libd`).
-pub fn initfs_path(needed: &str) -> Option<String> {
-    let name = needed.strip_prefix("/system/lib/").unwrap_or(needed);
+/// Jmeno knihovny v `/system/lib` z `DT_NEEDED` nebo cesty `dlopen`:
+/// `/system/lib/x` nebo hole `x` = `x`. Jine cesty (disk, `$ORIGIN`,
+/// relativni s `/`) = `None` (DL-4c). Znaky jmena hlida
+/// `libdproto::valid_name`.
+pub fn system_name(path: &str) -> Option<&str> {
+    let name = path.strip_prefix("/system/lib/").unwrap_or(path);
     if name.is_empty() || name.contains('/') || name == "." || name == ".." {
         return None;
     }
-    let mut p = String::from("lib/");
-    p.push_str(name);
-    Some(p)
+    Some(name)
+}
+
+/// Misto ve staticke rezerve TLS pro moduly z `dlopen`, ktere chteji
+/// initial-exec (`DF_STATIC_TLS`): posun od TP musi byt stejny ve vsech
+/// vlaknech, takze modul dostane kus rezervy, ktera je v bloku kazdeho
+/// vlakna (vcetne budoucich). Rezerva se neuvolnuje (moduly se
+/// neodstranuji).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Surplus {
+    machine: Machine,
+    /// Rezerva: posun zacatku od TP a velikost.
+    start: i64,
+    size: u64,
+    /// Dalsi volne misto (x86_64 roste dolu od konce, aarch64 nahoru).
+    next: i64,
+    /// Zarovnani TP (vetsi zarovnani modulu nejde zarucit).
+    tp_align: u64,
+}
+
+impl Surplus {
+    /// Rezerva z rozlozeni `layout`; `tp_align` = zaruka zarovnani TP
+    /// v bloku vlakna.
+    pub fn new(machine: Machine, layout: &TlsLayout, tp_align: u64) -> Self {
+        let (start, size) = layout.surplus;
+        let next = if machine == Machine::X86_64 { start + size as i64 } else { start };
+        Self { machine, start, size, next, tp_align }
+    }
+
+    /// Posun od TP pro `size` bajtu zarovnanych na `align`; `None` = v
+    /// rezerve neni misto (nebo prilis velke zarovnani).
+    pub fn alloc(&mut self, size: u64, align: u64) -> Option<i64> {
+        let align = align.max(1);
+        if !align.is_power_of_two() || align > self.tp_align || size > self.size {
+            return None;
+        }
+        let a = align as i64;
+        let off = match self.machine {
+            // Zaokrouhleni dolu (i pro zaporna cisla: dvojkovy doplnek).
+            Machine::X86_64 => (self.next - size as i64) & !(a - 1),
+            Machine::Aarch64 => (self.next + a - 1) & !(a - 1),
+        };
+        if off < self.start || off + size as i64 > self.start + self.size as i64 {
+            return None;
+        }
+        self.next = match self.machine {
+            Machine::X86_64 => off,
+            Machine::Aarch64 => off + size as i64,
+        };
+        Some(off)
+    }
+
+    /// Velikost rezervy.
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+
+    /// Pouzito (vcetne mezer zarovnani).
+    pub fn used(&self) -> u64 {
+        match self.machine {
+            Machine::X86_64 => (self.start + self.size as i64 - self.next) as u64,
+            Machine::Aarch64 => (self.next - self.start) as u64,
+        }
+    }
 }

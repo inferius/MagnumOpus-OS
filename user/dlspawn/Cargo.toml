@@ -1,0 +1,14 @@
+[package]
+name = "dlspawn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "dlspawn"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }

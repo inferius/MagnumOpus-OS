@@ -9,6 +9,7 @@
 //! id = "org.magnumopus.netprobe"   # povinne: a-z A-Z 0-9 . - _
 //! name = "Sitova sonda"            # pro dotazy uzivateli
 //! jit = true                       # smi spoustet pamet bez pecete (JIT); vychozi ne
+//! static_tls_reserve = "8K"        # rezerva statickeho TLS pro dlopen (vychozi 2K, nejvys 64K)
 //!
 //! [limits]                         # rozpocet jobu (bez sekce = bez limitu)
 //! memory = "64M"                   # uzivatelska pamet
@@ -86,6 +87,9 @@ pub struct Manifest {
     /// `[app] jit = true`: program smi spoustet pamet bez pecete (JIT,
     /// napr. prohlizec, .NET). Vychozi ne.
     pub jit: bool,
+    /// `[app] static_tls_reserve`: rezerva statickeho TLS pro knihovny
+    /// z `dlopen` s initial-exec (`None` = vychozi zavadece 2 KiB).
+    pub static_tls_reserve: Option<u64>,
     /// Prikazy terminalu, ktere program (balicek) poskytuje.
     pub commands: Vec<CommandDecl>,
 }
@@ -123,6 +127,10 @@ impl Manifest {
         if limits.stack.is_some_and(|s| s == 0 || s > 1 << 30) {
             return Err(err("limits.stack: 4K az 1G"));
         }
+        let static_tls_reserve = size(&t, "app.static_tls_reserve")?;
+        if static_tls_reserve.is_some_and(|s| s > 64 * 1024) {
+            return Err(err("app.static_tls_reserve: nejvys 64K"));
+        }
         let network = match t.get_table("network") {
             None => None,
             Some(n) => Some(network(n, id)?),
@@ -148,6 +156,7 @@ impl Manifest {
             limits,
             network,
             jit: t.get_bool("app.jit").unwrap_or(false),
+            static_tls_reserve,
             commands,
         })
     }

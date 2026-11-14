@@ -37,6 +37,7 @@ use core::time::Duration;
 
 use libos::{Handle, Port, Signals, Startup, println, time};
 
+pub use leases::queue_lease;
 // DepMode a Kept pouzivaji adaptery sluzeb (zapojuji vlakna sluzeb).
 #[allow(unused_imports)]
 pub use service::{Dep, DepMode, Kept, Restart, Service, Spec, StartCtx, Started};
@@ -267,6 +268,7 @@ impl Supervisor {
     /// co prislo.
     pub fn step(&mut self, startup: &Startup, deadline: Option<u64>) -> Vec<Happened> {
         let mut out = Vec::new();
+        self.adopt_pending();
         // Sluzby, ktere uz mohou startovat (zavislosti bezi), nebo nove
         // registrovane bez procesu.
         self.restart_due(startup, &mut out);

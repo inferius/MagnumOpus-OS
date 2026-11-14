@@ -145,6 +145,7 @@ then depending on the operation:
 | 1 | `RECONNECT` | `u32 wait_ms` | channel of the new session |
 | 2 | `NARROW` | `bytes narrowing` (service format) | channel of the narrowed session, a new lease |
 | 3 | `STATUS` | - | - |
+| 4 | `ADOPT` | - (handle: the supervisor end of a new lease) | **none** |
 
 **Reply:** `u32 op`, `u32 id`, `i32 status` (0 = ok, otherwise an error
 code), `u64 generation`, `u8 service_state` (0 `Running`, 1 `Restarting`,
@@ -184,6 +185,28 @@ code), `u64 generation`, `u8 service_state` (0 `Running`, 1 `Restarting`,
   one) has no lease and does not survive a restart: the child gets
   `SERVICE_UNAVAILABLE` and has to ask its parent. If the library restored
   it through the parent's lease, the child would get **higher** rights.
+
+`ADOPT` rules (DL-4b, the `libd` library service; generally for every
+service whose adapter can narrow with an empty narrowing):
+
+- the client creates a channel pair, sends one end to the supervisor
+  (`ADOPT`) and passes the other to the child together with a session the
+  **service itself** gave it (`libd`: `Connect` on the parent's session).
+  The parent waits for nothing,
+- the supervisor registers a new lease with the recipe
+  `narrow(recipe, [])` and the issue generation of the **parent's** lease.
+  The child can use the lease right away: a request waits in the channel
+  until the supervisor processes `ADOPT` (the ordering is checked by the
+  test `pad libd pred prevzetim listku`),
+- **a limit per lease** (`leaseproto::adopt`): at most 256 live adopted
+  leases and 128 per second (burst 128). Exceeding it, or a recipe that
+  cannot be narrowed, = the supervisor closes the endpoint and logs
+  `ADOPT odmitnut`; the child gets `SERVICE_UNAVAILABLE` when it uses the
+  lease. When an adopted lease ends, the parent gets its slot back,
+- `ADOPT` has no reply, so the parent does not see an error: a service
+  whose session for a child can fail must show it at first use (libd
+  closes the session, `RECONNECT` then returns `PEER_CLOSED` within 0.2 s
+  as a deliberate close).
 
 A lease ends when the client closes its endpoint. The recipe goes with it.
 
@@ -267,6 +290,7 @@ let reply = conn.call(Kind::Idempotent, &request, Vec::new())?;
 | `netd` | program sessions (network rules) from the recipe, addresses (DHCP again), DNS, firewall (`fwd` and `dnsd` with `Dep::restart`) | sockets: `CONNECTION_RESET` (connection lost), listening sockets have to be opened again | network thread |
 | `compd` | windows: the application reconnects through its lease (recipe = identity from the manifest) and sends its layer tree again; the display from the endpoint keeper; the focus from `inputd` | a window transaction in progress | GUI thread |
 | `devmgr` | drivers and all services on top of them (see the order above) | as with the individual services | recovery coordinator (init) |
+| `libd` | sessions from the lease (`RECONNECT`); the new instance builds library templates again (pages mapped in processes stay, the processes hold the VMOs) | nothing (requests are idempotent) | dynamic linking thread |
 | `termd`, `taskd` | terminal sessions, the task list (subscription from the last number) | a shell command running in the crashed session | shell thread |
 
 ## Task view
@@ -320,7 +344,8 @@ same commands `call`, `narrow`, `wait`, `gen` as `svctest client`).
 
 | Part | Status |
 |---|---|
-| lease protocol, `svcclient::Conn`, retry rules | done, tests on the host and in QEMU |
+| lease protocol, `svcclient::Conn`, retry rules | done, tests on the host and in QEMU; `ADOPT` (op 4) and its limits in `svcclient::policy::AdoptLimit` |
+| `libd` | done: the `LibdService` adapter (`user/init/src/libd.rs`), leases in the loader and launchers, `ADOPT` for children, `queue_lease` for init's children. Tests `obnova po padu libd`, `pad libd pred prevzetim listku` in suite `procesy` ([Dynamic linking](dynamic-linking.md#sessions-with-libd-and-recovery-dl-4b)) |
 | registry, dependencies (`Dep::restart`, `Dep::notify`), generations, backoff, giving up, `revive`, `status()` | done, suite `obnova sluzeb` |
 | endpoint keeper (`Kept`) | done in the supervisor; used by the service adapters |
 | `fsd` | done: adapter (`user/init/src/fsd.rs`, recipe and narrowing in the [file system](file-system.md#recovery-after-an-fsd-crash)), `FsClient` over `Conn` (`with_lease`), persistent handles and `REOPEN`, orphans kept for 30 s, disk `SYNC`; init and `fwd` hold a lease. Test `obnova fsd`. Remaining: leases for `dnsd`, `ntpd`, `revocd` (network thread) |

@@ -77,3 +77,43 @@ pub fn after_loss(kind: Kind, delivered: bool, had_handles: bool) -> After {
 pub fn wait_ms(wait: Duration) -> u32 {
     (wait.as_millis().min(crate::proto::MAX_WAIT_MS as u128)) as u32
 }
+
+/// Omezovac `ADOPT` jednoho listku (supervisor): nejvic
+/// `leaseproto::adopt::MAX_LIVE` zijicich prevzatych listku a rychlost
+/// pres tokeny (davka `BURST`, doplneni `PER_SEC` za sekundu). Cas
+/// v nanosekundach (monotonni hodiny).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdoptLimit {
+    /// Zijici prevzate listky.
+    pub live: u32,
+    /// Tokeny v tisicinach (presne doplnovani po malych krocich).
+    milli_tokens: u64,
+    last_ns: u64,
+}
+
+impl AdoptLimit {
+    pub const fn new(now_ns: u64) -> Self {
+        Self { live: 0, milli_tokens: leaseproto::adopt::BURST as u64 * 1000, last_ns: now_ns }
+    }
+
+    /// Smi listek prevzit dalsi? `true` = ano (a zapocita ho).
+    pub fn take(&mut self, now_ns: u64) -> bool {
+        use leaseproto::adopt::{BURST, MAX_LIVE, PER_SEC};
+        let dt = now_ns.saturating_sub(self.last_ns);
+        self.last_ns = self.last_ns.max(now_ns);
+        // PER_SEC tokenu za 1e9 ns = PER_SEC tisicin tokenu za 1e6 ns.
+        let add = dt / 1_000_000 * u64::from(PER_SEC);
+        self.milli_tokens = (self.milli_tokens + add).min(u64::from(BURST) * 1000);
+        if self.live >= MAX_LIVE || self.milli_tokens < 1000 {
+            return false;
+        }
+        self.milli_tokens -= 1000;
+        self.live += 1;
+        true
+    }
+
+    /// Prevzaty listek zanikl.
+    pub fn release(&mut self) {
+        self.live = self.live.saturating_sub(1);
+    }
+}

@@ -8,10 +8,19 @@
 //! | Zadost | Data | Handly | Odpoved |
 //! |---|---|---|---|
 //! | [`Request::Open`] | jmeno knihovny | - | [`Library`] + VMO na segment |
-//! | [`Request::Connect`] | - | konec noveho kanalu | prazdna (spojeni pro potomka) |
+//! | [`Request::Connect`] | - | konec noveho kanalu | **zadna** (nova relace pro dite) |
 //! | [`Request::Stats`] | - | - | [`Stats`] |
 //!
 //! Chyba = [`Reply::Error`] s kodem `abi::Error`.
+//!
+//! **Relace** tvori strom: korenove spojeni je bootstrap kanal libd (drzi ho
+//! adapter sluzby v initu, `docs/cs/obnova-sluzeb.md`), dalsi vznikaji
+//! `Connect` z existujici relace - **bez odpovedi**, aby rodic (spawn,
+//! adapter) nikdy necekal. Listek k nove relaci si rodic zaridi u supervisoru
+//! (`ADOPT`, take bez cekani). Nad mez ([`MAX_CHILD_CONNECTIONS`] zijicich
+//! z jedne relace = na proces, krome korene; [`MAX_CONNECTIONS`] celkem)
+//! libd novy konec zavre: dite pri prvnim pouziti dostane `PEER_CLOSED`
+//! a pres listek se dozvi, ze jde o odmitnuti (instance bezi dal).
 
 #![no_std]
 
@@ -29,10 +38,12 @@ pub const MAX_NAME: usize = 255;
 pub const MAX_SEGMENTS: usize = 16;
 /// Nejvetsi soubor knihovny (vetsi libd odmitne).
 pub const MAX_FILE: u64 = 256 << 20;
-/// Nejvic zivych spojeni vytvorenych z jednoho spojeni (`Connect`) - mez
-/// na proces (kazdy proces ma jedno spojeni od rodice).
+/// Nejvic zijicich relaci vytvorenych z jedne relace (`Connect`) - mez na
+/// proces (proces ma jednu relaci; deti dostanou relace z ni). Korenove
+/// spojeni (init, adapter) mez nema.
 pub const MAX_CHILD_CONNECTIONS: u32 = 256;
-/// Nejvic spojeni celkem.
+/// Nejvic spojeni celkem (nad mez libd nove spojeni zavre; klient pak
+/// dostane `PEER_CLOSED`).
 pub const MAX_CONNECTIONS: u32 = 4096;
 
 mod tag {
