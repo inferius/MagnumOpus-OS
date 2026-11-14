@@ -804,6 +804,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dltest-rs"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "libos",
+]
+
+[[package]]
 name = "dns"
 version = "0.1.0"
 dependencies = [

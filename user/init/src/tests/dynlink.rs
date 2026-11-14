@@ -14,6 +14,7 @@ pub const TESTS: &[Test] = &[
     ("dynamicke linkovani: PIE s knihovnami (relokace, TLS, inicializatory)", program_with_libraries),
     ("dynamicke linkovani: ASLR - dva behy, ruzne baze", aslr_differs),
     ("dynamicke linkovani: chybejici knihovna -> kod 127", missing_library),
+    ("dynamicke linkovani: vlakna libos s TLS knihoven, dl_iterate_phdr, r_debug, fini", rust_program),
 ];
 
 fn deadline() -> Option<u64> {
@@ -45,5 +46,12 @@ fn aslr_differs(s: &Startup) -> TestResult {
 
 fn missing_library(s: &Startup) -> TestResult {
     check_eq!(run(s, "dltest-missing")?, abi::auxv::EXIT_LOAD_FAILED, "kod zavadece pri chybejici knihovne");
+    Ok(())
+}
+
+fn rust_program(s: &Startup) -> TestResult {
+    let code = run(s, "dltest-rs")?;
+    // Bity viz user/dltest-rs/src/main.rs (E_*).
+    check_eq!(code, 0, "dltest-rs: 1 hlavni vlakno, 2 TLS vlaken, 4 tabulka zavadece, 8 dl_iterate_phdr, 16 r_debug, 32 fini, 64 vlakna, 128 dlopen/dladdr");
     Ok(())
 }

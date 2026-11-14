@@ -23,3 +23,14 @@ int dl_fn(int x) {
 int dl_tls_get(void) {
     return dl_tls;
 }
+
+// Finalizator (DL-3): zavadec ho zavola pri normalnim konci (run_fini).
+static int dl_fini_ran = 0;
+
+__attribute__((destructor)) static void dl_fini(void) {
+    dl_fini_ran = 1;
+}
+
+int dl_fini_get(void) {
+    return dl_fini_ran;
+}

@@ -396,6 +396,8 @@ impl Loader {
             (AT_BASE, self.ld_base),
             (AT_ENTRY, self.entry),
             (AT_RANDOM, 0),
+            // Misto pro tabulku zavadece (vyplni ld.so, abi::loader).
+            (abi::loader::AT_MO_LOADER, 0),
             (AT_NULL, 0),
         ];
         let words = 3 + 2 * pairs.len();

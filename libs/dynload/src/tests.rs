@@ -7,11 +7,11 @@ const M4: Option<TlsModule> = Some(TlsModule { size: 4, align: 4 });
 #[test]
 fn tls_x86_64_matches_linker_local_exec() {
     // Program s 4 B (align 4): lld pro local-exec dava TP - 4.
-    let l = tls_layout(Machine::X86_64, &[M4]);
+    let l = tls_layout(Machine::X86_64, &[M4], 0);
     assert_eq!(l.offsets, [Some(-4)]);
-    assert_eq!((l.tp, l.size, l.align), (16, 32, 16));
+    assert_eq!((l.tp, l.size, l.align), (64, 80, 16));
     // Program bez TLS, knihovny 4 B a 24 B s align 8.
-    let l = tls_layout(Machine::X86_64, &[None, M4, Some(TlsModule { size: 24, align: 8 })]);
+    let l = tls_layout(Machine::X86_64, &[None, M4, Some(TlsModule { size: 24, align: 8 })], 0);
     assert_eq!(l.offsets, [None, Some(-4), Some(-32)]);
     // Vsechna data pod TP a v bloku.
     assert!(l.tp >= 32 && l.tp % 16 == 0);
@@ -20,10 +20,10 @@ fn tls_x86_64_matches_linker_local_exec() {
 #[test]
 fn tls_aarch64_matches_linker_local_exec() {
     // lld: TP + zarovnane(16, align).
-    let l = tls_layout(Machine::Aarch64, &[M4]);
+    let l = tls_layout(Machine::Aarch64, &[M4], 0);
     assert_eq!(l.offsets, [Some(16)]);
     assert_eq!(l.tp, 0);
-    let l = tls_layout(Machine::Aarch64, &[M4, Some(TlsModule { size: 8, align: 64 })]);
+    let l = tls_layout(Machine::Aarch64, &[M4, Some(TlsModule { size: 8, align: 64 })], 0);
     assert_eq!(l.offsets, [Some(16), Some(64)]);
     assert_eq!((l.size, l.align), (128, 64));
 }
@@ -56,4 +56,19 @@ fn library_paths() {
     assert_eq!(initfs_path("/home/a/libx.so"), None);
     assert_eq!(initfs_path("../libx.so"), None);
     assert_eq!(initfs_path(""), None);
+}
+
+#[test]
+fn tls_surplus_after_modules() {
+    // Rezerva nesmi zmenit posuny modulu (program local-exec).
+    let x = tls_layout(Machine::X86_64, &[M4], STATIC_TLS_SURPLUS);
+    assert_eq!(x.offsets, [Some(-4)]);
+    let (start, len) = x.surplus;
+    assert_eq!(len, STATIC_TLS_SURPLUS);
+    assert!(start <= -4 - len as i64 && start % 64 == 0, "rezerva pod modulem: {start}");
+    assert!(x.tp as i64 + start >= 0, "rezerva v bloku");
+    let a = tls_layout(Machine::Aarch64, &[M4], STATIC_TLS_SURPLUS);
+    assert_eq!(a.offsets, [Some(16)]);
+    assert!(a.surplus.0 >= 20 && a.surplus.0 % 64 == 0);
+    assert!(a.size >= a.surplus.0 as u64 + STATIC_TLS_SURPLUS);
 }

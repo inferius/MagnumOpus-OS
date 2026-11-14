@@ -14,13 +14,32 @@ use cbuild::{Build, Link};
 
 use crate::{Options, Result, profile_dir, target_dir, workspace_root};
 
-/// Adresar cilu zavadece (jine priznaky nez ostatni programy).
-fn ld_target_dir() -> PathBuf {
-    target_dir().join("user-pie")
+/// Prelozi zavadec; vraci cestu k `ld`. static-PIE: kod pozicne
+/// nezavisly, link bez zavadece; jen relativni relokace (zavadec je
+/// provede sam, `user/ld/src/start.rs`).
+pub fn build_ld(opts: &Options) -> Result<PathBuf> {
+    build_pie(opts, "ld", "user-pie", &["-Clink-arg=--no-dynamic-linker"])
 }
 
-/// Prelozi zavadec; vraci cestu k `ld`.
-pub fn build_ld(opts: &Options) -> Result<PathBuf> {
+/// Testovaci program v Rustu (libos) jako PIE se zavadecem a knihovnami
+/// `user/dltest` (DL-3: vlakna s TLS knihoven). Bezne programy v Rustu
+/// zustavaji staticke.
+pub fn build_rust_test(opts: &Options, libs: &[PathBuf]) -> Result<PathBuf> {
+    let mut args: Vec<String> = vec![
+        format!("-Clink-arg=--dynamic-linker={}", cbuild::INTERP),
+        String::from("-Clink-arg=--allow-shlib-undefined"),
+    ];
+    for l in libs {
+        args.push(format!("-Clink-arg={}", l.display()));
+    }
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    build_pie(opts, "dltest-rs", "user-pie-test", &refs)
+}
+
+/// Program v Rustu jako PIE (`relocation-model=pie`, core a alloc z
+/// build-std v PIC, link `-pie -z now -z relro`). Vlastni adresar cilu:
+/// jine priznaky nez ostatni programy (jinak by se vse prekladalo znovu).
+fn build_pie(opts: &Options, package: &str, dir: &str, extra: &[&str]) -> Result<PathBuf> {
     let a = opts.arch;
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let json = workspace_root().join("third_party/rust-std/targets").join(format!("{}.json", a.user_target));
@@ -30,7 +49,7 @@ pub fn build_ld(opts: &Options) -> Result<PathBuf> {
         .arg("--target")
         .arg(&json)
         .args(["-Zjson-target-spec", "-Zbuild-std=core,alloc", "-Zbuild-std-features=compiler-builtins-mem"])
-        .args(["--package", "ld"]);
+        .args(["--package", package]);
     for krate in ["core", "alloc", "compiler_builtins"] {
         for (k, v) in [("opt-level", "3"), ("debug-assertions", "false"), ("overflow-checks", "false")] {
             cmd.arg("--config").arg(format!("profile.dev.package.{krate}.{k}={v}"));
@@ -39,29 +58,28 @@ pub fn build_ld(opts: &Options) -> Result<PathBuf> {
     if opts.release {
         cmd.arg("--release");
     }
-    // static-PIE: kod pozicne nezavisly, link bez zavadece; jen relativni
-    // relokace (zavadec je provede sam, `user/ld/src/start.rs`). Relokace
-    // v kodu (TEXTREL) = chyba linku.
     let sep = char::from(0x1F).to_string();
-    let flags = [
+    let mut flags: Vec<&str> = vec![
         "-Crelocation-model=pie",
         "-Cforce-frame-pointers=yes",
         "-Clink-arg=-pie",
-        "-Clink-arg=--no-dynamic-linker",
+        // Relokace v kodu (TEXTREL) = chyba linku (W^X).
         "-Clink-arg=-ztext",
         "-Clink-arg=-znow",
+        "-Clink-arg=-zrelro",
         "-Clink-arg=-zmax-page-size=65536",
         "-Clink-arg=-zpack-relative-relocs",
         // Bez ladicich sekci (initfs); tabulka symbolu zustava (symbolizace).
         "-Clink-arg=--strip-debug",
-    ]
-    .join(&sep);
-    cmd.env("CARGO_ENCODED_RUSTFLAGS", flags).arg("--target-dir").arg(ld_target_dir());
+    ];
+    flags.extend_from_slice(extra);
+    let target = target_dir().join(dir);
+    cmd.env("CARGO_ENCODED_RUSTFLAGS", flags.join(&sep)).arg("--target-dir").arg(&target);
     let status = cmd.status()?;
     if !status.success() {
-        return Err("build zavadece ld selhal".into());
+        return Err(format!("build {package} (PIE) selhal").into());
     }
-    Ok(ld_target_dir().join(a.user_target).join(profile_dir(opts)).join("ld"))
+    Ok(target.join(a.user_target).join(profile_dir(opts)).join(package))
 }
 
 /// Testovaci moduly v C (`user/dltest`): (jmeno v initfs, obsah).
@@ -88,8 +106,10 @@ pub fn build_tests(opts: &Options) -> Result<Vec<(String, Vec<u8>)>> {
         .file(src.join("missing.c"))
         .link(t, &out, &missing, &Link::pie().needs(&none))?;
     let read = |p: &PathBuf| std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()));
+    let rust = build_rust_test(opts, &[lib.clone(), lib2.clone()])?;
     // libdlnone se do obrazu zamerne nedava (test chybejici knihovny).
     Ok(vec![
+        (String::from("dltest-rs"), read(&rust)?),
         (String::from("lib/libdltest2.so.1"), read(&lib2)?),
         (String::from("lib/libdltest.so.1"), read(&lib)?),
         (String::from("dltest"), read(&prog)?),

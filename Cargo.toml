@@ -85,6 +85,7 @@ members = [
     "user/devmgr",
     "user/echo",
     "user/ld",
+    "user/dltest-rs",
     "user/hello-std",
     "user/agentd",
     "user/svctest",

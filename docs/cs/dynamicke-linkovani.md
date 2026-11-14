@@ -13,8 +13,8 @@ Wine a FFmpeg (LGPL, dynamicky). Programy v Rustu zůstávají statické
 |---|---|---|
 | DL-1 | parser `ET_DYN` v `libs/elf`: programové hlavičky (`PT_INTERP`, `PT_TLS`, `PT_GNU_RELRO`, `PT_DYNAMIC`), dynamická sekce, symboly s GNU a SysV hashem, relokace RELA a RELR obou architektur, odmítnutí TEXTREL | **[implementováno]** (host testy `cargo test -p elf` proti souborům z clang a ld.lld) |
 | DL-2 | zavaděč `user/ld` + `libs/dynload`: `PT_INTERP` ve `spawn`, ASLR, `DT_NEEDED`, `BIND_NOW`, relokace, statické TLS hlavního vlákna, RELRO jen pro čtení; PIC a link přes `ld.lld` v `cbuild`, knihovny v initfs (`lib/`) | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `procesy`, testy `dynamicke linkovani: ...`) |
-| DL-3 | `dlopen`/`dlsym`/`dlclose`, dynamické TLS (`__tls_get_addr`, TLSDESC), `dl_iterate_phdr`, `r_debug` | **[navrženo]** |
-| DL-4 | služba šablon `libd` (sdílení kódu knihoven), pečeť RELRO | **[navrženo]** |
+| DL-3 | tabulka zavaděče (`abi::loader`, `dl*` v ABI už teď), TLS nových vláken (libos, osrt), DTV a generace, statická rezerva TLS, `fini`, `dl_iterate_phdr`, `dladdr`, `r_debug` | **[ověřeno v QEMU]** x86_64 i aarch64 (test `dynamicke linkovani: vlakna libos ...`) |
+| DL-4 | služba šablon `libd` (sdílení kódu knihoven, knihovny i z disku), `dlopen`/`dlsym`/`dlclose` (dynamické TLS: líná alokace přes DTV, dynamický TLSDESC), pečeť RELRO | **[navrženo]** |
 
 ## Návrh (schválené volby)
 
@@ -134,13 +134,54 @@ moduly jsou v `user/dltest` (minimální `crt.c`: `_start` -> `program_main`
   zkopíruje do vlastní paměti (sdílení přes službu šablon `libd` v DL-4).
 - **Knihovny jen z initfs** a program se zavaděčem smí spustit jen proces,
   který má initfs (dnes init); disk, `$ORIGIN` aplikací a `libd` v DL-4.
-- **TLS jen hlavního vlákna**: nová vlákna (libos `thread::spawn`) blok
-  TLS knihoven nedostanou a běhové prostředí s vlastním TLS (`osrt` pro
-  Rust std) by ukazatel vlákna přepsalo - dohoda zavaděče s libos v DL-3.
-- **`DT_FINI` a `DT_FINI_ARRAY` se nevolají** (konec procesu syscallem).
+- TLS nových vláken a fini řeší DL-3a (výše).
 - **RELRO jde vrátit na RW** (`VM_PROTECT`); pečeť `max_flags` v DL-4.
 - Initfs je pro zavaděč dostupný celý (jen pro čtení) po dobu zavádění;
   program ho nedostane (zavaděč ho před skokem odmapuje a handly zavře).
+
+## Vlákna, fini a debugger (DL-3)
+
+**[ověřeno v QEMU]** x86_64 i aarch64.
+
+- **Tabulka zavaděče** `abi::loader::Interface` (verze, velikost;
+  `thread_tls_new`, `thread_tls_free`, `run_fini`, `dl_iterate_phdr`).
+  Adresu zapíše zavaděč do auxv (`AT_MO_LOADER`, místo připraví `spawn`)
+  a při skoku do programu předá navíc SP (auxv) a `ENTRY_MAGIC`
+  (x86_64 `rsi`/`rdx`, aarch64 `x1`/`x2`). libos (`rt_own` -> `loader::init`)
+  a crt ji tak najdou; program bez zavaděče má `loader::interface() = None`
+  a chová se jako dřív.
+- **TLS nových vláken:** `libos::thread::spawn` pod zavaděčem vezme blok
+  (`thread_tls_new`: kopie šablon všech modulů, rezerva, na x86_64 TCB)
+  a ukazatel vlákna nastaví v trampolíně dřív než kód vlákna; `join` blok
+  vrátí. `osrt` (Rust std) pod zavaděčem vlastní blok nevytváří.
+- **Statická rezerva TLS** `dynload::STATIC_TLS_SURPLUS` = 2 KiB za moduly
+  ze startu: pro pozdější `dlopen` modulů s initial-exec TLS (ovladače
+  Vulkan/GL z Mesy). glibc má pevnou rezervu 1664 B, dnes 512 B + 144 B na
+  jmenný prostor (1520 B); 2 KiB pokryje obojí.
+- **fini:** normální konec programu (`rt_own` po `main`, crt po
+  `program_main`) zavolá `run_fini`: program první, závislosti poslední,
+  `DT_FINI_ARRAY` pozpátku, pak `DT_FINI`; podruhé nic. Kill a pád fini
+  nevolají; přímý `PROCESS_EXIT` také ne.
+- **`dl_iterate_phdr`** (rozložení `struct dl_phdr_info` jako glibc, pro
+  unwinder a převzatý kód): v tabulce a jako vestavěný symbol pro C;
+  bez alokace (alokátor zavaděče neuvolňuje). Moduly: program a knihovny
+  (zavaděč sám ne).
+- **`r_debug`** (SVR4, `link_map` program a knihovny, `r_brk` =
+  `_dl_debug_state`): adresa v `DT_DEBUG` programu (zapsaná před RELRO).
+- **DTV a generace** (model glibc, příprava na `dlopen`): každé vlákno má
+  v bloku TLS vektor `[generace, blok modulu 1, 2, ...]`, ukazatel na něj
+  v TCB (x86_64 `TP + 8`, aarch64 `TP + 0`). `__tls_get_addr` čte blok
+  z DTV; moduly ze startu ho mají ve statickém TLS. Líná alokace bloku
+  modulu z `dlopen` (vyšší generace, prázdná položka) přijde s DL-4.
+- **`dlopen`, `dlsym`, `dlclose`, `dlerror`, `dladdr`** jsou v tabulce
+  i jako vestavěné symboly pro C už teď (ABI se v DL-4 nezmění): `dlopen`
+  vrací null a `dlerror` „zatím nepodporováno“. `dladdr` funguje (modul
+  podle adresy; symbol zatím ne). **`dlopen` až v DL-4** se službou `libd`:
+  zavaděč je ve stejném procesu jako program a cokoli si nechá (initfs),
+  dostal by i program - rozhodnutí uživatele.
+- Zavaděč si **ponechá handle vlastního procesu** (bloky TLS vláken); program
+  má handle na tentýž proces stejně, práva navíc nedostane. Initfs zavírá
+  a odmapuje.
 
 ## Parser `libs/elf` (DL-1)
 
@@ -183,3 +224,5 @@ a commitují se, testy clang nepotřebují.
 | QEMU `procesy`: `dynamicke linkovani: PIE s knihovnami` | `dltest`: volání přes dvě knihovny, ukazatel na funkci (ABS64), inicializátor po relokaci závislostí, TLS knihoven (GD/TLSDESC), TLS knihovny z programu (initial-exec), TLS programu (local-exec) |
 | QEMU `procesy`: `ASLR - dva behy, ruzne baze` | dva běhy `dltest` mají různou bázi programu |
 | QEMU `procesy`: `chybejici knihovna -> kod 127` | `dltest-missing`: `ld.so: knihovna ... nenalezena`, kód 127 |
+| QEMU `procesy`: `vlakna libos s TLS knihoven, dl_iterate_phdr, r_debug, fini` | `dltest-rs` (Rust + libos jako PIE, jen test): 4 vlákna mají vlastní čerstvou kopii TLS knihovny (přes DTV), hlavní vlákno beze změny; tabulka zavaděče; `dl_iterate_phdr` (3 moduly, jména, TLS); `r_debug` přes `DT_DEBUG` (verze 1, 3 uzly); finalizátor knihovny; `dlopen` = null + `dlerror`, `dladdr` funkce knihovny |
+| `cargo test -p dynload` (`tls_surplus_after_modules`) | rezerva TLS za moduly nemění jejich posuny |

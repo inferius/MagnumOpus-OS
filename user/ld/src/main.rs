@@ -24,6 +24,7 @@
 extern crate alloc;
 
 mod bump;
+mod iface;
 mod load;
 mod start;
 mod tls;

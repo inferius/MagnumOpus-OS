@@ -29,6 +29,9 @@ extern "C" fn _start() -> ! {
         "call {main}",
         "mov rsp, r13",
         "mov rdi, r12",
+        // Program pozna zavadec: rsi = auxv, rdx = abi::loader::ENTRY_MAGIC.
+        "mov rsi, r13",
+        "mov edx, 0x4D4F4C44",
         "xor ebp, ebp",
         "jmp rax",
         reloc = sym relocate_self,
@@ -56,6 +59,10 @@ extern "C" fn _start() -> ! {
         "mov x16, x0",
         "mov sp, x20",
         "mov x0, x19",
+        // Program pozna zavadec: x1 = auxv, x2 = abi::loader::ENTRY_MAGIC.
+        "mov x1, x20",
+        "movz x2, #0x4C44",
+        "movk x2, #0x4D4F, lsl #16",
         "mov x29, xzr",
         "mov x30, xzr",
         "br x16",

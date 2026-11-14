@@ -20,8 +20,34 @@ __attribute__((noreturn)) static void mo_exit(long code) {
     }
 }
 
+// Typ auxv s tabulkou zavadece (abi::loader::AT_MO_LOADER) a posun
+// run_fini v tabulce (verze u32, velikost u32, thread_tls_new,
+// thread_tls_free, run_fini).
+#define MO_AT_LOADER 0x4D4F0001ul
+#define MO_LOADER_RUN_FINI 24
+
+static unsigned long loader_table(unsigned long *sp) {
+    unsigned long *p = sp + 1 + sp[0] + 1;
+    while (*p != 0) {
+        p++;
+    }
+    for (p++; p[0] != 0; p += 2) {
+        if (p[0] == MO_AT_LOADER) {
+            return p[1];
+        }
+    }
+    return 0;
+}
+
 __attribute__((noreturn, used)) void __mo_start(unsigned long bootstrap, unsigned long *sp) {
-    mo_exit(program_main(bootstrap, sp));
+    unsigned long table = loader_table(sp);
+    long code = program_main(bootstrap, sp);
+    // Normalni konec: finalizatory modulu (DT_FINI_ARRAY) pres zavadec.
+    if (table != 0) {
+        void (*run_fini)(void) = *(void (**)(void))(table + MO_LOADER_RUN_FINI);
+        run_fini();
+    }
+    mo_exit(code);
 }
 
 #if defined(__x86_64__)

@@ -5,7 +5,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use abi::auxv::{AT_ENTRY, AT_NULL, AT_PHDR, AT_PHNUM};
+use abi::auxv::{AT_BASE, AT_ENTRY, AT_NULL, AT_PHDR, AT_PHNUM};
 use abi::bootstrap::{self, Entry, Header};
 use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_IN_RESERVATION, MAP_READ, MAP_WRITE};
 use dynload::{Apply, Def, TlsModule};
@@ -16,6 +16,7 @@ use elf::{ElfFile, ElfType, Machine, Tls, pt};
 use libos::initfs::Initfs;
 use libos::{Handle, Process, Vmo, sys};
 
+use crate::iface::{self, ModInfo, State, TlsState, TlsTemplate};
 use crate::{fail, tls};
 
 /// Nahrany modul.
@@ -36,6 +37,11 @@ struct Aux {
     phdr: u64,
     phnum: u64,
     entry: u64,
+    /// Baze zavadece.
+    base: u64,
+    /// Kam zapsat adresu tabulky zavadece (`AT_MO_LOADER`); 0 = spawn
+    /// misto nepripravil.
+    loader_slot: u64,
 }
 
 fn check<T, E: core::fmt::Display>(r: Result<T, E>, what: &str) -> T {
@@ -85,7 +91,7 @@ unsafe fn read_auxv(sp: *const u64) -> Aux {
             p = p.add(1);
         }
         p = p.add(1);
-        let mut aux = Aux { phdr: 0, phnum: 0, entry: 0 };
+        let mut aux = Aux { phdr: 0, phnum: 0, entry: 0, base: 0, loader_slot: 0 };
         loop {
             let (t, v) = (p.read(), p.add(1).read());
             match t {
@@ -93,6 +99,8 @@ unsafe fn read_auxv(sp: *const u64) -> Aux {
                 AT_PHDR => aux.phdr = v,
                 AT_PHNUM => aux.phnum = v,
                 AT_ENTRY => aux.entry = v,
+                AT_BASE => aux.base = v,
+                abi::loader::AT_MO_LOADER => aux.loader_slot = p.add(1) as u64,
                 _ => {}
             }
             p = p.add(2);
@@ -186,35 +194,32 @@ fn load_library(fs: &Initfs, process: &Process, needed: &str, page: u64) -> Modu
     module(needed.to_string(), base, mem)
 }
 
-/// Rozlozi a vytvori staticke TLS hlavniho vlakna, nastavi TP.
-fn setup_tls(mods: &mut [Module]) {
+/// Rozlozi staticke TLS vsech modulu (s rezervou pro `dlopen`), vytvori
+/// blok hlavniho vlakna a nastavi TP. Vraci stav pro bloky dalsich vlaken.
+fn setup_tls(mods: &mut [Module]) -> Option<TlsState> {
     let list: Vec<Option<TlsModule>> = mods.iter().map(|m| m.tls.map(|t| TlsModule { size: t.mem_size, align: t.align })).collect();
-    if list.iter().all(Option::is_none) {
-        return;
-    }
-    let layout = dynload::tls_layout(Machine::NATIVE, &list);
+    let layout = dynload::tls_layout(Machine::NATIVE, &list, dynload::STATIC_TLS_SURPLUS);
     if layout.align > libos::vm::page_size() || mods.len() > tls::MAX_MODULES {
         fail("TLS: prilis velke zarovnani nebo mnoho modulu");
     }
-    let len = layout.size.next_multiple_of(libos::vm::page_size());
-    let block = check(libos::vm::alloc(len, MAP_READ | MAP_WRITE), "pamet TLS");
-    let tp = block + layout.tp;
+    let mut templates = Vec::new();
     let mut id = 0u64;
     for (m, off) in mods.iter_mut().zip(&layout.offsets) {
         let (Some(t), Some(off)) = (m.tls, off) else { continue };
         id += 1;
         let data = check(m.elf.tls_data(&t), &m.name);
-        // SAFETY: cil lezi v bloku TLS (rozlozeni z `tls_layout`).
-        unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), tp.wrapping_add_signed(*off) as *mut u8, data.len()) };
+        templates.push(TlsTemplate { module: id, off: *off, src: data.as_ptr() as u64, len: data.len() as u64 });
         m.tls_info = Some((id, *off));
-        tls::set_offset(id, *off);
     }
-    if cfg!(target_arch = "x86_64") {
-        // TCB: na TP ukazatel sam na sebe (`mov rax, fs:0`).
-        // SAFETY: TP + 16 B TCB lezi v bloku.
-        unsafe { (tp as *mut u64).write(tp) };
+    // DTV za statickym TLS (zarovnane na 8 B).
+    let dtv = layout.size.next_multiple_of(8);
+    let state = TlsState { len: (dtv + tls::DTV_BYTES).next_multiple_of(libos::vm::page_size()), dtv, tp: layout.tp, templates };
+    let tp = iface::new_block(&state);
+    if tp == 0 {
+        fail("pamet TLS");
     }
     check(sys::thread_set_pointer(tp), "ukazatel vlakna");
+    Some(state)
 }
 
 /// Definice symbolu podle jmena v globalnim rozsahu (program, pak knihovny
@@ -233,7 +238,7 @@ fn lookup(mods: &[Module], name: &str) -> Option<Def> {
 fn builtin(name: &str) -> Option<u64> {
     match name {
         "__tls_get_addr" => Some(tls::tls_get_addr as *const () as u64),
-        _ => None,
+        _ => iface::builtin(name),
     }
 }
 
@@ -329,6 +334,53 @@ fn run_init(m: &Module) {
     }
 }
 
+/// Udaje modulu pro tabulku zavadece.
+fn mod_info(m: &Module) -> ModInfo {
+    let mut cname = if m.name == "program" { Vec::new() } else { m.name.as_bytes().to_vec() };
+    cname.push(0);
+    let fa = m.dynamic.fini_array;
+    ModInfo {
+        base: m.base,
+        span: m.elf.data().len() as u64,
+        cname,
+        phdr: m.base + check(m.elf.phdr_vaddr(), &m.name),
+        phnum: m.elf.phnum(),
+        tls: m.tls_info,
+        fini: m.dynamic.fini.map(|f| m.base + f),
+        fini_array: (m.base + fa.addr, fa.size / 8),
+    }
+}
+
+/// `r_debug` pro debuggery: seznam modulu a jeho adresa do `DT_DEBUG`
+/// programu (dynamicka sekce je v RELRO - zapis pred `protect_relro`).
+fn debug_hook(mods: &[Module], ldbase: u64) {
+    let mut list = Vec::new();
+    for m in mods {
+        let mut name = if m.name == "program" { Vec::new() } else { m.name.as_bytes().to_vec() };
+        name.push(0);
+        let name = alloc::boxed::Box::leak(name.into_boxed_slice());
+        let dynamic = check(m.elf.program_headers().find(|p| p.as_ref().is_ok_and(|p| p.p_type == pt::DYNAMIC)).transpose(), &m.name);
+        list.push((m.base, name.as_ptr(), dynamic.map_or(0, |p| m.base + p.vaddr)));
+    }
+    let r = iface::build_r_debug(&list, ldbase);
+    let Some(dynamic) = list.first().map(|l| l.2).filter(|&d| d != 0) else { return };
+    let mut p = dynamic;
+    loop {
+        // SAFETY: dynamicka sekce programu (pole tag/hodnota do DT_NULL),
+        // jeste zapisovatelna (pred RELRO).
+        let tag = unsafe { (p as *const u64).read_unaligned() };
+        if tag == elf::dynamic::dt::NULL {
+            break;
+        }
+        if tag == 21 {
+            // DT_DEBUG
+            unsafe { ((p + 8) as *mut u64).write_unaligned(r) };
+            break;
+        }
+        p += 16;
+    }
+}
+
 /// Zavede program; vraci jeho vstupni bod (skok dela `_start`).
 pub extern "C" fn main(sp: *const u64, bootstrap: u64) -> u64 {
     let (process_raw, initfs_raw) = loader_message(bootstrap);
@@ -361,21 +413,29 @@ pub extern "C" fn main(sp: *const u64, bootstrap: u64) -> u64 {
         next += 1;
     }
 
-    setup_tls(&mut mods);
+    let tls_state = setup_tls(&mut mods);
     // Zavislosti napred (opacne poradi nahrani), program posledni.
     for i in (0..mods.len()).rev() {
         relocate(&mods, i);
     }
+    debug_hook(&mods, aux.base);
     for m in &mods {
         protect_relro(m, page);
     }
     for m in mods.iter().rev() {
         run_init(m);
     }
+    iface::set_state(State { tls: tls_state, mods: mods.iter().map(mod_info).collect() });
+    if aux.loader_slot != 0 {
+        // SAFETY: misto hodnoty `AT_MO_LOADER` v auxv na zasobniku (spawn).
+        unsafe { (aux.loader_slot as *mut u64).write(&iface::INTERFACE as *const _ as u64) };
+    }
 
-    // Uklid: initfs a handly zavadece program nedostane.
+    // Uklid: initfs program nedostane. Handle vlastniho procesu si zavadec
+    // nechava (bloky TLS novych vlaken, pozdeji dlopen); program ma handle
+    // na tentyz proces stejne (zadna prava navic).
     fs.close();
     drop(initfs_vmo);
-    drop(process);
+    core::mem::forget(process);
     aux.entry
 }

@@ -1,0 +1,16 @@
+[package]
+name = "dltest-rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Test DL-3: program v Rustu (libos) jako PIE se zavadecem - vlakna s TLS knihoven, dl_iterate_phdr, r_debug, fini"
+
+[[bin]]
+name = "dltest-rs"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+abi.workspace = true

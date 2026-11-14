@@ -13,8 +13,8 @@ static (`ET_EXEC`, [rust-std.md](rust-std.md)).
 |---|---|---|
 | DL-1 | the `ET_DYN` parser in `libs/elf`: program headers (`PT_INTERP`, `PT_TLS`, `PT_GNU_RELRO`, `PT_DYNAMIC`), the dynamic section, symbols with GNU and SysV hash, RELA and RELR relocations of both architectures, rejecting TEXTREL | **[implemented]** (host tests `cargo test -p elf` against files from clang and ld.lld) |
 | DL-2 | the `user/ld` + `libs/dynload` loader: `PT_INTERP` in `spawn`, ASLR, `DT_NEEDED`, `BIND_NOW`, relocations, static TLS of the main thread, read-only RELRO; PIC and linking via `ld.lld` in `cbuild`, libraries in initfs (`lib/`) | **[verified in QEMU]** x86_64 and aarch64 (`procesy` suite, `dynamicke linkovani: ...` tests) |
-| DL-3 | `dlopen`/`dlsym`/`dlclose`, dynamic TLS (`__tls_get_addr`, TLSDESC), `dl_iterate_phdr`, `r_debug` | **[designed]** |
-| DL-4 | the `libd` template service (sharing library code), the RELRO seal | **[designed]** |
+| DL-3 | the loader table (`abi::loader`, `dl*` already in the ABI), TLS of new threads (libos, osrt), DTV and generations, static TLS surplus, `fini`, `dl_iterate_phdr`, `dladdr`, `r_debug` | **[verified in QEMU]** x86_64 and aarch64 (test `dynamicke linkovani: vlakna libos ...`) |
+| DL-4 | the `libd` template service (sharing library code, libraries from disk too), `dlopen`/`dlsym`/`dlclose` (dynamic TLS: lazy allocation via the DTV, dynamic TLSDESC), the RELRO seal | **[designed]** |
 
 ## Design (approved choices)
 
@@ -141,16 +141,59 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
 - **Libraries only from initfs**, and only a process that has initfs
   (init today) may start a program with the loader; disk, application
   `$ORIGIN` and `libd` in DL-4.
-- **TLS of the main thread only**: new threads (libos `thread::spawn`) do
-  not get the libraries' TLS block, and a runtime with its own TLS (`osrt`
-  for Rust std) would overwrite the thread pointer - an agreement between
-  the loader and libos in DL-3.
-- **`DT_FINI` and `DT_FINI_ARRAY` are not called** (the process ends with
-  a syscall).
+- TLS of new threads and fini are solved by DL-3a (above).
 - **RELRO can be switched back to RW** (`VM_PROTECT`); the `max_flags` seal
   in DL-4.
 - The loader has all of initfs (read-only) while loading; the program does
   not get it (the loader unmaps it and closes the handles before the jump).
+
+## Threads, fini and the debugger (DL-3)
+
+**[verified in QEMU]** x86_64 and aarch64.
+
+- **The loader table** `abi::loader::Interface` (version, size;
+  `thread_tls_new`, `thread_tls_free`, `run_fini`, `dl_iterate_phdr`). The
+  loader writes its address into auxv (`AT_MO_LOADER`, `spawn` prepares the
+  slot) and when jumping to the program also passes SP (auxv) and
+  `ENTRY_MAGIC` (x86_64 `rsi`/`rdx`, aarch64 `x1`/`x2`). libos (`rt_own` ->
+  `loader::init`) and crt find it that way; a program without the loader has
+  `loader::interface() = None` and behaves as before.
+- **TLS of new threads:** under the loader `libos::thread::spawn` takes a
+  block (`thread_tls_new`: copies of all modules' templates, the surplus, the
+  TCB on x86_64) and sets the thread pointer in the trampoline before the
+  thread's code; `join` returns the block. `osrt` (Rust std) creates no block
+  of its own under the loader.
+- **Static TLS surplus** `dynload::STATIC_TLS_SURPLUS` = 2 KiB after the
+  modules loaded at start: for a later `dlopen` of modules with
+  initial-exec TLS (Vulkan/GL drivers from Mesa). glibc has a fixed 1664 B
+  surplus, today 512 B + 144 B per namespace (1520 B); 2 KiB covers both.
+- **fini:** a normal program end (`rt_own` after `main`, crt after
+  `program_main`) calls `run_fini`: the program first, dependencies last,
+  `DT_FINI_ARRAY` backwards, then `DT_FINI`; a second call does nothing.
+  Kill and crashes do not call fini; neither does a direct `PROCESS_EXIT`.
+- **`dl_iterate_phdr`** (`struct dl_phdr_info` layout as glibc, for unwinders
+  and adopted code): in the table and as a built-in symbol for C; without
+  allocation (the loader's allocator does not free). Modules: the program
+  and the libraries (not the loader itself).
+- **`r_debug`** (SVR4, `link_map` program and libraries, `r_brk` =
+  `_dl_debug_state`): its address in the program's `DT_DEBUG` (written
+  before RELRO).
+- **DTV and generations** (glibc model, preparation for `dlopen`): each
+  thread has a vector `[generation, block of module 1, 2, ...]` in its TLS
+  block, a pointer to it in the TCB (x86_64 `TP + 8`, aarch64 `TP + 0`).
+  `__tls_get_addr` reads the block from the DTV; modules loaded at start
+  have it in the static TLS. Lazy allocation of a `dlopen` module's block
+  (a higher generation, an empty entry) comes with DL-4.
+- **`dlopen`, `dlsym`, `dlclose`, `dlerror`, `dladdr`** are in the table and
+  as built-in symbols for C already (the ABI will not change in DL-4):
+  `dlopen` returns null and `dlerror` "not supported yet". `dladdr` works
+  (module by address; no symbol yet). **`dlopen` only in DL-4** with the
+  `libd` service: the loader shares the process with the program, so
+  anything it keeps (initfs) the program would get too - the user's
+  decision.
+- The loader **keeps the handle of its own process** (TLS blocks of
+  threads); the program has a handle to the same process anyway, so it
+  gains no rights. initfs is closed and unmapped.
 
 ## The `libs/elf` parser (DL-1)
 
@@ -194,3 +237,5 @@ not produce it on aarch64). They are built with clang and ld.lld with
 | QEMU `procesy`: `dynamicke linkovani: PIE s knihovnami` | `dltest`: calls through two libraries, a function pointer (ABS64), an initializer after the dependencies are relocated, library TLS (GD/TLSDESC), library TLS from the program (initial-exec), program TLS (local-exec) |
 | QEMU `procesy`: `ASLR - dva behy, ruzne baze` | two `dltest` runs have different program bases |
 | QEMU `procesy`: `chybejici knihovna -> kod 127` | `dltest-missing`: `ld.so: knihovna ... nenalezena`, code 127 |
+| QEMU `procesy`: `vlakna libos s TLS knihoven, dl_iterate_phdr, r_debug, fini` | `dltest-rs` (Rust + libos as PIE, test only): 4 threads have their own fresh copy of the library TLS (through the DTV), the main thread unchanged; the loader table; `dl_iterate_phdr` (3 modules, names, TLS); `r_debug` via `DT_DEBUG` (version 1, 3 nodes); the library finalizer; `dlopen` = null + `dlerror`, `dladdr` of a library function |
+| `cargo test -p dynload` (`tls_surplus_after_modules`) | the TLS surplus after the modules does not change their offsets |

@@ -27,6 +27,15 @@ mod tests;
 /// vyhrazenych ABI) - stejne jako `osrt::tls`.
 pub const TCB_SIZE: u64 = 16;
 
+/// Rezerva statickeho TLS pro moduly nahrane pozdeji pres `dlopen`, ktere
+/// pouzivaji model initial-exec (`DF_STATIC_TLS`) - typicky ovladace
+/// Vulkan/GL z Mesy (ICD, NVK). Bez rezervy by jejich `dlopen` selhal: TP
+/// relativni pristup potrebuje misto ve statickem bloku kazdeho vlakna.
+/// glibc: puvodni pevna rezerva 1664 B, dnes `rtld.optional_static_tls`
+/// (512 B) + 144 B na jmenny prostor (vychozi 4 -> 1520 B). Bereme 2 KiB:
+/// pokryje obe hodnoty glibc a je to nasobek zarovnani 64 B.
+pub const STATIC_TLS_SURPLUS: u64 = 2048;
+
 /// Sablona TLS modulu (`PT_TLS`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TlsModule {
@@ -47,16 +56,19 @@ pub struct TlsLayout {
     pub align: u64,
     /// Kde v bloku lezi TP (x86_64 za daty, aarch64 na zacatku).
     pub tp: u64,
+    /// Rezerva pro moduly z `dlopen`: (posun zacatku od TP, velikost).
+    pub surplus: (i64, u64),
 }
 
 /// Rozlozi TLS modulu v poradi `mods` (prvni = program: linker pro nej
-/// pocital local-exec s presne timto posunem).
+/// pocital local-exec s presne timto posunem) a za ne rezervu `surplus`
+/// bajtu ([`STATIC_TLS_SURPLUS`]).
 ///
 /// - x86_64 (varianta II): data pod TP, modul k ma posun
 ///   `-zarovnane(soucet velikosti 0..=k, align_k)`; za TP je TCB.
 /// - aarch64 (varianta I): na TP 16 B TCB, data od `zarovnane(16, align)`
 ///   nahoru.
-pub fn tls_layout(machine: Machine, mods: &[Option<TlsModule>]) -> TlsLayout {
+pub fn tls_layout(machine: Machine, mods: &[Option<TlsModule>], surplus: u64) -> TlsLayout {
     let align = mods.iter().flatten().map(|m| m.align.max(1)).max().unwrap_or(1).max(TCB_SIZE);
     let mut offsets = Vec::with_capacity(mods.len());
     match machine {
@@ -68,8 +80,10 @@ pub fn tls_layout(machine: Machine, mods: &[Option<TlsModule>]) -> TlsLayout {
                     -(cum as i64)
                 }));
             }
+            // Rezerva pod posledni modul (zarovnana na 64 B).
+            cum = (cum + surplus).next_multiple_of(64);
             let data = cum.next_multiple_of(align);
-            TlsLayout { offsets, size: data + TCB_SIZE, align, tp: data }
+            TlsLayout { offsets, size: data + TCB_SIZE, align, tp: data, surplus: (-(cum as i64), surplus) }
         }
         Machine::Aarch64 => {
             let mut cum = TCB_SIZE;
@@ -80,7 +94,9 @@ pub fn tls_layout(machine: Machine, mods: &[Option<TlsModule>]) -> TlsLayout {
                     off as i64
                 }));
             }
-            TlsLayout { offsets, size: cum.next_multiple_of(align), align, tp: 0 }
+            let start = cum.next_multiple_of(64);
+            cum = start + surplus;
+            TlsLayout { offsets, size: cum.next_multiple_of(align), align, tp: 0, surplus: (start as i64, surplus) }
         }
     }
 }
