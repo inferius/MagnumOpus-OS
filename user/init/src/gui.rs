@@ -43,7 +43,7 @@ pub static GUI: spin::Mutex<Option<Gui>> = spin::Mutex::new(None);
 pub static LAUNCHER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
 
 /// Aplikace plochy, ktere lze spustit z listy (programy v initfs).
-pub const DESKTOP_APPS: &[&str] = &["gui-term", "gui-demo", "gui-tasks", "gui-komponenty", "gui-files"];
+pub const DESKTOP_APPS: &[&str] = &["gui-term", "gui-demo", "gui-tasks", "gui-komponenty", "gui-files", "gui-player"];
 
 /// Graficky instalator: jen na zivem USB (v liste a po prihlaseni se sam
 /// otevre jako ostatni aplikace plochy).
@@ -559,6 +559,15 @@ pub fn launch_app(gui: &mut Gui, startup: &Startup, sup: &mut Supervisor, progra
         // Instalator: kanal k installd (spusti ho init, jen zive USB);
         // v testu GUI instalace navic soubor odpovedi (autopilot).
         INSTALLER_APP => crate::install::app_handles()?,
+        // Prehravac: relace mediad, volitelne kanal k audiod (bez zvukove
+        // karty hraje bez zvuku).
+        "gui-player" => {
+            let mut v = vec![StartHandle::user(crate::media::connect()?.into_handle())];
+            if let Ok(a) = crate::audio::connect() {
+                v.push(StartHandle::user(a.into_handle()));
+            }
+            v
+        }
         _ => Vec::new(),
     };
     gui.launch_for_session(startup, program, sup, extra, session)

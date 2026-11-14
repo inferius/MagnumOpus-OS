@@ -7,7 +7,7 @@ description = "Nativni knihovna UI: deklarativni prvky, rozvrzeni, kresleni, vst
 
 [features]
 # Behove prostredi pro aplikace v OS (kanal ke kompozitoru, VMO bufferu).
-os = ["dep:libos", "dep:svcclient", "dep:clipproto"]
+os = ["dep:libos", "dep:svcclient", "dep:clipproto", "dep:bufdesc"]
 
 [dependencies]
 guiproto = { path = "../guiproto" }
@@ -19,6 +19,8 @@ theme = { path = "../theme" }
 font = { path = "../font", features = ["inter-400", "inter-500", "inter-600", "inter-700"] }
 inputproto = { path = "../inputproto" }
 libos = { path = "../libos", optional = true }
+# Popis bufferu povrchu videa (`client/video.rs`).
+bufdesc = { path = "../bufdesc", optional = true }
 # Obnova okna po padu kompozitoru (listek k supervisoru).
 svcclient = { path = "../svcclient", features = ["client"], optional = true }
 

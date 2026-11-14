@@ -1335,6 +1335,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gui-player"
+version = "0.1.0"
+dependencies = [
+ "audioproto",
+ "bufdesc",
+ "guiproto",
+ "libos",
+ "mediaproto",
+ "ui",
+]
+
+[[package]]
 name = "gui-tasks"
 version = "0.1.0"
 dependencies = [
@@ -3273,6 +3285,7 @@ checksum = "0c8352f8c05e47892e7eaf13b34abd76a7f4aeaf817b716e88789381927f199c"
 name = "ui"
 version = "0.1.0"
 dependencies = [
+ "bufdesc",
  "clipproto",
  "font",
  "gfx",

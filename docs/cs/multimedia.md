@@ -18,7 +18,8 @@ nezávisí.
 | F2a | protokol `libs/mediaproto` (host testy), služba `mediad`, testovací dekodér `mediatest` (obraz NV12 do poolu s plotem, tón do kruhu `audiod`), zdroj VMO i kanálem, `SEEK`, pád a obnova dekodéru | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `media`) |
 | F2b | proces `ffdec` s FFmpeg místo `mediatest` (čeká na mechanismus portů C) | **[navrženo]** |
 | F3 | video do sdílených bufferů (`bufdesc` NV12/I420/P010) s ploty, A/V synchronizace | **[navrženo]** |
-| F4 | aplikace Přehrávač nad `libs/ui` (videovrstva, ovládání, titulky libass, mediální relace) | **[navrženo]** |
+| F4a | plocha videa v `libs/ui` (`node::video`, vrstva z bufferů s ploty), aplikace Přehrávač s vestavěnou ukázkou: přehrát/pozastavit, posuvník (skok), čas, A/V synchronizace podle zvuku | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `gui`, test přehrávače) |
+| F4b | výběr souboru, titulky libass, hlasitost a výběr stop, celá obrazovka, mediální relace systému | **[navrženo]** |
 | F5 | hardwarová akcelerace dekódování (VA-API/Vulkan Video přes ovladač GPU) | **[navrženo]** |
 
 ## Proč izolovaný proces
@@ -202,8 +203,7 @@ Pozor na stav závislostí:
 - **Ploty v jádře (6a-1) jsou na `main`** ([ploty.md](ploty.md)).
 - **`bufdesc`, `BUFFER_CREATE_DESC` a body synchronizace oken (6a-3, 6a-4)
   jsou na `main`**; compd převádí YUV na CPU (`libs/yuv`) nebo ve
-  `vkcomp`. `libs/ui` zatím neumí vrstvu s cizím bufferem: přehrávač
-  potřebuje widget videovrstvy (F4).
+  `vkcomp`. `libs/ui` má plochu videa (`node::video`, F4a).
 - Zobrazení YUV bez převodu na CPU potřebuje videovrstvu v compd
   ([rozhrani-zarizeni.md](rozhrani-zarizeni.md), Videorovina [navrženo]);
   do té doby compd převádí YUV -> RGB shaderem nebo na CPU (cena: jedna
@@ -231,14 +231,35 @@ což je zdroj hodin pro synchronizaci.
 - Rozdílné takty (24 fps na 60 Hz): rytmus 3:2 vychází z deadlinů compd
   přirozeně; při VRR compd může periodu přizpůsobit (později).
 
-### Přehrávač (aplikace) [navrženo]
+### Přehrávač (aplikace)
 
-Aplikace nad `libs/ui`. Potřebuje rozšíření `libs/ui`:
+**Plocha videa v `libs/ui`** [ověřeno v QEMU]: uzel `video(id, w, h, alt)`
+v rozvržení jen rezervuje místo (přirozená velikost = rozměr videa, menší
+prostor ho zmenší se zachováním poměru stran, v přístupnosti role obrázku).
+Obraz ukazuje klient (`ui::client::run_video` s `VideoSurface`: popisy
+`bufdesc`, VMO, plot získání a uvolnění) ve vlastní vrstvě nad oknem
+(`900 + id`): `LAYER_SET` s bufferem a obdélníkem, `SYNC_POINTS` a commit,
+**bez překreslení okna**. Dokud `App::wants_frames`, klient tiká se snímky
+kompozitoru (`FRAME` s termínem výměny) a ptá se `App::video_frame`, co
+ukázat; `App::video_shown` vrátí hodnotu plotu uvolnění snímku. Po pádu
+kompozitoru klient povrch vytvoří znovu při dalším snímku.
 
-- **widget videovrstvy**: oblast okna, do které se commitují buffery
-  z `mediad` přímo (ne přes CPU obraz); dnes `libs/ui` umí jen CPU obrázek,
-- ovládání: přehrát/pauza, posuvník s náhledy klíčových snímků, hlasitost,
-  výběr stop, celá obrazovka, klávesové zkratky a mediální klávesy,
+**Přehrávač** (`user/gui-player`) [ověřeno v QEMU]: zatím přehrává
+vestavěnou ukázku `MTM1` (10 s, 640x360, tón) přes `mediad`
+a `mediatest`. Pool 4 bufferů NV12, proud `audiod` (kruh předá
+dekodéru); hodiny podle zvuku (`AUDIO_BASE` + přehrané rámce a latence
+kruhu), bez zvukové karty monotónní čas. Na každý snímek kompozitoru
+vybere `clock::decide` snímek pro čas výměny, pozdní zahodí, buffer vrátí
+dekodéru až po plotu uvolnění. Ovládání: přehrát/pozastavit, posuvník
+(skok na klíčový snímek), čas. Pád dekodéru obnoví (`REOPEN` + `SEEK`).
+Test sady `gui`: prázdná plocha před přehráním, obraz a jeho pohyb po
+„Přehrát“, postup času, zastavený obraz po pauze.
+
+Zbývá (F4b) [navrženo]:
+
+- výběr souboru (zdroj kanálem z aplikace, dokud fsd nemá úzký handle
+  souboru), posuvník s náhledy klíčových snímků, hlasitost, výběr stop,
+  celá obrazovka, klávesové zkratky a mediální klávesy,
 - titulky: plné ASS/SSA, SRT a WebVTT přes libass (kapitola
   [Titulky](#titulky)); přehrávač jen skládá hotové bitmapy nad video,
 - **mediální relace** pro systém (právě hraje, ovládání z panelu, pozastavení

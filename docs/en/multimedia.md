@@ -18,7 +18,8 @@ test decoder do not depend on it.
 | F2a | `libs/mediaproto` protocol (host tests), `mediad` service, `mediatest` test decoder (NV12 frames into the pool with a fence, tone into the `audiod` ring), VMO and channel sources, `SEEK`, decoder crash and recovery | **[verified in QEMU]** x86_64 and aarch64 (suite `media`) |
 | F2b | `ffdec` process with FFmpeg instead of `mediatest` (waits for the C port mechanism) | **[designed]** |
 | F3 | video into shared buffers (`bufdesc` NV12/I420/P010) with fences, A/V sync | **[designed]** |
-| F4 | Player application over `libs/ui` (video layer, controls, libass subtitles, media session) | **[designed]** |
+| F4a | video area in `libs/ui` (`node::video`, a layer from buffers with fences), Player application with a built-in sample: play/pause, slider (seek), time, A/V sync by audio | **[verified in QEMU]** x86_64 and aarch64 (suite `gui`, player test) |
+| F4b | file choice, libass subtitles, volume and track selection, fullscreen, system media session | **[designed]** |
 | F5 | hardware-accelerated decoding (VA-API/Vulkan Video through the GPU driver) | **[designed]** |
 
 ## Why an isolated process
@@ -205,8 +206,7 @@ Note the dependency state:
 - **Kernel fences (6a-1) are on `main`** ([fences.md](fences.md)).
 - **`bufdesc`, `BUFFER_CREATE_DESC` and window sync points (6a-3, 6a-4) are
   on `main`**; compd converts YUV on the CPU (`libs/yuv`) or in `vkcomp`.
-  `libs/ui` cannot show a layer with a foreign buffer yet: the player needs
-  a video layer widget (F4).
+  `libs/ui` has a video area (`node::video`, F4a).
 - Showing YUV without CPU conversion needs a video layer in compd
   ([device-interfaces.md](device-interfaces.md), video plane [designed]);
   until then compd converts YUV -> RGB with a shader or on the CPU (cost:
@@ -234,14 +234,36 @@ and the output latency, which is the clock source for sync.
 - Different rates (24 fps on 60 Hz): the 3:2 cadence follows naturally from
   compd deadlines; with VRR compd may adapt the period (later).
 
-### Player (application) [designed]
+### Player (application)
 
-An application over `libs/ui`. It needs `libs/ui` extensions:
+**Video area in `libs/ui`** [verified in QEMU]: the `video(id, w, h, alt)`
+node only reserves space in the layout (natural size = video size, less
+space scales it keeping the aspect ratio, image role in accessibility). The
+client shows the picture (`ui::client::run_video` with `VideoSurface`:
+`bufdesc` descriptions, VMOs, acquire and release fences) in its own layer
+above the window (`900 + id`): `LAYER_SET` with the buffer and rectangle,
+`SYNC_POINTS` and a commit, **without redrawing the window**. While
+`App::wants_frames`, the client ticks with compositor frames (`FRAME` with
+the swap deadline) and asks `App::video_frame` what to show;
+`App::video_shown` returns the frame's release fence value. After a
+compositor crash the client recreates the surface on the next frame.
 
-- a **video layer widget**: a window area into which buffers from `mediad`
-  are committed directly (not through a CPU image); today `libs/ui` only
-  has a CPU image,
-- controls: play/pause, seek bar with keyframe previews, volume, track
+**Player** (`user/gui-player`) [verified in QEMU]: for now it plays a
+built-in `MTM1` sample (10 s, 640x360, tone) through `mediad` and
+`mediatest`. A pool of 4 NV12 buffers, an `audiod` stream (the ring goes to
+the decoder); the clock follows audio (`AUDIO_BASE` + played frames and
+ring latency), without a sound card the monotonic time. On each compositor
+frame `clock::decide` picks the frame for the swap time, late ones are
+dropped, a buffer goes back to the decoder only after the release fence.
+Controls: play/pause, slider (seek to a keyframe), time. A decoder crash
+is recovered (`REOPEN` + `SEEK`). Test in suite `gui`: empty area before
+playing, a picture and its motion after "Přehrát" (Play), time advancing,
+a still picture after pause.
+
+Remaining (F4b) [designed]:
+
+- file choice (source over a channel from the application until fsd has a
+  narrow file handle), seek bar with keyframe previews, volume, track
   selection, fullscreen, keyboard shortcuts and media keys,
 - subtitles: full ASS/SSA, SRT and WebVTT through libass (see
   [Subtitles](#subtitles)); the player only composes finished bitmaps over

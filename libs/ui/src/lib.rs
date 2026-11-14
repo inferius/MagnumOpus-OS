@@ -37,6 +37,7 @@ pub mod complete;
 mod table;
 pub mod text;
 pub mod wrap;
+pub mod video;
 /// Prodleva dvoj- a trojkliku (pole, tabulka, mrizka terminalu).
 pub use field::MULTI_CLICK;
 
@@ -63,6 +64,7 @@ pub use context::{Context, SizeClass};
 pub use spatial::Axis;
 pub use suggest::{Suggest, suggest};
 pub use complete::Suggestion;
+pub use video::{MAX_VIDEOS, VideoShow, VideoTick};
 
 /// Id uzlu s textem chyby prvku s id `id` (mimo rozsah id prvku).
 pub fn error_node(id: u32) -> u32 {
@@ -183,6 +185,27 @@ pub trait App {
     fn pasted(&mut self, format: &str, data: &[u8]) -> bool {
         let _ = (format, data);
         false
+    }
+
+    /// Ma klient tikat se snimky kompozitoru (prehravani videa, animace)?
+    /// Pak po kazdem snimku zavola [`App::video_frame`].
+    fn wants_frames(&self) -> bool {
+        false
+    }
+
+    /// Snimek kompozitoru: `now_ns` = ted, `deadline_ns` = cas pristi
+    /// vymeny (0 = nezname). Vrati snimky videa, ktere se maji ukazat
+    /// (klient je posle bez prekresleni okna), a zda prekreslit okno.
+    /// Vola se jen s [`App::wants_frames`].
+    fn video_frame(&mut self, now_ns: u64, deadline_ns: u64) -> VideoTick {
+        let _ = (now_ns, deadline_ns);
+        VideoTick::default()
+    }
+
+    /// Klient snimek odeslal: buffer `slot` plochy `id` je volny, az plot
+    /// uvolneni povrchu dosahne `release`.
+    fn video_shown(&mut self, id: u32, slot: u8, release: u64) {
+        let _ = (id, slot, release);
     }
 }
 
@@ -603,7 +626,7 @@ impl<M: Clone> Ui<M> {
                     ElemKind::ListItem { text, agent, .. } => (Role::ListItem, if *agent { alloc::format!("agent: {text}") } else { text.clone() }, none(), ACTIVATE),
                     ElemKind::Progress { value } => (Role::Progress, none(), alloc::format!("{value}"), 0),
                     ElemKind::Table(t) => (Role::Table, t.columns.first().map_or_else(none, |c| c.title.clone()), alloc::format!("{} řádků", t.count), FOCUS | SCROLL),
-                    ElemKind::Image { alt, .. } => (Role::Image, alt.clone(), none(), 0),
+                    ElemKind::Image { alt, .. } | ElemKind::Video { alt, .. } => (Role::Image, alt.clone(), none(), 0),
                     ElemKind::Group => (Role::Group, none(), none(), 0),
                     ElemKind::Scroll { .. } => (Role::ScrollArea, none(), none(), SCROLL),
                     _ => (Role::Group, none(), none(), 0),
