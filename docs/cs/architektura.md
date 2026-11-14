@@ -905,6 +905,14 @@ dokumentace česky i anglicky (`docs/cs`, `docs/en`).
 ## Cizí kód a licence
 
 - Licence projektu `MIT OR Apache-2.0`.
+- **Kód pod GPL** (rozhodnuto 2026-11-14, **[navrženo]**) smí být převzat
+  i přeložen do Rustu, ale jen v oddělené složce `gpl/` (licence
+  GPL-2.0-only) a jen jako samostatný proces ovladače, který mluví se
+  systémem zprávami přes veřejný protokol. Nikdy v jádře, `libs/`,
+  službách ani aplikacích; ovladač z `gpl/` smí používat naše knihovny, ne
+  naopak. Podle FAQ FSF jsou procesy komunikující jen přes IPC samostatná
+  díla. ⚠️ Výklad není soudně vyzkoušen; před komerčním šířením ho nechat
+  posoudit právníkem. Pravidla: [Ovladače](ovladace.md#pravidla-zdrojů-a-licencí).
 - Převzít smíme cokoli (Mesa, DXVK, VKD3D, ...), kde psaní vlastního
   nedává smysl. Dlouhodobě směřujeme k vlastním komponentám.
 - Písmo systému Tuffy (Thatcher Ulrich) je public domain

@@ -615,7 +615,7 @@ a odladil na tisících strojů; jeho chyby a obejití chyb hardwaru
 | Původ | Jak převzít |
 |---|---|
 | malý ovladač pod BSD, MIT, ISC, Apache-2.0 (FreeBSD, OpenBSD, NetBSD, Redox, Haiku) | přeložit do Rustu na driverkit; zachovat copyright a licenci v hlavičce souboru |
-| kód pod GPL (většina Linuxu) | **nepřekládat** a nekopírovat; brát jen fakta o hardwaru (registry, pořadí kroků, errata), nejlépe z datasheetu |
+| kód pod GPL (většina Linuxu, nové NVIDIA, části amdgpu) | smí se převzít i přeložit do Rustu, ale **jen v oddělené části `gpl/`** jako samostatný proces ovladače (viz [Kód pod GPL](#kód-pod-gpl-oddělená-část-gpl)); jinak jen fakta o hardwaru (registry, pořadí kroků, errata), nejlépe z datasheetu |
 | obří ovladač (grafika DRM AMD/NVIDIA, Wi-Fi, ACPICA) | převzít v C jako izolovaný proces přes vrstvu kompatibility (níže); jen s licencí, která to dovoluje |
 | datasheet, specifikace (PCI-SIG, NVMe, AHCI, xHCI, virtio, HDA) | volně; uvést zdroj v hlavičce |
 
@@ -624,13 +624,44 @@ cesta), licenci a copyright původních autorů, co se změnilo. Převzatý kód
 patří i do `THIRD-PARTY.md` v kořeni repozitáře (projekt, verze, licence,
 cesta u nás). V manifestu to říká `driver.origin` a `driver.license`.
 
+### Kód pod GPL: oddělená část `gpl/`
+
+**Stav: [navrženo]** (rozhodnuto 2026-11-14; dosud platilo „GPL nepřekládat“).
+Kód pod GPL smí být převzat i přeložen do Rustu, ale jen za těchto pravidel:
+
+- **Kde:** jen ve složce `gpl/` v kořeni repozitáře, která má vlastní licenci
+  (`gpl/LICENSE`, GPL-2.0-only) a vlastní pravidla (`gpl/README.md`). Nikdy
+  v jádře, `libs/`, službách (`user/`) ani aplikacích.
+- **Jak:** jen jako **samostatný proces ovladače**, který se systémem mluví
+  výhradně zprávami přes náš veřejný zdokumentovaný protokol (třídy displej,
+  render, síť, zvuk, vstup, ...). Žádné sdílené vnitřní struktury, hlavičky
+  ani paměť mimo protokol.
+- **Směr závislostí:** ovladač v `gpl/` smí používat naše knihovny pod
+  MIT/Apache (driverkit, protokoly); naše knihovny a služby na kód z `gpl/`
+  nezávisí nikdy.
+- **Licence uvnitř:** nemíchat GPL-2.0-only s GPL-3.0 v jednom ovladači.
+- **Distribuce:** zdroje částí z `gpl/` jsou vždy součástí distribuce
+  (obrazu systému), ke každému binárnímu ovladači.
+- **Zápis:** každý takový ovladač má hlavičku podle šablony v
+  `THIRD-PARTY.md` a řádek v jeho tabulce.
+
+Zdůvodnění: podle FAQ Free Software Foundation jsou programy, které spolu
+komunikují jen přes IPC (zprávy), samostatná díla; náš systém tedy
+nepřechází pod GPL. ⚠️ **Riziko:** tento výklad **není soudně vyzkoušen**.
+Před komerčním šířením ho nechat posoudit právníkem.
+
+Co to přináší: nové ovladače NVIDIA (Rust, GPL), části `amdgpu`, ovladače
+Qualcomm pro telefony. Nic z toho ale nesmí oslabit izolaci: GPL ovladač
+běží stejně jako ostatní (omezený Resource, IOMMU, manifest, obnova po
+pádu).
+
 ## Rust, nebo převzaté C
 
 | Situace | Volba |
 |---|---|
 | nový nebo malý ovladač (do několika tisíc řádků), zdroj pod BSD/MIT nebo jen datasheet | Rust na driverkitu |
 | ovladač, kde je hlavní hodnota v letech ladění (stovky tisíc řádků, firmware, errata): DRM AMD/NVIDIA, Wi-Fi (iwlwifi, ath), ACPICA | převzít C beze změny logiky, izolovaný proces |
-| kód pod GPL | ani jedno: jen fakta, ovladač napsat v Rustu |
+| kód pod GPL | Rust nebo C jen v `gpl/` jako samostatný proces ovladače; mimo `gpl/` jen fakta a ovladač napsat znovu v Rustu |
 
 Převzaté C běží jako **samostatný proces** se stejnými pravidly jako
 ovladač v Rustu: omezený Resource, IOMMU, manifest, obnova po pádu.
@@ -668,7 +699,7 @@ a jeho knihovna patří k plánu jazyků (vlastní libc, clang).
 - [ ] Manifest: jen potřebné BARy, `irq_max` a `dma_max` s rezervou, ne
       s velkou; `driver.origin` a `driver.license` vyplněné.
 - [ ] Původ kódu: hlavička souborů, `THIRD-PARTY.md` u převzatého kódu,
-      žádný překlad kódu pod GPL.
+      kód pod GPL jen v `gpl/` a jako samostatný proces ovladače.
 - [ ] `probe` začíná resetem zařízení a nepředpokládá stav z minula.
 - [ ] `stop` zastaví DMA i přerušení; ověřeno testem (stav modelu po
       `finish`).

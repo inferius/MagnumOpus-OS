@@ -9,7 +9,7 @@ the wheel: a lot of work and more bugs than code that thousands of projects
 have tested for years.
 
 The rules for drivers (translate small ones to Rust from BSD/ISC/MIT, run
-large ones as an isolated C process, take only facts from GPL) are in
+large ones as an isolated C process, GPL only in the separate `gpl/`) are in
 [Drivers](drivers.md) (chapter Source and licence rules). Adopted code and
 its licence are listed in `THIRD-PARTY.md`.
 
@@ -64,7 +64,8 @@ Other deciding questions:
   unrestricted shared memory or root, write a thin layer of our own on top,
   do not rewrite it.
 - **Licences.** We take MIT, Apache 2.0, BSD, ISC and zlib. LGPL only as a
-  separate process or dynamic library. We do not translate GPL and do not
+  separate process or dynamic library. GPL only in the separate `gpl/` folder
+  as a standalone driver process (see [Drivers](drivers.md#source-and-licence-rules)); we do not
   take AGPL.
 
 ## Own (now and in the future)
