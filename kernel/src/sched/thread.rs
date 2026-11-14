@@ -179,15 +179,26 @@ impl Thread {
         }
     }
 
-    /// Ma vlakno jeste zasobnik jadra (pro testy)?
+    /// Ma vlakno jeste zasobnik jadra (pro testy)? `false` = zasobnik
+    /// i jeho rozpocet jobu uz jsou vracene.
     pub fn has_kernel_stack(&self) -> bool {
         self.stack.lock().is_some()
     }
 
     /// Uvolni zasobnik jadra mrtveho vlakna. Volat jen, kdyz na nem uz
     /// nic nebezi: vlakno je DEAD a jeho CPU dokoncilo prepnuti pryc.
+    ///
+    /// Rozpocet jobu se vraci jeste pod zamkem: kdo uvidi "bez zasobniku"
+    /// ([`Thread::has_kernel_stack`]), uvidi i vraceny rozpocet. Pamet
+    /// zasobniku se uvolni az po zamku (vraceni rozpoctu jsou jen atomicke
+    /// odecty, uvolneni stranek muze trvat dele).
     pub(super) fn release_stack(&self) {
-        let stack = self.stack.lock().take();
+        let mut slot = self.stack.lock();
+        let stack = slot.take().map(|(stack, charge)| {
+            drop(charge);
+            stack
+        });
+        drop(slot);
         drop(stack);
     }
 
