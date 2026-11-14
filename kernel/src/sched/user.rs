@@ -155,6 +155,14 @@ pub fn user_page_fault(addr: u64, access: crate::mm::Access) -> bool {
     interrupts::disable();
     match result {
         Ok(()) => true,
+        Err(_) if process.address_space().is_guard(addr) => {
+            log::error!(
+                "proces {} ({}): pristup do ochranne oblasti na {addr:#x} (preteceni zasobniku?)",
+                process.id,
+                process.name
+            );
+            false
+        }
         Err(crate::error::Error::NoMemory) => {
             log::error!(
                 "proces {} ({}): vypadek na {addr:#x}: nedostatek fyzicke pameti (jadro vycerpalo rezervu)",

@@ -55,7 +55,7 @@ fn address_space() {
         Err(Error::BadAddress)
     );
 
-    space.unmap(addr, 2 * PAGE_SIZE).unwrap();
+    space.unmap(addr, 2 * PAGE_SIZE, 0).unwrap();
     assert_eq!(space.mapping_count(), 0);
     assert!(space.translate(VirtAddr::new(addr)).is_none());
 }

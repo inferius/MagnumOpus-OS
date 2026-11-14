@@ -317,14 +317,56 @@ of the lower half always stays unmapped). Rights: process `WRITE`; object `MAP` 
 `READ`, plus `WRITE`/`EXECUTE` per flags. A mapping keeps the object alive
 after its handle is closed. Errors: `INVALID_ARGS`, `OUT_OF_RANGE`,
 `BAD_STATE` (`MAP_FIXED` over an existing mapping; the process has finished
-and its address space is gone), `NO_RESOURCES` (no free range), `NO_MEMORY`, `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+and its address space is gone; without `MAP_IN_RESERVATION` over a
+reservation; with it the range is not fully within reservations),
+`NO_RESOURCES` (no free range), `NO_MEMORY`, `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
 
 ### `VM_UNMAP`
 
-`(process, addr, len) -> 0`. Removes mappings. The range must cover whole
-mappings exactly (no partial unmap yet). On return no CPU holds a stale TLB
-entry. Requires `WRITE` on the process. Errors: `NOT_FOUND`,
-`INVALID_ARGS`, `BAD_HANDLE`, `ACCESS_DENIED`.
+`(process, addr, len, flags) -> 0`. Removes regions in the range (mappings
+and reservations), also parts of them - a region on the boundary is split.
+The range must be fully covered by regions without holes. `flags`: 0, or
+`UNMAP_DECOMMIT` = mappings turn into reservations (memory returned,
+addresses stay taken; `MEM_DECOMMIT` on Windows), reservations stay. On
+return no CPU holds a stale TLB entry. Requires `WRITE` on the process.
+Errors: `NOT_FOUND` (a hole in the range), `INVALID_ARGS`, `NO_RESOURCES`
+(kernel budget for splitting a region), `BAD_HANDLE`, `ACCESS_DENIED`.
+
+### `VM_RESERVE`
+
+`(process, addr, len, flags) -> addr`. Takes a range of addresses without
+memory (a reservation). `flags`: `MAP_FIXED` (exactly at `addr`, otherwise
+a free range and `addr` is a hint), `RESERVE_GUARD` (a guard region: an
+access ends the process with a stack overflow message). It costs only a
+region record from the job's kernel budget (no page tables, no memory), so
+even tens of GiB can be reserved (Wine). An access into a reservation is a
+process error. Only `VM_MAP` with `MAP_FIXED | MAP_IN_RESERVATION` maps
+into it. `VM_UNMAP` removes it. Requires `WRITE` on the process. Errors:
+`INVALID_ARGS`, `BAD_STATE` (`MAP_FIXED` over an existing region; the
+process has finished), `NO_RESOURCES`, `BAD_HANDLE`, `ACCESS_DENIED`.
+
+### `VM_PROTECT`
+
+`(process, addr, len, prot) -> 0`. Changes the rights of mappings in the
+range (also parts; the region is split). `prot` is a subset of `MAP_READ |
+MAP_WRITE | MAP_EXECUTE`, 0 = no access. Never write and execute together
+(W^X) and never above the rights at `VM_MAP` (which checked the object
+handle's rights). Mapped pages are unmapped and a fault fills them in with
+the new rights. Requires `WRITE` on the process. Errors: `INVALID_ARGS`
+(unknown bit, W+X, alignment), `ACCESS_DENIED` (above the original
+rights), `NOT_FOUND` (a hole), `BAD_STATE` (a reservation in the range),
+`NO_RESOURCES`, `BAD_HANDLE`.
+
+### `VM_QUERY`
+
+`(process, addr, out_ptr) -> 0`. Writes `abi::vm::RegionInfo` (40 B) of the
+region at `addr`: start, length, kind (`region::FREE` / `RESERVED` /
+`MAPPED`), current and maximum rights, attributes (`ATTR_GUARD`,
+`ATTR_IN_RESERVATION`) and the offset in the object. For a free range, the
+start and length of the gap between neighbouring regions. For
+`VirtualQuery`, a process memory listing and debugging. Requires `READ` on
+the process. Errors: `INVALID_ARGS` (`addr` outside `USER_MIN..USER_MAX`),
+`BAD_ADDRESS`, `BAD_HANDLE`, `ACCESS_DENIED`.
 
 ### `VM_PAGE_SIZE`
 

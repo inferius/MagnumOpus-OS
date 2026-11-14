@@ -16,7 +16,7 @@
 
 use alloc::sync::Arc;
 
-use abi::vm::{MAP_EXECUTE, MAP_WRITE};
+use abi::vm::{MAP_EXECUTE, MAP_READ, MAP_WRITE};
 
 use super::{AddressSpace, page_flags};
 use crate::arch::paging::{MapError, PAGE_SIZE, PageSize, PageTableOps};
@@ -39,15 +39,19 @@ impl AddressSpace {
         let va = VirtAddr::new(addr & !(PAGE_SIZE - 1));
         let mut inner = self.inner.lock();
         let (start, m) = inner.mapping_at(addr).ok_or(Error::BadAddress)?;
+        // Rezervace (i ochranna) nema pamet: pristup je chyba procesu.
+        let Some(vmo) = &m.vmo else {
+            return Err(Error::AccessDenied);
+        };
         let allowed = match access {
-            Access::Read => true,
+            Access::Read => m.flags & MAP_READ != 0,
             Access::Write => m.flags & MAP_WRITE != 0,
             Access::Exec => m.flags & MAP_EXECUTE != 0,
         };
         if !allowed {
             return Err(Error::AccessDenied);
         }
-        let vmo = Arc::clone(&m.vmo);
+        let vmo = Arc::clone(vmo);
         let flags = m.flags;
         let off = m.vmo_offset + (va.as_u64() - start);
         let table = inner.table.as_mut().ok_or(Error::BadState)?;

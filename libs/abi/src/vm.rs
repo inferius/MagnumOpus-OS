@@ -23,6 +23,79 @@ pub const MAP_EXECUTE: u32 = 1 << 2;
 /// Mapovat presne na zadanou adresu (jinak je adresa jen napoveda a 0 =
 /// vyber jadra).
 pub const MAP_FIXED: u32 = 1 << 3;
+/// `VM_MAP` jen dovnitr rezervaci (`VM_RESERVE`): rozsah musi lezet cely
+/// v rezervacich a mapovani je nahradi (jako `MEM_COMMIT` ve Windows).
+/// Jen spolu s `MAP_FIXED`. Bez nej je rezervace obsazene misto.
+pub const MAP_IN_RESERVATION: u32 = 1 << 4;
+/// `VM_RESERVE`: ochranna oblast (napr. pod zasobnikem). Pristup do ni
+/// ukonci proces s hlaskou o preteceni.
+pub const RESERVE_GUARD: u32 = 1 << 5;
+/// `VM_UNMAP`: mapovani v rozsahu zmenit na rezervaci (adresy zustanou
+/// zabrane, pamet se vrati; `MEM_DECOMMIT`). Rezervace zustanou.
+pub const UNMAP_DECOMMIT: u32 = 1 << 0;
+
+/// Druh oblasti a atributy ve vystupu `VM_QUERY`.
+pub mod region {
+    /// Volne misto (mezi oblastmi).
+    pub const FREE: u32 = 0;
+    /// Rezervace bez pameti.
+    pub const RESERVED: u32 = 1;
+    /// Mapovani objektu pameti.
+    pub const MAPPED: u32 = 2;
+    /// Atribut: ochranna rezervace (`RESERVE_GUARD`).
+    pub const ATTR_GUARD: u32 = 1 << 0;
+    /// Atribut: mapovani vzniklo v rezervaci (`MAP_IN_RESERVATION`).
+    pub const ATTR_IN_RESERVATION: u32 = 1 << 1;
+}
+
+/// Vystup `VM_QUERY` (40 B, little endian: `start`, `len` u64, `kind`,
+/// `flags`, `max_flags`, `attrs` u32, `vmo_offset` u64).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RegionInfo {
+    /// Zacatek oblasti (u volneho mista konec predchozi oblasti).
+    pub start: u64,
+    pub len: u64,
+    /// `region::FREE` / `RESERVED` / `MAPPED`.
+    pub kind: u32,
+    /// Aktualni prava (`MAP_READ | MAP_WRITE | MAP_EXECUTE`).
+    pub flags: u32,
+    /// Nejvyssi prava, na ktera smi `VM_PROTECT` vratit.
+    pub max_flags: u32,
+    /// `region::ATTR_*`.
+    pub attrs: u32,
+    /// Offset zacatku oblasti v objektu pameti (jen mapovani).
+    pub vmo_offset: u64,
+}
+
+impl RegionInfo {
+    pub const SIZE: usize = 40;
+
+    pub fn encode(&self) -> [u8; Self::SIZE] {
+        let mut b = [0u8; Self::SIZE];
+        b[0..8].copy_from_slice(&self.start.to_le_bytes());
+        b[8..16].copy_from_slice(&self.len.to_le_bytes());
+        b[16..20].copy_from_slice(&self.kind.to_le_bytes());
+        b[20..24].copy_from_slice(&self.flags.to_le_bytes());
+        b[24..28].copy_from_slice(&self.max_flags.to_le_bytes());
+        b[28..32].copy_from_slice(&self.attrs.to_le_bytes());
+        b[32..40].copy_from_slice(&self.vmo_offset.to_le_bytes());
+        b
+    }
+
+    pub fn decode(b: &[u8; Self::SIZE]) -> Self {
+        let u64_at = |i: usize| u64::from_le_bytes(b[i..i + 8].try_into().unwrap());
+        let u32_at = |i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap());
+        Self {
+            start: u64_at(0),
+            len: u64_at(8),
+            kind: u32_at(16),
+            flags: u32_at(20),
+            max_flags: u32_at(24),
+            attrs: u32_at(28),
+            vmo_offset: u64_at(32),
+        }
+    }
+}
 
 /// Typ cache fyzickeho objektu pameti (`VMO_CREATE_PHYSICAL`). Urcuje ho
 /// drzitel prostredku pri vytvoreni; kazde mapovani objektu ho zdedi.

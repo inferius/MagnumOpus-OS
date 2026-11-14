@@ -310,15 +310,54 @@ spodní poloviny zůstává vždy nenamapovaná). Práva: proces `WRITE`; objekt
 případně `WRITE`/`EXECUTE` podle příznaků. Mapování drží objekt naživu i po
 zavření handlu. Chyby: `INVALID_ARGS`, `OUT_OF_RANGE`, `BAD_STATE`
 (`MAP_FIXED` přes existující mapování; proces už skončil a jeho prostor je
-zrušený), `NO_RESOURCES` (není volné místo),
+zrušený; bez `MAP_IN_RESERVATION` přes rezervaci; s ním rozsah není celý
+v rezervacích), `NO_RESOURCES` (není volné místo),
 `NO_MEMORY`, `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
 
 ### `VM_UNMAP`
 
-`(process, addr, len) -> 0`. Zruší mapování. Rozsah musí přesně pokrývat
-celá mapování (částečné odmapování zatím není). Po návratu žádné CPU nemá
-starý překlad v TLB. Vyžaduje `WRITE` na procesu. Chyby: `NOT_FOUND`,
-`INVALID_ARGS`, `BAD_HANDLE`, `ACCESS_DENIED`.
+`(process, addr, len, flags) -> 0`. Zruší oblasti v rozsahu (mapování
+i rezervace), i jejich části - oblast na hranici se rozdělí. Rozsah musí
+být celý pokrytý oblastmi bez děr. `flags`: 0, nebo `UNMAP_DECOMMIT` =
+mapování se změní na rezervaci (paměť zpět, adresy zůstanou zabrané;
+`MEM_DECOMMIT` ve Windows), rezervace zůstanou. Po návratu žádné CPU nemá
+starý překlad v TLB. Vyžaduje `WRITE` na procesu. Chyby: `NOT_FOUND`
+(díra v rozsahu), `INVALID_ARGS`, `NO_RESOURCES` (rozpočet jádra na
+rozdělení oblasti), `BAD_HANDLE`, `ACCESS_DENIED`.
+
+### `VM_RESERVE`
+
+`(process, addr, len, flags) -> addr`. Zabere rozsah adres bez paměti
+(rezervace). `flags`: `MAP_FIXED` (přesně na `addr`, jinak volné místo
+a `addr` je nápověda), `RESERVE_GUARD` (ochranná oblast: přístup ukončí
+proces s hláškou o přetečení zásobníku). Stojí jen záznam oblasti z
+rozpočtu jádra jobu (ne tabulky stránek ani paměť), takže jde rezervovat
+i desítky GiB (Wine). Přístup do rezervace je chyba procesu. Mapovat do
+ní jde jen `VM_MAP` s `MAP_FIXED | MAP_IN_RESERVATION`. Zruší se
+`VM_UNMAP`. Vyžaduje `WRITE` na procesu. Chyby: `INVALID_ARGS`,
+`BAD_STATE` (`MAP_FIXED` přes existující oblast; proces skončil),
+`NO_RESOURCES`, `BAD_HANDLE`, `ACCESS_DENIED`.
+
+### `VM_PROTECT`
+
+`(process, addr, len, prot) -> 0`. Změní práva mapování v rozsahu (i části;
+oblast se rozdělí). `prot` je podmnožina `MAP_READ | MAP_WRITE |
+MAP_EXECUTE`, 0 = žádný přístup. Nikdy zápis a spuštění zároveň (W^X)
+a nikdy nad práva při `VM_MAP` (ta ověřila práva handlu objektu).
+Namapované stránky se odmapují a výpadek je doplní s novými právy.
+Vyžaduje `WRITE` na procesu. Chyby: `INVALID_ARGS` (neznámý bit, W+X,
+zarovnání), `ACCESS_DENIED` (nad původní práva), `NOT_FOUND` (díra),
+`BAD_STATE` (rezervace v rozsahu), `NO_RESOURCES`, `BAD_HANDLE`.
+
+### `VM_QUERY`
+
+`(process, addr, out_ptr) -> 0`. Zapíše `abi::vm::RegionInfo` (40 B) oblasti
+na adrese `addr`: začátek, délka, druh (`region::FREE` / `RESERVED` /
+`MAPPED`), aktuální a nejvyšší práva, atributy (`ATTR_GUARD`,
+`ATTR_IN_RESERVATION`) a offset v objektu. U volného místa začátek a délka
+mezery mezi sousedními oblastmi. Pro `VirtualQuery`, výpis paměti procesu
+a ladění. Vyžaduje `READ` na procesu. Chyby: `INVALID_ARGS` (`addr` mimo
+`USER_MIN..USER_MAX`), `BAD_ADDRESS`, `BAD_HANDLE`, `ACCESS_DENIED`.
 
 ### `VM_PAGE_SIZE`
 

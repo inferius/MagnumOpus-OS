@@ -198,8 +198,24 @@ pub mod futex_op {
 /// Na x86_64 musi byt `value` kanonicka adresa userspace.
 pub const THREAD_SET_POINTER: u64 = 56;
 
+/// Rezervace adres: `(process, addr, len, flags) -> addr`. Zabere rozsah
+/// adresniho prostoru bez pameti (`vm::MAP_FIXED` = presne na `addr`,
+/// `vm::RESERVE_GUARD` = ochranna oblast). Mapovat do nej jde jen
+/// s `vm::MAP_IN_RESERVATION`. Proces `WRITE`.
+pub const VM_RESERVE: u64 = 57;
+
+/// Zmena prav: `(process, addr, len, prot) -> 0`. Prava mapovani v rozsahu
+/// (i casti); `prot` podmnozina `MAP_READ | MAP_WRITE | MAP_EXECUTE`, 0 =
+/// zadny pristup, nikdy W+X, nikdy nad prava pri `VM_MAP`. Proces `WRITE`.
+pub const VM_PROTECT: u64 = 58;
+
+/// Dotaz na oblast: `(process, addr, out_ptr) -> 0`. Zapise
+/// `vm::RegionInfo` (40 B) oblasti nebo volneho mista na `addr`. Proces
+/// `READ`.
+pub const VM_QUERY: u64 = 59;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 57;
+pub const COUNT: u64 = 60;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {

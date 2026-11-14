@@ -115,6 +115,9 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::JOB_KILL => job::kill(a),
         nr::FUTEX => futex::call(a),
         nr::THREAD_SET_POINTER => futex::set_thread_pointer(a),
+        nr::VM_RESERVE => vm::reserve(a),
+        nr::VM_PROTECT => vm::protect(a),
+        nr::VM_QUERY => vm::query(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -183,6 +186,9 @@ pub fn name(number: u64) -> &'static str {
         "JOB_KILL",
         "FUTEX",
         "THREAD_SET_POINTER",
+        "VM_RESERVE",
+        "VM_PROTECT",
+        "VM_QUERY",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }
