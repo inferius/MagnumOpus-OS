@@ -245,6 +245,63 @@ until the deadline (`deadline` = 0: just try). Requires `READ`. Errors:
 `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `TIMED_OUT`, `CANCELED`,
 `BAD_ADDRESS` (the packet is then lost).
 
+## Fences
+
+A fence is a `u64` timeline for explicit synchronisation between processes
+(the producer advances, the consumer waits). Model, abandonment and wait
+rules: [fences.md](fences.md). **[verified in QEMU]** x86_64 and aarch64
+(`ploty` suite, kernel self-tests `plot: ...`). Wrappers: `libos::Fence`,
+`libos::fence::{wait_any, wait_all}`.
+
+### `FENCE_CREATE`
+
+`(initial, flags) -> handle`. A new fence with value `initial` and rights
+`DUPLICATE`, `TRANSFER`, `WAIT`, `SIGNAL`; `flags` must be 0. Consumers get
+a duplicate without `SIGNAL`. Errors: `INVALID_ARGS`, `NO_RESOURCES` (job
+kernel budget), `NO_MEMORY`.
+
+### `FENCE_SIGNAL`
+
+`(fence, value, flags) -> 0`. Without flags it advances the value to
+`value` (must be >= the reached value; equal = no-op). With
+`fence::signal::FAILED` it marks point `value` (greater than the reached
+value) as failed: a sticky error, waits on an unreached value end with
+`FENCE_FAILED`. Wakes the waiters whose value is decided and sets
+`SIGNALED` (value >= 1 or an error). Requires `SIGNAL`. Errors:
+`BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `INVALID_ARGS` (value going
+back, error on a reached point, unknown flag), `BAD_STATE` (the fence has
+already failed).
+
+### `FENCE_WAIT`
+
+`(items_ptr, count, flags, deadline, out_index_ptr) -> index`. Waits on
+items `fence::WaitItem { handle: u32, _reserved: u32, value: u64 }` (1 to
+64). Without flags one reached value is enough and the result is its
+index; with `fence::wait::ALL` it waits for all and returns 0. Items are
+checked in order; a fence error (`FENCE_FAILED`, `FENCE_ABANDONED`) ends
+the wait and the index of the deciding item is written to `out_index_ptr`
+(u32, 0 = do not write). `deadline` = 0: just try. Requires `WAIT` on all
+handles. Errors: also `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE` (the
+handle is not a fence), `INVALID_ARGS` (count 0 or > 64, unknown flag),
+`TIMED_OUT`, `CANCELED`, `BAD_ADDRESS`, `NO_MEMORY`.
+
+### `FENCE_WAIT_ASYNC`
+
+`(fence, value, port, key) -> 0`. One-shot registration: once value
+`value` is decided (reached, error or abandonment), the port receives a
+packet with `key` and the fence's signals; `FENCE_QUERY` tells the result.
+A decided value = the packet right away. Slot and budget as with
+`OBJECT_WAIT_ASYNC`. Requires `WAIT` on the fence and `WRITE` on the port.
+Errors: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `NO_RESOURCES`,
+`NO_MEMORY`.
+
+### `FENCE_QUERY`
+
+`(fence, out_ptr) -> 0`. Writes `fence::Info` (24 B): the reached value
+u64, the first failed point u64 (0 = no error), status i32 (0,
+`FENCE_FAILED` or `FENCE_ABANDONED`), reserved u32. Requires `WAIT`.
+Errors: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
+
 ## Channels
 
 A message = data (max 64 KiB) + handles (max 64). Each end has its own queue

@@ -6,7 +6,7 @@ Mikrojádro (`no_std`, `no_main`): paměť, plánovač, objekty s handly a práv
 
 - `src/main.rs` - start na bootovacím CPU; vlákno `boot` spustí self-testy a proces `init`.
 - `src/arch/api/` - smlouva architektury (traity); `src/arch/mod.rs` - fasáda `crate::arch`; `src/arch/{x86_64,aarch64}/` - implementace; `src/trap.rs` - jediná cesta arch -> jádro.
-- `src/mm/` (buddy `phys.rs`, `heap.rs`, `address_space.rs`), `src/sched/` (`qos.rs`, `balance.rs`, `topo.rs`), `src/object/` (`handle.rs`, `channel.rs`, `vmo.rs`, `job.rs`, `process.rs`), `src/syscall/` (dispatch v `mod.rs`).
+- `src/mm/` (buddy `phys.rs`, `heap.rs`, `address_space.rs`), `src/sched/` (`qos.rs`, `balance.rs`, `topo.rs`), `src/object/` (`handle.rs`, `channel.rs`, `vmo.rs`, `job.rs`, `process.rs`, `fence.rs`), `src/syscall/` (dispatch v `mod.rs`).
 - `src/sync.rs` - `SpinLock` (po dobu držení zakáže přerušení na CPU).
 - `src/tests/` - self-testy jádra: `SUITES` v `tests/mod.rs`, každá oblast má soubor s konstantou `TESTS`.
 - `linker.ld` je společný pro obě architektury.
@@ -36,6 +36,7 @@ Mikrojádro (`no_std`, `no_main`): paměť, plánovač, objekty s handly a práv
 - Synchronizace mezi CPU nesmí stát na vzoru „zapiš svůj příznak, přečti cizí“ (dvě adresy): QEMU TCG na x86 hostiteli nedodrží pořadí `stlr` -> `ldar` a probuzení se ztratí. Stav, o kterém rozhodují dvě strany, patří do jednoho atomického slova (CAS/swap), jako `Thread::cpu_flags`, nebo pod zámek.
 - Zásobník jádra vlákna uvolňuje `finish_switch` po dobrovolném odchodu z mrtvého vlákna (`PerCpu::exited` z větve DEAD ve `switch_away`), ne `Drop` vlákna. Na zásobník mrtvého vlákna se po tom nesmí nic odkazovat; `kernel_stack_top` je pevná hodnota jen pro spouštěná (živá) vlákna. Rozpočet jobu za zásobník se vrací pod zámkem slotu (`Thread::release_stack`), takže `has_kernel_stack() == false` znamená i vrácený rozpočet.
 - Čekání (`object/wait.rs`): signál mezi registrací a usnutím nesmí utéct - registrace pod zámkem objektu, stav `BLOCKING` -> `RUNNING` jen CAS. Změna cesty čekání musí projít `tests/object_wait.rs` (háček `wait::test_hook` posílá signál v každém místě registrace).
+- Plot (`object/fence.rs`, `docs/cs/ploty.md`): každý handle s právem `SIGNAL` drží obálku `FenceSignaler`, kterou dosadí `HandleTable::insert` přes `fence::bind` (bez `SIGNAL` holý `Fence`). Zánik poslední obálky = opuštění plotu; nová cesta, která vkládá objekty do tabulky handlů mimo `insert`, by opuštění rozbila. Plot za handlem vždy přes `fence::fence_of` (ne `get_as::<Fence>`). Čekání na hodnotu (`fence::wait`) má vlastní seznam čekajících, kontrola a registrace pod zámkem plotu, háček `wait::test_hook` platí i tady (`tests/fence.rs`).
 - Selhaný test plánovače má vypsat stav (`sched::dump_state`: fronty, časovače, `on_cpu`) - bez něj se uváznutí nedá rozebrat.
 
 ## Testy

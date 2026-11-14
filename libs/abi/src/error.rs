@@ -86,6 +86,12 @@ pub enum Error {
     NotMounted = -35,
     /// Mistni adresa nepatri zadnemu rozhrani (naslouchani, socket UDP).
     AddressNotAvailable = -36,
+    /// Plot skoncil chybou (producent ji nahlasil `FENCE_SIGNAL` s
+    /// `fence::signal::FAILED`); hodnota, na kterou se ceka, uz nenastane.
+    FenceFailed = -37,
+    /// Plot byl opusten: zavrel se posledni handle s pravem `SIGNAL` (pad
+    /// producenta) a hodnota, na kterou se ceka, nebyla dosazena.
+    FenceAbandoned = -38,
 }
 
 /// Vsechny chyby (pro dokumentaci a testy).
@@ -126,6 +132,8 @@ pub const ALL: &[Error] = &[
     Error::ServiceUnavailable,
     Error::NotMounted,
     Error::AddressNotAvailable,
+    Error::FenceFailed,
+    Error::FenceAbandoned,
 ];
 
 impl Error {
@@ -178,6 +186,8 @@ impl Error {
             Self::ServiceUnavailable => "SERVICE_UNAVAILABLE",
             Self::NotMounted => "NOT_MOUNTED",
             Self::AddressNotAvailable => "ADDRESS_NOT_AVAILABLE",
+            Self::FenceFailed => "FENCE_FAILED",
+            Self::FenceAbandoned => "FENCE_ABANDONED",
         }
     }
 
@@ -220,6 +230,8 @@ impl Error {
             Self::ServiceUnavailable => "sluzba nebezi (restart se nepovedl do lhuty nebo ho supervisor vzdal)",
             Self::NotMounted => "svazek s cilem neni pripojeny",
             Self::AddressNotAvailable => "mistni adresa nepatri zadnemu rozhrani",
+            Self::FenceFailed => "plot skoncil chybou",
+            Self::FenceAbandoned => "plot byl opusten (producent zavrel posledni handle s pravem SIGNAL)",
         }
     }
 }

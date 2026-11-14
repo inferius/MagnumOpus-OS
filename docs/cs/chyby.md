@@ -52,6 +52,8 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -34 | `SERVICE_UNAVAILABLE` | služba neběží (restart se nepovedl do lhůty nebo ho supervisor vzdal) |
 | -35 | `NOT_MOUNTED` | svazek s cílem není připojený |
 | -36 | `ADDRESS_NOT_AVAILABLE` | místní adresa nepatří žádnému rozhraní |
+| -37 | `FENCE_FAILED` | plot skončil chybou |
+| -38 | `FENCE_ABANDONED` | plot byl opuštěn (producent zavřel poslední handle s právem `SIGNAL`) |
 
 ## Podrobně
 
@@ -458,6 +460,30 @@ adresou rozhraní. I `127.0.0.1`: `netd` zatím nemá loopback.
 
 **Co dělat:** naslouchat na `0.0.0.0` (všechna rozhraní) nebo na adrese
 z `Net::info`.
+
+### `FENCE_FAILED` (-37)
+
+**Význam:** plot, na který se čeká, skončil chybou; čekaná hodnota už
+nenastane ([ploty.md](ploty.md)).
+
+**Kdy vzniká:** `FENCE_WAIT` (`Fence::wait`, `fence::wait_any`,
+`wait_all`) na hodnotu, kterou plot nedosáhl, poté co producent zavolal
+`FENCE_SIGNAL` s `FAILED` (např. zaseknutá úloha GPU, chyba dekodéru).
+Body před chybou se dočkají normálně.
+
+**Co dělat:** zahodit výsledek, který měl plot hlídat (snímek, buffer);
+podrobnosti (`failed_at`) vrátí `FENCE_QUERY`. Plot znovu nepoužívat.
+
+### `FENCE_ABANDONED` (-38)
+
+**Význam:** plot byl opuštěn: zanikl poslední handle s právem `SIGNAL`
+(producent skončil, spadl nebo zahodil zprávu s plotem) a čekaná hodnota
+nebyla dosažena.
+
+**Kdy vzniká:** `FENCE_WAIT` na nedosaženou hodnotu opuštěného plotu.
+
+**Co dělat:** zacházet jako s pádem producenta: zahodit výsledek
+a připojit se k nové instanci služby.
 
 ## Návratové kódy procesů
 

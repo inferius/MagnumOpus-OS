@@ -262,8 +262,34 @@ pub const PROCESS_THREADS: u64 = 66;
 /// procesu, debugger.
 pub const EXCEPTION_HANDLER: u64 = 67;
 
-/// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 68;
+/// Novy plot: `(initial, flags) -> handle`; `flags` = 0. Handle ma prava
+/// `BASIC | SIGNAL`, spotrebiteli se predava duplikat jen s `WAIT`
+/// (`abi::fence`).
+pub const FENCE_CREATE: u64 = 68;
+
+/// Posun plotu: `(fence, value, flags) -> 0`, pravo `SIGNAL`; `flags` =
+/// `fence::signal::FAILED` = trvala chyba od bodu `value`.
+pub const FENCE_SIGNAL: u64 = 69;
+
+/// Cekani na hodnoty plotu: `(items_ptr, count, flags, deadline,
+/// out_index_ptr) -> index`. Polozky `fence::WaitItem` (pravo `WAIT`), nejvys
+/// `WAIT_MANY_MAX`; `flags` = `fence::wait::ALL` (jinak staci jedna).
+/// Chyba plotu (`FENCE_FAILED`, `FENCE_ABANDONED`) ukonci cekani; index
+/// rozhodujici polozky se zapise na `out_index_ptr` (u32, 0 = nezapisovat).
+pub const FENCE_WAIT: u64 = 70;
+
+/// Jednorazova registrace do portu: `(fence, value, port, key) -> 0`. Az
+/// hodnota nastane (nebo chyba), port dostane paket s `key`; vysledek zjisti
+/// `FENCE_QUERY`. Plot pravo `WAIT`, port `WRITE`.
+pub const FENCE_WAIT_ASYNC: u64 = 71;
+
+/// Stav plotu: `(fence, out_ptr) -> 0`, zapise `fence::Info` (24 B); pravo
+/// `WAIT`.
+pub const FENCE_QUERY: u64 = 72;
+
+/// Pocet definovanych syscallu (pro tabulky a testy). Cisla 73-75 jsou
+/// rezervovana pro DMA (krok 6a-2).
+pub const COUNT: u64 = 73;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {

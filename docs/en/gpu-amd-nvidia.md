@@ -42,7 +42,7 @@ Intel display is handled by our own driver ([Display configuration](display.md))
 <rect class="box" x="505" y="165" width="250" height="70" rx="4"/><text class="t" x="630" y="187" text-anchor="middle">device classes</text><text class="m" x="630" y="205" text-anchor="middle">display (like intel-display),</text><text class="m" x="630" y="221" text-anchor="middle">render (nouveau uAPI, VM_BIND)</text>
 <rect class="warn" x="235" y="250" width="520" height="66" rx="4"/><text class="t" x="495" y="272" text-anchor="middle">driverkit: BAR (WC), MSI-X, scatter-gather DMA, IOMMU domain,</text><text class="m" x="495" y="290" text-anchor="middle">kernel fences and shared buffers, firmware service</text><text class="m" x="495" y="306" text-anchor="middle">(LinuxKPI only for AMD and Intel 3D, inside their process)</text>
 <path class="ln" d="M495 330 L495 358" marker-end="url(#ge1)"/>
-<rect class="box" x="10" y="360" width="760" height="50" rx="6"/><text class="t b" x="390" y="382" text-anchor="middle">kernel</text><text class="m" x="390" y="400" text-anchor="middle">Resource, BAR (WC), MSI-X, scatter-gather DMA, IOMMU domain, fence and buffer objects, firmware from FS</text>
+<rect class="box" x="10" y="360" width="760" height="50" rx="6"/><text class="t b" x="390" y="382" text-anchor="middle">kernel</text><text class="m" x="390" y="400" text-anchor="middle">Resource, BAR (WC), MSI-X, scatter-gather DMA, IOMMU domain, fences, buffers as VMO + bufdesc, firmware from FS</text>
 <rect class="box" x="10" y="190" width="190" height="120" rx="6"/><text class="t b" x="105" y="212" text-anchor="middle">firmware</text><text class="m" x="105" y="232" text-anchor="middle">GSP-RM 570.144,</text><text class="m" x="105" y="248" text-anchor="middle">booter, FWSEC (VBIOS),</text><text class="m" x="105" y="264" text-anchor="middle">AMD: PSP, SMU,</text><text class="m" x="105" y="280" text-anchor="middle">DMCUB, VCN</text><text class="m" x="105" y="296" text-anchor="middle">firmware service</text>
 <path class="ln" d="M200 250 L233 250" marker-end="url(#ge1)"/>
 </svg>
@@ -325,8 +325,8 @@ Rust) an existing Linux DRM driver (amdgpu, possibly xe) is reused in C.
 The LinuxKPI layer is **sealed inside the driver process**:
 
 - only **our interfaces** leave the process: the display class, the render
-  class (envelope: contexts, buffers, fences, quotas), fence and shared
-  buffer objects, the firmware service, the power protocol. No Linux API
+  class (envelope: contexts, buffers, fences, quotas), fences and shared
+  buffers (VMO + `libs/bufdesc`), the firmware service, the power protocol. No Linux API
   (kernel structures, ioctl numbers outside the render node payload,
   sysfs) crosses the process boundary;
 - inside the render node the driver's uAPI travels as payload for Mesa
@@ -388,7 +388,7 @@ which code can also be reused where it fits.
 | PCI | configuration, BARs, `pci_enable_device`, D0/D3 power | configuration page + power service |
 | firmware | `request_firmware` | **firmware service** |
 | i2c/DDC | `i2c_adapter`, `i2c_transfer` | inside the driver (nouveau/amdgpu have their own) |
-| synchronisation | `dma_fence`, `sync_file`, `dma_resv`, `dma_buf` | **our fence and buffer objects** |
+| synchronisation | `dma_fence`, `sync_file`, `dma_resv`, `dma_buf` | **our fences and buffers (VMO + `libs/bufdesc`)** |
 | debugging | `printk`, `dev_*`, `WARN_ON`, debugfs | driverkit log; no debugfs |
 
 Size estimate (not measured): layer 15–30 thousand lines (FreeBSD
@@ -460,8 +460,8 @@ M = 1–2 weeks, L = more.
 
 | # | Area | Change | Why now | Size |
 |---|---|---|---|---|
-| 1 | **fence object** | kernel object: state (pending, signalled, error), timeline (64-bit value), waitable in `wait_many`, passed by handle, signalled only by the holder of the `SIGNAL` right | `dma-fence.c` is GPL – we need our own; also the basis for Vulkan semaphores, `sync_file`, `drm_syncobj` and explicit sync in the display protocol; Venus has none today either (fences only inside the driver) | M |
-| 2 | **shared buffer** | buffer object over a VMO: size, placement (system / device memory), cache type, format + modifier (tiling, compression), stride, who may write; passed by handle between application, compositor and drivers; revoked on a crash | the `dma-buf` equivalent; device interfaces already require "the whole buffer lifecycle" (point 5) – define it once now for display, Venus and future GPUs | M |
+| 1 | **fence object** | kernel object: state (pending, signalled, error), timeline (64-bit value), waitable in `wait_many`, passed by handle, signalled only by the holder of the `SIGNAL` right; **[verified in QEMU]** step 6a-1 ([fences.md](fences.md)) | `dma-fence.c` is GPL – we need our own; also the basis for Vulkan semaphores, `sync_file`, `drm_syncobj` and explicit sync in the display protocol; Venus has none today either (fences only inside the driver) | M |
+| 2 | **shared buffer** | **decided (6a): a VMO + a description in the `libs/bufdesc` library, not a new kernel object.** Description: format (fourcc) + modifier (tiling, compression), planes `{offset, pitch}`, width and height, placement (system / device memory), cache type. Who may write is decided by the rights of the VMO handle (`READ`/`MAP`, the writer also `WRITE`). The receiver validates the description against the VMO size (untrusted input). Explicit synchronisation only: acquire and release fences in protocol messages (point 1), no implicit `dma_resv`. Revocation: device memory is a physical VMO which the driver revokes with `VMO_REVOKE`; system memory is held by handles. Linux's `dma-buf` is an object mainly because of implicit fencing and device attachment; we cover both with fences in messages and `DMA_MAP` over a VMO (point 4) **[designed]** | the `dma-buf` equivalent; device interfaces already require "the whole buffer lifecycle" (point 5) – define it once now for display, Venus and future GPUs | M |
 | 3 | **display class v2** | optional: a client buffer as a frame without a copy (with acquire and release fences), formats and modifiers, multiple planes (cursor, overlay), atomic commit (mode + buffers at once), full timings in `SET_MODE` | today's protocol copies the shadow; GPU drivers and Intel can scan a buffer out directly – add it now as capabilities so messages do not change later | S–M |
 | 4 | **scatter-gather DMA and IOMMU** | large pinned allocations page by page (not only contiguous 4 MiB), mapping a VMO range into the device domain at an IOVA chosen by the driver, unmapping with a synchronous IOMMU TLB flush, DMA quotas in GB | GPUs map hundreds of MB to GB (TTM, GTT); today's `dma_memory` is contiguous and small | M |
 | 5 | **interrupt remapping** | enable in the kernel (VT-d IR, AMD-Vi; GICv3 ITS exists) | without it a DMA device can forge MSIs | M |

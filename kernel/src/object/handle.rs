@@ -111,6 +111,8 @@ impl HandleTable {
         } else {
             return Err(Error::NoResources);
         };
+        // Plot s pravem SIGNAL drzi obalku producenta (opusteni plotu).
+        let object = super::fence::bind(object, rights);
         let slot = &mut self.slots[index];
         slot.entry = Some(Entry { object, rights });
         Ok(make_handle(index, slot.generation))

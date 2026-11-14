@@ -52,6 +52,8 @@ is documented in this file and in the Czech version.
 | -34 | `SERVICE_UNAVAILABLE` | the service is not running (the restart did not finish in time or the supervisor gave up) |
 | -35 | `NOT_MOUNTED` | the volume holding the target is not mounted |
 | -36 | `ADDRESS_NOT_AVAILABLE` | the local address does not belong to any interface |
+| -37 | `FENCE_FAILED` | the fence ended with an error |
+| -38 | `FENCE_ABANDONED` | the fence was abandoned (the producer closed the last handle with the `SIGNAL` right) |
 
 ## Details
 
@@ -464,6 +466,30 @@ loopback yet.
 
 **What to do:** listen on `0.0.0.0` (all interfaces) or on the address
 from `Net::info`.
+
+### `FENCE_FAILED` (-37)
+
+**Meaning:** the fence being waited on ended with an error; the awaited
+value will never be reached ([fences.md](fences.md)).
+
+**When:** `FENCE_WAIT` (`Fence::wait`, `fence::wait_any`, `wait_all`) on a
+value the fence has not reached, after the producer called `FENCE_SIGNAL`
+with `FAILED` (e.g. a hung GPU job, a decoder error). Points before the
+error complete normally.
+
+**What to do:** discard the result the fence guarded (frame, buffer);
+`FENCE_QUERY` returns the details (`failed_at`). Do not reuse the fence.
+
+### `FENCE_ABANDONED` (-38)
+
+**Meaning:** the fence was abandoned: the last handle with the `SIGNAL`
+right is gone (the producer exited, crashed or dropped the message carrying
+the fence) and the awaited value was not reached.
+
+**When:** `FENCE_WAIT` on an unreached value of an abandoned fence.
+
+**What to do:** treat it as a producer crash: discard the result and
+reconnect to the new instance of the service.
 
 ## Process exit codes
 

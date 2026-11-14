@@ -11,6 +11,7 @@ mod mm_regions;
 mod mm_cow;
 mod mm_wx;
 mod object;
+mod fence;
 mod object_wait;
 mod platform;
 mod quarantine;
@@ -42,6 +43,7 @@ const SUITES: &[(&str, Suite)] = &[
     ("planovac", sched_qos::TESTS),
     ("objekty", object::TESTS),
     ("objekty", object_wait::TESTS),
+    ("objekty", fence::TESTS),
     ("objekty", quarantine::TESTS),
     ("userspace", userspace::TESTS),
 ];

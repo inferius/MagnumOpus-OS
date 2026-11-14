@@ -12,6 +12,7 @@ pub fn read_user(p: &crate::object::process::Process, addr: u64, len: usize) -> 
     user::read_bytes(p, addr, len)
 }
 mod diag;
+mod fence;
 mod futex;
 mod handle;
 mod hw;
@@ -50,7 +51,7 @@ pub fn dispatch(number: u64, a: Args) -> u64 {
         // Ocekavane "chyby" rizeni toku nelogovat (byly by vsude a zahltily
         // by log): cekani, vyprseni a zjisteni velikosti bufferu (volajici
         // cte znovu s vetsim bufferem).
-        if !matches!(e, Error::ShouldWait | Error::TimedOut | Error::BufferTooSmall) {
+        if !matches!(e, Error::ShouldWait | Error::TimedOut | Error::BufferTooSmall | Error::FenceFailed | Error::FenceAbandoned) {
             log::debug!("syscall {} ({number}) selhal: {e}", name(number));
         }
     }
@@ -126,6 +127,11 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::EXCEPTION_RESOLVE => process::exception_resolve(a),
         nr::PROCESS_THREADS => process::process_threads(a),
         nr::EXCEPTION_HANDLER => process::exception_handler(a),
+        nr::FENCE_CREATE => fence::create(a),
+        nr::FENCE_SIGNAL => fence::signal(a),
+        nr::FENCE_WAIT => fence::wait(a),
+        nr::FENCE_WAIT_ASYNC => fence::wait_async(a),
+        nr::FENCE_QUERY => fence::query(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -205,6 +211,11 @@ pub fn name(number: u64) -> &'static str {
         "EXCEPTION_RESOLVE",
         "PROCESS_THREADS",
         "EXCEPTION_HANDLER",
+        "FENCE_CREATE",
+        "FENCE_SIGNAL",
+        "FENCE_WAIT",
+        "FENCE_WAIT_ASYNC",
+        "FENCE_QUERY",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

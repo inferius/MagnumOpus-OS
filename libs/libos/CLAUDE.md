@@ -1,6 +1,6 @@
 # libs/libos
 
-Knihovna pro programy v userspace (`no_std`) a **stabilní API pro aplikace**: typy objektů se zavíráním handlů (`Handle`, `Event`, `Channel`, `Vmo`, `Process`, `Thread`), čekání (`wait_one`, `wait_many`, `Port`), čas, náhoda, log (`println!`), start procesu (`entry!`, heap, panic handler, `Startup`), spouštění programů z initfs (`spawn.rs`, `StartHandle`), bariéry pro ovladače (`barrier`), futex a synchronizace (`sync.rs`). Popis: `docs/cs/libos.md`, `docs/cs/syscally.md`.
+Knihovna pro programy v userspace (`no_std`) a **stabilní API pro aplikace**: typy objektů se zavíráním handlů (`Handle`, `Event`, `Fence`, `Channel`, `Vmo`, `Process`, `Thread`), čekání (`wait_one`, `wait_many`, `Port`), čas, náhoda, log (`println!`), start procesu (`entry!`, heap, panic handler, `Startup`), spouštění programů z initfs (`spawn.rs`, `StartHandle`), bariéry pro ovladače (`barrier`), futex a synchronizace (`sync.rs`). Popis: `docs/cs/libos.md`, `docs/cs/syscally.md`.
 
 ## Klíčové soubory
 
