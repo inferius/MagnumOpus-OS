@@ -30,4 +30,5 @@ První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`,
 
 - Test delší než 20 s se v logu označí `[pomaly]`; každé další kolo `--repeat` přidá 60 s k limitu.
 - Žádné pevné časování bez termínu: testy čekají s deadlinem, jinak visí celý běh.
+- Sada, která si vezme ovladač z `display_native::NATIVES`, ho musí na konci vrátit (běžná instance, ne obnova), jinak další kolo `--repeat` ani další sady ovladač nenajdou. Kompozitoru v testu dávat duplikát konce klienta, ne jediný konec (jeho konec by ukončil ovladač).
 - `src/tests/` je velké (přes 17 000 řádků celého crate): nové testy do nových souborů, ne do existujících nad ~1500 řádků.
