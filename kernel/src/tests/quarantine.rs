@@ -19,13 +19,13 @@ fn decisions() {
     let fake = (0xFFF0, 0, 0);
     let vmo = MemoryObject::new_contiguous_dma(PAGE_SIZE, None, Some((fake, 1)), None).unwrap();
     let frame = vmo.page(0).unwrap();
-    driver_gone(&[fake], vec![vmo]);
+    driver_gone(&[fake], vec![vmo], vec![]);
     assert_eq!(held_count(), before + 1, "pamet nezastavitelneho zarizeni zustava");
     assert!(crate::mm::phys::is_pinned(frame), "drzena pamet je stale pripnuta");
     // Klient (zarizeni neridil): pamet se pusti hned, nic se nezastavuje.
     let other = MemoryObject::new_contiguous_dma(PAGE_SIZE, None, Some(((0xFFF1, 0, 0), 1)), None).unwrap();
     let f2 = other.page(0).unwrap();
-    driver_gone(&[], vec![other]);
+    driver_gone(&[], vec![other], vec![]);
     assert_eq!(held_count(), before + 1, "klient nic nedrzi");
     assert!(!crate::mm::phys::is_pinned(f2), "pamet klienta uvolnena");
 }

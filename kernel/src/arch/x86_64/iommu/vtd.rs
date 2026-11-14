@@ -12,6 +12,7 @@ use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
 use super::super::acpi::IommuUnit;
+use crate::arch::api::DmaAccess;
 use crate::error::Error;
 use crate::log;
 use crate::mm::{self, PhysAddr};
@@ -40,6 +41,8 @@ const STS_WBFS: u32 = 1 << 27;
 const PAGE: u64 = 4096;
 /// Zaznam strankove tabulky druhe urovne: cteni | zapis.
 const SL_RW: u64 = 0b11;
+const SL_R: u64 = 0b01;
+const SL_W: u64 = 0b10;
 
 /// Vektor preruseni pro hlaseni chyb DMA (viz `apic::VECTOR_IOMMU_FAULT`).
 use super::VECTOR_IOMMU_FAULT;
@@ -330,32 +333,39 @@ impl Domain {
         Ok(PhysAddr::new(table.as_u64() + ((iova >> 12) & 511) * 8))
     }
 
-    /// Povoli zarizeni cteni i zapis `pages` stranek od `phys` (identicky).
-    pub fn map(&self, phys: u64, pages: u64) -> Result<(), Error> {
+    /// Kolik bitu adresy domena preklada (3 urovne = 39, 4 = 48).
+    pub fn iova_bits(&self) -> u32 {
+        12 + 9 * self.unit.levels as u32
+    }
+
+    /// Povoli zarizeni pristup `access` na `iova..+pages` stranek
+    /// k souvislym strankam od `phys`.
+    pub fn map(&self, iova: u64, phys: u64, pages: u64, access: DmaAccess) -> Result<(), Error> {
+        let bits = access.read as u64 * SL_R | access.write as u64 * SL_W;
         let mut tables = self.tables.lock();
         for i in 0..pages {
-            let addr = phys + i * PAGE;
-            let e = match self.leaf(&mut tables, addr) {
+            let e = match self.leaf(&mut tables, iova + i * PAGE) {
                 Ok(e) => e,
                 Err(err) => {
                     drop(tables);
-                    self.unmap(phys, i);
+                    self.unmap(iova, i);
                     return Err(err);
                 }
             };
             // SAFETY: zaznam v tabulce domeny, pod zamkem.
-            unsafe { e.to_virt().as_mut_ptr::<u64>().write_volatile(addr | SL_RW) };
+            unsafe { e.to_virt().as_mut_ptr::<u64>().write_volatile((phys + i * PAGE) | bits) };
             flush_line(self.unit, e);
         }
         self.unit.invalidate();
         Ok(())
     }
 
-    /// Odebere zarizeni pristup ke strankam (pred vracenim pameti).
-    pub fn unmap(&self, phys: u64, pages: u64) {
+    /// Odebere zarizeni pristup ke strankam a vyprazdni IOTLB (synchronne,
+    /// `invalidate` ceka na dokonceni).
+    pub fn unmap(&self, iova: u64, pages: u64) {
         let mut tables = self.tables.lock();
         for i in 0..pages {
-            if let Ok(e) = self.leaf(&mut tables, phys + i * PAGE) {
+            if let Ok(e) = self.leaf(&mut tables, iova + i * PAGE) {
                 // SAFETY: viz map.
                 unsafe { e.to_virt().as_mut_ptr::<u64>().write_volatile(0) };
                 flush_line(self.unit, e);

@@ -63,6 +63,10 @@ Loader píše přes konzoli firmware (obrazovka i sériová linka) ve formátu
 | `IOMMU: zablokovan pristup zarizeni BB:ZZ.F na adrese A (udalost AMD-Vi K)` | W | Jako u VT-d níže; K = kód události AMD-Vi (0x2 = chyba stránky). |
 | `IOMMU: dalsich N udalosti AMD-Vi vynechano` | W | Jeden zablokovaný přenos vyvolal víc událostí; podrobně se vypisují jen první 4. |
 | `IOMMU: zablokovan zapis/cteni zarizeni BB:ZZ.F na adrese A (duvod R)` | W | Zařízení sáhlo mimo svou doménu: chyba ovladače (špatná adresa v deskriptoru) nebo vadné zařízení. Paměť zůstala nedotčená. Kód důvodu podle specifikace VT-d (např. 0x5 = stránka v doméně chybí, 0x6 = zápis do stránky jen pro čtení). |
+| `SMMU: zablokovany pristup DMA zarizeni (StreamID S) na adresu A (udalost K)` | W | Totéž na aarch64 (SMMUv3); vypisuje se při invalidaci nebo `DMA_SYNC` (SMMU zatím nemá přerušení událostí). |
+| `SMMU: dalsich N udalosti vynechano` | W | Jeden zablokovaný přenos vyvolal událost na každý přístup; podrobně se vypisují jen první 4. |
+| `DMA_MAP bez IOMMU: zarizeni SSSS:BB:ZZ.F dostava fyzicke adresy ...` | W | Ovladač mapuje paměť přes `DMA_MAP`, ale zařízení nepokrývá žádná IOMMU: smí přes DMA kamkoli. Jednou na prostředek. Zapnout IOMMU ve firmwaru ([dma.md](dma.md)). |
+| `DMA: zarizeni ... nema okno IOVA (domena preklada jen N bitu), DMA_MAP selze` | W | RAM sahá nad šířku překladu domény; `DMA_MAP` s IOMMU nepůjde (souvislá paměť ano). |
 
 ## Jádro: procesy
 

@@ -136,6 +136,9 @@ fn every_syscall_is_documented() {
         "FENCE_WAIT",
         "FENCE_WAIT_ASYNC",
         "FENCE_QUERY",
+        "DMA_MAP",
+        "DMA_SEGMENTS",
+        "DMA_SYNC",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {
@@ -161,6 +164,11 @@ fn job_info_roundtrip() {
         user: PoolInfo {
             used: 4,
             limit: 5,
+            available: 1,
+        },
+        dma: PoolInfo {
+            used: 8,
+            limit: 9,
             available: 1,
         },
         id: 77,

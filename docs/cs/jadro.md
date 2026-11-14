@@ -100,7 +100,7 @@ Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
   Slot, který vyčerpá generace, se vyřadí - starý handle tak nikdy nezačne
   platit pro jiný objekt.
 - **Práva** (`READ`, `WRITE`, `EXECUTE`, `MAP`, `DUPLICATE`, `TRANSFER`,
-  `WAIT`, `SIGNAL`, `MANAGE`) lze při duplikaci jen ubírat.
+  `WAIT`, `SIGNAL`, `MANAGE`, `DMA`) lze při duplikaci jen ubírat.
 - **Kanály**: zprávy s daty a handly; předání handlu ho přesune (odesílatel
   o něj přijde). Zavření konce nastaví druhému `PEER_CLOSED`.
 - **Porty** (`kernel/src/object/port.rs`): jednorázové registrace „až
@@ -253,6 +253,12 @@ ACPI DMAR) nebo **AMD-Vi** (tabulka ACPI IVRS), na aarch64 **SMMUv3**
   identicky: adresa pro zařízení je fyzická adresa, ovladač se nemění. Při
   zrušení objektu paměti se stránky z domény odmapují dřív, než se vrátí
   alokátoru.
+- **DMA po kusech** **[ověřeno v QEMU]**: připnutou paměť (`VMO_PINNED`,
+  i buffer jiného procesu s právem `DMA`) ovladač namapuje přes `DMA_MAP`
+  na souvislý rozsah IOVA v okně nad koncem RAM; zavření handlu = odmapování
+  se synchronním vyprázdněním IOTLB. Po konci ovladače jde mapování do
+  karantény jako souvislá paměť (nejdřív zastavit, pak odmapovat).
+  Podrobně: [dma.md](dma.md).
 - **Zablokovaný přístup** IOMMU nahlásí přerušením (vektor 36) a jádro ho
   zaloguje jako varování se zařízením, adresou a kódem důvodu (viz
   [hlasky.md](hlasky.md#jádro-iommu)).

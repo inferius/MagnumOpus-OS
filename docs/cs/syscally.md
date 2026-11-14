@@ -336,15 +336,17 @@ se zapíšou potřebné velikosti), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`,
 
 ### `VMO_CREATE`
 
-`(size, process) -> handle`. Objekt paměti o velikosti `size` (zaokrouhleno
-na 4 KiB, max. 1 TiB), vyplněný nulami. Celá velikost se hned slíbí
+`(size, process, flags) -> handle`. Objekt paměti o velikosti `size`
+(zaokrouhleno na 4 KiB, max. 1 TiB), vyplněný nulami. Celá velikost se hned slíbí
 (rozpočet uživatelské paměti jobu a globální strop paměti programů), rámce
 vzniknou až při prvním zápisu ([sprava-pameti.md](sprava-pameti.md)).
 Strhne se z rozpočtu uživatelské paměti jobu procesu `process`
 (handle s právem `WRITE`; 0 = volající). Rodič tak vytváří paměť programu
-(segmenty, zásobník) na účet potomka. Práva: `DUPLICATE`, `TRANSFER`,
-`WAIT`, `READ`, `WRITE`, `MAP`, `EXECUTE`. Chyby: `INVALID_ARGS` (0 nebo
-příliš velký), `NO_MEMORY`, `NO_RESOURCES` (rozpočet jobu), `BAD_HANDLE`,
+(segmenty, zásobník) na účet potomka. `flags`: 0, nebo `vm::VMO_PINNED`
+(1) = všechny stránky hned a připnuté pro DMA, strhne se navíc rozpočet
+`DMA` a objekt nejde zapečetit ([dma.md](dma.md#připnutá-paměť)). Práva:
+`DUPLICATE`, `TRANSFER`, `WAIT`, `READ`, `WRITE`, `MAP`, `EXECUTE`, `DMA`.
+Chyby: `INVALID_ARGS` (0, příliš velký, neznámá volba), `NO_MEMORY`, `NO_RESOURCES` (rozpočet jobu), `BAD_HANDLE`,
 `ACCESS_DENIED`, `WRONG_TYPE` (`process`). `NO_MEMORY` znamená i to, že
 se tolik paměti nedá slíbit (strop = volná RAM bez rezervy jádra a bez
 už slíbených stránek).
@@ -690,12 +692,13 @@ init od jádra (bez limitu, se všemi právy) a rozděluje ho mezi služby.
 Vše, co proces stojí, se strhává z rozpočtu jeho jobu **a zároveň ze
 všech předků**, takže limit jobu platí pro celý jeho podstrom.
 
-Dva rozpočty v bajtech (`abi::job::pool`):
+Tři rozpočty v bajtech (`abi::job::pool`):
 
 | Rozpočet | Co se strhává |
 |---|---|
 | `KERNEL` (0) – paměť jádra | proces (struktura + kořenová tabulka stránek), objekty (event, kanál, port, objekt paměti, přerušení, prostředek, job), sloty handlů, registrace portů (64 B), zprávy ve frontách kanálů (strhne se odesílateli), mapování (záznam + horní odhad tabulek stránek), vlákna (struktura + 64 KiB zásobníku jádra; zásobník se vrátí hned po konci vlákna), seznamy stránek objektů paměti |
 | `USER` (1) – uživatelská paměť | stránky objektů paměti (`VMO_CREATE`, `VMO_CREATE_CONTIGUOUS`, i paměť pro DMA) |
+| `DMA` (2) – připnutá paměť | navíc k `USER`: stránky, které se nesmí přesunout ani vystěhovat (`VMO_PINNED`, `VMO_CREATE_CONTIGUOUS`). Povinná kvóta: kořenový job má strop poloviny RAM a `JOB_SET_LIMIT` ho jen sníží ([dma.md](dma.md#připnutá-paměť)) |
 
 - Strženo se vrací automaticky se zánikem věci, která ho drží.
 - Překročení rozpočtu = `NO_RESOURCES`. Nedostatek fyzické paměti
@@ -738,7 +741,8 @@ předků). `parent` potřebuje `MANAGE`. Objekt se strhne z rozpočtu jádra
 ### `JOB_SET_LIMIT`
 
 `(job, pool, bytes) -> 0`. Nastaví vlastní limit rozpočtu `pool`
-(`KERNEL` = 0, `USER` = 1) v bajtech; `u64::MAX` (`job::UNLIMITED`) =
+(`KERNEL` = 0, `USER` = 1, `DMA` = 2; u kořenového jobu `DMA` nejvýš
+strop poloviny RAM) v bajtech; `u64::MAX` (`job::UNLIMITED`) =
 bez vlastního limitu. S `pool` = `policy::JIT` (2) nastaví politiku JIT:
 hodnota = bity `jit::RUN` (procesy jobu smí spouštět paměť bez pečeti)
 a `jit::GRANT` (job smí JIT udělit podřízeným); zapnout smí jen ten, jehož
@@ -749,11 +753,12 @@ Nový job nemá nic, kořenový jen `GRANT`. Vyžaduje `WRITE`. Chyby: `INVALID_
 
 ### `JOB_INFO`
 
-`(job, out_ptr) -> 0`. Zapíše `abi::job::JobInfo` (56 B, little endian):
+`(job, out_ptr) -> 0`. Zapíše `abi::job::JobInfo` (80 B, little endian):
 pro paměť jádra a pak uživatelskou paměť vždy `used` (strženo z jobu
 včetně potomků), `limit` (vlastní limit) a `available` (kolik ještě jde
 strhnout – nejmenší volné místo přes job a všechny předky; `u64::MAX` =
-nikde limit), nakonec `id` (číslo jobu, jedinečné do restartu).
+nikde limit), pak `id` (číslo jobu, jedinečné do restartu) a nakonec
+stejná trojice pro připnutou paměť (`DMA`).
 Vyžaduje `READ`. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`,
 `WRONG_TYPE`, `BAD_ADDRESS`.
 
@@ -839,6 +844,58 @@ Meze dané formátem dat nebo voláním, ne politikou:
 
 Tabulky stránek, heap a zásobníky jádra smí čerpat i z rezervy, takže
 vyčerpání paměti programem jádro neshodí.
+
+## DMA po kusech
+
+Připnutá paměť (`VMO_CREATE` s `VMO_PINNED`) zpřístupněná zařízení: s IOMMU
+jako jeden souvislý rozsah IOVA, bez IOMMU jako fyzické úseky. Model,
+okno IOVA, odmapování a karanténa: [dma.md](dma.md). **[ověřeno v QEMU]**
+x86_64 (VT-d) i aarch64 (SMMUv3) a bez IOMMU (sady `dma`, `ovladace
+z manifestu`, self-testy jádra `DMA: ...`). Obaly: `libos::DmaMap`,
+`libos::Vmo::create_pinned`; v driverkitu `Platform::alloc_dma_pages`.
+
+### `DMA_MAP`
+
+`(resource, vmo, offset, len, flags, iova_hint) -> handle`. Zpřístupní
+`len` bajtů objektu `vmo` od `offset` (obojí na celé stránky, nejvýš 4 GiB)
+zařízení prostředku `resource`. Příznaky `dma::map`: `DEVICE_READ` (1),
+`DEVICE_WRITE` (2), aspoň jeden; `REQUIRE_IOMMU` (4) = bez IOMMU
+`NOT_SUPPORTED`. Prostředek potřebuje `MANAGE` a identitu zařízení, objekt
+paměti právo `DMA` a k tomu `READ` (zařízení čte) nebo `WRITE` (zařízení
+zapisuje). Objekt musí být připnutý (`VMO_PINNED` nebo
+`VMO_CREATE_CONTIGUOUS`). S IOMMU vybere rozsah IOVA jádro (okno nad koncem
+RAM, ochranná stránka za rozsahem), nebo ho zvolí ovladač v `iova_hint`
+(0 = vybere jádro). Bez IOMMU jsou úseky fyzické a jádro to zaloguje
+jednou na prostředek. Délka se strhne z kvóty `dma_max` prostředku (vrátí
+se odmapováním), záznam stránek z rozpočtu jádra volajícího. Handle má
+práva `READ`, `DUPLICATE`, `WAIT` (bez `TRANSFER`: mapování patří procesu
+ovladače). Zavření posledního handlu = odmapování se synchronním
+vyprázdněním IOTLB. Chyby: `BAD_HANDLE`, `WRONG_TYPE`, `ACCESS_DENIED`
+(chybí právo, prostředek bez identity zařízení), `INVALID_ARGS`
+(nezarovnaný nebo prázdný rozsah, mimo objekt, bez směru, neznámý příznak,
+nápověda mimo okno), `BAD_STATE` (objekt není připnutý), `NOT_SUPPORTED`
+(nápověda nebo `REQUIRE_IOMMU` bez IOMMU), `ALREADY_EXISTS` (nápověda se
+překrývá), `NO_RESOURCES` (kvóta `dma_max`, okno IOVA plné, rozpočet
+jádra), `NO_MEMORY`.
+
+### `DMA_SEGMENTS`
+
+`(map, out_ptr, max) -> počet`. Zapíše nejvýš `max` (do 4096) položek
+`dma::Segment { addr: u64, len: u64 }` (16 B) a vrátí počet všech úseků
+(s IOMMU 1, bez IOMMU fyzické úseky se sloučenými sousedními stránkami).
+`max` = 0 vrátí jen počet. Vyžaduje `READ`. Chyby: `BAD_HANDLE`,
+`ACCESS_DENIED`, `WRONG_TYPE`, `INVALID_ARGS` (`max` nad 4096),
+`BAD_ADDRESS`, `NO_MEMORY`.
+
+### `DMA_SYNC`
+
+`(map, offset, len, direction) -> 0`. Údržba cache rozsahu mapování na
+nekoherentní platformě: `dma::sync::FOR_DEVICE` (0) před přenosem do
+zařízení, `FOR_CPU` (1) po přenosu do paměti. Na x86_64 a QEMU virt nic
+nedělá; `FOR_CPU` navíc vybere čekající hlášení zablokovaných přístupů
+IOMMU do logu (SMMUv3 nemá přerušení událostí). Vyžaduje `READ`. Chyby:
+`BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `INVALID_ARGS` (mimo
+mapování, neznámý směr).
 
 ## Hardware (ovladače)
 

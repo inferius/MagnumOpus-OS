@@ -24,6 +24,9 @@ pub enum DriverError {
     /// Pristup mimo DMA buffer (ovladac by dal zarizeni adresu mimo
     /// pridelenou pamet, nebo cetl za koncem).
     DmaBounds { buffer: &'static str, off: u64, len: u64, size: u64 },
+    /// Oblast bufferu neni pro zarizeni souvisla (buffer po strankach bez
+    /// IOMMU): jedna adresa ji nepopise.
+    DmaSplit { buffer: &'static str, off: u64, len: u64 },
     /// Zarizeni sahlo pres DMA mimo pamet pridelenou ovladaci (v simulaci;
     /// na skutecnem stroji to zablokuje IOMMU a jadro zaloguje
     /// `IOMMU: zablokovan ...`).
@@ -94,6 +97,10 @@ impl fmt::Display for DriverError {
             } => write!(
                 f,
                 "pristup mimo DMA buffer '{buffer}': offset {off:#x} + {len} B > velikost {size} B -> chyba v ovladaci (spatny index nebo delka)"
+            ),
+            Self::DmaSplit { buffer, off, len } => write!(
+                f,
+                "oblast {off:#x} + {len} B DMA bufferu '{buffer}' neni pro zarizeni souvisla (stranky bez IOMMU) -> DmaBuffer::device_chunks a prenos po kusech, nebo alloc_dma"
             ),
             Self::DmaFault { iova, len, write } => write!(
                 f,

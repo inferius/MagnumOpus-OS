@@ -142,7 +142,7 @@ pub mod iommu {
     use crate::acpi::Platform;
     use crate::error::Error;
 
-    pub use super::api::IommuDomain;
+    pub use super::api::{DmaAccess, IommuDomain};
 
     /// Domena prekladu DMA jednoho zarizeni.
     pub type Domain = <Current as Iommu>::Domain;
@@ -160,6 +160,11 @@ pub mod iommu {
     /// Domena zarizeni (segment, sbernice, zarizeni << 3 | funkce).
     pub fn domain(segment: u16, bus: u8, devfn: u8) -> Result<Option<Domain>, Error> {
         <Current as Iommu>::domain(segment, bus, devfn)
+    }
+
+    /// Vybere cekajici hlaseni zablokovanych pristupu DMA do logu.
+    pub fn poll_faults() {
+        <Current as Iommu>::poll_faults()
     }
 }
 

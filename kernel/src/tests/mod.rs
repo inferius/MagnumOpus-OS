@@ -11,6 +11,7 @@ mod mm_regions;
 mod mm_cow;
 mod mm_wx;
 mod object;
+mod dma;
 mod fence;
 mod object_wait;
 mod platform;
@@ -45,6 +46,7 @@ const SUITES: &[(&str, Suite)] = &[
     ("objekty", object_wait::TESTS),
     ("objekty", fence::TESTS),
     ("objekty", quarantine::TESTS),
+    ("objekty", dma::TESTS),
     ("userspace", userspace::TESTS),
 ];
 

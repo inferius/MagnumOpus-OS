@@ -134,3 +134,11 @@ pub const USER_ALLOC_BASE: u64 = 0x0000_1000_0000_0000;
 /// je dvouurovnove pole v blocich po 4 KiB. Skutecny strop urcuje rozpocet
 /// uzivatelske pameti jobu a fyzicka pamet.
 pub const VMO_MAX_SIZE: u64 = 1 << 40;
+
+/// Volba `VMO_CREATE`: vsechny stranky hned, pripnute po celou dobu zivota
+/// objektu (nesouvisle; zarizeni k nim pristupuje pres `DMA_MAP`). Strhava
+/// se z rozpoctu uzivatelske pameti i z rozpoctu `DMA` jobu
+/// (`job::pool::DMA`). Pripnuty objekt nejde zapecetit.
+pub const VMO_PINNED: u64 = 1 << 0;
+/// Vsechny zname volby `VMO_CREATE`.
+pub const VMO_CREATE_FLAGS: u64 = VMO_PINNED;

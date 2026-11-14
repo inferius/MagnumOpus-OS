@@ -11,6 +11,8 @@
 //! |--------------|-------------------------------------------|
 //! | `fact <n>`   | `fact <n> <n!>` (32 bitu, pretece jako hw) |
 //! | `dma <text>` | `dma <text>`: text projde DMA do zarizeni a zpet |
+//! | `sg <text>`  | `sg <text>`: jako `dma`, ale pres buffer po strankach (`DMA_MAP`) pres hranice stranek |
+//! | `stale`      | `stale <iova>`: zarizeni zapise na adresu odmapovaneho bufferu (jen s IOMMU; jadro pristup zablokuje a zaloguje) |
 //! | jiny prikaz  | `chyba <popis>`                           |
 //!
 //! Ovladac je genericky (`Edu<P: Platform>`): v systemu bezi nad jadrem,
@@ -28,6 +30,7 @@ mod model;
 #[cfg(test)]
 mod tests;
 
+use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::string::String;
 
@@ -41,6 +44,9 @@ pub const DEVICE: u16 = 0x11e8;
 /// velikost.
 pub const EDU_BUF: u64 = 0x40000;
 pub const EDU_BUF_SIZE: u64 = 4096;
+
+/// Buffer po strankach pro `sg` (tri stranky: text lezi pres hranici).
+pub const SG_SIZE: u64 = 3 * 4096;
 
 driverkit::registers! {
     /// Identifikace `0xRRrr00ed`: RR hlavni verze, rr vedlejsi.
@@ -79,6 +85,9 @@ driverkit::registers! {
     }
 }
 
+/// Jeden prenos DMA: (zdroj, cil, bajtu, do pameti).
+type Transfer = (u64, u64, u64, bool);
+
 /// Co zarizeni prave dela.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Op {
@@ -87,6 +96,17 @@ enum Op {
     /// DMA tam (pamet -> zarizeni), pak zpet do druheho bufferu.
     DmaToDevice(u64),
     DmaToRam(u64),
+    /// `sg`: prenosy po kusech (kus = souvisly usek pro zarizeni); `back`
+    /// = uz probiha cesta zpet, `len` delka textu.
+    Sg { queue: VecDeque<Transfer>, back: bool, len: u64 },
+    /// `stale`: zarizeni zapisuje na adresu odmapovaneho bufferu.
+    Stale(u64),
+}
+
+/// Kde lezi text v bufferu `sg`: tam (pres hranici stranek 0/1) a zpet
+/// (pres hranici 1/2).
+fn sg_offsets(len: u64) -> (u64, u64) {
+    (4096 - len / 2, 2 * 4096 - len / 2)
 }
 
 /// Ovladac zarizeni edu.
@@ -97,6 +117,8 @@ pub struct Edu<P: Platform> {
     /// prepsat zdroj, at jde roundtrip overit).
     out: DmaBuffer<P::Dma>,
     back: DmaBuffer<P::Dma>,
+    /// Buffer po strankach (pripnute nesouvisle stranky, `DMA_MAP`).
+    sg: DmaBuffer<P::Dma>,
     op: Op,
 }
 
@@ -115,6 +137,7 @@ impl<P: Platform> Driver<P> for Edu<P> {
         let irq = p.enable_irq()?;
         let out = p.alloc_dma("edu-tam", EDU_BUF_SIZE)?;
         let back = p.alloc_dma("edu-zpet", EDU_BUF_SIZE)?;
+        let sg = p.alloc_dma_pages("edu-sg", SG_SIZE)?;
         driverkit::log!(
             p,
             "karta edu {}.{} zije",
@@ -126,6 +149,7 @@ impl<P: Platform> Driver<P> for Edu<P> {
             irq,
             out,
             back,
+            sg,
             op: Op::Idle,
         })
     }
@@ -154,6 +178,40 @@ impl<P: Platform> Driver<P> for Edu<P> {
             self.op = Op::DmaToDevice(len);
             return Ok(());
         }
+        if let Some(data) = text.strip_prefix("sg ") {
+            let len = data.len() as u64;
+            if len == 0 || len > EDU_BUF_SIZE {
+                return reply(p, "chyba sg: 1-4096 bajtu");
+            }
+            let (there, back) = sg_offsets(len);
+            self.sg.write_bytes(there, data.as_bytes())?;
+            // Cil cesty zpet vynulovat: stara data by test oklamala.
+            self.sg.write_bytes(back, &alloc::vec![0u8; len as usize])?;
+            p.dma_wmb();
+            let mut queue = VecDeque::new();
+            let mut dev = EDU_BUF;
+            for (addr, n) in self.sg.device_chunks(there, len)? {
+                queue.push_back((addr, dev, n, false));
+                dev += n;
+            }
+            self.op = Op::Sg { queue, back: false, len };
+            return self.next_sg(p);
+        }
+        if text == "stale" {
+            // Bez IOMMU by zarizeni zapsalo do stranky, kterou uz mohl
+            // dostat kdokoli jiny: test ochrany jen s overenou IOMMU.
+            if !self.sg.is_protected() {
+                return reply(p, "chyba stale: bez IOMMU nejde (zarizeni by zapsalo do uvolnene pameti)");
+            }
+            let iova = {
+                let tmp = p.alloc_dma_pages("edu-stale", 4096)?;
+                tmp.iova_of(0, 64)?
+                // `tmp` zanikne: odmapovani s vyprazdnenim IOTLB.
+            };
+            self.start_dma(p, EDU_BUF, iova, 64, true)?;
+            self.op = Op::Stale(iova);
+            return Ok(());
+        }
         reply(p, "chyba neznamy prikaz")
     }
 
@@ -180,6 +238,14 @@ impl<P: Platform> Driver<P> for Edu<P> {
                 self.op = Op::Idle;
                 reply(p, &format!("dma {}", String::from_utf8_lossy(&data)))
             }
+            Op::Sg { .. } if IRQ_STATUS::DMA.get(why) != 0 => self.next_sg(p),
+            Op::Stale(iova) if IRQ_STATUS::DMA.get(why) != 0 => {
+                // Pristup zablokovala IOMMU; hlaseni vybere jadro do logu
+                // pri DMA_SYNC (SMMUv3 nema preruseni udalosti).
+                p.dma_sync_for_cpu(&self.sg);
+                self.op = Op::Idle;
+                reply(p, &format!("stale {iova:#x}"))
+            }
             // Cizi nebo opozdene preruseni (napr. po restartu ovladace).
             _ => Ok(()),
         }
@@ -194,6 +260,35 @@ impl<P: Platform> Driver<P> for Edu<P> {
 }
 
 impl<P: Platform> Edu<P> {
+    /// Dalsi kus `sg`: prenos z fronty, po ceste tam cesta zpet, po ni
+    /// odpoved.
+    fn next_sg(&mut self, p: &P) -> Result<()> {
+        let Op::Sg { queue, back, len } = &mut self.op else {
+            return Ok(());
+        };
+        let (back_done, len) = (*back, *len);
+        if let Some((src, dst, n, to_ram)) = queue.pop_front() {
+            return self.start_dma(p, src, dst, n, to_ram);
+        }
+        let (_, back_at) = sg_offsets(len);
+        if !back_done {
+            let mut queue = VecDeque::new();
+            let mut dev = EDU_BUF;
+            for (addr, n) in self.sg.device_chunks(back_at, len)? {
+                queue.push_back((dev, addr, n, true));
+                dev += n;
+            }
+            self.op = Op::Sg { queue, back: true, len };
+            return self.next_sg(p);
+        }
+        p.dma_sync_for_cpu(&self.sg);
+        p.dma_rmb();
+        let mut data = alloc::vec![0u8; len as usize];
+        self.sg.read_bytes(back_at, &mut data)?;
+        self.op = Op::Idle;
+        reply(p, &format!("sg {}", String::from_utf8_lossy(&data)))
+    }
+
     /// Spusti prenos DMA `count` bajtu ze `src` do `dst` s prerusenim po
     /// dokonceni.
     fn start_dma(&self, p: &P, src: u64, dst: u64, count: u64, to_ram: bool) -> Result<()> {

@@ -4,11 +4,16 @@
 //! init od jadra). Vse, co proces stoji, se strhava z rozpoctu jeho jobu
 //! a zaroven ze vsech predku - limit predka tak plati pro cely jeho podstrom.
 //!
-//! Dva oddelene rozpocty v bajtech ([`pool`]):
+//! Tri oddelene rozpocty v bajtech ([`pool`]):
 //! - **pamet jadra**: objekty jadra, sloty handlu, registrace portu,
 //!   zpravy ve frontach kanalu, mapovani a tabulky stranek, zasobniky
 //!   jadra vlaken,
-//! - **uzivatelska pamet**: stranky objektu pameti (vcetne pameti pro DMA).
+//! - **uzivatelska pamet**: stranky objektu pameti (vcetne pameti pro DMA),
+//! - **pripnuta pamet (DMA)**: stranky, ktere se nesmi presunout ani
+//!   vystehovat (`VMO_PINNED`, `VMO_CREATE_CONTIGUOUS`); strhava se navic
+//!   k uzivatelske pameti. Kvota je povinna: korenovy job ma pevny limit
+//!   (polovina pameti pro programy), takze pripnuta pamet nikdy nezabere
+//!   cely system.
 //!
 //! Prekroceni rozpoctu = `NO_RESOURCES`. Nedostatek fyzicke pameti systemu
 //! je dal `NO_MEMORY` (rezerva jadra se pro programy nepouzije nikdy).
@@ -19,8 +24,10 @@ pub mod pool {
     pub const KERNEL: u32 = 0;
     /// Uzivatelska pamet (stranky objektu pameti).
     pub const USER: u32 = 1;
+    /// Pripnuta pamet pro DMA (navic k `USER`).
+    pub const DMA: u32 = 2;
     /// Pocet rozpoctu.
-    pub const COUNT: usize = 2;
+    pub const COUNT: usize = 3;
 }
 
 /// Limit "bez vlastniho omezeni" (plati jen limity predku).
@@ -38,18 +45,21 @@ pub struct PoolInfo {
     pub available: u64,
 }
 
-/// Vystup `JOB_INFO` (56 B, little endian: pro jadro a pak uzivatelskou
-/// pamet vzdy `used`, `limit`, `available` jako u64, nakonec cislo jobu).
+/// Vystup `JOB_INFO` (80 B, little endian: pro jadro a pak uzivatelskou
+/// pamet vzdy `used`, `limit`, `available` jako u64, pak cislo jobu a nakonec
+/// stejna trojice pro pripnutou pamet).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct JobInfo {
     pub kernel: PoolInfo,
     pub user: PoolInfo,
+    /// Pripnuta pamet pro DMA.
+    pub dma: PoolInfo,
     /// Cislo jobu (jedinecne do restartu; stejne jako v [`ProcEntry::job`]).
     pub id: u64,
 }
 
 impl JobInfo {
-    pub const SIZE: usize = 56;
+    pub const SIZE: usize = 80;
 
     pub fn encode(&self) -> [u8; Self::SIZE] {
         let mut b = [0u8; Self::SIZE];
@@ -61,6 +71,9 @@ impl JobInfo {
             self.user.limit,
             self.user.available,
             self.id,
+            self.dma.used,
+            self.dma.limit,
+            self.dma.available,
         ];
         for (i, v) in values.iter().enumerate() {
             b[i * 8..i * 8 + 8].copy_from_slice(&v.to_le_bytes());
@@ -82,6 +95,11 @@ impl JobInfo {
                 available: v(5),
             },
             id: v(6),
+            dma: PoolInfo {
+                used: v(7),
+                limit: v(8),
+                available: v(9),
+            },
         }
     }
 }

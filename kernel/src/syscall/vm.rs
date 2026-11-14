@@ -12,13 +12,21 @@ use crate::object::{KernelObject, Rights};
 /// Najvetsi blok, ktery VMO_READ/VMO_WRITE prenese jednim volanim.
 const RW_MAX: usize = 1 << 20;
 
-/// `VMO_CREATE(size, process) -> handle`. Pamet se strhne z rozpoctu jobu
-/// procesu `process` (handle s pravem `WRITE`; 0 = volajici). Rodic tak
-/// vytvari pamet programu (segmenty, zasobnik) na ucet potomka.
+/// `VMO_CREATE(size, process, flags) -> handle`. Pamet se strhne z rozpoctu
+/// jobu procesu `process` (handle s pravem `WRITE`; 0 = volajici). Rodic
+/// tak vytvari pamet programu (segmenty, zasobnik) na ucet potomka.
+/// `abi::vm::VMO_PINNED`: stranky hned a pripnute (rozpocet `DMA`).
 pub fn vmo_create(a: Args) -> Result<u64> {
+    if a[2] & !abi::vm::VMO_CREATE_FLAGS != 0 {
+        return Err(Error::InvalidArgs);
+    }
     let p = current_process();
     let job = job_of(&p, a[1])?;
-    let vmo = MemoryObject::new(a[0], Some(&job))?;
+    let vmo = if a[2] & abi::vm::VMO_PINNED != 0 {
+        MemoryObject::new_pinned(a[0], Some(&job))?
+    } else {
+        MemoryObject::new(a[0], Some(&job))?
+    };
     let rights = vmo.default_rights();
     Ok(p.handles().insert(vmo, rights)?.0 as u64)
 }

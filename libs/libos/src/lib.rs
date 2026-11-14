@@ -28,6 +28,7 @@
 extern crate alloc;
 
 pub mod barrier;
+pub mod dma;
 mod channel;
 mod event;
 pub mod exception;
@@ -63,6 +64,7 @@ pub use abi;
 pub use abi::{Error, Result, Rights, Signals};
 pub use channel::{Channel, Message};
 pub use event::Event;
+pub use dma::DmaMap;
 pub use fence::Fence;
 pub use handle::Handle;
 pub use mapping::{Mapping, Pod};

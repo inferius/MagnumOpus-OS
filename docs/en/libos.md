@@ -81,6 +81,7 @@ Each type owns a handle and closes it when dropped.
 |---|---|---|
 | `Handle` | generic handle | `duplicate(rights)`, `into_raw`, `from_raw` |
 | `Event` | signal between threads and processes | `create`, `signal`, `reset` |
+| `DmaMap` | a mapping of pinned memory for a device ([dma.md](dma.md)); `Vmo::create_pinned` | `new`, `at` (IOVA hint), `segments`, `device_addr`, `sync`; closing = unmapping |
 | `Fence` | fence: a timeline for explicit synchronisation ([fences.md](fences.md)) | `create`, `for_waiter`, `signal`, `fail`, `wait`, `wait_async`, `query`; `fence::wait_any`, `wait_all` |
 | `Channel` | messages with data and handles | `create`, `write`, `try_read`, `read(deadline)` |
 | `Vmo` | memory object | `create`, `read`, `write` (any length; the kernel moves 1 MiB per call, libos splits) |

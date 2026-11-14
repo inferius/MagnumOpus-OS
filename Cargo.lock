@@ -1685,6 +1685,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "iova"
+version = "0.1.0"
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1711,6 +1715,7 @@ dependencies = [
  "csprng",
  "elf",
  "initfs",
+ "iova",
  "noto-sans-mono-bitmap",
  "qr",
  "schedcore",

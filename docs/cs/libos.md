@@ -78,6 +78,7 @@ Každý typ vlastní handle a zavře ho při zrušení (`Drop`).
 |---|---|---|
 | `Handle` | obecný handle | `duplicate(práva)`, `into_raw`, `from_raw` |
 | `Event` | signál mezi vlákny a procesy | `create`, `signal`, `reset` |
+| `DmaMap` | mapování připnuté paměti pro zařízení ([dma.md](dma.md)); `Vmo::create_pinned` | `new`, `at` (nápověda IOVA), `segments`, `device_addr`, `sync`; zavření = odmapování |
 | `Fence` | plot: časová osa pro explicitní synchronizaci ([ploty.md](ploty.md)) | `create`, `for_waiter`, `signal`, `fail`, `wait`, `wait_async`, `query`; `fence::wait_any`, `wait_all` |
 | `Channel` | zprávy s daty a handly | `create`, `write`, `try_read`, `read(deadline)` |
 | `Vmo` | objekt paměti | `create`, `read`, `write` (libovolně dlouhé; jádro přenese 1 MiB na volání, libos dělí) |

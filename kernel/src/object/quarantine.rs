@@ -18,13 +18,20 @@
 //!
 //! Klient, ktery jen sdilel buffer ovladace a skoncil, zarizeni nezastavi:
 //! zastavuje se jen zarizeni, pro ktere umirajici proces pamet pro DMA sam
-//! vytvoril.
+//! vytvoril nebo namapoval (`DMA_MAP`).
+//!
+//! Mapovani `DMA_MAP` (`dma.rs`) jde sem stejne: zarizeni se nejdriv
+//! zastavi, teprve pak se mapovani zrusi (odmapovani s vyprazdnenim IOTLB,
+//! pak pamet). Bez IOMMU by jinak zarizeni mohlo psat do stranek, ktere uz
+//! dostal nekdo jiny.
 
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::time::Duration;
 
+use super::KernelObject;
+use super::dma::DmaMap;
 use super::vmo::MemoryObject;
 use crate::log;
 use crate::mm::{PhysAddr, VirtAddr};
@@ -33,8 +40,9 @@ use crate::sync::SpinLock;
 /// Identita zarizeni PCI: (segment, sbernice, zarizeni << 3 | funkce).
 pub type DeviceId = (u16, u8, u8);
 
-/// Pamet zarizeni, ktera zustava v karantene (zarizeni nejde zastavit).
-static HELD: SpinLock<Vec<(Option<DeviceId>, Arc<MemoryObject>)>> = SpinLock::new(Vec::new());
+/// Pamet a mapovani zarizeni, ktere zustavaji v karantene (zarizeni nejde
+/// zastavit).
+static HELD: SpinLock<Vec<(Option<DeviceId>, Arc<dyn KernelObject>)>> = SpinLock::new(Vec::new());
 
 /// Namapovane stranky konfigurace PCI (virtualni adresa v jadre); mapuji
 /// se jednou na zarizeni.
@@ -138,11 +146,16 @@ fn quiesce(d: DeviceId) -> Result<(), Stuck> {
 }
 
 /// Proces skoncil. `driven` = zarizeni, ktera ridil, `dma` =
-/// pamet pro DMA, kterou mel (mapovanou nebo za handlem). Pamet zarizeni,
-/// ktera ridil, pusti az po jejich zastaveni; ostatni hned (klient sdileneho
-/// bufferu - ovladac zije a za pamet odpovida).
-pub fn driver_gone(driven: &[DeviceId], dma: Vec<Arc<MemoryObject>>) {
-    let mut by_device: BTreeMap<DeviceId, Vec<Arc<MemoryObject>>> = BTreeMap::new();
+/// pamet pro DMA, kterou mel (mapovanou nebo za handlem), `maps` = jeho
+/// mapovani `DMA_MAP`. Pamet a mapovani zarizeni, ktera ridil, pusti az po
+/// jejich zastaveni; ostatni hned (klient sdileneho bufferu - ovladac zije
+/// a za pamet odpovida).
+pub fn driver_gone(driven: &[DeviceId], dma: Vec<Arc<MemoryObject>>, maps: Vec<Arc<DmaMap>>) {
+    let mut by_device: BTreeMap<DeviceId, Vec<Arc<dyn KernelObject>>> = BTreeMap::new();
+    for map in maps {
+        // Mapovani vytvari jen ovladac zarizeni (prostredek s identitou).
+        by_device.entry(map.device()).or_default().push(map);
+    }
     for vmo in dma {
         match vmo.dma_device() {
             Some(d) if driven.contains(&d) => by_device.entry(d).or_default().push(vmo),

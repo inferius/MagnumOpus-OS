@@ -107,7 +107,7 @@ Details, design comparison and measurements: [Scheduler](scheduler.md).
   that runs out of generations is retired, so a stale handle never becomes
   valid for another object.
 - **Rights** (`READ`, `WRITE`, `EXECUTE`, `MAP`, `DUPLICATE`, `TRANSFER`,
-  `WAIT`, `SIGNAL`, `MANAGE`) can only be removed when duplicating.
+  `WAIT`, `SIGNAL`, `MANAGE`, `DMA`) can only be removed when duplicating.
 - **Channels**: messages with data and handles; transferring a handle moves
   it (the sender loses it). Closing an end sets `PEER_CLOSED` on the other.
 - **Ports** (`kernel/src/object/port.rs`): one-shot registrations "when the
@@ -268,6 +268,12 @@ and the rest of the kernel does not distinguish them (`arch::iommu::Domain`):
   identically: the device address is the physical address, the driver does
   not change. When the memory object is destroyed, its pages are unmapped
   from the domain before they return to the allocator.
+- **Scatter-gather DMA** **[verified in QEMU]**: the driver maps pinned
+  memory (`VMO_PINNED`, also another process's buffer with the `DMA` right)
+  through `DMA_MAP` onto a contiguous IOVA range in the window above the end
+  of RAM; closing the handle = unmapping with a synchronous IOTLB flush.
+  After the driver ends, the mapping goes to quarantine like contiguous
+  memory (stop first, then unmap). Details: [dma.md](dma.md).
 - **A blocked access** is reported by the IOMMU with an interrupt (vector
   36) and the kernel logs it as a warning with the device, address and
   reason code (see [messages.md](messages.md#kernel-iommu)).

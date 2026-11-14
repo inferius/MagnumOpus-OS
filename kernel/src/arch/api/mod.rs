@@ -406,15 +406,37 @@ pub trait Iommu {
     /// existujici, nebo nova. `Ok(None)` = zadna IOMMU zarizeni nepokryva
     /// (DMA neomezene).
     fn domain(segment: u16, bus: u8, devfn: u8) -> Result<Option<Self::Domain>, Error>;
+
+    /// Vybere cekajici hlaseni zablokovanych pristupu do logu jadra (i bez
+    /// preruseni: SMMUv3 zatim preruseni udalosti nema).
+    fn poll_faults();
+}
+
+/// Co zarizeni smi se strankou v domene.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DmaAccess {
+    pub read: bool,
+    pub write: bool,
+}
+
+impl DmaAccess {
+    pub const READ_WRITE: Self = Self {
+        read: true,
+        write: true,
+    };
 }
 
 /// Domena prekladu DMA jednoho zarizeni (levne klonovatelny odkaz).
 pub trait IommuDomain: Clone + Send + Sync {
-    /// Povoli zarizeni cteni i zapis `pages` stranek od `phys` (identicky:
-    /// adresa pro zarizeni = fyzicka adresa).
-    fn map(&self, phys: u64, pages: u64) -> Result<(), Error>;
-    /// Odebere zarizeni pristup ke strankam (pred vracenim pameti).
-    fn unmap(&self, phys: u64, pages: u64);
+    /// Povoli zarizeni pristup `access` na adresach `iova..+pages` stranek
+    /// k fyzicky souvislym strankam od `phys` (identicky: `iova == phys`).
+    /// Pri chybe nic nenamapuje.
+    fn map(&self, iova: u64, phys: u64, pages: u64, access: DmaAccess) -> Result<(), Error>;
+    /// Odebere zarizeni pristup k `pages` strankam od `iova` a synchronne
+    /// vyprazdni IOTLB: po navratu zarizeni na adresy nedosahne.
+    fn unmap(&self, iova: u64, pages: u64);
+    /// Kolik bitu adresy domena preklada (okno IOVA konci pod `1 << bits`).
+    fn iova_bits(&self) -> u32;
 }
 
 /// Start dalsich CPU.

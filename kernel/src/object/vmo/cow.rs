@@ -125,7 +125,7 @@ impl MemoryObject {
         }
         let count = len / PAGE;
         let first = (offset / PAGE) as usize;
-        let mut charges = charge(job, count, count * PAGE)?;
+        let mut charges = charge(job, count, count * PAGE, 0)?;
         let mut pages = page_list(count)?;
         let mut eager = 0u64;
         let mut failed = false;

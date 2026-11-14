@@ -37,6 +37,8 @@ ovladače ho zastaví devmgr vypnutím bus master.
 |---|---|
 | `fact <n>` | `fact <n> <n!>` (32 bitů, přeteče jako hardware) |
 | `dma <text>` | `dma <text>`: text projde DMA do zařízení a zpět (1-4096 B) |
+| `sg <text>` | `sg <text>`: totéž přes buffer po stránkách (`alloc_dma_pages`, [dma.md](dma.md)); text leží přes hranici stránek, bez IOMMU přenos po kusech (`device_chunks`) |
+| `stale` | `stale <iova>`: ovladač odmapuje buffer a nechá zařízení zapsat na jeho starou adresu; IOMMU zápis zablokuje a jádro ho zaloguje. Bez IOMMU odmítne (`chyba stale: bez IOMMU ...`), zařízení by zapsalo do uvolněné paměti |
 | jiný příkaz | `chyba <popis>` |
 | `dk:ping`, `dk:info`, `dk:restart`, `dk:crash` | společné zprávy driverkitu |
 
@@ -49,5 +51,7 @@ Během výpočtu nebo přenosu odpoví ovladač na další příkaz
   a zpět bez přístupu mimo přidělenou paměť, chybné příkazy, kvóta DMA
   z manifestu,
 - v QEMU (`cargo xtask test --driver edu`, sada `ovladace z manifestu`):
-  ping, faktoriál přes MSI, 1000 B přes DMA a IOMMU, obnova po `dk:crash`
-  a restart po `dk:restart`. Na x86_64 (VT-d) i aarch64 (SMMUv3).
+  ping, faktoriál přes MSI, 1000 B přes DMA a IOMMU, 3000 B přes
+  nesouvislé stránky (`sg`), zablokovaný zápis po odmapování v logu jádra
+  (`stale`, jen s IOMMU), obnova po `dk:crash` a restart po `dk:restart`.
+  Na x86_64 (VT-d) i aarch64 (SMMUv3).

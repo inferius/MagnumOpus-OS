@@ -379,6 +379,13 @@ fn frame_slot(array: &AtomicPtr<AtomicU16>, frame: PhysAddr) -> &'static AtomicU
     unsafe { &*array.load(Ordering::Acquire).add(idx as usize) }
 }
 
+/// Konec RAM, kterou spravuje alokator (vsechny ramce lezi pod ni). Okno
+/// IOVA pro `DMA_MAP` zacina nad ni, aby se nikdy neprekrylo s identickym
+/// mapovanim pameti pro DMA.
+pub fn ram_end() -> u64 {
+    PIN_FRAMES.load(Ordering::Acquire) * PAGE_SIZE
+}
+
 fn pin_slot(frame: PhysAddr) -> &'static AtomicU16 {
     frame_slot(&PINS, frame)
 }

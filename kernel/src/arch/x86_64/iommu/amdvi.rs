@@ -24,6 +24,7 @@ use core::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use super::super::acpi::AmdIommuUnit;
 use super::VECTOR_IOMMU_FAULT;
 use crate::acpi::PciEcam;
+use crate::arch::api::DmaAccess;
 use crate::error::Error;
 use crate::log;
 use crate::mm::{self, PhysAddr};
@@ -56,7 +57,11 @@ const DTE_IW: u64 = 1 << 62;
 /// Pocet urovni tabulek domeny (rezim 4 = 48 bitu).
 const LEVELS: u64 = 4;
 const PTE_PR: u64 = 1;
-const PTE_RW: u64 = 1 << 61 | 1 << 62;
+const PTE_IR: u64 = 1 << 61;
+const PTE_IW: u64 = 1 << 62;
+const PTE_RW: u64 = PTE_IR | PTE_IW;
+/// Kolik bitu adresy domena preklada (4 urovne).
+pub const IOVA_BITS: u32 = 12 + 9 * LEVELS as u32;
 const ADDR_MASK: u64 = 0x000F_FFFF_FFFF_F000;
 
 struct Unit {
@@ -348,16 +353,18 @@ impl Domain {
         Ok(entry(table, (iova >> 12) & 511))
     }
 
-    pub fn map(&self, phys: u64, pages: u64) -> Result<(), Error> {
+    /// Povoli zarizeni pristup `access` na `iova..+pages` stranek
+    /// k souvislym strankam od `phys`.
+    pub fn map(&self, iova: u64, phys: u64, pages: u64, access: DmaAccess) -> Result<(), Error> {
+        let bits = access.read as u64 * PTE_IR | access.write as u64 * PTE_IW;
         let mut tables = self.tables.lock();
         for i in 0..pages {
-            let addr = phys + i * 4096;
-            match self.leaf(&mut tables, addr) {
+            match self.leaf(&mut tables, iova + i * 4096) {
                 // SAFETY: zaznam v tabulce domeny, pod zamkem.
-                Ok(p) => unsafe { p.write_volatile(addr | PTE_RW | PTE_PR) },
+                Ok(p) => unsafe { p.write_volatile((phys + i * 4096) | bits | PTE_PR) },
                 Err(e) => {
                     drop(tables);
-                    self.unmap(phys, i);
+                    self.unmap(iova, i);
                     return Err(e);
                 }
             }
@@ -366,10 +373,12 @@ impl Domain {
         self.unit.run(&[invalidate_domain(self.id)])
     }
 
-    pub fn unmap(&self, phys: u64, pages: u64) {
+    /// Odebere zarizeni pristup ke strankam a vyprazdni IOTLB (`run` ceka
+    /// na dokonceni prikazu).
+    pub fn unmap(&self, iova: u64, pages: u64) {
         let mut tables = self.tables.lock();
         for i in 0..pages {
-            if let Ok(p) = self.leaf(&mut tables, phys + i * 4096) {
+            if let Ok(p) = self.leaf(&mut tables, iova + i * 4096) {
                 // SAFETY: viz map.
                 unsafe { p.write_volatile(0) };
             }

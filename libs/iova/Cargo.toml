@@ -1,0 +1,8 @@
+[package]
+name = "iova"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Alokator rozsahu adres pro zarizeni (IOVA) v domene IOMMU"
+
+[dependencies]

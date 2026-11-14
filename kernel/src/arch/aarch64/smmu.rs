@@ -24,7 +24,7 @@ use core::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use super::mmio::{read32, write32, write64};
 use super::mmu::PageTable;
 use super::regs::{dcache_clean_invalidate, dsb_sy};
-use crate::arch::api::IommuDomain;
+use crate::arch::api::{DmaAccess, IommuDomain};
 use crate::arch::api::paging::{MapFlags, PageSize, PageTableOps};
 use crate::error::Error;
 use crate::log;
@@ -306,13 +306,19 @@ impl Smmu {
         Ok(l2 + (sid as u64 & ((1 << STRTAB_SPLIT) - 1)) * STE_SIZE)
     }
 
-    /// Vypise udalosti (chyby DMA) z fronty udalosti do logu.
+    /// Vypise udalosti (chyby DMA) z fronty udalosti do logu. Jeden
+    /// zablokovany prenos vyvola udalost na kazdy pristup zarizeni: podrobne
+    /// jen prvni 4, zbytek souhrnem (log nesmi zahltit system).
     fn drain_events(&mut self) {
         let size = 1u32 << EVENTQ_LOG2;
+        let (mut shown, mut more) = (0u32, 0u32);
         loop {
             let prod = read32(self.regs + EVENTQ_PROD) & (2 * size - 1);
             let cons = read32(self.regs + EVENTQ_CONS) & (2 * size - 1);
             if prod == cons {
+                if more > 0 {
+                    log::warn!("SMMU: dalsich {more} udalosti vynechano");
+                }
                 return;
             }
             let rec = PhysAddr::new(self.eventq + (cons & (size - 1)) as u64 * 32)
@@ -326,11 +332,16 @@ impl Smmu {
                     ((rec + 16) as *const u64).read_volatile(),
                 )
             };
-            log::warn!(
-                "SMMU: zablokovany pristup DMA zarizeni (StreamID {:#x}) na adresu {w2:#x} (udalost {:#x})",
-                w0 >> 32,
-                w0 & 0xFF
-            );
+            if shown < 4 {
+                shown += 1;
+                log::warn!(
+                    "SMMU: zablokovany pristup DMA zarizeni (StreamID {:#x}) na adresu {w2:#x} (udalost {:#x})",
+                    w0 >> 32,
+                    w0 & 0xFF
+                );
+            } else {
+                more += 1;
+            }
             write32(self.regs + EVENTQ_CONS, (cons + 1) & (2 * size - 1));
         }
     }
@@ -446,14 +457,20 @@ pub fn domain(segment: u16, bus: u8, devfn: u8) -> Result<Option<Arc<SmmuDomain>
 }
 
 impl SmmuDomain {
-    fn map_range(&self, phys: u64, pages: u64, flags: MapFlags) -> Result<(), Error> {
+    fn map_range(&self, iova: u64, phys: u64, pages: u64, flags: MapFlags) -> Result<(), Error> {
         let mut table = self.table.lock();
         for i in 0..pages {
-            let a = phys + i * 4096;
-            match table.map(VirtAddr::new(a), PhysAddr::new(a), PageSize::Size4K, flags) {
+            let (v, p) = (iova + i * 4096, phys + i * 4096);
+            match table.map(VirtAddr::new(v), PhysAddr::new(p), PageSize::Size4K, flags) {
                 Ok(()) => {}
-                Err(crate::arch::api::paging::MapError::AlreadyMapped) => {}
-                Err(_) => return Err(Error::NoMemory),
+                // Identicke mapovani muze uz existovat (doorbell MSI).
+                Err(crate::arch::api::paging::MapError::AlreadyMapped) if v == p => {}
+                Err(_) => {
+                    for j in 0..i {
+                        table.unmap_4k(VirtAddr::new(iova + j * 4096));
+                    }
+                    return Err(Error::NoMemory);
+                }
             }
         }
         Ok(())
@@ -469,19 +486,43 @@ impl SmmuDomain {
 }
 
 impl IommuDomain for Arc<SmmuDomain> {
-    fn map(&self, phys: u64, pages: u64) -> Result<(), Error> {
+    fn map(&self, iova: u64, phys: u64, pages: u64, access: DmaAccess) -> Result<(), Error> {
         // USER: pristup povolen bez ohledu na privilegovanost transakce.
-        self.map_range(phys, pages, MapFlags::WRITE | MapFlags::USER)
+        // Stage 1 neumi "jen zapis": zapis vzdy dovoli i cteni.
+        let flags = if access.write {
+            MapFlags::WRITE | MapFlags::USER
+        } else {
+            MapFlags::USER
+        };
+        self.map_range(iova, phys, pages, flags)?;
+        // Nove zaznamy SMMU nikdy necachovala, ale v jejich miste mohla
+        // zustat stara neplatna polozka (po odmapovani) - zneplatnit.
+        self.invalidate();
+        Ok(())
     }
 
-    fn unmap(&self, phys: u64, pages: u64) {
+    fn unmap(&self, iova: u64, pages: u64) {
         {
             let mut table = self.table.lock();
             for i in 0..pages {
-                table.unmap_4k(VirtAddr::new(phys + i * 4096));
+                table.unmap_4k(VirtAddr::new(iova + i * 4096));
             }
         }
+        // TLBI + CMD_SYNC: po navratu SMMU stare preklady nepouzije.
         self.invalidate();
+    }
+
+    fn iova_bits(&self) -> u32 {
+        // T0SZ 16 = 48 bitu; adresy nad 47 bity by nebyly kanonicke pro
+        // spolecny kod tabulek stranek.
+        47
+    }
+}
+
+/// Vybere cekajici udalosti (zablokovane pristupy) do logu.
+pub fn poll_events() {
+    if let Some(smmu) = SMMU.lock().as_mut() {
+        smmu.drain_events();
     }
 }
 
@@ -506,6 +547,7 @@ pub fn map_msi_doorbell(segment: u16, bus: u8, devfn: u8, doorbell: u64) {
     if let Some(d) = domain {
         // Registr zarizeni: bez cache (Device), jen zapis zarizenim.
         if d.map_range(
+            doorbell & !0xFFF,
             doorbell & !0xFFF,
             1,
             MapFlags::WRITE | MapFlags::USER | MapFlags::UNCACHED,

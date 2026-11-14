@@ -29,7 +29,7 @@ pub fn set_limit(a: Args) -> Result<u64> {
     Ok(0)
 }
 
-/// `JOB_INFO(job, out_ptr)`: zapise `abi::job::JobInfo` (56 B).
+/// `JOB_INFO(job, out_ptr)`: zapise `abi::job::JobInfo` (80 B).
 pub fn info(a: Args) -> Result<u64> {
     let p = current_process();
     let job = p.handles().get_as::<Job>(arg_handle(a[0])?, Rights::READ)?;

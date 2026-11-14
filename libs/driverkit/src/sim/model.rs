@@ -104,6 +104,8 @@ pub(crate) struct Region {
     pub iova: u64,
     pub data: Vec<u8>,
     pub name: &'static str,
+    /// Buffer zanikl (odmapovano): zarizeni ho uz nevidi.
+    pub gone: bool,
 }
 
 /// Vsechna DMA pamet ovladace.
@@ -119,7 +121,7 @@ impl DmaSpace {
     /// v jedne oblasti.
     pub fn find(&self, iova: u64, len: u64) -> Option<(usize, usize)> {
         self.regions.iter().position(|r| {
-            iova >= r.iova && crate::io::fits(iova - r.iova, len, r.data.len() as u64)
+            !r.gone && iova >= r.iova && crate::io::fits(iova - r.iova, len, r.data.len() as u64)
         })
         .map(|i| (i, (iova - self.regions[i].iova) as usize))
     }

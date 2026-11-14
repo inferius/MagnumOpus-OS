@@ -18,6 +18,7 @@ pub mod auxv;
 pub mod bootstrap;
 pub mod error;
 pub mod exception;
+pub mod dma;
 pub mod fence;
 pub mod job;
 pub mod limits;
@@ -42,3 +43,5 @@ mod params_tests;
 mod time_tests;
 #[cfg(test)]
 mod fence_tests;
+#[cfg(test)]
+mod dma_tests;

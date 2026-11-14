@@ -9,6 +9,7 @@
 //! ([`fence`]) ma navic cekani na hodnotu casove osy.
 
 pub mod channel;
+pub mod dma;
 pub mod event;
 pub mod fence;
 pub mod exception;

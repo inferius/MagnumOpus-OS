@@ -491,6 +491,10 @@ impl api::Iommu for Aarch64 {
     fn domain(segment: u16, bus: u8, devfn: u8) -> Result<Option<Self::Domain>, Error> {
         smmu::domain(segment, bus, devfn)
     }
+
+    fn poll_faults() {
+        smmu::poll_events();
+    }
 }
 
 impl api::Smp for Aarch64 {
