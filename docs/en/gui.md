@@ -1416,6 +1416,14 @@ buffers (`libs/gfx`, `libs/font`) and derives **both the layer tree and
 the accessibility tree** - the application writes none of that by hand.
 Input (keys, text, mouse, accessibility actions) becomes `Msg` messages.
 
+**Layout in a row** **[implemented]** (host `libs/ui/src/tests/layout.rs`):
+containers (`column`, `scroll`, `table`, `list`) without a fixed height
+stretch to the full height of the row (like CSS `align-items: stretch`), so
+a sidebar, content and preview side by side start at the top and reach the
+bottom of the window. Leaves (button, label, field) and nested rows stay
+vertically centred; a fixed height `.height(h)` wins (the element is
+centred).
+
 | Element | Mouse | Keyboard | Accessibility |
 |---|---|---|---|
 | `label` | - | - | `label` |

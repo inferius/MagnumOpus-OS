@@ -1360,6 +1360,13 @@ a odvodí z nich **strom vrstev i strom přístupnosti** - aplikace nic
 z toho nepíše ručně. Vstup (klávesy, text, myš, akce přístupnosti)
 převede na zprávy `Msg`.
 
+**Rozvržení v řádku** **[implementováno]** (host `libs/ui/src/tests/layout.rs`):
+kontejnery (`column`, `scroll`, `table`, `list`) bez pevné výšky se
+natáhnou na celou výšku řádku (jako CSS `align-items: stretch`), takže
+postranní panel, obsah a náhled vedle sebe začínají nahoře a jdou do konce
+okna. Listy (tlačítko, štítek, pole) a vnořené řádky zůstávají svisle na
+středu; pevná výška `.height(h)` má přednost (prvek je na středu).
+
 | Prvek | Myš | Klávesnice | Přístupnost |
 |---|---|---|---|
 | `label` | - | - | `label` |

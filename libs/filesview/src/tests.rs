@@ -506,3 +506,43 @@ fn bmp_preview_shows_image() {
     let u = ui_for(&m, 1200);
     assert!(u.a11y().iter().any(|n| n.role == Role::Image && n.name == "Obrázek BMP 2 x 2, 24 bitů"));
 }
+
+/// `/home` jako u uzivatele: vlastni domov a cizi domov bez prava vypisu.
+fn home_with_foreign() -> Fm {
+    let mut b = TestBackend::sample();
+    b.fs.file("/home/petr/tajne.txt", b"x");
+    b.locked.push(String::from("/home/petr"));
+    let mut m = FileManager::new(b);
+    m.update(Msg::Go(String::from("/home")));
+    m
+}
+
+#[test]
+fn foreign_folder_has_lock() {
+    let m = home_with_foreign();
+    let petr = m.listing.items.iter().find(|i| i.e.name == "petr").expect("cizi domov ve vypisu");
+    assert!(petr.locked());
+    assert_eq!((petr.icon(), petr.kind_text()), ("lock", "Složka bez přístupu"));
+    let jana = m.listing.items.iter().find(|i| i.e.name == "jana").unwrap();
+    assert!(!jana.locked());
+    assert_eq!(jana.icon(), "folder");
+}
+
+#[test]
+fn denied_listing_is_not_empty_folder() {
+    let mut m = home_with_foreign();
+    let id = m.listing.items.iter().find(|i| i.e.name == "petr").unwrap().e.oid;
+    m.update(Msg::Activate(id));
+    assert_eq!(m.nav.cur, "/home/petr");
+    assert_eq!(m.list_error, Some(abi::Error::AccessDenied));
+    let labels = names(&ui_for(&m, 1200), Role::Label);
+    assert!(labels.iter().any(|l| l == "Ke složce petr nemáte přístup."), "{labels:?}");
+    assert!(!labels.iter().any(|l| l.contains("prázdná")), "odmitnuty vypis neni prazdna slozka: {labels:?}");
+    assert!(!names(&ui_for(&m, 1200), Role::Button).iter().any(|b| b == "Nová složka"), "bez vypisu ani akce");
+    // Navrat zpet: chyba zmizi.
+    m.update(Msg::Back);
+    assert_eq!(m.list_error, None);
+    // Neexistujici slozka: duvod, ne prazdna slozka.
+    m.update(Msg::Go(String::from("/home/nikdo")));
+    assert!(names(&ui_for(&m, 1200), Role::Label).iter().any(|l| l == "Složku nikdo nejde otevřít: neexistuje."));
+}

@@ -46,7 +46,8 @@ impl<B: Backend> FileManager<B> {
             Mode::Trash => self.trash_view(),
         });
         if cx.class == SizeClass::Expanded && self.mode == Mode::Folder {
-            main.push(self.preview_panel().width(PREVIEW_W));
+            // Nahled (text, obrazek, historie verzi) muze byt vyssi nez okno.
+            main.push(scroll(self.preview_panel()).width(PREVIEW_W));
         }
         let mut items = vec![self.toolbar(cx), row(main).grow()];
         items.extend(self.jobs_view());
@@ -141,6 +142,12 @@ impl<B: Backend> FileManager<B> {
             if !e.error.is_empty() {
                 v.push(label(&e.error));
             }
+        }
+        if let Some(e) = self.list_error {
+            // Odmitnuty vypis neni prazdna slozka (tabulka ani akce nemaji smysl).
+            v.clear();
+            v.push(label(&denied_text(&self.nav.cur, e)).heading());
+            return column(v).grow();
         }
         if self.listing.is_empty() {
             v.push(label(if self.listing.filter.is_empty() { "Složka je prázdná." } else { "Nic neodpovídá hledání." }));
@@ -376,4 +383,14 @@ fn rights_text(r: u8) -> String {
 /// Sloupec razeni pro zahlavi (pro testy).
 pub fn sort_col(s: SortBy) -> usize {
     s.col()
+}
+
+/// Text misto obsahu slozky, ktera nejde vypsat. Bez prava -> "nemate
+/// pristup" (jmeno slozky, ne cela cesta), jinak duvod chyby.
+pub fn denied_text(path: &str, e: abi::Error) -> String {
+    let n = if path == "/" { "Svazek" } else { name(path) };
+    match e {
+        abi::Error::AccessDenied => format!("Ke složce {n} nemáte přístup."),
+        _ => format!("Složku {n} nejde otevřít: {}.", crate::error_text(e)),
+    }
 }

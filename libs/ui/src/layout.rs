@@ -188,6 +188,12 @@ fn measure<M>(n: &Node<M>, t: &Look) -> (u32, u32) {
     (if n.width > 0 { n.width } else { w }, if n.height > 0 { n.height } else { h })
 }
 
+/// Natahne se dite radku na jeho vysku? Kontejnery ano, pokud aplikace
+/// nedala pevnou vysku (`Node::height` ma prednost).
+fn stretches<M>(n: &Node<M>) -> bool {
+    n.height == 0 && matches!(n.kind, Kind::Column(_) | Kind::Scroll(_) | Kind::Table(_) | Kind::List { .. })
+}
+
 /// Rozvrhne strom do obdelniku `area` (souradnice okna).
 ///
 /// Klice jsou v okne jedinecne: dva sourozenci se stejnym vlastnim klicem
@@ -314,7 +320,12 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
             let mut x = r.x;
             for (c, (w, h)) in children.into_iter().zip(sizes) {
                 let w = if c.grow && grow > 0 { w + extra / grow } else { w };
-                // Svisle na stred radku.
+                // Kontejnery (sloupec, posuv, tabulka, seznam) bez pevne
+                // vysky se natahnou na vysku radku (jako CSS `align-items:
+                // stretch`): postranni panel a nahled vedle obsahu zacinaji
+                // nahore a jdou do konce okna. Listy (tlacitko, stitek,
+                // pole) a vnorene radky jsou svisle na stredu.
+                let h = if stretches(&c) { r.h } else { h };
                 let y = r.y + (r.h.saturating_sub(h) / 2) as i32;
                 let k = child_key(&c, key, &mut counts);
                 place(c, k, Rect::new(x, y, w, h.min(r.h)), space, id, t, out);

@@ -324,6 +324,7 @@ mod controls;
 mod field;
 mod hover;
 mod keys;
+mod layout;
 mod popup;
 mod shots;
 mod spatial;

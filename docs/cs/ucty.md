@@ -112,8 +112,14 @@ Argon2id, klíč domova jen zabalený.
   (`CREATE_HOME`): vlastník = `uid`, popis oprávnění `PROTECTED` bez
   grantů (ostatní uživatelé domov ani nevidí: `NOT_FOUND`), `NOEXEC`
   podle profilu (standardní a přísný: zapnuto - data nejsou programy).
-- `/home` patří systému a má grant `TRAVERSE` pro skupinu `uzivatele`
-  (projít, ne vypsat): kdo nezná jméno, nedozví se, jaké domovy existují.
+- `/home` patří systému a má grant `LIST | TRAVERSE` (jen adresář,
+  nedědí se) pro skupinu `uzivatele`. Výpis ukáže jen položky, ke kterým
+  má volající nějaké právo (`Fs::visible`), takže uživatel v `/home` vidí
+  právě svůj domov: cizí domovy i koš správy jsou `PROTECTED` bez grantů,
+  tedy neviditelné (`NOT_FOUND`) a jména ostatních účtů se neprozradí.
+  Grant doplní init při každém startu (`accounts::layout`, idempotentně),
+  takže ho dostanou i instalace, kde `/home` měl jen `TRAVERSE` (správce
+  souborů tam ukazoval prázdnou složku).
 - Smazání účtu: domov se **nemaže hned**, přesune se do koše správy
   (`/home/.smazane/<uid>`, `PROTECTED` bez grantů - vidí ho jen systém;
   prohlížení pro roli správy a mazání po 30 dnech přijdou se správou
@@ -306,7 +312,8 @@ dohromady, PIN navíc svých 5 pokusů):
   Kompozitor dostává `session open|lock|unlock|close` (skryje nebo ukáže
   přihlašovací obrazovku).
 - **Základní práva lidí na FS:** skupina `uzivatele` smí vypsat kořen
-  (vidí jen položky, ke kterým má právo), `/home` jen projít a v `/tmp`
+  a `/home` (vidí jen položky, ke kterým má právo - v `/home` svůj
+  domov), v `/tmp`
   a `/tmp/.aside` (klony shellu) zakládat; grant platí jen pro adresář
   a nedědí se, takže cizí soubory v `/tmp` nevidí.
 - Recept relace v lístku (obnova po pádu fsd), aplikace s užšími relacemi
@@ -659,7 +666,7 @@ i aarch64):
 | založení prvního účtu | `CREATE_FIRST` (krátké heslo odmítnuto, druhý „první“ účet odmítnut), role, domov `/home/alice` je dataset s vlastníkem uid, `PROTECTED` bez grantů, `NOEXEC` |
 | přihlášení heslem | `AUTH` -> relace, FS relace zapisuje do domova, `WHOAMI`, fráze, `ELEVATE` a `ENCRYPT_HOME` `NOT_SUPPORTED`, odhlášení |
 | přihlášení PINem | `SET_PIN` (špatné heslo odmítnuto), příznak `PIN_WEAK`, špatný PIN se zbývajícími pokusy, přihlášení PINem |
-| relace vidí jen svůj domov | cizí domov i soubory v něm `NOT_FOUND`, `/home` nejde vypsat, DB účtů `NOT_FOUND` |
+| relace vidí jen svůj domov | cizí domov i soubory v něm `NOT_FOUND`; výpis `/home` ukáže vlastní domov, ne cizí ani `.smazane`; DB účtů `NOT_FOUND` |
 | init nevyrazí systémovou identitu | `OPEN_SESSION` pro 0, 902, 999 a skupinu 0 odmítnut, domov pro systém ne |
 | zamčení a odhlášení | zamčení, odemčení špatným a správným heslem, po odhlášení relace i její FS zmizí |
 | události a job relace | události otevřena/zamčena/odemčena/skončila, jméno a aktivní relace, proces v jobu relace, job po odhlášení zmizí |

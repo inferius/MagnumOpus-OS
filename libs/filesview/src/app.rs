@@ -127,6 +127,9 @@ pub struct FileManager<B: Backend> {
     /// Zprava v liste (chyba posledni operace, vysledek).
     pub status: String,
     pub search: String,
+    /// Vypis aktualni slozky selhal (bez prava, neexistuje): misto
+    /// obsahu se ukaze duvod, nikdy "Slozka je prazdna".
+    pub list_error: Option<abi::Error>,
     pub edit: Option<NameEdit>,
     /// Posledni Kopirovat / Vyjmout v tomto okne (popisek Vlozit). Vklada
     /// se ze systemove schranky (i z jinych oken); jen kdyz se seznam
@@ -161,6 +164,7 @@ impl<B: Backend> FileManager<B> {
             places: Vec::new(),
             status: String::new(),
             search: String::new(),
+            list_error: None,
             edit: None,
             clip: None,
             clip_local: false,
@@ -207,6 +211,7 @@ impl<B: Backend> FileManager<B> {
         let cur = self.nav.cur.clone();
         match self.b.list(&cur) {
             Ok(entries) => {
+                self.list_error = None;
                 let (now, zone) = (self.b.now(), self.b.zone().cloned());
                 self.listing.set(entries, now, zone.as_ref());
                 // Vyber jen z polozek, ktere jeste jsou.
@@ -219,9 +224,10 @@ impl<B: Backend> FileManager<B> {
                 }
             }
             Err(e) => {
+                // Duvod ukaze telo okna (`view::denied_text`), ne lista.
                 self.listing.set(Vec::new(), None, None);
                 self.sel.clear();
-                self.status = format!("Složku {cur} nejde otevřít: {}", crate::error_text(e));
+                self.list_error = Some(e);
             }
         }
         self.update_preview();
