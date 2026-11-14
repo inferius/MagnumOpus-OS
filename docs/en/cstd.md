@@ -21,7 +21,9 @@ Compiling C (clang, flags, protections) is described in
 > `epoll`. Part 2f **[verified in QEMU]** (step `mmap`): `mmap`, `mprotect`,
 > `madvise`, `mseal`. Part 2g **[verified in QEMU]** (step `signal`):
 > signals, `setjmp`. File locks **[verified in QEMU]** (test `ctest lock`:
-> two processes, `EDEADLK`). Further parts (
+> two processes, `EDEADLK`). Part 2i **[verified in QEMU]** (suite
+> `cstd porty`): `libc.a`, the C sysroot and the zlib and sqlite ports.
+> Further parts (
 > signals, file locks, `libc.so`, ports) **[designed]**, see [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
 
 ## Layers
@@ -266,6 +268,68 @@ file. They are released by closing the process's last fd on the file
 `flock` without `LOCK_NB` wait by retrying; fsd watches for a wait cycle
 (`EDEADLK`). `l_pid` from `F_GETLK` is -1 (fsd does not know process
 numbers).
+
+## C sysroot and ports (part 2i)
+
+**[verified in QEMU]** x86_64 and aarch64 (suite `cstd porty`).
+
+<figure class="diagram">
+<svg viewBox="0 0 780 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Building a C port against the sysroot">
+<defs><marker id="cs3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="10" width="220" height="60" rx="6"/><text class="t b" x="120" y="34" text-anchor="middle">port sources</text><text class="m" x="120" y="52" text-anchor="middle">HTTPS + SHA-256, tar</text>
+<rect class="acc" x="280" y="10" width="220" height="60" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">clang + C sysroot</text><text class="m" x="390" y="52" text-anchor="middle">include, clang.cfg</text>
+<rect class="acc" x="550" y="10" width="220" height="60" rx="6"/><text class="t b" x="660" y="34" text-anchor="middle">ld.lld</text><text class="m" x="660" y="52" text-anchor="middle">libc.a, magnumopus.ld</text>
+<path class="ln" d="M230 40 L276 40" marker-end="url(#cs3)"/>
+<path class="ln" d="M500 40 L546 40" marker-end="url(#cs3)"/>
+<path class="ln" d="M660 70 L660 98" marker-end="url(#cs3)"/>
+<rect class="ok" x="400" y="100" width="370" height="60" rx="6"/><text class="t b" x="585" y="124" text-anchor="middle">static ET_EXEC program in initfs</text><text class="m" x="585" y="142" text-anchor="middle">zlib-example, minigzip, sqlite3, sqltest</text>
+<rect class="box" x="10" y="100" width="370" height="60" rx="6"/><text class="t b" x="195" y="124" text-anchor="middle">libc.a = cstd + std + osrt</text><text class="m" x="195" y="142" text-anchor="middle">crate libs/cstd-libc (staticlib), _start from osrt</text>
+</svg>
+<figcaption>A C port is compiled by clang against the sysroot and linked with libc.a; _start from osrt calls its main.</figcaption>
+</figure>
+
+- **`libc.a`** (crate `libs/cstd-libc`, `staticlib`): `cstd`, `std` and
+  `osrt` including `_start`, which calls the C program's `main`. Built with
+  the std applications (`stdsys::STD_LIBS`).
+- **C sysroot** `target/c-sysroot/<arch>/` (`xtask/src/csysroot.rs`):
+  `include/` (cstd) and `include-core/` (cstd-core), `lib/libc.a`,
+  `lib/magnumopus.ld` (the linker script of std programs) and `clang.cfg`
+  with compile and link flags for `clang --config=...` - foreign build
+  systems (`configure`, CMake, Meson) use it as a cross build
+  **[implemented]** (the ports below use the same flags).
+- **Ports** (`xtask/src/cports.rs`): sources from the official places over
+  HTTPS (`curl`), verified SHA-256 (zlib matches the release hash; sqlite
+  pinned from the first download from sqlite.org), unpacked with `tar`,
+  compiled by clang with `-w` and linked with `libc.a`. Objects are
+  recompiled only on change.
+  - **zlib 1.3.1** (zlib licence): `zlib-example` (the package's own test)
+    and `minigzip`; test: every `example` step, compressing a file and back
+    with identical content.
+  - **sqlite 3.46.1** (public domain): the `sqlite3` shell and `sqltest`
+    (`user/ctest/c/sqltest.c`); the default unix VFS with `fcntl` locks in
+    fsd. No WAL and no mmap I/O (`SQLITE_OMIT_WAL`,
+    `SQLITE_MAX_MMAP_SIZE=0`: shared file memory does not exist yet), no
+    `load_extension` (static program). Test: the shell over a file and
+    persistence, two processes over one database - a write during a
+    foreign exclusive transaction = `SQLITE_BUSY`, with `busy_timeout` it
+    succeeds after the other process's `COMMIT`.
+- Functions added for the ports: `strspn`, `strcspn`, `strpbrk`,
+  `strtok_r`, `strdup`, `strndup`, `strcasecmp`, `strerror_r`, `qsort`,
+  `bsearch`, `rand`, `div`, `atol`, the `scanf` family, `getpwuid` (user
+  from `USER` and `HOME`), `getuid` and friends (0), `fchown` and `utimes`
+  without effect, `readlink`/`symlink`/`link` (no FS symlinks yet),
+  `ioctl` (`ENOTTY`), `setlocale`/`localeconv` (C, C.UTF-8), `uname`,
+  `getrusage`/`getrlimit`, `system` (`ENOSYS`; starting processes via
+  `posix_spawn` **[designed]**).
+- **`libc.so`** (shared) **[designed]**, the next step right after this
+  part (a separate branch before SDL and FFmpeg, which will build on it): a
+  second std sysroot built as PIC (a new JSON target with
+  `relocation-model: pic`, TLS via the loader - initial-exec/TLSDESC instead
+  of `local-exec`, `osrt` under `ld.so` without its own TLS block), `libc.so`
+  as a `cdylib` of cstd + std + osrt in `/system/lib`, PIE programs with
+  `PT_INTERP`. Build time estimate: a second std build per architecture,
+  i.e. roughly as long again as today's std sysroot (incremental, only when
+  std or osrt changes).
 
 ### fd numbers
 

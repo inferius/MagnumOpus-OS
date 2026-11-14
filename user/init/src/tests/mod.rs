@@ -58,6 +58,7 @@ mod recovery;
 mod recovery_kit;
 mod console;
 mod shell;
+mod cports;
 mod cstd;
 mod std_app;
 mod std_net;
@@ -121,6 +122,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("std porty", std_ports::TESTS),
     ("cstd", cstd::TESTS),
     ("cstd sit", cstd::NET_TESTS),
+    ("cstd porty", cports::TESTS),
     ("sit soubeh", net_v2::TESTS),
     ("sit pripravenost", net_ready::TESTS),
     ("TLS a HTTP", web::TESTS),

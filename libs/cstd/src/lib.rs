@@ -29,8 +29,10 @@ pub mod dirent;
 pub mod errno;
 pub mod flock;
 pub mod math;
+pub mod misc;
 pub mod mman;
 pub mod poll;
+pub mod scanf;
 pub mod setjmp;
 pub mod signal;
 pub mod pthread;
@@ -56,6 +58,8 @@ mod socket_tests;
 mod mman_tests;
 #[cfg(test)]
 mod signal_tests;
+#[cfg(test)]
+mod scanf_tests;
 
 pub use cstd_core::ctypes::{c_char, c_int, c_long, c_uint, c_ulong, size_t};
 

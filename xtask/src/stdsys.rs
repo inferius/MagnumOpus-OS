@@ -29,6 +29,9 @@ use crate::{Options, Result, target_dir, workspace_root};
 /// souboru).
 pub const STD_PROGRAMS: &[&str] = &["hello-std", "std-net", "std-proc", "std-http", "ctest"];
 
+/// Knihovny se std pro sysroot C (`csysroot.rs`): `libc.a`.
+pub const STD_LIBS: &[&str] = &["cstd-libc"];
+
 /// Pripnuty nightly z `rust-toolchain.toml` (cesty std-src a sysrootu).
 fn nightly() -> Result<String> {
     let text = std::fs::read_to_string(workspace_root().join("rust-toolchain.toml"))?;

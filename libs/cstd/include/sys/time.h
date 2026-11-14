@@ -20,6 +20,7 @@ struct itimerval {
 };
 #define ITIMER_REAL 0
 int setitimer(int which, const struct itimerval *nv, struct itimerval *ov);
+int utimes(const char *path, const struct timeval tv[2]);
 
 _CSTD_END
 

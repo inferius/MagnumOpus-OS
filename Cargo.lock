@@ -673,6 +673,13 @@ name = "cstd-core"
 version = "0.1.0"
 
 [[package]]
+name = "cstd-libc"
+version = "0.1.0"
+dependencies = [
+ "cstd",
+]
+
+[[package]]
 name = "ctest"
 version = "0.1.0"
 dependencies = [

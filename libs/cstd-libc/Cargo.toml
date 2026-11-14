@@ -1,0 +1,17 @@
+[package]
+name = "cstd-libc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Staticka knihovna C libc.a (cstd + std + osrt) pro sysroot C a cizi build systemy"
+
+[lib]
+# Vystup libc.a: vsechny symboly C (cstd, cstd-core), std a runtime osrt
+# vcetne _start, ktery zavola main z programu v C.
+name = "c"
+crate-type = ["staticlib"]
+test = false
+
+[dependencies]
+cstd = { path = "../cstd" }

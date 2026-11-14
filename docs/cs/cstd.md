@@ -20,7 +20,8 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
 > **[ověřeno v QEMU]** (krok `mmap`): `mmap`, `mprotect`, `madvise`,
 > `mseal`. Část 2g **[ověřeno v QEMU]** (krok `signal`): signály,
 > `setjmp`. Zámky souborů **[ověřeno v QEMU]** (test `ctest lock`: dva
-> procesy, `EDEADLK`). Další části (
+> procesy, `EDEADLK`). Část 2i **[ověřeno v QEMU]** (sada `cstd porty`):
+> `libc.a`, sysroot C a porty zlib a sqlite. Další části (
 > `libc.so`, porty) **[navrženo]**, viz
 > [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
 
@@ -256,6 +257,67 @@ zavření posledního fd procesu na souboru (`flock`: zavření fd) a konec
 procesu. `F_SETLKW` a `flock` bez `LOCK_NB` čekají opakovaným zkoušením;
 fsd přitom hlídá cyklus čekání (`EDEADLK`). `l_pid` z `F_GETLK` je -1
 (čísla procesů fsd nezná).
+
+## Sysroot C a porty (část 2i)
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (sada `cstd porty`).
+
+<figure class="diagram">
+<svg viewBox="0 0 780 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sestavení portu v C proti sysrootu">
+<defs><marker id="cs3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="10" width="220" height="60" rx="6"/><text class="t b" x="120" y="34" text-anchor="middle">zdroje portu</text><text class="m" x="120" y="52" text-anchor="middle">HTTPS + SHA-256, tar</text>
+<rect class="acc" x="280" y="10" width="220" height="60" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">clang + sysroot C</text><text class="m" x="390" y="52" text-anchor="middle">include, clang.cfg</text>
+<rect class="acc" x="550" y="10" width="220" height="60" rx="6"/><text class="t b" x="660" y="34" text-anchor="middle">ld.lld</text><text class="m" x="660" y="52" text-anchor="middle">libc.a, magnumopus.ld</text>
+<path class="ln" d="M230 40 L276 40" marker-end="url(#cs3)"/>
+<path class="ln" d="M500 40 L546 40" marker-end="url(#cs3)"/>
+<path class="ln" d="M660 70 L660 98" marker-end="url(#cs3)"/>
+<rect class="ok" x="400" y="100" width="370" height="60" rx="6"/><text class="t b" x="585" y="124" text-anchor="middle">statický program ET_EXEC v initfs</text><text class="m" x="585" y="142" text-anchor="middle">zlib-example, minigzip, sqlite3, sqltest</text>
+<rect class="box" x="10" y="100" width="370" height="60" rx="6"/><text class="t b" x="195" y="124" text-anchor="middle">libc.a = cstd + std + osrt</text><text class="m" x="195" y="142" text-anchor="middle">crate libs/cstd-libc (staticlib), _start z osrt</text>
+</svg>
+<figcaption>Port v C se přeloží clangem proti sysrootu a slinkuje s libc.a; _start z osrt zavolá jeho main.</figcaption>
+</figure>
+
+- **`libc.a`** (crate `libs/cstd-libc`, `staticlib`): `cstd`, `std`
+  a `osrt` včetně `_start`, který zavolá `main` programu v C. Staví se se
+  std aplikacemi (`stdsys::STD_LIBS`).
+- **Sysroot C** `target/c-sysroot/<arch>/` (`xtask/src/csysroot.rs`):
+  `include/` (cstd) a `include-core/` (cstd-core), `lib/libc.a`,
+  `lib/magnumopus.ld` (linker skript programu se std) a `clang.cfg`
+  s příznaky překladu i linku pro `clang --config=...` - cizí build
+  systémy (`configure`, CMake, Meson) ho použijí jako křížový překlad
+  **[implementováno]** (porty níže ho používají přes stejné příznaky).
+- **Porty** (`xtask/src/cports.rs`): zdroje z oficiálních míst přes HTTPS
+  (`curl`), ověřený SHA-256 (zlib shodný s hashem vydání; sqlite připnutý
+  z prvního stažení ze sqlite.org), rozbalení `tar`, překlad clangem
+  s `-w` a link s `libc.a`. Objekty se překládají znovu jen při změně.
+  - **zlib 1.3.1** (licence zlib): `zlib-example` (vlastní test balíku)
+    a `minigzip`; test: všechny kroky `example`, komprese souboru a zpět
+    se shodným obsahem.
+  - **sqlite 3.46.1** (public domain): shell `sqlite3` a `sqltest`
+    (`user/ctest/c/sqltest.c`); výchozí unixové VFS se zámky `fcntl`
+    ve fsd. Bez WAL a mmap I/O (`SQLITE_OMIT_WAL`,
+    `SQLITE_MAX_MMAP_SIZE=0`: sdílená paměť souboru zatím není), bez
+    `load_extension` (statický program). Test: shell nad souborem
+    a trvalost, dva procesy nad jednou databází - zápis při cizí
+    exkluzivní transakci = `SQLITE_BUSY`, s `busy_timeout` uspěje po
+    `COMMIT` druhého procesu.
+- Doplněné funkce pro porty: `strspn`, `strcspn`, `strpbrk`, `strtok_r`,
+  `strdup`, `strndup`, `strcasecmp`, `strerror_r`, `qsort`, `bsearch`,
+  `rand`, `div`, `atol`, rodina `scanf`, `getpwuid` (uživatel z `USER`
+  a `HOME`), `getuid` a spol. (0), `fchown` a `utimes` bez účinku,
+  `readlink`/`symlink`/`link` (symlinky FS zatím nejsou), `ioctl`
+  (`ENOTTY`), `setlocale`/`localeconv` (C, C.UTF-8), `uname`,
+  `getrusage`/`getrlimit`, `system` (`ENOSYS`; spouštění procesů
+  `posix_spawn` **[navrženo]**).
+- **`libc.so`** (sdílená) **[navrženo]**, další krok hned po této části
+  (samostatná větev před SDL a FFmpegem, které na ní budou stavět):
+  druhý sysroot std přeložený jako PIC (nový JSON cíl s
+  `relocation-model: pic`, TLS přes zavaděč - initial-exec/TLSDESC místo
+  `local-exec`, `osrt` pod `ld.so` bez vlastního bloku TLS), `libc.so` jako
+  `cdylib` cstd + std + osrt v `/system/lib`, programy PIE s `PT_INTERP`.
+  Odhad času sestavení: druhý překlad std pro každou architekturu, tedy
+  zhruba stejně dlouho jako dnešní sysroot std navíc (inkrementálně jen
+  při změně std nebo osrt).
 
 ### Čísla fd
 

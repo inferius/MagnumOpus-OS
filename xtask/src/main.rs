@@ -32,6 +32,8 @@ mod dnshelper;
 mod ntshelper;
 mod revhelper;
 mod ports;
+mod csysroot;
+mod cports;
 mod stdsys;
 mod webhelper;
 mod powertest;
@@ -1054,7 +1056,11 @@ fn build(opts: &Options) -> Result<Artifacts> {
     }
     cargo_build(&programs, a.user_target, opts, true)?;
     // Aplikace se std (vlastni cil a sysroot, docs/cs/rust-std.md).
-    let std_bin = stdsys::build_apps(stdsys::STD_PROGRAMS, opts)?;
+    let std_list: Vec<&str> = stdsys::STD_PROGRAMS.iter().chain(stdsys::STD_LIBS).copied().collect();
+    let std_bin = stdsys::build_apps(&std_list, opts)?;
+    // Sysroot C (libc.a, hlavicky, clang.cfg) a porty v C proti nemu.
+    let c_sysroot = csysroot::assemble(a, &std_bin)?;
+    let c_ports = cports::build(a, &c_sysroot)?;
     // Zavadec sdilenych knihoven a testovaci moduly v C.
     let ld = dynlink::build_ld(opts)?;
     let dl_tests = dynlink::build_tests(opts)?;
@@ -1071,6 +1077,10 @@ fn build(opts: &Options) -> Result<Artifacts> {
     // Prevzate aplikace (ripgrep, ...) bez uprav: overeni std v praxi.
     for (name, path) in ports::build(a)? {
         let data = std::fs::read(&path).map_err(|e| format!("nelze cist port {name}: {e}"))?;
+        files.push((name, loadable_only(&data)));
+    }
+    for (name, path) in c_ports {
+        let data = std::fs::read(&path).map_err(|e| format!("nelze cist port C {name}: {e}"))?;
         files.push((name, loadable_only(&data)));
     }
     for name in stdsys::STD_PROGRAMS {
