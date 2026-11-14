@@ -94,13 +94,78 @@ fn answers() -> Option<String> {
     STARTUP_INITFS.get().and_then(|f| f.find("install-answers")).map(|a| String::from_utf8_lossy(a).into_owned())
 }
 
+/// Hodnota `rozhrani` v souboru odpovedi (`gui`, `gui-vstup`).
+fn ui_mode(text: &str) -> Option<String> {
+    text.lines().find_map(|l| {
+        let l = l.split('#').next().unwrap_or("").replace(' ', "");
+        l.strip_prefix("rozhrani=").map(|v| String::from(v.trim_matches('"')))
+    })
+}
+
 /// Test GUI instalace: odpovedi s `rozhrani = "gui"` projde graficky
 /// instalator (autopilot), ne textova cesta.
 fn gui_test(text: &str) -> bool {
-    text.lines().any(|l| {
-        let l = l.split('#').next().unwrap_or("").replace(' ', "");
-        l == "rozhrani=\"gui\""
-    })
+    ui_mode(text).as_deref() == Some("gui")
+}
+
+/// Test skutecneho vstupu (`rozhrani = "gui-vstup"`): instalator bezi bez
+/// autopilota a klika `cargo xtask` pres QMP. Init jen najde inspekci
+/// kompozitoru pole casoveho pasma a tlacitko Pokracovat a zaloguje
+/// jejich stred na obrazovce, takze klik nezavisi na rozliseni (aarch64
+/// ramfb 800 x 600, x86_64 1280 x 800) ani na poloze okna.
+fn input_test_targets() {
+    let r = libos::thread::spawn("test-vstupu", || {
+        if let Err(e) = find_targets() {
+            println!("init: test vstupu instalatoru: {e}");
+        }
+    });
+    if let Err(e) = r {
+        println!("init: test vstupu instalatoru: vlakno: {e}");
+    }
+}
+
+fn find_targets() -> core::result::Result<(), String> {
+    use guiproto::a11y::{Node, Role};
+    use guiproto::control::{INSPECT, InspectReply, InspectRequest};
+    let end = time::deadline_after(Duration::from_secs(600));
+    let pause = || time::sleep(Duration::from_millis(500));
+    // Kompozitor startuje se supervisorem: kanal az bude.
+    let ch = loop {
+        let c = crate::gui::GUI.lock().as_ref().map(|g| g.channel(INSPECT.as_bytes()));
+        match c {
+            Some(Ok(ch)) => break ch,
+            _ if time::now() > end => return Err(String::from("kompozitor nedal kanal inspect")),
+            _ => pause(),
+        }
+    };
+    let ask = |r: InspectRequest| -> core::result::Result<InspectReply, String> {
+        while ch.try_read().is_ok() {}
+        ch.write(&r.encode(), Vec::new()).map_err(|e| format!("inspekce: {e}"))?;
+        let m = ch.read(Some(time::deadline_after(Duration::from_secs(10)))).map_err(|e| format!("inspekce: {e}"))?;
+        InspectReply::decode(&m.data).map_err(|e| format!("inspekce: {e}"))
+    };
+    // Strom z inspekce ma obdelniky uz na obrazovce (vcetne posuvnych
+    // vrstev a orezu, `Comp::screen_tree`).
+    let center = |n: &Node| (n.bounds.x + n.bounds.w as i32 / 2, n.bounds.y + n.bounds.h as i32 / 2);
+    loop {
+        if let InspectReply::Windows(ws) = ask(InspectRequest::Windows)?
+            && let Some(w) = ws.iter().find(|w| w.app == "org.magnumopus.install")
+            && let InspectReply::Tree(t) = ask(InspectRequest::Tree { window: w.id })?
+        {
+            let zone = t.iter().find(|n| n.role == Role::TextInput && n.name == "Europe/Prague");
+            let next = t.iter().find(|n| n.role == Role::Button && n.name == "Pokračovat");
+            if let (Some(z), Some(n)) = (zone, next) {
+                let (zx, zy) = center(z);
+                let (nx, ny) = center(n);
+                println!("init: test vstupu instalatoru: pasmo {zx},{zy}; pokracovat {nx},{ny}");
+                return Ok(());
+            }
+        }
+        if time::now() > end {
+            return Err(String::from("okno instalatoru s polem pasma a tlacitkem Pokracovat se neobjevilo"));
+        }
+        pause();
+    }
 }
 
 /// Handly pro graficky instalator: kanal k installd, v testu GUI instalace
@@ -123,8 +188,10 @@ pub fn app_handles() -> Result<Vec<StartHandle>> {
 pub fn test_hook() {
     use installplan::proto::{Reply, Request};
     let Some(text) = answers() else { return };
-    if gui_test(&text) {
-        return;
+    match ui_mode(&text).as_deref() {
+        Some("gui") => return,
+        Some("gui-vstup") => return input_test_targets(),
+        _ => {}
     }
     let run = || -> core::result::Result<String, String> {
         let ans = installplan::answers::parse(&text)?;

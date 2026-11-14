@@ -110,13 +110,18 @@ started from the live stick). Status: **[verified in QEMU]** (x86_64,
   stays at the top.
 
 The QEMU test (`cargo xtask test --only instalace-gui`) has two parts.
-First **real input**: the live USB without an answers file, the window
-opens by itself after login and QMP sends real events through
+First **real input**: the live USB with an answers file holding only
+`rozhrani = "gui-vstup"` (the installer runs without the autopilot). The
+window opens by itself after login and QMP sends real events through
 `usb-tablet` and `usb-kbd`. The test clicks into the time zone field,
 presses Ctrl+A, types `utc` and clicks *Pokračovat* (Continue). It checks
 the logged time zone and the second step; the screenshots are
-`vstup-1.png` and `vstup-2.png`. The coordinates hold for a 900 × 680
-window on a 1280 × 800 screen.
+`vstup-1.png` and `vstup-2.png`. Where to click is found by init through
+compositor inspection (window position and accessibility tree); it logs
+the on-screen centre of the field and the button. The resolution
+differs: x86_64 has 1280 × 800, aarch64 from the live USB only ramfb
+800 × 600. xtask reads the screen size for the tablet coordinates from
+the `vstup-1.png` screenshot.
 
 Then the **full run**: an answers file with
 `rozhrani = "gui"` goes to the installer window instead of the text path.

@@ -514,7 +514,10 @@ impl Comp {
             (0, 0)
         } else {
             let y = (70 + n * 30).min(work_h - h as i32 - geo.border as i32).max(top);
-            (60 + n * 36, y)
+            // Na male obrazovce (ramfb 800 x 600) by posun kaskady vysunul
+            // pravy okraj okna (tlacitka dialogu) mimo obrazovku.
+            let x = (60 + n * 36).min(self.w as i32 - w as i32 - geo.border as i32).max(geo.border as i32);
+            (x, y)
         };
         let win = Window {
             client: c,

@@ -136,3 +136,26 @@ fn context_ext_tile_follows_maximize() {
     assert_eq!(e.tile, Tile::Full);
     assert!(g1 > g0);
 }
+
+/// Kaskada noveho okna nesmi vysunout pravy okraj mimo malou obrazovku
+/// (800 x 600, aarch64 ramfb): i paty siroky okno se cele vejde, at uz
+/// velikost prisla pri vytvoreni nebo zpravou `WINDOW_SIZE` pred
+/// prvnim zobrazenim.
+#[test]
+fn cascade_keeps_wide_window_on_screen() {
+    let mut t = T::new();
+    let border = t.c.style.geo().border as i32;
+    for i in 0..5 {
+        let c = t.client(&alloc::format!("k{i}"));
+        t.msg(c, ClientMsg::WindowCreate { window: 1, mode: Mode::Standard, w: 200, h: 100, title: "Okno".into() });
+    }
+    let a = t.client("siroke");
+    t.msg(a, ClientMsg::WindowCreate { window: 1, mode: Mode::Standard, w: 900, h: 640, title: "Siroke".into() });
+    let r = t.rect_of(a);
+    assert!(r.x >= border && r.x + r.w as i32 + border <= W as i32, "okno {r:?} na sirku mimo obrazovku {W}");
+    let b = t.client("pozdeji");
+    t.msg(b, ClientMsg::WindowCreate { window: 1, mode: Mode::Standard, w: 200, h: 100, title: "Okno".into() });
+    size(&mut t, b, 900, 300, 0);
+    let r = t.rect_of(b);
+    assert!(r.x >= border && r.x + r.w as i32 + border <= W as i32, "okno {r:?} po WINDOW_SIZE mimo obrazovku {W}");
+}

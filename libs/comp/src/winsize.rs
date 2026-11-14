@@ -146,10 +146,13 @@ impl Comp {
             let geo = win.geo;
             let top = if mode == Mode::Standard { (geo.title_h + geo.border) as i32 } else { geo.border as i32 };
             let work_h = self.work_area().h as i32;
+            let screen_w = self.w as i32;
             let win = self.windows.get_mut(&gid).unwrap();
             win.rect.w = tw;
             win.rect.h = th;
             win.rect.y = win.rect.y.min(work_h - th as i32 - geo.border as i32).max(top);
+            // Cele okno na obrazovce i na sirku (kaskada v `window_create`).
+            win.rect.x = win.rect.x.min(screen_w - tw as i32 - geo.border as i32).max(geo.border as i32);
             win.serial = win.serial.wrapping_add(1);
             let (serial, focused) = (win.serial, false);
             let state = win.state(focused);
