@@ -233,6 +233,10 @@ zůstávají v plných [účtech](ucty.md).
 | výjimka | rodič pustí jeden titul jednou, PINem v důvěryhodném dialogu, jen z místního fyzického vstupu |
 | časové limity a nákupy | systémová politika profilu; aplikace se ptá na povolení, nehlídá si je sama |
 
+Pro dětský **účet** (ne jen profil domácnosti) platí rozšířená
+[Rodičovská kontrola](rodicovska-kontrola.md): časové limity, filtr webu,
+žádosti rodiči **[navrženo]**.
+
 Aplikace dostane jen „smí / nesmí“ a důvod pro text, ne nastavení
 profilu. Souvisí s [vzhledem pro televizi](vzhled.md#tablet-a-televize-návrh).
 

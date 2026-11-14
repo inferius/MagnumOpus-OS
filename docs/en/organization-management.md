@@ -180,7 +180,9 @@ group** (employees, developers, kiosks, ...) at **three levels**
   The administration role may **set the level for another account**
   (parental control: "From the catalog" or "None" + a request to the
   parent); it is a computer administration action
-  ([Administering the computer](accounts.md#administering-the-computer)).
+  ([Administering the computer](accounts.md#administering-the-computer)). The
+  extended mode (time limits, web filtering, overview) is on the page
+  [Parental controls](parental-controls.md).
 - **Developers:** level **Freely** + the **Relaxed** file profile
   ([Profiles](fs-v3-design.md#permissions-and-visibility)); secrets and
   other accounts stay protected even there.

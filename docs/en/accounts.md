@@ -520,7 +520,7 @@ computer, policies and endpoint monitoring are described in
 including the right to
 [install applications](organization-management.md#the-right-to-install-applications)
 (Freely / From the catalog / None; the administration role may set it for
-another account, e.g. parental control). A personal computer never has
+another account, e.g. [parental controls](parental-controls.md)). A personal computer never has
 these features.
 
 ## Home encryption

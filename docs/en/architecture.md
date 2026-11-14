@@ -249,6 +249,10 @@ The system enforces the **content policy**, not the apps:
 | exception | a parent allows one title once, with a PIN in a trusted dialog, only from local physical input |
 | time limits and purchases | a system policy of the profile; the app asks for permission, it does not enforce them itself |
 
+For a child **account** (not just a household profile) the extended
+[Parental controls](parental-controls.md) apply: time limits, web
+filtering, requests to the parent **[designed]**.
+
 The app only gets "allowed / not allowed" and a reason for the text, not
 the profile settings. Related to the [TV design](appearance.md#tablet-and-tv-design).
 
