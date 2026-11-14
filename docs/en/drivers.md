@@ -200,7 +200,18 @@ value there, not `modify`.
 little endian (`read::<u32>`, `write::<u64>`), every access checks bounds.
 The address the driver writes into a register or a descriptor comes
 **only** from `iova_of(offset, length)`: it checks that the whole range
-lies inside the buffer.
+lies inside the buffer and is contiguous for the device.
+
+A large buffer (more than 4 MiB, or whenever non-contiguous pages do not
+matter) comes from `Platform::alloc_dma_pages(name, size)`: pinned pages
+mapped through `DMA_MAP` ([dma.md](dma.md)). With an IOMMU it is contiguous
+for the device; without one it is described by `device_chunks(offset,
+length)` (one chunk per physical segment; `iova_of` across a segment
+boundary returns `DmaSplit`). `is_protected()` tells whether a verified IOMMU
+protects the buffer. After a transfer into memory call
+`p.dma_sync_for_cpu(&buf)` (cache maintenance, collecting IOMMU reports).
+Dropping the buffer = unmapping: the device hits an IOMMU fault on the old
+address.
 
 `DescRing` is a ring the driver writes (e1000/igc, r8169, NVMe SQ, AHCI):
 `push` returns a slot, `tail` goes into the device register,
@@ -303,11 +314,12 @@ pci = ["1234:11e8"]
 [resources]
 bars = [0]
 irq_max = 1
-dma_max = "16K"
+dma_max = "32K"
 ```
 
 Only what the driver really needs: edu has its registers in BAR0, one
-interrupt and two 4 KiB buffers. The full format is in
+interrupt, two 4 KiB buffers and a buffer in pages (12 KiB for `sg`,
+4 KiB for `stale`). The full format is in
 [Manifest](#manifest).
 
 ### 3. Registers and probe
@@ -623,6 +635,7 @@ messages (the system's messages are in Czech; the meaning is given here):
 | DMA quota | `DMA buffer 'edu-zpet' (4096 B) se nevejde do kvoty -> zvyste resources.dma_max ...` (does not fit the quota, raise `dma_max`) |
 | interrupt quota | `preruseni c. 1 nelze zapnout -> zvyste resources.irq_max ...` (raise `irq_max`) |
 | DMA outside a buffer (driver) | `pristup mimo DMA buffer 'tx': offset 0x40 + 16 B > velikost 64 B -> chyba v ovladaci ...` (a driver bug: wrong index or length) |
+| range across segments (no IOMMU) | `oblast 0xfa0 + 200 B DMA bufferu 'sg' neni pro zarizeni souvisla ... -> DmaBuffer::device_chunks ...` (use chunked transfers or `alloc_dma`) |
 | DMA outside the IOMMU (simulation) | `DMA mimo pridelenou pamet: zarizeni zapsalo 3 B na 0x100003000 -> ...` (the driver gave the device an address not from `DmaBuffer::iova_of`; an IOMMU would block it) |
 | register field | `hodnota 0x8 se nevejde do pole CTRL.MODE (3 b)` (does not fit the field) |
 | kernel call | `mapovani BARu: ACCESS_DENIED (-2): ... -> ovladac na to nema pravo; ...` (no right; check `resources` in the manifest) |

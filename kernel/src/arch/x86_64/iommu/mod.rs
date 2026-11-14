@@ -11,9 +11,10 @@
 //! - po zapnuti nema zadne zarizeni domenu: veskere DMA je zakazane,
 //! - domenu zarizeni dostane az omezeny Resource s identitou zarizeni
 //!   (`RESOURCE_CREATE` od spravce zarizeni),
-//! - do domeny se mapuje jen DMA pamet vytvorena pres tento Resource
-//!   (`VMO_CREATE_CONTIGUOUS`), identicky (adresa pro zarizeni = fyzicka
-//!   adresa) - ovladace se nemeni,
+//! - do domeny se mapuje DMA pamet vytvorena pres tento Resource
+//!   (`VMO_CREATE_CONTIGUOUS`) identicky (adresa pro zarizeni = fyzicka
+//!   adresa) a pripnuta pamet pres `DMA_MAP` na adresy z okna nad koncem RAM
+//!   (`object/dma.rs`),
 //! - pri zruseni objektu pameti se stranky z domeny odmapuji drive, nez se
 //!   vrati alokatoru.
 //!
@@ -26,6 +27,7 @@ use alloc::sync::Arc;
 
 use super::acpi::{AmdIommuUnit, IommuUnit};
 use crate::acpi::PciEcam;
+use crate::arch::api::DmaAccess;
 use crate::error::Error;
 use crate::log;
 
@@ -40,19 +42,24 @@ pub enum Domain {
 }
 
 impl crate::arch::api::IommuDomain for Domain {
-    /// Povoli zarizeni cteni i zapis `pages` stranek od `phys` (identicky).
-    fn map(&self, phys: u64, pages: u64) -> Result<(), Error> {
+    fn map(&self, iova: u64, phys: u64, pages: u64, access: DmaAccess) -> Result<(), Error> {
         match self {
-            Domain::Vtd(d) => d.map(phys, pages),
-            Domain::Amd(d) => d.map(phys, pages),
+            Domain::Vtd(d) => d.map(iova, phys, pages, access),
+            Domain::Amd(d) => d.map(iova, phys, pages, access),
         }
     }
 
-    /// Odebere zarizeni pristup ke strankam (pred vracenim pameti).
-    fn unmap(&self, phys: u64, pages: u64) {
+    fn unmap(&self, iova: u64, pages: u64) {
         match self {
-            Domain::Vtd(d) => d.unmap(phys, pages),
-            Domain::Amd(d) => d.unmap(phys, pages),
+            Domain::Vtd(d) => d.unmap(iova, pages),
+            Domain::Amd(d) => d.unmap(iova, pages),
+        }
+    }
+
+    fn iova_bits(&self) -> u32 {
+        match self {
+            Domain::Vtd(d) => d.iova_bits(),
+            Domain::Amd(_) => amdvi::IOVA_BITS,
         }
     }
 }

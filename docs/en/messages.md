@@ -65,6 +65,10 @@ The loader writes through the firmware console (screen and serial) as
 | `IOMMU: zablokovan pristup zarizeni BB:DD.F na adrese A (udalost AMD-Vi K)` | W | As for VT-d below; K = AMD-Vi event code (0x2 = page fault). |
 | `IOMMU: dalsich N udalosti AMD-Vi vynechano` | W | One blocked transfer raised more events; only the first 4 are printed in detail. |
 | `IOMMU: zablokovan zapis/cteni zarizeni BB:DD.F na adrese A (duvod R)` | W | A device accessed memory outside its domain: a driver bug (wrong address in a descriptor) or a faulty device. Memory stayed intact. Reason code per the VT-d specification (e.g. 0x5 = page missing in the domain, 0x6 = write to a read-only page). |
+| `SMMU: zablokovany pristup DMA zarizeni (StreamID S) na adresu A (udalost K)` | W | The same on aarch64 (SMMUv3); printed on an invalidation or `DMA_SYNC` (the SMMU has no event interrupt yet). |
+| `SMMU: dalsich N udalosti vynechano` | W | One blocked transfer raised an event per access; only the first 4 are printed in detail. |
+| `DMA_MAP bez IOMMU: zarizeni SSSS:BB:DD.F dostava fyzicke adresy ...` | W | A driver maps memory through `DMA_MAP` but no IOMMU covers the device: it may DMA anywhere. Once per resource. Enable the IOMMU in the firmware ([dma.md](dma.md)). |
+| `DMA: zarizeni ... nema okno IOVA (domena preklada jen N bitu), DMA_MAP selze` | W | RAM reaches beyond the domain's translation width; `DMA_MAP` with an IOMMU will fail (contiguous memory still works). |
 
 ## Kernel: processes
 

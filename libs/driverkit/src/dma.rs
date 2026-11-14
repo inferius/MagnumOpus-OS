@@ -1,13 +1,18 @@
 //! DMA buffery: pamet, kterou cte a zapisuje zarizeni.
 //!
-//! Buffer alokuje [`Platform::alloc_dma`](crate::Platform::alloc_dma). Nad
-//! jadrem je to fyzicky souvisla pamet vytvorena pres omezeny Resource
-//! ovladace: s IOMMU je to jedina pamet, kam zarizeni smi (jina adresa
-//! skonci zablokovanim a hlaskou jadra `IOMMU: zablokovan ...`).
+//! Buffer alokuje [`Platform::alloc_dma`](crate::Platform::alloc_dma) (nad
+//! jadrem fyzicky souvisla pamet, nejvys 4 MiB) nebo
+//! [`Platform::alloc_dma_pages`](crate::Platform::alloc_dma_pages)
+//! (pripnute nesouvisle stranky namapovane pres `DMA_MAP`; s IOMMU jeden
+//! souvisly rozsah IOVA, bez IOMMU fyzicke useky). Obe jdou pres omezeny
+//! Resource ovladace: s IOMMU je to jedina pamet, kam zarizeni smi (jina
+//! adresa skonci zablokovanim a hlaskou jadra `IOMMU: zablokovan ...`).
 //!
 //! Adresu pro zarizeni (IOVA) dava jen [`DmaBuffer::iova_of`], ktera hlida,
-//! ze cela oblast lezi v bufferu. Ovladac tak nemuze omylem predat zarizeni
-//! adresu za koncem bufferu (preteceni indexu, spatna delka).
+//! ze cela oblast lezi v bufferu a je pro zarizeni souvisla. Ovladac tak
+//! nemuze omylem predat zarizeni adresu za koncem bufferu (preteceni
+//! indexu, spatna delka). Oblast pres vic useku (buffer po strankach bez
+//! IOMMU) da [`DmaBuffer::device_chunks`].
 //!
 //! Cisla ve sdilene pameti jsou little endian (vsechna bezna zarizeni PCI).
 
@@ -21,6 +26,16 @@ pub trait DmaMemory {
     fn len(&self) -> u64;
     fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+    /// Adresa bajtu `off` pro zarizeni a kolik bajtu od nej je pro zarizeni
+    /// souvisle (do konce useku). Vychozi: cely buffer je jeden usek.
+    fn device_run(&self, off: u64) -> (u64, u64) {
+        (self.iova() + off, self.len() - off)
+    }
+    /// Je buffer jedina pamet, kam zarizeni smi (IOMMU overena jadrem)?
+    /// Vychozi `false` = nevi se, pocitat s nejhorsim.
+    fn is_protected(&self) -> bool {
+        false
     }
     /// Cteni a zapis; volajici zarucuje meze (dela to [`DmaBuffer`]).
     fn read_bytes(&self, off: u64, buf: &mut [u8]);
@@ -70,9 +85,45 @@ impl<M: DmaMemory> DmaBuffer<M> {
 
     /// Adresa oblasti `off..off+len` pro zarizeni. Jedine misto, odkud ma
     /// ovladac brat adresy, ktere zapisuje do registru a deskriptoru.
+    /// Oblast musi byt pro zarizeni souvisla (jinak
+    /// [`DriverError::DmaSplit`]; pak [`DmaBuffer::device_chunks`]).
     pub fn iova_of(&self, off: u64, len: u64) -> Result<u64> {
         self.check(off, len)?;
-        Ok(self.mem.iova() + off)
+        if len == 0 {
+            return Ok(self.mem.iova() + off);
+        }
+        let (addr, run) = self.mem.device_run(off);
+        if len > run {
+            return Err(DriverError::DmaSplit {
+                buffer: self.name,
+                off,
+                len,
+            });
+        }
+        Ok(addr)
+    }
+
+    /// Oblast `off..off+len` jako souvisle kusy pro zarizeni `(adresa,
+    /// delka)`: s IOMMU (nebo u souvisle pameti) jeden, u bufferu po
+    /// strankach bez IOMMU jeden na fyzicky usek. Pro zarizeni se seznamem
+    /// useku (scatter-gather) nebo pro prenos po kusech.
+    pub fn device_chunks(&self, off: u64, len: u64) -> Result<alloc::vec::Vec<(u64, u64)>> {
+        self.check(off, len)?;
+        let mut out = alloc::vec::Vec::new();
+        let mut at = off;
+        while at < off + len {
+            let (addr, run) = self.mem.device_run(at);
+            let n = run.min(off + len - at);
+            out.push((addr, n));
+            at += n;
+        }
+        Ok(out)
+    }
+
+    /// Chrani buffer IOMMU (zarizeni jinam nesmi a po zaniku bufferu na
+    /// jeho adresy nedosahne)? Bez overene ochrany `false`.
+    pub fn is_protected(&self) -> bool {
+        self.mem.is_protected()
     }
 
     /// Adresa celeho bufferu.

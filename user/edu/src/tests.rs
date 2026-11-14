@@ -61,6 +61,35 @@ fn dma_roundtrip_stays_in_iommu() {
 }
 
 #[test]
+fn sg_roundtrip_across_pages() {
+    let sim = sim();
+    let p = sim.platform();
+    let mut r = driverkit::Runner::<Edu<_>>::new(&p).ok().unwrap();
+    let text: String = (0..1000).map(|i| (b'a' + (i % 26) as u8) as char).collect();
+    sim.send(format!("sg {text}").as_bytes());
+    // Zprava, cesta tam, cesta zpet (v simulaci je buffer souvisly: jeden kus).
+    for _ in 0..3 {
+        assert_eq!(r.step(&p), None);
+    }
+    assert_eq!(sim.sent_text(), [format!("sg {text}")]);
+    assert!(sim.faults().is_empty(), "{:?}", sim.faults());
+}
+
+#[test]
+fn stale_address_after_unmap_faults() {
+    let sim = sim();
+    let p = sim.platform();
+    let mut r = driverkit::Runner::<Edu<_>>::new(&p).ok().unwrap();
+    sim.send(b"stale");
+    assert_eq!(r.step(&p), None); // zprava
+    assert_eq!(r.step(&p), None); // preruseni po (zablokovanem) prenosu
+    let sent = sim.sent_text();
+    let iova = u64::from_str_radix(sent[0].strip_prefix("stale 0x").unwrap(), 16).unwrap();
+    // Buffer zanikl pred prenosem: zapis zarizeni zablokovan.
+    assert_eq!(sim.faults(), [driverkit::DriverError::DmaFault { iova, len: 64, write: true }]);
+}
+
+#[test]
 fn bad_commands() {
     let sim = sim();
     sim.send(b"fact x");
@@ -72,8 +101,9 @@ fn bad_commands() {
 
 #[test]
 fn manifest_quota_is_enough() {
-    // Dva buffery po 4 KiB se vejdou do dma_max = 16K z manifestu;
-    // s mensi kvotou probe selze citelne.
+    // Buffery 2x 4 KiB a 12 KiB po strankach (plus 4 KiB pro `stale`) se
+    // vejdou do dma_max = 32K z manifestu; s mensi kvotou probe selze
+    // citelne.
     let sim = sim().dma_max(4096);
     let Exit::Failed { probe: true, err } = run::<_, Edu<_>>(&sim.platform()) else { panic!() };
     assert!(format!("{err}").contains("edu-zpet"), "{err}");

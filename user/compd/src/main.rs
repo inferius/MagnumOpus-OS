@@ -383,7 +383,7 @@ impl Service {
                     // GPU selhalo: zpet na CPU, prekreslit vse.
                     println!("compd: skladani na GPU selhalo ({e:?}), zpet na CPU");
                     if let Some(g) = self.gpu.take() {
-                        g.destroy();
+                        let _ = g.destroy();
                     }
                     c.redraw_all();
                     None
@@ -674,7 +674,7 @@ impl Service {
                 }
             }
             control::OUTPUTS => self.outputs_text().map(|t| (t, Vec::new())),
-            control::BACKEND => self.set_backend(words.next().unwrap_or("")),
+            control::BACKEND => self.set_backend(words.next().unwrap_or(""), handles.into_iter().next()),
             control::STATUS => match &self.comp {
                 Some(c) => {
                     let mut s = String::new();
@@ -694,12 +694,13 @@ impl Service {
         }
     }
 
-    /// `backend gpu|cpu`: prepnuti skladani (viz `gpu.rs`).
-    fn set_backend(&mut self, which: &str) -> Result<(String, Vec<Handle>)> {
+    /// `backend gpu|cpu`: prepnuti skladani (viz `gpu.rs`); `gpu` nese
+    /// v `render` kanal render uzlu.
+    fn set_backend(&mut self, which: &str, render: Option<Handle>) -> Result<(String, Vec<Handle>)> {
         match which {
             "cpu" => {
                 if let Some(g) = self.gpu.take() {
-                    g.destroy();
+                    let _ = g.destroy();
                 }
             }
             "gpu" => {
@@ -708,25 +709,9 @@ impl Service {
                 }
                 let sc = self.screen.as_ref().ok_or(Error::NotFound)?;
                 let (w, h) = (sc.w, sc.h);
-                // Render uzel z kanalu displeje; odpovedi PRESENTED, ktere
-                // mezitim prijdou, se zpracuji hned.
-                sc.display.write(&Request::OpenRender.encode(), Vec::new())?;
-                let end = libos::time::deadline_after(core::time::Duration::from_secs(5));
-                let render = loop {
-                    let m = sc.display.read(Some(end))?;
-                    match Reply::decode(&m.data)? {
-                        Reply::Render => break m.handles.into_iter().next().ok_or(Error::Corrupted)?,
-                        Reply::Error { op: guiproto::display::op::OPEN_RENDER, code } => return Err(code),
-                        Reply::Presented { time, .. } => {
-                            if let Some(c) = self.comp.as_mut() {
-                                c.presented(time);
-                            }
-                        }
-                        Reply::Hotplug { .. } => self.pending_hotplug = true,
-                        Reply::Reset => self.pending_reset = true,
-                        _ => {}
-                    }
-                };
+                // Render uzel od gpud (otevre ho init a posle s prikazem);
+                // vlastnik displeje 3D sam nerozdava.
+                let render = render.ok_or(Error::NotSupported)?;
                 let g = gpu::GpuBackend::new(Channel::from_handle(render), w, h).map_err(|e| {
                     println!("compd: GPU backend nejde: {e:?}");
                     match e {

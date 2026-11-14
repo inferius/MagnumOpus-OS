@@ -67,14 +67,20 @@ fn present(phys: PhysAddr) -> AtomicU64 {
 
 /// Strhne rozpocty za objekt s `count` strankami, z toho `user_bytes`
 /// uzivatelske pameti.
-fn charge(job: Option<&Arc<Job>>, count: u64, user_bytes: u64) -> Result<[Charge; 2], Error> {
+/// `pinned_bytes` = pripnuta pamet (rozpocet `DMA`, navic k uzivatelske).
+fn charge(job: Option<&Arc<Job>>, count: u64, user_bytes: u64, pinned_bytes: u64) -> Result<[Charge; 3], Error> {
     let Some(job) = job else {
-        return Ok([Charge::none(), Charge::none()]);
+        return Ok([Charge::none(), Charge::none(), Charge::none()]);
     };
     let kernel = object_cost::<MemoryObject>() + count * core::mem::size_of::<PhysAddr>() as u64;
     let k = job.charge(Pool::Kernel, kernel)?;
     let u = job.charge(Pool::User, user_bytes)?;
-    Ok([k, u])
+    let d = if pinned_bytes > 0 {
+        job.charge(Pool::Dma, pinned_bytes)?
+    } else {
+        Charge::none()
+    };
+    Ok([k, u, d])
 }
 
 fn page_list(count: u64) -> Result<PageList, Error> {
@@ -126,12 +132,15 @@ pub struct MemoryObject {
     /// Jen fyzicke objekty jdou odvolat (`revoke`).
     revocable: bool,
     revoked: AtomicBool,
-    /// Strzeni z rozpoctu jadra a uzivatelske pameti jobu.
-    _charges: [Charge; 2],
+    /// Vsechny stranky vznikly hned a jsou pripnute po celou dobu zivota
+    /// (`VMO_PINNED`): zarizeni k nim smi pres `DMA_MAP`.
+    pinned: bool,
+    /// Strzeni z rozpoctu jadra, uzivatelske pameti a pripnute pameti jobu.
+    _charges: [Charge; 3],
 }
 
 impl MemoryObject {
-    fn with(size: u64, pages: PageList, kind: Kind, unbacked: u64, charges: [Charge; 2]) -> Self {
+    fn with(size: u64, pages: PageList, kind: Kind, unbacked: u64, charges: [Charge; 3]) -> Self {
         Self {
             core: ObjectCore::new(Signals::NONE),
             size,
@@ -145,6 +154,7 @@ impl MemoryObject {
             dma: None,
             device: None,
             for_dma: false,
+            pinned: false,
             revocable: false,
             revoked: AtomicBool::new(false),
             _charges: charges,
@@ -166,7 +176,7 @@ impl MemoryObject {
         if !phys::user_room(count.saturating_add(list_pages)) {
             return Err(Error::NoMemory);
         }
-        let charges = charge(job, count, count * PAGE)?;
+        let charges = charge(job, count, count * PAGE, 0)?;
         if !phys::commit(count) {
             return Err(Error::NoMemory);
         }
@@ -187,6 +197,52 @@ impl MemoryObject {
         Ok(Arc::new(Self::with(count * PAGE, pages, Kind::Pages, count, charges)))
     }
 
+    /// Pripnuty objekt (`VMO_PINNED`): vsechny stranky hned (nesouvisle,
+    /// vynulovane) a pripnute po celou dobu zivota. Strhava se uzivatelska
+    /// pamet i rozpocet `DMA` jobu; do domeny zarizeni se mapuje az pres
+    /// `DMA_MAP` (`object/dma.rs`).
+    pub fn new_pinned(size: u64, job: Option<&Arc<Job>>) -> Result<Arc<Self>, Error> {
+        if size == 0 || size > abi::vm::VMO_MAX_SIZE {
+            return Err(Error::InvalidArgs);
+        }
+        let count = size.div_ceil(PAGE);
+        let list_pages = (count * core::mem::size_of::<AtomicU64>() as u64).div_ceil(PAGE);
+        if !phys::user_room(count.saturating_add(list_pages)) {
+            return Err(Error::NoMemory);
+        }
+        let charges = charge(job, count, count * PAGE, count * PAGE)?;
+        let mut pages = page_list(count)?;
+        let mut vmo = Self::with(count * PAGE, PageList::new(), Kind::Pages, 0, charges);
+        vmo.pinned = true;
+        for _ in 0..count {
+            // Bez slibu: ramec vznika hned (alloc_user_pages respektuje
+            // rezervu jadra i sliby ostatnich objektu). Pri chybe Drop
+            // objektu vrati uz pridane stranky.
+            let Some(frame) = phys::alloc_user_pages(0) else {
+                vmo.pages = pages;
+                return Err(Error::NoMemory);
+            };
+            // SAFETY: prave alokovana stranka v prime mape.
+            unsafe { frame.to_virt().as_mut_ptr::<u8>().write_bytes(0, PAGE as usize) };
+            phys::pin(frame);
+            // Misto je rezervovane (`page_list`), push nealokuje.
+            pages.push(AtomicU64::new(frame.as_u64() | PRESENT | PINNED))?;
+        }
+        vmo.pages = pages;
+        // Nuly zapsane pres primou mapu musi byt v pameti driv, nez je uvidi
+        // zarizeni (nekoherentni platforma).
+        for p in vmo.pages.iter() {
+            arch::dma_sync_for_device(p.load(Ordering::Relaxed) & !ENTRY_FLAGS, PAGE);
+        }
+        Ok(Arc::new(vmo))
+    }
+
+    /// Jsou vsechny stranky trvale pripnute (`VMO_PINNED` nebo souvisla
+    /// pamet pro DMA)? Jen takovy objekt jde predat `DMA_MAP`.
+    pub fn is_pinned(&self) -> bool {
+        self.pinned || self.for_dma
+    }
+
     /// Fyzicky souvisly objekt pro DMA (max. 4 MiB), vyplneny nulami; s
     /// domenou IOMMU ho zarizeni smi cist i zapisovat (identicky).
     pub fn new_contiguous_dma(
@@ -195,7 +251,7 @@ impl MemoryObject {
         device: Option<(super::quarantine::DeviceId, u64)>,
         job: Option<&Arc<Job>>,
     ) -> Result<Arc<Self>, Error> {
-        let vmo = Self::new_contiguous(size, job)?;
+        let vmo = Self::contiguous(size, job)?;
         let mut vmo = Arc::try_unwrap(vmo).map_err(|_| Error::BadState)?;
         vmo.for_dma = true;
         vmo.device = device;
@@ -208,20 +264,23 @@ impl MemoryObject {
         // zarizeni nebo mapovani bez cache v procesu.
         arch::dma_sync_for_device(vmo.first_frame().as_u64(), vmo.allocated_bytes());
         if let Some(domain) = domain {
-            domain.map(vmo.first_frame().as_u64(), vmo.allocated_bytes() / PAGE)?;
+            let first = vmo.first_frame().as_u64();
+            domain.map(first, first, vmo.allocated_bytes() / PAGE, crate::arch::iommu::DmaAccess::READ_WRITE)?;
             vmo.dma = Some(domain);
         }
         Ok(Arc::new(vmo))
     }
 
-    /// Fyzicky souvisly objekt pro DMA (max. 4 MiB), vyplneny nulami.
-    pub fn new_contiguous(size: u64, job: Option<&Arc<Job>>) -> Result<Arc<Self>, Error> {
+    /// Fyzicky souvisly blok (max. 4 MiB), vyplneny nulami; strhne i rozpocet
+    /// pripnute pameti (`DMA`), objekt je pro DMA.
+    fn contiguous(size: u64, job: Option<&Arc<Job>>) -> Result<Arc<Self>, Error> {
         if size == 0 || size > (PAGE << phys::MAX_ORDER) {
             return Err(Error::InvalidArgs);
         }
         let count = size.div_ceil(PAGE);
         let order = count.next_power_of_two().trailing_zeros() as usize;
-        let charges = charge(job, count, PAGE << order)?;
+        let bytes = PAGE << order;
+        let charges = charge(job, count, bytes, bytes)?;
         let mut pages = page_list(count)?;
         let base = phys::alloc_user_pages(order).ok_or(Error::NoMemory)?;
         // SAFETY: prave alokovany blok 2^order stranek v prime mape.
@@ -278,7 +337,7 @@ impl MemoryObject {
         }
         let count = size.div_ceil(PAGE);
         // Registry zarizeni nejsou RAM: jen seznam stranek z rozpoctu jadra.
-        let charges = charge(job, count, 0)?;
+        let charges = charge(job, count, 0, 0)?;
         let mut pages = page_list(count)?;
         for i in 0..count {
             pages.push(present(PhysAddr::new(phys_start + i * PAGE)))?;
@@ -377,7 +436,8 @@ impl MemoryObject {
     /// mapperu (oboji SeqCst) - bud pecet mapovani najde, nebo mapovani
     /// uvidi pecet.
     pub fn seal(&self) -> Result<(), Error> {
-        if !matches!(self.kind, Kind::Pages) || self.for_dma {
+        // Do pripnute pameti muze zapisovat zarizeni: obsah se muze zmenit.
+        if !matches!(self.kind, Kind::Pages) || self.for_dma || self.pinned {
             return Err(Error::NotSupported);
         }
         if self.sealed.swap(true, Ordering::SeqCst) {
@@ -673,6 +733,6 @@ impl KernelObject for MemoryObject {
     }
 
     fn default_rights(&self) -> Rights {
-        Rights::BASIC | Rights::READ | Rights::WRITE | Rights::MAP | Rights::EXECUTE
+        Rights::BASIC | Rights::READ | Rights::WRITE | Rights::MAP | Rights::EXECUTE | Rights::DMA
     }
 }

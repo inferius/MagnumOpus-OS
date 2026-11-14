@@ -29,8 +29,10 @@ pub const CHANNEL_CREATE: u64 = 8;
 pub const CHANNEL_WRITE: u64 = 9;
 /// Precte zpravu. `(handle, data_ptr, data_cap, handles_ptr, handles_cap, out_actual_ptr)`
 pub const CHANNEL_READ: u64 = 10;
-/// Vytvori objekt pameti. `(size, process) -> handle`; stranky se strhnou
-/// z rozpoctu jobu procesu `process` (handle s pravem `WRITE`, 0 = volajici)
+/// Vytvori objekt pameti. `(size, process, flags) -> handle`; stranky se
+/// strhnou z rozpoctu jobu procesu `process` (handle s pravem `WRITE`, 0 =
+/// volajici). `flags`: `vm::VMO_PINNED` = stranky hned a pripnute (pro DMA,
+/// navic rozpocet `DMA`), jinak 0
 pub const VMO_CREATE: u64 = 11;
 /// Cte z objektu pameti. `(handle, offset, buf_ptr, len)`
 pub const VMO_READ: u64 = 12;
@@ -113,7 +115,7 @@ pub const JOB_CREATE: u64 = 42;
 /// `pool` z [`crate::job::pool`], `bytes` = [`crate::job::UNLIMITED`] = bez limitu
 pub const JOB_SET_LIMIT: u64 = 43;
 /// Stav rozpoctu jobu. `(job, out_ptr)`; job potrebuje `READ`, na `out_ptr`
-/// zapise [`crate::job::JobInfo`] (56 B)
+/// zapise [`crate::job::JobInfo`] (80 B)
 pub const JOB_INFO: u64 = 44;
 /// Plynula korekce realneho casu (Resource s pravem `SET_CLOCK`).
 /// `(resource, offset_ns i64, freq_ppb i64, flags, out_ptr)`; `flags`
@@ -287,9 +289,25 @@ pub const FENCE_WAIT_ASYNC: u64 = 71;
 /// `WAIT`.
 pub const FENCE_QUERY: u64 = 72;
 
-/// Pocet definovanych syscallu (pro tabulky a testy). Cisla 73-75 jsou
-/// rezervovana pro DMA (krok 6a-2).
-pub const COUNT: u64 = 73;
+/// Zpristupni cast pripnuteho objektu pameti zarizeni: `(resource, vmo,
+/// offset, len, flags, iova_hint) -> handle` mapovani (`abi::dma`). Prostredek
+/// s pravem `MANAGE` a identitou zarizeni, objekt pameti s pravem `DMA` (a
+/// `READ`/`WRITE` podle smeru). S IOMMU jeden souvisly rozsah IOVA (vybere
+/// jadro, nebo `iova_hint` overi na prekryv), bez IOMMU fyzicke useky.
+/// Zavreni handlu = odmapovani se synchronnim vyprazdnenim IOTLB.
+pub const DMA_MAP: u64 = 73;
+
+/// Useky mapovani pro zarizeni: `(map, out_ptr, max) -> pocet`. Zapise
+/// nejvys `max` polozek `dma::Segment` (16 B), vrati pocet vsech; pravo
+/// `READ`.
+pub const DMA_SEGMENTS: u64 = 74;
+
+/// Udrzba cache mapovani: `(map, offset, len, direction) -> 0`
+/// (`dma::sync`); na koherentnich platformach nedela nic. Pravo `READ`.
+pub const DMA_SYNC: u64 = 75;
+
+/// Pocet definovanych syscallu (pro tabulky a testy).
+pub const COUNT: u64 = 76;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {

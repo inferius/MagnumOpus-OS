@@ -5,9 +5,10 @@
 //! jobu plati pro cely jeho podstrom a potomek ho nemuze obejit ani tim,
 //! ze si zvedne vlastni limit (predek ho porad omezuje).
 //!
-//! Dva rozpocty v bajtech (`abi::job::pool`): pamet jadra a uzivatelska
-//! pamet. Strzeni je bez zamku (atomicke citace) a vraci se automaticky,
-//! kdyz zanikne vec, ktera ho drzi ([`Charge`] v `Drop`).
+//! Tri rozpocty v bajtech (`abi::job::pool`): pamet jadra, uzivatelska
+//! pamet a pripnuta pamet pro DMA (navic k uzivatelske; korenovy job ma
+//! povinny strop `root_dma_cap`). Strzeni je bez zamku (atomicke citace)
+//! a vraci se automaticky, kdyz zanikne vec, ktera ho drzi ([`Charge`] v `Drop`).
 //!
 //! Soubeh: dve soucasna strzeni tesne pod limitem mohou obe selhat (citac
 //! chvili ukazuje obe). Opacne to nejde - limit se nikdy neprekroci.
@@ -26,6 +27,8 @@ use super::{Error, KernelObject, ObjectCore, ObjectType, Rights, Signals};
 pub enum Pool {
     Kernel = pool::KERNEL as isize,
     User = pool::USER as isize,
+    /// Pripnuta pamet pro DMA (strhava se navic k `User`).
+    Dma = pool::DMA as isize,
 }
 
 impl Pool {
@@ -33,6 +36,7 @@ impl Pool {
         match v {
             v if v == pool::KERNEL as u64 => Some(Self::Kernel),
             v if v == pool::USER as u64 => Some(Self::User),
+            v if v == pool::DMA as u64 => Some(Self::Dma),
             _ => None,
         }
     }
@@ -42,6 +46,12 @@ impl Pool {
 /// zaokrouhleno na tridu heapu - mocnina dvou).
 pub const fn object_cost<T>() -> u64 {
     (core::mem::size_of::<T>() + 16).next_power_of_two() as u64
+}
+
+/// Strop pripnute pameti korenoveho jobu: polovina RAM, kterou spravuje
+/// alokator.
+fn root_dma_cap() -> u64 {
+    crate::mm::phys::stats().1 * crate::arch::paging::PAGE_SIZE / 2
 }
 
 /// Cislovani jobu (od 1).
@@ -69,6 +79,9 @@ impl Job {
     /// rezerva jadra, rozdeleni mezi sluzby urci init.
     pub fn new_root() -> Arc<Self> {
         let root = Self::make(None, Charge::none());
+        // Pripnuta pamet ma povinnou kvotu: korenovy job nejvys polovinu
+        // pameti systemu (nikdo ji nezvedne, `set_limit` ji jen snizi).
+        root.limits[Pool::Dma as usize].store(root_dma_cap(), Ordering::Release);
         // Koren JIT udeluje, sam ho nema (init JIT nepotrebuje).
         root.jit.store(abi::job::jit::GRANT as u8, Ordering::Release);
         root
@@ -145,8 +158,8 @@ impl Job {
             id: NEXT_JOB_ID.fetch_add(1, Ordering::Relaxed),
             core: ObjectCore::new(Signals::NONE),
             parent,
-            limits: [AtomicU64::new(UNLIMITED), AtomicU64::new(UNLIMITED)],
-            used: [AtomicU64::new(0), AtomicU64::new(0)],
+            limits: [const { AtomicU64::new(UNLIMITED) }; pool::COUNT],
+            used: [const { AtomicU64::new(0) }; pool::COUNT],
             qos_max: AtomicU8::new(Class::Realtime as u8),
             killed: AtomicBool::new(false),
             jit: AtomicU8::new(0),
@@ -156,7 +169,14 @@ impl Job {
 
     /// Nastavi vlastni limit. Limit pod aktualni spotrebou je povoleny:
     /// nic se neodebira, jen dalsi strzeni selzou.
+    /// U pripnute pameti korenoveho jobu nejvys pevny strop
+    /// (`root_dma_cap`): kvota je povinna.
     pub fn set_limit(&self, pool: Pool, bytes: u64) {
+        let bytes = if pool == Pool::Dma && self.parent.is_none() {
+            bytes.min(root_dma_cap())
+        } else {
+            bytes
+        };
         self.limits[pool as usize].store(bytes, Ordering::Release);
     }
 
@@ -232,6 +252,7 @@ impl Job {
         JobInfo {
             kernel: self.pool_info(Pool::Kernel),
             user: self.pool_info(Pool::User),
+            dma: self.pool_info(Pool::Dma),
             id: self.id,
         }
     }

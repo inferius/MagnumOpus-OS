@@ -17,10 +17,10 @@ of a `VkDeviceMemory`. Next steps: see [Plan](#plan).
 <defs><marker id="v1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
 <rect class="box" x="20" y="20" width="230" height="64" rx="6"/><text class="t b" x="135" y="44" text-anchor="middle">vk-probe (application)</text><text class="m" x="135" y="64" text-anchor="middle">vkCreateInstance, vkEnumerate...</text>
 <rect class="acc" x="20" y="110" width="230" height="110" rx="6"/><text class="t b" x="135" y="134" text-anchor="middle">libs/venus</text><text class="m" x="135" y="154" text-anchor="middle">vk: types and commands (generated)</text><text class="m" x="135" y="172" text-anchor="middle">cs: stream encoding</text><text class="m" x="135" y="190" text-anchor="middle">client: context, reply blob,</text><text class="m" x="135" y="206" text-anchor="middle">fenced calls</text>
-<rect class="box" x="20" y="250" width="230" height="64" rx="6"/><text class="t b" x="135" y="274" text-anchor="middle">init / compositor</text><text class="m" x="135" y="294" text-anchor="middle">OPEN_RENDER on the display</text>
+<rect class="box" x="20" y="250" width="230" height="64" rx="6"/><text class="t b" x="135" y="274" text-anchor="middle">init / compositor</text><text class="m" x="135" y="294" text-anchor="middle">render node from gpud</text>
 <path class="ln" d="M135 84 L135 108" marker-end="url(#v1)"/>
 <path class="ln dash" d="M135 250 L135 222" marker-end="url(#v1)"/><text class="m" x="142" y="241">render node channel</text>
-<rect class="acc" x="300" y="110" width="210" height="140" rx="6"/><text class="t b" x="405" y="134" text-anchor="middle">user/virtio-gpu</text><text class="m" x="405" y="154" text-anchor="middle">render node (gpuproto)</text><text class="m" x="405" y="172" text-anchor="middle">CTX_CREATE with capset 4</text><text class="m" x="405" y="190" text-anchor="middle">RESOURCE_CREATE_BLOB</text><text class="m" x="405" y="208" text-anchor="middle">RESOURCE_MAP_BLOB</text><text class="m" x="405" y="226" text-anchor="middle">fenced SUBMIT_3D</text>
+<rect class="acc" x="300" y="110" width="210" height="140" rx="6"/><text class="t b" x="405" y="134" text-anchor="middle">user/virtio-gpu</text><text class="m" x="405" y="154" text-anchor="middle">render node (renderproto)</text><text class="m" x="405" y="172" text-anchor="middle">CTX_CREATE with capset 4</text><text class="m" x="405" y="190" text-anchor="middle">RESOURCE_CREATE_BLOB</text><text class="m" x="405" y="208" text-anchor="middle">RESOURCE_MAP_BLOB</text><text class="m" x="405" y="226" text-anchor="middle">fenced SUBMIT_3D</text>
 <path class="ln" d="M250 160 L298 160" marker-end="url(#v1)"/><text class="m" x="256" y="152">SUBMIT</text>
 <path class="ln dash" d="M298 200 L252 200" marker-end="url(#v1)"/><text class="m" x="256" y="216">blob VMO</text>
 <rect class="box" x="560" y="110" width="200" height="140" rx="6"/><text class="t b" x="660" y="134" text-anchor="middle">QEMU virtio-gpu</text><text class="m" x="660" y="154" text-anchor="middle">venus=on, blob=on</text><text class="m" x="660" y="172" text-anchor="middle">hostmem=256M: BAR with</text><text class="m" x="660" y="190" text-anchor="middle">shared memory</text><text class="m" x="660" y="208" text-anchor="middle">(capability type 8, id 1)</text>
@@ -47,8 +47,8 @@ the display):
    If not, the test is **skipped** - the default `cargo xtask test` on the
    Windows QEMU (no Venus) passes on x86_64 and `--arch aarch64`
    unchanged.
-2. `OPEN_RENDER` returns a render node channel; init starts `vk-probe`
-   with it.
+2. init asks the **gpud** service for a render node ([render.md](render.md))
+   and starts `vk-probe` with that channel.
 3. `vk-probe` uses `libs/venus` to create an instance, enumerate physical
    devices, read their properties and send the line
    `ok <count>|<name>|<type>|<api>|<vendor:device>` (first test).
@@ -57,7 +57,7 @@ the display):
    memory, a buffer in `HOST_VISIBLE | HOST_COHERENT` memory, a command
    buffer (barrier, `vkCmdClearColorImage`, barrier,
    `vkCmdCopyImageToBuffer`, host barrier), `vkQueueSubmit` with a fence,
-   waiting with `vkGetFenceStatus`. Pixels are read straight from the blob
+   waiting through a kernel fence on queue 1 (`Venus::wait_queue`). Pixels are read straight from the blob
    mapped from the buffer's `VkDeviceMemory`; all 4096 must have the fill
    color.
 
@@ -172,32 +172,33 @@ Not supported yet (generation error, never silently wrong encoding):
 unions in outputs, pNext chains in outputs, multidimensional arrays,
 pointers in output structs.
 
-## Render node (`gpuproto`)
+## Render node (`renderproto`)
 
-One channel = one client = at most one context. The display owner opens
-it (`guiproto::display` `OPEN_RENDER`) and passes it on.
+The render node channel is now opened by the **gpud** service and the
+protocol is the common render class (`renderproto`). The message table,
+fences in `SUBMIT` and the hang deadline are in [render.md](render.md). For
+Venus:
 
-| Op | Fields | Reply |
-|---|---|---|
-| `INFO` | - | capsets (id, version, size), shared memory size |
-| `GET_CAPSET` | id, version | capset data |
-| `CREATE_CONTEXT` | capset | `CONTEXT` |
-| `CREATE_BLOB` | memory (`HOST3D`), flags (`MAPPABLE`...), blob_id, size | `BLOB` (resource, size, `map_info`) + VMO when `MAPPABLE` |
-| `DESTROY_BLOB` | resource | `DONE` |
-| `SUBMIT` | ring_idx (only 0 for now), fence, stream (at most 60 KiB, multiple of 4) | `SUBMITTED` (with a fence, after processing) |
-| `SCANOUT_BLOB` | resource (0 = restore the original image), w, h, format, row pitch | `DONE`; step 4 experiment, only the client's own blob |
+- uAPI = the Venus capset (4), capset contents through `QUERY CAPSET`,
+- buffer = a `HOST3D` blob, driver id = `VkDeviceMemory` id (0 = new shared
+  memory for replies),
+- `SUBMIT` queue = `ring_idx`: 0 is the CPU timeline (fence after the stream
+  is processed), 1..63 Vulkan queues bound with
+  `VkDeviceQueueTimelineInfoMESA`.
 
 Closing the channel: the driver revokes the shared-memory windows
-(`VMO_REVOKE`), unmaps and frees the blobs and destroys the context.
+(`VMO_REVOKE`), unmaps and frees the blobs, sets the output fences of
+unfinished commands to `FENCE_FAILED` and destroys the context.
 
 **Asynchronous queue.** The driver has 32 slots (each 72 KiB of DMA
 memory for the command and response, a pair of descriptors). Synchronous
-commands (display, blobs, contexts) wait only for their own slot. A fenced
-`SUBMIT` is only sent; the main loop replies `SUBMITTED` once the device
-returns the slot (the interrupt is in `wait_many` together with the
-channels). A slow renderer of one client thus blocks neither the display
-nor other clients. Two slots are always kept for synchronous commands;
-a client may have at most 4 pending `SUBMIT`s (then `SHOULD_WAIT`).
+commands (display, blobs, contexts) wait only for their own slot. A
+`SUBMIT` with fences is only sent; the main loop advances the fences once
+the device returns the slot (the interrupt is in `wait_many` together with
+the channels and the fence port). A slow renderer of one client thus blocks
+neither the display nor other clients. Two slots are always kept for
+synchronous commands; a client may have at most 16 pending `SUBMIT`s (then
+`SHOULD_WAIT`).
 
 ## Risks
 
@@ -215,10 +216,11 @@ Risks from step 1 that are now solved:
   waits 40 s and then marks the connection as desynchronized
   (`Error::Broken`).
 
-⚠️ Remaining: a `ring_idx` other than 0 is rejected - a fence on a
-timeline the client did not bind to a queue would never signal and the
-slot would stay taken. Waiting for the GPU therefore uses
-`vkGetFenceStatus` for now.
+- **Vulkan queues** (step 6a-3) **[verified in QEMU]** (WSL): `ring_idx`
+  1..63 works through kernel fences (`Venus::wait_queue`), polling
+  `vkGetFenceStatus` is gone. A fence on a timeline the client did not bind
+  to a queue never signals; the driver ends it with an error after
+  `HANG_TIMEOUT` (10 s) ([render.md](render.md#submit-and-fences)).
 
 Venus is not tested without KVM or under TCG (aarch64 in WSL); `vk.xml`
 is 3.3 MB (a fraction of that compressed in git).
@@ -242,7 +244,7 @@ and that memory is shown directly, without a CPU copy. virtio-gpu has
 `SET_SCANOUT_BLOB` for this; with virgl/Venus the blob must be backed by a
 dmabuf and the QEMU display imports it through EGL.
 
-Experiment (`vk-probe`, the step 3 buffer on output 0 for 0.5 s):
+Experiment (steps 4 to 6a-2; `vk-probe`, the step 3 buffer on output 0 for 0.5 s). It was removed in step 6a-3: scanout belongs to the display owner (compd), not to a render client, and will come with the display class v2 ([render.md](render.md#what-changed-against-gpuproto)).
 
 | Part | Result in WSL |
 |---|---|

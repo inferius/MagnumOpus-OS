@@ -379,7 +379,7 @@ fn display_roundtrip() {
             rects: vec![Rect::new(0, 0, 10, 10)],
         },
         Request::Sync { token: u64::MAX - 7 },
-        Request::OpenRender,
+        Request::OpenProvider,
     ] {
         assert_eq!(Request::decode(&m.encode()), Ok(m));
     }
@@ -395,7 +395,7 @@ fn display_roundtrip() {
         Reply::Attached { output: 0 },
         Reply::Presented { seq: 3, time: 5 },
         Reply::Synced { token: 9 },
-        Reply::Render,
+        Reply::Provider,
         Reply::Error {
             op: display::op::ATTACH,
             code: Error::NoMemory,

@@ -38,6 +38,8 @@ cancelled; after the driver ends, devmgr stops it by disabling bus master.
 |---|---|
 | `fact <n>` | `fact <n> <n!>` (32 bits, overflows like the hardware) |
 | `dma <text>` | `dma <text>`: the text goes through DMA into the device and back (1-4096 B) |
+| `sg <text>` | `sg <text>`: the same through a buffer in pages (`alloc_dma_pages`, [dma.md](dma.md)); the text lies across a page boundary, without an IOMMU the transfer goes in chunks (`device_chunks`) |
+| `stale` | `stale <iova>`: the driver unmaps a buffer and lets the device write to its old address; the IOMMU blocks the write and the kernel logs it. Without an IOMMU it refuses (`chyba stale: bez IOMMU ...`), the device would write into freed memory |
 | another command | `chyba <description>` (error) |
 | `dk:ping`, `dk:info`, `dk:restart`, `dk:crash` | common driverkit messages |
 
@@ -51,5 +53,7 @@ While computing or transferring, the driver answers another command with
   commands, the DMA quota from the manifest,
 - in QEMU (`cargo xtask test --driver edu`, the `ovladace z manifestu`
   suite): ping, the factorial through MSI, 1000 B through DMA and the
-  IOMMU, recovery after `dk:crash` and a restart after `dk:restart`. On
+  IOMMU, 3000 B across non-contiguous pages (`sg`), a write after unmapping
+  blocked and in the kernel log (`stale`, only with an IOMMU), recovery
+  after `dk:crash` and a restart after `dk:restart`. On
   x86_64 (VT-d) and aarch64 (SMMUv3).

@@ -16,4 +16,4 @@ pci = { path = "../../libs/pci" }
 virtio = { path = "../../libs/virtio" }
 vgpu = { path = "../../libs/vgpu" }
 guiproto = { path = "../../libs/guiproto" }
-gpuproto = { path = "../../libs/gpuproto" }
+renderproto = { path = "../../libs/renderproto" }

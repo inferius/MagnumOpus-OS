@@ -329,7 +329,9 @@ impl Compositor {
             cmd::decode_queue_submit_reply,
         )?;
         check(r.ret)?;
-        self.v.wait_fence(device, fence, FENCE_TIMEOUT)
+        // Plot fronty (osa 1, VkDeviceQueueTimelineInfoMESA) jako plot jadra.
+        let _ = (device, fence);
+        self.v.wait_queue(1, FENCE_TIMEOUT)
     }
 
     /// Uvolni vse na GPU (bloby pred pameti) a vrati spojeni.

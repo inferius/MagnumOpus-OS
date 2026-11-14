@@ -194,7 +194,16 @@ fronty): tam patří `Reg::write` s celou hodnotou, ne `modify`.
 little endian (`read::<u32>`, `write::<u64>`), každý přístup kontroluje
 meze. Adresu, kterou ovladač zapíše do registru nebo deskriptoru, dává
 **jen** `iova_of(offset, délka)`: kontroluje, že celá oblast leží
-v bufferu.
+v bufferu a je pro zařízení souvislá.
+
+Velký buffer (víc než 4 MiB, nebo kdykoli nevadí nesouvislé stránky) dá
+`Platform::alloc_dma_pages(jméno, velikost)`: připnuté stránky namapované
+přes `DMA_MAP` ([dma.md](dma.md)). S IOMMU je pro zařízení souvislý, bez
+IOMMU ho popisuje `device_chunks(offset, délka)` (kus na fyzický úsek;
+`iova_of` přes hranici úseku vrátí `DmaSplit`). `is_protected()` řekne, jestli
+buffer chrání ověřená IOMMU. Po přenosu do paměti `p.dma_sync_for_cpu(&buf)`
+(údržba cache, výběr hlášení IOMMU). Zánik bufferu = odmapování: zařízení na
+staré adrese narazí na chybu IOMMU.
 
 `DescRing` je kruh, kam píše ovladač (e1000/igc, r8169, NVMe SQ, AHCI):
 `push` vrací slot, `tail` jde do registru zařízení, `complete_to(hlava)`
@@ -294,11 +303,12 @@ pci = ["1234:11e8"]
 [resources]
 bars = [0]
 irq_max = 1
-dma_max = "16K"
+dma_max = "32K"
 ```
 
 Jen to, co ovladač opravdu potřebuje: edu má registry v BAR0, jedno
-přerušení a dva buffery po 4 KiB. Celý formát v kapitole
+přerušení, dva buffery po 4 KiB a buffer po stránkách (12 KiB pro `sg`,
+4 KiB pro `stale`). Celý formát v kapitole
 [Manifest](#manifest).
 
 ### 3. Registry a probe
@@ -598,6 +608,7 @@ kanál (init: `init: ovladac X obnoven (N. start)`).
 | kvóta DMA | `DMA buffer 'edu-zpet' (4096 B) se nevejde do kvoty -> zvyste resources.dma_max v manifestu, nebo pouzijte mensi buffer` |
 | kvóta přerušení | `preruseni c. 1 nelze zapnout -> zvyste resources.irq_max v manifestu ovladace` |
 | DMA mimo buffer (ovladač) | `pristup mimo DMA buffer 'tx': offset 0x40 + 16 B > velikost 64 B -> chyba v ovladaci (spatny index nebo delka)` |
+| oblast přes úseky (bez IOMMU) | `oblast 0xfa0 + 200 B DMA bufferu 'sg' neni pro zarizeni souvisla (stranky bez IOMMU) -> DmaBuffer::device_chunks a prenos po kusech, nebo alloc_dma` |
 | DMA mimo IOMMU (simulace) | `DMA mimo pridelenou pamet: zarizeni zapsalo 3 B na 0x100003000 -> ovladac zapsal do zarizeni adresu, kterou nedostal od DmaBuffer::iova_of (IOMMU by pristup zablokovala)` |
 | pole registru | `hodnota 0x8 se nevejde do pole CTRL.MODE (3 b)` |
 | volání jádra | `mapovani BARu: ACCESS_DENIED (-2): ... -> ovladac na to nema pravo; zkontrolujte resources v manifestu ovladace` |

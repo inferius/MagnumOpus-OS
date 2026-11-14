@@ -16,6 +16,13 @@ impl Vmo {
         sys::vmo_create(size, 0).map(|h| Self(Handle::from_raw(h)))
     }
 
+    /// Pripnuty objekt pameti (`VMO_PINNED`): vsechny stranky hned
+    /// a pripnute, aby k nim smelo zarizeni (`DMA_MAP`, buffer pro ovladac).
+    /// Strhava se i rozpocet pripnute pameti jobu (`job::pool::DMA`).
+    pub fn create_pinned(size: u64) -> Result<Self> {
+        sys::vmo_create_with(size, 0, abi::vm::VMO_PINNED).map(|h| Self(Handle::from_raw(h)))
+    }
+
     /// Objekt pameti na ucet jobu procesu `process` (rodic tak vytvari
     /// pamet potomka; potrebuje pravo `WRITE` na proces).
     pub fn create_for(size: u64, process: &crate::Process) -> Result<Self> {

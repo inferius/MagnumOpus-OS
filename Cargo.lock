@@ -404,6 +404,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bufdesc"
+version = "0.1.0"
+dependencies = [
+ "wire",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1244,11 +1251,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "gpuproto"
+name = "gpud"
 version = "0.1.0"
 dependencies = [
- "abi",
- "wire",
+ "libos",
+ "renderproto",
 ]
 
 [[package]]
@@ -1587,6 +1594,7 @@ dependencies = [
  "netproto",
  "openwith",
  "powerproto",
+ "renderproto",
  "shlang",
  "spin 0.12.3",
  "svcclient",
@@ -1685,6 +1693,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "iova"
+version = "0.1.0"
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1711,6 +1723,7 @@ dependencies = [
  "csprng",
  "elf",
  "initfs",
+ "iova",
  "noto-sans-mono-bitmap",
  "qr",
  "schedcore",
@@ -2426,6 +2439,15 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "renderproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "bufdesc",
+ "wire",
+]
 
 [[package]]
 name = "revocd"
@@ -3329,8 +3351,8 @@ checksum = "b8c0a043c9540bae7c578c88f91dda8bd82e59ae27c21baca69c8b191aaf5a6e"
 name = "venus"
 version = "0.1.0"
 dependencies = [
- "gpuproto",
  "libos",
+ "renderproto",
 ]
 
 [[package]]
@@ -3365,10 +3387,10 @@ dependencies = [
 name = "virtio-gpu"
 version = "0.1.0"
 dependencies = [
- "gpuproto",
  "guiproto",
  "libos",
  "pci",
+ "renderproto",
  "vgpu",
  "virtio",
 ]

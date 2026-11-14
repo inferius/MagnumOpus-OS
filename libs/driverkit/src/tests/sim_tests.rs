@@ -358,3 +358,51 @@ fn driver_survives_client_loss_when_asked() {
     // Bez klienta a bez preruseni uz nic neprijde: simulace to ukonci.
     assert!(matches!(r.step(&p), Some(Exit::Failed { .. })));
 }
+
+/// Buffer po strankach bez IOMMU: dva fyzicke useky (stranka 0 na 0x5000,
+/// stranka 1 na 0x9000).
+struct Split;
+
+impl crate::dma::DmaMemory for Split {
+    fn iova(&self) -> u64 {
+        0x5000
+    }
+    fn len(&self) -> u64 {
+        8192
+    }
+    fn device_run(&self, off: u64) -> (u64, u64) {
+        if off < 4096 { (0x5000 + off, 4096 - off) } else { (0x9000 + off - 4096, 8192 - off) }
+    }
+    fn read_bytes(&self, _: u64, _: &mut [u8]) {}
+    fn write_bytes(&self, _: u64, _: &[u8]) {}
+}
+
+#[test]
+fn split_buffer_gives_chunks_not_one_address() {
+    let b = DmaBuffer::new(Split, "sg");
+    assert_eq!(b.iova_of(4000, 96), Ok(0x5000 + 4000));
+    assert_eq!(b.iova_of(4096, 100), Ok(0x9000));
+    let e = b.iova_of(4000, 200).unwrap_err();
+    assert_eq!(e, DriverError::DmaSplit { buffer: "sg", off: 4000, len: 200 });
+    assert!(format!("{e}").contains("device_chunks"), "{e}");
+    assert_eq!(b.device_chunks(4000, 200), Ok(alloc::vec![(0x5000 + 4000, 96), (0x9000, 104)]));
+    assert_eq!(b.device_chunks(0, 8192).unwrap().len(), 2);
+    assert!(b.device_chunks(8000, 300).is_err(), "za koncem");
+}
+
+#[test]
+fn page_buffer_unmaps_on_drop_and_returns_quota() {
+    let sim = Sim::new("kopirka", info(), Copier::new()).dma_max(3 * 4096);
+    let p = sim.platform();
+    let a = p.alloc_dma_pages("a", 2 * 4096).unwrap();
+    assert!(matches!(p.alloc_dma_pages("b", 2 * 4096), Err(DriverError::DmaQuota { .. })));
+    let iova = a.iova_of(0, 8192).unwrap();
+    drop(a);
+    // Kvota zpet; zarizeni na stare adrese narazi na chybu (jako IOMMU).
+    let b = p.alloc_dma_pages("b", 2 * 4096).unwrap();
+    assert_ne!(b.iova(), iova);
+    sim.with_model(|_: &mut Copier, bus: &mut Bus| {
+        assert!(bus.dma_write(iova, b"x").is_err());
+    });
+    assert_eq!(sim.faults(), [DriverError::DmaFault { iova, len: 1, write: true }]);
+}

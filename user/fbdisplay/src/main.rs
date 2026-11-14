@@ -236,8 +236,8 @@ fn handle(d: &mut Display, data: &[u8], handles: Vec<libos::Handle>) -> Reply {
         // Znacka pro novou instanci kompozitoru po jeho padu (zahodi
         // odpovedi stare instance), stejne jako ovladac virtio-gpu.
         Request::Sync { token } => Reply::Synced { token },
-        // Framebuffer firmwaru nema 3D (render uzel ma jen virtio-gpu).
-        Request::OpenRender => err(Error::NotSupported),
+        // Framebuffer firmwaru nema 3D (render uzly ma jen virtio-gpu).
+        Request::OpenProvider => err(Error::NotSupported),
         // Jediny rezim z firmwaru.
         ref r @ (Request::Connectors | Request::SetMode { .. }) => {
             let sizes = [(d.geo.width, d.geo.height)];

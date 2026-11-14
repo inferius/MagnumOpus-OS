@@ -12,6 +12,7 @@ pub fn read_user(p: &crate::object::process::Process, addr: u64, len: usize) -> 
     user::read_bytes(p, addr, len)
 }
 mod diag;
+mod dma;
 mod fence;
 mod futex;
 mod handle;
@@ -132,6 +133,9 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::FENCE_WAIT => fence::wait(a),
         nr::FENCE_WAIT_ASYNC => fence::wait_async(a),
         nr::FENCE_QUERY => fence::query(a),
+        nr::DMA_MAP => dma::dma_map(a),
+        nr::DMA_SEGMENTS => dma::dma_segments(a),
+        nr::DMA_SYNC => dma::dma_sync(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -216,6 +220,9 @@ pub fn name(number: u64) -> &'static str {
         "FENCE_WAIT",
         "FENCE_WAIT_ASYNC",
         "FENCE_QUERY",
+        "DMA_MAP",
+        "DMA_SEGMENTS",
+        "DMA_SYNC",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

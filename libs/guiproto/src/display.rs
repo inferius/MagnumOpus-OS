@@ -13,9 +13,10 @@
 //! `SYNC` - i to je znacka). Pak znovu `INFO` a `ATTACH` (nova VMO nahradi
 //! starou).
 //!
-//! `OPEN_RENDER` otevre novy kanal render uzlu (protokol `gpuproto`):
-//! vlastnik displeje (init, pak kompozitor) tak muze dat pristup ke 3D
-//! (Venus) dalsimu procesu, aniz by mu dal displej.
+//! `OPEN_PROVIDER` vyda **jednou** kanal poskytovatele render uzlu
+//! (protokol `renderproto::node`, dalsi pokus `BAD_STATE`). Vyzada si ho
+//! init pred predanim displeje kompozitoru a preda ho sluzbe `gpud`, ktera
+//! render uzly rozdava; vlastnik displeje tak 3D nerozdava.
 //! **Nastaveni obrazu** (`docs/cs/displej.md`): `CONNECTORS` vrati
 //! konektory, monitory a jejich rezimy ([`crate::modes`]), `SET_MODE`
 //! zmeni rezim vystupu (pak kompozitor posle nove `ATTACH` s novou
@@ -51,8 +52,8 @@ pub mod op {
     pub const ATTACHED: u32 = 102;
     pub const PRESENTED: u32 = 103;
     pub const SYNCED: u32 = 104;
-    pub const OPEN_RENDER: u32 = 5;
-    pub const RENDER: u32 = 105;
+    pub const OPEN_PROVIDER: u32 = 5;
+    pub const PROVIDER: u32 = 105;
     pub const ERROR: u32 = 199;
 }
 
@@ -60,7 +61,7 @@ pub mod op {
 pub mod caps {
     /// Zarizeni umi 3D (virgl).
     pub const VIRGL: u32 = 1 << 0;
-    /// Ovladac ma render uzel s capsetem Venus (Vulkan, `OPEN_RENDER`).
+    /// Ovladac ma render uzel s capsetem Venus (Vulkan, render uzly pres `OPEN_PROVIDER` a `gpud`).
     pub const VENUS: u32 = 1 << 1;
     // Bity 2..=7: nastaveni obrazu.
     /// Ovladac umi `SET_MODE` (vic nez jeden rezim).
@@ -94,8 +95,8 @@ pub enum Request {
     /// Znacka v proudu odpovedi: ovladac odpovi `SYNCED` se stejnym
     /// tokenem (vse pred ni patri predchozi instanci kompozitoru).
     Sync { token: u64 },
-    /// Novy kanal render uzlu (odpoved `Render`).
-    OpenRender,
+    /// Kanal poskytovatele render uzlu (odpoved `Provider`; jen jednou).
+    OpenProvider,
     /// Vycet konektoru a rezimu (odpoved `Connectors`).
     Connectors,
     /// Nastavi rezim vystupu; `refresh_mhz` 0 = nejvyssi obnova pro rozmery.
@@ -108,8 +109,8 @@ pub enum Reply {
     Attached { output: u32 },
     Presented { seq: u64, time: u64 },
     Synced { token: u64 },
-    /// Kanal render uzlu jde v handlech zpravy.
-    Render,
+    /// Kanal poskytovatele render uzlu jde v handlech zpravy.
+    Provider,
     Connectors { connectors: Vec<Connector> },
     /// Rezim nastaven (skutecna obnova); nasleduje `ATTACH` nove velikosti.
     ModeSet { output: u32, w: u32, h: u32, refresh_mhz: u32 },
@@ -158,7 +159,7 @@ impl Request {
                 w = Writer::op(op::SYNC);
                 w.u64(*token);
             }
-            Request::OpenRender => w = Writer::op(op::OPEN_RENDER),
+            Request::OpenProvider => w = Writer::op(op::OPEN_PROVIDER),
             Request::Connectors => w = Writer::op(op::CONNECTORS),
             Request::SetMode { output, w: mw, h, refresh_mhz } => {
                 w = Writer::op(op::SET_MODE);
@@ -189,7 +190,7 @@ impl Request {
                 Request::Present { seq, output, rects }
             }
             op::SYNC => Request::Sync { token: r.u64()? },
-            op::OPEN_RENDER => Request::OpenRender,
+            op::OPEN_PROVIDER => Request::OpenProvider,
             op::CONNECTORS => Request::Connectors,
             op::SET_MODE => Request::SetMode {
                 output: r.u32()?,
@@ -229,7 +230,7 @@ impl Reply {
                 w = Writer::op(op::SYNCED);
                 w.u64(*token);
             }
-            Reply::Render => w = Writer::op(op::RENDER),
+            Reply::Provider => w = Writer::op(op::PROVIDER),
             Reply::Connectors { connectors } => {
                 w = Writer::op(op::CONNECTORS_REPLY);
                 modes::encode_connectors(&mut w, connectors);
@@ -273,7 +274,7 @@ impl Reply {
                 time: r.u64()?,
             },
             op::SYNCED => Reply::Synced { token: r.u64()? },
-            op::RENDER => Reply::Render,
+            op::PROVIDER => Reply::Provider,
             op::CONNECTORS_REPLY => Reply::Connectors {
                 connectors: modes::decode_connectors(&mut r, data.len())?,
             },

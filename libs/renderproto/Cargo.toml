@@ -1,0 +1,11 @@
+[package]
+name = "renderproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protokol tridy render: klient <-> ovladac GPU (kontext s uAPI, buffery, SUBMIT s ploty jadra) a poskytovatel render uzlu"
+
+[dependencies]
+abi = { workspace = true }
+bufdesc = { path = "../bufdesc" }
+wire = { path = "../wire" }

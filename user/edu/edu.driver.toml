@@ -12,7 +12,7 @@ pci = ["1234:11e8"]
 [resources]
 bars = [0]
 irq_max = 1
-dma_max = "16K"
+dma_max = "32K"
 
 [service]
 restart = true

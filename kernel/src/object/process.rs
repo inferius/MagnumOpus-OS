@@ -311,8 +311,18 @@ impl Process {
         // mimo zamek (Drop objektu muze budit dalsi vlakna). Pamet pro DMA
         // si poznamename pro karantenu.
         let table = core::mem::take(&mut *self.handles.lock());
+        let mut maps: Vec<Arc<super::dma::DmaMap>> = Vec::new();
         for object in table.objects() {
             let any: Arc<dyn core::any::Any + Send + Sync> = object.clone();
+            let any = match any.downcast::<super::dma::DmaMap>() {
+                Ok(map) => {
+                    if !maps.iter().any(|m| Arc::ptr_eq(m, &map)) {
+                        maps.push(map);
+                    }
+                    continue;
+                }
+                Err(any) => any,
+            };
             if let Ok(vmo) = any.downcast::<MemoryObject>()
                 && vmo.is_dma()
                 && !dma.iter().any(|p| Arc::ptr_eq(p, &vmo))
@@ -332,9 +342,14 @@ impl Process {
                 driven.push(d);
             }
         }
+        for m in &maps {
+            if !driven.contains(&m.device()) {
+                driven.push(m.device());
+            }
+        }
         // 3. Zarizeni, ktera proces ridil, zastavit; jejich pamet pustit az
         // potom (pred TERMINATED: novy ovladac nastartuje az po tom).
-        super::quarantine::driver_gone(&driven, dma);
+        super::quarantine::driver_gone(&driven, dma, maps);
         // 4. Fronty futexu (vlakna uz neexistuji), kanaly vyjimek a seznam
         // vlaken.
         drop(core::mem::take(&mut *self.futex.lock()));

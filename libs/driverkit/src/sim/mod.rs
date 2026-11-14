@@ -349,11 +349,29 @@ pub struct SimDma {
     index: usize,
     iova: u64,
     len: u64,
+    /// Buffer po strankach: zanik vrati kvotu (jako odmapovani `DMA_MAP`).
+    pages: bool,
+}
+
+impl Drop for SimDma {
+    fn drop(&mut self) {
+        // Jako jadro: zanik bufferu = odmapovani, zarizeni na stare adrese
+        // narazi na chybu (Sim::faults).
+        let mut s = self.inner.state.borrow_mut();
+        s.dma.regions[self.index].gone = true;
+        if self.pages {
+            s.dma.used -= self.len;
+        }
+    }
 }
 
 impl DmaMemory for SimDma {
     fn iova(&self) -> u64 {
         self.iova
+    }
+    /// Simulace hlida kazdy pristup zarizeni jako IOMMU (`Sim::faults`).
+    fn is_protected(&self) -> bool {
+        true
     }
     fn len(&self) -> u64 {
         self.len
@@ -405,32 +423,15 @@ impl Platform for SimPlatform {
     }
 
     fn alloc_dma(&self, name: &'static str, size: u64) -> Result<DmaBuffer<SimDma>> {
-        let mut s = self.inner.state.borrow_mut();
-        let size = size.max(1);
-        if s.dma.used.saturating_add(size) > s.dma_max {
-            return Err(DriverError::DmaQuota { buffer: name, size });
-        }
-        let iova = s.dma.next_iova;
-        // Mezera jedne stranky za kazdou oblasti: preteceni za konec bufferu
-        // nenarazi do dalsiho (jako ochranna stranka).
-        s.dma.next_iova += size.next_multiple_of(PAGE) + PAGE;
-        s.dma.used += size;
-        let index = s.dma.regions.len();
-        s.dma.regions.push(Region {
-            iova,
-            data: alloc::vec![0; size as usize],
-            name,
-        });
-        Ok(DmaBuffer::new(
-            SimDma {
-                inner: self.inner.clone(),
-                index,
-                iova,
-                len: size,
-            },
-            name,
-        ))
+        alloc_region(self, name, size, false)
     }
+
+    fn alloc_dma_pages(&self, name: &'static str, size: u64) -> Result<DmaBuffer<SimDma>> {
+        // Simulace ma vzdy "IOMMU": buffer je pro zarizeni souvisly.
+        alloc_region(self, name, size, true)
+    }
+
+    fn dma_sync_for_cpu(&self, _buf: &DmaBuffer<SimDma>) {}
 
     fn enable_irq(&self) -> Result<IrqId> {
         let mut s = self.inner.state.borrow_mut();
@@ -523,4 +524,36 @@ impl Platform for SimPlatform {
     fn mmio_wmb(&self) {
         core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
     }
+}
+
+/// Nova DMA oblast simulace; `pages` = buffer po strankach (zanik vrati
+/// kvotu jako odmapovani `DMA_MAP`).
+fn alloc_region(p: &SimPlatform, name: &'static str, size: u64, pages: bool) -> Result<DmaBuffer<SimDma>> {
+    let mut s = p.inner.state.borrow_mut();
+    let size = size.max(1);
+    if s.dma.used.saturating_add(size) > s.dma_max {
+        return Err(DriverError::DmaQuota { buffer: name, size });
+    }
+    let iova = s.dma.next_iova;
+    // Mezera jedne stranky za kazdou oblasti: preteceni za konec bufferu
+    // nenarazi do dalsiho (jako ochranna stranka).
+    s.dma.next_iova += size.next_multiple_of(PAGE) + PAGE;
+    s.dma.used += size;
+    let index = s.dma.regions.len();
+    s.dma.regions.push(Region {
+        iova,
+        data: alloc::vec![0; size as usize],
+        name,
+        gone: false,
+    });
+    Ok(DmaBuffer::new(
+        SimDma {
+            inner: p.inner.clone(),
+            index,
+            iova,
+            len: size,
+            pages,
+        },
+        name,
+    ))
 }

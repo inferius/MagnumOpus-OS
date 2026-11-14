@@ -82,6 +82,18 @@ pub trait Platform {
     /// `resources.dma_max` = [`DriverError::DmaQuota`].
     fn alloc_dma(&self, name: &'static str, size: u64) -> Result<DmaBuffer<Self::Dma>>;
 
+    /// Alokuje velky DMA buffer po strankach (pripnute, nesouvisle; nad
+    /// jadrem `VMO_PINNED` + `DMA_MAP`). S IOMMU je pro zarizeni souvisly,
+    /// bez IOMMU ho popisuje [`DmaBuffer::device_chunks`]. Zanik bufferu =
+    /// odmapovani: zarizeni na stare adrese narazi na chybu IOMMU. Nad kvotu
+    /// `resources.dma_max` (ziva mapovani) nebo rozpocet pripnute pameti
+    /// jobu = [`DriverError::DmaQuota`].
+    fn alloc_dma_pages(&self, name: &'static str, size: u64) -> Result<DmaBuffer<Self::Dma>>;
+
+    /// Po prenosu zarizeni do bufferu (pred ctenim dat): udrzba cache na
+    /// nekoherentni platforme a vybrani hlaseni chyb IOMMU do logu jadra.
+    fn dma_sync_for_cpu(&self, buf: &DmaBuffer<Self::Dma>);
+
     /// Zapne dalsi preruseni zarizeni (MSI-X polozka `n`, nebo MSI, kdyz
     /// MSI-X zarizeni nema) a vrati jeho cislo.
     fn enable_irq(&self) -> Result<IrqId>;

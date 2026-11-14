@@ -1,5 +1,5 @@
 //! virtio-gpu: ovladac grafiky (virtio 1.x pres PCI): displej 2D a render
-//! uzel pro 3D (Venus, protokol `gpuproto`, viz `render.rs`).
+//! uzly pro 3D (Venus, protokol `renderproto`, viz `render.rs`).
 //!
 //! Spousti ho spravce zarizeni. Startovni zprava (kind USER, v tomto poradi):
 //! 1. omezeny Resource tohoto zarizeni,
@@ -14,8 +14,10 @@
 //! bufferu DMA (s IOMMU jedina pamet, kterou zarizeni vidi), posle
 //! `TRANSFER_TO_HOST_2D` a `RESOURCE_FLUSH` a odpovi `PRESENTED` s casem.
 //!
-//! `OPEN_RENDER` vrati novy kanal render uzlu (kontext s capsetem, bloby
-//! ve sdilene pameti, proudy prikazu). Render klientu muze byt vic.
+//! `OPEN_PROVIDER` vyda jednou kanal poskytovatele (`renderproto::node`);
+//! drzi ho init a `gpud` na nem otevira render uzly (kontext s capsetem,
+//! buffery ve sdilene pameti, proudy prikazu s ploty jadra). Render klientu
+//! muze byt vic.
 //!
 //! RIZIKO: kompozitor muze VMO menit i behem kopie - roztrhne to jen
 //! jeden snimek (kompozitor je jediny klient). Bez IOMMU muze zarizeni
@@ -36,7 +38,7 @@ use alloc::vec::Vec;
 use guiproto::Rect;
 use guiproto::display::{Output, Reply, Request};
 use libos::hw::Resource;
-use libos::{Channel, Error, Signals, Startup, Vmo, println};
+use libos::{Channel, Error, Port, Signals, Startup, Vmo, println};
 use pci::Ecam;
 
 use device::Gpu;
@@ -95,6 +97,13 @@ fn main(startup: Startup) -> i64 {
     }
     let mut renders: Vec<Client> = Vec::new();
     let mut next_client = 1u64;
+    // Poskytovatel render uzlu (vyda se jednou) a port pro cekani na
+    // vstupni ploty prikazu render klientu.
+    let mut provider = Provider::default();
+    let Ok(port) = Port::create() else {
+        println!("virtio-gpu {address}: port nejde vytvorit");
+        return 5;
+    };
     loop {
         // Ovladac konci, az klient displeje (init, pak kompozitor) zavre
         // kanal. Po padu kompozitoru kanal nezanikne (konec drzi
@@ -104,25 +113,38 @@ fn main(startup: Startup) -> i64 {
         let mut items = alloc::vec![
             (client.handle(), Signals::READABLE | Signals::PEER_CLOSED),
             (gpu.q.irq.handle(), Signals::SIGNALED),
+            (port.handle(), Signals::READABLE),
         ];
+        if let Some(p) = provider.ch.as_ref() {
+            items.push((p.handle(), Signals::READABLE | Signals::PEER_CLOSED));
+        }
+        // Prvni render klient v `items` (za poskytovatelem, je-li).
+        let base = items.len();
         for r in &renders {
             items.push((r.ch.handle(), Signals::READABLE | Signals::PEER_CLOSED));
         }
-        let Ok((_, obs)) = libos::wait_many(&items, None) else {
-            break;
+        // Nejblizsi termin zaseknuti prikazu (HANG_TIMEOUT).
+        let deadline = renders.iter().filter_map(Client::next_deadline).min();
+        let obs = match libos::wait_many(&items, deadline) {
+            Ok((_, obs)) => obs,
+            Err(Error::TimedOut) => alloc::vec![Signals::NONE; items.len()],
+            Err(_) => break,
         };
         drop(items);
         if obs[1].intersects(Signals::SIGNALED) {
             let _ = gpu.q.irq.ack();
         }
+        // Splnene vstupni ploty: pakety jen budi, stav se zjisti dotazem.
+        if obs[2].intersects(Signals::READABLE) {
+            while port.wait(Some(0)).is_ok() {}
+        }
         // Render klienti (odzadu, zavrene se odebiraji).
         for i in (0..renders.len()).rev() {
-            let o = obs[i + 2];
+            let o = obs[base + i];
             if o.intersects(Signals::READABLE) {
                 while let Ok(m) = renders[i].ch.try_read() {
-                    if let Some((reply, handles)) = renders[i].handle(&mut gpu, &m.data) {
-                        let _ = renders[i].ch.write(&reply.encode(), handles);
-                    }
+                    let (reply, handles) = renders[i].handle(&mut gpu, &port, &m.data, m.handles);
+                    let _ = renders[i].ch.write(&reply.encode(), handles);
                     if gpu.broken() {
                         break;
                     }
@@ -132,9 +154,20 @@ fn main(startup: Startup) -> i64 {
                 c.close(&mut gpu);
             }
         }
+        // Poskytovatel: novy render uzel (zprava od gpud). Az po render
+        // klientech: novy klient v tomto kole v `obs` jeste neni.
+        if base == 4 {
+            let o = obs[3];
+            if o.intersects(Signals::READABLE) {
+                provider.serve(&gpu, &mut renders, &mut next_client);
+            } else if o.intersects(Signals::PEER_CLOSED) {
+                println!("virtio-gpu {address}: poskytovatel render uzlu zavren (nove uzly uz nebudou)");
+                provider.ch = None;
+            }
+        }
         if obs[0].intersects(Signals::READABLE) {
             while let Ok(m) = client.try_read() {
-                let (reply, handles) = handle(&mut gpu, &m.data, m.handles, &mut renders, &mut next_client);
+                let (reply, handles) = handle(&mut gpu, &m.data, m.handles, &mut provider);
                 if client.write(&reply.encode(), handles).is_err() {
                     break;
                 }
@@ -142,14 +175,21 @@ fn main(startup: Startup) -> i64 {
         } else if obs[0].intersects(Signals::PEER_CLOSED) {
             break;
         }
-        // Dokoncene asynchronni prikazy (i ty, ktere vyzvedl synchronni
-        // prikaz behem obsluhy zprav): odpovedi klientum. Klient, ktery
-        // mezitim skoncil, odpoved nedostane.
+        // Dokoncene prikazy (i ty, ktere vyzvedl synchronni prikaz behem
+        // obsluhy zprav): znacka = id klienta << 32 | poradi prikazu.
+        // Klient, ktery mezitim skoncil, uz nic nedostane.
         for c in gpu.completions() {
-            if let Some(r) = renders.iter_mut().find(|r| r.id == c.tag) {
-                let reply = r.complete(c.resp_type);
-                let _ = r.ch.write(&reply.encode(), Vec::new());
+            if let Some(r) = renders.iter_mut().find(|r| r.id == c.tag >> 32) {
+                r.complete(c.tag as u32, c.resp_type);
             }
+        }
+        // Prikazy, kterym se splnily vstupni ploty, a zaseknute prikazy.
+        let now = libos::time::now();
+        for r in renders.iter_mut() {
+            if let Some(ctx) = r.context() {
+                r.ready_jobs(&mut gpu, ctx);
+            }
+            r.expire(now);
         }
         if gpu.broken() {
             println!("virtio-gpu {address}: zarizeni neodpovida, koncim");
@@ -162,22 +202,54 @@ fn main(startup: Startup) -> i64 {
     0
 }
 
+/// Poskytovatel render uzlu: kanal vydany jednou (`OPEN_PROVIDER`).
+#[derive(Default)]
+struct Provider {
+    ch: Option<Channel>,
+    given: bool,
+}
+
+impl Provider {
+    /// `OPEN_PROVIDER`: jen jednou a jen se zarizenim s kontexty 3D.
+    fn open(&mut self, gpu: &Gpu) -> Result<libos::Handle, Error> {
+        if !gpu.virgl || !gpu.context_init {
+            return Err(Error::NotSupported);
+        }
+        if self.given {
+            return Err(Error::BadState);
+        }
+        let (mine, theirs) = Channel::create()?;
+        self.ch = Some(mine);
+        self.given = true;
+        Ok(theirs.into_handle())
+    }
+
+    /// Zpravy poskytovatele: `OPEN` = novy render uzel.
+    fn serve(&mut self, gpu: &Gpu, renders: &mut Vec<Client>, next_client: &mut u64) {
+        let Some(ch) = self.ch.as_ref() else { return };
+        while let Ok(m) = ch.try_read() {
+            let (reply, handles) = match renderproto::node::Request::decode(&m.data) {
+                Ok(renderproto::node::Request::Open) => match open_render(gpu, renders, next_client) {
+                    Ok(h) => (renderproto::node::Reply::Opened, alloc::vec![h]),
+                    Err(code) => (renderproto::node::Reply::Error { code }, Vec::new()),
+                },
+                Err(code) => (renderproto::node::Reply::Error { code }, Vec::new()),
+            };
+            let _ = ch.write(&reply.encode(), handles);
+        }
+    }
+}
+
 /// Zprava displeje; odpoved a handly k ni.
-fn handle(
-    gpu: &mut Gpu,
-    data: &[u8],
-    handles: Vec<libos::Handle>,
-    renders: &mut Vec<Client>,
-    next_client: &mut u64,
-) -> (Reply, Vec<libos::Handle>) {
+fn handle(gpu: &mut Gpu, data: &[u8], handles: Vec<libos::Handle>, provider: &mut Provider) -> (Reply, Vec<libos::Handle>) {
     let op = guiproto::window::ClientMsg::op_of(data);
     let req = match Request::decode(data) {
         Ok(r) => r,
         Err(code) => return (Reply::Error { op, code }, Vec::new()),
     };
-    if req == Request::OpenRender {
-        return match open_render(gpu, renders, next_client) {
-            Ok(h) => (Reply::Render, alloc::vec![h]),
+    if req == Request::OpenProvider {
+        return match provider.open(gpu) {
+            Ok(h) => (Reply::Provider, alloc::vec![h]),
             Err(code) => (Reply::Error { op, code }, Vec::new()),
         };
     }
@@ -209,7 +281,7 @@ const MAX_RENDER_CLIENTS: usize = 16;
 fn handle_display(gpu: &mut Gpu, req: Request, handles: Vec<libos::Handle>, op: u32) -> Reply {
     let err = |code: Error| Reply::Error { op, code };
     match req {
-        Request::OpenRender => err(Error::BadState),
+        Request::OpenProvider => err(Error::BadState),
         Request::Info => Reply::Modes {
             caps: (if gpu.virgl { guiproto::display::caps::VIRGL } else { 0 })
                 | (if has_venus(gpu) { guiproto::display::caps::VENUS } else { 0 }),

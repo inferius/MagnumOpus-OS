@@ -1,8 +1,8 @@
 //! GPU backend kompozitoru: snimek slozi Vulkan pres Venus (`libs/vkcomp`).
 //!
 //! Zapina se ridicim prikazem `backend gpu` (vychozi je CPU, `backend cpu`
-//! vrati CPU). Kompozitor si na kanalu displeje vyzada render uzel
-//! (`OPEN_RENDER`), pripoji se k rendereru Venus a od te doby misto
+//! vrati CPU), ktery nese kanal render uzlu (otevre ho init pres `gpud`).
+//! Kompozitor se pripoji k rendereru Venus a od te doby misto
 //! kresleni do snimku vytvari seznam operaci (`comp::gpu`). Casti kreslene
 //! CPU (plocha, ramy, panel...) a buffery aplikaci se nahravaji do
 //! povrchu na GPU, operace slozi vypocetni shader a hotove poskozene
@@ -146,10 +146,15 @@ impl GpuSink for Sink {
 }
 
 impl GpuBackend {
-    /// Render uzel z kanalu displeje (odpoved `RENDER` uz prisla) a skladac
+    /// Render uzel (od `gpud`, prisel s prikazem `backend gpu`) a skladac
     /// `w` x `h`.
     pub fn new(render: Channel, w: u32, h: u32) -> Result<Self> {
-        let v = Venus::connect(render)?;
+        Self::with(Venus::connect(render)?, w, h)
+    }
+
+    /// Skladac `w` x `h` nad uz pripojenym Venusem (zmena velikosti
+    /// obrazovky: render uzel zustava).
+    pub fn with(v: Venus, w: u32, h: u32) -> Result<Self> {
         let c = Compositor::new(v, w, h)?;
         println!("compd: skladani na GPU ({})", c.device_name);
         Ok(Self {
@@ -196,12 +201,13 @@ impl GpuBackend {
         Ok(Some(rects))
     }
 
-    /// Uvolni GPU (pri prepnuti zpet na CPU).
-    pub fn destroy(self) {
+    /// Uvolni GPU (pri prepnuti zpet na CPU); vrati spojeni s Venusem,
+    /// pokud zustalo pouzitelne.
+    pub fn destroy(self) -> Option<Venus> {
         let Sink { mut c, surfaces, .. } = self.sink;
         for (_, s) in surfaces {
             let _ = c.destroy_surface(s.id);
         }
-        let _ = c.destroy();
+        c.destroy().ok()
     }
 }

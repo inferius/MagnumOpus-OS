@@ -25,6 +25,8 @@ pub const TESTS: &[Test] = &[
     ("ocekavane ovladace bezi a odpovi na dk:ping", ping_all),
     ("edu: faktorial pres preruseni MSI", edu_factorial),
     ("edu: DMA tam a zpet (IOMMU)", edu_dma),
+    ("edu: DMA pres nesouvisle stranky (DMA_MAP)", edu_sg),
+    ("edu: pristup po odmapovani zablokovan (log IOMMU)", edu_stale),
     ("edu: obnova po padu (dk:crash)", edu_crash_recovery),
     ("edu: restart na zadost (dk:restart)", edu_restart),
 ];
@@ -141,6 +143,41 @@ fn edu_dma(startup: &Startup) -> TestResult {
     let text: String = (0..1000).map(|i| (b'a' + (i % 26) as u8) as char).collect();
     let r = ask(&ch, &format!("dma {text}"))?;
     check!(r == format!("dma {text}"), "data po DMA tam a zpet se lisi");
+    Ok(())
+}
+
+fn edu_sg(startup: &Startup) -> TestResult {
+    let Some(ch) = edu(startup)? else { return Ok(()) };
+    // 3000 bajtu: tam pres hranici stranek 0/1, zpet pres 1/2; bez IOMMU
+    // po fyzickych usecich (vic prenosu).
+    let text: String = (0..3000).map(|i| (b'A' + (i % 26) as u8) as char).collect();
+    let r = ask(&ch, &format!("sg {text}"))?;
+    check!(r == format!("sg {text}"), "data po DMA pres stranky se lisi");
+    Ok(())
+}
+
+/// Ovladac odmapuje buffer a necha zarizeni zapsat na jeho starou adresu:
+/// IOMMU zapis zablokuje a jadro ho zaloguje (hlaseni VT-d, AMD-Vi i SMMUv3
+/// konci `na adrese/adresu <iova> (`).
+fn edu_stale(startup: &Startup) -> TestResult {
+    let Some(ch) = edu(startup)? else { return Ok(()) };
+    if !iommu_present(startup) {
+        let r = ask(&ch, "stale")?;
+        check!(r.starts_with("chyba stale: bez IOMMU"), format!("stale bez IOMMU -> '{r}'"));
+        println!("edu stale: bez IOMMU jen odmitnuti (test ochrany preskocen)");
+        return Ok(());
+    }
+    let r = ask(&ch, "stale")?;
+    let iova = r.strip_prefix("stale ").ok_or_else(|| format!("stale -> '{r}'"))?;
+    let needle = format!("{iova} (");
+    let log = kernel_log(startup)?;
+    check!(
+        log.lines().any(|l| l.contains("zablokovan") && l.contains(&needle)),
+        format!("v logu jadra chybi zablokovany zapis edu na {iova}")
+    );
+    // Zarizeni dal funguje.
+    let r = ask(&ch, "dma po chybe")?;
+    check!(r == "dma po chybe", "DMA po zablokovanem pristupu");
     Ok(())
 }
 

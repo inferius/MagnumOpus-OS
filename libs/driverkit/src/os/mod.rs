@@ -113,10 +113,18 @@ os_io!(read8 write8 u8, read16 write16 u16, read32 write32 u32, read64 write64 u
 
 /// DMA pamet z Resource ovladace.
 pub struct OsDma {
+    /// Mapovani `DMA_MAP` (buffer po strankach); zanikne pred objektem
+    /// pameti (poradi poli = poradi ruseni).
+    dma: Option<libos::DmaMap>,
     _vmo: Vmo,
     map: Mapping,
     iova: u64,
     len: u64,
+    /// Useky pro zarizeni (offset v bufferu, adresa, delka); prazdne =
+    /// souvisla pamet od `iova`.
+    segments: Vec<(u64, u64, u64)>,
+    /// Mapovani overene s IOMMU (`REQUIRE_IOMMU`).
+    protected: bool,
 }
 
 impl DmaMemory for OsDma {
@@ -125,6 +133,15 @@ impl DmaMemory for OsDma {
     }
     fn len(&self) -> u64 {
         self.len
+    }
+    fn device_run(&self, off: u64) -> (u64, u64) {
+        match self.segments.iter().find(|&&(o, _, l)| off >= o && off < o + l) {
+            Some(&(o, a, l)) => (a + (off - o), (o + l).min(self.len) - off),
+            None => (self.iova + off, self.len - off),
+        }
+    }
+    fn is_protected(&self) -> bool {
+        self.protected
     }
     fn read_bytes(&self, off: u64, buf: &mut [u8]) {
         self.map.read_bytes(off, buf)
@@ -279,13 +296,66 @@ impl Platform for OsPlatform {
             .map_err(DriverError::os("mapovani DMA pameti"))?;
         Ok(DmaBuffer::new(
             OsDma {
+                dma: None,
                 _vmo: vmo,
                 map,
                 iova,
                 len: size,
+                segments: Vec::new(),
+                protected: false,
             },
             name,
         ))
+    }
+
+    fn alloc_dma_pages(&self, name: &'static str, size: u64) -> Result<DmaBuffer<OsDma>> {
+        let quota = |op| {
+            move |e| match e {
+                Error::NoResources | Error::AccessDenied => DriverError::DmaQuota { buffer: name, size },
+                err => DriverError::Os { op, err },
+            }
+        };
+        let bytes = size.max(1).next_multiple_of(4096);
+        let vmo = Vmo::create_pinned(bytes).map_err(quota("pripnuta pamet"))?;
+        use libos::dma::map::{DEVICE_READ, DEVICE_WRITE, REQUIRE_IOMMU};
+        let flags = DEVICE_READ | DEVICE_WRITE;
+        // Nejdriv s IOMMU (pak buffer vi, ze je chraneny); bez ni jadro
+        // vrati NOT_SUPPORTED a mapuje se fyzicky (s varovanim v logu jadra).
+        let (dma, protected) = match libos::DmaMap::new(&self.resource, &vmo, 0, bytes, flags | REQUIRE_IOMMU) {
+            Ok(d) => (d, true),
+            Err(Error::NotSupported) => (
+                libos::DmaMap::new(&self.resource, &vmo, 0, bytes, flags).map_err(quota("DMA_MAP"))?,
+                false,
+            ),
+            Err(e) => return Err(quota("DMA_MAP")(e)),
+        };
+        let mut segments = Vec::new();
+        let mut off = 0;
+        for s in dma.segments().map_err(DriverError::os("useky DMA"))? {
+            segments.push((off, s.addr, s.len));
+            off += s.len;
+        }
+        let map = Mapping::new(&vmo, 0, bytes, MAP_READ | MAP_WRITE)
+            .map_err(DriverError::os("mapovani DMA pameti"))?;
+        Ok(DmaBuffer::new(
+            OsDma {
+                iova: segments.first().map_or(0, |s| s.1),
+                dma: Some(dma),
+                _vmo: vmo,
+                map,
+                len: size,
+                segments,
+                protected,
+            },
+            name,
+        ))
+    }
+
+    fn dma_sync_for_cpu(&self, buf: &DmaBuffer<OsDma>) {
+        // Souvislou pamet jadro udrzuje samo (VMO_READ, mapovani pro DMA).
+        if let Some(d) = &buf.memory().dma {
+            let _ = d.sync(0, buf.len().next_multiple_of(4096), libos::dma::sync::FOR_CPU);
+        }
     }
 
     fn enable_irq(&self) -> Result<IrqId> {

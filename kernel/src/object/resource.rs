@@ -20,13 +20,17 @@
 //! (`abi::syscall::RANGE_IO_PORTS`, `RANGE_IRQ_LINES`). Potrebuji je
 //! zarizeni na desce bez PCI (radic PS/2).
 //!
-//! Bez IOMMU muze zarizeni pres DMA zapsat kamkoli do pameti - ovladac, ktery
-//! zarizeni naprogramuje spatne, porad muze poskodit system. TODO: IOMMU
-//! (VT-d / AMD-Vi) a domena DMA na zarizeni.
+//! Prostredek s identitou zarizeni ma jeho domenu IOMMU (`dma::DeviceDomain`,
+//! sdilenou vsemi prostredky zarizeni): do ni jde souvisla pamet pro DMA
+//! (identicky) a mapovani `DMA_MAP` (rozsahy IOVA). Kvota `dma_max` plati pro
+//! souvislou pamet po celou dobu zivota prostredku a pro ziva mapovani
+//! `DMA_MAP` (vrati se odmapovanim). Bez IOMMU muze zarizeni pres DMA zapsat
+//! kamkoli do pameti - ovladac, ktery zarizeni naprogramuje spatne, porad
+//! muze poskodit system.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use super::{KernelObject, ObjectCore, ObjectType, Rights, Signals};
 use crate::error::Error;
@@ -56,7 +60,9 @@ pub struct Resource {
     /// Zarizeni (segment, sbernice, zarizeni << 3 | funkce), kteremu
     /// prostredek patri, a jeho domena IOMMU (DMA pamet se mapuje do ni).
     device: Option<(u16, u8, u8)>,
-    domain: Option<crate::arch::iommu::Domain>,
+    domain: Option<Arc<super::dma::DeviceDomain>>,
+    /// Varovani "DMA_MAP bez IOMMU" uz bylo v logu.
+    warned_unprotected: AtomicBool,
 }
 
 /// Nejvic rozsahu jednoho omezeneho prostredku.
@@ -99,6 +105,7 @@ impl Resource {
             parent: None,
             device: None,
             domain: None,
+            warned_unprotected: AtomicBool::new(false),
         })
     }
 
@@ -162,7 +169,7 @@ impl Resource {
         };
         let domain = match (&self.domain, device) {
             (Some(d), _) => Some(d.clone()),
-            (None, Some((seg, bus, devfn))) => crate::arch::iommu::domain(seg, bus, devfn)?,
+            (None, Some(d)) => super::dma::DeviceDomain::for_device(d)?,
             (None, None) => None,
         };
         Ok(Arc::new(Self {
@@ -179,7 +186,18 @@ impl Resource {
             parent: Some(self.clone()),
             device,
             domain,
+            warned_unprotected: AtomicBool::new(false),
         }))
+    }
+
+    /// Jen pro self-testy jadra: prostredek zarizeni bez domeny IOMMU (cesta
+    /// `DMA_MAP` bez IOMMU i na stroji s IOMMU, kde by `restrict` domenu
+    /// vytvoril nebo smyslene zarizeni odmitl). Syscall ho vytvorit neumi.
+    pub fn new_test_device(dma_max: u64, device: (u16, u8, u8)) -> Arc<Self> {
+        let r = Self::new_root().restrict(Vec::new(), 0, dma_max, None).unwrap();
+        let mut r = Arc::try_unwrap(r).ok().unwrap();
+        r.device = Some(device);
+        Arc::new(r)
     }
 
     /// Smi prostredek mapovat fyzicky rozsah? Kontroluje cele stranky
@@ -222,7 +240,22 @@ impl Resource {
 
     /// Domena IOMMU zarizeni (DMA pamet z tohoto prostredku se mapuje do ni).
     pub fn domain(&self) -> Option<&crate::arch::iommu::Domain> {
+        self.domain.as_deref().map(super::dma::DeviceDomain::hw)
+    }
+
+    /// Domena zarizeni s alokatorem IOVA (`DMA_MAP`).
+    pub fn device_domain(&self) -> Option<&Arc<super::dma::DeviceDomain>> {
         self.domain.as_ref()
+    }
+
+    /// Zaloguje jednou na prostredek, ze `DMA_MAP` bez IOMMU nic nechrani.
+    pub fn warn_unprotected_once(&self, device: (u16, u8, u8)) {
+        if !self.warned_unprotected.swap(true, Ordering::AcqRel) {
+            crate::log::warn!(
+                "DMA_MAP bez IOMMU: zarizeni {} dostava fyzicke adresy a smi pres DMA kamkoli do pameti",
+                super::quarantine::fmt_device(device)
+            );
+        }
     }
 
     /// Retezec omezenych prostredku od tohoto ke koreni.
@@ -249,6 +282,13 @@ impl Resource {
     pub fn refund_irq(&self) {
         for l in self.chain() {
             l.irqs.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+
+    /// Vrati zapocitanou DMA pamet (odmapovani `DMA_MAP`).
+    pub fn refund_dma(&self, bytes: u64) {
+        for l in self.chain() {
+            l.dma_used.fetch_sub(bytes, Ordering::AcqRel);
         }
     }
 

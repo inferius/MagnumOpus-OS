@@ -56,10 +56,14 @@ impl Rights {
     /// (`CRASH_RECORD`). Ma ho jen korenovy Resource; init ho preda jen
     /// sluzbe logu.
     pub const DIAG: Self = Self(1 << 11);
+    /// Zpristupnit objekt pameti zarizeni (`DMA_MAP`). Odesilatel bufferu
+    /// tak rozhoduje, jestli ho smi cist nebo zapisovat zarizeni; ma ho
+    /// vychozi handle objektu pameti.
+    pub const DMA: Self = Self(1 << 12);
 
     pub const BASIC: Self = Self(Self::DUPLICATE.0 | Self::TRANSFER.0 | Self::WAIT.0);
     /// Vsechna prava (jen jako horni mez, napr. "zachovat prava" pri duplikaci).
-    pub const ALL: Self = Self((1 << 12) - 1);
+    pub const ALL: Self = Self((1 << 13) - 1);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
@@ -160,6 +164,8 @@ pub enum ObjectType {
     ExceptionToken = 11,
     /// Plot: casova osa `u64` (`FENCE_*`, `abi::fence`).
     Fence = 12,
+    /// Mapovani pameti pro zarizeni (`DMA_MAP`); zavreni = odmapovani.
+    DmaMap = 13,
 }
 
 /// Zprava MSI, kterou ovladac zapise do zarizeni (vystup `INTERRUPT_CREATE`).

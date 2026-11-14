@@ -487,6 +487,10 @@ impl api::Iommu for X86_64 {
     fn domain(segment: u16, bus: u8, devfn: u8) -> Result<Option<iommu::Domain>, Error> {
         iommu::domain(segment, bus, devfn)
     }
+
+    fn poll_faults() {
+        iommu::on_fault_interrupt();
+    }
 }
 
 impl api::Smp for X86_64 {

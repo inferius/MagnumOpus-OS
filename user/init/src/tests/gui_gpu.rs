@@ -20,7 +20,12 @@ pub fn gpu_backend(_: &Startup) -> TestResult {
             points.iter().map(|&(x, y)| pixel(&s.inspect, x, y)).collect()
         };
         let cpu = sample(s)?;
-        match s.gui.command(b"backend gpu", Vec::new()) {
+        // Render uzel od gpud (bez nej, napr. bez virtio-gpu 3D, NOT_SUPPORTED).
+        let render = match crate::render::open_render() {
+            Ok(ch) => alloc::vec![ch.into_handle()],
+            Err(_) => Vec::new(),
+        };
+        match s.gui.command(b"backend gpu", render) {
             Ok(_) => {}
             Err(libos::Error::NotSupported) => {
                 println!("init: test gui: GPU backend neni (bez Venusu), preskoceno");

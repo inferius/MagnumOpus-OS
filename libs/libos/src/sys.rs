@@ -208,7 +208,38 @@ pub fn channel_read(h: u32, data: &mut [u8], handles: &mut [u32]) -> (Result<()>
 
 /// Objekt pameti na ucet jobu procesu `process` (0 = vlastni).
 pub fn vmo_create(size: u64, process: u32) -> Result<u32> {
-    call(nr::VMO_CREATE, [size, process as u64, 0, 0, 0, 0]).map(|v| v as u32)
+    vmo_create_with(size, process, 0)
+}
+
+/// `VMO_CREATE` s volbami (`abi::vm::VMO_PINNED`).
+pub fn vmo_create_with(size: u64, process: u32, flags: u64) -> Result<u32> {
+    call(nr::VMO_CREATE, [size, process as u64, flags, 0, 0, 0]).map(|v| v as u32)
+}
+
+/// Zpristupni cast pripnuteho objektu pameti zarizeni (`DMA_MAP`); vrati
+/// handle mapovani.
+pub fn dma_map(resource: u32, vmo: u32, offset: u64, len: u64, flags: u64, iova_hint: u64) -> Result<u32> {
+    call(
+        nr::DMA_MAP,
+        [resource as u64, vmo as u64, offset, len, flags, iova_hint],
+    )
+    .map(|v| v as u32)
+}
+
+/// Useky mapovani (`DMA_SEGMENTS`): zapise jich nejvys `out.len()`, vrati
+/// pocet vsech.
+pub fn dma_segments(map: u32, out: &mut [abi::dma::Segment]) -> Result<usize> {
+    // `Segment` je #[repr(C)] (16 B, dve u64) - stejne jako zapisuje jadro.
+    call(
+        nr::DMA_SEGMENTS,
+        [map as u64, out.as_mut_ptr() as u64, out.len() as u64, 0, 0, 0],
+    )
+    .map(|v| v as usize)
+}
+
+/// Udrzba cache mapovani (`DMA_SYNC`, `abi::dma::sync`).
+pub fn dma_sync(map: u32, offset: u64, len: u64, direction: u64) -> Result<()> {
+    call(nr::DMA_SYNC, [map as u64, offset, len, direction, 0, 0]).map(|_| ())
 }
 
 pub fn vmo_seal(vmo: u32) -> Result<()> {

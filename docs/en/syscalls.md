@@ -343,16 +343,18 @@ are written to `out_actual_ptr`), `BAD_HANDLE`, `ACCESS_DENIED`,
 
 ### `VMO_CREATE`
 
-`(size, process) -> handle`. A memory object of `size` bytes (rounded up
-to 4 KiB, max 1 TiB), zero-filled. The whole size is committed at once
+`(size, process, flags) -> handle`. A memory object of `size` bytes
+(rounded up to 4 KiB, max 1 TiB), zero-filled. The whole size is committed at once
 (the job's user-memory budget and the global ceiling of program memory);
 frames come into existence on the first write
 ([memory-management.md](memory-management.md)). It is charged to the
 user-memory budget of the job of `process` (a handle
 with `WRITE`; 0 = the caller). A parent thus creates a program's memory
-(segments, stack) on the child's account. Rights: `DUPLICATE`,
-`TRANSFER`, `WAIT`, `READ`, `WRITE`, `MAP`, `EXECUTE`. Errors:
-`INVALID_ARGS` (0 or too large), `NO_MEMORY`, `NO_RESOURCES` (job
+(segments, stack) on the child's account. `flags`: 0, or `vm::VMO_PINNED`
+(1) = all pages at once and pinned for DMA; the `DMA` budget is charged
+as well and the object cannot be sealed ([dma.md](dma.md#pinned-memory)).
+Rights: `DUPLICATE`, `TRANSFER`, `WAIT`, `READ`, `WRITE`, `MAP`, `EXECUTE`,
+`DMA`. Errors: `INVALID_ARGS` (0, too large, unknown flag), `NO_MEMORY`, `NO_RESOURCES` (job
 budget), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE` (`process`).
 `NO_MEMORY` also means that so much memory cannot be committed (ceiling =
 free RAM minus the kernel reserve minus pages already committed).
@@ -716,12 +718,13 @@ root from the kernel (no limit, all rights) and divides it among
 services. Everything a process costs is charged to the budget of its job
 **and of all ancestors**, so a job limit applies to its whole subtree.
 
-Two budgets in bytes (`abi::job::pool`):
+Three budgets in bytes (`abi::job::pool`):
 
 | Budget | What is charged |
 |---|---|
 | `KERNEL` (0) - kernel memory | the process (structure + root page table), objects (event, channel, port, memory object, interrupt, resource, job), handle slots, port registrations (64 B), messages in channel queues (charged to the sender), mappings (record + upper estimate of page tables), threads (structure + 64 KiB kernel stack; the stack is returned right when the thread ends), page lists of memory objects |
 | `USER` (1) - user memory | pages of memory objects (`VMO_CREATE`, `VMO_CREATE_CONTIGUOUS`, DMA memory too) |
+| `DMA` (2) - pinned memory | on top of `USER`: pages that must not move or be evicted (`VMO_PINNED`, `VMO_CREATE_CONTIGUOUS`). Mandatory quota: the root job has a ceiling of half of RAM and `JOB_SET_LIMIT` can only lower it ([dma.md](dma.md#pinned-memory)) |
 
 - A charge is returned automatically when the thing holding it goes away.
 - Exceeding a budget = `NO_RESOURCES`. Running out of physical memory of
@@ -767,7 +770,8 @@ budget of `parent`. Rights: `DUPLICATE`, `TRANSFER`, `WAIT`, `READ`,
 ### `JOB_SET_LIMIT`
 
 `(job, pool, bytes) -> 0`. Sets the own limit of budget `pool`
-(`KERNEL` = 0, `USER` = 1) in bytes; `u64::MAX` (`job::UNLIMITED`) = no
+(`KERNEL` = 0, `USER` = 1, `DMA` = 2; for the root job `DMA` at most the
+ceiling of half of RAM) in bytes; `u64::MAX` (`job::UNLIMITED`) = no
 own limit. With `pool` = `policy::JIT` (2) it sets the JIT policy: the
 value is the bits `jit::RUN` (processes of the job may execute unsealed
 memory) and `jit::GRANT` (the job may grant JIT to sub-jobs); only someone
@@ -779,12 +783,13 @@ Requires `WRITE`. Errors: `INVALID_ARGS` (unknown `pool`, unknown bit),
 
 ### `JOB_INFO`
 
-`(job, out_ptr) -> 0`. Writes `abi::job::JobInfo` (56 B, little endian):
+`(job, out_ptr) -> 0`. Writes `abi::job::JobInfo` (80 B, little endian):
 for kernel memory and then user memory always `used` (charged to the job
 including descendants), `limit` (own limit) and `available` (how much
 can still be charged - the smallest free room over the job and all
-ancestors; `u64::MAX` = no limit anywhere), finally `id` (the job number,
-unique until reboot). Requires `READ`. Errors:
+ancestors; `u64::MAX` = no limit anywhere), then `id` (the job number,
+unique until reboot) and finally the same triple for pinned memory
+(`DMA`). Requires `READ`. Errors:
 `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
 
 ### `JOB_PROCESSES`
@@ -874,6 +879,60 @@ Limits given by data formats or calls, not policy:
 
 Page tables, the heap and kernel stacks may also use the reserve, so
 memory exhaustion by a program cannot bring the kernel down.
+
+## Scatter-gather DMA
+
+Pinned memory (`VMO_CREATE` with `VMO_PINNED`) made accessible to a device:
+with an IOMMU as one contiguous IOVA range, without an IOMMU as physical
+segments. Model, IOVA window, unmapping and quarantine: [dma.md](dma.md).
+**[verified in QEMU]** x86_64 (VT-d) and aarch64 (SMMUv3) and without an
+IOMMU (suites `dma`, `ovladace z manifestu`, kernel self-tests `DMA: ...`).
+Wrappers: `libos::DmaMap`, `libos::Vmo::create_pinned`; in driverkit
+`Platform::alloc_dma_pages`.
+
+### `DMA_MAP`
+
+`(resource, vmo, offset, len, flags, iova_hint) -> handle`. Makes `len`
+bytes of `vmo` from `offset` (both whole pages, at most 4 GiB) accessible
+to the device of `resource`. Flags `dma::map`: `DEVICE_READ` (1),
+`DEVICE_WRITE` (2), at least one; `REQUIRE_IOMMU` (4) = `NOT_SUPPORTED`
+without an IOMMU. The resource needs `MANAGE` and a device identity, the
+memory object the `DMA` right plus `READ` (the device reads) or `WRITE`
+(the device writes). The object must be pinned (`VMO_PINNED` or
+`VMO_CREATE_CONTIGUOUS`). With an IOMMU the kernel picks the IOVA range
+(window above the end of RAM, guard page after the range), or the driver
+chooses it in `iova_hint` (0 = the kernel picks). Without an IOMMU the
+segments are physical and the kernel logs this once per resource. The
+length is charged to the resource's `dma_max` quota (returned on unmap),
+the page record to the caller's kernel budget. The handle has the rights
+`READ`, `DUPLICATE`, `WAIT` (no `TRANSFER`: the mapping belongs to the
+driver process). Closing the last handle = unmapping with a synchronous
+IOTLB flush. Errors: `BAD_HANDLE`, `WRONG_TYPE`, `ACCESS_DENIED` (missing
+right, resource without a device identity), `INVALID_ARGS` (unaligned or
+empty range, outside the object, no direction, unknown flag, hint outside
+the window), `BAD_STATE` (the object is not pinned), `NOT_SUPPORTED` (hint
+or `REQUIRE_IOMMU` without an IOMMU), `ALREADY_EXISTS` (the hint overlaps),
+`NO_RESOURCES` (`dma_max` quota, IOVA window full, kernel budget),
+`NO_MEMORY`.
+
+### `DMA_SEGMENTS`
+
+`(map, out_ptr, max) -> count`. Writes at most `max` (up to 4096) entries
+`dma::Segment { addr: u64, len: u64 }` (16 B) and returns the number of
+all segments (1 with an IOMMU; without one, physical segments with
+adjacent pages merged). `max` = 0 only returns the count. Requires
+`READ`. Errors: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`,
+`INVALID_ARGS` (`max` above 4096), `BAD_ADDRESS`, `NO_MEMORY`.
+
+### `DMA_SYNC`
+
+`(map, offset, len, direction) -> 0`. Cache maintenance of a range of the
+mapping on a non-coherent platform: `dma::sync::FOR_DEVICE` (0) before a
+transfer to the device, `FOR_CPU` (1) after a transfer into memory. Does
+nothing on x86_64 and QEMU virt; `FOR_CPU` also collects pending reports
+of blocked IOMMU accesses into the log (SMMUv3 has no event interrupt).
+Requires `READ`. Errors: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`,
+`INVALID_ARGS` (outside the mapping, unknown direction).
 
 ## Hardware (drivers)
 

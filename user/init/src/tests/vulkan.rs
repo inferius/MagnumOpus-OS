@@ -1,5 +1,5 @@
-//! Vulkan pres Venus: render uzel ovladace virtio-gpu a testovaci program
-//! `vk-probe` (knihovna `venus`).
+//! Vulkan pres Venus: render uzel ovladace virtio-gpu (od sluzby render
+//! `gpud`) a testovaci program `vk-probe` (knihovna `venus`).
 //!
 //! Bezi pred sadou `gui`, dokud displej drzi init (pak ho prevezme
 //! kompozitor). Zarizeni bez Venusu (vychozi QEMU s `--gpu 2d`, Windows
@@ -70,12 +70,9 @@ fn start_probe(s: &Startup) -> Result<Option<Probe>, String> {
         println!("init: test vulkan: zarizeni nema Venus, preskoceno");
         return Ok(None);
     }
-    let (reply, mut handles) = ask(display, Request::OpenRender)?;
-    if reply != Reply::Render || handles.len() != 1 {
-        return Err(alloc::format!("OPEN_RENDER: {reply:?}"));
-    }
-    let render = handles.remove(0);
     drop(guard);
+    // Render uzel od sluzby render (gpud), ne od vlastnika displeje.
+    let render = crate::render::open_render().map_err(|e| fail("render uzel od gpud", e))?.into_handle();
     let fs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
     let image = fs.find("vk-probe").ok_or("vk-probe neni v initfs")?;
     let (proc, ch) =

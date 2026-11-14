@@ -13,9 +13,9 @@ ve složce, kde pracuješ.
 - `libs/` - ~70 crate. `no_std` knihovny, většina testovatelná na hostiteli:
   - rozhraní: `abi` (jádro<->userspace), `boot-info`, `libos` (API pro programy), `osrt` (std), `*proto` (protokoly služeb), `svcclient`
   - souborový systém: `fs`, `fsproto`, `osfs-proto`, `initfs`
-  - GUI: `comp` (jádro kompozitoru), `ui`, `gfx`, `font`, `theme`, `guiproto`, `vkcomp`
+  - GUI a GPU: `comp` (jádro kompozitoru), `ui`, `gfx`, `font`, `theme`, `guiproto`, `vkcomp`, `renderproto` (třída render), `bufdesc` (popis sdíleného bufferu)
   - shell a terminál: `shlang`, `term`, `agentsh`; účty: `accounts`; ovladače: `driverkit`, `pci`, `virtio`, `nic`, ...
-- `user/` - procesy userspace: `init` (první proces, supervisor, testy userspace), služby (`fsd`, `netd`, `compd`, `termd`, `accountd`, `devmgr`, `inputd`, `logd`, `timed`, `launchd`, ...), ovladače (`virtio-*`, `nvme`, `ahci`, `xhci`, `e1000e`, `hda`, ...), Soubory (`gui-files` + `files-copy`), ukázky (`echo`, `gui-demo`).
+- `user/` - procesy userspace: `init` (první proces, supervisor, testy userspace), služby (`fsd`, `netd`, `compd`, `gpud`, `termd`, `accountd`, `devmgr`, `inputd`, `logd`, `timed`, `launchd`, ...), ovladače (`virtio-*`, `nvme`, `ahci`, `xhci`, `e1000e`, `hda`, ...), Soubory (`gui-files` + `files-copy`), ukázky (`echo`, `gui-demo`).
 - `xtask/` - `cargo xtask`: build, obraz disku, QEMU, testy, docs, USB, VMware.
 - `design/` - klikací HTML prototypy GUI a `tokens.toml` (zdroj pravdy pro vzhled).
 - `docs/` - `cs/` a `en/` (vývojářská kniha), `prirucka/` (uživatelská), `README.md` (rozcestník, tabulka stránek).
@@ -65,7 +65,7 @@ Log sériové linky testu: `target/serial-test-<arch>-<pid>.log`. Běžící `ca
 
 ## Čísla syscallů
 
-Zdroj: `libs/abi/src/syscall.rs`, dnes `COUNT = 73` (čísla 0..72, bez děr; 73-75 rezervována pro DMA z kroku 6a-2). Nový syscall dostane číslo `COUNT` a v jednom commitu:
+Zdroj: `libs/abi/src/syscall.rs`, dnes `COUNT = 76` (čísla 0..75, bez děr). Nový syscall dostane číslo `COUNT` a v jednom commitu:
 
 1. konstanta + zvýšit `COUNT` (`libs/abi/src/syscall.rs`),
 2. jméno na správný index `NAMES` a větev v `kernel/src/syscall/mod.rs`,
