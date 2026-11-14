@@ -61,9 +61,28 @@ domova), na model [Bezpečnosti](architektura.md#bezpečnost) a na
   sledují, výchozí chování `AUTH` při nedostupném agentu (fail-open /
   fail-closed), zda se zálohuje klíč domova, povolené aplikace.
   Změna politiky jde do auditu a uživatel ji vidí.
-- **Odepsání z evidence** je také úkon `ELEVATE` s potvrzením. Zda ho smí
-  uživatel na firemním počítači udělat bez organizace, určuje politika
-  (otevřená otázka 1).
+- **Identita organizace je její veřejný klíč.** Politika, escrow i povolení
+  odběru jsou **podepsané tímto klíčem**; počítač přijme jen podepsanou
+  aktualizaci politiky, nepodepsanou zahodí a zaloguje.
+- **Tři cesty zápisu** **[navrženo]**:
+  1. **V instalátoru:** volba „Tento počítač patří organizaci“. Zadá se
+     adresa organizace nebo kód či QR od IT, počítač stáhne podepsanou
+     politiku, **ukáže rozsah** (co organizace uvidí a smí) a zápis se
+     potvrdí **před založením prvního účtu**.
+  2. **Později v Nastavení:** „Připojit k organizaci“ je úkon správy přes
+     `ELEVATE`. Ostatní uživatelé počítače se to **dozvědí při dalším
+     přihlášení**.
+  3. **Zero-touch:** IT si vyrobí vlastní instalační obraz nebo USB
+     s vloženým profilem organizace (obdoba Apple ADE nebo Windows
+     Autopilot, ale bez databáze výrobců: důvěra je jen v klíč
+     organizace vložený do obrazu).
+- **Odpojení** je úkon `ELEVATE` s potvrzením. Podle politiky může
+  vyžadovat **podpis organizace** (otevřená otázka 1). Odpojení **smaže
+  firemní obal klíčů a vypne odběr událostí**.
+- ⚠️ **Upřímné omezení:** kdo má k počítači fyzický přístup a roli správy,
+  může systém **přeinstalovat** a tím správu zrušit. **Firemní data zůstanou
+  chráněná**: šifrovaný domov a firemní úložiště přeinstalací
+  nezískáte, protože klíče drží organizace.
 - **Osobní počítač** záznam nemá: capability pro odběr událostí ani
   firemní obal klíče nikdo nevydá a služby, které by je používaly, se
   nespustí.
@@ -164,6 +183,15 @@ kód v jádře.
   v auditu a viditelný v nastavení i na liště.
 - Rozsah událostí a kategorie, které se smí sledovat, vymezuje politika;
   co není v politice, agent nedostane.
+- **Nezapsaný počítač nemá žádnou režii:** bez odběratele místo emise
+  události jen **atomicky přečte příznak „má odběr“** (jednotky ns)
+  a pokračuje. Nevzniká událost, kopie ani žádná služba navíc.
+  **Podmínka zavedení:** tvrzení ověří budoucí test a měření
+  **[navrženo]**.
+- **Zapsaný počítač:** `NOTIFY` jde **asynchronně do fronty** (levné);
+  `AUTH` je **jedna výměna zpráv s agentem**, odhad **desítky µs** na
+  sledovaný `exec` nebo `open` plus cache verdiktu. Odhad se ověří
+  měřením (viz [Rizika](#rizika)).
 
 ## Záznam obrazovky a kláves
 
