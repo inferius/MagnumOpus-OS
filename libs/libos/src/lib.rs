@@ -61,7 +61,7 @@ pub use event::Event;
 pub use handle::Handle;
 pub use mapping::{Mapping, Pod};
 pub use port::{Port, PortPacket};
-pub use process::{Process, Thread};
+pub use process::{Process, SuspendToken, Thread};
 pub use rt::Startup;
 pub use job::Job;
 pub use spawn::{spawn, spawn_in};

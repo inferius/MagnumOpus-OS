@@ -110,6 +110,9 @@ pub struct Thread {
     /// prostor procesu (bezi s korenem jadra), aby ho proces mohl zrusit
     /// hned po konci posledniho vlakna.
     pub(super) user_gone: AtomicBool,
+    /// Pozastaveni (`THREAD_SUSPEND`) a cekajici zapis kontextu
+    /// (`suspend.rs`).
+    pub(super) stop: SpinLock<super::suspend::Stop>,
 }
 
 // SAFETY: `context` cte a zapisuje jen planovac na CPU, ktere vlakno prave
@@ -154,6 +157,7 @@ impl Thread {
             started: AtomicBool::new(false),
             user_tp: AtomicU64::new(0),
             user_gone: AtomicBool::new(false),
+            stop: SpinLock::new(super::suspend::Stop::default()),
         }
     }
 
@@ -264,7 +268,9 @@ impl KernelObject for Thread {
         ObjectType::Thread
     }
 
+    /// `MANAGE` = pozastavit, `READ` / `WRITE` = cist / zapsat kontext
+    /// (`THREAD_STATE`).
     fn default_rights(&self) -> Rights {
-        Rights::BASIC | Rights::MANAGE
+        Rights::BASIC | Rights::MANAGE | Rights::READ | Rights::WRITE
     }
 }

@@ -23,6 +23,7 @@ pub mod params;
 pub mod process;
 pub mod sched;
 pub mod syscall;
+pub mod thread;
 pub mod time;
 pub mod vm;
 

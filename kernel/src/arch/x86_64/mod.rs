@@ -27,6 +27,7 @@ mod smp;
 mod tests;
 mod time;
 mod user;
+mod ustate;
 
 use core::arch::asm;
 use core::fmt;

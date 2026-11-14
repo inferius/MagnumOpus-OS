@@ -41,6 +41,7 @@ mod smmu;
 mod smp;
 mod tests;
 mod timer;
+mod ustate;
 
 use core::arch::asm;
 use core::fmt;

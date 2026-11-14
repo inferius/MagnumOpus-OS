@@ -120,6 +120,8 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::VM_QUERY => vm::query(a),
         nr::VMO_CLONE => vm::vmo_clone(a),
         nr::VMO_SEAL => vm::seal(a),
+        nr::THREAD_SUSPEND => process::thread_suspend(a),
+        nr::THREAD_STATE => process::thread_state(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -193,6 +195,8 @@ pub fn name(number: u64) -> &'static str {
         "VM_QUERY",
         "VMO_CLONE",
         "VMO_SEAL",
+        "THREAD_SUSPEND",
+        "THREAD_STATE",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

@@ -22,6 +22,7 @@ mod balance;
 mod debug;
 mod percpu;
 mod qos;
+pub mod suspend;
 mod thread;
 pub mod topo;
 mod user;
@@ -176,6 +177,8 @@ pub fn yield_now() {
 
 /// Uspi aktualni vlakno (po `Thread::prepare_wait`), dokud ho nekdo neprobudi.
 pub fn block() {
+    // Pozastavene vlakno, ktere usina v syscallu, uz stoji (`SUSPENDED`).
+    suspend::note_blocking(&current());
     schedule();
 }
 

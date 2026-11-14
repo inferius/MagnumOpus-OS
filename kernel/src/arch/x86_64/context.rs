@@ -38,6 +38,13 @@ pub struct Context {
     fpu: Box<FpuArea>,
 }
 
+impl Context {
+    /// Ulozeny stav FPU/SSE (obraz FXSAVE, 512 B).
+    pub fn fpu_bytes(&self) -> &[u8] {
+        &self.fpu.0
+    }
+}
+
 impl Default for Context {
     fn default() -> Self {
         Self {

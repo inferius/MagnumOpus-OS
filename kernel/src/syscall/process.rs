@@ -103,6 +103,47 @@ pub fn thread_start(a: Args) -> Result<u64> {
     Ok(0)
 }
 
+/// `THREAD_SUSPEND(thread) -> token`: pozastavi vlakno (pravo `MANAGE`);
+/// zavreni tokenu ho obnovi.
+pub fn thread_suspend(a: Args) -> Result<u64> {
+    let p = current_process();
+    let thread = p
+        .handles()
+        .get_as::<Thread>(arg_handle(a[0])?, Rights::MANAGE)?;
+    let token = sched::suspend::SuspendToken::new(thread)?;
+    let rights = token.default_rights();
+    Ok(p.handles().insert(token, rights)?.0 as u64)
+}
+
+/// `THREAD_STATE(thread, op, kind, ptr, len)`: cteni (`READ`) nebo zapis
+/// (`WRITE`) kontextu pozastaveneho vlakna (`abi::thread`).
+pub fn thread_state(a: Args) -> Result<u64> {
+    let p = current_process();
+    let (op, kind) = (
+        u32::try_from(a[1]).map_err(|_| Error::InvalidArgs)?,
+        u32::try_from(a[2]).map_err(|_| Error::InvalidArgs)?,
+    );
+    let size = sched::suspend::state_size(kind)?;
+    if a[4] != size as u64 {
+        return Err(Error::InvalidArgs);
+    }
+    match op {
+        abi::thread::op::READ => {
+            let thread = p.handles().get_as::<Thread>(arg_handle(a[0])?, Rights::READ)?;
+            let mut buf = alloc::vec![0u8; size];
+            sched::suspend::read_state(&thread, kind, &mut buf)?;
+            user::write_bytes(&p, a[3], &buf)?;
+        }
+        abi::thread::op::WRITE => {
+            let thread = p.handles().get_as::<Thread>(arg_handle(a[0])?, Rights::WRITE)?;
+            let data = user::read_bytes(&p, a[3], size)?;
+            sched::suspend::write_state(&thread, kind, &data)?;
+        }
+        _ => return Err(Error::InvalidArgs),
+    }
+    Ok(0)
+}
+
 /// `THREAD_EXIT()`: nevraci se.
 pub fn thread_exit() -> Result<u64> {
     sched::exit()

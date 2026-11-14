@@ -23,6 +23,13 @@ pub struct Context {
     fpu: Box<FpuArea>,
 }
 
+impl Context {
+    /// Ulozeny stav FPU/SIMD (q0-q31, FPCR, FPSR; 528 B).
+    pub fn fpu_bytes(&self) -> &[u8] {
+        &self.fpu.0
+    }
+}
+
 impl Default for Context {
     fn default() -> Self {
         Self {

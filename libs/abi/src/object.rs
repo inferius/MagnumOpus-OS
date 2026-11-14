@@ -95,6 +95,9 @@ impl Signals {
     pub const READABLE: Self = Self(1 << 2);
     /// Kanal: druha strana je zavrena.
     pub const PEER_CLOSED: Self = Self(1 << 3);
+    /// Vlakno je pozastavene (`THREAD_SUSPEND`): stoji pred navratem do
+    /// userspace nebo spi v syscallu; jeho kontext jde cist a zapsat.
+    pub const SUSPENDED: Self = Self(1 << 4);
 
     pub const fn intersects(self, other: Self) -> bool {
         self.0 & other.0 != 0
@@ -138,6 +141,8 @@ pub enum ObjectType {
     Interrupt = 7,
     Port = 8,
     Job = 9,
+    /// Token pozastaveni vlakna (`THREAD_SUSPEND`); zavreni = obnoveni.
+    SuspendToken = 10,
 }
 
 /// Zprava MSI, kterou ovladac zapise do zarizeni (vystup `INTERRUPT_CREATE`).

@@ -226,8 +226,21 @@ pub const VMO_CLONE: u64 = 60;
 /// `WRITE`; objekt nesmi mit mapovani, ktere smi zapisovat.
 pub const VMO_SEAL: u64 = 61;
 
+/// Pozastaveni vlakna: `(thread) -> token`. Vlakno se zastavi pred
+/// navratem do userspace (vlakno spici v syscallu se pocita jako
+/// pozastavene hned); signal `SUSPENDED`. Zavreni tokenu vlakno obnovi,
+/// vic tokenu = stoji, dokud existuje aspon jeden. Pravo `MANAGE`.
+pub const THREAD_SUSPEND: u64 = 62;
+
+/// Kontext vlakna: `(thread, op, kind, ptr, len) -> 0`. `op` =
+/// `thread::op::READ` / `WRITE`, `kind` = `thread::kind::GENERAL` / `FP`,
+/// struktura podle architektury (`abi::thread`). Jen u pozastaveneho
+/// vlakna. Cteni pravo `READ`, zapis `WRITE`; zapis jadro overi a vlakno
+/// ho pouzije pred navratem do userspace.
+pub const THREAD_STATE: u64 = 63;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 62;
+pub const COUNT: u64 = 64;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {

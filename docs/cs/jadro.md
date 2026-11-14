@@ -138,6 +138,17 @@ Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
 - **Paměť pro DMA řízeného zařízení** se při konci procesu nevrací hned:
   jde do karantény DMA, jádro zařízení zastaví a paměť pustí až potom
   (viz [IOMMU](#iommu-ochrana-dma), Karanténa DMA).
+- **Pozastavení vlákna a jeho kontext** (`THREAD_SUSPEND`, `THREAD_STATE`,
+  `kernel/src/sched/suspend.rs`) **[ověřeno v QEMU]** (sada `procesy`,
+  x86_64 i aarch64): token pozastavení zastaví vlákno na hranici návratu
+  do userspace (i před prvním vstupem); vlákno spící v syscallu je
+  pozastavené hned. Obecné registry jsou v rámci na vrcholu zásobníku
+  jádra vlákna (každý vstup z userspace ho tam uloží celý), FPU/SIMD
+  v `Context`. Čtení jde jen u stojícího vlákna; zápis jádro ověří a vlákno
+  ho samo použije těsně před návratem (registry do rámce, FPU/SIMD přímo
+  do registrů), takže se nemine s ukládáním FPU při přepnutí. Kill vždy
+  vyhraje. Podklad pro doručení výjimek (SEH ve Windows vrstvě, signály
+  v `cstd`) a debugger.
 - **Výjimka v programu** (page fault, neplatná instrukce, ...) ukončí jen
   proces, ne jádro: kód -1 000 100 - vektor, v logu adresa a typ chyby.
 - **Vstup do userspace:** vstupní bod a zásobník vlákna musí ležet v paměti

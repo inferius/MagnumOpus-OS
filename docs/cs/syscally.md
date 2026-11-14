@@ -464,6 +464,41 @@ Vyžaduje `MANAGE`. Chyby: `BAD_STATE`, `INVALID_ARGS`.
 `()` - nevrací se. Ukončí aktuální vlákno. Konec posledního vlákna ukončí
 proces (kód -1 000 002, pokud předtím nevolal `PROCESS_EXIT`).
 
+### `THREAD_SUSPEND`
+
+`(thread) -> token`. Pozastaví vlákno procesu. Vlákno se zastaví na hranici
+návratu do userspace a dostane signál `SUSPENDED`; vlákno, které právě spí
+v syscallu, se počítá jako pozastavené hned (jeho uživatelský kontext je
+uložený) a po probuzení se zastaví před návratem. Běžící vlákno jádro
+přeruší (IPI). Zavření tokenu vlákno obnoví; víc tokenů = vlákno stojí,
+dokud žije aspoň jeden (když debugger zemře, vlákno se rozběhne samo).
+Kill a `JOB_KILL` vždy vyhrají: pozastavené vlákno skončí. Vyžaduje
+`MANAGE` na vlákně. Chyby: `WRONG_TYPE` (vlákno jádra), `BAD_STATE`
+(vlákno skončilo), `NO_RESOURCES`, `BAD_HANDLE`, `ACCESS_DENIED`.
+
+### `THREAD_STATE`
+
+`(thread, op, kind, ptr, len) -> 0`. Čtení (`thread::op::READ`, pravo
+`READ`) nebo zápis (`WRITE`, pravo `WRITE`) kontextu pozastaveného vlákna.
+`kind`: `thread::kind::GENERAL` - obecné registry, PC, SP, příznaky a báze
+TLS (`abi::thread::X64General` 160 B, `A64General` 280 B); `FP` - FPU/SIMD
+(x86_64 obraz FXSAVE 512 B, aarch64 V0-V31 + FPCR + FPSR 528 B); `len`
+přesně podle architektury. Čtení počká (nejvýš desetinu sekundy), než pozastavené
+vlákno opravdu stojí v jádře. Zápis jádro ověří a vlákno ho použije
+těsně před návratem do userspace (čtení ho už vidí); u vlákna spícího
+v syscallu přepíše i návratovou hodnotu (rax / x0). Ověření zápisu: PC, SP
+a báze TLS v paměti procesu (na x86_64 kanonické, pod `USER_MAX`),
+z příznaků jen uživatelské bity (x86_64 RFLAGS bez IOPL, IF vždy 1;
+aarch64 jen NZCV), u FPU nulové rezervované bity (MXCSR, FPCR, FPSR).
+Chyby: `INVALID_ARGS` (neznámý `op`/`kind`, špatná délka, neplatný
+kontext), `BAD_STATE` (vlákno není pozastavené), `WRONG_TYPE`,
+`BAD_ADDRESS`, `BAD_HANDLE`, `ACCESS_DENIED`.
+
+Kdo má handle procesu s `WRITE` (nebo vlákna s `WRITE`), má nad procesem
+**plnou kontrolu**: stejně jako `VM_MAP` do něj může přepsat kód nebo
+registry. Rodič je tak přirozeně debuggerem potomka; handle procesu
+s `WRITE` se nikomu jinému nedává.
+
 ### `THREAD_YIELD`
 
 `() -> 0`. Přenechá CPU dalšímu připravenému vláknu stejné nebo vyšší třídy.

@@ -87,4 +87,37 @@ impl Thread {
     pub fn wait_exit(&self, deadline: Option<u64>) -> Result<()> {
         wait_one(&self.0, Signals::TERMINATED, deadline).map(|_| ())
     }
+
+    /// Pozastavi vlakno (pravo `MANAGE`): stoji, dokud zije vraceny token.
+    /// Na skutecne zastaveni se ceka [`Thread::wait_suspended`].
+    pub fn suspend(&self) -> Result<SuspendToken> {
+        sys::thread_suspend(self.0.raw()).map(|h| SuspendToken(Handle::from_raw(h)))
+    }
+
+    /// Pocka, az pozastavene vlakno opravdu stoji (signal `SUSPENDED`).
+    pub fn wait_suspended(&self, deadline: Option<u64>) -> Result<()> {
+        wait_one(&self.0, Signals::SUSPENDED, deadline).map(|_| ())
+    }
+
+    /// Precte kontext pozastaveneho vlakna (`abi::thread::kind`, struktura
+    /// podle architektury; pravo `READ`).
+    pub fn read_state(&self, kind: u32, buf: &mut [u8]) -> Result<()> {
+        sys::thread_state_read(self.0.raw(), kind, buf)
+    }
+
+    /// Zapise kontext pozastaveneho vlakna (pravo `WRITE`); plati od
+    /// obnoveni. Neplatny kontext (adresa mimo userspace, rezervovane bity)
+    /// = `INVALID_ARGS`.
+    pub fn write_state(&self, kind: u32, buf: &[u8]) -> Result<()> {
+        sys::thread_state_write(self.0.raw(), kind, buf)
+    }
+}
+
+/// Token pozastaveni vlakna: zavreni (Drop) vlakno obnovi.
+pub struct SuspendToken(Handle);
+
+impl SuspendToken {
+    pub fn handle(&self) -> &Handle {
+        &self.0
+    }
 }

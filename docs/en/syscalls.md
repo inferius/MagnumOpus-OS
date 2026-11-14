@@ -478,6 +478,43 @@ same rules as for `PROCESS_START`. Requires `MANAGE`. Errors: `BAD_STATE`,
 `()` - does not return. Ends the current thread. When the last thread ends,
 the process ends (code -1,000,002 unless `PROCESS_EXIT` was called before).
 
+### `THREAD_SUSPEND`
+
+`(thread) -> token`. Suspends a process thread. The thread stops at the
+boundary of returning to userspace and gets the `SUSPENDED` signal; a thread
+sleeping in a syscall right now counts as suspended at once (its user
+context is saved) and after waking it stops before returning. A running
+thread is interrupted (IPI). Closing the token resumes the thread; with
+several tokens the thread stays stopped while at least one lives (if a
+debugger dies, the thread runs again by itself). Kill and `JOB_KILL` always
+win: a suspended thread ends. Requires `MANAGE` on the thread. Errors:
+`WRONG_TYPE` (kernel thread), `BAD_STATE` (the thread has ended),
+`NO_RESOURCES`, `BAD_HANDLE`, `ACCESS_DENIED`.
+
+### `THREAD_STATE`
+
+`(thread, op, kind, ptr, len) -> 0`. Reads (`thread::op::READ`, right
+`READ`) or writes (`WRITE`, right `WRITE`) the context of a suspended
+thread. `kind`: `thread::kind::GENERAL` - general registers, PC, SP, flags
+and the TLS base (`abi::thread::X64General` 160 B, `A64General` 280 B);
+`FP` - FPU/SIMD (x86_64 an FXSAVE image of 512 B, aarch64 V0-V31 + FPCR +
+FPSR, 528 B); `len` exactly per architecture. A read waits (at most about a
+tenth of a second) until the suspended thread really stands in the kernel.
+The kernel validates a write and the thread applies it right before
+returning to userspace (a read already sees it); for a thread sleeping in a
+syscall it also overwrites the return value (rax / x0). Write validation:
+PC, SP and the TLS base inside the process memory (canonical on x86_64,
+below `USER_MAX`), only user bits of the flags (x86_64 RFLAGS without IOPL,
+IF always 1; aarch64 only NZCV), zero reserved bits for the FPU (MXCSR,
+FPCR, FPSR). Errors: `INVALID_ARGS` (unknown `op`/`kind`, wrong length,
+invalid context), `BAD_STATE` (the thread is not suspended), `WRONG_TYPE`,
+`BAD_ADDRESS`, `BAD_HANDLE`, `ACCESS_DENIED`.
+
+Whoever holds a process handle with `WRITE` (or a thread handle with
+`WRITE`) has **full control** over the process: just like with `VM_MAP`
+they can overwrite its code or registers. A parent is thus naturally its
+child's debugger; a process handle with `WRITE` is given to nobody else.
+
 ### `THREAD_YIELD`
 
 `() -> 0`. Gives the CPU to the next ready thread of the same or higher

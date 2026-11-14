@@ -125,6 +125,8 @@ fn every_syscall_is_documented() {
         "VM_QUERY",
         "VMO_CLONE",
         "VMO_SEAL",
+        "THREAD_SUSPEND",
+        "THREAD_STATE",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {
@@ -199,4 +201,23 @@ fn sched_info_roundtrip() {
     assert_eq!(QosInfo::decode(&q.encode()), q);
     let c = CpuInfo { kind: 1, capacity: 512, cluster: 3, hw_id: 7, run_ns: [1, 2, 3, 4], idle_ns: 9, ..Default::default() };
     assert_eq!(CpuInfo::decode(&c.encode()), c);
+}
+
+#[test]
+fn thread_context_roundtrip() {
+    use crate::thread::{A64General, X64General};
+    let mut x = X64General::default();
+    x.rax = 1;
+    x.r15 = 0xF0F0;
+    x.rip = 0x40_1000;
+    x.gs_base = 7;
+    assert_eq!(X64General::decode(&x.encode()), x);
+    let mut a = A64General::default();
+    a.x[0] = 5;
+    a.x[30] = 0x30;
+    a.pc = 0x40_2000;
+    a.tpidr = 9;
+    assert_eq!(A64General::decode(&a.encode()), a);
+    assert_eq!(X64General::SIZE, 20 * 8);
+    assert_eq!(A64General::SIZE, 35 * 8);
 }
