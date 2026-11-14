@@ -13,7 +13,8 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
 > Část 2a **[ověřeno v QEMU]** na x86_64 i aarch64 (krok `posix` téhož
 > testu): čísla fd, `unistd.h`, `fcntl.h`, `sys/stat.h`, `dirent.h`, `FILE`
 > nad čísly fd. Část 2b **[ověřeno v QEMU]** (krok `threads`): `pthread`.
-> Další části (čas, sockety, `math.h`, `mmap`, signály, zámky souborů,
+> Část 2c **[ověřeno v QEMU]** (krok `time`): čas, kalendář, `setenv`.
+> Další části (sockety, `math.h`, `mmap`, signály, zámky souborů,
 > `libc.so`, porty) **[navrženo]**, viz
 > [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
 
@@ -114,10 +115,28 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
   destruktory `thread_local!` v Rustu toho vlákna ne.
 - Zrušení je jen odložené (rozhodnutí 5): body zrušení jsou
   `pthread_testcancel`, `pthread_join` a čekání na podmínku (po kusech
-  100 ms, zrušení tedy nejvýš o 100 ms později).
+  `CANCEL_SLICE`, sto milisekund; o tolik se zrušení může opozdit).
 - `pthread_exit` v hlavním vlákně ukončí proces kódem 0 (ostatní vlákna
   nečeká).
 - `PTHREAD_PROCESS_SHARED` není (futex je soukromý procesu).
+
+## Funkce (část 2c: čas)
+
+| Hlavička | Funkce | Poznámka |
+|---|---|---|
+| `time.h` | `clock_gettime`, `clock_getres` (`REALTIME`, `MONOTONIC`, `BOOTTIME`, `*_COARSE`, `MONOTONIC_RAW`), `nanosleep`, `clock_nanosleep` (i `TIMER_ABSTIME`), `time`, `clock`, `difftime` | čas CPU (`*_CPUTIME_ID`, `clock`) jádro nedává: `EINVAL`, `clock()` = -1 |
+| `time.h` | `gmtime_r`, `localtime_r`, `gmtime`, `localtime`, `mktime`, `timegm`, `strftime`, `tzset` | `struct tm` s `tm_gmtoff` a `tm_zone` (jako glibc); `strftime` v locale C vč. ISO týdne (`%G`, `%V`) |
+| `sys/time.h` | `gettimeofday` | |
+| `unistd.h` | `sleep`, `usleep` | |
+| `stdlib.h` | `setenv`, `unsetenv` | |
+
+- **Místní čas:** pásmo z proměnné `TZ` - jméno IANA (`Europe/Prague`)
+  nebo pevný posun ve stylu ISO (`UTC+2`), jinak UTC. Pravidla pásem
+  jsou v `libs/tz` (bez tzdata). Řetězce POSIX typu `CET-1CEST` se
+  nečtou. Předání pásma systému (nastavení času) do `TZ` při spuštění
+  programu **[navrženo]**.
+- Spánek se nepřeruší (signály nejsou, `EINTR` nevzniká), `rem` je vždy 0;
+  `nanosleep`, `sleep` a `usleep` jsou body zrušení vlákna.
 
 ### Čísla fd
 

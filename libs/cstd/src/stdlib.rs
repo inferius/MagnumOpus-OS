@@ -75,6 +75,55 @@ pub unsafe extern "C" fn getenv(name: *const c_char) -> *const c_char {
     list.last().map_or(core::ptr::null(), |c| c.as_ptr().cast())
 }
 
+/// Platne jmeno promenne (`setenv`, `unsetenv`).
+fn env_name<'a>(name: *const c_char) -> Option<&'a str> {
+    if name.is_null() {
+        return None;
+    }
+    // SAFETY: retezec C.
+    let n = core::str::from_utf8(unsafe { c_bytes(name) }).ok()?;
+    (!n.is_empty() && !n.contains('=')).then_some(n)
+}
+
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn setenv(name: *const c_char, value: *const c_char, overwrite: c_int) -> c_int {
+    let (Some(n), false) = (env_name(name), value.is_null()) else {
+        crate::errno::set(crate::errno::EINVAL);
+        return -1;
+    };
+    if overwrite == 0 && std::env::var_os(n).is_some() {
+        return 0;
+    }
+    // SAFETY: retezec C.
+    let v = os_str(unsafe { c_bytes(value) });
+    // SAFETY: prostredi procesu meni jen tato knihovna a std (osrt drzi
+    // promenne pod zamkem, cteni z jinych vlaken je bezpecne).
+    unsafe { std::env::set_var(n, v) };
+    0
+}
+
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn unsetenv(name: *const c_char) -> c_int {
+    let Some(n) = env_name(name) else {
+        crate::errno::set(crate::errno::EINVAL);
+        return -1;
+    };
+    // SAFETY: viz setenv.
+    unsafe { std::env::remove_var(n) };
+    0
+}
+
+/// Bajty hodnoty jako `OsStr` (na cili libovolne bajty, na hostiteli
+/// jen UTF-8).
+fn os_str(b: &[u8]) -> &std::ffi::OsStr {
+    #[cfg(target_os = "magnumopus")]
+    {
+        std::os::magnumopus::ffi::OsStrExt::from_bytes(b)
+    }
+    #[cfg(not(target_os = "magnumopus"))]
+    std::ffi::OsStr::new(core::str::from_utf8(b).unwrap_or(""))
+}
+
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn abort() -> ! {
     let _ = std::io::stderr().write_all(b"abort()\n");

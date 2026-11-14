@@ -17,6 +17,9 @@ test = true
 # Retezce, ctype, malloc (nad alokatorem std), snprintf a SSP bez vystupu
 # do logu (ten maji jen sluzby no_std).
 cstd-core = { path = "../cstd-core", default-features = false }
+# Kalendar (prevody dni) a casova pasma pro time.h (cista logika, bez stavu).
+abi.workspace = true
+tz = { path = "../tz" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("magnumopus"))'] }

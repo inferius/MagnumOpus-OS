@@ -14,7 +14,8 @@ Compiling C (clang, flags, protections) is described in
 > Part 2a **[verified in QEMU]** on x86_64 and aarch64 (step `posix` of
 > the same test): fd numbers, `unistd.h`, `fcntl.h`, `sys/stat.h`,
 > `dirent.h`, `FILE` over fd numbers. Part 2b **[verified in QEMU]** (step
-> `threads`): `pthread`. Further parts (time, sockets, `math.h`, `mmap`,
+> `threads`): `pthread`. Part 2c **[verified in QEMU]** (step `time`):
+> time, calendar, `setenv`. Further parts (sockets, `math.h`, `mmap`,
 > signals, file locks, `libc.so`, ports) **[designed]**, see [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
 
 ## Layers
@@ -116,10 +117,28 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
   `thread_local!` destructors of that thread do not.
 - Cancellation is deferred only (decision 5): cancellation points are
   `pthread_testcancel`, `pthread_join` and waiting on a condition (in
-  100 ms slices, so cancellation is at most 100 ms late).
+  `CANCEL_SLICE` slices, a hundred milliseconds; cancellation may be that late).
 - `pthread_exit` in the main thread ends the process with code 0 (it does
   not wait for the other threads).
 - No `PTHREAD_PROCESS_SHARED` (the futex is private to the process).
+
+## Functions (part 2c: time)
+
+| Header | Functions | Note |
+|---|---|---|
+| `time.h` | `clock_gettime`, `clock_getres` (`REALTIME`, `MONOTONIC`, `BOOTTIME`, `*_COARSE`, `MONOTONIC_RAW`), `nanosleep`, `clock_nanosleep` (also `TIMER_ABSTIME`), `time`, `clock`, `difftime` | the kernel does not provide CPU time (`*_CPUTIME_ID`, `clock`): `EINVAL`, `clock()` = -1 |
+| `time.h` | `gmtime_r`, `localtime_r`, `gmtime`, `localtime`, `mktime`, `timegm`, `strftime`, `tzset` | `struct tm` with `tm_gmtoff` and `tm_zone` (like glibc); `strftime` in the C locale incl. ISO week (`%G`, `%V`) |
+| `sys/time.h` | `gettimeofday` | |
+| `unistd.h` | `sleep`, `usleep` | |
+| `stdlib.h` | `setenv`, `unsetenv` | |
+
+- **Local time:** the zone comes from the `TZ` variable - an IANA name
+  (`Europe/Prague`) or a fixed offset in ISO style (`UTC+2`), otherwise
+  UTC. Zone rules are in `libs/tz` (no tzdata). POSIX strings such as
+  `CET-1CEST` are not read. Passing the system zone (time settings) into
+  `TZ` when a program starts **[designed]**.
+- Sleeping is not interrupted (no signals, no `EINTR`), `rem` is always 0;
+  `nanosleep`, `sleep` and `usleep` are thread cancellation points.
 
 ### fd numbers
 

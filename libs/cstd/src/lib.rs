@@ -33,6 +33,7 @@ pub mod stat;
 pub mod stdio;
 pub mod stdlib;
 pub mod sys;
+pub mod time;
 pub mod unistd;
 
 #[cfg(test)]
@@ -41,6 +42,8 @@ mod tests;
 mod fd_tests;
 #[cfg(test)]
 mod pthread_tests;
+#[cfg(test)]
+mod time_tests;
 
 pub use cstd_core::ctypes::{c_char, c_int, c_long, c_uint, c_ulong, size_t};
 
