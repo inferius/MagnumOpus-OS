@@ -71,15 +71,11 @@ pub fn target_flags(target: &str) -> Result<&'static [&'static str], String> {
             "--target=x86_64-unknown-none-elf",
             "-march=x86-64-v2",
             "-mcmodel=small",
-            // Nativni TLS v modelu local-exec (staticky ET_EXEC; `_Thread_local`
-            // a `errno` v C sdili bloky TLS s Rustem, docs/cs/rust-std.md).
-            "-ftls-model=local-exec",
         ]),
         "aarch64-unknown-magnumopus" => Ok(&[
             "--target=aarch64-unknown-none-elf",
             "-march=armv8-a+simd",
             "-mstrict-align",
-            "-ftls-model=local-exec",
         ]),
         "x86_64-unknown-none" => Ok(&[
             "--target=x86_64-unknown-none-elf",
@@ -261,6 +257,13 @@ impl Build {
             Code::Shared => "-fPIC",
         };
         f.extend(COMMON_FLAGS.iter().map(|s| if *s == "-fno-pic" { String::from(pic) } else { s.to_string() }));
+        // Staticky program (ET_EXEC) se std: nativni TLS v modelu local-exec
+        // (`_Thread_local` a `errno` v C sdili bloky TLS s Rustem,
+        // docs/cs/rust-std.md). PIE a knihovny ne - model urci prekladac
+        // (GD/TLSDESC v knihovnach, docs/cs/dynamicke-linkovani.md).
+        if code == Code::Static && target.ends_with("-unknown-magnumopus") {
+            f.push("-ftls-model=local-exec".into());
+        }
         match self.trust {
             Trust::Own => f.extend(["-Wall", "-Wextra", "-Werror"].map(String::from)),
             Trust::Vendored => f.push("-w".into()),
