@@ -4,6 +4,7 @@
 
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::time::Duration;
 
 use libos::{Startup, println, time};
@@ -24,9 +25,26 @@ fn shots(fs: &fsproto::FsClient) -> Result<alloc::vec::Vec<String>, String> {
     Ok(list.into_iter().map(|e| e.name).filter(|n| n.starts_with("snimek-") && n.ends_with(".bmp")).collect())
 }
 
+/// Cesta k logu tohoto bootu (nejnovejsi `boot-*.log`).
+fn boot_log(fs: &fsproto::FsClient) -> Result<String, String> {
+    let name = fs
+        .list(crate::logd::LOG_DIR)
+        .map_err(|e| fail("vypis /system/log", e))?
+        .into_iter()
+        .map(|e| e.name)
+        .filter(|n| n.starts_with("boot-") && n.ends_with(".log"))
+        .max()
+        .ok_or("chybi boot-*.log")?;
+    Ok(format!("{}/{name}", crate::logd::LOG_DIR))
+}
+
 pub fn diag_snapshot(_: &Startup) -> TestResult {
     let fs = fs()?;
     let before = shots(fs)?;
+    // Blok se hleda v tom, co logd pripise od ted: cely novy usek (ne jen
+    // konec souboru), at je log jakkoli velky nebo rychle roste.
+    let log = boot_log(fs)?;
+    let mut at = fs.stat(&log).map_err(|e| fail("stat logu", e))?.size;
     println!("{QEMU_SNAPSHOT}");
     // Obrazek ulozi logd (kazdou sekundu vyrizuje zpravy).
     let end = time::deadline_after(Duration::from_secs(30));
@@ -53,39 +71,59 @@ pub fn diag_snapshot(_: &Startup) -> TestResult {
     // Id snimku: snimek-<boot>-<id>-<revize>.bmp (id muze obsahovat '-').
     let mid = name.trim_start_matches("snimek-").trim_end_matches(".bmp");
     let id = mid.split_once('-').and_then(|(_, r)| r.rsplit_once('-')).map(|(id, _)| id).ok_or("jmeno obrazku")?;
-    // Blok stavu v logu bootu (logd ho pripisuje kazdou sekundu).
-    let log = fs
-        .list(crate::logd::LOG_DIR)
-        .map_err(|e| fail("vypis /system/log", e))?
-        .into_iter()
-        .map(|e| e.name)
-        .filter(|n| n.starts_with("boot-") && n.ends_with(".log"))
-        .max()
-        .ok_or("chybi boot-*.log")?;
-    let log = format!("{}/{log}", crate::logd::LOG_DIR);
-    let end = time::deadline_after(Duration::from_secs(15));
+    // Blok stavu v logu bootu (logd ho pripisuje kazdou sekundu): cist
+    // prubezne od `at`, drzet jen radky bloku (a poznamky logd o ztrate).
+    let tag = format!("snimek {id}:");
+    let mut block = String::new();
+    let mut notes = String::new();
+    let mut partial: Vec<u8> = Vec::new();
+    let end = time::deadline_after(Duration::from_secs(30));
     loop {
         let size = fs.stat(&log).map_err(|e| fail("stat logu", e))?.size;
-        let from = size.saturating_sub(1 << 20);
-        let data = fs.read(&log, from, (size - from) as usize).map_err(|e| fail("cteni logu", e))?;
-        let text = String::from_utf8_lossy(&data);
-        let tag = format!("snimek {id}:");
-        // Blok kompozitoru a za nim trasovani vstupu z pameti (logd).
-        if text.contains(&format!("{tag} konec")) && text.contains(&format!("{tag} trasovani vstupu")) {
-            check!(text.contains(&format!("{tag}   ")) && text.contains("] vstup: id="), "trasovani vstupu v bloku snimku");
-            check!(text.contains(&format!("{tag} okno z=0")), "okna v bloku snimku");
-            check!(text.contains(&format!("{tag}   uzel")) && text.contains("checkbox 'Jen úlohy agenta'"), "strom pristupnosti v bloku snimku");
-            check!(text.contains(&format!("{tag} fokus okno")), "fokus v bloku snimku");
-            check!(text.contains(&format!("{tag} duvod zkratka")), "duvod snimku");
-            check!(text.contains("viditelny"), "viditelnost prvku v bloku snimku");
-            check!(text.contains("posuvna oblast vrstva"), "posuvna oblast v bloku snimku");
+        while at < size {
+            let n = ((size - at) as usize).min(256 << 10);
+            let data = fs.read(&log, at, n).map_err(|e| fail("cteni logu", e))?;
+            if data.is_empty() {
+                break;
+            }
+            at += data.len() as u64;
+            partial.extend_from_slice(&data);
+            let Some(e) = partial.iter().rposition(|&c| c == b'\n') else { continue };
+            let whole: Vec<u8> = partial.drain(..=e).collect();
+            for line in String::from_utf8_lossy(&whole).lines() {
+                if line.contains(tag.as_str()) {
+                    block.push_str(line);
+                    block.push('\n');
+                } else if line.starts_with("[logd:") && notes.len() < 300 {
+                    notes.push_str(line);
+                    notes.push(' ');
+                }
+            }
+        }
+        let done = block.contains(&format!("{tag} konec"));
+        let trace = block.contains(&format!("{tag} trasovani vstupu"));
+        if done && trace {
             break;
         }
         if time::now() > end {
-            return Err(format!("blok '{tag}' v logu chybi"));
+            // Duvod do hlaseni: co z bloku doslo a kam az se cetlo.
+            return Err(format!(
+                "blok '{tag}' v {log} chybi: konec {done}, trasovani {trace}, radku bloku {}, precteno do {at} B z {size} B{}{}",
+                block.lines().count(),
+                if notes.is_empty() { "" } else { ", logd: " },
+                notes.trim_end()
+            ));
         }
         time::sleep(Duration::from_millis(300));
     }
+    let text = block.as_str();
+    check!(text.contains(&format!("{tag}   ")) && text.contains("] vstup: id="), "trasovani vstupu v bloku snimku");
+    check!(text.contains(&format!("{tag} okno z=0")), "okna v bloku snimku");
+    check!(text.contains(&format!("{tag}   uzel")) && text.contains("checkbox 'Jen úlohy agenta'"), "strom pristupnosti v bloku snimku");
+    check!(text.contains(&format!("{tag} fokus okno")), "fokus v bloku snimku");
+    check!(text.contains(&format!("{tag} duvod zkratka")), "duvod snimku");
+    check!(text.contains("viditelny"), "viditelnost prvku v bloku snimku");
+    check!(text.contains("posuvna oblast vrstva"), "posuvna oblast v bloku snimku");
     // Prikaz `snapshot` (jako shell `diag snap` pres init): dalsi obrazek.
     let before = shots(fs)?;
     super::gui::with(|s| s.gui.command(guiproto::control::SNAPSHOT.as_bytes(), alloc::vec::Vec::new()).map_err(|e| fail("prikaz snapshot", e)))?;

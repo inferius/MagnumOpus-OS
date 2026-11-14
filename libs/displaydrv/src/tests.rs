@@ -153,6 +153,17 @@ fn info_and_connectors() {
     assert_eq!(s.handle(Request::Sync { token: 7 }, None, 0), vec![Reply::Synced { token: 7 }]);
 }
 
+/// Ovladac bez GPU odmitne render uzel chybou s kodem pozadavku (klient
+/// ji paruje podle `op`; s `op` 0 by cekal do vyprseni).
+#[test]
+fn open_render_is_not_supported() {
+    let mut s = Server::new(Fake::new(64, 32));
+    assert_eq!(
+        s.handle(Request::OpenRender, None, 0),
+        vec![Reply::Error { op: guiproto::display::op::OPEN_RENDER, code: Error::NotSupported }]
+    );
+}
+
 #[test]
 fn double_buffer_keeps_screen_equal_to_shadow() {
     let (w, h) = (64u32, 32u32);
