@@ -504,3 +504,73 @@ pub trait DebugSerial: fmt::Write + Send {
     /// Nastavi linku (rychlost, format). Volat jednou pri startu.
     fn init(&mut self);
 }
+
+/// Kontext uzivatelskeho vlakna pro `THREAD_STATE` (debuggery, doruceni
+/// vyjimek). Format bufferu je `abi::thread` dane architektury.
+///
+/// Obecne registry vlakna, ktere stoji v jadre, lezi v ramci na vrcholu
+/// jeho zasobniku jadra (kazdy vstup z userspace ho tam ulozi cely). Stav
+/// FPU/SIMD je v `Context` vlakna (uklada ho `switch`).
+pub trait UserState: Threads {
+    /// Velikost obecnych registru (`abi::thread::kind::GENERAL`).
+    const GENERAL_SIZE: usize;
+    /// Velikost stavu FPU/SIMD (`abi::thread::kind::FP`).
+    const FP_SIZE: usize;
+
+    /// Precte obecne registry vlakna do `out` (`GENERAL_SIZE` B); `tp` je
+    /// baze TLS vlakna.
+    ///
+    /// # Safety
+    ///
+    /// `stack_top` je vrchol zasobniku jadra vlakna, ktere prave stoji
+    /// v jadre (jeho uzivatelsky ramec je platny a nikdo ho nemeni).
+    unsafe fn read_general(stack_top: u64, tp: u64, out: &mut [u8]);
+
+    /// Je zapis obecnych registru bezpecny (adresy v userspace)? Priznaky
+    /// se pri zapisu orezou na uzivatelske bity, nekontroluji se.
+    fn check_general(buf: &[u8]) -> bool;
+
+    /// Zapise obecne registry do ramce vlakna; vraci novou bazi TLS.
+    ///
+    /// # Safety
+    ///
+    /// Vola vlakno samo pred navratem do userspace (zakazana preruseni),
+    /// `buf` prosel `check_general`.
+    unsafe fn write_general(stack_top: u64, buf: &[u8]) -> u64;
+
+    /// Precte stav FPU/SIMD ulozeny v kontextu vlakna (`FP_SIZE` B).
+    fn read_fp(ctx: &Self::Context, out: &mut [u8]);
+
+    /// Je stav FPU/SIMD bezpecny k nahrani (rezervovane bity nulove)?
+    fn check_fp(buf: &[u8]) -> bool;
+
+    /// Nahraje stav FPU/SIMD do registru aktualniho CPU.
+    ///
+    /// # Safety
+    ///
+    /// Vola vlakno samo pred navratem do userspace (zakazana preruseni),
+    /// `buf` prosel `check_fp`.
+    unsafe fn load_fp(buf: &[u8]);
+
+    /// Ulozi aktualni stav FPU/SIMD (registry tohoto CPU) do `out`
+    /// (`FP_SIZE` B) - stav vlakna, ktere je prave v jadre.
+    ///
+    /// # Safety
+    ///
+    /// Vola vlakno samo (jadro FPU/SIMD nepouziva, registry patri jemu).
+    unsafe fn save_fp(out: &mut [u8]);
+
+    /// Velikost a offset FPU v ramci vyjimky (`abi::exception::frame`).
+    const FRAME_SIZE: usize;
+    const FRAME_FP: usize;
+
+    /// SP a hodnota navratoveho registru syscallu (rax / x0) z obecnych
+    /// registru.
+    fn general_sp_ret(buf: &[u8]) -> (u64, u64);
+
+    /// Upravi obecne registry pro skok do obsluhy vyjimky: PC = `entry`,
+    /// argument (rdi / x0) = `frame`, SP podle ABI (x86_64 `frame - 8` jako
+    /// po `call`, navratova adresa 0 v pameti; aarch64 `frame`, x30 = 0).
+    /// Vraci adresu, kam patri 8 B nul (navratova adresa), nebo `None`.
+    fn prepare_handler_call(buf: &mut [u8], entry: u64, frame: u64) -> Option<u64>;
+}

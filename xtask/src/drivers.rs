@@ -66,9 +66,11 @@ pub fn qemu_has_device(qemu: &Path, device: &str) -> bool {
 /// z IOMMU nebo fyzicka adresa nad 256 MiB projde.
 pub const EDU_DEVICE: &str = "edu,dma_mask=0xffffffffffffffff";
 
-/// Obsah `driver-test` v initfs (viz `user/init/src/tests/driverkit.rs`).
-pub fn test_plan(expect: &[&str], only: Option<&str>) -> String {
-    format!("expect = {}\nonly = {}\n", expect.join(","), only.unwrap_or(""))
+/// Obsah `driver-test` v initfs (viz `user/init/src/tests/driverkit.rs`):
+/// ocekavane ovladace, jediny ovladac (`--driver`) a emulovana IOMMU
+/// (`--iommu`; `none` = testy ochrany IOMMU se preskoci).
+pub fn test_plan(expect: &[&str], only: Option<&str>, iommu: &str) -> String {
+    format!("expect = {}\nonly = {}\niommu = {iommu}\n", expect.join(","), only.unwrap_or(""))
 }
 
 // --- Generator kostry -----------------------------------------------------

@@ -226,6 +226,15 @@ fn el0_sync(frame: &mut TrapFrame) {
             return;
         }
     }
+    let access = match ec {
+        EC_IABT_LOWER => abi::exception::access::EXEC,
+        _ if code == FAULT_PAGE && iss & (1 << 6) != 0 => abi::exception::access::WRITE,
+        _ => abi::exception::access::READ,
+    };
+    // Obsluhy (kanaly vyjimek), jinak konec procesu.
+    if trap::user_exception(code, iss, frame.elr, addr, access) {
+        return;
+    }
     trap::user_fault(code, iss, frame.elr, addr, frame.sp_el0, frame.x[29])
 }
 

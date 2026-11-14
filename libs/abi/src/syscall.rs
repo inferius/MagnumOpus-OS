@@ -226,8 +226,44 @@ pub const VMO_CLONE: u64 = 60;
 /// `WRITE`; objekt nesmi mit mapovani, ktere smi zapisovat.
 pub const VMO_SEAL: u64 = 61;
 
+/// Pozastaveni vlakna: `(thread) -> token`. Vlakno se zastavi pred
+/// navratem do userspace (vlakno spici v syscallu se pocita jako
+/// pozastavene hned); signal `SUSPENDED`. Zavreni tokenu vlakno obnovi,
+/// vic tokenu = stoji, dokud existuje aspon jeden. Pravo `MANAGE`.
+pub const THREAD_SUSPEND: u64 = 62;
+
+/// Kontext vlakna: `(thread, op, kind, ptr, len) -> 0`. `op` =
+/// `thread::op::READ` / `WRITE`, `kind` = `thread::kind::GENERAL` / `FP`,
+/// struktura podle architektury (`abi::thread`). Jen u pozastaveneho
+/// vlakna. Cteni pravo `READ`, zapis `WRITE`; zapis jadro overi a vlakno
+/// ho pouzije pred navratem do userspace.
+pub const THREAD_STATE: u64 = 63;
+
+/// Kanal vyjimek: `(task, flags) -> channel`. `task` = proces nebo vlakno
+/// (pravo `MANAGE`); `flags` = `exception::channel::DEBUGGER` (jen proces)
+/// nebo 0; `HANDLER_THREAD` na vlakne ho jen oznaci jako vlakno obsluhy
+/// (vraci 0). Na kazde misto nejvys jeden zivy kanal.
+pub const EXCEPTION_CHANNEL: u64 = 64;
+
+/// Rozhodnuti o vyjimce: `(token, action) -> 0`, `action` z
+/// `exception::action`. Vlakno pokracuje (RESUME), jde k dalsi obsluze
+/// (NEXT) nebo proces skonci (KILL).
+pub const EXCEPTION_RESOLVE: u64 = 65;
+
+/// Vlakna procesu: `(process, out_ptr, max) -> pocet`. Zapise az `max`
+/// handlu (u32) zivych vlaken; prava podle handlu procesu (`READ` = cist
+/// kontext, s `WRITE` i zapsat a pozastavit). Vraci celkovy pocet.
+pub const PROCESS_THREADS: u64 = 66;
+
+/// Doruceni vyjimky primo ve vlaknu: `(op, a0, a1) -> ...`, operace
+/// `exception::handler` (SET_ENTRY s handlem procesu a pravem `WRITE`,
+/// SET_STACK, RETURN). Obsluha dostane ramec `exception::frame` na
+/// zasobniku; poradi: debugger, obsluha ve vlaknu, kanal vlakna, kanal
+/// procesu, debugger.
+pub const EXCEPTION_HANDLER: u64 = 67;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 62;
+pub const COUNT: u64 = 68;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {

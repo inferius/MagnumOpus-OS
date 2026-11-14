@@ -82,6 +82,16 @@ pub fn start_user_thread(
         return Err(e);
     }
     *t.entry.lock() = Some(Box::new(move || {
+        // Vlakno pozastavene jeste pred prvnim vstupem stoji uz tady
+        // (prvni vstup nejde pres `on_return_to_user`). Kontext pred
+        // prvnim vstupem jeste neni (ramec vznikne az pri vstupu do
+        // jadra), cekajici zapis se tu proto nepouzije.
+        interrupts::disable();
+        super::suspend::park_before_start();
+        interrupts::enable();
+        if super::current().kill_requested() {
+            exit();
+        }
         // SAFETY: planovac pred spustenim vlakna prepnul na adresni prostor
         // jeho procesu a nastavil zasobnik jadra pro navrat z userspace.
         unsafe { arch::enter_user(entry, stack, arg0, arg1) }
@@ -119,6 +129,8 @@ pub fn start_user_thread_in_kernel(
 pub fn request_kill(t: &Arc<Thread>) {
     t.set_kill();
     wake(t, t.wait_seq());
+    // Zaparkovane pozastavene vlakno: probuzeni pod zamkem `stop`.
+    super::suspend::kill_wake(t);
     if t.on_cpu_after_update()
         && let Some(cpu) = percpu::cpu(t.last_cpu.load(Ordering::Relaxed))
     {
@@ -130,6 +142,8 @@ pub fn request_kill(t: &Arc<Thread>) {
 /// z userspace) se zakazanymi prerusenimi: ukoncovane vlakno skonci.
 pub fn on_return_to_user() {
     let cpu = percpu::this_cpu();
+    // Pozastavene vlakno tu stoji (a pouzije cekajici zapis kontextu).
+    super::suspend::park();
     if cpu.current().kill_requested() {
         interrupts::enable();
         exit();
@@ -144,6 +158,23 @@ const USER_FRAMES: usize = 16;
 /// `force-frame-pointers`) a ukonci proces.
 /// `code` = cislo chyby podle ABI (viz `trap::user_fault`), `pc` = adresa
 /// instrukce (v logu pod jmenem registru architektury, `arch::PC_NAME`).
+/// Vyjimka v userspace pro kanaly vyjimek (viz `trap::user_exception`).
+pub fn user_exception(code: u8, error_code: u64, pc: u64, addr: u64, access: u32) -> bool {
+    let report = abi::exception::Report {
+        kind: code as u32,
+        access,
+        pc,
+        addr,
+        code: error_code,
+        ..Default::default()
+    };
+    // Obsluha muze cekat dlouho (debugger): s prerusenimi jako syscall.
+    interrupts::enable();
+    let outcome = crate::object::exception::deliver(report);
+    interrupts::disable();
+    outcome == crate::object::exception::Outcome::Resume
+}
+
 /// Vypadek stranky v userspace (viz `trap::user_page_fault`).
 pub fn user_page_fault(addr: u64, access: crate::mm::Access) -> bool {
     let Some(process) = super::current().process.clone() else {

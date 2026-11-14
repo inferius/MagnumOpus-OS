@@ -16,6 +16,7 @@
 pub mod acpi;
 pub mod bootstrap;
 pub mod error;
+pub mod exception;
 pub mod job;
 pub mod limits;
 pub mod object;
@@ -23,6 +24,7 @@ pub mod params;
 pub mod process;
 pub mod sched;
 pub mod syscall;
+pub mod thread;
 pub mod time;
 pub mod vm;
 

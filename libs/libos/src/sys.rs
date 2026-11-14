@@ -340,6 +340,47 @@ pub fn thread_create(process: u32, name: &str) -> Result<u32> {
     .map(|v| v as u32)
 }
 
+pub fn exception_channel(task: u32, flags: u32) -> Result<u32> {
+    call(nr::EXCEPTION_CHANNEL, [task as u64, flags as u64, 0, 0, 0, 0]).map(|v| v as u32)
+}
+
+pub fn exception_handler(op: u32, a0: u64, a1: u64) -> Result<u64> {
+    call(nr::EXCEPTION_HANDLER, [op as u64, a0, a1, 0, 0, 0])
+}
+
+pub fn exception_resolve(token: u32, action: u32) -> Result<()> {
+    call(nr::EXCEPTION_RESOLVE, [token as u64, action as u64, 0, 0, 0, 0]).map(|_| ())
+}
+
+/// Handly vlaken procesu do `out`; vraci celkovy pocet vlaken.
+pub fn process_threads(process: u32, out: &mut [u32]) -> Result<usize> {
+    call(
+        nr::PROCESS_THREADS,
+        [process as u64, out.as_mut_ptr() as u64, out.len() as u64, 0, 0, 0],
+    )
+    .map(|v| v as usize)
+}
+
+pub fn thread_suspend(thread: u32) -> Result<u32> {
+    call(nr::THREAD_SUSPEND, [thread as u64, 0, 0, 0, 0, 0]).map(|v| v as u32)
+}
+
+pub fn thread_state_read(thread: u32, kind: u32, buf: &mut [u8]) -> Result<()> {
+    call(
+        nr::THREAD_STATE,
+        [thread as u64, abi::thread::op::READ as u64, kind as u64, buf.as_mut_ptr() as u64, buf.len() as u64, 0],
+    )
+    .map(|_| ())
+}
+
+pub fn thread_state_write(thread: u32, kind: u32, buf: &[u8]) -> Result<()> {
+    call(
+        nr::THREAD_STATE,
+        [thread as u64, abi::thread::op::WRITE as u64, kind as u64, buf.as_ptr() as u64, buf.len() as u64, 0],
+    )
+    .map(|_| ())
+}
+
 pub fn thread_start(thread: u32, entry: u64, stack: u64, arg0: u64, arg1: u64) -> Result<()> {
     call(
         nr::THREAD_START,

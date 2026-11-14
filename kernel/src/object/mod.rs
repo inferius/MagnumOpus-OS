@@ -9,6 +9,7 @@
 
 pub mod channel;
 pub mod event;
+pub mod exception;
 pub mod handle;
 pub mod interrupt;
 pub mod job;

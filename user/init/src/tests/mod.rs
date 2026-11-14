@@ -44,6 +44,9 @@ pub mod net;
 mod nic;
 pub mod power;
 mod process;
+mod thread_state;
+mod exceptions;
+mod exceptions_fast;
 mod reboot;
 mod recovery;
 mod recovery_kit;
@@ -75,6 +78,9 @@ const SUITES: &[(&str, &[Test])] = &[
     ("ipc", ipc::TESTS),
     ("udalosti a nahoda", events::TESTS),
     ("procesy", process::TESTS),
+    ("procesy", thread_state::TESTS),
+    ("procesy", exceptions::TESTS),
+    ("procesy", exceptions_fast::TESTS),
     ("joby", jobs::TESTS),
     ("ovladace", drivers::TESTS),
     ("ovladace z manifestu", driverkit::TESTS),

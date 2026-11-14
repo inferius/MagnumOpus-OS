@@ -182,6 +182,18 @@ pub fn spawn_with(
     handles: Vec<StartHandle>,
     opts: Options,
 ) -> Result<(Process, Channel)> {
+    spawn_with_thread(job, name, image, handles, opts).map(|(p, _, ch)| (p, ch))
+}
+
+/// Jako [`spawn_with`], navic vrati handle hlavniho vlakna (debugger,
+/// pozastaveni a kontext vlakna).
+pub fn spawn_with_thread(
+    job: &Job,
+    name: &str,
+    image: &[u8],
+    handles: Vec<StartHandle>,
+    opts: Options,
+) -> Result<(Process, Thread, Channel)> {
     let elf = elf::ElfFile::parse(image).map_err(|_| Error::Corrupted)?;
     let process = Process::create(job, name)?;
     if let Some(q) = opts.qos {
@@ -267,5 +279,5 @@ pub fn spawn_with(
 
     let thread = Thread::create(&process, name)?;
     process.start(&thread, elf.entry, stack_top, child_end.into_handle())?;
-    Ok((process, parent_end))
+    Ok((process, thread, parent_end))
 }

@@ -4,7 +4,9 @@
 //!
 //! xtask zapise do initfs `driver-test`:
 //! - `expect = edu,...`: ovladace, jejichz zarizeni QEMU ma (musi bezet),
-//! - `only = <jmeno>`: `cargo xtask test --driver <jmeno>` (jen ten).
+//! - `only = <jmeno>`: `cargo xtask test --driver <jmeno>` (jen ten),
+//! - `iommu = <typ>`: emulovana IOMMU (`--iommu`); `none` = testy ochrany
+//!   IOMMU se preskoci ([`iommu_present`]).
 //!
 //! Ovladac, jehoz zarizeni v QEMU neni (napr. kostra z `new-driver` pro
 //! skutecny hardware), devmgr nespusti; test to jen zaloguje.
@@ -34,6 +36,13 @@ const RECOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 struct Plan {
     expect: Vec<String>,
     only: Option<String>,
+    iommu: Option<String>,
+}
+
+/// Ma QEMU v tomto behu IOMMU? Bez udaje v planu se predpoklada, ze ano
+/// (vychozi `cargo xtask test`).
+pub(super) fn iommu_present(startup: &Startup) -> bool {
+    plan(startup).iommu.as_deref() != Some("none")
 }
 
 fn plan(startup: &Startup) -> Plan {
@@ -44,6 +53,7 @@ fn plan(startup: &Startup) -> Plan {
     let mut p = Plan {
         expect: Vec::new(),
         only: None,
+        iommu: None,
     };
     for line in text.lines() {
         match line.split_once('=') {
@@ -51,6 +61,7 @@ fn plan(startup: &Startup) -> Plan {
                 p.expect = v.split(',').map(|s| String::from(s.trim())).filter(|s| !s.is_empty()).collect();
             }
             Some((k, v)) if k.trim() == "only" && !v.trim().is_empty() => p.only = Some(String::from(v.trim())),
+            Some((k, v)) if k.trim() == "iommu" && !v.trim().is_empty() => p.iommu = Some(String::from(v.trim())),
             _ => {}
         }
     }

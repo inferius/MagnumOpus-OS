@@ -147,9 +147,37 @@ Details, design comparison and measurements: [Scheduler](scheduler.md).
   process ends: it goes to the DMA quarantine, the kernel stops the device
   and releases the memory only afterwards (see [IOMMU](#iommu-dma-protection),
   DMA quarantine).
+- **Suspending a thread and its context** (`THREAD_SUSPEND`,
+  `THREAD_STATE`, `kernel/src/sched/suspend.rs`) **[verified in QEMU]**
+  (suite `procesy`, x86_64 and aarch64): a suspend token stops the thread at
+  the boundary of returning to userspace (also before its first entry); a
+  thread sleeping in a syscall is suspended at once. General registers are
+  in the frame at the top of the thread's kernel stack (every entry from
+  userspace saves it there in full), FPU/SIMD in `Context`. A read works
+  only for a standing thread; the kernel validates a write and the thread
+  applies it itself right before returning (registers into the frame,
+  FPU/SIMD straight into the registers), so it never races with saving the
+  FPU on a switch. Kill always wins. The basis for exception delivery (SEH
+  in the Windows layer, signals in `cstd`) and a debugger.
 - **An exception in a program** (page fault, invalid opcode, ...) ends only
   that process, not the kernel: code -1,000,100 - vector, address and fault
-  type in the log.
+  type in the log. Before that the kernel offers it to **exception
+  channels** (`EXCEPTION_CHANNEL`, `kernel/src/object/exception.rs`)
+  **[verified in QEMU]** (suite `procesy`, x86_64 and aarch64) in order
+  debugger (first chance), thread, process, debugger (second chance). The
+  thread stands in the exception and a handler may read and change its
+  context and let it continue, pass the exception on, or end the process.
+  A handler thread (`HANDLER_THREAD`) skips the thread and process
+  channels so it never waits for itself. Kill always wins. The basis for
+  SEH in the Windows layer, signals in `cstd` and a debugger. The fast path
+  without a switch: a handler right in the thread (`EXCEPTION_HANDLER`);
+  details in [exceptions.md](exceptions.md).
+- **aarch64 does not report division by zero** (`udiv`/`sdiv` return 0);
+  the "divide by zero" exception exists only on x86_64. `cstd` (SIGFPE)
+  and Wine (`EXCEPTION_INT_DIVIDE_BY_ZERO`) must provide it on aarch64 by
+  checking in code, as everywhere on ARM.
+- **`int3` from userspace** (a breakpoint) has an IDT gate with DPL 3,
+  otherwise it would end as a general protection fault.
 - **Entering userspace:** a thread's entry point and stack must lie in the
   process memory (`USER_MIN`..`USER_MAX`); the last page of the lower half
   of the address space is always unmapped, so a return from a syscall never

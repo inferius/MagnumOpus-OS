@@ -138,8 +138,35 @@ Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
 - **Paměť pro DMA řízeného zařízení** se při konci procesu nevrací hned:
   jde do karantény DMA, jádro zařízení zastaví a paměť pustí až potom
   (viz [IOMMU](#iommu-ochrana-dma), Karanténa DMA).
+- **Pozastavení vlákna a jeho kontext** (`THREAD_SUSPEND`, `THREAD_STATE`,
+  `kernel/src/sched/suspend.rs`) **[ověřeno v QEMU]** (sada `procesy`,
+  x86_64 i aarch64): token pozastavení zastaví vlákno na hranici návratu
+  do userspace (i před prvním vstupem); vlákno spící v syscallu je
+  pozastavené hned. Obecné registry jsou v rámci na vrcholu zásobníku
+  jádra vlákna (každý vstup z userspace ho tam uloží celý), FPU/SIMD
+  v `Context`. Čtení jde jen u stojícího vlákna; zápis jádro ověří a vlákno
+  ho samo použije těsně před návratem (registry do rámce, FPU/SIMD přímo
+  do registrů), takže se nemine s ukládáním FPU při přepnutí. Kill vždy
+  vyhraje. Podklad pro doručení výjimek (SEH ve Windows vrstvě, signály
+  v `cstd`) a debugger.
 - **Výjimka v programu** (page fault, neplatná instrukce, ...) ukončí jen
   proces, ne jádro: kód -1 000 100 - vektor, v logu adresa a typ chyby.
+  Předtím ji jádro nabídne **kanálům výjimek** (`EXCEPTION_CHANNEL`,
+  `kernel/src/object/exception.rs`) **[ověřeno v QEMU]** (sada `procesy`,
+  x86_64 i aarch64) v pořadí debugger (první šance), vlákno, proces,
+  debugger (druhá šance). Vlákno ve výjimce stojí a obsluha může číst
+  a měnit jeho kontext a nechat ho pokračovat, poslat výjimku dál, nebo
+  proces ukončit. Vlákno obsluhy (`HANDLER_THREAD`) přeskočí kanály vlákna
+  a procesu, aby nečekalo samo na sebe. Kill vždy vyhraje. Podklad pro SEH
+  ve Windows vrstvě, signály v `cstd` a debugger. Rychlá cesta bez
+  přepnutí: obsluha přímo ve vlákně (`EXCEPTION_HANDLER`); podrobně
+  [vyjimky.md](vyjimky.md).
+- **aarch64 dělení nulou nehlásí** (`udiv`/`sdiv` vrátí 0), výjimka
+  „dělení nulou“ existuje jen na x86_64. `cstd` (SIGFPE) a Wine
+  (`EXCEPTION_INT_DIVIDE_BY_ZERO`) ji na aarch64 musí zajistit kontrolou
+  v kódu, stejně jako na ARM všude.
+- **`int3` z userspace** (breakpoint) má v IDT bránu s DPL 3, jinak by
+  skončil jako obecná ochrana.
 - **Vstup do userspace:** vstupní bod a zásobník vlákna musí ležet v paměti
   procesu (`USER_MIN`..`USER_MAX`); poslední stránka spodní poloviny
   adresního prostoru je vždy nenamapovaná, takže návrat ze syscallu nikdy

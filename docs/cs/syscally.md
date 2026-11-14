@@ -464,6 +464,108 @@ Vyžaduje `MANAGE`. Chyby: `BAD_STATE`, `INVALID_ARGS`.
 `()` - nevrací se. Ukončí aktuální vlákno. Konec posledního vlákna ukončí
 proces (kód -1 000 002, pokud předtím nevolal `PROCESS_EXIT`).
 
+### `THREAD_SUSPEND`
+
+`(thread) -> token`. Pozastaví vlákno procesu. Vlákno se zastaví na hranici
+návratu do userspace a dostane signál `SUSPENDED`; vlákno, které právě spí
+v syscallu, se počítá jako pozastavené hned (jeho uživatelský kontext je
+uložený) a po probuzení se zastaví před návratem. Běžící vlákno jádro
+přeruší (IPI). Zavření tokenu vlákno obnoví; víc tokenů = vlákno stojí,
+dokud žije aspoň jeden (když debugger zemře, vlákno se rozběhne samo).
+Kill a `JOB_KILL` vždy vyhrají: pozastavené vlákno skončí. Vyžaduje
+`MANAGE` na vlákně. Chyby: `WRONG_TYPE` (vlákno jádra), `BAD_STATE`
+(vlákno skončilo), `NO_RESOURCES`, `BAD_HANDLE`, `ACCESS_DENIED`.
+
+### `THREAD_STATE`
+
+`(thread, op, kind, ptr, len) -> 0`. Čtení (`thread::op::READ`, pravo
+`READ`) nebo zápis (`WRITE`, pravo `WRITE`) kontextu pozastaveného vlákna.
+`kind`: `thread::kind::GENERAL` - obecné registry, PC, SP, příznaky a báze
+TLS (`abi::thread::X64General` 160 B, `A64General` 280 B); `FP` - FPU/SIMD
+(x86_64 obraz FXSAVE 512 B, aarch64 V0-V31 + FPCR + FPSR 528 B); `len`
+přesně podle architektury. Čtení počká (nejvýš desetinu sekundy), než pozastavené
+vlákno opravdu stojí v jádře. Zápis jádro ověří a vlákno ho použije
+těsně před návratem do userspace (čtení ho už vidí); u vlákna spícího
+v syscallu přepíše i návratovou hodnotu (rax / x0). Ověření zápisu: PC, SP
+a báze TLS v paměti procesu (na x86_64 kanonické, pod `USER_MAX`),
+z příznaků jen uživatelské bity (x86_64 RFLAGS bez IOPL, IF vždy 1;
+aarch64 jen NZCV), u FPU nulové rezervované bity (MXCSR, FPCR, FPSR).
+Chyby: `INVALID_ARGS` (neznámý `op`/`kind`, špatná délka, neplatný
+kontext), `BAD_STATE` (vlákno není pozastavené), `WRONG_TYPE`,
+`BAD_ADDRESS`, `BAD_HANDLE`, `ACCESS_DENIED`.
+
+### `EXCEPTION_CHANNEL`
+
+`(task, flags) -> channel`. Kanál výjimek procesu nebo vlákna (`task`,
+právo `MANAGE`). `flags`: 0, `exception::channel::DEBUGGER` (jen proces:
+kanál debuggeru, první a druhá šance), nebo `HANDLER_THREAD` (jen vlákno:
+označí ho jako vlákno obsluhy - jeho výjimky přeskočí kanály vlákna
+a procesu, kanál nevznikne, vrací 0). Na každé místo nejvýš jeden živý
+kanál (zavřený se nahradí). Výjimka CPU v userspace, kterou jádro
+nevyřeší samo (stránky na požádání), jde obsluhám v pořadí: debugger
+(první šance), vlákno, proces, debugger (druhá šance); nikdo = konec
+procesu jako dřív. Zpráva: `exception::Report` (56 B: druh, stupeň,
+přístup, proces, vlákno, PC, adresa, kód architektury) a handly vlákna
+(`READ`, `WRITE`, `MANAGE`) a tokenu výjimky. Vlákno mezitím stojí a jeho
+kontext jde číst a zapsat (`THREAD_STATE`). Chyby: `INVALID_ARGS`
+(příznak k jinému typu), `ALREADY_EXISTS`, `WRONG_TYPE`, `BAD_HANDLE`,
+`ACCESS_DENIED`.
+
+### `EXCEPTION_RESOLVE`
+
+`(token, action) -> 0`. Rozhodnutí obsluhy (`exception::action`): `RESUME`
+= vlákno pokračuje (s kontextem změněným přes `THREAD_STATE`), `NEXT` =
+další obsluha v pořadí, `KILL` = konec procesu jako u neošetřené výjimky.
+Zavření tokenu bez rozhodnutí = `NEXT` (i když obsluha zemře). Breakpoint:
+na x86_64 je PC už za `int3`, na aarch64 na `brk` (obsluha ho posune o 4).
+Chyby: `INVALID_ARGS` (neznámá akce), `BAD_STATE` (už rozhodnuto nebo
+vlákno skončilo - kill vždy vyhraje), `WRONG_TYPE`, `BAD_HANDLE`.
+
+### `EXCEPTION_HANDLER`
+
+`(op, a0, a1) -> ...`. Doručení výjimky přímo ve vlákně (rychlá cesta pro
+SEH ve Windows vrstvě a signály v `cstd`). Operace `exception::handler`:
+
+- `SET_ENTRY(process, entry)`: vstup obsluhy procesu (0 = zrušit; právo
+  `WRITE` na procesu). `entry` musí ležet ve spustitelném mapování - tedy
+  zapečetěném nebo s oprávněním JIT (W^X), obsluha pravidla spustitelné
+  paměti neobejde. Jinak `INVALID_ARGS`.
+- `SET_STACK(base, size)`: alternativní zásobník aktuálního vlákna (jako
+  `sigaltstack`, 0 = žádný; aspoň rámec + 256 B), nutný pro obsluhu
+  přetečení zásobníku.
+- `RETURN(frame, disposition)`: návrat z obsluhy. `RESUME` obnoví kontext
+  z rámce (stejná kontrola jako `THREAD_STATE`: PC, SP v userspace,
+  uživatelské příznaky, FPU bez rezervovaných bitů; báze TLS se
+  neobnovuje) a vlákno pokračuje; `NEXT` obnoví kontext a výjimku nabídne
+  dalším obsluhám (kanál vlákna, procesu, debugger, konec procesu) - druh
+  a adresu výjimky bere jádro ze své kopie, ne z rámce. Úspěšný návrat se
+  nevrací volajícímu. Chyby: `INVALID_ARGS` (neplatný rámec, neznámá
+  akce), `BAD_STATE` (žádná obsluha neběží), `BAD_ADDRESS`.
+
+Pořadí obsluh: debugger (první šance), obsluha ve vlákně, kanál vlákna,
+kanál procesu, debugger (druhá šance). Obsluha ve vlákně dostane rámec
+`exception::frame` (zarovnaný na 64 B: `Report`, obecné registry
+a FPU/SIMD) na alternativním zásobníku (je-li nastavený a vlákno na něm
+ještě není), jinak pod SP (x86_64 pod červenou zónou 128 B); x86_64:
+`rdi` = rámec, `rsp % 16 == 8`, návratová adresa 0; aarch64: `x0` =
+rámec, `x30` = 0. Když se rámec nevejde (ochranná oblast při přetečení),
+obsluha se přeskočí a výjimka jde dál - nikdy rekurze. Vnoření (výjimka
+v obsluze) nejvýš `handler::MAX_DEPTH` (8); další jde rovnou dál.
+
+### `PROCESS_THREADS`
+
+`(process, out_ptr, max) -> počet`. Zapíše na `out_ptr` až `max` (do 4096)
+handlů (`u32`) živých vláken procesu (pro debugger: pozastavit všechna).
+Práva handlů podle handlu procesu: `READ` = jen číst kontext, s `WRITE`
+i zapsat a pozastavit (`MANAGE`). Vrací celkový počet vláken (i nad
+`max`). Vyžaduje `READ`. Chyby: `INVALID_ARGS` (`max` nad 4096),
+`BAD_ADDRESS`, `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+
+Kdo má handle procesu s `WRITE` (nebo vlákna s `WRITE`), má nad procesem
+**plnou kontrolu**: stejně jako `VM_MAP` do něj může přepsat kód nebo
+registry. Rodič je tak přirozeně debuggerem potomka; handle procesu
+s `WRITE` se nikomu jinému nedává.
+
 ### `THREAD_YIELD`
 
 `() -> 0`. Přenechá CPU dalšímu připravenému vláknu stejné nebo vyšší třídy.

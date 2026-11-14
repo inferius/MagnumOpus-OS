@@ -125,6 +125,12 @@ fn every_syscall_is_documented() {
         "VM_QUERY",
         "VMO_CLONE",
         "VMO_SEAL",
+        "THREAD_SUSPEND",
+        "THREAD_STATE",
+        "EXCEPTION_CHANNEL",
+        "EXCEPTION_RESOLVE",
+        "PROCESS_THREADS",
+        "EXCEPTION_HANDLER",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {
@@ -199,4 +205,42 @@ fn sched_info_roundtrip() {
     assert_eq!(QosInfo::decode(&q.encode()), q);
     let c = CpuInfo { kind: 1, capacity: 512, cluster: 3, hw_id: 7, run_ns: [1, 2, 3, 4], idle_ns: 9, ..Default::default() };
     assert_eq!(CpuInfo::decode(&c.encode()), c);
+}
+
+#[test]
+fn thread_context_roundtrip() {
+    use crate::thread::{A64General, X64General};
+    let mut x = X64General::default();
+    x.rax = 1;
+    x.r15 = 0xF0F0;
+    x.rip = 0x40_1000;
+    x.gs_base = 7;
+    assert_eq!(X64General::decode(&x.encode()), x);
+    let mut a = A64General::default();
+    a.x[0] = 5;
+    a.x[30] = 0x30;
+    a.pc = 0x40_2000;
+    a.tpidr = 9;
+    assert_eq!(A64General::decode(&a.encode()), a);
+    assert_eq!(X64General::SIZE, 20 * 8);
+    assert_eq!(A64General::SIZE, 35 * 8);
+}
+
+#[test]
+fn exception_report_roundtrip() {
+    use crate::exception::Report;
+    let r = Report { kind: 14, stage: 3, access: 1, _reserved: 0, pid: 7, tid: 9, pc: 0x40_1000, addr: 0x1234, code: 6 };
+    assert_eq!(Report::decode(&r.encode()), Some(r));
+    assert_eq!(Report::decode(&[0u8; 10]), None);
+}
+
+#[test]
+fn exception_frame_layout() {
+    use crate::exception::frame::*;
+    use crate::thread::{A64_FP_SIZE, A64General, X64_FP_SIZE, X64General};
+    assert!(GENERAL >= crate::exception::Report::SIZE);
+    assert!(X64_FP >= GENERAL + X64General::SIZE && X64_FP % 64 == 0);
+    assert!(X64_SIZE >= X64_FP + X64_FP_SIZE && X64_SIZE % 64 == 0);
+    assert!(A64_FP >= GENERAL + A64General::SIZE && A64_FP % 64 == 0);
+    assert!(A64_SIZE >= A64_FP + A64_FP_SIZE && A64_SIZE % 64 == 0);
 }

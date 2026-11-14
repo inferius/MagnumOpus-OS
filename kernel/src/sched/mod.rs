@@ -22,6 +22,7 @@ mod balance;
 mod debug;
 mod percpu;
 mod qos;
+pub mod suspend;
 mod thread;
 pub mod topo;
 mod user;
@@ -36,7 +37,7 @@ pub use qos::{QosLoan, boost, boost_current, ipc_class, rt_admitted, set_thread_
 pub use thread::{Qos, Thread};
 pub use user::{
     create_user_thread, on_return_to_user, request_kill, start_user_thread, start_user_thread_in_kernel,
-    user_fault, user_page_fault,
+    user_exception, user_fault, user_page_fault,
 };
 
 use crate::arch::context::{self, Context, ThreadContext};
@@ -160,6 +161,11 @@ pub fn exit() -> ! {
     unreachable!("mrtve vlakno bylo znovu naplanovano");
 }
 
+/// Ulozena baze TLS vlakna (u bezici aarch64 muze byt starsi nez registr).
+pub fn user_thread_pointer(t: &Thread) -> u64 {
+    t.user_tp.load(Ordering::Relaxed)
+}
+
 /// Nastavi registr ukazatele vlakna (TLS) aktualniho vlakna.
 pub fn set_user_thread_pointer(value: u64) {
     let irq = interrupts::disable();
@@ -176,6 +182,8 @@ pub fn yield_now() {
 
 /// Uspi aktualni vlakno (po `Thread::prepare_wait`), dokud ho nekdo neprobudi.
 pub fn block() {
+    // Pozastavene vlakno, ktere usina v syscallu, uz stoji (`SUSPENDED`).
+    suspend::note_blocking(&current());
     schedule();
 }
 

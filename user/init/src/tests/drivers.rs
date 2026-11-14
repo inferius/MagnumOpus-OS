@@ -171,9 +171,13 @@ fn restricted_resource(s: &Startup) -> TestResult {
     Ok(())
 }
 
-fn dma_protection(_: &Startup) -> TestResult {
-    // Bez IOMMU (`cargo xtask test --no-iommu`) zarizeni stranku prepise a
-    // test ohlasi, ze ochrana chybi.
+fn dma_protection(s: &Startup) -> TestResult {
+    // Bez IOMMU (`cargo xtask test --iommu none`) zarizeni stranku prepise:
+    // ochranu neni co overit.
+    if !super::driverkit::iommu_present(s) {
+        libos::println!("init: test ovladace: [preskoceno] ochrana DMA: QEMU bez IOMMU (--iommu none)");
+        return Ok(());
+    }
     let protected = scratch()?
         .test_dma_protection()
         .map_err(|e| fail("test DMA", e))?;

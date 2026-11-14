@@ -20,6 +20,7 @@ site menu.
 | Česky | English | Obsah / Contents |
 |---|---|---|
 | [Jádro](cs/jadro.md) | [Kernel](en/kernel.md) | jak jádro funguje / how the kernel works |
+| [Výjimky a kontext vlákna](cs/vyjimky.md) | [Exceptions and thread context](en/exceptions.md) | pozastavení vlákna, čtení a zápis registrů, kanály výjimek, doručení ve vlákně (SEH, signály, debugger) / suspending a thread, reading and writing registers, exception channels, in-thread delivery (SEH, signals, debugger) |
 | [Správa paměti](cs/sprava-pameti.md) | [Memory management](en/memory-management.md) | paměť procesů: stránky na požádání, nulová stránka, commit a strop, piny; plán rezervací, CoW a JIT / process memory: demand paging, the zero page, commit and ceiling, pins; plan for reservations, CoW and JIT |
 | [Plánovač](cs/planovac.md) | [Scheduler](en/scheduler.md) | třídy QoS, spravedlivé dělení, hybridní CPU / QoS classes, fair sharing, hybrid CPUs |
 | [Syscally](cs/syscally.md) | [Syscalls](en/syscalls.md) | referenční popis syscallů / syscall reference |

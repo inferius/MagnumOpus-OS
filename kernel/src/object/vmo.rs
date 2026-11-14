@@ -159,14 +159,30 @@ impl MemoryObject {
             return Err(Error::InvalidArgs);
         }
         let count = size.div_ceil(PAGE);
-        let charges = charge(job, count, count * PAGE)?;
-        let mut pages = page_list(count)?;
-        for _ in 0..count {
-            // Misto je rezervovane (`page_list`), push nealokuje.
-            pages.push(AtomicU64::new(0))?;
+        // Nejdriv levne kontroly: seznam stranek je v halde jadra (8 B na
+        // stranku) a obri pozadavek by ji jinak na chvili vycerpal (ostatni
+        // procesy by mezitim dostaly NO_MEMORY), i kdyz slib stejne neprojde.
+        let list_pages = (count * core::mem::size_of::<AtomicU64>() as u64).div_ceil(PAGE);
+        if !phys::user_room(count.saturating_add(list_pages)) {
+            return Err(Error::NoMemory);
         }
+        let charges = charge(job, count, count * PAGE)?;
         if !phys::commit(count) {
             return Err(Error::NoMemory);
+        }
+        let mut pages = match page_list(count) {
+            Ok(p) => p,
+            Err(e) => {
+                phys::uncommit(count);
+                return Err(e);
+            }
+        };
+        for _ in 0..count {
+            // Misto je rezervovane (`page_list`), push nealokuje.
+            if let Err(e) = pages.push(AtomicU64::new(0)) {
+                phys::uncommit(count);
+                return Err(e);
+            }
         }
         Ok(Arc::new(Self::with(count * PAGE, pages, Kind::Pages, count, charges)))
     }

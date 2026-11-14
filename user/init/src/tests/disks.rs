@@ -169,7 +169,12 @@ fn bounds(b: &BlockClient) -> TestResult {
     Ok(())
 }
 
-fn dma(b: &BlockClient) -> TestResult {
+fn dma(s: &Startup, b: &BlockClient) -> TestResult {
+    // Bez IOMMU (`--iommu none`) radic stranku prepise: neni co overit.
+    if !super::driverkit::iommu_present(s) {
+        libos::println!("init: test disky: [preskoceno] ochrana DMA: QEMU bez IOMMU (--iommu none)");
+        return Ok(());
+    }
     let protected = b.test_dma_protection().map_err(|e| fail("test DMA", e))?;
     check!(protected, "radic zapsal mimo svou DMA pamet (IOMMU nechrani)");
     // Ovladac po testu dal funguje.
@@ -193,8 +198,8 @@ fn nvme_trim(_: &Startup) -> TestResult {
 fn nvme_bounds(_: &Startup) -> TestResult {
     bounds(nvme()?)
 }
-fn nvme_dma(_: &Startup) -> TestResult {
-    dma(nvme()?)
+fn nvme_dma(s: &Startup) -> TestResult {
+    dma(s, nvme()?)
 }
 fn nvme4k_partition(_: &Startup) -> TestResult {
     partition(nvme4k()?, NVME4K_MARK)
@@ -211,8 +216,8 @@ fn nvme4k_trim(_: &Startup) -> TestResult {
 fn nvme4k_bounds(_: &Startup) -> TestResult {
     bounds(nvme4k()?)
 }
-fn nvme4k_dma(_: &Startup) -> TestResult {
-    dma(nvme4k()?)
+fn nvme4k_dma(s: &Startup) -> TestResult {
+    dma(s, nvme4k()?)
 }
 fn ahci_partition(_: &Startup) -> TestResult {
     partition(ahci()?, AHCI_MARK)
@@ -229,8 +234,8 @@ fn ahci_trim(_: &Startup) -> TestResult {
 fn ahci_bounds(_: &Startup) -> TestResult {
     bounds(ahci()?)
 }
-fn ahci_dma(_: &Startup) -> TestResult {
-    dma(ahci()?)
+fn ahci_dma(s: &Startup) -> TestResult {
+    dma(s, ahci()?)
 }
 
 fn foreign_read_only(_: &Startup) -> TestResult {
