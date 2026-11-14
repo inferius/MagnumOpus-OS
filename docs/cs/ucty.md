@@ -483,8 +483,10 @@ chvíli vypne sám a ví o tom.
 
 **Počítač spravovaný organizací** (firma, škola): zápis počítače do správy,
 politiky a sledování koncových bodů jsou popsané v
-[Správě organizace](sprava-organizace.md) **[navrženo]**. Osobní počítač
-tyto funkce nikdy nemá.
+[Správě organizace](sprava-organizace.md) **[navrženo]**, včetně práva
+[instalovat aplikace](sprava-organizace.md#právo-instalovat-aplikace)
+(Volně / Z katalogu / Žádné; role správy ho může nastavit jinému účtu,
+např. rodičovská kontrola). Osobní počítač tyto funkce nikdy nemá.
 
 ## Šifrování domova
 

@@ -132,6 +132,41 @@ přidá **další obal**: klíč domova zabalený **veřejným klíčem organiza
 - **Zálohu klíče domova** zapíná politika; v nastavení se ukáže, že je
   zapnutá a pro koho.
 
+## Právo instalovat aplikace
+
+Politika organizace nastavuje **po skupinách** (zaměstnanci, vývojáři,
+kiosky, ...) právo „instalovat aplikace“ na **třech úrovních**
+**[navrženo]**:
+
+| Úroveň | Co smí | Pro koho |
+|---|---|---|
+| **Volně** | cokoli, s ochranou podle zdroje (podpis, původ, [pracovní složky](navrh-fs-v3.md#pracovní-složky-a-chráněné-oblasti)) | vývojáři |
+| **Z katalogu** | jen aplikace z **katalogu organizace**, sám bez IT (jako Company Portal v Intune) | běžní zaměstnanci |
+| **Žádné** | nic; aplikace nasazuje jen IT | personalistika, kiosky |
+
+- **Neobejitelnost.** Kdo nesmí instalovat, nesmí **ani spouštět programy
+  z uživatelských složek**: FS právo *Spustit* na datech je vypnuté
+  ([Zákaz spouštění na datasetu](navrh-fs-v3.md#další-pojistky)) a politika
+  „spouštět jen nainstalované nebo podepsané“ to vynutí i pro **skripty,
+  interprety s cizím kódem a vrstvu Windows**.
+- ⚠️ **Známé riziko:** interprety (Python, shell, ...) umí spustit cizí kód
+  **i bez `exec`**, protože ho načtou jako data. Politika je proto musí
+  buď **pokrýt** (interpret smí číst jen skripty z nainstalovaných aplikací
+  nebo podepsané), nebo **omezit** (interpret bez práva na síť a na
+  pracovní složky). Bez toho by „Žádné“ šlo obejít skriptem.
+- **Žádost místo slepé uličky.** Aplikace, kterou uživatel nesmí
+  nainstalovat, nabídne „**Požádat IT o aplikaci X**“. Žádost jde **správě
+  organizace** (ne uživateli: dotaz dostane ten, kdo rozhoduje) a po
+  schválení se aplikace **nainstaluje sama**.
+- **Bez organizace** instaluje každý sám (současný návrh,
+  [Aplikace](architektura.md#aplikace-instalace-aktualizace-odinstalace-návrh)).
+  Role správy může **jinému účtu nastavit úroveň** (rodičovská kontrola:
+  „Z katalogu“ nebo „Žádné“ + žádost rodiči); je to úkon správy počítače
+  ([Správa počítače](ucty.md#správa-počítače)).
+- **Vývojáři:** úroveň **Volně** + profil souborů **Volný**
+  ([Profily](navrh-fs-v3.md#oprávnění-a-viditelnost)); tajemství a cizí
+  účty zůstávají chráněné i tam.
+
 ## Sledování koncových bodů (EDR)
 
 Organizace chtějí vidět, co se na jejich počítačích děje (jako nástroje
@@ -243,6 +278,7 @@ tahle stránka ho nemění. Co musí být před každou částí:
 | služba událostí `auditd` | `logd` (uložení a dohledání), `fsd` a `netd` jako zdroje událostí, jádro (kanály výjimek, události procesů), init (capability, supervisor) |
 | agent a odběr `AUTH` | `auditd`, init (restart přes lístky), politiky ze záznamu o zápisu |
 | záznam obrazovky a kláves | `compd` (indikátor), vstupní vrstva (`inputd`), politika |
+| právo instalovat aplikace | katalog a balíčky ([Aplikace](architektura.md#aplikace-instalace-aktualizace-odinstalace-návrh)), FS právo *Spustit*, `accountd` (skupiny, žádosti), zápis do správy |
 
 ## Otevřené otázky
 
@@ -262,3 +298,4 @@ tahle stránka ho nemění. Co musí být před každou částí:
 | firemní obal klíče domova (escrow) | **[navrženo]** (po šifrovaných trezorech FS) |
 | služba událostí `auditd`, agent, odběry `NOTIFY` a `AUTH` | **[navrženo]** |
 | záznam obrazovky a kláves | **[navrženo]** |
+| právo instalovat aplikace (Volně / Z katalogu / Žádné), žádost o aplikaci | **[navrženo]** |

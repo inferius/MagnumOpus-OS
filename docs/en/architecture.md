@@ -413,6 +413,10 @@ sandbox, without the dependency hell of Linux package managers.
 
 Added 2026-11-09 (agreed, **[designed]**):
 
+- **Who may install** **[designed]**: without an organization everybody on
+  their own; an organization or the administration role may restrict the
+  level (Freely / From the catalog / None, request for an application), see
+  [The right to install applications](organization-management.md#the-right-to-install-applications).
 - **No install scripts.** No app code runs during installation.
   Everything is a declaration in the manifest that the system registers:
   the icon in the bar and launcher, file types, palette and menu actions,

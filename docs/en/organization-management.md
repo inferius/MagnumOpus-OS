@@ -147,6 +147,44 @@ RFC 9180).
 - **Key backup** is switched on by policy; settings show that it is on
   and for whom.
 
+## The right to install applications
+
+The organization policy sets the "install applications" right **per
+group** (employees, developers, kiosks, ...) at **three levels**
+**[designed]**:
+
+| Level | What it may do | For whom |
+|---|---|---|
+| **Freely** | anything, with protection by source (signature, origin, [working folders](fs-v3-design.md#working-folders-and-protected-areas)) | developers |
+| **From the catalog** | only applications from the **organization catalog**, on their own without IT (like Company Portal in Intune) | ordinary employees |
+| **None** | nothing; only IT deploys applications | HR, kiosks |
+
+- **No way around it.** Whoever may not install may **not run programs from
+  user folders** either: the FS *Execute* right on data is off
+  ([No execution on a dataset](fs-v3-design.md#further-safeguards)) and the
+  "run only installed or signed" policy enforces it also for **scripts,
+  interpreters with foreign code and the Windows layer**.
+- ⚠️ **Known risk:** interpreters (Python, shell, ...) can run foreign code
+  **even without `exec`**, because they load it as data. The policy must
+  therefore either **cover** them (an interpreter may read only scripts
+  from installed applications or signed ones) or **restrict** them (an
+  interpreter without the network right and without working folders).
+  Without that, "None" could be bypassed with a script.
+- **A request instead of a dead end.** An application the user may not
+  install offers "**Ask IT for application X**". The request goes to
+  **organization management** (not to the user: the prompt goes to the one
+  who decides) and after approval the application **installs itself**.
+- **Without an organization** everybody installs on their own (the current
+  design,
+  [Applications](architecture.md#applications-install-update-uninstall-proposal)).
+  The administration role may **set the level for another account**
+  (parental control: "From the catalog" or "None" + a request to the
+  parent); it is a computer administration action
+  ([Administering the computer](accounts.md#administering-the-computer)).
+- **Developers:** level **Freely** + the **Relaxed** file profile
+  ([Profiles](fs-v3-design.md#permissions-and-visibility)); secrets and
+  other accounts stay protected even there.
+
 ## Endpoint monitoring (EDR)
 
 Organizations want to see what happens on their computers (like tools
@@ -269,6 +307,7 @@ this page does not change it. What must exist before each part:
 | event service `auditd` | `logd` (storage and lookup), `fsd` and `netd` as event sources, kernel (exception channels, process events), init (capability, supervisor) |
 | agent and `AUTH` subscription | `auditd`, init (restart through leases), policies from the enrollment record |
 | screen and key recording | `compd` (indicator), input layer (`inputd`), policy |
+| the right to install applications | catalog and packages ([Applications](architecture.md#applications-install-update-uninstall-proposal)), FS *Execute* right, `accountd` (groups, requests), enrollment |
 
 ## Open questions
 
@@ -290,3 +329,4 @@ this page does not change it. What must exist before each part:
 | company wrap of the home key (escrow) | **[designed]** (after the FS encrypted vaults) |
 | event service `auditd`, agent, `NOTIFY` and `AUTH` subscriptions | **[designed]** |
 | screen and key recording | **[designed]** |
+| the right to install applications (Freely / From the catalog / None), request for an application | **[designed]** |

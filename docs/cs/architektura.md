@@ -389,6 +389,9 @@ mobilu, bez závislostního pekla linuxových balíčkovačů.
 
 Doplněno 2026-11-09 (odsouhlaseno, **[navrženo]**):
 
+- **Kdo smí instalovat** **[navrženo]**: bez organizace každý sám; organizace
+  nebo role správy může úroveň omezit (Volně / Z katalogu / Žádné, žádost
+  o aplikaci), viz [Právo instalovat aplikace](sprava-organizace.md#právo-instalovat-aplikace).
 - **Žádné instalační skripty.** Při instalaci se nespouští žádný kód
   aplikace. Vše je deklarace v manifestu a zaregistruje ji systém: ikona
   v liště a spouštěči, přípony souborů, akce do palety a menu, položky

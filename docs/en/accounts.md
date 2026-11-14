@@ -516,8 +516,12 @@ administration turns the dialogs off for a while themselves, knowingly.
 
 **A computer managed by an organization** (company, school): enrolling the
 computer, policies and endpoint monitoring are described in
-[Organization management](organization-management.md) **[designed]**. A
-personal computer never has these features.
+[Organization management](organization-management.md) **[designed]**,
+including the right to
+[install applications](organization-management.md#the-right-to-install-applications)
+(Freely / From the catalog / None; the administration role may set it for
+another account, e.g. parental control). A personal computer never has
+these features.
 
 ## Home encryption
 
