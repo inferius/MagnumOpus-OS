@@ -14,6 +14,7 @@ Služba sítě (TCP/IP, DHCP, DNS klient, firewall napojení). Start (kind USER)
 - Data z ovladače a ze sítě jsou nedůvěryhodný vstup.
 - Protokol netproto v2: každý dotaz má v hlavičce číslo a absolutní termín, odpověď nese číslo. Kanál se čte pořád (i s rozpracovanými dotazy). Na socketu je v každém směru (`obj::Dir`) rozpracovaný nejvýš jeden dotaz a další čekají ve frontě FIFO (nejvýš `DIRECTION_QUEUE`), aby se data neproložila. Na relaci platí limit `Quota::ops` (`OpTicket`); další dotazy se odloží (`ops::SESSION_BACKLOG`) a s plným odkladem se kanál nečte (protitlak), `CANCEL` platí i pro odložené. Termín 0 (`TRY`) = neblokující: místo `TIMED_OUT` vrací `SHOULD_WAIT` (`stack::expired`). Zrušení (`CANCEL`, zavření kanálu) musí uvolnit všechno, co dotaz drží: `obj::cancel_pending`.
 - Čas dotazu na uživatele se do termínu operace nepočítá (`Deferred::extend`).
+- Připravenost socketu (`READINESS`, `ready.rs`): event s uživatelskými bity, netd drží `SIGNAL`, klient jen `WAIT`. Bity se přepočítají po každém kole jen u sledovaných socketů (`Service::watched`); nový druh socketu = větev v `ready::compute`.
 - Filtr příchozího provozu (`libs/netfilter`) je jediná cesta: `netd` je jediný síťový zásobník, každý přijatý rámec projde `Filter::inbound`. Změna pravidel = test v `libs/netfilter` i v sadě `firewall`.
 
 ## Testy

@@ -161,10 +161,16 @@ as `OBJECT_WAIT_ONE` plus `INVALID_ARGS` (count > 64).
 ### `OBJECT_SIGNAL`
 
 `(handle, clear, set) -> 0`. Changes an event's signals: clears `clear`,
-then sets `set`. A process may only change `SIGNALED`; other signals are
-kernel-controlled. Requires `SIGNAL`. Errors: `BAD_HANDLE`,
-`ACCESS_DENIED`, `WRONG_TYPE` (not an event), `INVALID_ARGS` (bit other
-than `SIGNALED`).
+then sets `set`. A process may change `SIGNALED` and eight user bits
+`USER_0` to `USER_7` (bits 24 to 31, `Signals::USER_ALL`) **[verified in
+QEMU]** (suite "udalosti a nahoda"); other signals are kernel-controlled.
+User bits carry state that a service shows to its clients: the service
+keeps a handle with `SIGNAL` and gives the client a duplicate with `WAIT`
+only. For example `netd` reports socket readiness with them (see
+[Network](network.md#socket-readiness)). They are waited for like other
+signals (`OBJECT_WAIT_*`, ports). Requires `SIGNAL`. Errors:
+`BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE` (not an event), `INVALID_ARGS`
+(a bit other than `SIGNALED` and `USER_*`).
 
 ### `EVENT_CREATE`
 

@@ -159,9 +159,16 @@ a `INVALID_ARGS` (count > 64).
 ### `OBJECT_SIGNAL`
 
 `(handle, clear, set) -> 0`. Změní signály eventu: nejdřív smaže bity
-`clear`, pak nastaví `set`. Proces smí měnit jen `SIGNALED`; ostatní signály
-řídí jádro. Vyžaduje `SIGNAL`. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`,
-`WRONG_TYPE` (není event), `INVALID_ARGS` (jiný bit než `SIGNALED`).
+`clear`, pak nastaví `set`. Proces smí měnit `SIGNALED` a osm
+uživatelských bitů `USER_0` až `USER_7` (bity 24 až 31,
+`Signals::USER_ALL`) **[ověřeno v QEMU]** (sada „udalosti a nahoda“);
+ostatní signály řídí jádro. Uživatelské bity nesou stav, který služba
+ukazuje klientům: služba drží handle s `SIGNAL` a klientovi dá duplikát jen
+s `WAIT`. Například `netd` jimi hlásí připravenost socketu (viz
+[Síť](sit.md#připravenost-socketů)). Čeká se na ně jako na ostatní signály
+(`OBJECT_WAIT_*`, porty). Vyžaduje `SIGNAL`. Chyby: `BAD_HANDLE`,
+`ACCESS_DENIED`, `WRONG_TYPE` (není event), `INVALID_ARGS` (jiný bit než
+`SIGNALED` a `USER_*`).
 
 ### `EVENT_CREATE`
 

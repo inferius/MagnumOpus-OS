@@ -41,6 +41,44 @@ impl Deadline {
     }
 }
 
+/// Pripravenost socketu: event, na kterem sluzba nastavuje bity
+/// [`crate::ready`] (cteni, zapis, konec, chyba). Pro neblokujici smycky
+/// a backend mio: `handle()` se zaregistruje na portu (`Port::wait_async`
+/// s maskou podle zajmu), po udalosti se operace zkusi s [`Deadline::TRY`]
+/// (`SHOULD_WAIT` = uz neni pripraveny) a registrace se obnovi. Stav je
+/// urovnovy, takze bit nastaveny pri registraci se ohlasi hned.
+pub struct Readiness(libos::Event);
+
+impl Readiness {
+    pub fn handle(&self) -> &Handle {
+        self.0.handle()
+    }
+
+    /// Pocka, az bude nastaveny nektery z bitu `mask`, nejvys do
+    /// `deadline`; vraci vsechny bity (`TIMED_OUT` po terminu).
+    pub fn wait(&self, mask: libos::Signals, deadline: Deadline) -> Result<libos::Signals> {
+        let d = if deadline == Deadline::NONE { None } else { Some(deadline.0) };
+        libos::wait_one(self.handle(), mask, d)
+    }
+
+    /// Bity prave ted (bez cekani).
+    pub fn current(&self) -> libos::Signals {
+        match libos::wait_one(self.handle(), crate::ready::ALL, Some(0)) {
+            Ok(s) => libos::Signals(s.0 & crate::ready::ALL.0),
+            Err(_) => libos::Signals::NONE,
+        }
+    }
+}
+
+/// `READINESS` na kanalu socketu.
+fn readiness_of(m: &Arc<Mux>) -> Result<Readiness> {
+    let (_, mut handles) = call(m, op::READINESS, Writer::new(), Deadline::NONE, Wait::Immediate, None)?;
+    if handles.len() != 1 {
+        return Err(Error::Corrupted);
+    }
+    Ok(Readiness(libos::Event::from_handle(handles.remove(0))))
+}
+
 /// Posle dotaz a vrati telo odpovedi a handly.
 fn call(
     m: &Arc<Mux>,
@@ -460,6 +498,11 @@ impl TcpStream {
         self.shared.write_timeout.get()
     }
 
+    /// Event pripravenosti spojeni (viz [`Readiness`]).
+    pub fn readiness(&self) -> Result<Readiness> {
+        readiness_of(&self.mux)
+    }
+
     /// Ukonci zapis (druha strana dostane konec proudu), cteni zustava.
     pub fn shutdown_write(&self) -> Result<()> {
         call_now(&self.mux, op::SHUTDOWN, Writer::new()).map(|_| ())
@@ -570,6 +613,11 @@ impl TcpListener {
         Ok(Self { mux: self.mux.clone() })
     }
 
+    /// Event pripravenosti (`READABLE` = ceka spojeni na `accept`).
+    pub fn readiness(&self) -> Result<Readiness> {
+        readiness_of(&self.mux)
+    }
+
     /// Pocka na prichozi spojeni.
     pub fn accept(&self) -> Result<(TcpStream, SocketAddr)> {
         self.accept_ctx(Deadline::NONE, None)
@@ -602,6 +650,11 @@ impl UdpSocket {
 
     pub fn try_clone(&self) -> Result<UdpSocket> {
         Ok(Self { mux: self.mux.clone() })
+    }
+
+    /// Event pripravenosti (`READABLE` = datagram, `WRITABLE` = misto).
+    pub fn readiness(&self) -> Result<Readiness> {
+        readiness_of(&self.mux)
     }
 
     /// Posle datagram (nejvys [`MAX_DATAGRAM`] bajtu).

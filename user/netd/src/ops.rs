@@ -174,6 +174,35 @@ fn cancel(stack: &mut Stack, o: &mut Obj, id: u32, created: &mut Vec<Obj>) {
     drain_backlog(stack, o, created);
 }
 
+/// `READINESS`: event pripravenosti socketu (zalozi se pri prvnim dotazu,
+/// dalsi dotaz vrati dalsi duplikat stejneho eventu).
+fn readiness(stack: &mut Stack, o: &mut Obj, id: u32) {
+    if matches!(o.kind, Kind::Session(_)) {
+        let _ = o.ch.write(&msg::reply(id, Err(Error::NotSupported)), Vec::new());
+        return;
+    }
+    if o.ready.is_none() {
+        match crate::ready::Readiness::new() {
+            Ok(r) => o.ready = Some(r),
+            Err(e) => {
+                let _ = o.ch.write(&msg::reply(id, Err(e)), Vec::new());
+                return;
+            }
+        }
+    }
+    crate::ready::update(stack, o);
+    let r = o.ready.as_ref().map(|r| r.client_handle());
+    match r {
+        Some(Ok(h)) => {
+            let _ = o.ch.write(&msg::reply(id, Ok(Writer::new())), alloc::vec![h]);
+        }
+        Some(Err(e)) => {
+            let _ = o.ch.write(&msg::reply(id, Err(e)), Vec::new());
+        }
+        None => {}
+    }
+}
+
 /// Nova zprava od klienta.
 pub fn on_message(stack: &mut Stack, o: &mut Obj, data: Vec<u8>, created: &mut Vec<Obj>) {
     // Zprava bez platne hlavicky nema cislo, na ktere by slo odpovedet:
@@ -183,6 +212,10 @@ pub fn on_message(stack: &mut Stack, o: &mut Obj, data: Vec<u8>, created: &mut V
     };
     if h.op == op::CANCEL {
         cancel(stack, o, h.id, created);
+        return;
+    }
+    if h.op == op::READINESS {
+        readiness(stack, o, h.id);
         return;
     }
     let backlogged = o.backlog.iter().any(|d| header_of(d).is_some_and(|x| x.id == h.id));

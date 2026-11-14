@@ -33,6 +33,7 @@ mod fw;
 mod link;
 mod obj;
 mod ops;
+mod ready;
 mod ping;
 mod rand;
 mod resolve;
@@ -153,6 +154,8 @@ struct Service {
     live: usize,
     /// Sloty s rozpracovanymi dotazy (posouvaji se v kazdem kole).
     pending: alloc::collections::BTreeSet<usize>,
+    /// Sloty se sledovanou pripravenosti (prepocet v kazdem kole).
+    watched: alloc::collections::BTreeSet<usize>,
     /// Sloty, ktere potrebuji obnovit registraci na portu: (slot, generace).
     to_arm: Vec<(usize, u32)>,
     link_armed: bool,
@@ -169,6 +172,7 @@ impl Service {
             free_slots: Vec::new(),
             live: 0,
             pending: alloc::collections::BTreeSet::new(),
+            watched: alloc::collections::BTreeSet::new(),
             to_arm: Vec::new(),
             link_armed: false,
             fw_armed: false,
@@ -200,6 +204,7 @@ impl Service {
             // Odeslat, co pozadavky zaradily, a uklidit zavrena spojeni.
             stack.poll();
             tcp::reap_closing(stack);
+            self.update_readiness(stack);
             if self.arm(stack).is_err() {
                 println!("netd: registrace na portu selhala, koncim");
                 return;
@@ -224,6 +229,17 @@ impl Service {
                     return;
                 }
                 deadline = Some(0);
+            }
+        }
+    }
+
+    /// Pripravenost sledovanych socketu (po zpracovani site a dotazu).
+    /// Prace je umerna poctu sledovanych socketu.
+    fn update_readiness(&mut self, stack: &mut Stack) {
+        self.watched.retain(|&i| matches!(self.objs.get(i), Some(Some(o)) if o.ready.is_some()));
+        for &i in &self.watched {
+            if let Some(Some(o)) = self.objs.get_mut(i) {
+                ready::update(stack, o);
             }
         }
     }
@@ -355,6 +371,9 @@ impl Service {
         }
         let busy = ops::busy(o);
         let paused = o.read_paused;
+        if o.ready.is_some() {
+            self.watched.insert(i);
+        }
         if closed {
             self.free(stack, i);
         } else {

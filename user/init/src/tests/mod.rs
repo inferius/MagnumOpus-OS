@@ -37,6 +37,7 @@ mod ipc;
 mod jobs;
 mod memory;
 pub mod net;
+mod net_ready;
 mod net_v2;
 mod nic;
 pub mod power;
@@ -91,6 +92,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("firewall", firewall::TESTS),
     ("sit", net::TESTS),
     ("sit soubeh", net_v2::TESTS),
+    ("sit pripravenost", net_ready::TESTS),
     ("TLS a HTTP", web::TESTS),
     ("sifrovane DNS", dns::TESTS),
     ("supervisor", supervisor::TESTS),

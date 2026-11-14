@@ -423,6 +423,12 @@ pub fn listener_request(
     }
 }
 
+/// Ceka nejake spojeni na `accept` (pripravenost naslouchani)?
+pub fn listener_has_ready(stack: &mut Stack, l: &mut Listener) -> bool {
+    refill(stack, l);
+    !l.ready.is_empty()
+}
+
 /// Presune navazana spojeni do fronty `ready` a doplni naslouchajici
 /// sockety (dokud fronta nedosahne `backlog`).
 fn refill(stack: &mut Stack, l: &mut Listener) {

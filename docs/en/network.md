@@ -347,8 +347,8 @@ its socket and port, a firewall question stops waiting for the user. The
 time of a question to the user does not count towards the deadline.
 `Deadline::TRY` is the non-blocking mode: `recv_ctx`, `send_ctx`,
 `accept_ctx` and `recv_from_ctx` without data, room or a connection return
-`SHOULD_WAIT` (not `TIMED_OUT`) **[verified in QEMU]**. Readiness for
-`poll`/mio (a signal on an object or a port) is **[designed]**.
+`SHOULD_WAIT` (not `TIMED_OUT`) **[verified in QEMU]**. When to try
+again is told by [socket readiness](#socket-readiness).
 
 **Client safeguard:** `netd` enforces operation limits, and the client has
 its own as well: the deadline + 10 s, 30 s for operations without a limit
@@ -458,6 +458,64 @@ another process: `into_channel()` at the sender (`BAD_STATE` when a
 clone still holds the connection or a request is running on it),
 `TcpStream::from_channel()` at the receiver.
 
+## Socket readiness
+
+Non-blocking loops (an mio backend, and tokio on top of it) need to wait
+for many sockets at once and then try an operation without waiting
+**[verified in QEMU]** (suite "sit pripravenost").
+
+- **`READINESS`** on a socket channel (connection, listener, UDP) returns
+  an **event** in the reply handles. The client gets a duplicate with the
+  `WAIT` right only (plus `DUPLICATE`, `TRANSFER`); `netd` keeps `SIGNAL`.
+  The bits are the event's user bits
+  ([`OBJECT_SIGNAL`](syscalls.md#object_signal)), so they can be waited
+  for with a kernel port like any other object.
+- **Bits** (`netproto::ready`):
+
+| Bit | Signal | When |
+|---|---|---|
+| `READABLE` | `USER_0` | connection: data, end of stream or an error (a read does not block); listener: a connection waits for `accept`; UDP: a datagram |
+| `WRITABLE` | `USER_1` | room in the send queue (or an error) |
+| `HUP` | `USER_2` | the other side finished writing (FIN) or the connection is closed |
+| `ERROR` | `USER_3` | the connection was broken (RST, the other side stopped responding) |
+
+- **The state is level-triggered:** after every round `netd` recomputes
+  the bits of watched sockets (those for which someone called
+  `READINESS`) and writes only the change to the event. The extra work is
+  proportional to the number of watched sockets. A bit already set at
+  registration is reported on the port at once.
+- **A loop as in mio:** `Port::wait_async(readiness.handle(), token,
+  mask)` = `Registry::register`; `Port::wait` = `Poll::poll`; after an
+  event the operation with `Deadline::TRY` (`SHOULD_WAIT` = no longer
+  ready, which can happen because the state is as of `netd`'s last round)
+  and a new registration (one-shot like epoll with `ONESHOT`). A wake-up
+  from another thread (`Waker`) = an event with `SIGNALED` on the same
+  port.
+
+```rust
+use netproto::{Deadline, ready};
+
+let port = libos::Port::create()?;
+let r = stream.readiness()?;
+port.wait_async(r.handle(), TOKEN, ready::READABLE)?;
+loop {
+    let ev = port.wait(None)?;
+    let mut buf = [0u8; 4096];
+    match stream.recv_ctx(&mut buf, Deadline::TRY, None) {
+        Ok(n) => { /* data */ }
+        Err(libos::Error::ShouldWait) => {} // try after the next event
+        Err(e) => return Err(e),
+    }
+    port.wait_async(r.handle(), TOKEN, ready::READABLE)?;
+}
+```
+
+> **Change from the first version:** there was no readiness; a
+> non-blocking loop needed a thread per socket. **Why:** mio/tokio and
+> servers with thousands of connections. The kernel got user bits on
+> events for it (a small change of `OBJECT_SIGNAL`), and `netd` shows the
+> state with them without extra messages.
+
 ## The netproto protocol
 
 Version 2 **[verified in QEMU]**. Every message has a header with the
@@ -512,6 +570,7 @@ channel between `fwd` and the user agent has its own reply format
 | listener | `ACCEPT` (30) | → remote address, local address + connection channel |
 | listener, UDP | `LOCAL_ADDR` (31) | → local address (from the current interface address) |
 | UDP | `SEND_TO` (40) | destination, data → () (at most 5 s for room in the queue) |
+| every socket | `READINESS` (50) | → () + readiness event in the handles (see [Socket readiness](#socket-readiness)) |
 | UDP | `RECV_FROM` (41) | max u32 → sender, data |
 
 **Info:** MAC (6 B), MTU u16, flags u8 (bit 0 link, bit 1 configured),
@@ -752,8 +811,8 @@ described in [firewall.md](firewall.md#tests).
   disk).
 - **More socket operations** (codes reserved in `netproto::op`): `RECV`
   with a `PEEK` flag (`RECV_FROM` too), `SHUTDOWN_READ`, `SET_OPTION` and
-  `GET_OPTION` (nodelay, TTL, keep-alive, linger, broadcast) and a
-  readiness signal for non-blocking loops (mio, tokio) **[designed]**.
+  `GET_OPTION` (nodelay, TTL, keep-alive, linger, broadcast), the number
+  of bytes to read (`FIONREAD`) **[designed]**.
 - **Loopback** (127.0.0.1) in the service **[designed]**.
 - **More cards**, static configuration, DNS cache, NTP servers from DHCP
   (option 42).

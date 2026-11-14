@@ -327,8 +327,8 @@ dotazy s tímto tokenem (vrátí `CANCELED`) a každý další dotaz s ním vrá
 čekání na uživatele. Čas dotazu na uživatele se do termínu nepočítá.
 `Deadline::TRY` je neblokující režim: `recv_ctx`, `send_ctx`, `accept_ctx`
 a `recv_from_ctx` bez dat, místa nebo spojení vrátí `SHOULD_WAIT` (ne
-`TIMED_OUT`) **[ověřeno v QEMU]**. Připravenost pro `poll`/mio (signál na
-objektu nebo port) je **[navrženo]**.
+`TIMED_OUT`) **[ověřeno v QEMU]**. Kdy to zkusit znovu, řekne
+[připravenost socketu](#připravenost-socketů).
 
 **Pojistka v klientovi:** limity operací hlídá `netd`, klient má navíc
 vlastní: termín operace + 10 s, operace bez limitu (stav, relace, socket)
@@ -433,6 +433,60 @@ strana přestala odpovídat. Spojení lze předat jinému procesu:
 `into_channel()` u odesílatele (`BAD_STATE`, když spojení drží klon nebo
 na něm běží dotaz), `TcpStream::from_channel()` u příjemce.
 
+## Připravenost socketů
+
+Neblokující smyčky (backend mio, a nad ním tokio) potřebují čekat na mnoho
+socketů najednou a pak operaci zkusit bez čekání **[ověřeno v QEMU]**
+(sada „sit pripravenost“).
+
+- **`READINESS`** na kanálu socketu (spojení, naslouchání, UDP) vrátí
+  **event** v handlech odpovědi. Klient dostane duplikát jen s právem
+  `WAIT` (a `DUPLICATE`, `TRANSFER`), `netd` si drží `SIGNAL`. Bity jsou
+  uživatelské bity eventu ([`OBJECT_SIGNAL`](syscally.md#object_signal)),
+  takže na ně jde čekat portem jádra jako na jakýkoli jiný objekt.
+- **Bity** (`netproto::ready`):
+
+| Bit | Signál | Kdy |
+|---|---|---|
+| `READABLE` | `USER_0` | spojení: data, konec proudu nebo chyba (čtení neblokuje); naslouchání: spojení čeká na `accept`; UDP: datagram |
+| `WRITABLE` | `USER_1` | místo ve frontě odesílání (nebo chyba) |
+| `HUP` | `USER_2` | druhá strana ukončila zápis (FIN) nebo je spojení zavřené |
+| `ERROR` | `USER_3` | spojení přerušeno (RST, druhá strana přestala odpovídat) |
+
+- **Stav je úrovňový:** `netd` po každém kole přepočítá bity sledovaných
+  socketů (těch, pro které někdo zavolal `READINESS`) a do eventu zapíše
+  jen změnu. Práce navíc je úměrná počtu sledovaných socketů. Bit
+  nastavený už při registraci se na portu ohlásí hned.
+- **Smyčka jako v mio:** `Port::wait_async(readiness.handle(), token,
+  maska)` = `Registry::register`; `Port::wait` = `Poll::poll`; po události
+  operace s `Deadline::TRY` (`SHOULD_WAIT` = už není připravený, což se
+  může stát, protože stav platí k poslednímu kolu `netd`) a nová
+  registrace (jednorázová jako epoll s `ONESHOT`). Probuzení z jiného
+  vlákna (`Waker`) = event se `SIGNALED` na stejném portu.
+
+```rust
+use netproto::{Deadline, ready};
+
+let port = libos::Port::create()?;
+let r = stream.readiness()?;
+port.wait_async(r.handle(), TOKEN, ready::READABLE)?;
+loop {
+    let ev = port.wait(None)?;
+    let mut buf = [0u8; 4096];
+    match stream.recv_ctx(&mut buf, Deadline::TRY, None) {
+        Ok(n) => { /* data */ }
+        Err(libos::Error::ShouldWait) => {} // zkusit po další události
+        Err(e) => return Err(e),
+    }
+    port.wait_async(r.handle(), TOKEN, ready::READABLE)?;
+}
+```
+
+> **Změna proti první verzi:** připravenost neexistovala, neblokující
+> smyčku šlo udělat jen vláknem na socket. **Proč:** mio/tokio a servery
+> s tisíci spojení. Jádro na to dostalo uživatelské bity eventu (malá
+> změna `OBJECT_SIGNAL`), `netd` jimi stav ukazuje bez zpráv navíc.
+
 ## Protokol netproto
 
 Verze 2 **[ověřeno v QEMU]**. Každá zpráva má hlavičku s kontextem
@@ -484,6 +538,7 @@ Kanál mezi `fwd` a agentem uživatele má vlastní formát odpovědi
 | naslouchání | `ACCEPT` (30) | → vzdálená adresa, místní adresa + kanál spojení |
 | naslouchání, UDP | `LOCAL_ADDR` (31) | → místní adresa (podle aktuální adresy rozhraní) |
 | UDP | `SEND_TO` (40) | cíl, data → () (na místo ve frontě nejvýš 5 s) |
+| každý socket | `READINESS` (50) | → () + event připravenosti v handlech (viz [Připravenost socketů](#připravenost-socketů)) |
 | UDP | `RECV_FROM` (41) | nejvýš u32 → odesílatel, data |
 
 **Info:** MAC (6 B), MTU u16, příznaky u8 (bit 0 linka, bit 1 nastaveno),
@@ -715,8 +770,8 @@ Formáty a oprávnění testuje i hostitel: `cargo test -p netproto
 - **Sdílená paměť pro data** místo kopírování zprávami (jako u disku).
 - **Další operace socketu** (kódy rezervované v `netproto::op`): `RECV`
   s příznakem `PEEK` (i `RECV_FROM`), `SHUTDOWN_READ`, `SET_OPTION`
-  a `GET_OPTION` (nodelay, TTL, keep-alive, linger, broadcast) a signál
-  připravenosti pro neblokující smyčky (mio, tokio) **[navrženo]**.
+  a `GET_OPTION` (nodelay, TTL, keep-alive, linger, broadcast), počet
+  bajtů k přečtení (`FIONREAD`) **[navrženo]**.
 - **Loopback** (127.0.0.1) ve službě **[navrženo]**.
 - **Víc karet**, statická konfigurace, mezipaměť DNS, servery NTP z DHCP
   (volba 42).

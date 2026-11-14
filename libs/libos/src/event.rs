@@ -20,4 +20,11 @@ impl Event {
     pub fn reset(&self) -> Result<()> {
         sys::object_signal(self.0.raw(), Signals::SIGNALED.0, 0)
     }
+
+    /// Smaze bity `clear` a nastavi `set` (jen `SIGNALED` a uzivatelske
+    /// bity `Signals::USER_*`; jinak `INVALID_ARGS`). Pravo `SIGNAL`.
+    pub fn update(&self, clear: Signals, set: Signals) -> Result<()> {
+        sys::object_signal(self.0.raw(), clear.0, set.0)
+    }
+
 }

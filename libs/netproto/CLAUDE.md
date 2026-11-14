@@ -8,6 +8,7 @@ Protokol sítě: zprávy mezi programy a službou `netd` (relace a sockety), mez
 - `src/client.rs` - `Net`, `TcpStream`, `TcpListener`, `UdpSocket`, `Deadline`; `src/client/mux.rs` - sdílený kanál (směrování odpovědí podle čísla, futex) a `CancelToken`.
 - `src/lib.rs` - kódy operací (`op`), `Info`, `Buffers`, `DIRECTION_QUEUE`; `src/auth.rs` - relace, vrstvy, rozpočet (`Quota`: sockety, bajty, souběžné dotazy).
 - `src/link.rs` - ovladač karty <-> netd (jiný protokol, bez hlavičky v2).
+- `ready` (v `lib.rs`) - bity připravenosti socketu na eventu (`USER_0..3`); `Readiness` v `client.rs` = základ backendu mio.
 
 ## Invarianty
 

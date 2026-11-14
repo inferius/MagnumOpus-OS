@@ -37,6 +37,8 @@ pub struct Obj {
     pub backlog: VecDeque<Vec<u8>>,
     /// Cteni kanalu zastavene (plny `backlog`).
     pub read_paused: bool,
+    /// Event pripravenosti socketu (az po `READINESS`).
+    pub ready: Option<crate::ready::Readiness>,
     /// Je na portu registrace "kanal je ke cteni"?
     pub read_armed: bool,
     /// Je na portu registrace "klient kanal zavrel"?
@@ -51,6 +53,7 @@ impl Obj {
             ops: Vec::new(),
             backlog: VecDeque::new(),
             read_paused: false,
+            ready: None,
             read_armed: false,
             close_armed: false,
         }

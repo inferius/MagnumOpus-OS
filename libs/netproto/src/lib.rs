@@ -64,7 +64,7 @@ pub use auth::{Auth, Quota, Restriction, UserRules, Verdict, layer_flags};
 pub use policy::{Policy, Rule, Target, proto, rights, rights_names};
 
 #[cfg(feature = "client")]
-pub use client::{CancelToken, Deadline, Net, NtpSync, TcpListener, TcpStream, UdpSocket};
+pub use client::{CancelToken, Deadline, Net, NtpSync, Readiness, TcpListener, TcpStream, UdpSocket};
 
 /// Nejvic bajtu dat v jedne zprave proudu (kousek; klient vetsi data deli,
 /// zprava kanalu ma nejvys 64 KiB).
@@ -173,11 +173,34 @@ pub mod op {
     /// () -> mistni socket_addr (podle aktualni adresy rozhrani)
     pub const LOCAL_ADDR: u32 = 31;
 
+    // Kanal kazdeho socketu (spojeni, naslouchani, UDP).
+    /// () -> () + event pripravenosti v handlech (jen pravo `WAIT`), viz
+    /// [`crate::ready`]
+    pub const READINESS: u32 = 50;
+
     // Kanal socketu UDP.
     /// cil socket_addr, data -> ()
     pub const SEND_TO: u32 = 40;
     /// nejvic u32 -> odesilatel socket_addr, data
     pub const RECV_FROM: u32 = 41;
+}
+
+/// Bity pripravenosti socketu na eventu od [`op::READINESS`] (uzivatelske
+/// bity eventu). Stav je urovnovy: bit plati, dokud plati podminka.
+pub mod ready {
+    use abi::Signals;
+
+    /// Cteni (`RECV`, `RECV_FROM`, `ACCEPT`) neblokuje: data, datagram,
+    /// spojeni k prijeti, konec proudu nebo chyba.
+    pub const READABLE: Signals = Signals::USER_0;
+    /// Zapis neblokuje: misto ve fronte odesilani (nebo chyba).
+    pub const WRITABLE: Signals = Signals::USER_1;
+    /// Druha strana ukoncila zapis (FIN) nebo je spojeni zavrene.
+    pub const HUP: Signals = Signals::USER_2;
+    /// Spojeni preruseno (RST, druha strana prestala odpovidat).
+    pub const ERROR: Signals = Signals::USER_3;
+    /// Vsechny bity pripravenosti.
+    pub const ALL: Signals = Signals(READABLE.0 | WRITABLE.0 | HUP.0 | ERROR.0);
 }
 
 /// Stav rozhrani.

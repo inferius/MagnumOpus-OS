@@ -95,6 +95,19 @@ impl Signals {
     pub const READABLE: Self = Self(1 << 2);
     /// Kanal: druha strana je zavrena.
     pub const PEER_CLOSED: Self = Self(1 << 3);
+    /// Event: uzivatelske bity (vyznam urcuje sluzba, ktera event vydala;
+    /// napr. pripravenost socketu u `netd`). Meni je `OBJECT_SIGNAL`
+    /// s pravem `SIGNAL`, cekat na ne jde jako na ostatni signaly.
+    pub const USER_0: Self = Self(1 << 24);
+    pub const USER_1: Self = Self(1 << 25);
+    pub const USER_2: Self = Self(1 << 26);
+    pub const USER_3: Self = Self(1 << 27);
+    pub const USER_4: Self = Self(1 << 28);
+    pub const USER_5: Self = Self(1 << 29);
+    pub const USER_6: Self = Self(1 << 30);
+    pub const USER_7: Self = Self(1 << 31);
+    /// Vsechny uzivatelske bity.
+    pub const USER_ALL: Self = Self(0xFF00_0000);
 
     pub const fn intersects(self, other: Self) -> bool {
         self.0 & other.0 != 0
