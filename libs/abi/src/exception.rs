@@ -87,12 +87,18 @@ pub mod frame {
     pub const REPORT: usize = 0;
     /// Offset obecnych registru.
     pub const GENERAL: usize = 64;
-    /// x86_64: offset obrazu FXSAVE a velikost ramce.
+    /// x86_64: offset FP casti (hlavicka `thread::fp::Header`, data o 64 B
+    /// dal).
     pub const X64_FP: usize = 256;
-    pub const X64_SIZE: usize = 768;
-    /// aarch64: offset V0-V31 + FPCR + FPSR a velikost ramce.
+    /// aarch64: offset FP casti.
     pub const A64_FP: usize = 384;
-    pub const A64_SIZE: usize = 960;
+
+    /// Velikost ramce s FP casti na `fp_off` a daty delky `fp_len`
+    /// (zaokrouhleno na 64 B). Delka dat zavisi na CPU: ramec ma
+    /// promennou velikost.
+    pub const fn size(fp_off: usize, fp_len: usize) -> usize {
+        (fp_off + crate::thread::fp::HEADER + fp_len).next_multiple_of(64)
+    }
 }
 
 /// Zprava o vyjimce (56 B, little endian). Ke zprave patri dva handly:

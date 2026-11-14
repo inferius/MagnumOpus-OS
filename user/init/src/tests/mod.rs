@@ -19,6 +19,7 @@ mod driverkit;
 mod events;
 mod firewall;
 mod fpu;
+mod fpu_avx;
 mod fs;
 mod fs_data;
 mod fs_datasets;

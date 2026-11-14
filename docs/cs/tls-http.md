@@ -509,6 +509,11 @@ testovací CA vygenerovaná při každém běhu):
 - **Spojení znovu** (keep-alive HTTP/1.1, víc proudů HTTP/2) a komprese
   (gzip, brotli).
 - **NTS** (RFC 8915) pro ověřený čas; DoH/DoT pro ověřené DNS.
-- **ring nebo vlastní assembler** pro AES-GCM s AES-NI/ARMv8 Crypto, až
-  budou programy smět používat SIMD.
+- **Hardwarové AES a GHASH** (fronta, SIMD programy mají od FPU-1):
+  zrušit `--cfg aes_force_soft` / `polyval_force_soft` a nechat
+  RustCrypto zjistit AES-NI a PCLMULQDQ za běhu (CPUID; x86-64-v2 je
+  nezaručuje). Na aarch64 potřebuje detekce ARMv8 Crypto informaci od
+  jádra (obdoba HWCAP, `ID_AA64ISAR0_EL1` z EL0 nejde číst). Změřit
+  handshake a propustnost a ověřit konstantní čas. Pak případně ring
+  nebo vlastní assembler.
 - **Klientské certifikáty** a TLS server (pro služby v systému).

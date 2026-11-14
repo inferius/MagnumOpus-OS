@@ -24,8 +24,10 @@ does not use the FPU, but it saves the FPU state of every thread
 | aarch64 | ARMv8-A with FP and AdvSIMD (NEON) | - (FP and NEON are always present on common cores) | every common ARMv8 |
 
 Programs do not assume higher levels (AVX, AVX2, AVX-512, AES-NI);
-libraries that can use them detect them at run time (CPUID detection;
-saving the extended XSAVE state comes in the next part of the FPU work).
+libraries that can use them detect them at run time (CPUID and XGETBV:
+the kernel enables AVX and AVX-512 in XCR0 when the CPU has them and
+saves their state with XSAVE, [kernel.md](kernel.md)). AMX is not enabled
+yet.
 
 ## What happens on an older processor
 

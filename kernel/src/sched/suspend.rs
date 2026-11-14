@@ -303,7 +303,7 @@ fn apply(me: &Arc<Thread>, general: Option<Vec<u8>>, fp: Option<Vec<u8>>) {
 pub fn state_size(kind: u32) -> Result<usize, Error> {
     match kind {
         abi::thread::kind::GENERAL => Ok(ustate::GENERAL_SIZE),
-        abi::thread::kind::FP => Ok(ustate::FP_SIZE),
+        abi::thread::kind::FP => Ok(ustate::fp_size()),
         _ => Err(Error::InvalidArgs),
     }
 }

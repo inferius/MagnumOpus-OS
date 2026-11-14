@@ -481,17 +481,25 @@ Kill a `JOB_KILL` vždy vyhrají: pozastavené vlákno skončí. Vyžaduje
 `(thread, op, kind, ptr, len) -> 0`. Čtení (`thread::op::READ`, pravo
 `READ`) nebo zápis (`WRITE`, pravo `WRITE`) kontextu pozastaveného vlákna.
 `kind`: `thread::kind::GENERAL` - obecné registry, PC, SP, příznaky a báze
-TLS (`abi::thread::X64General` 160 B, `A64General` 280 B); `FP` - FPU/SIMD
-(x86_64 obraz FXSAVE 512 B, aarch64 V0-V31 + FPCR + FPSR 528 B); `len`
-přesně podle architektury. Čtení počká (nejvýš desetinu sekundy), než pozastavené
+TLS (`abi::thread::X64General` 160 B, `A64General` 280 B); `FP` - FPU/SIMD:
+hlavička `abi::thread::fp::Header` (64 B: formát, délka dat, x86_64 XCR0)
+a data - x86_64 obraz XSAVE ve standardním formátu pro části zapnuté
+jádrem (velikost podle CPU, CPUID 0xD; bez XSAVE obraz FXSAVE 512 B),
+aarch64 V0-V31 + FPCR + FPSR 528 B. Velikost zjistí program přes
+`libos::exception::fp_state_size()` (nebo z hlavičky). `len` nejméně
+velikost stavu (větší buffer se použije jen do ní, menší =
+`BUFFER_TOO_SMALL`; při čtení FPU s bufferem aspoň na hlavičku do ní
+jádro zapíše potřebnou délku). Čtení počká (nejvýš desetinu sekundy), než pozastavené
 vlákno opravdu stojí v jádře. Zápis jádro ověří a vlákno ho použije
 těsně před návratem do userspace (čtení ho už vidí); u vlákna spícího
 v syscallu přepíše i návratovou hodnotu (rax / x0). Ověření zápisu: PC, SP
 a báze TLS v paměti procesu (na x86_64 kanonické, pod `USER_MAX`),
 z příznaků jen uživatelské bity (x86_64 RFLAGS bez IOPL, IF vždy 1;
-aarch64 jen NZCV), u FPU nulové rezervované bity (MXCSR, FPCR, FPSR).
-Chyby: `INVALID_ARGS` (neznámý `op`/`kind`, špatná délka, neplatný
-kontext), `BAD_STATE` (vlákno není pozastavené), `WRONG_TYPE`,
+aarch64 jen NZCV), u FPU hlavička tohoto CPU (formát, délka, XCR0)
+a nulové rezervované bity (MXCSR, FPCR, FPSR; v hlavičce XSAVE
+XSTATE_BV jen části z XCR0, XCOMP_BV 0 - kompaktní formát se nepřijímá).
+Chyby: `BUFFER_TOO_SMALL` (`len` menší než stav), `INVALID_ARGS`
+(neznámý `op`/`kind`, neplatný kontext), `BAD_STATE` (vlákno není pozastavené), `WRONG_TYPE`,
 `BAD_ADDRESS`, `BAD_HANDLE`, `ACCESS_DENIED`.
 
 ### `EXCEPTION_CHANNEL`

@@ -22,8 +22,9 @@ nepoužívá, ale stav FPU každého vlákna ukládá ([jadro.md](jadro.md)).
 | aarch64 | ARMv8-A s FP a AdvSIMD (NEON) | - (FP a NEON jsou na běžných jádrech vždy) | každé běžné ARMv8 |
 
 Vyšší úrovně (AVX, AVX2, AVX-512, AES-NI) programy nepředpokládají;
-knihovny, které je umějí využít, je zjistí za běhu (detekce přes CPUID,
-uložení rozšířeného stavu XSAVE přijde v další části práce na FPU).
+knihovny, které je umějí využít, je zjistí za běhu (CPUID a XGETBV:
+jádro zapne v XCR0 AVX a AVX-512, když je CPU má, a ukládá jejich stav
+přes XSAVE, [jadro.md](jadro.md)). AMX zatím zapnuté není.
 
 ## Co se stane na starším procesoru
 

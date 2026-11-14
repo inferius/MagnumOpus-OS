@@ -18,6 +18,8 @@ pub const TESTS: &[Test] = &[
     ("FPU: nove vlakno zacina s nulovym stavem", fresh_state),
     ("FPU: vsechny vektorove registry preziji prepnuti vlaken", registers_survive_switch),
     ("FPU: vypocty f64 v soubeznych vlaknech", float_math_in_threads),
+    ("FPU: AVX - horni poloviny YMM preziji prepnuti vlaken", super::fpu_avx::ymm_survive_switch),
+    ("FPU: AVX - THREAD_STATE cte a zapisuje YMM v obrazu XSAVE", super::fpu_avx::ymm_thread_state),
 ];
 
 fn deadline() -> Option<u64> {

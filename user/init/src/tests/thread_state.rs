@@ -45,11 +45,21 @@ mod regs {
         g.rflags = f;
         b.copy_from_slice(&g.encode());
     }
-    pub const FP_SIZE: usize = libos::abi::thread::X64_FP_SIZE;
-    /// Rezervovany bit MXCSR (FXRSTOR by v jadre vyvolal #GP).
+    /// Rezervovany bit MXCSR (FXRSTOR/XRSTOR by v jadre vyvolal #GP).
     pub fn break_fp(b: &mut [u8]) {
-        let at = libos::abi::thread::X64_FP_MXCSR;
+        let at = libos::abi::thread::fp::HEADER + libos::abi::thread::X64_FP_MXCSR;
         b[at + 3] = 0x80;
+    }
+    /// Cast mimo XCR0 v XSTATE_BV (XRSTOR by vyvolal #GP); `false` = CPU
+    /// bez XSAVE (obraz FXSAVE nema hlavicku XSAVE).
+    pub fn break_xstate(b: &mut [u8]) -> bool {
+        let h = libos::abi::thread::fp::Header::decode(b).unwrap_or_default();
+        if h.format != libos::abi::thread::fp::format::X64_XSAVE {
+            return false;
+        }
+        let at = libos::abi::thread::fp::HEADER + libos::abi::thread::X64_XSAVE_HEADER;
+        b[at + 7] |= 0x80;
+        true
     }
 }
 
@@ -72,10 +82,13 @@ mod regs {
         g.pstate = f;
         b.copy_from_slice(&g.encode());
     }
-    pub const FP_SIZE: usize = libos::abi::thread::A64_FP_SIZE;
     /// Nedefinovany bit FPCR.
     pub fn break_fp(b: &mut [u8]) {
-        b[512] |= 1;
+        b[libos::abi::thread::fp::HEADER + 512] |= 1;
+    }
+    /// aarch64 nema XSAVE.
+    pub fn break_xstate(_: &mut [u8]) -> bool {
+        false
     }
 }
 
@@ -109,7 +122,7 @@ fn redirect_running(_: &Startup) -> TestResult {
     let (pc, sp) = regs::pc_sp(&g);
     check!(pc > 0x10000 && pc < USER_MAX && sp > 0x10000 && sp < USER_MAX, "PC a SP v pameti procesu");
     // FPU: cteni a zapis tehoz stavu.
-    let mut fp = vec![0u8; regs::FP_SIZE];
+    let mut fp = vec![0u8; libos::exception::fp_state_size()];
     t.read_state(kind::FP, &mut fp).map_err(|e| fail("cteni FPU", e))?;
     t.write_state(kind::FP, &fp).map_err(|e| fail("zapis FPU", e))?;
     // Druhy token: obnoveni az po zavreni obou.
@@ -190,12 +203,26 @@ fn invalid_context(_: &Startup) -> TestResult {
     regs::set_flags(&mut flags, u64::MAX);
     t.write_state(kind::GENERAL, &flags).map_err(|e| fail("priznaky", e))?;
     t.write_state(kind::GENERAL, &good).map_err(|e| fail("puvodni registry", e))?;
-    let mut fp = vec![0u8; regs::FP_SIZE];
+    let mut fp = vec![0u8; libos::exception::fp_state_size()];
     t.read_state(kind::FP, &mut fp).map_err(|e| fail("cteni FPU", e))?;
-    regs::break_fp(&mut fp);
-    check_eq!(t.write_state(kind::FP, &fp).err(), Some(Error::InvalidArgs), "rezervovane bity FPU");
+    // Hlavicka: format a delka dat odpovidaji CPU (velikost z libos).
+    let h = libos::abi::thread::fp::Header::decode(&fp).ok_or("hlavicka FPU")?;
+    check_eq!(h.total(), fp.len(), "delka stavu FPU v hlavicce");
+    let mut bad = fp.clone();
+    regs::break_fp(&mut bad);
+    check_eq!(t.write_state(kind::FP, &bad).err(), Some(Error::InvalidArgs), "rezervovane bity FPU");
+    let mut bad = fp.clone();
+    if regs::break_xstate(&mut bad) {
+        check_eq!(t.write_state(kind::FP, &bad).err(), Some(Error::InvalidArgs), "XSTATE_BV mimo XCR0");
+    }
+    let mut bad = fp.clone();
+    bad[8] ^= 1;
+    check_eq!(t.write_state(kind::FP, &bad).err(), Some(Error::InvalidArgs), "hlavicka jineho CPU (features)");
+    let mut short = [0u8; 100];
+    check_eq!(t.read_state(kind::FP, &mut short).err(), Some(Error::BufferTooSmall), "kratky buffer FPU");
+    check_eq!(libos::abi::thread::fp::Header::decode(&short), Some(h), "potrebna delka v hlavicce kratkeho bufferu");
     // Spatna delka, druh a operace.
-    check_eq!(t.read_state(kind::GENERAL, &mut g[..8]).err(), Some(Error::InvalidArgs), "kratky buffer");
+    check_eq!(t.read_state(kind::GENERAL, &mut g[..8]).err(), Some(Error::BufferTooSmall), "kratky buffer");
     check_eq!(t.read_state(7, &mut g).err(), Some(Error::InvalidArgs), "neznamy druh");
     let mut z = vec![0u8; regs::SIZE];
     check_eq!(

@@ -981,7 +981,7 @@ obě architektury projdou všemi testy.
 |---|---|---|---|
 | `Cpu` | start CPU, HW ID, per-CPU ukazatel, zastavení, breakpoint | GDT/TSS/IDT, ID lokálního APIC, GS báze | VBAR_EL1, MPIDR_EL1, TPIDR_EL1 |
 | `Interrupts` | zapnout/vypnout přerušení, uspat do přerušení | `sti`/`cli`/`hlt` | DAIF, `wfi` |
-| `Threads` | kontext vlákna, přepnutí, zásobník jádra, vstup do userspace | callee-saved + FXSAVE, `iretq` | x19-x30 + v0-v31, `eret` |
+| `Threads` | kontext vlákna, přepnutí, zásobník jádra, vstup do userspace | callee-saved + XSAVE/FXSAVE, `iretq` | x19-x30 + v0-v31, `eret` |
 | `Time` | hodiny v ns, čítač cyklů, jednorázový časovač, navázání času firmwaru (`ns_from_counter_to_start`), hardwarové hodiny ([reálný čas](cas.md)) | TSC (kalibrace HPET), APIC timer, CMOS RTC | CNTVCT_EL0, CNTP; hodiny zatím jen z UEFI |
 | `Ipi` | přeplánuj, zastav, vyprázdni TLB | APIC IPI | GICv3 SGI |
 | `Memory` | tabulky stránek (`PageTableOps`), TLB, cache pro DMA | 4 úrovně, CR3, IPI shootdown | TTBR0/TTBR1, `TLBI ... IS` bez IPI |
@@ -1287,9 +1287,9 @@ Co zatím funguje jednodušeji, než návrh popisuje (a proč to nevadí teď):
   `x86_64-unknown-magnumopus` (základní úroveň x86-64-v2) a
   `aarch64-unknown-magnumopus` (NEON) s hard-float ABI; core a alloc
   z rust-src (`-Zbuild-std`), kód v C stejné ABI (`cbuild`). Jádro zůstává
-  soft-float a stav FPU vláken ukládá (FXSAVE, x87 + XMM0-15). Starší CPU
-  jádro zastaví při startu ([pozadavky-hw.md](pozadavky-hw.md)). AVX
-  (XSAVE) zatím zapnuté není - další část (FPU-2).
+  soft-float a stav FPU vláken ukládá (FPU-2: XSAVE s AVX a AVX-512, bez
+  XSAVE FXSAVE; [jadro.md](jadro.md)). Starší CPU jádro zastaví při startu
+  ([pozadavky-hw.md](pozadavky-hw.md)). AMX zatím zapnuté není.
 - **IOMMU (Intel VT-d, AMD-Vi) jen pro překlad DMA:** chybí překlad
   přerušení a oblasti RMRR/IVMD; na stroji bez IOMMU DMA omezené není
   (jádro to zaloguje).

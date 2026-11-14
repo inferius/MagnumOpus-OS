@@ -522,6 +522,11 @@ CA generated on every run):
 - **Connection reuse** (HTTP/1.1 keep-alive, several HTTP/2 streams) and
   compression (gzip, brotli).
 - **NTS** (RFC 8915) for authenticated time; DoH/DoT for authenticated DNS.
-- **ring or our own assembly** for AES-GCM with AES-NI/ARMv8 Crypto, once
-  programs may use SIMD.
+- **Hardware AES and GHASH** (queued; programs have SIMD since FPU-1):
+  drop `--cfg aes_force_soft` / `polyval_force_soft` and let RustCrypto
+  detect AES-NI and PCLMULQDQ at run time (CPUID; x86-64-v2 does not
+  guarantee them). On aarch64 detecting ARMv8 Crypto needs information
+  from the kernel (like HWCAP; `ID_AA64ISAR0_EL1` cannot be read from
+  EL0). Measure the handshake and throughput and check constant time.
+  Then possibly ring or our own assembly.
 - **Client certificates** and a TLS server (for services in the system).

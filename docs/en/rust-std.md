@@ -213,9 +213,8 @@ Since FPU-1 services and programs without std are built for the same
 targets (`*-unknown-magnumopus`, hard-float; core and alloc via
 `-Zbuild-std`); the kernel stays `*-none` with soft-float. std
 applications have their own sysroot, so shared crates (libos,
-fsproto...) are compiled twice. AVX is not
-possible yet (the kernel saves state with FXSAVE, AVX instructions end
-with `#UD`); FFmpeg will need XSAVE in the kernel.
+fsproto...) are compiled twice. AVX and AVX-512 work since FPU-2 (the
+kernel saves state with XSAVE) and are detected at run time.
 
 ## Mapping std onto libos and services
 
@@ -281,7 +280,7 @@ with termd and the shell is work for the terminal thread **[designed]**.
    switch).
 3. **CPU count** was already provided by the kernel (`SCHED_CONTROL`
    `CPU_INFO`).
-4. Later: XSAVE (AVX) for FFmpeg, demand paging (see
+4. Later: demand paging (see
    [Memory management](#memory-management)), loading `ET_DYN` (see rustc).
 
 ## Known limitations
@@ -331,8 +330,8 @@ stdin and stdio in the terminal, the stack guard page, then a
   belongs in `osrt` so that `std` and C see the same thing
   (`os::magnumopus::io::AsRawFd`).
 - FFmpeg: `pthread_*`, anonymous `mmap` (works through VMOs), files,
-  optional sockets, no `fork`. SIMD assembly: SSE only on x86_64 (AVX
-  waits for XSAVE in the kernel), NEON on aarch64; the std target must be
+  optional sockets, no `fork`. SIMD assembly: SSE up to AVX-512 on x86_64
+  (run-time detection, XSAVE in the kernel since FPU-2), NEON on aarch64; the std target must be
   hard-float (it is).
 
 ### Porting rustc + LLVM + lld into the system

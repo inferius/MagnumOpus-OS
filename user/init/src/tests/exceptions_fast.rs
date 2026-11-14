@@ -112,7 +112,8 @@ extern "C" fn handler(f: *mut u8) -> ! {
                 && signal_class(fr.report().kind) == SignalClass::Trap
                 && fr.pc() == r.pc
                 && fr.sp() != 0
-                && fr.fp().len() == if cfg!(target_arch = "x86_64") { 512 } else { 528 }
+                && fr.fp().len() == libos::exception::fp_data_len()
+                && fr.fp_header().len as usize == libos::exception::fp_data_len()
                 && fr.fp()[FP_REG0..FP_REG0 + 8] == FP_BEFORE.to_le_bytes()
                 && on_alt;
             // Zmena FP casti ramce se po RESUME projevi v registru.

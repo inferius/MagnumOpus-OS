@@ -86,6 +86,8 @@ prepinace:
   --headless       (run) bez okna, jen seriova linka v terminalu
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
   --res <SxV>      (run, x86_64) vychozi rozliseni, napr. 1920x1080
+  --cpu <model>    (run, test) model CPU QEMU misto vychoziho (x86_64 max,
+                   aarch64 cortex-a76), napr. Nehalem = CPU bez XSAVE
   --iommu <typ>    (run, test) IOMMU v QEMU: x86_64 intel (vychozi), amd,
                    none; aarch64 smmu (vychozi), none
   --data-disk <r>  (run, test) radic datoveho disku: virtio (vychozi), nvme,
@@ -137,6 +139,8 @@ pub struct Options {
     iommu: String,
     /// `--res SxV`: vychozi rozliseni grafiky v QEMU (x86_64).
     res: Option<(u32, u32)>,
+    /// `--cpu`: model CPU QEMU (`None` = vychozi architektury).
+    cpu: Option<String>,
     /// Radic datoveho disku: "virtio", "nvme", "nvme4k" (sektor 4 KiB), "ahci",
     /// "usb" (flash disk usb-storage na radici xHCI).
     data_disk: String,
@@ -268,6 +272,7 @@ fn run_cli() -> Result<()> {
         accel: None,
         iommu: String::new(),
         res: None,
+        cpu: None,
         data_disk: String::from("virtio"),
         gpu: String::from("2d"),
         qemu_wsl: false,
@@ -294,6 +299,10 @@ fn run_cli() -> Result<()> {
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--release") => opts.release = true,
+            Some("--cpu") => {
+                let value = args.next().ok_or("--cpu ocekava model CPU QEMU, napr. Nehalem")?;
+                opts.cpu = Some(value.to_string_lossy().into_owned());
+            }
             Some("--res") => {
                 let value = args.next().ok_or("--res ocekava SxV, napr. 1920x1080")?;
                 let value = value.to_string_lossy().into_owned();

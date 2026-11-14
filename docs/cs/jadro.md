@@ -177,12 +177,33 @@ Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
   procesu tak nikdy není vidět v jiném **[ověřeno v QEMU]** (test
   `procesy: TPIDR_EL0 neprosakuje mezi procesy`, aarch64). Na x86_64 si
   program `FS_BASE` sám nastavit nemůže.
-- **Stav FPU/SSE:** každé vlákno má vlastní 512B oblast FXSAVE; přepnutí
-  kontextu ji vždy uloží a obnoví. Nové vlákno začíná s výchozím stavem
-  (FCW 0x037F, MXCSR 0x1F80), takže data jiného vlákna nemohou uniknout.
-  Jádro samo FPU/SSE nepoužívá (soft-float); programy ano (hard-float,
-  [pozadavky-hw.md](pozadavky-hw.md)). AVX není zapnuté (instrukce
-  skončí výjimkou #UD).
+- **Stav FPU/SIMD** **[ověřeno v QEMU]** (FPU-2): s XSAVE zapne jádro
+  v XCR0 x87, SSE, AVX a AVX-512 (co CPU umí; AMX ne) a každé vlákno má
+  oblast obrazu XSAVE ve standardním formátu (velikost z CPUID 0xD, stejná
+  pro všechna vlákna, zarovnaná na 64 B). Přepnutí kontextu ji vždy uloží
+  (XSAVEOPT, jinak XSAVE) a obnoví (XRSTOR); CPU bez XSAVE = 512 B FXSAVE.
+  Nové vlákno začíná s výchozím stavem (FCW 0x037F, MXCSR 0x1F80,
+  XSTATE_BV 0), takže data jiného vlákna nemohou uniknout. Jádro samo FPU
+  nepoužívá (soft-float); programy ano (hard-float,
+  [pozadavky-hw.md](pozadavky-hw.md)), AVX a výš zjistí za běhu (CPUID,
+  XGETBV). Ověřeno: XSAVE s AVX (QEMU TCG `-cpu max`: XCR0 0x7, 832 B na
+  vlákno; testy `FPU: AVX ...`) a FXSAVE (`--cpu Nehalem`, 512 B).
+  **AVX-512 neověřeno** (TCG ho nenabízí) - cesta je stejná, jen větší
+  oblast; ověřit na HW nebo s WHPX/KVM.
+  - **AMX** **[navrženo]**: automaticky při prvním použití přes XFD (bez
+    žádosti procesu): instrukce AMX vyvolá #NM (XFD), jádro vláknu
+    přidělí 8 KiB oblast pro data dlaždic, zapne část v jeho XFD
+    a instrukci zopakuje. Větší oblast, rámec výjimky a alternativní
+    zásobník jen u vláken, která AMX použila. Implementace až bude CPU
+    s AMX k testu.
+  - **Stupně ukládání podle CPUID:** (1) bez XSAVE (Nehalem, Westmere -
+    patří do základní úrovně x86-64-v2): FXSAVE 512 B, hlavička
+    `format = X64_FXSAVE`, `features` = x87|SSE (0b11), programy to poznají
+    z hlavičky; (2) XSAVE/XSAVEOPT (Sandy Bridge a novější): standardní
+    obraz XSAVE; (3) budoucí XSAVES pro CET shadow stack (stav CET je
+    supervisor část) - **doplnění, ne náhrada**: jen uvnitř jádra, vnější
+    formát (`THREAD_STATE`, rámec) zůstane standardní XSAVE. Stupeň 1 ověřuje
+    `cargo xtask test --only procesy --cpu Nehalem`.
 - **Rozpočty a meze:** paměť jádra a uživatelská paměť se strhává
   z rozpočtu jobu procesu (strom jobů, limity v bajtech), rezerva paměti
   jádra a strukturální meze - viz

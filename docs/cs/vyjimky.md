@@ -87,7 +87,13 @@ if e.report.kind == abi::exception::kind::PAGE_FAULT {
 
 Obsluha (`libos::exception::set_handler`) dostane rámec
 `abi::exception::frame` (zarovnaný na 64 B): `Report`, obecné registry
-a FPU/SIMD v okamžiku výjimky. Leží na **alternativním zásobníku**
+a FPU/SIMD v okamžiku výjimky. FP část má hlavičku
+`abi::thread::fp::Header` (jako `THREAD_STATE`) a data za ní; její délka
+závisí na CPU (x86_64 obraz XSAVE s AVX/AVX-512), takže **rámec má
+proměnnou velikost** (`libos::exception::frame_size()`,
+`abi::exception::frame::size`). Typový přístup: `Frame::fp_header()`,
+`fp()`, `fp_mut()`; nejmenší alternativní zásobník
+`libos::exception::min_alt_stack()`. Leží na **alternativním zásobníku**
 (`set_alt_stack`, jako `sigaltstack`), je-li nastavený a vlákno na něm
 ještě není, jinak pod SP (na x86_64 pod červenou zónou 128 B). Obsluha se
 nevrací, končí `handler_return(rámec, RESUME | NEXT)`.
@@ -141,7 +147,7 @@ extern "C" fn on_fault(f: *mut u8) -> ! {
 - `THREAD_SUSPEND` vrací token, zavření ho vlákno obnoví. Vlákno stojí na
   hranici návratu do userspace; spící v syscallu je pozastavené hned.
 - `THREAD_STATE` čte a zapisuje obecné registry (`abi::thread::X64General`,
-  `A64General`) a FPU/SIMD (FXSAVE, V0-V31 + FPCR + FPSR) pozastaveného
+  `A64General`) a FPU/SIMD (hlavička a obraz XSAVE/FXSAVE, V0-V31 + FPCR + FPSR) pozastaveného
   vlákna nebo vlákna ve výjimce. Zápis vlákno samo použije před návratem.
 - `PROCESS_THREADS` dá debuggeru handly všech vláken.
 
