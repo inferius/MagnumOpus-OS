@@ -16,7 +16,9 @@ Compiling C (clang, flags, protections) is described in
 > `dirent.h`, `FILE` over fd numbers. Part 2b **[verified in QEMU]** (step
 > `threads`): `pthread`. Part 2c **[verified in QEMU]** (step `time`):
 > time, calendar, `setenv`. Part 2d **[verified in QEMU]** (step `math`):
-> `math.h`, floating point in `printf`, `strtod`. Further parts (sockets, `mmap`,
+> `math.h`, floating point in `printf`, `strtod`. Part 2e **[verified in
+> QEMU]** (suite `cstd sit`): BSD sockets, `getaddrinfo`, `poll`, `select`,
+> `epoll`. Further parts (`mmap`,
 > signals, file locks, `libc.so`, ports) **[designed]**, see [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
 
 ## Layers
@@ -157,6 +159,36 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 - `%Lf` (`long double` in `printf`) cannot be read from a `VaList` yet: it
   prints `?` and does not consume the argument.
 - `scanf` **[designed]**.
+
+## Functions (part 2e: sockets and waiting)
+
+| Header | Functions | Note |
+|---|---|---|
+| `sys/socket.h` | `socket` (`AF_INET`, `AF_INET6`; `SOCK_STREAM`, `SOCK_DGRAM`, `SOCK_NONBLOCK`, `SOCK_CLOEXEC`), `bind`, `listen`, `accept`, `accept4`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg` (no control messages), `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt` | `AF_UNIX` and `socketpair` = `EAFNOSUPPORT`; `MSG_PEEK` = `ENOTSUP` |
+| `netinet/in.h`, `arpa/inet.h` | `htons` ..., `inet_pton`, `inet_ntop`, `inet_addr`, `inet_ntoa`, `in6addr_any` | |
+| `netdb.h` | `getaddrinfo`, `freeaddrinfo`, `gai_strerror`, `getnameinfo` | names via the netd resolver; `getnameinfo` numeric only |
+| `poll.h`, `sys/select.h`, `sys/epoll.h` | `poll`, `select`, `epoll_create`, `epoll_create1`, `epoll_ctl`, `epoll_wait` | over `osrt::poll` |
+
+- A socket is an object in the fd table (`osrt::sock`): after `socket()` it
+  has no connection at netd yet; `connect`/`listen`/`bind` turn it into a
+  TCP connection, a listener or a UDP socket. `read`, `write`, `fdopen` and
+  `close` also work on a socket.
+- What a program may do (targets, ports, listening) is decided by the
+  network session from the manifest: a forbidden target or port = `EACCES`.
+  `SO_REUSEADDR`, `SO_KEEPALIVE`, `TCP_NODELAY` and buffer sizes are
+  accepted without effect, `SO_RCVTIMEO`/`SO_SNDTIMEO` apply.
+- `O_NONBLOCK` (`SOCK_NONBLOCK`, `MSG_DONTWAIT`) = deadline `TRY` at netd,
+  `EAGAIN` without data. `connect` completes immediately even in
+  non-blocking mode (POSIX allows it), so `SO_ERROR` is always 0.
+- **Waiting** (`osrt::poll`): files are always ready, stdin and pipes wait
+  for a channel signal (`READABLE`, `PEER_CLOSED`), sockets for the netd
+  readiness event (netproto v2). A channel has no "writable" signal, so
+  stdout and the write end of a pipe always report `POLLOUT`. Up to 64
+  objects `OBJECT_WAIT_MANY`, more via a port.
+- **`epoll`** is a set in the fd table; level-triggered mode exactly,
+  `EPOLLET` reports only newly set bits, `EPOLLONESHOT` disables the entry
+  until `EPOLL_CTL_MOD`. An mio backend directly over readiness
+  **[designed]**.
 
 ### fd numbers
 

@@ -14,6 +14,7 @@ pub const DT_CHR: u8 = 2;
 pub const DT_DIR: u8 = 4;
 pub const DT_REG: u8 = 8;
 pub const DT_LNK: u8 = 10;
+pub const DT_SOCK: u8 = 12;
 
 /// `struct dirent` (jako Linux).
 #[repr(C)]
@@ -44,6 +45,7 @@ fn d_type(k: Kind) -> u8 {
         Kind::Symlink => DT_LNK,
         Kind::Stream => DT_CHR,
         Kind::Pipe => DT_FIFO,
+        Kind::Socket => DT_SOCK,
     }
 }
 

@@ -81,6 +81,7 @@ pub enum Kind {
     /// Stdio procesu (znakove zarizeni, jako terminal).
     Stream,
     Pipe,
+    Socket,
 }
 
 /// Metadata (`struct stat` je sklada v `stat.rs`).
@@ -124,3 +125,18 @@ pub struct Entry {
 
 /// Funkce vlakna pro [`spawn`].
 pub type ThreadFn = Box<dyn FnOnce() + Send + 'static>;
+
+/// Druh socketu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SockKind {
+    Stream,
+    Datagram,
+}
+
+/// Polozka `poll` (udalosti jako Linux `POLL*`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PollItem {
+    pub fd: i32,
+    pub events: u16,
+    pub revents: u16,
+}

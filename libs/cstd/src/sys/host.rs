@@ -19,6 +19,7 @@ enum Obj {
     Stderr,
     PipeR(Mutex<io::PipeReader>),
     PipeW(Mutex<io::PipeWriter>),
+    User(Box<dyn core::any::Any + Send + Sync>),
 }
 
 struct Desc {
@@ -377,4 +378,93 @@ pub fn monotonic_ns() -> u64 {
 pub fn realtime() -> Option<(i64, u32)> {
     let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?;
     Some((d.as_secs() as i64, d.subsec_nanos()))
+}
+
+// --- sockety a cekani (na hostiteli jen epoll a poll nad soubory) ----------
+
+use std::net::SocketAddr;
+
+pub fn socket(_k: super::SockKind, _v6: bool, _cloexec: bool, _nb: bool) -> R<i32> {
+    Err(errno::ENOSYS)
+}
+pub fn sock_bind(_fd: i32, _a: SocketAddr) -> R<()> {
+    Err(errno::ENOTSOCK)
+}
+pub fn sock_listen(_fd: i32, _b: u16) -> R<()> {
+    Err(errno::ENOTSOCK)
+}
+pub fn sock_connect(_fd: i32, _a: SocketAddr) -> R<()> {
+    Err(errno::ENOTSOCK)
+}
+pub fn sock_accept(_fd: i32, _c: bool, _n: bool) -> R<(i32, SocketAddr)> {
+    Err(errno::ENOTSOCK)
+}
+pub fn sock_recv(_fd: i32, _b: &mut [u8], _d: bool) -> R<usize> {
+    Err(errno::ENOTSOCK)
+}
+pub fn sock_send(_fd: i32, _b: &[u8], _d: bool) -> R<usize> {
+    Err(errno::ENOTSOCK)
+}
+pub fn sock_recv_from(_fd: i32, _b: &mut [u8], _d: bool) -> R<(usize, SocketAddr)> {
+    Err(errno::ENOTSOCK)
+}
+pub fn sock_send_to(_fd: i32, _b: &[u8], _t: SocketAddr) -> R<usize> {
+    Err(errno::ENOTSOCK)
+}
+pub fn sock_shutdown_write(_fd: i32) -> R<()> {
+    Err(errno::ENOTSOCK)
+}
+pub fn sock_name(_fd: i32, _peer: bool) -> R<SocketAddr> {
+    Err(errno::ENOTSOCK)
+}
+pub fn sock_is_stream(_fd: i32) -> R<(bool, bool)> {
+    Err(errno::ENOTSOCK)
+}
+pub fn sock_set_timeouts(
+    _fd: i32,
+    _r: Option<Option<core::time::Duration>>,
+    _w: Option<Option<core::time::Duration>>,
+) -> R<()> {
+    Err(errno::ENOTSOCK)
+}
+pub fn sock_timeouts(_fd: i32) -> R<(Option<core::time::Duration>, Option<core::time::Duration>)> {
+    Err(errno::ENOTSOCK)
+}
+pub fn sock_listening(_fd: i32) -> R<bool> {
+    Err(errno::ENOTSOCK)
+}
+pub fn resolve(_host: &str) -> R<Vec<std::net::IpAddr>> {
+    Err(errno::ENOSYS)
+}
+
+/// Na hostiteli: soubory a roury vzdy pripravene (testy logiky epoll).
+pub fn poll(items: &mut [super::PollItem], _timeout: Option<core::time::Duration>) -> R<usize> {
+    let mut n = 0;
+    for p in items.iter_mut() {
+        p.revents = match get(p.fd) {
+            Err(_) => 0x20,
+            Ok(d) => match &d.obj {
+                Obj::PipeR(_) | Obj::Stdin => p.events & 0x1,
+                Obj::PipeW(_) | Obj::Stdout | Obj::Stderr => p.events & 0x4,
+                Obj::User(_) => 0,
+                _ => p.events & 0x5,
+            },
+        };
+        if p.revents != 0 {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+pub fn insert_user(obj: Box<dyn core::any::Any + Send + Sync>, cloexec: bool) -> R<i32> {
+    insert(Obj::User(obj), super::status::RDWR, 0, cloexec)
+}
+
+pub fn with_user<T>(fd: i32, f: impl FnOnce(&(dyn core::any::Any + Send + Sync)) -> R<T>) -> R<T> {
+    let d = get(fd)?;
+    match &d.obj {
+        Obj::User(o) => f(o.as_ref()),
+        _ => Err(errno::EINVAL),
+    }
 }

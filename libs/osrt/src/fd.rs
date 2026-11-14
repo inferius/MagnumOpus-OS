@@ -41,6 +41,11 @@ pub enum Object {
     Stdio(Stream),
     /// Konec roury.
     Pipe(Pipe),
+    /// Socket ([`crate::sock`]).
+    Socket(crate::sock::Socket),
+    /// Objekt knihovny nad std (napr. mnozina `epoll` v cstd); cteni
+    /// a zapis nejdou.
+    User(alloc::boxed::Box<dyn core::any::Any + Send + Sync>),
 }
 
 /// Popis otevreni (sdileny vsemi duplikaty cisla).
@@ -73,6 +78,10 @@ impl Description {
         self.status() & status::ACCMODE != status::RDONLY
     }
 
+    fn nonblock(&self) -> bool {
+        self.status() & status::NONBLOCK != 0
+    }
+
     pub fn read(&self, buf: &mut [u8]) -> Result<usize> {
         if !self.can_read() {
             return Err(Error::BadHandle);
@@ -80,8 +89,9 @@ impl Description {
         match &self.object {
             Object::File(f) => f.read(buf),
             Object::Stdio(Stream::In) => stdio::read(buf),
-            Object::Stdio(_) => Err(Error::BadHandle),
+            Object::Stdio(_) | Object::User(_) => Err(Error::BadHandle),
             Object::Pipe(p) => p.read(buf),
+            Object::Socket(s) => s.recv(buf, self.nonblock()),
         }
     }
 
@@ -91,9 +101,10 @@ impl Description {
         }
         match &self.object {
             Object::File(f) => f.write(data),
-            Object::Stdio(Stream::In) => Err(Error::BadHandle),
+            Object::Stdio(Stream::In) | Object::User(_) => Err(Error::BadHandle),
             Object::Stdio(s) => stdio::write(*s, data),
             Object::Pipe(p) => p.write(data),
+            Object::Socket(s) => s.send(data, self.nonblock()),
         }
     }
 
@@ -129,6 +140,19 @@ impl Description {
             Object::File(f) => Some(f),
             _ => None,
         }
+    }
+
+    /// Socket pod cislem (pro funkce socketu v cstd).
+    pub fn socket(&self) -> Option<&crate::sock::Socket> {
+        match &self.object {
+            Object::Socket(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Je neblokujici (`O_NONBLOCK`)?
+    pub fn is_nonblocking(&self) -> bool {
+        self.nonblock()
     }
 
     /// Metadata souboru; `None` = proud nebo roura.

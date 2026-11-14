@@ -15,7 +15,9 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
 > nad čísly fd. Část 2b **[ověřeno v QEMU]** (krok `threads`): `pthread`.
 > Část 2c **[ověřeno v QEMU]** (krok `time`): čas, kalendář, `setenv`.
 > Část 2d **[ověřeno v QEMU]** (krok `math`): `math.h`, plovoucí čárka
-> v `printf`, `strtod`. Další části (sockety, `mmap`, signály, zámky souborů,
+> v `printf`, `strtod`. Část 2e **[ověřeno v QEMU]** (sada `cstd sit`):
+> sockety BSD, `getaddrinfo`, `poll`, `select`, `epoll`. Další části (`mmap`,
+> signály, zámky souborů,
 > `libc.so`, porty) **[navrženo]**, viz
 > [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
 
@@ -154,6 +156,35 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 - `%Lf` (`long double` v `printf`) zatím neumíme přečíst z `VaList`:
   vypíše `?` a argument nespotřebuje.
 - `scanf` **[navrženo]**.
+
+## Funkce (část 2e: sockety a čekání)
+
+| Hlavička | Funkce | Poznámka |
+|---|---|---|
+| `sys/socket.h` | `socket` (`AF_INET`, `AF_INET6`; `SOCK_STREAM`, `SOCK_DGRAM`, `SOCK_NONBLOCK`, `SOCK_CLOEXEC`), `bind`, `listen`, `accept`, `accept4`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg` (bez řídicích zpráv), `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt` | `AF_UNIX` a `socketpair` = `EAFNOSUPPORT`; `MSG_PEEK` = `ENOTSUP` |
+| `netinet/in.h`, `arpa/inet.h` | `htons` ..., `inet_pton`, `inet_ntop`, `inet_addr`, `inet_ntoa`, `in6addr_any` | |
+| `netdb.h` | `getaddrinfo`, `freeaddrinfo`, `gai_strerror`, `getnameinfo` | jména přes resolver netd; `getnameinfo` jen číselně |
+| `poll.h`, `sys/select.h`, `sys/epoll.h` | `poll`, `select`, `epoll_create`, `epoll_create1`, `epoll_ctl`, `epoll_wait` | nad `osrt::poll` |
+
+- Socket je objekt v tabulce fd (`osrt::sock`): po `socket()` ještě nemá
+  spojení u netd, `connect`/`listen`/`bind` ho převedou na spojení TCP,
+  naslouchání nebo socket UDP. `read`, `write`, `fdopen` a `close` fungují
+  i nad socketem.
+- Co program smí (cíle, porty, naslouchání), určuje relace sítě
+  z manifestu: zakázaný cíl nebo port = `EACCES`. `SO_REUSEADDR`,
+  `SO_KEEPALIVE`, `TCP_NODELAY` a velikosti bufferů se přijmou bez účinku,
+  `SO_RCVTIMEO`/`SO_SNDTIMEO` platí.
+- `O_NONBLOCK` (`SOCK_NONBLOCK`, `MSG_DONTWAIT`) = termín `TRY` u netd,
+  bez dat `EAGAIN`. `connect` se dokončí hned i v neblokujícím režimu
+  (POSIX to dovoluje), `SO_ERROR` je proto vždy 0.
+- **Čekání** (`osrt::poll`): soubory jsou vždy připravené, stdin a roury
+  čekají na signál kanálu (`READABLE`, `PEER_CLOSED`), sockety na událost
+  připravenosti netd (netproto v2). Kanál nemá signál „lze zapisovat“,
+  proto stdout a zapisovací konec roury hlásí `POLLOUT` vždy. Do 64 objektů
+  `OBJECT_WAIT_MANY`, víc přes port.
+- **`epoll`** je množina v tabulce fd; úrovňový režim přesně, `EPOLLET`
+  hlásí jen nově nastavené bity, `EPOLLONESHOT` položku vypne do
+  `EPOLL_CTL_MOD`. Backend mio přímo nad připraveností **[navrženo]**.
 
 ### Čísla fd
 

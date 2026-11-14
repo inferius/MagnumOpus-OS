@@ -16,6 +16,7 @@ int posix_test(const char *dir);
 int threads_test(void);
 int time_test(void);
 int math_test(void);
+int net_main(void);
 
 #define CHECK(name, cond)                                              \
     do {                                                               \
@@ -117,6 +118,8 @@ static int errors(void) {
 }
 
 int main(int argc, char **argv) {
+    /* Rezim "net": jen sitovy test (sada "cstd sit", relace site). */
+    if (argc == 2 && strcmp(argv[1], "net") == 0) return net_main();
     atexit(first_registered);
     atexit(last_words);
 

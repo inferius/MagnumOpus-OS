@@ -38,6 +38,11 @@ fn session() -> Result<&'static Mutex<Net>> {
     SESSION.get().ok_or(Error::NotSupported)
 }
 
+/// Klon relace site (sdili kanal) pro sockety knihovny C ([`crate::sock`]).
+pub fn session_net() -> Result<Net> {
+    Ok(session()?.lock().clone())
+}
+
 /// Ma proces relaci site?
 pub fn available() -> bool {
     SESSION.get().is_some()

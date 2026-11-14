@@ -120,6 +120,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("std procesy", std_proc::TESTS),
     ("std porty", std_ports::TESTS),
     ("cstd", cstd::TESTS),
+    ("cstd sit", cstd::NET_TESTS),
     ("sit soubeh", net_v2::TESTS),
     ("sit pripravenost", net_ready::TESTS),
     ("TLS a HTTP", web::TESTS),

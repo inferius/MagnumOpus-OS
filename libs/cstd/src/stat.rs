@@ -15,6 +15,7 @@ pub const S_IFCHR: u32 = 0o020000;
 pub const S_IFDIR: u32 = 0o040000;
 pub const S_IFREG: u32 = 0o100000;
 pub const S_IFLNK: u32 = 0o120000;
+pub const S_IFSOCK: u32 = 0o140000;
 
 /// `struct timespec`.
 #[repr(C)]
@@ -52,6 +53,7 @@ pub fn mode_of(s: &Stat) -> u32 {
         Kind::Symlink => (S_IFLNK, 0o777),
         Kind::Stream => (S_IFCHR, 0),
         Kind::Pipe => (S_IFIFO, 0),
+        Kind::Socket => (S_IFSOCK, 0),
     };
     let mut m = t;
     if s.kind == Kind::Symlink {

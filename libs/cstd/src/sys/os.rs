@@ -140,6 +140,8 @@ pub fn fstat(fd: i32) -> R<Stat> {
         Object::File(f) => f.stat().map(|s| stat_of(&s)).map_err(e),
         Object::Stdio(_) => Ok(Stat::stream(Kind::Stream)),
         Object::Pipe(_) => Ok(Stat::stream(Kind::Pipe)),
+        Object::Socket(_) => Ok(Stat::stream(Kind::Socket)),
+        Object::User(_) => Ok(Stat::stream(Kind::Stream)),
     }
 }
 
@@ -257,4 +259,131 @@ pub fn monotonic_ns() -> u64 {
 /// Realny cas (sekundy, ns od 1970 UTC); `None` = jadro ho nezna.
 pub fn realtime() -> Option<(i64, u32)> {
     rt::time::realtime()
+}
+
+// --- sockety a cekani ------------------------------------------------------
+
+use std::net::SocketAddr;
+
+fn net_err(err: rt::Error) -> crate::c_int {
+    match err {
+        rt::Error::ShouldWait => errno::EAGAIN,
+        rt::Error::NotSupported => errno::ENETDOWN,
+        rt::Error::BadState => errno::ENOTCONN,
+        rt::Error::InvalidArgs => errno::EINVAL,
+        rt::Error::AlreadyExists => errno::EISCONN,
+        rt::Error::PeerClosed => errno::EPIPE,
+        other => e(other),
+    }
+}
+
+fn sock<T>(fd: i32, f: impl FnOnce(&rt::sock::Socket, bool) -> rt::Result<T>) -> R<T> {
+    let d = desc(fd)?;
+    let s = d.socket().ok_or(errno::ENOTSOCK)?;
+    f(s, d.is_nonblocking()).map_err(net_err)
+}
+
+pub fn socket(kind: super::SockKind, v6: bool, cloexec: bool, nonblock: bool) -> R<i32> {
+    let k = match kind {
+        super::SockKind::Stream => rt::sock::Kind::Stream,
+        super::SockKind::Datagram => rt::sock::Kind::Datagram,
+    };
+    let st = super::status::RDWR | if nonblock { super::status::NONBLOCK } else { 0 };
+    fd::insert(Description::new(Object::Socket(rt::sock::Socket::new(k, v6)), st), 0, cloexec).map_err(|err| match err {
+        rt::Error::NoResources => errno::EMFILE,
+        other => e(other),
+    })
+}
+
+pub fn sock_bind(fd: i32, a: SocketAddr) -> R<()> {
+    sock(fd, |s, _| s.bind(a))
+}
+
+pub fn sock_listen(fd: i32, backlog: u16) -> R<()> {
+    sock(fd, |s, _| s.listen(backlog))
+}
+
+pub fn sock_connect(fd: i32, a: SocketAddr) -> R<()> {
+    sock(fd, |s, nb| s.connect(a, nb))
+}
+
+pub fn sock_accept(fd: i32, cloexec: bool, nonblock: bool) -> R<(i32, SocketAddr)> {
+    let (new, from) = sock(fd, |s, nb| s.accept(nb))?;
+    let st = super::status::RDWR | if nonblock { super::status::NONBLOCK } else { 0 };
+    let n = fd::insert(Description::new(Object::Socket(new), st), 0, cloexec).map_err(e)?;
+    Ok((n, from))
+}
+
+pub fn sock_recv(fd: i32, buf: &mut [u8], dontwait: bool) -> R<usize> {
+    sock(fd, |s, nb| s.recv(buf, nb || dontwait))
+}
+
+pub fn sock_send(fd: i32, data: &[u8], dontwait: bool) -> R<usize> {
+    sock(fd, |s, nb| s.send(data, nb || dontwait))
+}
+
+pub fn sock_recv_from(fd: i32, buf: &mut [u8], dontwait: bool) -> R<(usize, SocketAddr)> {
+    sock(fd, |s, nb| s.recv_from(buf, nb || dontwait))
+}
+
+pub fn sock_send_to(fd: i32, data: &[u8], to: SocketAddr) -> R<usize> {
+    sock(fd, |s, _| s.send_to(data, to))
+}
+
+pub fn sock_shutdown_write(fd: i32) -> R<()> {
+    sock(fd, |s, _| s.shutdown_write())
+}
+
+pub fn sock_name(fd: i32, peer: bool) -> R<SocketAddr> {
+    sock(fd, |s, _| if peer { s.peer_addr() } else { s.local_addr() })
+}
+
+pub fn sock_is_stream(fd: i32) -> R<(bool, bool)> {
+    sock(fd, |s, _| Ok((s.kind == rt::sock::Kind::Stream, s.v6)))
+}
+
+pub fn sock_set_timeouts(fd: i32, read: Option<Option<core::time::Duration>>, write: Option<Option<core::time::Duration>>) -> R<()> {
+    sock(fd, |s, _| {
+        s.set_timeouts(read, write);
+        Ok(())
+    })
+}
+
+pub fn sock_timeouts(fd: i32) -> R<(Option<core::time::Duration>, Option<core::time::Duration>)> {
+    sock(fd, |s, _| Ok(s.timeouts()))
+}
+
+pub fn sock_listening(fd: i32) -> R<bool> {
+    sock(fd, |s, _| Ok(s.is_listening()))
+}
+
+pub fn resolve(host: &str) -> R<Vec<std::net::IpAddr>> {
+    rt::sock::resolve(host).map_err(net_err)
+}
+
+pub fn poll(items: &mut [super::PollItem], timeout: Option<core::time::Duration>) -> R<usize> {
+    let mut v: Vec<rt::poll::PollFd> =
+        items.iter().map(|p| rt::poll::PollFd { fd: p.fd, events: p.events, revents: 0 }).collect();
+    let n = rt::poll::poll(&mut v, timeout).map_err(e)?;
+    for (a, b) in items.iter_mut().zip(&v) {
+        a.revents = b.revents;
+    }
+    Ok(n)
+}
+
+/// Objekt knihovny v tabulce fd (mnozina `epoll`).
+pub fn insert_user(obj: Box<dyn core::any::Any + Send + Sync>, cloexec: bool) -> R<i32> {
+    fd::insert(Description::new(Object::User(obj), super::status::RDWR), 0, cloexec).map_err(|err| match err {
+        rt::Error::NoResources => errno::EMFILE,
+        other => e(other),
+    })
+}
+
+/// Objekt knihovny pod cislem.
+pub fn with_user<T>(fd: i32, f: impl FnOnce(&(dyn core::any::Any + Send + Sync)) -> R<T>) -> R<T> {
+    let d = desc(fd)?;
+    match &d.object {
+        Object::User(o) => f(o.as_ref()),
+        _ => Err(errno::EINVAL),
+    }
 }
