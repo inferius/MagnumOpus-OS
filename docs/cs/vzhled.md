@@ -30,6 +30,7 @@ velikosti písma a omezení pohybu.
 |---|---|
 | `design/prirucka.html` | **příručka grafického jazyka** (cs / en) |
 | `design/design-system.html` | barvy s tabulkou kontrastu, typografie, mřížka, zaoblení, stíny, ikony, pohyb, komponenty |
+| `design/komponenty.html` | **knihovna komponent**: 25 prvků ve všech stavech, klávesnice, hustoty počítač / tablet / TV, rozdíly proti `libs/ui` ([Knihovna komponent](komponenty.md)) |
 | `design/okna.html` | anatomie okna, odznak důvěry (odebrání oprávnění), režimy okna, stavy |
 | `design/plocha.html` | lišta v 6 polohách, přepínání oken, oznámení, systémové dialogy, výběr souboru, bezpečná obrazovka, správce úloh, agent v liště |
 | `design/terminal.html` | bloky výstupu, tabulky se schématem, doplňování podle typů, nanečisto a undo, chyby, panel úloh, zápis B / C |
@@ -1075,3 +1076,4 @@ budou jen služby mimo GUI (`taskd`, klony v `fsproto`, konfigurace).
 | v1.7 | 12. 11. 2026 | návrhy: mobilní prostředí (etapa A), systémové dialogy pro počítač i telefon, spouštěč a jména palety, bubliny a panely lišty |
 | v1.8 | 13. 11. 2026 | návrhy: tabletový režim (rozdělení oken, pero, 2v1), televizní režim s rozborem základů; kompaktní výběr souboru; spouštěč varianta D |
 | v1.9 | 13. 11. 2026 | rozhodnutí: tablet přepíná automaticky, na výšku dlaždice nad sebou, televize se dál nerozpracovává, dětem se obsah nad hodnocení skrývá; body 3, 5 a 6 do základů jako návrh; infografika oprávnění a barva ikon podle závažnosti |
+| v1.10 | 14. 11. 2026 | knihovna komponent ([komponenty.md](komponenty.md), `design/komponenty.html`): stavy, klávesnice, hustoty, specifikace pro `libs/ui`, rozdíly a návrh nových tokenů |

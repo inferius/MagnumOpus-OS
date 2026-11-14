@@ -14,6 +14,7 @@ Clickable GUI prototypes and design-system tokens. Design description:
 | `prirucka.html` | příručka grafického jazyka (cs / en) / visual language handbook (cs / en) |
 | `index.html` | rozcestník a rozhodnutí ke stylu / index and style decisions |
 | `design-system.html` | barvy, kontrast, písmo, mřížka, ikony, pohyb, komponenty / colors, contrast, type, grid, icons, motion, components |
+| `komponenty.html` | knihovna komponent: stavy, klávesnice, hustoty, specifikace a rozdíly proti `libs/ui` / component library: states, keyboard, densities, spec and gaps vs `libs/ui` |
 | `okna.html` | okna, odznak důvěry, režimy, stavy / windows, trust badge, modes, states |
 | `plocha.html` | lišta, přepínání oken, oznámení, systémové dialogy, správce úloh / bar, window switcher, notifications, system dialogs, task manager |
 | `terminal.html` | terminál / terminal |
