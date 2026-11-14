@@ -40,6 +40,7 @@ use super::thread::state;
 use super::{Thread, block, current, percpu, wake};
 use crate::arch::{self, interrupts, ustate};
 use crate::error::Error;
+use crate::object::channel::Channel;
 use crate::object::{KernelObject, ObjectCore, ObjectType, Rights, Signals};
 
 /// Stav pozastaveni vlakna (pod zamkem `Thread::stop`).
@@ -57,6 +58,46 @@ pub(super) struct Stop {
     general: Option<Vec<u8>>,
     /// Cekajici zapis FPU/SIMD (overeny `ustate::check_fp`).
     fp: Option<Vec<u8>>,
+    /// Vlakno stoji ve vyjimce (ceka na obsluhu): kontext jde cist
+    /// a zapsat jako u pozastaveneho.
+    in_exception: bool,
+    /// Kanal vyjimek vlakna (`EXCEPTION_CHANNEL`, konec jadra).
+    exc_channel: Option<Arc<Channel>>,
+    /// Vlakno obsluhy: jeho vyjimky preskoci kanaly vlakna a procesu.
+    handler: bool,
+}
+
+/// Vlakno stoji ve vyjimce (cteni a zapis kontextu povoleny).
+pub fn set_in_exception(t: &Thread, on: bool) {
+    t.stop.lock().in_exception = on;
+}
+
+/// Kanal vyjimek vlakna (zivy), pokud nejaky je.
+pub fn exception_channel(t: &Thread) -> Option<Arc<Channel>> {
+    t.stop.lock().exc_channel.clone().filter(|c| !c.peer_closed())
+}
+
+/// Nastavi kanal vyjimek vlakna; zivy kanal uz existuje = `AlreadyExists`.
+pub fn set_exception_channel(t: &Thread, ch: Arc<Channel>) -> Result<(), Error> {
+    user_thread(t)?;
+    let mut s = t.stop.lock();
+    if s.exc_channel.as_ref().is_some_and(|c| !c.peer_closed()) {
+        return Err(Error::AlreadyExists);
+    }
+    s.exc_channel = Some(ch);
+    Ok(())
+}
+
+/// Oznaci vlakno jako vlakno obsluhy vyjimek.
+pub fn mark_handler(t: &Thread) -> Result<(), Error> {
+    user_thread(t)?;
+    t.stop.lock().handler = true;
+    Ok(())
+}
+
+/// Je vlakno vlaknem obsluhy?
+pub fn is_handler(t: &Thread) -> bool {
+    t.stop.lock().handler
 }
 
 fn user_thread(t: &Thread) -> Result<(), Error> {
@@ -241,7 +282,7 @@ pub fn read_state(t: &Arc<Thread>, kind: u32, out: &mut [u8]) -> Result<(), Erro
     for _ in 0..1000 {
         {
             let s = t.stop.lock();
-            if s.suspends == 0 || s.before_start {
+            if (s.suspends == 0 && !s.in_exception) || s.before_start {
                 return Err(Error::BadState);
             }
             let pending = if kind == abi::thread::kind::GENERAL { &s.general } else { &s.fp };
@@ -249,7 +290,7 @@ pub fn read_state(t: &Arc<Thread>, kind: u32, out: &mut [u8]) -> Result<(), Erro
                 out.copy_from_slice(p);
                 return Ok(());
             }
-            if (s.parked || asleep(t)) && !t.on_cpu() {
+            if (s.parked || s.in_exception || asleep(t)) && !t.on_cpu() {
                 let seq = t.wait_seq();
                 copy_state(t, kind, out)?;
                 // Stale stoji (zadne nove cekani, neni na CPU): kopie plati.
@@ -293,7 +334,7 @@ pub fn write_state(t: &Arc<Thread>, kind: u32, data: &[u8]) -> Result<(), Error>
     buf.try_reserve_exact(data.len()).map_err(|_| Error::NoMemory)?;
     buf.extend_from_slice(data);
     let mut s = t.stop.lock();
-    if s.suspends == 0 || s.before_start {
+    if (s.suspends == 0 && !s.in_exception) || s.before_start {
         return Err(Error::BadState);
     }
     if kind == abi::thread::kind::GENERAL {

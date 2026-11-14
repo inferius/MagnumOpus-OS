@@ -239,8 +239,24 @@ pub const THREAD_SUSPEND: u64 = 62;
 /// ho pouzije pred navratem do userspace.
 pub const THREAD_STATE: u64 = 63;
 
+/// Kanal vyjimek: `(task, flags) -> channel`. `task` = proces nebo vlakno
+/// (pravo `MANAGE`); `flags` = `exception::channel::DEBUGGER` (jen proces)
+/// nebo 0; `HANDLER_THREAD` na vlakne ho jen oznaci jako vlakno obsluhy
+/// (vraci 0). Na kazde misto nejvys jeden zivy kanal.
+pub const EXCEPTION_CHANNEL: u64 = 64;
+
+/// Rozhodnuti o vyjimce: `(token, action) -> 0`, `action` z
+/// `exception::action`. Vlakno pokracuje (RESUME), jde k dalsi obsluze
+/// (NEXT) nebo proces skonci (KILL).
+pub const EXCEPTION_RESOLVE: u64 = 65;
+
+/// Vlakna procesu: `(process, out_ptr, max) -> pocet`. Zapise az `max`
+/// handlu (u32) zivych vlaken; prava podle handlu procesu (`READ` = cist
+/// kontext, s `WRITE` i zapsat a pozastavit). Vraci celkovy pocet.
+pub const PROCESS_THREADS: u64 = 66;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 64;
+pub const COUNT: u64 = 67;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {

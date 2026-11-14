@@ -30,6 +30,7 @@ extern crate alloc;
 pub mod barrier;
 mod channel;
 mod event;
+pub mod exception;
 mod handle;
 pub mod hw;
 pub mod initfs;

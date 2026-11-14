@@ -212,6 +212,10 @@ pub unsafe fn init() {
             };
             (*idt)[vector as usize] = IdtEntry::interrupt_gate(stubs + vector * STUB_SIZE, ist);
         }
+        // `int3` z userspace (breakpoint debuggeru): brana s DPL 3, jinak
+        // by z ring 3 skoncila jako #GP. Ostatni vektory nejdou vyvolat
+        // instrukci `int` z userspace (DPL 0 -> #GP).
+        (*idt)[VEC_BREAKPOINT as usize].type_attr = 0xEE;
     }
 }
 
@@ -242,14 +246,25 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
                 e if e & (1 << 1) != 0 => crate::mm::Access::Write,
                 _ => crate::mm::Access::Read,
             }) => {}
-        // Vyjimka v userspace (vcetne int3): ukonci proces, ne jadro.
+        // Vyjimka v userspace (vcetne int3): nejdriv obsluhy (kanaly
+        // vyjimek), jinak konec procesu, ne jadra.
         v if v < 32 && user => {
-            let addr = if v == VEC_PAGE_FAULT {
-                cpu::read_cr2()
+            let (addr, access) = if v == VEC_PAGE_FAULT {
+                let e = frame.error_code;
+                let a = if e & (1 << 4) != 0 {
+                    abi::exception::access::EXEC
+                } else if e & (1 << 1) != 0 {
+                    abi::exception::access::WRITE
+                } else {
+                    abi::exception::access::READ
+                };
+                (cpu::read_cr2(), a)
             } else {
-                0
+                (0, 0)
             };
-            trap::user_fault(v as u8, frame.error_code, frame.rip, addr, frame.rsp, frame.rbp)
+            if !trap::user_exception(v as u8, frame.error_code, frame.rip, addr, access) {
+                trap::user_fault(v as u8, frame.error_code, frame.rip, addr, frame.rsp, frame.rbp)
+            }
         }
         VEC_BREAKPOINT => {
             log::info!("breakpoint na {:#x}", frame.rip);

@@ -161,7 +161,21 @@ Details, design comparison and measurements: [Scheduler](scheduler.md).
   in the Windows layer, signals in `cstd`) and a debugger.
 - **An exception in a program** (page fault, invalid opcode, ...) ends only
   that process, not the kernel: code -1,000,100 - vector, address and fault
-  type in the log.
+  type in the log. Before that the kernel offers it to **exception
+  channels** (`EXCEPTION_CHANNEL`, `kernel/src/object/exception.rs`)
+  **[verified in QEMU]** (suite `procesy`, x86_64 and aarch64) in order
+  debugger (first chance), thread, process, debugger (second chance). The
+  thread stands in the exception and a handler may read and change its
+  context and let it continue, pass the exception on, or end the process.
+  A handler thread (`HANDLER_THREAD`) skips the thread and process
+  channels so it never waits for itself. Kill always wins. The basis for
+  SEH in the Windows layer, signals in `cstd` and a debugger.
+- **aarch64 does not report division by zero** (`udiv`/`sdiv` return 0);
+  the "divide by zero" exception exists only on x86_64. `cstd` (SIGFPE)
+  and Wine (`EXCEPTION_INT_DIVIDE_BY_ZERO`) must provide it on aarch64 by
+  checking in code, as everywhere on ARM.
+- **`int3` from userspace** (a breakpoint) has an IDT gate with DPL 3,
+  otherwise it would end as a general protection fault.
 - **Entering userspace:** a thread's entry point and stack must lie in the
   process memory (`USER_MIN`..`USER_MAX`); the last page of the lower half
   of the address space is always unmapped, so a return from a syscall never

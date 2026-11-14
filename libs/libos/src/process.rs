@@ -67,6 +67,30 @@ impl Process {
         sys::process_kill(self.0.raw())
     }
 
+    /// Kanal vyjimek procesu (`debugger` = kanal debuggeru, prvni a druha
+    /// sance); pravo `MANAGE`. Zpravy cte [`crate::exception::receive`].
+    pub fn exception_channel(&self, debugger: bool) -> Result<crate::Channel> {
+        let flags = if debugger { abi::exception::channel::DEBUGGER } else { 0 };
+        sys::exception_channel(self.0.raw(), flags).map(|h| crate::Channel::from_handle(Handle::from_raw(h)))
+    }
+
+    /// Handly zivych vlaken procesu (pravo `READ`; s `WRITE` i zapis
+    /// kontextu a pozastaveni).
+    pub fn threads(&self) -> Result<alloc::vec::Vec<Thread>> {
+        let mut buf = alloc::vec![0u32; 64];
+        loop {
+            let n = sys::process_threads(self.0.raw(), &mut buf)?;
+            if n <= buf.len() {
+                return Ok(buf[..n].iter().map(|&h| Thread(Handle::from_raw(h))).collect());
+            }
+            // Handly z prilis maleho bufferu zavrit, zkusit vetsi.
+            for &h in &buf {
+                drop(Handle::from_raw(h));
+            }
+            buf = alloc::vec![0u32; n.min(4096)];
+        }
+    }
+
     /// Pocka na konec procesu a vrati jeho navratovy kod.
     pub fn wait_exit(&self, deadline: Option<u64>) -> Result<i64> {
         wait_one(&self.0, Signals::TERMINATED, deadline)?;
@@ -86,6 +110,17 @@ impl Thread {
 
     pub fn wait_exit(&self, deadline: Option<u64>) -> Result<()> {
         wait_one(&self.0, Signals::TERMINATED, deadline).map(|_| ())
+    }
+
+    /// Kanal vyjimek vlakna (pravo `MANAGE`).
+    pub fn exception_channel(&self) -> Result<crate::Channel> {
+        sys::exception_channel(self.0.raw(), 0).map(|h| crate::Channel::from_handle(Handle::from_raw(h)))
+    }
+
+    /// Oznaci vlakno jako vlakno obsluhy vyjimek: jeho vlastni vyjimky
+    /// preskoci kanaly vlakna a procesu (necekalo by samo na sebe).
+    pub fn mark_exception_handler(&self) -> Result<()> {
+        sys::exception_channel(self.0.raw(), abi::exception::channel::HANDLER_THREAD).map(|_| ())
     }
 
     /// Pozastavi vlakno (pravo `MANAGE`): stoji, dokud zije vraceny token.

@@ -158,6 +158,23 @@ const USER_FRAMES: usize = 16;
 /// `force-frame-pointers`) a ukonci proces.
 /// `code` = cislo chyby podle ABI (viz `trap::user_fault`), `pc` = adresa
 /// instrukce (v logu pod jmenem registru architektury, `arch::PC_NAME`).
+/// Vyjimka v userspace pro kanaly vyjimek (viz `trap::user_exception`).
+pub fn user_exception(code: u8, error_code: u64, pc: u64, addr: u64, access: u32) -> bool {
+    let report = abi::exception::Report {
+        kind: code as u32,
+        access,
+        pc,
+        addr,
+        code: error_code,
+        ..Default::default()
+    };
+    // Obsluha muze cekat dlouho (debugger): s prerusenimi jako syscall.
+    interrupts::enable();
+    let outcome = crate::object::exception::deliver(report);
+    interrupts::disable();
+    outcome == crate::object::exception::Outcome::Resume
+}
+
 /// Vypadek stranky v userspace (viz `trap::user_page_fault`).
 pub fn user_page_fault(addr: u64, access: crate::mm::Access) -> bool {
     let Some(process) = super::current().process.clone() else {

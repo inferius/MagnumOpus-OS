@@ -494,6 +494,42 @@ Chyby: `INVALID_ARGS` (neznámý `op`/`kind`, špatná délka, neplatný
 kontext), `BAD_STATE` (vlákno není pozastavené), `WRONG_TYPE`,
 `BAD_ADDRESS`, `BAD_HANDLE`, `ACCESS_DENIED`.
 
+### `EXCEPTION_CHANNEL`
+
+`(task, flags) -> channel`. Kanál výjimek procesu nebo vlákna (`task`,
+právo `MANAGE`). `flags`: 0, `exception::channel::DEBUGGER` (jen proces:
+kanál debuggeru, první a druhá šance), nebo `HANDLER_THREAD` (jen vlákno:
+označí ho jako vlákno obsluhy - jeho výjimky přeskočí kanály vlákna
+a procesu, kanál nevznikne, vrací 0). Na každé místo nejvýš jeden živý
+kanál (zavřený se nahradí). Výjimka CPU v userspace, kterou jádro
+nevyřeší samo (stránky na požádání), jde obsluhám v pořadí: debugger
+(první šance), vlákno, proces, debugger (druhá šance); nikdo = konec
+procesu jako dřív. Zpráva: `exception::Report` (56 B: druh, stupeň,
+přístup, proces, vlákno, PC, adresa, kód architektury) a handly vlákna
+(`READ`, `WRITE`, `MANAGE`) a tokenu výjimky. Vlákno mezitím stojí a jeho
+kontext jde číst a zapsat (`THREAD_STATE`). Chyby: `INVALID_ARGS`
+(příznak k jinému typu), `ALREADY_EXISTS`, `WRONG_TYPE`, `BAD_HANDLE`,
+`ACCESS_DENIED`.
+
+### `EXCEPTION_RESOLVE`
+
+`(token, action) -> 0`. Rozhodnutí obsluhy (`exception::action`): `RESUME`
+= vlákno pokračuje (s kontextem změněným přes `THREAD_STATE`), `NEXT` =
+další obsluha v pořadí, `KILL` = konec procesu jako u neošetřené výjimky.
+Zavření tokenu bez rozhodnutí = `NEXT` (i když obsluha zemře). Breakpoint:
+na x86_64 je PC už za `int3`, na aarch64 na `brk` (obsluha ho posune o 4).
+Chyby: `INVALID_ARGS` (neznámá akce), `BAD_STATE` (už rozhodnuto nebo
+vlákno skončilo - kill vždy vyhraje), `WRONG_TYPE`, `BAD_HANDLE`.
+
+### `PROCESS_THREADS`
+
+`(process, out_ptr, max) -> počet`. Zapíše na `out_ptr` až `max` (do 4096)
+handlů (`u32`) živých vláken procesu (pro debugger: pozastavit všechna).
+Práva handlů podle handlu procesu: `READ` = jen číst kontext, s `WRITE`
+i zapsat a pozastavit (`MANAGE`). Vrací celkový počet vláken (i nad
+`max`). Vyžaduje `READ`. Chyby: `INVALID_ARGS` (`max` nad 4096),
+`BAD_ADDRESS`, `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+
 Kdo má handle procesu s `WRITE` (nebo vlákna s `WRITE`), má nad procesem
 **plnou kontrolu**: stejně jako `VM_MAP` do něj může přepsat kód nebo
 registry. Rodič je tak přirozeně debuggerem potomka; handle procesu

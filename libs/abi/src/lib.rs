@@ -16,6 +16,7 @@
 pub mod acpi;
 pub mod bootstrap;
 pub mod error;
+pub mod exception;
 pub mod job;
 pub mod limits;
 pub mod object;

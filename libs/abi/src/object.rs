@@ -143,6 +143,8 @@ pub enum ObjectType {
     Job = 9,
     /// Token pozastaveni vlakna (`THREAD_SUSPEND`); zavreni = obnoveni.
     SuspendToken = 10,
+    /// Token vyjimky (zprava kanalu vyjimek); `EXCEPTION_RESOLVE`.
+    ExceptionToken = 11,
 }
 
 /// Zprava MSI, kterou ovladac zapise do zarizeni (vystup `INTERRUPT_CREATE`).

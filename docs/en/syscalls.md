@@ -510,6 +510,45 @@ FPCR, FPSR). Errors: `INVALID_ARGS` (unknown `op`/`kind`, wrong length,
 invalid context), `BAD_STATE` (the thread is not suspended), `WRONG_TYPE`,
 `BAD_ADDRESS`, `BAD_HANDLE`, `ACCESS_DENIED`.
 
+### `EXCEPTION_CHANNEL`
+
+`(task, flags) -> channel`. An exception channel of a process or a thread
+(`task`, right `MANAGE`). `flags`: 0, `exception::channel::DEBUGGER`
+(process only: the debugger channel, first and second chance), or
+`HANDLER_THREAD` (thread only: marks it as a handler thread - its
+exceptions skip the thread and process channels; no channel is created,
+returns 0). At most one live channel per slot (a closed one is replaced).
+A CPU exception in userspace that the kernel does not resolve itself
+(demand paging) goes to handlers in order: debugger (first chance),
+thread, process, debugger (second chance); nobody = the process ends as
+before. Message: `exception::Report` (56 B: kind, stage, access, process,
+thread, PC, address, architecture code) and handles of the thread (`READ`,
+`WRITE`, `MANAGE`) and of the exception token. The thread stands meanwhile
+and its context can be read and written (`THREAD_STATE`). Errors:
+`INVALID_ARGS` (a flag for the other type), `ALREADY_EXISTS`,
+`WRONG_TYPE`, `BAD_HANDLE`, `ACCESS_DENIED`.
+
+### `EXCEPTION_RESOLVE`
+
+`(token, action) -> 0`. The handler's decision (`exception::action`):
+`RESUME` = the thread continues (with the context changed through
+`THREAD_STATE`), `NEXT` = the next handler in order, `KILL` = the process
+ends as with an unhandled exception. Closing the token without a decision
+= `NEXT` (also when the handler dies). Breakpoint: on x86_64 the PC is
+already past `int3`, on aarch64 at `brk` (the handler advances it by 4).
+Errors: `INVALID_ARGS` (unknown action), `BAD_STATE` (already decided or
+the thread has ended - kill always wins), `WRONG_TYPE`, `BAD_HANDLE`.
+
+### `PROCESS_THREADS`
+
+`(process, out_ptr, max) -> count`. Writes up to `max` (at most 4096)
+handles (`u32`) of the process's live threads to `out_ptr` (for a
+debugger: suspend them all). Handle rights follow the process handle:
+`READ` = read the context only, with `WRITE` also write it and suspend
+(`MANAGE`). Returns the total thread count (also above `max`). Requires
+`READ`. Errors: `INVALID_ARGS` (`max` over 4096), `BAD_ADDRESS`,
+`BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+
 Whoever holds a process handle with `WRITE` (or a thread handle with
 `WRITE`) has **full control** over the process: just like with `VM_MAP`
 they can overwrite its code or registers. A parent is thus naturally its

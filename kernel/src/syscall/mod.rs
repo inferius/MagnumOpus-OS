@@ -122,6 +122,9 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::VMO_SEAL => vm::seal(a),
         nr::THREAD_SUSPEND => process::thread_suspend(a),
         nr::THREAD_STATE => process::thread_state(a),
+        nr::EXCEPTION_CHANNEL => process::exception_channel(a),
+        nr::EXCEPTION_RESOLVE => process::exception_resolve(a),
+        nr::PROCESS_THREADS => process::process_threads(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -197,6 +200,9 @@ pub fn name(number: u64) -> &'static str {
         "VMO_SEAL",
         "THREAD_SUSPEND",
         "THREAD_STATE",
+        "EXCEPTION_CHANNEL",
+        "EXCEPTION_RESOLVE",
+        "PROCESS_THREADS",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

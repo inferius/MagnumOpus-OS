@@ -72,6 +72,15 @@ pub fn user_page_fault(addr: u64, access: crate::mm::Access) -> bool {
     sched::user_page_fault(addr, access)
 }
 
+/// Vyjimka CPU v userspace: nabidne ji obsluham (kanaly vyjimek). `true`
+/// = vyresena (vratit se do userspace), `false` = volajici zavola
+/// `user_fault`. `access` = `abi::exception::access` (jen vypadek
+/// stranky). Volat se zakazanymi prerusenimi (vraci se take se zakazanymi).
+#[inline]
+pub fn user_exception(code: u8, error_code: u64, pc: u64, addr: u64, access: u32) -> bool {
+    sched::user_exception(code, error_code, pc, addr, access)
+}
+
 /// Vyjimka CPU v userspace: ukonci proces. `code` je cislo chyby podle ABI
 /// (`abi::process::EXIT_FAULT_BASE - code`); cisla odpovidaji vektorum
 /// x86 (6 = neplatna instrukce, 13 = ochrana, 14 = vypadek stranky, ...)

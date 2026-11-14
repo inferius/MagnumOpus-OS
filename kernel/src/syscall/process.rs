@@ -144,6 +144,85 @@ pub fn thread_state(a: Args) -> Result<u64> {
     Ok(0)
 }
 
+/// `EXCEPTION_CHANNEL(task, flags) -> channel`: kanal vyjimek procesu nebo
+/// vlakna (pravo `MANAGE`); `HANDLER_THREAD` na vlakne ho jen oznaci.
+pub fn exception_channel(a: Args) -> Result<u64> {
+    use abi::exception::channel::{DEBUGGER, HANDLER_THREAD};
+    let p = current_process();
+    let flags = u32::try_from(a[1]).map_err(|_| Error::InvalidArgs)?;
+    if flags & !(DEBUGGER | HANDLER_THREAD) != 0 || flags == DEBUGGER | HANDLER_THREAD {
+        return Err(Error::InvalidArgs);
+    }
+    let object = p.handles().get(arg_handle(a[0])?, Rights::MANAGE)?;
+    let any: alloc::sync::Arc<dyn core::any::Any + Send + Sync> = object;
+    let (kernel_end, user_end) = crate::object::channel::Channel::create();
+    match any.downcast::<Process>() {
+        Ok(target) => {
+            if flags & HANDLER_THREAD != 0 {
+                return Err(Error::InvalidArgs);
+            }
+            target.set_exception_channel(flags & DEBUGGER != 0, kernel_end)?;
+        }
+        Err(any) => {
+            let thread = any.downcast::<Thread>().map_err(|_| Error::WrongType)?;
+            if flags & DEBUGGER != 0 {
+                return Err(Error::InvalidArgs);
+            }
+            if flags & HANDLER_THREAD != 0 {
+                sched::suspend::mark_handler(&thread)?;
+                return Ok(0);
+            }
+            sched::suspend::set_exception_channel(&thread, kernel_end)?;
+        }
+    }
+    let rights = user_end.default_rights();
+    Ok(p.handles().insert(user_end, rights)?.0 as u64)
+}
+
+/// `EXCEPTION_RESOLVE(token, action)`.
+pub fn exception_resolve(a: Args) -> Result<u64> {
+    let p = current_process();
+    let token = p
+        .handles()
+        .get_as::<crate::object::exception::ExceptionToken>(arg_handle(a[0])?, Rights::NONE)?;
+    token.resolve(u32::try_from(a[1]).map_err(|_| Error::InvalidArgs)?)?;
+    Ok(0)
+}
+
+/// `PROCESS_THREADS(process, out_ptr, max) -> pocet`: handly zivych vlaken
+/// (pravo `READ`; s `WRITE` i zapis kontextu a pozastaveni).
+pub fn process_threads(a: Args) -> Result<u64> {
+    let p = current_process();
+    let (target, rights) = {
+        let t = p.handles();
+        let h = arg_handle(a[0])?;
+        (t.get_as::<Process>(h, Rights::READ)?, t.rights(h)?)
+    };
+    let max = usize::try_from(a[2]).map_err(|_| Error::InvalidArgs)?;
+    if max > 4096 {
+        return Err(Error::InvalidArgs);
+    }
+    let thread_rights = if rights.contains(Rights::WRITE) {
+        Rights::BASIC | Rights::READ | Rights::WRITE | Rights::MANAGE
+    } else {
+        Rights::BASIC | Rights::READ
+    };
+    let threads = target.threads();
+    let mut out = alloc::vec::Vec::new();
+    for t in threads.iter().take(max) {
+        let h = p.handles().insert(t.clone(), thread_rights)?;
+        out.extend_from_slice(&h.0.to_le_bytes());
+    }
+    if let Err(e) = user::write_bytes(&p, a[1], &out) {
+        // Handly, ktere program neuvidi, zavrit.
+        for c in out.chunks(4) {
+            let _ = p.handles().close(crate::object::Handle(u32::from_le_bytes(c.try_into().unwrap())));
+        }
+        return Err(e);
+    }
+    Ok(threads.len() as u64)
+}
+
 /// `THREAD_EXIT()`: nevraci se.
 pub fn thread_exit() -> Result<u64> {
     sched::exit()

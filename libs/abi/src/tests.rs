@@ -127,6 +127,9 @@ fn every_syscall_is_documented() {
         "VMO_SEAL",
         "THREAD_SUSPEND",
         "THREAD_STATE",
+        "EXCEPTION_CHANNEL",
+        "EXCEPTION_RESOLVE",
+        "PROCESS_THREADS",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {
@@ -220,4 +223,12 @@ fn thread_context_roundtrip() {
     assert_eq!(A64General::decode(&a.encode()), a);
     assert_eq!(X64General::SIZE, 20 * 8);
     assert_eq!(A64General::SIZE, 35 * 8);
+}
+
+#[test]
+fn exception_report_roundtrip() {
+    use crate::exception::Report;
+    let r = Report { kind: 14, stage: 3, access: 1, _reserved: 0, pid: 7, tid: 9, pc: 0x40_1000, addr: 0x1234, code: 6 };
+    assert_eq!(Report::decode(&r.encode()), Some(r));
+    assert_eq!(Report::decode(&[0u8; 10]), None);
 }

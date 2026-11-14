@@ -90,6 +90,11 @@ impl Channel {
         (a, b)
     }
 
+    /// Je druhy konec zavreny?
+    pub fn peer_closed(&self) -> bool {
+        self.peer.lock().strong_count() == 0
+    }
+
     /// Posle zpravu druhemu konci. Pri chybe se zprava (i s handly) zahodi.
     pub fn write(&self, msg: Message) -> Result<(), Error> {
         if msg.data.len() > CHANNEL_MAX_DATA || msg.handles.len() > CHANNEL_MAX_HANDLES {

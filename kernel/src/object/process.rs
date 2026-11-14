@@ -59,6 +59,8 @@ pub struct Process {
     jit_events: AtomicU64,
     /// Trida QoS novych vlaken a Realtime parametry (ns) z `PROCESS_SET`.
     qos: SpinLock<(schedcore::Class, Option<(u64, u64)>)>,
+    /// Kanaly vyjimek procesu (konec jadra): [debugger, proces].
+    exc: SpinLock<[Option<Arc<super::channel::Channel>>; 2]>,
     /// Fronty futexu (`FUTEX`): virtualni adresa ->
     /// cekajici vlakna (vlakno, poradove cislo cekani) v poradi prichodu.
     /// Polozek je nejvys tolik, kolik ma proces vlaken.
@@ -102,6 +104,7 @@ impl Process {
             jit_events: AtomicU64::new(0),
             qos: SpinLock::new((schedcore::Class::Normal, None)),
             futex: SpinLock::new(BTreeMap::new()),
+            exc: SpinLock::new([None, None]),
         });
         p.core.set_charge(charge);
         {
@@ -120,6 +123,22 @@ impl Process {
         }
         log::debug!("proces {} ({}) vytvoren", p.id, p.name);
         Ok(p)
+    }
+
+    /// Zivy kanal vyjimek procesu (`debugger` = kanal debuggeru).
+    pub fn exception_channel(&self, debugger: bool) -> Option<Arc<super::channel::Channel>> {
+        self.exc.lock()[!debugger as usize].clone().filter(|c| !c.peer_closed())
+    }
+
+    /// Nastavi kanal vyjimek; zivy kanal uz existuje = `AlreadyExists`.
+    pub fn set_exception_channel(&self, debugger: bool, ch: Arc<super::channel::Channel>) -> Result<(), Error> {
+        let mut e = self.exc.lock();
+        let slot = &mut e[!debugger as usize];
+        if slot.as_ref().is_some_and(|c| !c.peer_closed()) {
+            return Err(Error::AlreadyExists);
+        }
+        *slot = Some(ch);
+        Ok(())
     }
 
     /// Audit JIT: proces prave dostal spustitelnou pamet bez pecete
@@ -293,8 +312,10 @@ impl Process {
         // 3. Zarizeni, ktera proces ridil, zastavit; jejich pamet pustit az
         // potom (pred TERMINATED: novy ovladac nastartuje az po tom).
         super::quarantine::driver_gone(&driven, dma);
-        // 4. Fronty futexu (vlakna uz neexistuji) a seznam vlaken.
+        // 4. Fronty futexu (vlakna uz neexistuji), kanaly vyjimek a seznam
+        // vlaken.
         drop(core::mem::take(&mut *self.futex.lock()));
+        drop(core::mem::take(&mut *self.exc.lock()));
         self.state.lock().threads = Vec::new();
         if crate::console::process_finished(self.id) {
             log::info!("framebuffer: proces {} skoncil, vracen jadru", self.id);
