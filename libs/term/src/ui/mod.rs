@@ -126,9 +126,10 @@ pub struct App {
     /// Jak kreslit ukazatel cinnosti a pruh ([`crate::activity`]): okno
     /// GUI vlastnim prvkem, konzole znaky, "Omezit pohyb" staticky.
     pub glyphs: crate::activity::Glyphs,
-    /// Okno GUI kresli pred slozku ve vyzve ikonu: radek vstupu pro ni
-    /// nechava dve bunky (pilulka podle `design/terminal.html`).
-    pub icon_room: bool,
+    /// Bunky pred slozkou ve vyzve: okno GUI do nich kresli ikonu a okraj
+    /// pilulky (`design/terminal.html`, `.cwd`); konzole `0`. Za slozkou
+    /// je oddelovac " > " (3 bunky), ktery okno pilulkou prekryje.
+    pub cwd_lead: usize,
     /// Nabidku doplnovani kresli okno samo (seznam navrhu ve vrstve
     /// popoveru, [`menu`]): snimek pro ni nema radky.
     pub float_menu: bool,
@@ -200,7 +201,7 @@ impl App {
             out: Vec::new(),
             now: None,
             glyphs: crate::activity::Glyphs::Text,
-            icon_room: false,
+            cwd_lead: 0,
             float_menu: false,
             notation_c: false,
             tick: 0,
@@ -950,8 +951,8 @@ impl App {
         let t = &self.theme;
         let mut l = Line::new();
         // Vyzva: kde jsem (tucne, zvyraznene), pak oddelovac.
-        if self.icon_room {
-            l.push(None, "  ");
+        if self.cwd_lead > 0 {
+            l.push(None, &" ".repeat(self.cwd_lead));
         }
         l.push(Some(Style { bold: true, ..Style::fg(t.ui.accent) }), &self.cwd_short());
         l.push(Some(Style { bold: true, ..Style::fg(t.ui.fg) }), " \u{276F} ");
@@ -997,7 +998,7 @@ impl App {
         if let Some(e) = &h.error {
             l.push(Some(Style::fg(t.ui.err)), &alloc::format!("   {}", e.message));
         }
-        l.role(draw::Role::Input { prefix: if self.icon_room { 3 } else { 2 }, cwd: self.cwd_short() })
+        l.role(draw::Role::Input { prefix: if self.cwd_lead > 0 { 3 } else { 2 }, cwd: self.cwd_short() })
     }
 
     /// Zvoli zapis B (`false`) nebo C (`true`) a rozepsany radek do nej
@@ -1309,28 +1310,49 @@ const SCROLL_MAX: usize = 2000;
 /// pouzivaji cisla bez nej).
 const HINT_SEQ: u32 = 0x8000_0000;
 
-/// Cesta pro vyzvu: domov `/home/<jmeno>` jako `~`, dlouha cesta jen
-/// s poslednimi slozkami (`.../a/b`) do `max` znaku.
+/// Cesta pro vyzvu: domov `/home/<jmeno>` jako `~`, jinak cela cesta. Do
+/// `max` znaku se nevejde: zkratit zprostredka po celych slozkach
+/// (`~/proj/.../src`: zacatek, "...", od konce cele slozky), pak bez
+/// zacatku (`.../a/b`), nakonec zkratit jmeno posledni slozky.
 pub fn short_path(cwd: &str, max: usize) -> String {
     let mut p = String::from(cwd);
     if let Some(rest) = cwd.strip_prefix("/home/") {
         let (_, tail) = rest.split_once('/').unwrap_or((rest, ""));
         p = if tail.is_empty() { "~".into() } else { alloc::format!("~/{tail}") };
     }
-    if p.chars().count() <= max {
+    let len = |s: &str| s.chars().count();
+    if len(&p) <= max {
         return p;
     }
-    // Od konce cele slozky, dokud se vejdou.
-    let parts: Vec<&str> = p.split('/').filter(|s| !s.is_empty()).collect();
-    let mut out = String::new();
-    for part in parts.iter().rev() {
-        let next = if out.is_empty() { String::from(*part) } else { alloc::format!("{part}/{out}") };
-        if next.chars().count() + 2 > max && !out.is_empty() {
-            break;
+    let parts: Vec<&str> = p.split('/').filter(|s| !s.is_empty() && *s != "~").collect();
+    // Zacatek ("~" nebo prvni slozka) a slozky za nim.
+    let (head, rest) = match parts.split_first() {
+        _ if p.starts_with('~') => (String::from("~"), &parts[..]),
+        Some((first, rest)) if !rest.is_empty() => (alloc::format!("/{first}"), rest),
+        _ => (String::new(), &parts[..]),
+    };
+    // `pre` a od konce cele slozky z `from`, kolik se vejde (nejmene
+    // posledni, jinak nic).
+    let fit = |pre: String, from: &[&str]| -> Option<String> {
+        let mut tail = String::new();
+        for part in from.iter().rev() {
+            let next = if tail.is_empty() { String::from(*part) } else { alloc::format!("{part}/{tail}") };
+            if len(&pre) + len(&next) > max {
+                break;
+            }
+            tail = next;
         }
-        out = next;
+        (!tail.is_empty()).then(|| pre + &tail)
+    };
+    let with_head = if head.is_empty() { None } else { fit(alloc::format!("{head}/\u{2026}/"), rest) };
+    if let Some(out) = with_head.or_else(|| fit(String::from("\u{2026}/"), &parts)) {
+        return out;
     }
-    alloc::format!("\u{2026}/{out}")
+    // Ani posledni slozka se nevejde: jmeno zkratit na konci.
+    let last = parts.last().copied().unwrap_or("");
+    let room = max.saturating_sub(3).max(1);
+    let cut: String = last.chars().take(room).collect();
+    if len(last) > room { alloc::format!("\u{2026}/{cut}\u{2026}") } else { alloc::format!("\u{2026}/{cut}") }
 }
 
 /// Prikaz akce nad radkem (spusti se jako bezny radek - vidi ho historie

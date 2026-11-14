@@ -1812,7 +1812,7 @@ Statické řezy (ne proměnné písmo), protože rasterizér čte `glyf`.
 ## Okno terminálu
 
 Terminál 6b je v GUI oknem `gui-term` nad svým nativním protokolem:
-**vlastní titulek** (aplikace kreslí kartu relace „Relace N“ a deklaruje oblast `DRAG` s výjimkou `NO_DRAG` pro kartu,
+**vlastní titulek** (aplikace kreslí karty relací „Relace N“ a deklaruje oblast `DRAG` přes celý titulek s výjimkami `NO_DRAG` jen pro jednotlivé karty, tlačítko + a přepínač zápisu; volné místo mezi nimi se chová jako titulek: tah přesune okno, dvojklik maximalizuje; oblasti posílá znovu, když se karty změní; **[ověřeno v QEMU]** tahem fyzické myši, test `gui_term.rs`;
 odznak a tlačítka kreslí systém), obsah je mřížka znaků `term::screen`
 (písmo JetBrains Mono, barvy `term_*` z tokenů, titulek 40 px s kartou
 relace) a strom přístupnosti má

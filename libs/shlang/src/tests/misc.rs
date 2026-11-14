@@ -211,7 +211,31 @@ fn system_error_cause_is_czech_from_catalog() {
         let m = crate::explain::meaning(e.name());
         assert!(m.as_deref().is_some_and(|t| !t.is_empty() && !t.ends_with('.')), "{}: {m:?}", e.name());
     }
-    // Hlaseni chyby: "příčina: KOD: vyznam" cesky (s diakritikou).
+    // Hlaseni chyby systemu: jedna veta "Co: vyznam (KOD)" cesky, kod
+    // jen jednou.
     let r = crate::error::ShError::sys(abi::Error::NotFound, "soubor nejde otevřít").report("");
-    assert!(r.contains("příčina: NOT_FOUND: požadovaná věc neexistuje"), "{r}");
+    assert_eq!(r, "Soubor nejde otevřít: požadovaná věc neexistuje (NOT_FOUND)");
+}
+
+/// Misto ve zdroji (radek, sloupec, `^^`) jen u chyby syntaxe nebo kdyz
+/// chyba patri k casti delsiho radku; u celeho prikazu ne.
+#[test]
+fn error_report_place_only_when_it_helps() {
+    use crate::error::{ShError, code};
+    use crate::span::Span;
+    let deny = || ShError::sys_because(abi::Error::AccessDenied, "složku /zamceno nejde vypsat", "nemáte právo výpisu");
+    // Jednoslovny prikaz: jedna veta, bez mista a bez druheho kodu.
+    let r = deny().at(Span::new(0, 2)).report("ls");
+    assert_eq!(r, "Složku /zamceno nejde vypsat: nemáte právo výpisu (ACCESS_DENIED)");
+    // Cela roura (i s mezerami okolo): taky bez mista.
+    let line = " ls /zamceno | where size > 1 ";
+    let r = deny().at(Span::new(1, line.len() - 1)).report(line);
+    assert!(!r.contains("řádku") && !r.contains('^'), "{r}");
+    // Cast delsiho radku: misto ma smysl.
+    let line = "cd /tmp; ls /zamceno";
+    let r = deny().at(Span::new(9, line.len())).report(line);
+    assert!(r.contains("na řádku 1, sloupec 10") && r.contains("^^^"), "{r}");
+    // Chyba syntaxe: misto vzdy.
+    let r = ShError::new(code::PARSE, "chybí )").at(Span::new(0, 2)).report("ls");
+    assert!(r.starts_with("chyba SH_PARSE: chybí )") && r.contains("na řádku 1, sloupec 1"), "{r}");
 }

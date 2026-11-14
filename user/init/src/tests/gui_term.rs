@@ -5,7 +5,9 @@
 //! po `QEMU_TERM_KEYS` (`xtask/src/qmp.rs`, modul `gui`). Pak nabidka
 //! doplnovani: po `QEMU_TERM_TAB` Ctrl+U, "e" a Tab otevrou seznam navrhu
 //! nad radkem vstupu, po `QEMU_TERM_DOWN` sipka dolu vybere dalsi polozku;
-//! polozku prijme akce pristupnosti.
+//! polozku prijme akce pristupnosti. Nakonec tah za volne misto vlastniho
+//! titulku (vpravo od karet a mezi odznakem a kartou) okno posune
+//! (`QEMU_TERM_TITLE_RIGHT`, `QEMU_TERM_TITLE_LEFT`).
 
 use alloc::vec;
 
@@ -27,6 +29,11 @@ pub const QEMU_TERM_KEYS: &str = "init: test gui: terminal ceka na Ctrl+C a Ctrl
 pub const QEMU_TERM_TAB: &str = "init: test gui: terminal ceka na doplneni Tab";
 /// Sipka dolu (az kdyz je seznam otevreny).
 pub const QEMU_TERM_DOWN: &str = "init: test gui: terminal ceka na sipku v seznamu navrhu";
+/// Tah za volne misto titulku vpravo od karet (pred prepinacem B / C):
+/// za znackou "x0 y0 x1 y1".
+pub const QEMU_TERM_TITLE_RIGHT: &str = "init: test gui: terminal tah titulku vpravo ";
+/// Tah za volne misto titulku mezi odznakem a kartou zpet.
+pub const QEMU_TERM_TITLE_LEFT: &str = "init: test gui: terminal tah titulku vlevo ";
 
 const NAME: &str = "gui-term (vyber)";
 const WORD: &str = "vyber-z-mysi";
@@ -75,7 +82,8 @@ pub fn select_copy_paste(startup: &Startup) -> TestResult {
             })?;
             let v = term(&t).map(|n| n.value.clone()).unwrap_or_default();
             check!(v.lines().filter(|l| l.trim() == WORD).count() == 1, alloc::format!("vlozeni nic nespustilo: {v}"));
-            completion(&s.inspect, w.id, &pump)
+            completion(&s.inspect, w.id, &pump)?;
+            title_drag(&s.inspect, w.id, &pump)
         })();
         close_terminal(startup, s, app, NAME)?;
         r
@@ -118,6 +126,53 @@ fn completion<R>(inspect: &libos::Channel, w: u32, pump: &dyn Fn() -> R) -> Test
         pump();
         !t.iter().any(|n| n.role == Role::ListBox)
             && term(t).is_some_and(|n| n.state & state::EXPANDED == 0 && n.value.lines().any(|l| l.contains('\u{276F}') && l.contains("explain")))
+    })
+    .map_err(short)?;
+    Ok(())
+}
+
+/// Titulek okna (meze na obrazovce).
+fn title(t: &[Node]) -> Option<guiproto::Rect> {
+    t.iter().find(|n| n.role == Role::Titlebar).map(|n| n.bounds)
+}
+
+/// Tah za volne misto vlastniho titulku: vpravo od karet (za + nebo
+/// kartou, pred prepinacem B / C) okno posune o (40, 30), mezi odznakem
+/// a kartou zpet. Volne misto ma chovani titulku kompozitoru (oblast
+/// `Drag` bez `NoDrag`), karty a prepinac ne.
+fn title_drag<R>(inspect: &libos::Channel, w: u32, pump: &dyn Fn() -> R) -> TestResult {
+    let short = |e: alloc::string::String| -> alloc::string::String { e.chars().take(400).collect() };
+    let t = wait_tree(inspect, w, "titulek terminalu", |t| {
+        pump();
+        title(t).is_some() && t.iter().any(|n| n.name == "Zápis B (příkazový)")
+    })
+    .map_err(short)?;
+    let bar = title(&t).ok_or("titulek chybi")?;
+    // Konec karet: karta relace (uzel 3) nebo posledni karta / +.
+    let tabs_end = t.iter().filter(|n| n.parent == 2 && n.role == Role::Button && !n.name.starts_with("Zápis")).map(|n| n.bounds.x + n.bounds.w as i32).max().ok_or("karta chybi")?;
+    let tab_x = t.iter().find(|n| n.id == 3).map(|n| n.bounds.x).ok_or("karta relace chybi")?;
+    let b = t.iter().find(|n| n.name == "Zápis B (příkazový)").ok_or("prepinac zapisu chybi")?.bounds;
+    // Stred mezery (okraj prepinace kolem voleb je mensi nez polovina).
+    let gap = b.x - tabs_end;
+    check!(gap > 32, alloc::format!("titulek bez volneho mista: karty do {tabs_end}, B od {}", b.x));
+    let y = bar.y + bar.h as i32 / 2;
+    let x = tabs_end + gap / 2;
+    settle(inspect)?;
+    println!("{QEMU_TERM_TITLE_RIGHT}{x} {y} {} {}", x + 40, y + 30);
+    let moved = wait_tree(inspect, w, "presun okna tahem za titulek vpravo", |t| {
+        pump();
+        title(t).is_some_and(|r| r.x == bar.x + 40 && r.y == bar.y + 30)
+    })
+    .map_err(short)?;
+    let bar2 = title(&moved).ok_or("titulek chybi")?;
+    // Mezi odznakem (system, vlevo) a kartou: kousek pred kartou.
+    let x = bar2.x + (tab_x - bar.x) - 6;
+    let y = bar2.y + bar2.h as i32 / 2;
+    settle(inspect)?;
+    println!("{QEMU_TERM_TITLE_LEFT}{x} {y} {} {}", x - 40, y - 30);
+    wait_tree(inspect, w, "presun okna tahem za titulek vlevo", |t| {
+        pump();
+        title(t).is_some_and(|r| r.x == bar.x && r.y == bar.y)
     })
     .map_err(short)?;
     Ok(())

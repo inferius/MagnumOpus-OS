@@ -51,7 +51,7 @@ impl App {
     /// Sloupec radku vstupu, na kterem lezi bajt `at` textu editoru (za
     /// vyzvou: ikona, kratka slozka, `" > "`; konec radku = jedna bunka).
     pub fn input_col(&self, at: usize) -> usize {
-        let start = if self.icon_room { 2 } else { 0 } + self.cwd_short().chars().count() + 3;
+        let start = self.cwd_lead + self.cwd_short().chars().count() + 3;
         let at = at.min(self.editor.text.len());
         start + self.editor.text.get(..at).map_or(0, |s| s.chars().count())
     }

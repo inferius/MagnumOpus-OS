@@ -445,10 +445,18 @@ earlier statements are dropped there; use `log` for a note.
   column, underline), a hint and a cause. `explain code` shows the
   explanation from [Error codes](errors.md) and from the
   [Shell errors chapter](#shell-errors).
-- The cause from a system error is shown in Czech from the same catalog
-  (the **Význam** sentence in the Czech error codes page), e.g.
-  `příčina: NOT_FOUND: požadovaná věc neexistuje`. The descriptions in
-  `abi` stay ASCII and are only a fallback **[implemented]**.
+- A system error is **one sentence** in the report, with the code once at
+  the end: "Složku /x nejde vypsat: nemáte právo výpisu (ACCESS_DENIED)".
+  For common codes of file operations the shell gives the reason in its own
+  words (listing, reading, writing; `NOT_FOUND`, `ALREADY_EXISTS`,
+  `NOT_EMPTY`), otherwise in Czech from the catalog (the **Význam**
+  sentence in the Czech error codes page). The descriptions in `abi` stay
+  ASCII and are only a fallback **[implemented]** (host tests
+  `tests/misc.rs`).
+- The location in the source (line, column, `^^` underline) is shown only
+  for a syntax error and for an error that belongs to a part of a longer
+  line. For an error of a whole command or a whole pipeline (`ls` ->
+  `ACCESS_DENIED`) it would say nothing, so it is left out **[implemented]**.
 
 ### Functions, closures, jobs
 
@@ -1056,9 +1064,10 @@ comparison: `target/shots/terminal.png` (look test `look_shots`).
 |---|---|
 | block left bar by state (running, done, error), bold command, time and result on the right in the UI font | **[implemented]** |
 | error box (danger-soft, danger border) | **[implemented]** |
-| input row: a line above it, a pill with a folder icon and name | **[implemented]** |
+| window footer (`.input-wrap`): the input row with the key hints sits at the bottom edge (the rest of the window height after whole grid rows goes to the top, only the `s3` margin stays at the bottom), a line across the full width above it | **[implemented]** |
+| folder pill in the prompt: an icon and the full path (home as `~`), width by the text; the row keeps cells for it from the tokens (`App::cwd_lead`). A path longer than a third of the width is cut in the middle by whole folders (`~/…/src/arch`), then without the start (`…/b/c`), finally the name of the last folder (`short_path`) | **[implemented]** (shortening: host tests `tests_ui.rs`) |
 | change preview (dangerous operation lock, `preview`): a box with the list of changes (at most 6, then "... and N more") and buttons "Take N changes" / "Discard"; the buttons are in accessibility too, the console shows the list of changes as well | **[verified in QEMU]** |
-| key hints as chips | **[implemented]** |
+| key hints as chips (`.kbd`): every key of a combination on its own (`Ctrl` `C`), `surface` fill, `border_strong` border with a thicker bottom edge, `caption` font, `s4` between items | **[implemented]** |
 | a line under the table header | **[implemented]** (no column type under the name yet) |
 | text selection with the mouse (like Windows Terminal): a drag selects characters, a double click a word (`ui::text::word_at`), a triple click lines, Shift+click extends; color `accent_soft`. The selection keeps screen cells; with new output it moves with the text, and when the text of the selected rows changes it is cleared (`libs/term/src/select.rs`). Typing clears it | **[verified in QEMU]** (a mouse drag with physical input, test `gui_term.rs`; double and triple click host tests `tests_select.rs`) |
 | clipboard: Ctrl+C with a selection and Ctrl+Shift+C copy (the selection then disappears), without a selection Ctrl+C interrupts the command; Ctrl+V and Ctrl+Shift+V paste at the input line cursor. Pasting runs nothing: the last line break is dropped, inner ones stay (the line shows them as ↵, Enter runs everything as one script), a tab = a space, control characters are dropped, at most 64 Ki characters | **[verified in QEMU]** (Ctrl+C and Ctrl+V from a physical keyboard, test `gui_term.rs`; the clipboard needs a physical gesture) |

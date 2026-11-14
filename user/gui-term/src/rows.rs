@@ -154,27 +154,93 @@ pub fn under(c: &mut Canvas<'_>, look: &mut Look, lines: &[Line], g: &Grid) {
             }
             Role::Input { prefix, cwd } => {
                 let y = g.row_y(row);
-                c.fill(Rect::new(g.x, y - 3, (g.right() - g.x).max(0) as u32, 1), col.border);
+                // Paticka (`.input-wrap`): linka pres celou sirku mrizky
+                // i s okraji.
+                c.fill(Rect::new(0, y - 3, (g.right() + g.x).max(0) as u32, 1), col.border);
                 if let Some(&(_, end)) = lines[row].part_cols().get(prefix.saturating_sub(1)) {
-                    let w = (end as u32 * g.cw).saturating_sub(g.cw);
-                    let r = Rect::new(g.x, y + 1, w, g.ch - 2);
-                    c.round_fill(r, (g.ch - 2) / 2, col.accent_soft);
-                    // Ikona slozky (`icon_s`, nejvys vyska pilulky bez
-                    // okraje), za ni jmeno slozky (okraj s3, mezera s1).
-                    let pad = t.space[3] as i32;
-                    let is = t.size.icon_s.min(r.h.saturating_sub(4));
-                    look.icons.draw(c, "folder", r.x + pad, r.y + (r.h - is) as i32 / 2, is, t.icon_stroke, col.accent_ink);
-                    let tx = r.x + pad + is as i32 + t.space[1] as i32;
+                    // Pilulka `.cwd`: okraj s3, ikona, mezera s1, jmeno,
+                    // okraj s3; sirka podle textu, nejvys k mezere s3 pred
+                    // textem radku (bunka `end`).
+                    let pad = t.space[3];
                     let s = t.text.small;
                     let f = look.ui.face(t.text.body_strong.weight);
+                    let is = t.size.icon_s.min(g.ch.saturating_sub(6));
+                    let max = (end as u32 * g.cw).saturating_sub(t.space[3]);
+                    let w = (2 * pad + is + t.space[1] + f.width(cwd, s.size)).min(max);
+                    let r = Rect::new(g.x, y + 1, w, g.ch - 2);
+                    c.round_fill(r, (g.ch - 2) / 2, col.accent_soft);
+                    look.icons.draw(c, "folder", r.x + pad as i32, r.y + (r.h - is) as i32 / 2, is, t.icon_stroke, col.accent_ink);
+                    let tx = r.x + (pad + is + t.space[1]) as i32;
                     let base = r.y + f.baseline_in(s.size, r.h);
-                    let room = (r.x + r.w as i32 - pad - tx).max(0) as u32;
+                    let room = (r.x + r.w as i32 - pad as i32 - tx).max(0) as u32;
                     f.draw_ellipsized(c, tx, base, cwd, s.size, col.accent_ink, room);
                 }
             }
             _ => {}
         }
         row += 1;
+    }
+}
+
+/// Klavesy jedne napovedy: kombinace s modifikatorem ("Ctrl-C",
+/// "Shift+PgUp") jako samostatne klavesy, jinak cela.
+fn keys_of(key: &str) -> Vec<&str> {
+    let parts: Vec<&str> = key.split(['+', '-']).collect();
+    let modifier = |p: &str| matches!(p, "Ctrl" | "Shift" | "Alt" | "Super");
+    if parts.len() > 1 && parts[..parts.len() - 1].iter().all(|p| modifier(p)) && !parts[parts.len() - 1].is_empty() {
+        parts
+    } else {
+        alloc::vec![key]
+    }
+}
+
+/// Napoveda klaves v paticce (`.hintbar` a `.kbd` z navrhu): kazda
+/// klavesa stitek (plocha `surface`, okraj `border_strong`, spodni hrana
+/// silnejsi, pismo `caption`), za klavesami popis `term_dim`, mezi
+/// polozkami mezera `s4`. Co se nevejde, nahradi "...".
+fn paint_hints(c: &mut Canvas<'_>, look: &mut Look, chips: &[(String, String)], g: &Grid, y: i32) {
+    let t = look.t.clone();
+    let col = &t.color;
+    let s = t.text.caption;
+    let sp = &t.space;
+    // Vyska stitku: radek `caption` s okrajem s2, nejvys radek mrizky.
+    let h = (s.line + sp[2]).min(g.ch);
+    let ky = y + (g.ch - h) as i32 / 2;
+    let kpad = sp[2] + sp[1];
+    let kmin = t.size.icon_s + 2 * sp[1];
+    let mut x = g.x;
+    for (k, (key, label)) in chips.iter().enumerate() {
+        let keys = keys_of(key);
+        let fk = look.ui.face(s.weight);
+        let widths: Vec<u32> = keys.iter().map(|q| (fk.width(q, s.size) + 2 * kpad).max(kmin)).collect();
+        let kw: u32 = widths.iter().sum::<u32>() + sp[1] * (keys.len() as u32 - 1);
+        let fl = look.ui.face(s.weight);
+        let lw = if label.is_empty() { 0 } else { sp[2] + fl.width(label, s.size) };
+        if x + (kw + lw) as i32 > g.right() {
+            if k > 0 {
+                let base = y + fl.baseline_in(s.size, g.ch);
+                fl.draw(c, x, base, "\u{2026}", s.size, col.term_dim);
+            }
+            break;
+        }
+        for (q, w) in keys.iter().zip(&widths) {
+            let r = Rect::new(x, ky, *w, h);
+            // Spodni hrana 2 px: plocha okraje, nad ni klavesa o 1 px nizsi.
+            c.round_fill(r, t.radius.xs, col.border_strong);
+            c.round_fill_bordered(Rect::new(r.x, r.y, r.w, r.h - 1), t.radius.xs, col.surface, col.border_strong, 1);
+            let fk = look.ui.face(s.weight);
+            let base = r.y + fk.baseline_in(s.size, r.h - 1);
+            let tw = fk.width(q, s.size);
+            fk.draw(c, r.x + (r.w - tw) as i32 / 2, base, q, s.size, col.ink);
+            x += (*w + sp[1]) as i32;
+        }
+        x -= sp[1] as i32;
+        if !label.is_empty() {
+            let fl = look.ui.face(s.weight);
+            let base = y + fl.baseline_in(s.size, g.ch);
+            fl.draw(c, x + sp[2] as i32, base, label, s.size, col.term_dim);
+        }
+        x += (lw + sp[4]) as i32;
     }
 }
 
@@ -236,36 +302,7 @@ pub fn over(c: &mut Canvas<'_>, look: &mut Look, lines: &[Line], g: &Grid, hover
                     c.fill(Rect::new(g.col_x(2), y + g.ch as i32 - 2, w, 1), col.border);
                 }
             }
-            Role::Hints(chips) => {
-                let s = t.text.caption;
-                let mut x = g.x;
-                let h = g.ch.saturating_sub(6);
-                for (k, (key, label)) in chips.iter().enumerate() {
-                    let fk = look.ui.face(t.text.body_strong.weight);
-                    let kw = fk.width(key, s.size) + 10;
-                    let fl = look.ui.face(s.weight);
-                    let lw = if label.is_empty() { 0 } else { fl.width(label, s.size) + 4 };
-                    if x + (kw + lw) as i32 > g.right() {
-                        let fl = look.ui.face(s.weight);
-                        let base = y + fl.baseline_in(s.size, g.ch);
-                        if k > 0 {
-                            fl.draw(c, x, base, "\u{2026}", s.size, col.term_dim);
-                        }
-                        break;
-                    }
-                    let r = Rect::new(x, y + 3, kw, h);
-                    c.round_fill_bordered(r, t.radius.xs, col.surface, col.border, 1);
-                    let fk = look.ui.face(t.text.body_strong.weight);
-                    let base = r.y + fk.baseline_in(s.size, r.h);
-                    fk.draw(c, x + 5, base, key, s.size, col.ink);
-                    if !label.is_empty() {
-                        let fl = look.ui.face(s.weight);
-                        let base = y + fl.baseline_in(s.size, g.ch);
-                        fl.draw(c, x + kw as i32 + 4, base, label, s.size, col.term_dim);
-                    }
-                    x += (kw + lw) as i32 + 12;
-                }
-            }
+            Role::Hints(chips) => paint_hints(c, look, chips, g, y),
             _ => {}
         }
     }

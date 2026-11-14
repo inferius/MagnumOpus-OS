@@ -69,7 +69,7 @@ fn anchor_column_is_word_start() {
     // Vyzva "/ > " (bez ikony): slovo zacina za "open ".
     let base = a.input_col(0);
     assert_eq!(a.menu_col(), Some(base + 5));
-    a.icon_room = true;
+    a.cwd_lead = 2;
     assert_eq!(a.input_col(0), base + 2);
     a.menu_close();
     assert_eq!(a.menu_col(), None);

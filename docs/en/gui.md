@@ -1893,8 +1893,12 @@ rasterizer reads `glyf`.
 
 The 6b terminal is the `gui-term` window in the GUI on top of its native
 protocol: a **custom title bar** (the app draws the session tab
-"Session N" and declares a `DRAG` region with
-a `NO_DRAG` exception for the tab; the badge and buttons are drawn by the
+"Session N" and declares a `DRAG` region over the whole title bar with
+`NO_DRAG` exceptions only for the individual tabs, the + button and the
+notation switch; the free space between them behaves as a title bar: a drag
+moves the window, a double click maximizes; the regions are sent again when
+the tabs change; **[verified in QEMU]** with a physical mouse drag, test
+`gui_term.rs`; the badge and buttons are drawn by the
 system), the content is a `term::screen` character grid (JetBrains Mono, `term_*` colors from the tokens, 40 px title with the
 session tab;
 the same as on the console), and the accessibility tree has a `terminal`

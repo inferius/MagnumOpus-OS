@@ -11,8 +11,34 @@ use crate::span::Span;
 use crate::value::Value;
 use crate::vfs::path::{self, resolve, within};
 
+/// Operace se soubory: podle ni vysvetleni chyby pro cloveka.
+#[derive(Clone, Copy)]
+enum Op {
+    List,
+    Read,
+    Write,
+}
+
+/// Chyba operace se soubory: co nejde a proc (bezne kody vlastni vetou,
+/// ostatni vyznamem z katalogu chyb).
+fn sys_op(e: abi::Error, what: String, op: Op) -> Flow {
+    let because = match (e.name(), op) {
+        ("ACCESS_DENIED", Op::List) => Some("nemáte právo výpisu"),
+        ("ACCESS_DENIED", Op::Read) => Some("nemáte právo čtení"),
+        ("ACCESS_DENIED", Op::Write) => Some("nemáte právo zápisu"),
+        ("NOT_FOUND", _) => Some("taková cesta neexistuje"),
+        ("ALREADY_EXISTS", _) => Some("už existuje"),
+        ("NOT_EMPTY", _) => Some("složka není prázdná"),
+        _ => None,
+    };
+    Flow::Err(match because {
+        Some(b) => ShError::sys_because(e, what, b),
+        None => ShError::sys(e, what),
+    })
+}
+
 fn sys(e: abi::Error, what: String) -> Flow {
-    Flow::Err(ShError::sys(e, what))
+    sys_op(e, what, Op::Write)
 }
 
 impl Interp {
@@ -47,7 +73,7 @@ impl Interp {
 
     pub(crate) fn fs_stat(&mut self, host: &mut dyn Host, p: &str) -> R<Meta> {
         self.check_read(p)?;
-        self.draft.stat(host.fs(), p).map_err(|e| sys(e, alloc::format!("{p} nejde otevřít")))
+        self.draft.stat(host.fs(), p).map_err(|e| sys_op(e, alloc::format!("{p} nejde otevřít"), Op::Read))
     }
 
     pub(crate) fn fs_exists(&mut self, host: &mut dyn Host, p: &str) -> R<bool> {
@@ -57,23 +83,23 @@ impl Interp {
 
     pub(crate) fn fs_list(&mut self, host: &mut dyn Host, p: &str) -> R<Vec<DirEntry>> {
         self.check_read(p)?;
-        self.draft.list(host.fs(), p).map_err(|e| sys(e, alloc::format!("složku {p} nejde vypsat")))
+        self.draft.list(host.fs(), p).map_err(|e| sys_op(e, alloc::format!("složku {p} nejde vypsat"), Op::List))
     }
 
     /// Jen jmena a druhy (levnejsi nez `fs_list`).
     pub(crate) fn fs_list_names(&mut self, host: &mut dyn Host, p: &str) -> R<Vec<DirEntry>> {
         self.check_read(p)?;
-        self.draft.list_names(host.fs(), p).map_err(|e| sys(e, alloc::format!("složku {p} nejde vypsat")))
+        self.draft.list_names(host.fs(), p).map_err(|e| sys_op(e, alloc::format!("složku {p} nejde vypsat"), Op::List))
     }
 
     pub(crate) fn fs_read(&mut self, host: &mut dyn Host, p: &str) -> R<Vec<u8>> {
         self.check_read(p)?;
-        self.draft.read(host.fs(), p).map_err(|e| sys(e, alloc::format!("{p} nejde přečíst")))
+        self.draft.read(host.fs(), p).map_err(|e| sys_op(e, alloc::format!("{p} nejde přečíst"), Op::Read))
     }
 
     pub(crate) fn fs_read_range(&mut self, host: &mut dyn Host, p: &str, offset: u64, len: usize) -> R<Vec<u8>> {
         self.check_read(p)?;
-        self.draft.read_range(host.fs(), p, offset, len).map_err(|e| sys(e, alloc::format!("{p} nejde přečíst")))
+        self.draft.read_range(host.fs(), p, offset, len).map_err(|e| sys_op(e, alloc::format!("{p} nejde přečíst"), Op::Read))
     }
 
     pub(crate) fn fs_write(&mut self, host: &mut dyn Host, p: &str, data: Vec<u8>) -> R<()> {

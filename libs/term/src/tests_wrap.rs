@@ -89,7 +89,7 @@ fn icon_room_reserves_cells_before_folder() {
     use crate::ui::draw::Role;
     let mut a = App::new(crate::theme::Theme::dark(), 80, 30);
     a.on_msg(ServerMsg::Attached { session: 7, cwd: "/home/eva".into(), blocks: 0 });
-    a.icon_room = true;
+    a.cwd_lead = 2;
     let (_, lines) = a.frame_lines();
     let input = lines.iter().find(|l| matches!(l.role, Role::Input { .. })).expect("radek vstupu");
     let Role::Input { prefix, .. } = input.role else { unreachable!() };

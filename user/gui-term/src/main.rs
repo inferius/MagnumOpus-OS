@@ -57,6 +57,10 @@ struct Look {
     ui: Family,
     /// Ikony z prototypu (`design/assets/mo.js`).
     icons: gfx::icon::Icons,
+    /// Zbytek vysky okna po celych radcich mrizky: jde nad mrizku, aby
+    /// radek vstupu s napovedou (paticka, `.input-wrap`) sedel u spodniho
+    /// okraje (`Look::fit`).
+    slack: u32,
 }
 
 impl Look {
@@ -65,7 +69,7 @@ impl Look {
         // Terminal bez ligatur (`font.mono_features` je vypina); zapnute
         // vlastnosti zadne.
         let mono = Family::new(font::mono(), &[]);
-        Self { t, mono, ui: ui::Look::ui_fonts(), icons: gfx::icon::Icons::new() }
+        Self { t, mono, ui: ui::Look::ui_fonts(), icons: gfx::icon::Icons::new(), slack: 0 }
     }
 
     fn title_h(&self) -> u32 {
@@ -85,11 +89,24 @@ impl Look {
         ((w + 0.5) as u32, s.line)
     }
 
-    /// Mrizka bunek v okne (pocatek pod titulkem s okrajem).
+    /// Mrizka bunek v okne (pocatek pod titulkem s okrajem a zbytkem
+    /// vysky `slack`).
     fn grid(&self, cols: usize) -> rows::Grid {
         let (cw, ch) = self.cell();
         let pad = self.pad() as i32;
-        rows::Grid { x: pad, y: self.title_h() as i32 + pad, cw, ch, cols }
+        rows::Grid { x: pad, y: self.title_h() as i32 + pad + self.slack as i32, cw, ch, cols }
+    }
+
+    /// Spodni okraj paticky (`.input-wrap`: `s3`).
+    fn foot_pad(&self) -> u32 {
+        self.t.space[3]
+    }
+
+    /// Zbytek vysky okna `h` pro `rows` radku mrizky: nad mrizku, dole
+    /// zustane jen okraj paticky.
+    fn fit(&mut self, h: u32, rows: usize) {
+        let used = self.title_h() + self.pad() + rows as u32 * self.cell().1 + self.foot_pad();
+        self.slack = h.saturating_sub(used);
     }
 
     /// Prepinac zapisu B / C v titulku vlevo od tlacitek okna (ta kresli
@@ -107,6 +124,16 @@ impl Look {
         let y = (self.title_h().saturating_sub(h) / 2) as i32;
         let b = |i: i32| Rect::new(x + pad as i32 + i * z.hit_min as i32, y + pad as i32, z.hit_min, h - 2 * pad);
         (Rect::new(x, y, sw, h), [b(0), b(1)])
+    }
+
+    /// Bunky pred slozkou ve vyzve (`App::cwd_lead`): okraj pilulky, ikona,
+    /// mezera a za pilulkou mezera k textu (`rows::cwd_pill`), bez tri
+    /// bunek oddelovace, ktere pilulka prekryje.
+    fn cwd_lead(&self) -> usize {
+        let sp = &self.t.space;
+        let px = 2 * sp[3] + self.t.size.icon_s + sp[1] + sp[3];
+        let cw = self.cell().0.max(1);
+        (px.div_ceil(cw) as usize).saturating_sub(3).max(1)
     }
 
     /// Karta relace v titulku: za odznakem systemu (misto podle
@@ -188,13 +215,16 @@ struct Term {
     /// Poloha obsahu okna na obrazovce (`WINDOW_PLACE`; prazdna =
     /// nezname, seznam navrhu jen v okne).
     place: Rect,
+    /// Naposledy poslane oblasti titulku (`regions`); posilaji se znovu,
+    /// jen kdyz se zmeni (nova karta, zmena velikosti).
+    regions_sent: Vec<(Rect, RegionKind)>,
 }
 
 /// Mrizka v okne `w` x `h`; s panelem uloh je o jeho sirku uzsi.
 fn grid(look: &Look, w: u32, h: u32, panel: bool) -> (usize, usize) {
     let w = if panel { w.saturating_sub(look.t.size.side_panel) } else { w };
     let (cw, ch) = look.cell();
-    let p = 2 * look.pad();
+    let p = look.pad() + look.foot_pad();
     let cols = (w.saturating_sub(p) / cw.max(1)).max(1);
     let rows = (h.saturating_sub(look.title_h() + p) / ch.max(1)).max(1);
     (cols as usize, rows as usize)
@@ -207,14 +237,15 @@ fn now() -> Option<i64> {
 
 impl Term {
     fn new(win: Window, conn: Option<Channel>) -> Self {
-        let look = Look::new();
+        let mut look = Look::new();
         let (c, r) = grid(&look, win.w, win.h, panel::shown(win.screen.0, win.w));
+        look.fit(win.h, r);
         let th = look.term_theme();
         let mut app = App::new(th, c, r);
         // Krouzek a dilci bunky pruhu kresli okno samo (term::activity).
         app.glyphs = term::activity::Glyphs::Drawn;
-        // Pred slozku ve vyzve okno kresli ikonu (rows.rs).
-        app.icon_room = true;
+        // Pred slozku ve vyzve okno kresli ikonu a okraj pilulky (rows.rs).
+        app.cwd_lead = look.cwd_lead();
         // Nabidku doplnovani kresli okno (seznam navrhu, compl.rs).
         app.float_menu = true;
         let mut t = Self {
@@ -231,6 +262,7 @@ impl Term {
             select: term::select::Selector::new(Some(ui::text::word_at), ui::MULTI_CLICK),
             compl: None,
             place: Rect::default(),
+            regions_sent: Vec::new(),
         };
         t.app.welcome = true;
         t.conn.start();
@@ -381,6 +413,7 @@ impl Term {
 
     fn resize(&mut self) {
         let (c, r) = grid(&self.look, self.win.w, self.win.h, self.panel());
+        self.look.fit(self.win.h, r);
         self.screen = Screen::new(c, r);
         self.app.resize(c, r);
     }
@@ -408,14 +441,6 @@ impl Term {
         }
         let limit = self.look.notation(self.win.w).0.x - self.look.t.space[4] as i32;
         tabs::layout(&self.look, &self.app.session_tabs(), self.app.session, limit)
-    }
-
-    /// Plocha vsech karet (oblast bez presunu okna): od prvni karty az
-    /// k prepinaci zapisu.
-    fn tabs_area(&self) -> Rect {
-        let first = self.look.tab();
-        let end = self.look.notation(self.win.w).0.x;
-        Rect::new(first.x, 0, (end - first.x).max(0) as u32, self.look.title_h())
     }
 
     /// Je videt panel uloh vpravo?
@@ -601,24 +626,34 @@ impl Term {
             }
             None => self.win.hide_popover()?,
         }
+        // Karty se meni s relacemi: oblasti titulku za nimi.
+        self.regions_if_changed()?;
         let nodes = self.a11y();
         self.win.set_a11y(&nodes)?;
         self.win.commit_redrawn(false)
     }
 
-    /// Deklarovane oblasti: titulek tahne okno, karta ne. Jdou pres
-    /// `send`, takze je po padu kompozitoru obnova posle znovu.
+    /// Oblasti titulku pro kompozitor: cely titulek tahne okno (presun,
+    /// dvojklik = maximalizace), bez tahu jen jednotlive karty, tlacitko +
+    /// a prepinac zapisu. Volne misto mezi nimi je titulek.
+    fn region_list(&self) -> Vec<(Rect, RegionKind)> {
+        let mut out = vec![(Rect::new(0, 0, self.win.w, self.look.title_h()), RegionKind::Drag), (self.look.tab(), RegionKind::NoDrag)];
+        out.extend(self.tabs().into_iter().map(|t| (t.rect, RegionKind::NoDrag)));
+        out.push((self.look.notation(self.win.w).0, RegionKind::NoDrag));
+        out
+    }
+
+    /// Posle oblasti titulku (vzdy). Jdou pres `send`, takze je po padu
+    /// kompozitoru obnova posle znovu.
     fn regions(&mut self) -> Result<(), Error> {
-        let msg = ClientMsg::Regions {
-            window: 1,
-            regions: vec![
-                (Rect::new(0, 0, self.win.w, self.look.title_h()), RegionKind::Drag),
-                (self.look.tab(), RegionKind::NoDrag),
-                (self.tabs_area(), RegionKind::NoDrag),
-                (self.look.notation(self.win.w).0, RegionKind::NoDrag),
-            ],
-        };
-        self.win.send(msg)
+        let regions = self.region_list();
+        self.regions_sent = regions.clone();
+        self.win.send(ClientMsg::Regions { window: 1, regions })
+    }
+
+    /// Posle oblasti, jen kdyz se od posledniho poslani zmenily.
+    fn regions_if_changed(&mut self) -> Result<(), Error> {
+        if self.region_list() != self.regions_sent { self.regions() } else { Ok(()) }
     }
 
     /// Udalost okna; `Some(true)` = prekreslit, `None` = konec aplikace.
@@ -751,6 +786,8 @@ impl Term {
             Event::Theme(m) => {
                 self.look.t = theme::Theme::builtin(m);
                 self.app.theme = self.look.term_theme();
+                self.app.cwd_lead = self.look.cwd_lead();
+                self.resize();
                 true
             }
             // Polozka seznamu navrhu (ACTIVATE doplni, FOCUS vybere).
@@ -953,8 +990,7 @@ fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, line
     let body = Rect::new(0, th as i32, w, h.saturating_sub(th));
     c.fill(body, col.term_bg);
     let (cw, ch) = look.cell();
-    let pad = look.pad() as i32;
-    paint_grid(c, look, screen, lines, veils, cw, ch, pad, th, w, hover);
+    paint_grid(c, look, screen, lines, veils, cw, ch, w, hover);
 }
 
 /// Karta se stavem pripojeni (jeste neni relace: "Pripojuji...").
@@ -984,7 +1020,7 @@ type Marks<'a> = (Option<u64>, &'a [u64], &'a [(usize, usize, usize)]);
 /// Mrizka bunek s prvky navrhu, prolnutim novych bloku, vyberem
 /// a kurzorem.
 #[allow(clippy::too_many_arguments)]
-fn paint_grid(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, lines: &[term::ui::draw::Line], veils: &[u32], cw: u32, ch: u32, pad: i32, th: u32, w: u32, (hover, collapsed, sel): Marks<'_>) {
+fn paint_grid(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, lines: &[term::ui::draw::Line], veils: &[u32], cw: u32, ch: u32, w: u32, (hover, collapsed, sel): Marks<'_>) {
     let t = look.t.clone();
     let col = &t.color;
     let ms = t.text.mono;
@@ -999,7 +1035,7 @@ fn paint_grid(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, lines: &[ter
                 continue;
             }
             let cell = screen.cell(colm, row);
-            let (ox, oy) = (pad + (colm as u32 * cw) as i32, th as i32 + pad + (row as u32 * ch) as i32);
+            let (ox, oy) = (grid.x + (colm as u32 * cw) as i32, grid.y + (row as u32 * ch) as i32);
             if let Some(b) = cell.bg {
                 c.fill(Rect::new(ox, oy, cw, ch), px(b));
             }
@@ -1033,13 +1069,13 @@ fn paint_grid(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, lines: &[ter
     // Prolnuti noveho bloku: prekryv barvou pozadi (i pres levy pruh).
     for (row, &a) in veils.iter().enumerate().take(screen.rows) {
         if a > 0 {
-            let y = th as i32 + pad + (row as u32 * ch) as i32;
+            let y = grid.y + (row as u32 * ch) as i32;
             c.blend(Rect::new(0, y, w, ch), alpha(col.term_bg, a));
         }
     }
     // Kurzor (blok, barva akcentu, text pod nim zustane citelny).
     if screen.x < screen.cols && screen.y < screen.rows {
-        let (ox, oy) = (pad + (screen.x as u32 * cw) as i32, th as i32 + pad + (screen.y as u32 * ch) as i32);
+        let (ox, oy) = (grid.x + (screen.x as u32 * cw) as i32, grid.y + (screen.y as u32 * ch) as i32);
         c.blend(Rect::new(ox, oy + 2, 2, ch - 4), col.accent);
     }
 }
