@@ -197,10 +197,17 @@ fn build_sysroot_locked(arch: &Arch) -> Result<PathBuf> {
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .env_remove("RUSTFLAGS")
         .env("CARGO_ENCODED_RUSTFLAGS", ["-Zunstable-options", "-Zforce-unstable-if-unmarked"].join("\u{1f}"))
-        .stdout(Stdio::piped());
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     println!("xtask: std pro {target}");
     let out = cmd.output()?;
     if !out.status.success() {
+        // Hlaseni cargo (chyby prekladu, zamky) ze stdout v JSON i stderr.
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines().filter(|l| l.contains("\"level\":\"error\"") || !l.starts_with('{')) {
+            eprintln!("{line}");
+        }
+        eprintln!("{}", String::from_utf8_lossy(&out.stderr));
         return Err(format!("sestaveni std pro {target} selhalo").into());
     }
     // Soubory knihoven z hlaseni cargo (compiler-artifact, pole filenames).

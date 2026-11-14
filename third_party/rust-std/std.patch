@@ -231,18 +231,149 @@ index 0000000..dd95508
 +
 +#[stable(feature = "rust1", since = "1.0.0")]
 +pub use self::os_str::{OsStrExt, OsStringExt};
+diff --git a/std/src/os/magnumopus/fs.rs b/std/src/os/magnumopus/fs.rs
+new file mode 100644
+index 0000000..78f53c6
+--- /dev/null
++++ b/std/src/os/magnumopus/fs.rs
+@@ -0,0 +1,124 @@
++//! Rozsireni `std::fs` pro MagnumOpus: opravneni FS (vlastnik, ucinna
++//! prava, popis opravneni = ACL s granty), viz docs/cs/rust-std.md.
++//!
++//! `fs::Permissions` z std umi jen `readonly` (z ucinnych prav, nastaveni
++//! vraci `Unsupported`); plne opravneni se ctou a nastavuji tady.
++
++#![stable(feature = "rust1", since = "1.0.0")]
++
++use crate::io;
++use crate::os::magnumopus::ffi::OsStrExt;
++use crate::path::Path;
++use crate::sys::map_error;
++
++/// Bity prav (stejne jako ve sluzbe FS, `fsproto::perm::rights`).
++#[stable(feature = "rust1", since = "1.0.0")]
++pub mod rights {
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub const LIST: u8 = 1 << 0;
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub const TRAVERSE: u8 = 1 << 1;
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub const READ: u8 = 1 << 2;
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub const WRITE: u8 = 1 << 3;
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub const CREATE: u8 = 1 << 4;
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub const DELETE: u8 = 1 << 5;
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub const EXECUTE: u8 = 1 << 6;
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub const MANAGE: u8 = 1 << 7;
++}
++
++/// Prijemce grantu: kazdy uzivatel.
++#[stable(feature = "rust1", since = "1.0.0")]
++pub const EVERYONE: u64 = u64::MAX;
++
++/// Grant: komu (uzivatel nebo skupina), jaka prava, priznaky dedeni.
++#[stable(feature = "rust1", since = "1.0.0")]
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub struct Grant {
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub who: u64,
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub rights: u8,
++    /// 1 = plati pro objekt, 2 = dedi se do obsahu, 3 = oboji.
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub flags: u8,
++}
++
++/// Popis opravneni objektu.
++#[stable(feature = "rust1", since = "1.0.0")]
++#[derive(Debug, Clone, PartialEq, Eq, Default)]
++pub struct Acl {
++    /// Nededit opravneni od rodice.
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub protected: bool,
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub grants: Vec<Grant>,
++}
++
++/// Opravneni objektu.
++#[stable(feature = "rust1", since = "1.0.0")]
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct Access {
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub owner: u64,
++    /// Ucinna prava volajiciho ([`rights`]).
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub rights: u8,
++    /// Vlastni popis opravneni (`None` = dedi od rodice).
++    #[stable(feature = "rust1", since = "1.0.0")]
++    pub acl: Option<Acl>,
++}
++
++/// Opravneni objektu na ceste.
++#[stable(feature = "rust1", since = "1.0.0")]
++pub fn access<P: AsRef<Path>>(path: P) -> io::Result<Access> {
++    let p = osrt::fs::permissions(path.as_ref().as_os_str().as_bytes()).map_err(map_error)?;
++    Ok(Access {
++        owner: p.owner,
++        rights: p.rights,
++        acl: p.acl.map(|a| Acl {
++            protected: a.flags & 1 != 0,
++            grants: a.grants.iter().map(|g| Grant { who: g.who, rights: g.rights, flags: g.flags }).collect(),
++        }),
++    })
++}
++
++/// Nastavi popis opravneni (`None` = dedit od rodice); vyzaduje pravo
++/// `MANAGE`.
++#[stable(feature = "rust1", since = "1.0.0")]
++pub fn set_acl<P: AsRef<Path>>(path: P, acl: Option<&Acl>) -> io::Result<()> {
++    let acl = acl.map(|a| osrt::fs::Acl {
++        flags: a.protected as u32,
++        grants: a.grants.iter().map(|g| osrt::fs::Grant { who: g.who, rights: g.rights, flags: g.flags }).collect(),
++    });
++    osrt::fs::set_acl(path.as_ref().as_os_str().as_bytes(), acl.as_ref()).map_err(map_error)
++}
++
++/// Rozsireni [`crate::fs::Metadata`].
++#[stable(feature = "rust1", since = "1.0.0")]
++pub trait MetadataExt {
++    /// Ucinna prava volajiciho ([`rights`]).
++    #[stable(feature = "rust1", since = "1.0.0")]
++    fn rights(&self) -> u8;
++    /// Vlastnik objektu (0 = system).
++    #[stable(feature = "rust1", since = "1.0.0")]
++    fn owner(&self) -> u64;
++}
++
++#[stable(feature = "rust1", since = "1.0.0")]
++impl MetadataExt for crate::fs::Metadata {
++    fn rights(&self) -> u8 {
++        use crate::sys::AsInner;
++        self.as_inner().rights()
++    }
++
++    fn owner(&self) -> u64 {
++        use crate::sys::AsInner;
++        self.as_inner().owner()
++    }
++}
 diff --git a/std/src/os/magnumopus/mod.rs b/std/src/os/magnumopus/mod.rs
 new file mode 100644
-index 0000000..3e841d9
+index 0000000..b87321c
 --- /dev/null
 +++ b/std/src/os/magnumopus/mod.rs
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,16 @@
 +//! Rozsireni std pro MagnumOpus.
 +
 +#![stable(feature = "rust1", since = "1.0.0")]
 +#![deny(unsafe_op_in_unsafe_fn)]
 +
 +pub mod ffi;
++pub mod fs;
 +pub mod process;
 +
 +/// Rozsirujici traity (`use std::os::magnumopus::prelude::*`).
@@ -454,10 +585,10 @@ index 1ca2bd8..8f48d36 100644
          }
 diff --git a/std/src/sys/fs/magnumopus.rs b/std/src/sys/fs/magnumopus.rs
 new file mode 100644
-index 0000000..b5f7f07
+index 0000000..9ad90da
 --- /dev/null
 +++ b/std/src/sys/fs/magnumopus.rs
-@@ -0,0 +1,388 @@
+@@ -0,0 +1,397 @@
 +//! Soubory nad relaci FS (`osrt::fs`, fsproto v2).
 +
 +use crate::ffi::OsString;
@@ -509,6 +640,15 @@ index 0000000..b5f7f07
 +}
 +
 +impl FileAttr {
++    /// Ucinna prava volajiciho (`os::magnumopus::fs::MetadataExt`).
++    pub fn rights(&self) -> u8 {
++        self.0.rights
++    }
++
++    pub fn owner(&self) -> u64 {
++        self.0.owner
++    }
++
 +    pub fn size(&self) -> u64 {
 +        self.0.size
 +    }
