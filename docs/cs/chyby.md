@@ -50,6 +50,7 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -32 | `ADDRESS_IN_USE` | adresa nebo port už se používá |
 | -33 | `SERVICE_RESTARTED` | služba se během požadavku restartovala, nevíme, jestli ho provedla |
 | -34 | `SERVICE_UNAVAILABLE` | služba neběží (restart se nepovedl do lhůty nebo ho supervisor vzdal) |
+| -35 | `ADDRESS_NOT_AVAILABLE` | místní adresa nepatří žádnému rozhraní |
 
 ## Podrobně
 
@@ -432,6 +433,18 @@ kanálu; odpověď `RECONNECT` na lístku.
 **Co dělat:** ukázat uživateli, že služba neběží (přehled úloh ukazuje
 důvod), a zkusit to později: další volání zkusí obnovu znovu. Dávková
 úloha si může nastavit delší čekání (`Conn::set_wait`).
+
+### `ADDRESS_NOT_AVAILABLE` (-35)
+
+**Význam:** místní adresa naslouchání nebo socketu UDP nepatří žádnému
+rozhraní služby sítě.
+
+**Kdy vzniká:** `Net::tcp_listen_addr`, `udp_bind_addr` (a v `std::net`
+`TcpListener::bind`, `UdpSocket::bind`) s jinou adresou než `0.0.0.0` nebo
+adresou rozhraní. I `127.0.0.1`: `netd` zatím nemá loopback.
+
+**Co dělat:** naslouchat na `0.0.0.0` (všechna rozhraní) nebo na adrese
+z `Net::info`.
 
 ## Návratové kódy procesů
 

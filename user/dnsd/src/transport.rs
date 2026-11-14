@@ -76,7 +76,7 @@ impl Connector for Fixed<'_> {
     type Stream = TlsStream<TcpStream>;
 
     fn connect(&mut self, url: &Url) -> httpc::Result<(Self::Stream, Version)> {
-        let mut tcp = self
+        let tcp = self
             .net
             .tcp_connect(SocketAddr::new(self.addr, url.port), Some(CONNECT))
             .map_err(|e| httpc::Error::Transport(e, format!("{}", self.addr)))?;
@@ -126,7 +126,7 @@ impl Transport {
                 // Trvale spojeni; po chybe jeden novy pokus.
                 for attempt in 0..2 {
                     if self.dot.is_none() {
-                        let mut tcp = net.tcp_connect(addr, Some(CONNECT)).map_err(|e| format!("{addr}: {e}"))?;
+                        let tcp = net.tcp_connect(addr, Some(CONNECT)).map_err(|e| format!("{addr}: {e}"))?;
                         tcp.set_read_timeout(Some(TIMEOUT));
                         self.dot = Some(tls.connect(&name, tcp).map_err(|e| format!("{e}"))?);
                     }

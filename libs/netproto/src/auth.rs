@@ -39,6 +39,11 @@ pub const SESSION_COST: u64 = 2048;
 /// Bez limitu (socketu, bajtu).
 pub const UNLIMITED_SOCKETS: u32 = u32::MAX;
 pub const UNLIMITED_BYTES: u64 = u64::MAX;
+/// Vychozi limit soubeznych dotazu na relaci (connect, resolve, ping, ...).
+/// Plati i pro relaci "bez limitu": rozpracovany dotaz drzi pamet sluzby.
+pub const DEFAULT_OPS: u32 = 32;
+/// Nejvic soubeznych dotazu, ktere si relace muze vyzadat.
+pub const MAX_OPS: u32 = 1024;
 
 /// Priznaky vrstvy ([`Restriction::flags`]).
 pub mod layer_flags {
@@ -47,17 +52,21 @@ pub mod layer_flags {
     pub const ALL: u8 = ASK;
 }
 
-/// Rozpocet relace: nejvic socketu a bajtu bufferu.
+/// Rozpocet relace: nejvic socketu a bajtu bufferu (i za potomky) a nejvic
+/// soubeznych dotazu na kanalu relace (jen tato relace; meze
+/// 1..=[`MAX_OPS`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Quota {
     pub sockets: u32,
     pub bytes: u64,
+    pub ops: u32,
 }
 
 impl Quota {
     pub const UNLIMITED: Self = Self {
         sockets: UNLIMITED_SOCKETS,
         bytes: UNLIMITED_BYTES,
+        ops: DEFAULT_OPS,
     };
 }
 
@@ -74,6 +83,8 @@ pub struct Budget {
     quota: Quota,
     sockets: Cell<u32>,
     bytes: Cell<u64>,
+    /// Rozpracovane dotazy na kanalu teto relace.
+    ops: Cell<u32>,
 }
 
 impl Budget {
@@ -83,7 +94,18 @@ impl Budget {
             quota,
             sockets: Cell::new(0),
             bytes: Cell::new(0),
+            ops: Cell::new(0),
         })
+    }
+
+    /// Nejvic soubeznych dotazu teto relace.
+    pub fn ops_limit(&self) -> u32 {
+        self.quota.ops.clamp(1, MAX_OPS)
+    }
+
+    /// Rozpracovane dotazy teto relace.
+    pub fn ops_used(&self) -> u32 {
+        self.ops.get()
     }
 
     fn fits(&self, bytes: u64) -> bool {
@@ -111,6 +133,18 @@ impl Budget {
     /// (sockety, bajty) teto relace vcetne potomku.
     pub fn used(&self) -> (u32, u64) {
         (self.sockets.get(), self.bytes.get())
+    }
+}
+
+/// Jeden rozpracovany dotaz relace; pri zaniku se vrati.
+#[derive(Debug)]
+pub struct OpTicket {
+    budget: Rc<Budget>,
+}
+
+impl Drop for OpTicket {
+    fn drop(&mut self) {
+        self.budget.ops.set(self.budget.ops.get() - 1);
     }
 }
 
@@ -166,7 +200,7 @@ impl Restriction {
         w.u32(self.rights);
         self.policy.put(w);
         w.u8(self.flags).str(&self.app);
-        w.u32(self.quota.sockets).u64(self.quota.bytes);
+        w.u32(self.quota.sockets).u64(self.quota.bytes).u32(self.quota.ops);
     }
 
     pub fn get(r: &mut Reader) -> Result<Self> {
@@ -177,6 +211,7 @@ impl Restriction {
         let quota = Quota {
             sockets: r.u32()?,
             bytes: r.u64()?,
+            ops: r.u32()?,
         };
         if flags & !layer_flags::ALL != 0 || app.len() > MAX_APP_ID || !valid_app_id(&app) {
             return Err(Error::InvalidArgs);
@@ -312,6 +347,17 @@ impl Auth {
     }
 
     /// Strhne socket s `bytes` bajty bufferu z rozpoctu (`NO_RESOURCES`).
+    /// Zacatek dotazu na kanalu relace: nad limit [`Quota::ops`]
+    /// `NO_RESOURCES`.
+    pub fn begin_op(&self) -> Result<OpTicket> {
+        let b = &self.budget;
+        if b.ops.get() >= b.ops_limit() {
+            return Err(Error::NoResources);
+        }
+        b.ops.set(b.ops.get() + 1);
+        Ok(OpTicket { budget: b.clone() })
+    }
+
     pub fn charge(&self, bytes: u64) -> Result<Usage> {
         if !self.budget.fits(bytes) {
             return Err(Error::NoResources);

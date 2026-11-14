@@ -32,6 +32,7 @@ mod forward;
 mod fw;
 mod link;
 mod obj;
+mod ops;
 mod ping;
 mod rand;
 mod resolve;
@@ -49,7 +50,7 @@ use core::time::Duration;
 use libos::{Channel, Error, Port, Signals, Startup, println};
 use netproto::{Auth, Quota};
 
-use crate::obj::{Kind, Obj, Step};
+use crate::obj::{Kind, Obj};
 use crate::stack::{Stack, now_ns};
 
 /// Slot klice pro kanal sluzby firewallu.
@@ -65,6 +66,7 @@ fn root_quota() -> Quota {
         Ok(info) if info.user.available != libos::job::UNLIMITED => Quota {
             sockets: netproto::auth::UNLIMITED_SOCKETS,
             bytes: info.user.available / 4 * 3,
+            ops: netproto::auth::DEFAULT_OPS,
         },
         _ => Quota::UNLIMITED,
     }
@@ -149,8 +151,8 @@ struct Service {
     free_slots: Vec<usize>,
     /// Pocet zivych objektu.
     live: usize,
-    /// Sloty s rozpracovanym pozadavkem (posouvaji se v kazdem kole).
-    pending: Vec<usize>,
+    /// Sloty s rozpracovanymi dotazy (posouvaji se v kazdem kole).
+    pending: alloc::collections::BTreeSet<usize>,
     /// Sloty, ktere potrebuji obnovit registraci na portu: (slot, generace).
     to_arm: Vec<(usize, u32)>,
     link_armed: bool,
@@ -166,7 +168,7 @@ impl Service {
             gens: Vec::new(),
             free_slots: Vec::new(),
             live: 0,
-            pending: Vec::new(),
+            pending: alloc::collections::BTreeSet::new(),
             to_arm: Vec::new(),
             link_armed: false,
             fw_armed: false,
@@ -208,10 +210,8 @@ impl Service {
                 .poll_delay_ns()
                 .map_or(u64::MAX, |d| now.saturating_add(d));
             for &i in &self.pending {
-                if let Some(Some(o)) = self.objs.get(i)
-                    && let Some(p) = &o.pending
-                {
-                    wake = wake.min(p.wake_at());
+                if let Some(Some(o)) = self.objs.get(i) {
+                    wake = wake.min(ops::wake_at(o));
                 }
             }
             if stack.dev.has_rx() {
@@ -228,8 +228,7 @@ impl Service {
         }
     }
 
-    /// Posune rozpracovane pozadavky; dokoncene objekty pujdou znovu
-    /// zaregistrovat "ke cteni".
+    /// Posune rozpracovane dotazy objektu.
     fn progress_pending(&mut self, stack: &mut Stack) {
         let mut created = Vec::new();
         let list = core::mem::take(&mut self.pending);
@@ -237,14 +236,13 @@ impl Service {
             let Some(Some(o)) = self.objs.get_mut(i) else {
                 continue;
             };
-            let Some(p) = o.pending.take() else {
-                continue;
-            };
-            let step = obj::progress(stack, &mut o.kind, p);
-            finish(stack, o, step, &mut created);
-            if o.pending.is_some() {
-                self.pending.push(i);
-            } else {
+            ops::progress(stack, o, &mut created);
+            if ops::busy(o) {
+                self.pending.insert(i);
+            }
+            // Odklad relace se uvolnil: zase cist kanal.
+            if o.read_paused && ops::can_read(o) {
+                o.read_paused = false;
                 self.to_arm.push((i, self.gens[i]));
             }
         }
@@ -252,7 +250,7 @@ impl Service {
     }
 
     /// Obnovi registrace: kanal ovladace, "zavreno" u novych objektu
-    /// a "ke cteni" u objektu bez rozpracovaneho pozadavku.
+    /// a "ke cteni" (kanal se cte porad, i s rozpracovanymi dotazy).
     fn arm(&mut self, stack: &Stack) -> libos::Result<()> {
         if !self.link_armed {
             self.port.wait_async(
@@ -288,7 +286,7 @@ impl Service {
                     .wait_async(o.ch.handle(), key(Some(i), g, true), Signals::PEER_CLOSED)?;
                 o.close_armed = true;
             }
-            if !o.read_armed && o.pending.is_none() {
+            if !o.read_armed {
                 self.port
                     .wait_async(o.ch.handle(), key(Some(i), g, false), Signals::READABLE)?;
                 o.read_armed = true;
@@ -335,23 +333,37 @@ impl Service {
             return true;
         }
         o.read_armed = false;
-        if o.pending.is_some() {
-            // Dalsi zprava pocka; registrace se obnovi po dokonceni.
-            return true;
-        }
         let mut created = Vec::new();
-        match o.ch.try_read() {
-            Ok(msg) => {
-                let step = obj::request(stack, &mut o.kind, &msg.data);
-                finish(stack, o, step, &mut created);
-                if o.pending.is_some() {
-                    self.pending.push(i);
-                } else {
-                    self.to_arm.push((i, generation));
+        let mut closed = false;
+        // Davka zprav; zbytek az v dalsim kole (registrace "ke cteni" se
+        // hned obnovi a ohlasi se znovu).
+        for _ in 0..ops::READ_BATCH {
+            if !ops::can_read(o) {
+                // Plny odklad relace: kanal se obnovi az po uvolneni.
+                o.read_paused = true;
+                break;
+            }
+            match o.ch.try_read() {
+                // Handly v dotazech protokol nepouziva: zahodi se.
+                Ok(msg) => ops::on_message(stack, o, msg.data, &mut created),
+                Err(Error::ShouldWait) => break,
+                Err(_) => {
+                    closed = true;
+                    break;
                 }
             }
-            Err(Error::ShouldWait) => self.to_arm.push((i, generation)),
-            Err(_) => self.free(stack, i),
+        }
+        let busy = ops::busy(o);
+        let paused = o.read_paused;
+        if closed {
+            self.free(stack, i);
+        } else {
+            if !paused {
+                self.to_arm.push((i, generation));
+            }
+            if busy {
+                self.pending.insert(i);
+            }
         }
         self.add_objects(created);
         true
@@ -360,7 +372,7 @@ impl Service {
     /// Uvolni slot: uklid objektu a nova generace (stare pakety neplati).
     fn free(&mut self, stack: &mut Stack, i: usize) {
         if let Some(o) = self.objs[i].take() {
-            obj::close(stack, o.kind, o.pending);
+            obj::close(stack, o.kind, o.ops);
             self.live -= 1;
             self.free_slots.push(i);
         }
@@ -384,35 +396,4 @@ impl Service {
             self.to_arm.push((i, self.gens[i]));
         }
     }
-}
-
-/// Dokonci krok pozadavku: ulozi rozpracovany, nebo posle odpoved
-/// (s kanalem noveho objektu).
-fn finish(stack: &mut Stack, o: &mut Obj, step: Step, created: &mut Vec<Obj>) {
-    let (mut result, new) = match step {
-        Step::Wait(p) => {
-            o.pending = Some(p);
-            return;
-        }
-        Step::Done(r, n) => (r, n),
-    };
-    let mut handles = Vec::new();
-    if let Some(kind) = new {
-        if result.is_err() {
-            obj::close(stack, kind, None);
-        } else {
-            match Channel::create() {
-                Ok((client, server)) => {
-                    handles.push(client.into_handle());
-                    created.push(Obj::new(server, kind));
-                }
-                Err(e) => {
-                    obj::close(stack, kind, None);
-                    result = Err(e);
-                }
-            }
-        }
-    }
-    // Klient, ktery mezitim kanal zavrel, se uklidi po paketu "zavreno".
-    let _ = o.ch.write(&netproto::reply(result), handles);
 }

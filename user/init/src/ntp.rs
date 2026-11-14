@@ -131,7 +131,7 @@ pub fn start(startup: &Startup, net: &NetService, devices: &crate::system::Devic
         }
     }
     let mut handles = vec![
-        StartHandle::user(session.into_channel().into_handle()),
+        StartHandle::user(session.into_channel()?.into_handle()),
         StartHandle::user(to_timed.into_handle()),
     ];
     // TLS pro NTS-KE: korenove CA a kontrola odvolani (oboje volitelne;

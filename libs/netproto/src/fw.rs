@@ -12,8 +12,10 @@
 //! [`op::QUESTION`] a [`op::NETWORK_QUESTION`], agent odpovida
 //! [`op::DECIDE`] a [`op::CLASSIFY`]. Agent muze poslat pozadavky
 //! [`op::CONFIG_GET`], [`op::CONFIG_SET`], [`op::PROFILE_SET`]; fwd na ne
-//! odpovi formatem [`crate::reply`]. Odpoved zacina statusem <= 0,
-//! zprava fwd kodem operace > 0 - agent je tak rozlisi.
+//! odpovi formatem [`agent_reply`] (status i32, rezerva u32, vysledek).
+//! Odpoved zacina statusem <= 0, zprava fwd kodem operace > 0 - agent je
+//! tak rozlisi. Na kanalu agenta je nejvys jeden pozadavek (bez cisla
+//! dotazu - to ma jen protokol relaci a socketu, [`crate::msg`]).
 //!
 //! Audit: `netd` drzi kruhovy seznam [`AuditRecord`] (`AUDIT` na relaci
 //! s pravem `rights::AUDIT`) a pocty bajtu podle aplikaci (`STATS`).
@@ -356,4 +358,30 @@ impl AppStats {
             sockets: r.u64()?,
         })
     }
+}
+
+/// Odpoved fwd agentovi: status, rezerva a vysledek.
+pub fn agent_reply(result: Result<Writer>) -> Vec<u8> {
+    let mut w = Writer::new();
+    match result {
+        Ok(body) => {
+            w.i32(0).u32(0);
+            w.bytes(&body.finish());
+        }
+        Err(e) => {
+            w.i32(e.code()).u32(0);
+        }
+    }
+    w.finish()
+}
+
+/// Rozebere odpoved fwd agentovi: chyba, nebo ctecka vysledku.
+pub fn parse_agent_reply(data: &[u8]) -> Result<Reader<'_>> {
+    let mut r = Reader::new(data);
+    let status = r.i32()?;
+    r.u32()?;
+    if status != 0 {
+        return Err(Error::from_code(status as i64).unwrap_or(Error::IoError));
+    }
+    Ok(r)
 }

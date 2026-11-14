@@ -81,6 +81,8 @@ pub enum Error {
     /// Sluzba nebezi: neobnovila se do lhuty klienta, nebo ji supervisor
     /// vzdal.
     ServiceUnavailable = -34,
+    /// Mistni adresa nepatri zadnemu rozhrani (naslouchani, socket UDP).
+    AddressNotAvailable = -35,
 }
 
 /// Vsechny chyby (pro dokumentaci a testy).
@@ -119,6 +121,7 @@ pub const ALL: &[Error] = &[
     Error::AddressInUse,
     Error::ServiceRestarted,
     Error::ServiceUnavailable,
+    Error::AddressNotAvailable,
 ];
 
 impl Error {
@@ -169,6 +172,7 @@ impl Error {
             Self::AddressInUse => "ADDRESS_IN_USE",
             Self::ServiceRestarted => "SERVICE_RESTARTED",
             Self::ServiceUnavailable => "SERVICE_UNAVAILABLE",
+            Self::AddressNotAvailable => "ADDRESS_NOT_AVAILABLE",
         }
     }
 
@@ -209,6 +213,7 @@ impl Error {
             Self::AddressInUse => "adresa nebo port uz se pouziva",
             Self::ServiceRestarted => "sluzba se behem pozadavku restartovala, nevime, jestli ho provedla",
             Self::ServiceUnavailable => "sluzba nebezi (restart se nepovedl do lhuty nebo ho supervisor vzdal)",
+            Self::AddressNotAvailable => "mistni adresa nepatri zadnemu rozhrani",
         }
     }
 }

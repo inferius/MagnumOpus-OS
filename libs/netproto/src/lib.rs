@@ -7,14 +7,16 @@
 //! [`op::RESTRICT`]. Kazdy socket je **vlastni kanal**: lze ho predat jinemu
 //! procesu a zavreni kanalu socket zavre.
 //!
-//! Pozadavek: `op` u32 a parametry. Odpoved: `status` i32 (0 nebo kod
-//! chyby), rezerva u32 a vysledek; novy socket nebo relace jde v handlech
-//! odpovedi. Na jednom kanalu je vzdy nejvys jeden pozadavek: sluzba dalsi
-//! zpravu precte az po odpovedi. Cisla little-endian, adresa IP = rodina u8
-//! (4/6) + bajty, retezec = delka u16 + UTF-8, data = zbytek zpravy.
+//! Dotaz: hlavicka (`op` u32, `id` u32, termin u64) a parametry. Odpoved:
+//! `id` u32, `status` i32 (0 nebo kod chyby) a vysledek; novy socket nebo
+//! relace jde v handlech odpovedi. Na jednom kanalu muze byt vic dotazu
+//! najednou; odpovedi se paruji podle `id` ([`msg`]). Cisla little-endian,
+//! adresa IP = rodina u8 (4/6) + bajty, retezec = delka u16 + UTF-8, data =
+//! zbytek zpravy.
 //!
-//! Cekani: parametr `timeout` v ms, [`NO_WAIT`] = jen zkusit,
-//! [`FOREVER`] = bez limitu. Vyprseni = `TIMED_OUT`.
+//! Cekani: absolutni termin v hlavicce ([`msg::NO_DEADLINE`] = bez limitu,
+//! [`msg::TRY`] = jen zkusit). Vyprseni = `TIMED_OUT`, zruseni
+//! ([`op::CANCEL`]) = `CANCELED`.
 //!
 //! Adresy jsou `core::net::IpAddr` (IPv4 i IPv6). Sluzba zatim umi jen IPv4;
 //! IPv6 vraci `UNREACHABLE`, ale protokol se jeho pridanim nezmeni.
@@ -30,6 +32,7 @@ extern crate std;
 pub mod auth;
 mod codec;
 pub mod dns;
+pub mod msg;
 pub mod fw;
 pub mod link;
 pub mod ntp;
@@ -44,25 +47,32 @@ pub mod io;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_msg;
 #[cfg(all(test, feature = "nts"))]
 mod tests_nts;
 
 use alloc::vec::Vec;
 use core::net::IpAddr;
-use core::time::Duration;
 
-use abi::{Error, Result};
+
+use abi::Result;
 
 pub use codec::{ReadAddr, Reader, WriteAddr, Writer};
+pub use msg::{Header, NO_DEADLINE, TRY, parse_reply, reply, reply_id};
 pub use auth::{Auth, Quota, Restriction, UserRules, Verdict, layer_flags};
 pub use policy::{Policy, Rule, Target, proto, rights, rights_names};
 
 #[cfg(feature = "client")]
-pub use client::{Net, NtpSync, TcpListener, TcpStream, UdpSocket};
+pub use client::{CancelToken, Deadline, Net, NtpSync, TcpListener, TcpStream, UdpSocket};
 
 /// Nejvic bajtu dat v jedne zprave proudu (kousek; klient vetsi data deli,
 /// zprava kanalu ma nejvys 64 KiB).
 pub const MAX_IO: usize = 60 * 1024;
+/// Nejvic rozpracovanych dotazu stejneho smeru na jednom socketu (RECV,
+/// SEND, ACCEPT, RECV_FROM, SEND_TO): sluzba je vyrizuje postupne ve
+/// fronte FIFO, dalsi dostane `NO_RESOURCES`.
+pub const DIRECTION_QUEUE: usize = 8;
 /// Nejvetsi datagram UDP: nejvetsi obsah datagramu IPv4 (65 535 - 20 B
 /// hlavicky IP - 8 B hlavicky UDP). Vejde se do jedne zpravy kanalu.
 pub const MAX_DATAGRAM: usize = 65_507;
@@ -106,39 +116,29 @@ impl Buffers {
     }
 }
 
-/// Timeout "necekat".
-pub const NO_WAIT: u64 = 0;
-/// Timeout "cekat bez limitu".
-pub const FOREVER: u64 = u64::MAX;
-
-/// Prevod timeoutu na drat (ms, zaokrouhleno nahoru).
-pub fn timeout_ms(t: Option<Duration>) -> u64 {
-    match t {
-        None => FOREVER,
-        Some(d) => {
-            let ms = d.as_nanos().div_ceil(1_000_000);
-            ms.min(FOREVER as u128 - 1) as u64
-        }
-    }
-}
-
 /// Kody operaci.
 pub mod op {
+    // Kazdy kanal.
+    /// Zrusi rozpracovany dotaz s `id` z hlavicky (viz [`crate::msg`]);
+    /// vlastni odpoved nema.
+    pub const CANCEL: u32 = 0xFFFF_FFFF;
+
     // Kanal relace.
     /// () -> Info
     pub const INFO: u32 = 1;
-    /// timeout -> Info (az bude rozhrani nastavene, napr. po DHCP)
+    /// () -> Info (az bude rozhrani nastavene, napr. po DHCP; do terminu)
     pub const WAIT_CONFIGURED: u32 = 2;
-    /// cil socket_addr, timeout, Buffers -> mistni socket_addr + kanal spojeni
+    /// cil socket_addr, Buffers -> mistni socket_addr + kanal spojeni
     pub const TCP_CONNECT: u32 = 3;
-    /// port u16, fronta u16, Buffers -> mistni socket_addr + kanal naslouchani
+    /// mistni socket_addr (0.0.0.0 nebo adresa rozhrani), fronta u16,
+    /// Buffers -> mistni socket_addr + kanal naslouchani
     pub const TCP_LISTEN: u32 = 4;
-    /// port u16, Buffers -> mistni socket_addr + kanal socketu UDP
+    /// mistni socket_addr, Buffers -> mistni socket_addr + kanal socketu UDP
     pub const UDP_BIND: u32 = 5;
-    /// jmeno str, rodina u8 (0 = obe, 4, 6), ma server u8 [socket_addr],
-    /// timeout -> pocet u16, adresy, TTL u32
+    /// jmeno str, rodina u8 (0 = obe, 4, 6), ma server u8 [socket_addr]
+    /// -> pocet u16, adresy, TTL u32
     pub const RESOLVE: u32 = 6;
-    /// adresa, poradi u16, delka dat u16, timeout -> doba odezvy ns u64
+    /// adresa, poradi u16, delka dat u16 -> doba odezvy ns u64
     pub const PING: u32 = 7;
     /// Restriction (prava u32, Policy, priznaky u8, aplikace str, sockety
     /// u32, bajty u64) -> kanal nove (uzsi) relace
@@ -153,17 +153,20 @@ pub mod op {
     pub const STATS: u32 = 11;
 
     // Kanal spojeni TCP.
-    /// timeout, data -> prijato u32 (vse, nebo cast pri vyprseni)
+    /// data -> prijato u32 (vse, nebo cast pri vyprseni terminu)
     pub const SEND: u32 = 20;
-    /// nejvic u32, timeout -> data (prazdna = druha strana ukoncila zapis)
+    /// nejvic u32 -> data (prazdna = druha strana ukoncila zapis)
     pub const RECV: u32 = 21;
     /// () -> () - ukonci zapis (FIN), cteni pokracuje
     pub const SHUTDOWN: u32 = 22;
     /// () -> mistni socket_addr, vzdalena socket_addr
     pub const ADDRS: u32 = 23;
+    // Plan (kody rezervovane): RECV s priznakem PEEK, SHUTDOWN_READ (24),
+    // SET_OPTION (25), GET_OPTION (26) - nodelay, ttl, keepalive, linger,
+    // broadcast.
 
     // Kanal naslouchani TCP.
-    /// timeout -> vzdalena socket_addr, mistni socket_addr + kanal spojeni
+    /// () -> vzdalena socket_addr, mistni socket_addr + kanal spojeni
     pub const ACCEPT: u32 = 30;
 
     // Kanal naslouchani i socketu UDP.
@@ -173,7 +176,7 @@ pub mod op {
     // Kanal socketu UDP.
     /// cil socket_addr, data -> ()
     pub const SEND_TO: u32 = 40;
-    /// nejvic u32, timeout -> odesilatel socket_addr, data
+    /// nejvic u32 -> odesilatel socket_addr, data
     pub const RECV_FROM: u32 = 41;
 }
 
@@ -258,30 +261,4 @@ impl Info {
             unauthenticated_fallback: r.u8()? != 0,
         })
     }
-}
-
-/// Telo odpovedi: status, rezerva a vysledek.
-pub fn reply(result: Result<Writer>) -> Vec<u8> {
-    let mut w = Writer::new();
-    match result {
-        Ok(body) => {
-            w.i32(0).u32(0);
-            w.bytes(&body.finish());
-        }
-        Err(e) => {
-            w.i32(e.code()).u32(0);
-        }
-    }
-    w.finish()
-}
-
-/// Rozebere odpoved: chyba sluzby, nebo ctecka vysledku.
-pub fn parse_reply(data: &[u8]) -> Result<Reader<'_>> {
-    let mut r = Reader::new(data);
-    let status = r.i32()?;
-    r.u32()?;
-    if status != 0 {
-        return Err(Error::from_code(status as i64).unwrap_or(Error::IoError));
-    }
-    Ok(r)
 }

@@ -798,7 +798,7 @@ new file mode 100644
 index 0000000..7f191c0
 --- /dev/null
 +++ b/std/src/sys/io/error/magnumopus.rs
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,57 @@
 +use crate::{fmt, io};
 +
 +/// MagnumOpus nema `errno`: chyby vraci kazde volani primo.
@@ -837,6 +837,7 @@ index 0000000..7f191c0
 +        E::ConnectionReset => K::ConnectionReset,
 +        E::Unreachable => K::HostUnreachable,
 +        E::AddressInUse => K::AddrInUse,
++        E::AddressNotAvailable => K::AddrNotAvailable,
 +        E::Canceled => K::Interrupted,
 +        E::NoResources => K::QuotaExceeded,
 +        E::BufferTooSmall

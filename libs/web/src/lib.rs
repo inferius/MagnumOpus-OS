@@ -92,7 +92,7 @@ impl Write for Conn {
 
 /// Spojeni TCP na jmeno nebo adresu s casovym limitem (i pro cteni).
 pub fn tcp(net: &Net, host: &str, port: u16, timeout: Duration) -> libos::Result<TcpStream> {
-    let mut s = match host.parse::<IpAddr>() {
+    let s = match host.parse::<IpAddr>() {
         Ok(ip) => net.tcp_connect(SocketAddr::new(ip, port), Some(timeout)),
         Err(_) => net.tcp_connect_host(host, port, Some(timeout)),
     }?;

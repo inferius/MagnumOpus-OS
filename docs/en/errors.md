@@ -50,6 +50,7 @@ is documented in this file and in the Czech version.
 | -32 | `ADDRESS_IN_USE` | the address or port is already in use |
 | -33 | `SERVICE_RESTARTED` | the service restarted during the request; we do not know whether it carried it out |
 | -34 | `SERVICE_UNAVAILABLE` | the service is not running (the restart did not finish in time or the supervisor gave up) |
+| -35 | `ADDRESS_NOT_AVAILABLE` | the local address does not belong to any interface |
 
 ## Details
 
@@ -436,6 +437,19 @@ the reply to `RECONNECT` on a lease.
 **What to do:** show the user that the service is not running (the task
 overview shows why) and try again later: the next call tries to recover
 again. A batch job may set a longer wait (`Conn::set_wait`).
+
+### `ADDRESS_NOT_AVAILABLE` (-35)
+
+**Meaning:** the local address of a listener or UDP socket does not belong
+to any interface of the network service.
+
+**When:** `Net::tcp_listen_addr`, `udp_bind_addr` (and `std::net`
+`TcpListener::bind`, `UdpSocket::bind`) with an address other than
+`0.0.0.0` or the interface address. `127.0.0.1` too: `netd` has no
+loopback yet.
+
+**What to do:** listen on `0.0.0.0` (all interfaces) or on the address
+from `Net::info`.
 
 ## Process exit codes
 

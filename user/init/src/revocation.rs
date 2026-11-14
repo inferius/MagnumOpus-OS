@@ -70,7 +70,7 @@ pub fn start(startup: &Startup, net: &NetService, devices: &Devices) -> Result<R
         r.policy.connect = Some(vec![Rule::any_port(proto::TCP, host)]);
     }
     let session = net.root.restrict_with(&r)?;
-    let mut handles = vec![StartHandle::user(session.into_channel().into_handle())];
+    let mut handles = vec![StartHandle::user(session.into_channel()?.into_handle())];
     match fs_session(devices) {
         Ok(ch) => handles.push(StartHandle::user(ch.into_handle())),
         Err(e) => println!("init: revocd bez FS (mezipamet jen v pameti, bez CA pro https): {e}"),

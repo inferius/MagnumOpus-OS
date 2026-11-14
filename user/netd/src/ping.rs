@@ -14,7 +14,7 @@ use smoltcp::socket::icmp;
 use smoltcp::wire::{Icmpv4Packet, Icmpv4Repr, IpAddress};
 
 use crate::obj::{AuthRef, Deferred, Gate, Pending, Step, ask_wait, gate};
-use crate::stack::{Stack, deadline, now_ns, v4};
+use crate::stack::{Stack, now_ns, v4};
 
 /// Hlavicka IPv4 + ICMP: nejvic dat = MTU - 28 (bez fragmentace; stack
 /// fragmenty nesklada a mnoho siti je zahazuje).
@@ -30,7 +30,8 @@ pub struct PingReq {
     addr: IpAddr,
     seq: u16,
     size: u16,
-    timeout: u64,
+    /// Termin (absolutni ns).
+    pub until: u64,
 }
 
 pub struct Ping {
@@ -68,12 +69,12 @@ impl Ping {
 }
 
 /// `PING` na relaci.
-pub fn start(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
+pub fn start(stack: &mut Stack, auth: &AuthRef, until: u64, r: &mut Reader) -> Result<Step> {
     let req = PingReq {
         addr: r.ip()?,
         seq: r.u16()?,
         size: r.u16()?,
-        timeout: r.u64()?,
+        until,
     };
     auth.borrow().require(rights::PING)?;
     start_checked(stack, auth, req, Vec::new())
@@ -85,7 +86,7 @@ pub fn start_checked(stack: &mut Stack, auth: &AuthRef, req: PingReq, granted: V
         addr,
         seq,
         size,
-        timeout,
+        until,
     } = req;
     let mtu = stack.dev.info.mtu;
     if size > mtu.saturating_sub(HEADERS) {
@@ -98,7 +99,7 @@ pub fn start_checked(stack: &mut Stack, auth: &AuthRef, req: PingReq, granted: V
             addr,
             seq,
             size,
-            timeout,
+            until,
         })));
     }
     stack.local_ip()?;
@@ -120,7 +121,7 @@ pub fn start_checked(stack: &mut Stack, auth: &AuthRef, req: PingReq, granted: V
         dest,
         payload,
         sent_at: None,
-        deadline: deadline(timeout),
+        deadline: until,
         _usage: usage,
     };
     p.try_send(stack);

@@ -57,9 +57,14 @@ Main decisions:
 - **A socket is a channel.** A TCP connection, a listener and a UDP socket
   are separate channels. A socket can be handed to another process, for
   example a server passes an accepted connection to a worker process.
-  Closing the channel closes the socket. There is at most one request on a
-  channel at a time. The service reads the next message only after it has
-  replied, which acts as natural back-pressure.
+  Closing the channel closes the socket. A channel can carry several
+  requests at once: each has a number and a deadline, and the reply
+  belongs to the number (see [Protocol](#the-netproto-protocol)). Reading
+  and writing one connection from different threads do not block each
+  other, and a long connect does not hold up the other requests of the
+  session **[verified in QEMU]** (suites `sit soubeh` and `firewall`).
+  Back-pressure comes from the direction queues and the session request
+  limit.
 - **The API is not a copy of BSD sockets.** The types are Rust-style:
   `Net`, `TcpStream`, `TcpListener`, `UdpSocket`. A POSIX layer for ported
   C programs can come later on top of them.
@@ -155,9 +160,10 @@ and starts DHCP. Then a single thread repeats:
 1. `poll` of the stack: received frames, TCP timers, DHCP,
 2. progress of pending requests (connections, reads, DNS queries, ping),
 3. `PORT_WAIT` on a **kernel port** (see [Ports](syscalls.md#ports)),
-   with a deadline from the nearest timer. Every channel has two one-shot
-   registrations on the port: "readable" (renewed after a message is read,
-   but not while a request is pending) and "closed". The packet key carries
+   with a deadline from the nearest timer and request deadlines. Every
+   channel has two one-shot registrations on the port: "readable" (renewed
+   after reading a batch of at most 32 messages, even while requests are
+   pending) and "closed". The packet key carries
    the slot number and its generation, so an old packet after the slot is
    freed confuses nothing. The work in each round is proportional to the
    active objects (pending requests, received packets), not to the number
@@ -171,6 +177,8 @@ and starts DHCP. Then a single thread repeats:
 | closing a connection | FIN, cleanup when finished or after 30 s at the latest |
 | listen backlog | 1 to 4096 connections (like `SOMAXCONN`); 16 concurrent handshakes between two rounds of the service |
 | ephemeral ports | 49152 to 65535, random start; the last 4096 released ones are not handed out again (an old session in NAT/slirp) |
+| concurrent requests on a socket | in each direction (receive: `RECV`, `RECV_FROM`; send: `SEND`, `SHUTDOWN`, `SEND_TO`; `ACCEPT`) at most one in progress, others wait in a FIFO queue, at most 8 in total (`DIRECTION_QUEUE`), further ones get `NO_RESOURCES` |
+| concurrent requests on a session | at most `Quota::ops` (default 32, bounds 1 to 1024, `ops` in the manifest) for this session only. The service sets further requests aside (at most 32 messages, FIFO) and starts them when room frees up; then it stops reading the session and the messages wait in the channel in the kernel (back-pressure, no error). `CANCEL` also reaches requests set aside |
 | UDP datagram | at most 65,507 B (the largest IPv4 datagram payload; IPv4 fragmentation and reassembly) and at most the socket queue size (default 64 KiB) |
 | DNS | A (and AAAA) query with EDNS0 (1232 B), a truncated reply over TCP, retry after 1 s alternating servers, at most 30 s |
 
@@ -317,15 +325,52 @@ let app_net = root.restrict(rights::INFO | rights::TCP_CONNECT | rights::RESOLVE
 The client library is in `netproto` (feature `client`). All methods
 block. A `None` timeout means no limit.
 
+**Threads** **[verified in QEMU]**: `Net`, `TcpStream`, `TcpListener`
+and `UdpSocket` are `Send + Sync` and their methods take `&self`. Several
+threads can wait on one channel at once. `try_clone()` returns another
+handle to the same socket (it shares the channel and the
+`set_read_timeout` and `set_write_timeout` limits, like `SO_RCVTIMEO`);
+`Net` is `Clone`. A shared `Mux` routes replies by request number. A
+waiting thread reads the channel itself when nobody else is reading,
+stores replies for others and wakes their threads (futex). A single thread
+therefore makes no extra syscall.
+
+**Deadline and cancellation** **[verified in QEMU]**: the `*_ctx` variants
+(`Net::tcp_connect_ctx`, `resolve_ctx`, `TcpStream::recv_ctx`,
+`send_ctx`, `TcpListener::accept_ctx`, `UdpSocket::recv_from_ctx`) take an
+absolute `Deadline` (`Deadline::after(Option<Duration>)`,
+`Deadline::NONE`, `Deadline::TRY` = only try) and an optional
+`CancelToken`. `CancelToken::cancel()` from another thread cancels the
+requests in progress with this token (they return `CANCELED`), and every
+later request with it returns `CANCELED` at once. A connection releases
+its socket and port, a firewall question stops waiting for the user. The
+time of a question to the user does not count towards the deadline.
+`Deadline::TRY` is the non-blocking mode: `recv_ctx`, `send_ctx`,
+`accept_ctx` and `recv_from_ctx` without data, room or a connection return
+`SHOULD_WAIT` (not `TIMED_OUT`) **[verified in QEMU]**. Readiness for
+`poll`/mio (a signal on an object or a port) is **[designed]**.
+
 **Client safeguard:** `netd` enforces operation limits, and the client has
-its own as well: the operation limit + 10 s, 30 s for operations without a
-limit (status, session, socket), plus 300 s for operations that may wait for
-a firewall question (connect, datagram to a new target, ping, resolution by
-an own server). When `netd` does not answer, the program gets `TIMED_OUT`
-and the log shows `netproto: sluzba site neodpovedela na pozadavek <op> do
-N s` ("the network service did not answer request <op> within N s"). The
-channel is then unusable (`BAD_STATE`): a late answer would belong to
-another request.
+its own as well: the deadline + 10 s, 30 s for operations without a limit
+(status, session, socket), plus 300 s for operations that may wait for a
+firewall question (connect, datagram to a new target, ping, resolution by
+an own server). When `netd` does not answer, the program gets `TIMED_OUT`,
+the client sends `CANCEL`, and the log shows `netproto: sluzba site
+neodpovedela na dotaz <op> (id N) vcas, rusim ho` ("the network service
+did not answer request <op> in time, cancelling it"). The channel stays
+usable: a late reply carries a number nobody waits for and is dropped
+together with its handles.
+
+> **Change from the first version:** a channel carried at most one
+> request and a reply had no number. Two threads on one connection swapped
+> replies, a write waited behind a blocked `RECV`, and a connect waiting
+> for a firewall question (up to 300 s) blocked the whole session. A
+> channel was unusable after the safeguard expired. **Why:** std
+> (`TcpStream` is both `Read` and `Write`, `try_clone`, a reader thread and
+> a writer thread) and async runtimes need concurrency. The header with a
+> number, a deadline and cancellation is also the operation context of
+> the future IDL ([architecture](architecture.md)). The old message format
+> is not read: all clients were converted at once.
 
 ```rust
 use core::time::Duration;
@@ -357,6 +402,27 @@ fn main(startup: libos::Startup) -> i64 {
 }
 ```
 
+Reading and writing from different threads, and cancellation:
+
+```rust
+use netproto::{CancelToken, Deadline};
+
+let s = net.tcp_connect(addr, Some(Duration::from_secs(5)))?;
+let reader = s.try_clone()?;
+let stop = CancelToken::new();
+let token = stop.clone();
+libos::thread::spawn("cteni", move || {
+    let mut buf = [0u8; 4096];
+    // Waits without a limit until data arrives or `stop.cancel()`.
+    while let Ok(n) = reader.recv_ctx(&mut buf, Deadline::NONE, Some(&token)) {
+        if n == 0 { break; }
+        // ...
+    }
+})?;
+s.write(b"hello")?;     // does not block behind the read
+stop.cancel();          // the read ends with CANCELED
+```
+
 | Method | Right | Additional errors |
 |---|---|---|
 | `Net::info`, `wait_configured` | `INFO` | `TIMED_OUT` |
@@ -368,6 +434,9 @@ fn main(startup: libos::Startup) -> i64 {
 | `Net::restrict`, `restrict_with` | `RESTRICT` | `INVALID_ARGS` (invalid rules, `ask` without an identity), `NO_RESOURCES` |
 | `Net::audit`, `stats` | `AUDIT` | |
 | `Net::tcp_connect_with`, `tcp_listen_with`, `udp_bind_with` | as without `_with` | `NO_RESOURCES` (session budget) |
+| `*_ctx` variants | as without `_ctx` | `CANCELED` (cancelled by a token), `TIMED_OUT` (deadline) |
+| every request on a socket | | `NO_RESOURCES` (the direction queue is full, more than 8 requests in one direction) |
+| `Net::tcp_listen_addr`, `udp_bind_addr` | as `tcp_listen`, `udp_bind` | `ADDRESS_NOT_AVAILABLE` (the address is neither `0.0.0.0` nor the interface address; `127.0.0.1` too, there is no loopback yet) |
 | `Net::set_dns` | `CONFIGURE` | |
 | `Net::ntp_query` | `UDP` + destination | `TIMED_OUT`, `BAD_STATE` (unsynchronized server) |
 | `TcpStream::read`, `write` | | `CONNECTION_RESET`, `TIMED_OUT` |
@@ -385,39 +454,65 @@ name (IPv6 too, `"::1"`) is returned by `resolve` at once without a query.
 `TcpStream::read` returns `Ok(0)` at the end of the stream (the other side
 finished writing). `CONNECTION_RESET` means the connection was broken by an
 RST or the other side stopped responding. A connection can be handed to
-another process: `into_channel()` at the sender,
+another process: `into_channel()` at the sender (`BAD_STATE` when a
+clone still holds the connection or a request is running on it),
 `TcpStream::from_channel()` at the receiver.
 
 ## The netproto protocol
 
-Request: `op` u32 and parameters. Reply: `status` i32 (0 or an error
-code), reserved u32 and the result. A new socket or session goes in the
-reply handles. Encoding: little-endian numbers, IP address = family u8
-(4/6) + 4/16 B, `socket_addr` = address + port u16, string = length u16 +
-UTF-8, data = the rest of the message. A timeout is u64 in ms: 0 = do not
-wait, `u64::MAX` = no limit.
+Version 2 **[verified in QEMU]**. Every message has a header with the
+operation context (`netproto::msg`):
+
+| Message | Header | Body |
+|---|---|---|
+| request | `op` u32, `id` u32, deadline u64 (16 B) | parameters |
+| reply | `id` u32, `status` i32 (8 B) | result (only with `status` 0) |
+
+- **`id`** is chosen by the client. It is unique among the requests in
+  progress on the channel and never 0. The reply carries the same `id`;
+  the order of replies is not fixed. A request whose `id` is already
+  waiting gets `ALREADY_EXISTS`.
+- **The deadline** is an absolute time of the kernel's monotonic clock in
+  ns (the same clock in all processes). `u64::MAX` = no limit, 0 (or the
+  past) = only try. Expiry = `TIMED_OUT`, for "only try" (0)
+  `SHOULD_WAIT` (`RECV`, `SEND`, `ACCEPT`, `RECV_FROM`, `SEND_TO`). Time
+  spent in a queue is thus not counted twice.
+- **`CANCEL`** (op `0xFFFF_FFFF`, on every channel): the `id` in the
+  header is the number of the request to cancel; the body is empty and it
+  has no reply of its own. The cancelled request (in progress or queued)
+  replies `CANCELED`; a `SEND` of which a part already went through
+  replies with the number of accepted bytes. The service ignores an
+  unknown or finished `id`.
+- The service drops a message without a valid header (it has no number to
+  reply to).
+
+A new socket or session goes in the reply handles. Encoding: little-endian
+numbers, IP address = family u8 (4/6) + 4/16 B, `socket_addr` = address +
+port u16, string = length u16 + UTF-8, data = the rest of the message. The
+channel between `fwd` and the user agent has its own reply format
+(`fw::agent_reply`), see [firewall.md](firewall.md).
 
 | Channel | Op | Parameters → result |
 |---|---|---|
 | session | `INFO` (1) | → Info |
-| session | `WAIT_CONFIGURED` (2) | timeout → Info |
-| session | `TCP_CONNECT` (3) | destination, timeout, Buffers → local address + connection channel |
-| session | `TCP_LISTEN` (4) | port u16, backlog u16, Buffers → local address + listener channel |
-| session | `UDP_BIND` (5) | port u16, Buffers → local address + socket channel |
-| session | `RESOLVE` (6) | name, family u8 (0/4/6), has server u8 [server], timeout → count u16, addresses, TTL u32 |
-| session | `PING` (7) | address, sequence u16, length u16, timeout → round trip ns u64 |
+| session | `WAIT_CONFIGURED` (2) | → Info (until the deadline) |
+| session | `TCP_CONNECT` (3) | destination, Buffers → local address + connection channel |
+| session | `TCP_LISTEN` (4) | local address (`0.0.0.0` or the interface address), backlog u16, Buffers → local address + listener channel |
+| session | `UDP_BIND` (5) | local address, Buffers → local address + socket channel |
+| session | `RESOLVE` (6) | name, family u8 (0/4/6), has server u8 [server] → count u16, addresses, TTL u32 |
+| session | `PING` (7) | address, sequence u16, length u16 → round trip ns u64 |
 | session | `RESTRICT` (8) | Restriction → session channel |
 | session | `SET_DNS` (9) | count u8, servers → () |
 | session | `AUDIT` (10) | from u64, max u16 → next u64, count u16, records |
 | session | `STATS` (11) | → profile, count u16, traffic per application |
-| connection | `SEND` (20) | timeout, data → accepted u32 |
-| connection | `RECV` (21) | max u32, timeout → data (empty = end of stream) |
+| connection | `SEND` (20) | data → accepted u32 |
+| connection | `RECV` (21) | max u32 → data (empty = end of stream) |
 | connection | `SHUTDOWN` (22) | → () (FIN, reading continues) |
 | connection | `ADDRS` (23) | → local, remote address |
-| listener | `ACCEPT` (30) | timeout → remote address, local address + connection channel |
+| listener | `ACCEPT` (30) | → remote address, local address + connection channel |
 | listener, UDP | `LOCAL_ADDR` (31) | → local address (from the current interface address) |
-| UDP | `SEND_TO` (40) | destination, data → () |
-| UDP | `RECV_FROM` (41) | max u32, timeout → sender, data |
+| UDP | `SEND_TO` (40) | destination, data → () (at most 5 s for room in the queue) |
+| UDP | `RECV_FROM` (41) | max u32 → sender, data |
 
 **Info:** MAC (6 B), MTU u16, flags u8 (bit 0 link, bit 1 configured),
 has address u8 [address, prefix u8], has gateway u8 [gateway], DNS count
@@ -428,7 +523,8 @@ to 16 MiB).
 
 **Restriction:** rights u32, Policy, flags u8 (bit 0 = `ask`),
 application (string, at most 128 characters `a-z A-Z 0-9 . - _`), sockets
-u32, bytes u64 (`u32::MAX` / `u64::MAX` = no limit).
+u32, bytes u64 (`u32::MAX` / `u64::MAX` = no limit), concurrent requests
+u32 (bounds 1 to 1024; init gives 32).
 
 **Policy:** has connect u8 [count u32, rules], has bind u8 [count u32,
 (from u16, to u16)...]. Rule = protocols u8, target kind u8 (0 any,
@@ -607,6 +703,9 @@ host's 127.0.0.1.
 | permissions | missing rights, destinations outside restrictions, handing a connection to another channel |
 | host name | the `*.magnumopus` rule applies after a system resolution, not after one by an own server |
 | encrypted DNS | the "sifrovane DNS" suite: validated A, CNAME, wildcard, AAAA; NXDOMAIN (NSEC and NSEC3), NODATA; unsigned and bogus zone; failover from a broken resolver, DoT, cache; the profile rule |
+| concurrency ("sit soubeh" suite) | reading and writing one connection from two threads (the write does not wait behind the read), two readers on one connection (FIFO queue), "only try" = `SHOULD_WAIT` and a 300 ms deadline, cancelling a read from another thread and a token cancelled beforehand, the local address of a listener and a UDP socket (`ADDRESS_NOT_AVAILABLE` for a foreign address and 127.0.0.1) |
+| full session limit ("firewall" suite) | a session with `ops = 1`: the second request is set aside (it does not fail), its cancellation arrives within 2 s while the first request still waits for the user |
+| connect cancellation ("firewall" suite) | a connect waits for a user question, the session meanwhile answers `INFO`, a `CancelToken` cancels it within 2 s (`CANCELED`), a late user answer changes nothing |
 | NTP | `ntpd` against the host server (the "synchronizace casu" suite, see [time.md](time.md#synchronization-over-the-network-ntpd)) |
 
 **DNS in tests is local only:** all queries go to the host helper server
@@ -651,5 +750,10 @@ described in [firewall.md](firewall.md#tests).
   is ready (`IpAddr` addresses).
 - **Shared memory for data** instead of copying in messages (as for the
   disk).
+- **More socket operations** (codes reserved in `netproto::op`): `RECV`
+  with a `PEEK` flag (`RECV_FROM` too), `SHUTDOWN_READ`, `SET_OPTION` and
+  `GET_OPTION` (nodelay, TTL, keep-alive, linger, broadcast) and a
+  readiness signal for non-blocking loops (mio, tokio) **[designed]**.
+- **Loopback** (127.0.0.1) in the service **[designed]**.
 - **More cards**, static configuration, DNS cache, NTP servers from DHCP
   (option 42).

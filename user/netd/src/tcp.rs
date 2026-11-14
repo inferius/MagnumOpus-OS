@@ -17,7 +17,7 @@ use smoltcp::wire::{IpAddress, IpEndpoint};
 
 use crate::fw::app_name;
 use crate::obj::{AuthRef, Deferred, Gate, Kind, Listener, Pending, Step, Stream, ask_wait, gate};
-use crate::stack::{PortProto, Stack, deadline, now_ns, v4};
+use crate::stack::{PortProto, Stack, expired, now_ns, v4};
 
 /// Navazani spojeni bez limitu se po teto dobe vzda (`TIMED_OUT`).
 const CONNECT_MAX_NS: u64 = 75_000_000_000;
@@ -60,15 +60,16 @@ impl Connect {
 /// Parametry `TCP_CONNECT`.
 pub struct ConnectReq {
     remote: SocketAddr,
-    timeout: u64,
+    /// Termin (absolutni ns).
+    pub until: u64,
     buffers: Buffers,
 }
 
 /// `TCP_CONNECT` na relaci.
-pub fn connect(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
+pub fn connect(stack: &mut Stack, auth: &AuthRef, until: u64, r: &mut Reader) -> Result<Step> {
     let req = ConnectReq {
         remote: r.socket_addr()?,
-        timeout: r.u64()?,
+        until,
         buffers: Buffers::get(r)?,
     };
     auth.borrow().require(rights::TCP_CONNECT)?;
@@ -114,7 +115,7 @@ pub fn connect_start(
         sock,
         port,
         remote,
-        deadline: deadline(req.timeout).min(limit),
+        deadline: req.until.min(limit),
         app,
         usage,
     })))
@@ -189,21 +190,20 @@ pub fn stream_request(
     stack: &mut Stack,
     s: &mut Stream,
     code: u32,
+    until: u64,
     r: &mut Reader,
 ) -> Result<Step> {
     match code {
         op::SEND => {
-            let timeout = r.u64()?;
             let data = r.rest().to_vec();
             if data.len() > MAX_IO {
                 return Err(Error::OutOfRange);
             }
-            Ok(send_progress(stack, s, data, 0, deadline(timeout)))
+            Ok(send_progress(stack, s, data, 0, until))
         }
         op::RECV => {
             let max = (r.u32()? as usize).clamp(1, MAX_IO);
-            let timeout = r.u64()?;
-            Ok(recv_progress(stack, s, max, deadline(timeout), now_ns()))
+            Ok(recv_progress(stack, s, max, until, now_ns()))
         }
         op::SHUTDOWN => {
             stack.tcp(s.sock).close();
@@ -226,6 +226,13 @@ pub fn stream_progress(stack: &mut Stack, s: &mut Stream, p: Pending, now: u64) 
             deadline,
         } => {
             if now >= deadline {
+                if done == 0 {
+                    // Nic neprijato: "jen zkusit" = SHOULD_WAIT; jinak
+                    // klient z nuly udela TIMED_OUT.
+                    if deadline == netproto::TRY {
+                        return Step::err(Error::ShouldWait);
+                    }
+                }
                 let mut w = Writer::new();
                 w.u32(done as u32);
                 return Step::reply(Ok(w));
@@ -304,7 +311,7 @@ fn recv_progress(stack: &mut Stack, s: &mut Stream, max: usize, deadline: u64, n
         return Step::reply(Ok(Writer::new()));
     }
     if now >= deadline {
-        return Step::err(Error::TimedOut);
+        return Step::err(expired(deadline));
     }
     Step::Wait(Pending::Recv { max, deadline })
 }
@@ -343,7 +350,7 @@ pub fn reap_closing(stack: &mut Stack) {
 
 /// `TCP_LISTEN` na relaci.
 pub fn listen(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
-    let port = r.u16()?;
+    let port = stack.bind_port(r.socket_addr()?)?;
     let backlog = (r.u16()? as usize).clamp(1, BACKLOG_MAX);
     let buffers = Buffers::get(r)?;
     auth.borrow().require(rights::TCP_LISTEN)?;
@@ -402,16 +409,11 @@ pub fn listener_request(
     stack: &mut Stack,
     l: &mut Listener,
     code: u32,
-    r: &mut Reader,
+    until: u64,
+    _r: &mut Reader,
 ) -> Result<Step> {
     match code {
-        op::ACCEPT => {
-            let timeout = r.u64()?;
-            // Hned se zkusi v `progress` (main), tady jen zalozit.
-            Ok(Step::Wait(Pending::Accept {
-                deadline: deadline(timeout),
-            }))
-        }
+        op::ACCEPT => Ok(accept_progress(stack, l, until, now_ns())),
         op::LOCAL_ADDR => {
             let mut w = Writer::new();
             w.socket_addr(stack.local_addr(l.port));
@@ -494,7 +496,7 @@ pub fn accept_progress(stack: &mut Stack, l: &mut Listener, deadline: u64, now: 
         );
     }
     if now >= deadline {
-        return Step::err(Error::TimedOut);
+        return Step::err(expired(deadline));
     }
     Step::Wait(Pending::Accept { deadline })
 }

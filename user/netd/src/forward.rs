@@ -107,7 +107,8 @@ pub struct Forward {
     pub name: String,
     pub family: u8,
     pub deadline: u64,
-    pub timeout: u64,
+    /// Termin dotazu klienta (pro zalozni preklad).
+    pub until: u64,
 }
 
 /// Vysledek pro relaci: adresy a TTL, chyba, nebo zaloha.

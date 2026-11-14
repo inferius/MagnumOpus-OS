@@ -11,7 +11,7 @@ use abi::time::WallTime;
 
 use crate::auth::{Auth, Quota, Restriction, UserRules, Verdict, layer_flags};
 use crate::policy::{Policy, Rule, Target, host_matches, in_network, proto, rights};
-use crate::{Info, ReadAddr, Reader, WriteAddr, Writer, dns, link, ntp, parse_reply, reply};
+use crate::{Info, ReadAddr, Reader, WriteAddr, Writer, dns, link, ntp};
 
 fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
     IpAddr::V4(Ipv4Addr::new(a, b, c, d))
@@ -42,16 +42,6 @@ fn codec_roundtrip_addresses() {
     // Neplatna rodina adresy a zkracena zprava.
     assert_eq!(Reader::new(&[5, 1, 2, 3, 4]).ip(), Err(Error::InvalidArgs));
     assert_eq!(Reader::new(&[4, 1, 2]).ip(), Err(Error::InvalidArgs));
-}
-
-#[test]
-fn reply_status() {
-    let mut body = Writer::new();
-    body.u32(42);
-    let ok = reply(Ok(body));
-    assert_eq!(parse_reply(&ok).unwrap().u32().unwrap(), 42);
-    let err = reply(Err(Error::ConnectionRefused));
-    assert_eq!(parse_reply(&err).err(), Some(Error::ConnectionRefused));
 }
 
 #[test]
@@ -192,6 +182,7 @@ fn session_budget_is_hierarchical() {
     let root = Auth::root_with(Quota {
         sockets: 4,
         bytes: 1000 + session,
+        ops: 2,
     });
     let child = root
         .restrict_with(Restriction {
@@ -199,6 +190,7 @@ fn session_budget_is_hierarchical() {
             quota: Quota {
                 sockets: 10,
                 bytes: 600,
+                ops: 5,
             },
             ..Restriction::default()
         })
@@ -291,6 +283,7 @@ fn restriction_wire_roundtrip() {
         quota: Quota {
             sockets: 100,
             bytes: 1 << 20,
+            ops: 8,
         },
     };
     let mut w = Writer::new();
@@ -606,16 +599,6 @@ fn link_status_roundtrip() {
     assert_eq!(old, link::Status { flags: 0, speed_mbps: 0 });
     assert!(link::Status::decode(&[link::INFO, 1]).is_err());
     assert!(link::Status::decode(&[link::LINK]).is_err());
-}
-
-#[test]
-fn timeout_conversion() {
-    use core::time::Duration;
-    assert_eq!(crate::timeout_ms(None), crate::FOREVER);
-    assert_eq!(crate::timeout_ms(Some(Duration::ZERO)), 0);
-    assert_eq!(crate::timeout_ms(Some(Duration::from_micros(1))), 1);
-    assert_eq!(crate::timeout_ms(Some(Duration::from_secs(2))), 2000);
-    let _: Vec<u8> = Vec::new();
 }
 
 #[test]

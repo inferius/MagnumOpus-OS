@@ -14,7 +14,7 @@ use crate::fw::app_name;
 use crate::obj::{
     AuthRef, Deferred, Gate, Kind, Pending, Step, UDP_TARGETS_MAX, Udp, ask_progress, ask_wait, gate,
 };
-use crate::stack::{PortProto, Stack, deadline, now_ns, v4};
+use crate::stack::{PortProto, Stack, expired, now_ns, v4};
 use crate::tcp::to_sa;
 
 /// Jak dlouho ceka odeslani na misto v plne fronte socketu.
@@ -22,7 +22,7 @@ const SEND_WAIT_NS: u64 = 5_000_000_000;
 
 /// `UDP_BIND` na relaci.
 pub fn bind(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
-    let port = r.u16()?;
+    let port = stack.bind_port(r.socket_addr()?)?;
     let buffers = Buffers::get(r)?;
     auth.borrow().require(rights::UDP)?;
     if !auth.borrow().allows_bind(port) {
@@ -56,10 +56,12 @@ pub fn bind(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
     ))
 }
 
-pub fn request(stack: &mut Stack, u: &mut Udp, code: u32, r: &mut Reader) -> Result<Step> {
+pub fn request(stack: &mut Stack, u: &mut Udp, code: u32, until: u64, r: &mut Reader) -> Result<Step> {
     match code {
         op::SEND_TO => {
             let to = r.socket_addr()?;
+            // Na misto v plne fronte nejvys SEND_WAIT_NS.
+            let until = until.min(now_ns().saturating_add(SEND_WAIT_NS));
             let data = r.rest().to_vec();
             if data.len() > MAX_DATAGRAM || data.len() > stack.udp(u.sock).payload_send_capacity() {
                 return Err(Error::OutOfRange);
@@ -68,12 +70,11 @@ pub fn request(stack: &mut Stack, u: &mut Udp, code: u32, r: &mut Reader) -> Res
             if to.port() == 0 || ip.is_unspecified() {
                 return Err(Error::InvalidArgs);
             }
-            send_to_start(stack, u, to, data, Vec::new())
+            send_to_start(stack, u, to, data, until, Vec::new())
         }
         op::RECV_FROM => {
             let max = (r.u32()? as usize).clamp(1, MAX_DATAGRAM);
-            let timeout = r.u64()?;
-            Ok(recv_progress(stack, u, max, deadline(timeout), now_ns()))
+            Ok(recv_progress(stack, u, max, until, now_ns()))
         }
         op::LOCAL_ADDR => {
             let mut w = Writer::new();
@@ -102,6 +103,7 @@ fn send_to_start(
     u: &mut Udp,
     to: SocketAddr,
     data: Vec<u8>,
+    until: u64,
     granted: Vec<String>,
 ) -> Result<Step> {
     if !u.allowed.contains(&to) {
@@ -113,7 +115,7 @@ fn send_to_start(
             match gate(stack, &u.auth.borrow(), proto::UDP, to, &granted)? {
                 Gate::Go => {}
                 Gate::Ask(id, app) => {
-                    return Ok(ask_wait(id, app, proto::UDP, to, granted, Deferred::SendTo { to, data }));
+                    return Ok(ask_wait(id, app, proto::UDP, to, granted, Deferred::SendTo { to, data, until }));
                 }
             }
             remember(&mut u.seen, to);
@@ -126,14 +128,7 @@ fn send_to_start(
         }
     }
     stack.local_ip()?;
-    Ok(send_progress(
-        stack,
-        u,
-        to,
-        data,
-        now_ns().saturating_add(SEND_WAIT_NS),
-        now_ns(),
-    ))
+    Ok(send_progress(stack, u, to, data, until, now_ns()))
 }
 
 pub fn progress(stack: &mut Stack, u: &mut Udp, p: Pending, now: u64) -> Step {
@@ -141,8 +136,8 @@ pub fn progress(stack: &mut Stack, u: &mut Udp, p: Pending, now: u64) -> Step {
         Pending::SendTo { to, data, deadline } => send_progress(stack, u, to, data, deadline, now),
         Pending::RecvFrom { max, deadline } => recv_progress(stack, u, max, deadline, now),
         Pending::Ask(a) => match ask_progress(stack, a, now) {
-            Ok((granted, Deferred::SendTo { to, data })) => {
-                send_to_start(stack, u, to, data, granted).unwrap_or_else(Step::err)
+            Ok((granted, Deferred::SendTo { to, data, until })) => {
+                send_to_start(stack, u, to, data, until, granted).unwrap_or_else(Step::err)
             }
             Ok(_) => Step::err(Error::BadState),
             Err(step) => step,
@@ -174,7 +169,7 @@ fn send_progress(
         Err(smoltcp::socket::udp::SendError::BufferFull) if now < deadline => {
             Step::Wait(Pending::SendTo { to, data, deadline })
         }
-        Err(smoltcp::socket::udp::SendError::BufferFull) => Step::err(Error::TimedOut),
+        Err(smoltcp::socket::udp::SendError::BufferFull) => Step::err(expired(deadline)),
         Err(_) => Step::err(Error::Unreachable),
     }
 }
@@ -196,7 +191,7 @@ fn recv_progress(stack: &mut Stack, u: &Udp, max: usize, deadline: u64, now: u64
         return Step::reply(Ok(w));
     }
     if now >= deadline {
-        return Step::err(Error::TimedOut);
+        return Step::err(expired(deadline));
     }
     Step::Wait(Pending::RecvFrom { max, deadline })
 }

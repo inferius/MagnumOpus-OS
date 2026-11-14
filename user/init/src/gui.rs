@@ -520,9 +520,10 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>, sup: &mut Supervi
     let mut hs = Vec::new();
     if let Some(n) = crate::system::NET.get()
         && let Ok(s) = n.root.restrict(netproto::policy::rights::INFO, &netproto::policy::Policy::only(Vec::new()))
+        && let Ok(s) = s.into_channel()
     {
         names.push("net");
-        hs.push(s.into_channel().into_handle());
+        hs.push(s.into_handle());
     }
     if let Ok(a) = crate::audio::connect() {
         names.push("audio");
