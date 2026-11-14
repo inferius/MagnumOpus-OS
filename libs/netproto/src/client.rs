@@ -357,6 +357,7 @@ impl Net {
         let mut attempt_timeout = Duration::from_secs(1);
         loop {
             let t1 = libos::time::wall().unwrap_or(WallTime::UNIX_EPOCH);
+            let mono1 = libos::time::now();
             sock.send_to(&ntp::build_request(t1), server)?;
             let wait_until = libos::time::now().saturating_add(attempt_timeout.as_nanos() as u64);
             loop {
@@ -368,9 +369,16 @@ impl Net {
                 match sock.recv_from_ctx(&mut buf, Deadline(until), None) {
                     Ok((n, from)) if from == server => {
                         let t4 = libos::time::wall().unwrap_or(WallTime::UNIX_EPOCH);
+                        if ntp::clock_stepped(t1, t4, libos::time::now() - mono1) {
+                            // Hodiny se behem mereni posunuly: novy dotaz.
+                            break;
+                        }
                         match ntp::parse_reply(t1, &buf[..n]) {
                             Ok(reply) => {
                                 let (offset, delay) = ntp::offset_delay(t1, &reply, t4);
+                                if !ntp::plausible(&ntp::Sample { offset_ns: offset, delay_ns: delay }) {
+                                    continue;
+                                }
                                 return Ok(NtpSync {
                                     time: ntp::corrected(t4, offset),
                                     offset_ns: offset,

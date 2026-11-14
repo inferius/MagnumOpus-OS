@@ -249,6 +249,7 @@ porušený vnitřní předpoklad (chyba jádra).
 | `ntpd: NTS-KE <server>: ...` | Výměna klíčů NTS selhala (spojení, certifikát, odpověď); server se v kole přeskočí. Při neplatném certifikátu zkontrolovat hodiny (RTC). |
 | `ntpd: neoverene servery: Never\|Fallback` | Init změnil pravidlo podle profilu sítě. |
 | `ntpd: zadny server neodpovedel (..., NTS: ...)` | V tomto kole žádná odpověď (síť, firewall, server). Další pokus za 2, 4, 8, … s (nejvýš `min_poll`), stejná hláška se znovu nevypíše; hodiny běží dál podle poslední frekvence. |
+| `ntpd: <server>: neverohodny vzorek zahozen (posun N ns, zpozdeni N ns)` | Měření se záporným nebo příliš dlouhým zpožděním (chyba časových značek serveru nebo skok hodin během měření). Vzorek se nepoužije; ostatní vzorky a servery platí dál. |
 | `ntpd: konfigurace: ...` | Konfigurace od init je neplatná; `ntpd` skončí. Opravit `ntpd.toml`. |
 | `timed: prvni synchronizace: skok o N ms` | První korekce od `ntpd` byla velká: čas se nastavil skokem (jediný povolený skok). |
 | `timed: prvni synchronizace: dorovnani o N ms` | První korekce byla malá: dorovná se plynule. |

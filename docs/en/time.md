@@ -213,6 +213,19 @@ it after the network service:
   sample with the **smallest delay** (least distorted by queues and an
   asymmetric path), and the **median** across servers (one bad server
   does not pull the result).
+- **Sample plausibility** **[implemented]** (host test
+  `ntp_clock_step_during_measurement_is_discarded`):
+  - A measurement during which someone stepped the real-time clock (the
+    elapsed real and monotonic times differ by more than 100 ms) is
+    dropped, because t1 and t4 come from different clocks.
+  - A sample with a negative delay or a delay over 16 s is dropped with a
+    message and never reaches `timed`.
+
+> **Change from the first version:** samples were not checked. The time
+> test in the full suite stepped the clock by a day and back while `ntpd`
+> was measuring. The result was an offset of -12 h and a delay of -24 h;
+> the smallest-delay filter picked exactly that sample and `timed`
+> rejected the correction (`OUT_OF_RANGE`).
 - **Frequency:** from the offset between rounds (minus the part of the
   previous correction the kernel has not made up yet) it estimates the
   crystal drift. It proposes half of the error so measurement noise does

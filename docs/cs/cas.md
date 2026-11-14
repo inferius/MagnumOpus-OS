@@ -202,6 +202,18 @@ službě sítě:
 - Každé kolo: z každého serveru dávka měření (`samples`), z ní vzorek
   s **nejmenším zpožděním** (nejméně ho zkreslí fronty a nesymetrická
   cesta), ze serverů **medián** (jeden špatný server výsledek nestáhne).
+- **Věrohodnost vzorku** **[implementováno]** (test na hostiteli
+  `ntp_clock_step_during_measurement_is_discarded`):
+  - Měření, během kterého někdo posunul reálné hodiny (rozdíl uplynulého
+    reálného a monotónního času přes 100 ms), se zahodí, protože t1 a t4
+    jsou z různých hodin.
+  - Vzorek se záporným zpožděním nebo zpožděním nad 16 s se zahodí
+    s hláškou a k `timed` se nedostane.
+
+> **Změna proti první verzi:** vzorky se nekontrolovaly. Test času
+> v plné sadě posunul hodiny o den a vrátil je, zatímco `ntpd` měřil.
+> Vyšel posun −12 h a zpoždění −24 h, filtr podle nejmenšího zpoždění
+> vybral právě ten a `timed` korekci odmítl (`OUT_OF_RANGE`).
 - **Frekvence:** z posunu mezi koly (minus část předchozí korekce, kterou
   jádro ještě nestihlo dorovnat) odhadne drift krystalu. Navrhne polovinu
   chyby, aby šum měření nerozkmital smyčku (`netproto::ntp::Discipline`).

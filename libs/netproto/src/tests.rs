@@ -644,3 +644,37 @@ fn resolver_messages() {
     assert_eq!(Answer::decode(&a.encode()).unwrap(), a);
     assert!(Answer::decode(&a.encode()[..5]).is_err());
 }
+
+/// Plna sada na aarch64: test `cas` nastavil hodiny o den dopredu a vratil
+/// je, zatimco ntpd meril. t1 o 24 h napred proti t4 dava posun -12 h
+/// a zpozdeni -24 h; filtr ho vybral jako "nejlepsi" (nejmensi zpozdeni).
+#[test]
+fn ntp_clock_step_during_measurement_is_discarded() {
+    use crate::ntp::{self, MAX_DELAY_NS, Reply, Sample, best_sample, clock_stepped, plausible};
+    use abi::time::WallTime;
+    let day = 86_400i64;
+    let t = |secs: i64, nanos: u32| WallTime { secs, nanos };
+    let real_t1 = t(1_800_000_000, 0);
+    let t2 = t(1_800_000_000, 1_000_000);
+    let t3 = t(1_800_000_000, 2_000_000);
+    let t4 = t(1_800_000_000, 3_000_000);
+    let reply = Reply { receive: t2, transmit: t3, stratum: 2 };
+    // t1 zmereny v posunutem okne (o den dopredu).
+    let stepped_t1 = t(1_800_000_000 + day, 0);
+    let (offset, delay) = ntp::offset_delay(stepped_t1, &reply, t4);
+    assert_eq!(offset, -(day as i128) * 1_000_000_000 / 2, "posun -12 h");
+    assert!(delay < -(day as i128) * 1_000_000_000 + 10_000_000, "zpozdeni -24 h");
+    // Kontrola skoku: realne hodiny ubehly -24 h, monotonni 3 ms.
+    assert!(clock_stepped(stepped_t1, t4, 3_000_000));
+    assert!(!clock_stepped(real_t1, t4, 3_000_000), "bez skoku");
+    // Plynula korekce (rozdil pod 100 ms) neni skok.
+    assert!(!clock_stepped(real_t1, t4, 50_000_000));
+    // Verohodnost a vyber.
+    let bad = Sample { offset_ns: offset, delay_ns: delay };
+    let good = Sample { offset_ns: 500, delay_ns: 3_000_000 };
+    assert!(!plausible(&bad));
+    assert!(plausible(&good));
+    assert!(!plausible(&Sample { offset_ns: 0, delay_ns: MAX_DELAY_NS + 1 }));
+    assert_eq!(best_sample(&[bad, good]), Some(good), "zaporne zpozdeni nevyhraje");
+    assert_eq!(best_sample(&[bad]), None, "jen neverohodne = zadny vzorek");
+}
