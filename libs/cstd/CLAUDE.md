@@ -11,6 +11,7 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 - `src/time.rs` - hodiny (`sys::monotonic_ns`, `sys::realtime`), spánek, kalendář (`split`, `civil_secs` nad `abi::time`), pásmo z `TZ` (`libs/tz`), `strftime` (`format_tm`).
 - `src/math.rs` - `math.h` nad crate `libm`, `strtod`/`strtof`/`atof`; `c/math_ld.c` - funkce `*l` a `strtold` v C (ABI `long double`), překládá `build.rs` jen pro cíl magnumopus.
 - `src/socket.rs` - sockety BSD, adresy, `getaddrinfo`; `src/poll.rs` - `poll`, `select`, `epoll` (množina = objekt `User` v tabulce fd). Logika socketů a čekání je v `osrt::sock` a `osrt::poll`.
+- `src/mman.rs` - `mmap` a spol. nad `sys::vm_*` (`osrt::vm` = obálka `libos::vm`); `check` = čistá kontrola argumentů.
 - `src/stdio.rs` - `FILE` nad číslem fd (zámek, buffery: stdout po řádcích, stderr bez, soubory 4 KiB), `fdopen`/`fileno`, `getline`, seznam otevřených proudů, vyprázdnění při konci (`ensure_exit_hook`).
 - `src/stdlib.rs` - `exit`, `_Exit`, `atexit`, `getenv` (cache řetězců C), `abort`, `__cstd_assert_fail`.
 - `include/` - hlavičky POSIX; `stdio.h`, `stdlib.h`, `string.h` doplňují cstd-core přes `#include_next`.

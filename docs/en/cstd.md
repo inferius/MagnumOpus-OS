@@ -18,7 +18,8 @@ Compiling C (clang, flags, protections) is described in
 > time, calendar, `setenv`. Part 2d **[verified in QEMU]** (step `math`):
 > `math.h`, floating point in `printf`, `strtod`. Part 2e **[verified in
 > QEMU]** (suite `cstd sit`): BSD sockets, `getaddrinfo`, `poll`, `select`,
-> `epoll`. Further parts (`mmap`,
+> `epoll`. Part 2f **[verified in QEMU]** (step `mmap`): `mmap`, `mprotect`,
+> `madvise`, `mseal`. Further parts (
 > signals, file locks, `libc.so`, ports) **[designed]**, see [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
 
 ## Layers
@@ -189,6 +190,32 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
   `EPOLLET` reports only newly set bits, `EPOLLONESHOT` disables the entry
   until `EPOLL_CTL_MOD`. An mio backend directly over readiness
   **[designed]**.
+
+## Functions (part 2f: memory mapping)
+
+| Header | Functions | Note |
+|---|---|---|
+| `sys/mman.h` | `mmap`, `munmap` (also a part), `mprotect`, `madvise`, `posix_madvise`, `mseal`, `msync`, `mlock`, `munlock` | over `libos::vm` (via `osrt::vm`) |
+| `unistd.h` | `sysconf(_SC_PAGESIZE)`, `getpagesize` | page size from the kernel (not a constant) |
+
+- **Anonymous memory** has on-demand pages (first write). `PROT_NONE` =
+  an address reservation without memory; `mprotect` with rights fills it in
+  (the GC and JIT pattern: reserve a large range, use it in parts).
+  `MAP_FIXED` replaces whatever was in the range; `MAP_FIXED_NOREPLACE` only
+  free space.
+- **Anonymous `MAP_SHARED`** is the same as private within the process (no
+  `fork`).
+- **File:** the content is read into anonymous memory (`MAP_PRIVATE`, or
+  read-only `MAP_SHARED` - later changes to the file are not visible).
+  `MAP_SHARED` with writing = `ENOTSUP` until fsd provides a file memory
+  object **[designed]**. A pipe or socket = `ENODEV`.
+- **W^X:** `PROT_EXEC` on unsealed memory only with the JIT permission from
+  the manifest ([memory-management.md](memory-management.md)), otherwise
+  `EACCES`.
+- `madvise(MADV_DONTNEED | MADV_FREE)` returns the memory and the next read
+  returns zeros; other advice is accepted without effect. `mseal` seals the
+  range with its current rights (then it cannot be unmapped or have its
+  rights changed).
 
 ### fd numbers
 

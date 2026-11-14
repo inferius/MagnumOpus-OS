@@ -17,6 +17,7 @@ int threads_test(void);
 int time_test(void);
 int math_test(void);
 int net_main(void);
+int mmap_test(const char *dir);
 
 #define CHECK(name, cond)                                              \
     do {                                                               \
@@ -141,6 +142,9 @@ int main(int argc, char **argv) {
     int mt = math_test();
     if (mt != 0) fprintf(stderr, "ctest math: krok %d\n", mt);
     CHECK("math", mt == 0);
+    int mm = dir != NULL ? mmap_test(dir) : -1;
+    if (mm != 0) fprintf(stderr, "ctest mmap: krok %d errno %d\n", mm, errno);
+    CHECK("mmap", mm == 0);
     assert(failures == 0);
     fputs("chyba na stderr\n", stderr);
     fflush(stdout);

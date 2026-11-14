@@ -387,3 +387,56 @@ pub fn with_user<T>(fd: i32, f: impl FnOnce(&(dyn core::any::Any + Send + Sync))
         _ => Err(errno::EINVAL),
     }
 }
+
+// --- pamet (mmap) ------------------------------------------------------------
+
+fn vm_err(err: rt::Error) -> crate::c_int {
+    match err {
+        rt::Error::NoMemory | rt::Error::NoResources => errno::ENOMEM,
+        rt::Error::AccessDenied => errno::EACCES,
+        rt::Error::OutOfRange | rt::Error::NotFound => errno::ENOMEM,
+        rt::Error::AlreadyExists => errno::EEXIST,
+        other => e(other),
+    }
+}
+
+pub fn page_size() -> u64 {
+    rt::vm::page_size()
+}
+
+pub fn vm_alloc(len: u64, prot: u32) -> R<u64> {
+    rt::vm::alloc(len, prot).map_err(vm_err)
+}
+
+pub fn vm_reserve(len: u64) -> R<u64> {
+    rt::vm::reserve(len, 0).map_err(vm_err)
+}
+
+pub fn vm_reserve_at(addr: u64, len: u64) -> R<u64> {
+    rt::vm::reserve_at(addr, len, 0).map_err(vm_err)
+}
+
+pub fn vm_commit(addr: u64, len: u64, prot: u32) -> R<()> {
+    rt::vm::commit(addr, len, prot).map_err(vm_err)
+}
+
+pub fn vm_protect(addr: u64, len: u64, prot: u32) -> R<()> {
+    rt::vm::protect(addr, len, prot).map_err(vm_err)
+}
+
+pub fn vm_release(addr: u64, len: u64) -> R<()> {
+    rt::vm::release(addr, len).map_err(vm_err)
+}
+
+pub fn vm_decommit(addr: u64, len: u64) -> R<()> {
+    rt::vm::decommit(addr, len).map_err(vm_err)
+}
+
+pub fn vm_seal(addr: u64, len: u64, prot: u32) -> R<()> {
+    rt::vm::seal(addr, len, prot).map_err(vm_err)
+}
+
+pub fn vm_query(addr: u64) -> R<super::Region> {
+    let r = rt::vm::query(addr).map_err(vm_err)?;
+    Ok(super::Region { kind: r.kind, start: r.start, len: r.len, prot: r.flags & 7 })
+}

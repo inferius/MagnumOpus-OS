@@ -16,8 +16,9 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
 > Část 2c **[ověřeno v QEMU]** (krok `time`): čas, kalendář, `setenv`.
 > Část 2d **[ověřeno v QEMU]** (krok `math`): `math.h`, plovoucí čárka
 > v `printf`, `strtod`. Část 2e **[ověřeno v QEMU]** (sada `cstd sit`):
-> sockety BSD, `getaddrinfo`, `poll`, `select`, `epoll`. Další části (`mmap`,
-> signály, zámky souborů,
+> sockety BSD, `getaddrinfo`, `poll`, `select`, `epoll`. Část 2f
+> **[ověřeno v QEMU]** (krok `mmap`): `mmap`, `mprotect`, `madvise`,
+> `mseal`. Další části (signály, zámky souborů,
 > `libc.so`, porty) **[navrženo]**, viz
 > [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
 
@@ -185,6 +186,29 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 - **`epoll`** je množina v tabulce fd; úrovňový režim přesně, `EPOLLET`
   hlásí jen nově nastavené bity, `EPOLLONESHOT` položku vypne do
   `EPOLL_CTL_MOD`. Backend mio přímo nad připraveností **[navrženo]**.
+
+## Funkce (část 2f: mapování paměti)
+
+| Hlavička | Funkce | Poznámka |
+|---|---|---|
+| `sys/mman.h` | `mmap`, `munmap` (i část), `mprotect`, `madvise`, `posix_madvise`, `mseal`, `msync`, `mlock`, `munlock` | nad `libos::vm` (přes `osrt::vm`) |
+| `unistd.h` | `sysconf(_SC_PAGESIZE)`, `getpagesize` | velikost stránky od jádra (ne konstanta) |
+
+- **Anonymní paměť** má stránky na požádání (první zápis). `PROT_NONE` =
+  jen rezervace adres bez paměti; `mprotect` s právy ji doplní (vzor GC
+  a JIT: rezervovat velký rozsah, používat po částech). `MAP_FIXED`
+  nahradí, co v rozsahu bylo; `MAP_FIXED_NOREPLACE` jen volné místo.
+- **`MAP_SHARED` anonymní** je v rámci procesu totéž co soukromá (`fork`
+  není).
+- **Soubor:** obsah se načte do anonymní paměti (`MAP_PRIVATE`, nebo
+  `MAP_SHARED` jen pro čtení - pozdější změny souboru se neprojeví).
+  `MAP_SHARED` se zápisem = `ENOTSUP`, dokud fsd nedá objekt paměti
+  souboru **[navrženo]**. Roura nebo socket = `ENODEV`.
+- **W^X:** `PROT_EXEC` na nezapečetěné paměti jen s oprávněním JIT
+  z manifestu ([sprava-pameti.md](sprava-pameti.md)), jinak `EACCES`.
+- `madvise(MADV_DONTNEED | MADV_FREE)` vrátí paměť a další čtení vrátí
+  nuly; ostatní rady se přijmou bez účinku. `mseal` zapečetí rozsah se
+  současnými právy (pak nejde odmapovat ani změnit práva).
 
 ### Čísla fd
 

@@ -480,7 +480,7 @@ pub const SC_CLK_TCK: c_int = 2;
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn sysconf(name: c_int) -> i64 {
     match name {
-        SC_PAGESIZE => 4096,
+        SC_PAGESIZE => sys::page_size() as i64,
         SC_OPEN_MAX => 4096,
         SC_CLK_TCK => 100,
         SC_NPROCESSORS_CONF | SC_NPROCESSORS_ONLN => {
@@ -495,5 +495,5 @@ pub extern "C" fn sysconf(name: c_int) -> i64 {
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn getpagesize() -> c_int {
-    4096
+    sys::page_size() as c_int
 }

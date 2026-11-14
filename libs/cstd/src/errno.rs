@@ -71,6 +71,7 @@ pub const ECONNABORTED: c_int = 103;
 pub const ENOBUFS: c_int = 105;
 pub const EISCONN: c_int = 106;
 pub const ENFILE: c_int = 23;
+pub const ENODEV: c_int = 19;
 
 thread_local! {
     static ERRNO: Cell<c_int> = const { Cell::new(0) };
@@ -234,6 +235,7 @@ pub fn message(e: c_int) -> &'static [u8] {
         ECONNABORTED => b"Software caused connection abort\0",
         ENOBUFS => b"No buffer space available\0",
         EISCONN => b"Transport endpoint is already connected\0",
+        ENODEV => b"No such device\0",
         ENFILE => b"Too many open files in system\0",
         EMFILE => b"Too many open files\0",
         EFAULT => b"Bad address\0",

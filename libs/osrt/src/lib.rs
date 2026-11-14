@@ -20,6 +20,7 @@
 extern crate alloc;
 
 pub mod env;
+pub mod exception;
 pub mod fd;
 pub mod fs;
 pub mod futex;
@@ -34,6 +35,7 @@ pub mod stdio;
 pub mod thread;
 pub mod time;
 pub mod tls;
+pub mod vm;
 
 pub use abi::Error;
 
