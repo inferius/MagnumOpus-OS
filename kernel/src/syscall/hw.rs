@@ -128,7 +128,8 @@ pub fn vmo_phys_addr(a: Args) -> Result<u64> {
     let vmo = p
         .handles()
         .get_as::<MemoryObject>(arg_handle(a[1])?, Rights::NONE)?;
-    let page = vmo.page(a[2] & !(PAGE_SIZE - 1)).ok_or(Error::OutOfRange)?;
+    // Bezny objekt stranku vytvori a pripne (adresa zustane platna).
+    let page = vmo.expose_phys(a[2] & !(PAGE_SIZE - 1))?;
     Ok(page.as_u64() + (a[2] % PAGE_SIZE))
 }
 

@@ -10,6 +10,21 @@
 //! Bitmapy pokryvaji fyzicke adresy od 0 do konce nejvyssi oblasti RAM.
 //! Diry v pameti v bitmapach nikdy nejsou oznacene jako volne, takze se pres
 //! ne bloky nespoji.
+//!
+//! **Commit:** objekty pameti strhnou stranky predem (`commit`), ale ramce
+//! si vezmou az pri prvnim pristupu (`alloc_committed_zeroed`). Slibene
+//! a jeste nevzate stranky (`committed`) jsou pro ostatni alokace programu
+//! obsazene stejne jako rezerva jadra: `free_pages >= rezerva + committed`
+//! plati pro kazdou alokaci programu, takze vypadek stranky nikdy nenarazi
+//! na nedostatek pameti (zadny OOM killer). Porusit to muze jen jadro samo
+//! (heap, tabulky stranek), pokud vycerpa celou svou rezervu.
+//!
+//! **Piny:** pocitadlo na kazdy ramec RAM (`pin`/`unpin`). Pripnuty ramec
+//! pouziva zarizeni (DMA): nesmi se presunout, nahradit kopii (CoW) ani
+//! vystehovat. Dnes pripina jen souvisla pamet pro DMA po celou dobu zivota
+//! objektu; pouziji ho CoW a pager.
+
+use core::sync::atomic::{AtomicPtr, AtomicU16, AtomicU64, Ordering};
 
 use crate::sync::SpinLock;
 use boot_info::{MemoryKind, MemoryRegion};
@@ -38,6 +53,8 @@ struct Buddy {
     free_lists: [u64; MAX_ORDER + 1],
     free_pages: u64,
     total_pages: u64,
+    /// Stranky slibene objektum pameti, ktere si jeste nevzaly ramec.
+    committed: u64,
 }
 
 // SAFETY: ukazatele do bitmap a volnych bloku vlastni vyhradne alokator,
@@ -45,6 +62,11 @@ struct Buddy {
 unsafe impl Send for Buddy {}
 
 static ALLOCATOR: SpinLock<Option<Buddy>> = SpinLock::new(None);
+
+/// Pocitadla pinu (jedno na ramec od fyzicke adresy 0), v pameti za
+/// bitmapami alokatoru.
+static PINS: AtomicPtr<AtomicU16> = AtomicPtr::new(core::ptr::null_mut());
+static PIN_FRAMES: AtomicU64 = AtomicU64::new(0);
 
 const fn block_bytes(order: usize) -> u64 {
     PAGE_SIZE << order
@@ -182,7 +204,9 @@ pub fn init(regions: &[MemoryRegion]) {
     let pages = max_addr / PAGE_SIZE;
 
     let words: u64 = (0..=MAX_ORDER).map(|k| bitmap_words(pages, k)).sum();
-    let bitmap_bytes = (words * 8).next_multiple_of(PAGE_SIZE);
+    let pins_bytes = pages * core::mem::size_of::<AtomicU16>() as u64;
+    // Bitmapy a za nimi pocitadla pinu, vse v jednom bloku.
+    let bitmap_bytes = (words * 8 + pins_bytes).next_multiple_of(PAGE_SIZE);
     let bitmap_region = regions
         .iter()
         .filter(|r| r.kind == MemoryKind::Usable && r.start >= LOW_MEMORY_LIMIT)
@@ -201,6 +225,9 @@ pub fn init(regions: &[MemoryRegion]) {
         *bitmap = base.wrapping_add(offset as usize);
         offset += bitmap_words(pages, k);
     }
+    // Vynulovane bajty = platna AtomicU16 s hodnotou 0.
+    PINS.store(base.wrapping_add(offset as usize).cast(), Ordering::Release);
+    PIN_FRAMES.store(pages, Ordering::Release);
 
     let mut buddy = Buddy {
         pages,
@@ -208,6 +235,7 @@ pub fn init(regions: &[MemoryRegion]) {
         free_lists: [NONE; MAX_ORDER + 1],
         free_pages: 0,
         total_pages: 0,
+        committed: 0,
     };
     for r in regions.iter().filter(|r| r.kind == MemoryKind::Usable) {
         if r.start == bitmap_start {
@@ -250,28 +278,66 @@ pub fn free_pages(addr: PhysAddr, order: usize) {
 /// pameti, zasobniky vlaken) se nealokuje, kdyby volnych stranek zbylo
 /// mene. Tabulky stranek, heap a zasobniky jadra z rezervy cerpat smi, takze
 /// vycerpani pameti programem jadro neshodi. 1/32 RAM, nejmene 16 MiB.
-pub fn reserve_pages() -> u64 {
-    let total = ALLOCATOR.lock().as_ref().map_or(0, |b| b.total_pages);
+fn reserve_of(total: u64) -> u64 {
     (total / 32).max(4096)
 }
 
-/// Alokace pro programy: jako `alloc_pages`, ale respektuje rezervu jadra.
+impl Buddy {
+    /// Volne stranky pro programy: nad rezervou jadra a slibenymi strankami.
+    fn user_available(&self) -> u64 {
+        self.free_pages
+            .saturating_sub(reserve_of(self.total_pages) + self.committed)
+    }
+}
+
+/// Alokace pro programy: jako `alloc_pages`, ale respektuje rezervu jadra
+/// a stranky slibene objektum pameti.
 pub fn alloc_user_pages(order: usize) -> Option<PhysAddr> {
     if order > MAX_ORDER {
         return None;
     }
-    let reserve = reserve_pages();
     let mut guard = ALLOCATOR.lock();
     let buddy = guard.as_mut()?;
-    if buddy.free_pages < reserve + (1u64 << order) {
+    if buddy.user_available() < 1u64 << order {
         return None;
     }
     buddy.alloc(order).map(PhysAddr::new)
 }
 
-/// Jedna vynulovana stranka pro program (respektuje rezervu jadra).
-pub fn alloc_user_frame_zeroed() -> Option<PhysAddr> {
-    let frame = alloc_user_pages(0)?;
+/// Slibi `pages` stranek objektu pameti (ramce vzniknou az pri pristupu).
+/// `false` = tolik pameti programum nezbyva.
+pub fn commit(pages: u64) -> bool {
+    let mut guard = ALLOCATOR.lock();
+    let Some(buddy) = guard.as_mut() else { return false };
+    if buddy.user_available() < pages {
+        return false;
+    }
+    buddy.committed += pages;
+    true
+}
+
+/// Vrati slib `pages` stranek, ktere si objekt nikdy nevzal.
+pub fn uncommit(pages: u64) {
+    if pages == 0 {
+        return;
+    }
+    let mut guard = ALLOCATOR.lock();
+    let buddy = guard.as_mut().expect("alokator neni inicializovany");
+    debug_assert!(buddy.committed >= pages, "uncommit nad slib");
+    buddy.committed = buddy.committed.saturating_sub(pages);
+}
+
+/// Vezme jeden slibeny ramec (vynulovany). Selze jen kdyz jadro samo
+/// vycerpalo pamet nad svou rezervu; slib pak zustava.
+pub fn alloc_committed_zeroed() -> Option<PhysAddr> {
+    let frame = {
+        let mut guard = ALLOCATOR.lock();
+        let buddy = guard.as_mut()?;
+        let frame = buddy.alloc(0)?;
+        debug_assert!(buddy.committed > 0, "ramec bez slibu");
+        buddy.committed = buddy.committed.saturating_sub(1);
+        PhysAddr::new(frame)
+    };
     // SAFETY: prave alokovana stranka, dostupna pres primou mapu.
     unsafe {
         frame
@@ -282,10 +348,49 @@ pub fn alloc_user_frame_zeroed() -> Option<PhysAddr> {
     Some(frame)
 }
 
-/// Je nad rezervou jadra jeste `pages` volnych stranek?
+/// Vrati ramec vzaty `alloc_committed_zeroed`, ktery se nakonec
+/// nepouzil (soubeh): ramec zpet a slib zustava.
+pub fn free_committed(frame: PhysAddr) {
+    let mut guard = ALLOCATOR.lock();
+    let buddy = guard.as_mut().expect("alokator neni inicializovany");
+    buddy.free(frame.as_u64(), 0);
+    buddy.committed += 1;
+}
+
+/// Stranky slibene objektum pameti a jeste nevzate (pro testy a prehled).
+pub fn committed_pages() -> u64 {
+    ALLOCATOR.lock().as_ref().map_or(0, |b| b.committed)
+}
+
+fn pin_slot(frame: PhysAddr) -> &'static AtomicU16 {
+    let idx = frame.as_u64() / PAGE_SIZE;
+    assert!(idx < PIN_FRAMES.load(Ordering::Acquire), "pin: ramec {:#x} mimo RAM", frame.as_u64());
+    // SAFETY: pole ma `PIN_FRAMES` prvku (nastavene v `init` pred prvni
+    // alokaci) a zije po celou dobu behu jadra.
+    unsafe { &*PINS.load(Ordering::Acquire).add(idx as usize) }
+}
+
+/// Pripne ramec RAM (zarizeni do nej muze zapisovat): nesmi se presunout,
+/// nahradit kopii ani vystehovat, dokud `unpin`.
+pub fn pin(frame: PhysAddr) {
+    let old = pin_slot(frame).fetch_add(1, Ordering::AcqRel);
+    assert!(old != u16::MAX, "pin: preteceni pocitadla");
+}
+
+pub fn unpin(frame: PhysAddr) {
+    let old = pin_slot(frame).fetch_sub(1, Ordering::AcqRel);
+    assert!(old != 0, "unpin: ramec {:#x} neni pripnuty", frame.as_u64());
+}
+
+/// Je ramec pripnuty?
+pub fn is_pinned(frame: PhysAddr) -> bool {
+    pin_slot(frame).load(Ordering::Acquire) != 0
+}
+
+/// Je nad rezervou jadra a slibenymi strankami jeste `pages` volnych
+/// stranek?
 pub fn user_room(pages: u64) -> bool {
-    let reserve = reserve_pages();
-    stats().0 >= reserve + pages
+    ALLOCATOR.lock().as_ref().is_some_and(|b| b.user_available() >= pages)
 }
 
 /// Alokuje jednu vynulovanou stranku.

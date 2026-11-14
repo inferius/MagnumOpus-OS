@@ -273,13 +273,17 @@ se zapíšou potřebné velikosti), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`,
 ### `VMO_CREATE`
 
 `(size, process) -> handle`. Objekt paměti o velikosti `size` (zaokrouhleno
-na 4 KiB, max. 1 TiB), vyplněný nulami. Stránky se zatím alokují hned
-a strhnou se z rozpočtu uživatelské paměti jobu procesu `process`
+na 4 KiB, max. 1 TiB), vyplněný nulami. Celá velikost se hned slíbí
+(rozpočet uživatelské paměti jobu a globální strop paměti programů), rámce
+vzniknou až při prvním zápisu ([sprava-pameti.md](sprava-pameti.md)).
+Strhne se z rozpočtu uživatelské paměti jobu procesu `process`
 (handle s právem `WRITE`; 0 = volající). Rodič tak vytváří paměť programu
 (segmenty, zásobník) na účet potomka. Práva: `DUPLICATE`, `TRANSFER`,
 `WAIT`, `READ`, `WRITE`, `MAP`, `EXECUTE`. Chyby: `INVALID_ARGS` (0 nebo
 příliš velký), `NO_MEMORY`, `NO_RESOURCES` (rozpočet jobu), `BAD_HANDLE`,
-`ACCESS_DENIED`, `WRONG_TYPE` (`process`).
+`ACCESS_DENIED`, `WRONG_TYPE` (`process`). `NO_MEMORY` znamená i to, že
+se tolik paměti nedá slíbit (strop = volná RAM bez rezervy jádra a bez
+už slíbených stránek).
 
 ### `VMO_READ`
 
@@ -664,7 +668,9 @@ rozsah objektu povolovat. Chyby: `NOT_SUPPORTED` (není fyzický objekt),
 
 `(resource, vmo, offset) -> phys`. Fyzická adresa bajtu `offset` objektu
 paměti (pro programování DMA). U souvislého objektu platí pro celý rozsah,
-u běžného jen v rámci jedné stránky. Chyby: `OUT_OF_RANGE`, `ACCESS_DENIED`.
+u běžného jen v rámci jedné stránky. Běžnému objektu stránku vytvoří
+a připne (adresa zůstane platná, dokud objekt žije). Chyby:
+`OUT_OF_RANGE`, `ACCESS_DENIED`, `NO_MEMORY`.
 
 ### `INTERRUPT_CREATE`
 

@@ -6,6 +6,7 @@
 
 mod log;
 mod mm;
+mod mm_lazy;
 mod object;
 mod platform;
 mod sched;
@@ -25,6 +26,7 @@ type Suite = &'static [(&'static str, fn())];
 
 const SUITES: &[(&str, Suite)] = &[
     ("pamet", mm::TESTS),
+    ("pamet", mm_lazy::TESTS),
     ("platforma", crate::arch::TESTS),
     ("platforma", platform::TESTS),
     ("log", log::TESTS),

@@ -279,13 +279,18 @@ are written to `out_actual_ptr`), `BAD_HANDLE`, `ACCESS_DENIED`,
 ### `VMO_CREATE`
 
 `(size, process) -> handle`. A memory object of `size` bytes (rounded up
-to 4 KiB, max 1 TiB), zero-filled. Pages are allocated up front for now
-and charged to the user-memory budget of the job of `process` (a handle
+to 4 KiB, max 1 TiB), zero-filled. The whole size is committed at once
+(the job's user-memory budget and the global ceiling of program memory);
+frames come into existence on the first write
+([memory-management.md](memory-management.md)). It is charged to the
+user-memory budget of the job of `process` (a handle
 with `WRITE`; 0 = the caller). A parent thus creates a program's memory
 (segments, stack) on the child's account. Rights: `DUPLICATE`,
 `TRANSFER`, `WAIT`, `READ`, `WRITE`, `MAP`, `EXECUTE`. Errors:
 `INVALID_ARGS` (0 or too large), `NO_MEMORY`, `NO_RESOURCES` (job
 budget), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE` (`process`).
+`NO_MEMORY` also means that so much memory cannot be committed (ceiling =
+free RAM minus the kernel reserve minus pages already committed).
 
 ### `VMO_READ`
 
@@ -682,8 +687,9 @@ destroyed). The resource must allow the object's range. Errors:
 
 `(resource, vmo, offset) -> phys`. Physical address of byte `offset` of the
 memory object (for programming DMA). For a contiguous object it holds for the
-whole range, for a regular one only within one page. Errors:
-`OUT_OF_RANGE`, `ACCESS_DENIED`.
+whole range, for a regular one only within one page. For a regular object
+it creates and pins the page (the address stays valid while the object
+lives). Errors: `OUT_OF_RANGE`, `ACCESS_DENIED`, `NO_MEMORY`.
 
 ### `INTERRUPT_CREATE`
 

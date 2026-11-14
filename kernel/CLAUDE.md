@@ -21,6 +21,9 @@ Mikrojádro (`no_std`, `no_main`): paměť, plánovač, objekty s handly a práv
 - Obsluha přerušení smí brát jen `SpinLock` (zakazuje přerušení), jinak hrozí deadlock.
 - Konec procesu (`Process::finish`) hned zruší adresní prostor (`AddressSpace::teardown`), handly a futexy; zůstane náhrobek. Předpoklad: žádné CPU nemá prostor aktivní - `sched::exit` nastaví `user_gone` a přepne na kořen jádra **před** `thread_exited`, plánovač vláknu s `user_gone` kořen procesu nenahraje. Nová cesta ke konci vlákna musí jít přes `sched::exit`.
 - Paměť pro DMA bez IOMMU (`MemoryObject::is_unprotected_dma`) se při konci procesu nevrací alokátoru (zařízení může dál zapisovat); drží ji náhrobek (`Process::parked`) do posledního handlu.
+- Stránky objektů paměti vznikají na požádání (`docs/cs/sprava-pameti.md`): každý nový vznik stránky mimo výpadek v daném mapování musí volat `MemoryObject::forget_zero` (jinak někdo dál čte nulovou stránku místo dat). Jádro do paměti procesu nikdy nesahá přes adresy procesu - kopírování jde přes `copy_from_user`/`copy_to_user`, výpadek v jádře nesmí vzniknout.
+- Slib (`phys::commit`) se strhává při vytvoření objektu; výpadek bere rámec ze slibu (`alloc_committed_zeroed`), takže nikdy nedojde paměť (žádný OOM kill). Nová alokace pro programy musí jít přes `alloc_user_pages`/`user_room` (respektují slib i rezervu).
+- Připnutý rámec (`phys::pin`: DMA, `VMO_PHYS_ADDR`) se nesmí přesunout, nahradit ani vystěhovat.
 - Po `teardown` je prostor mrtvý: `map` -> `BadState`, ostatní operace nic nenajdou; `root()` vrací `None`.
 - Plánovač: vlákno, které ještě běží (`on_cpu`), nesmí být v **cizí** frontě - jiné CPU by na něj čekalo se zakázanými přerušeními a dvě CPU by se mohla zablokovat navzájem. Přesun na jiné CPU a zařazení vlákna probuzeného během usínání dělá `finish_switch`; kradení taková vlákna přeskakuje (`sched/mod.rs`, `sched/balance.rs`).
 

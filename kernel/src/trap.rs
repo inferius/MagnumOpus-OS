@@ -63,6 +63,15 @@ pub fn syscall(number: u64, args: [u64; 6]) -> u64 {
     syscall::dispatch(number, args)
 }
 
+/// Vypadek stranky v userspace: zkusi doplnit stranku na pozadani
+/// (`AddressSpace::resolve_fault`). `true` = vyreseno, vratit se do
+/// userspace a instrukci zopakovat; `false` = volajici zavola `user_fault`.
+/// Volat se zakazanymi prerusenimi (vraci se take se zakazanymi).
+#[inline]
+pub fn user_page_fault(addr: u64, access: crate::mm::Access) -> bool {
+    sched::user_page_fault(addr, access)
+}
+
 /// Vyjimka CPU v userspace: ukonci proces. `code` je cislo chyby podle ABI
 /// (`abi::process::EXIT_FAULT_BASE - code`); cisla odpovidaji vektorum
 /// x86 (6 = neplatna instrukce, 13 = ochrana, 14 = vypadek stranky, ...)

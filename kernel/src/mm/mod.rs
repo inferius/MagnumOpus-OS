@@ -18,7 +18,7 @@ pub mod heap;
 pub mod phys;
 pub mod tlb;
 
-pub use address_space::AddressSpace;
+pub use address_space::{Access, AddressSpace};
 
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -34,6 +34,26 @@ use crate::arch::paging::{
 const KERNEL_STACKS_BASE: u64 = 0xFFFF_FE00_0000_0000;
 /// Velikost zasobniku jadra (bez ochranne stranky).
 pub const KERNEL_STACK_SIZE: u64 = 64 * 1024;
+
+/// Sdilena nulova stranka (0 = jeste nevznikla). Mapuje se jen pro cteni
+/// za stranky objektu pameti, ktere jeste nevznikly; nikdy se neuvolni.
+static ZERO_FRAME: AtomicU64 = AtomicU64::new(0);
+
+/// Sdilena vynulovana stranka jen pro cteni (vznikne pri prvnim pouziti).
+pub fn zero_frame() -> PhysAddr {
+    let cur = ZERO_FRAME.load(Ordering::Acquire);
+    if cur != 0 {
+        return PhysAddr::new(cur);
+    }
+    let frame = phys::alloc_frame_zeroed().expect("nedostatek pameti pro nulovou stranku");
+    match ZERO_FRAME.compare_exchange(0, frame.as_u64(), Ordering::AcqRel, Ordering::Acquire) {
+        Ok(_) => frame,
+        Err(other) => {
+            phys::free_pages(frame, 0);
+            PhysAddr::new(other)
+        }
+    }
+}
 
 /// Fyzicka adresa.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
