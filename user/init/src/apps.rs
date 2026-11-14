@@ -79,6 +79,7 @@ pub fn spawn_in(startup: &Startup, name: &str, handles: Vec<StartHandle>, parent
     if let Some(s) = manifest.as_ref().and_then(|m| m.limits.stack) {
         opts.stack_size = s;
     }
+    opts.static_tls_reserve = manifest.as_ref().and_then(|m| m.static_tls_reserve);
     let (process, control) = libos::spawn::spawn_with(&job, name, image, handles, opts)?;
     if let Some(m) = &manifest {
         let mem = |v: Option<u64>| v.map_or(String::from("bez limitu"), |b| format!("{} MiB", b >> 20));

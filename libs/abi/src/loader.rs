@@ -16,6 +16,11 @@
 /// Typ auxv s adresou [`Interface`] (mimo rozsah SysV, "MO").
 pub const AT_MO_LOADER: u64 = 0x4D4F_0001;
 
+/// Typ auxv s velikosti rezervy statickeho TLS v bajtech (manifest
+/// `[app] static_tls_reserve`, `libos::spawn::Options`); bez nej vychozi
+/// 2 KiB, nejvys 64 KiB.
+pub const AT_MO_TLS_RESERVE: u64 = 0x4D4F_0002;
+
 /// Hodnota v tretim argumentu vstupu programu od zavadece ("MOLD").
 pub const ENTRY_MAGIC: u64 = 0x4D4F_4C44;
 
@@ -62,6 +67,12 @@ pub mod rtld {
     pub const GLOBAL: i32 = 0x100;
     pub const LOCAL: i32 = 0;
     pub const NODELETE: i32 = 0x1000;
+    /// Jen vratit handle uz nahraneho modulu (jinak null bez chyby).
+    pub const NOLOAD: i32 = 4;
+    /// `dlsym`: globalni rozsah (program, knihovny ze startu, `GLOBAL`).
+    pub const DEFAULT: usize = 0;
+    /// `dlsym`: dalsi vyskyt za volajicim modulem (zatim nepodporovano).
+    pub const NEXT: usize = usize::MAX;
 }
 
 /// Callback `dl_iterate_phdr`: nenulova navratova hodnota zastavi pruchod.
@@ -83,16 +94,18 @@ pub struct Interface {
     pub run_fini: unsafe extern "C" fn(),
     /// `dl_iterate_phdr` (glibc): projde nahrane moduly.
     pub dl_iterate_phdr: unsafe extern "C" fn(cb: PhdrCallback, data: *mut u8) -> i32,
-    /// `dlopen(cesta, rtld::*)` -> handle, null = chyba (`dlerror`). Do DL-4
-    /// (sluzba knihoven `libd`) vzdy null s duvodem "nepodporovano".
+    /// `dlopen(cesta, rtld::*)` -> handle, null = chyba (`dlerror`).
+    /// Cesta jen `/system/lib/<jmeno>` nebo `<jmeno>` (knihovny od libd);
+    /// null = program (globalni rozsah). `LAZY` = `NOW`.
     pub dlopen: unsafe extern "C" fn(path: *const u8, flags: i32) -> *mut u8,
     /// `dlsym(handle, jmeno)` -> adresa, null = nenalezeno.
     pub dlsym: unsafe extern "C" fn(handle: *mut u8, name: *const u8) -> *mut u8,
-    /// `dlclose(handle)`: 0 = ok. Modul zustava nahrany (pocitadlo odkazu).
+    /// `dlclose(handle)`: 0 = ok. Snizi pocitadlo odkazu; modul zustava
+    /// nahrany (kod je zapeceteny, odstraneni modulu neni).
     pub dlclose: unsafe extern "C" fn(handle: *mut u8) -> i32,
-    /// Posledni chyba `dl*` jako C retezec (null = zadna); cteni ji vymaze.
-    /// Zatim jedna pro cely proces (POSIX chce vlakno) - staci, dokud
-    /// `dlopen` neni (DL-4).
+    /// Posledni chyba `dl*` volajiciho vlakna jako C retezec (null =
+    /// zadna); cteni ji vymaze, retezec plati do dalsiho volani `dl*`
+    /// v tomtez vlakne.
     pub dlerror: unsafe extern "C" fn() -> *const u8,
     /// `dladdr(adresa, &mut DlInfo)`: nenulove = adresa lezi v modulu.
     pub dladdr: unsafe extern "C" fn(addr: *const u8, info: *mut DlInfo) -> i32,

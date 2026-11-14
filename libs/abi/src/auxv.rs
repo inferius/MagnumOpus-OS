@@ -14,6 +14,8 @@
 
 /// Konec vektoru.
 pub const AT_NULL: u64 = 0;
+/// Polozka bez vyznamu (prectena se preskoci).
+pub const AT_IGNORE: u64 = 1;
 /// Adresa programovych hlavicek programu (uz s bazi).
 pub const AT_PHDR: u64 = 3;
 /// Velikost programove hlavicky (56).

@@ -105,6 +105,36 @@ pub fn build_tests(opts: &Options) -> Result<Vec<(String, Vec<u8>)>> {
         .file(src.join("crt.c"))
         .file(src.join("missing.c"))
         .link(t, &out, &missing, &Link::pie().needs(&none))?;
+    // DL-4b: knihovny pro dlopen (dynamicke TLS, initial-exec do rezervy,
+    // prilis velke initial-exec) a program pro test rezervy.
+    let plug = out.join("libdlplug.so.1");
+    let mut b = Build::new("dlplug").file(src.join("plug.c")).file(src.join("plug_gd.c"));
+    if a.name == "x86_64" {
+        // TLSDESC i na x86_64 (vychozi je __tls_get_addr; plug_gd.c ho
+        // pouzije stejne, model je na jednotku - tady pro obe).
+        b = b.flag("-mtls-dialect=gnu2");
+    }
+    b.link(t, &out, &plug, &Link::shared("libdlplug.so.1").needs(&lib2))?;
+    let plug_gd = out.join("libdlplug-gd.so.1");
+    Build::new("dlplug-gd")
+        .file(src.join("plug.c"))
+        .file(src.join("plug_gd.c"))
+        .link(t, &out, &plug_gd, &Link::shared("libdlplug-gd.so.1").needs(&lib2))?;
+    let stat = out.join("libdlstatic.so.1");
+    Build::new("dlstatic")
+        .file(src.join("static.c"))
+        .flag("-ftls-model=initial-exec")
+        .link(t, &out, &stat, &Link::shared("libdlstatic.so.1").needs(&lib2))?;
+    let big = out.join("libdlbig.so.1");
+    Build::new("dlbig")
+        .file(src.join("big.c"))
+        .flag("-ftls-model=initial-exec")
+        .link(t, &out, &big, &Link::shared("libdlbig.so.1").needs(&lib2))?;
+    let prog_dl = out.join("dltest-dl");
+    Build::new("dltest-dl")
+        .file(src.join("crt.c"))
+        .file(src.join("main_dl.c"))
+        .link(t, &out, &prog_dl, &Link::pie().needs(&lib2))?;
     let read = |p: &PathBuf| std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()));
     let rust = build_rust_test(opts, &[lib.clone(), lib2.clone()])?;
     // libdlnone se do obrazu zamerne nedava (test chybejici knihovny).
@@ -114,5 +144,10 @@ pub fn build_tests(opts: &Options) -> Result<Vec<(String, Vec<u8>)>> {
         (String::from("lib/libdltest.so.1"), read(&lib)?),
         (String::from("dltest"), read(&prog)?),
         (String::from("dltest-missing"), read(&missing)?),
+        (String::from("lib/libdlplug.so.1"), read(&plug)?),
+        (String::from("lib/libdlplug-gd.so.1"), read(&plug_gd)?),
+        (String::from("lib/libdlstatic.so.1"), read(&stat)?),
+        (String::from("lib/libdlbig.so.1"), read(&big)?),
+        (String::from("dltest-dl"), read(&prog_dl)?),
     ])
 }

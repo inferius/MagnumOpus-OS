@@ -1756,6 +1756,7 @@ dependencies = [
  "elf",
  "libdproto",
  "libos",
+ "linked_list_allocator",
 ]
 
 [[package]]

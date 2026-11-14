@@ -81,6 +81,17 @@ fn minimal_manifest_has_no_network() {
     assert!(!m.jit, "JIT jen kdyz ho manifest vyslovne chce");
     let j = Manifest::parse("[app]\nid = \"org.x\"\njit = true\n").unwrap();
     assert!(j.jit);
+    assert_eq!(m.static_tls_reserve, None);
+}
+
+#[test]
+fn static_tls_reserve() {
+    let m = Manifest::parse("[app]\nid = \"org.x\"\nstatic_tls_reserve = \"8K\"\n").unwrap();
+    assert_eq!(m.static_tls_reserve, Some(8192));
+    let m = Manifest::parse("[app]\nid = \"org.x\"\nstatic_tls_reserve = \"64K\"\n").unwrap();
+    assert_eq!(m.static_tls_reserve, Some(65536));
+    assert!(Manifest::parse("[app]\nid = \"org.x\"\nstatic_tls_reserve = \"65K\"\n").is_err());
+    assert!(Manifest::parse("[app]\nid = \"org.x\"\nstatic_tls_reserve = \"hodne\"\n").is_err());
 }
 
 #[test]

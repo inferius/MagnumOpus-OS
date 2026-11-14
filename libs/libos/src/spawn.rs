@@ -215,6 +215,10 @@ pub struct Options {
     pub stack_size: u64,
     /// Trida planovace vsech vlaken procesu (nastavi se pred startem).
     pub qos: Option<crate::sched::Qos>,
+    /// Rezerva statickeho TLS pro `dlopen` modulu s initial-exec (manifest
+    /// `[app] static_tls_reserve`; `None` = vychozi 2 KiB, zavadec omezi na
+    /// 64 KiB). Jen program se zavadecem.
+    pub static_tls_reserve: Option<u64>,
 }
 
 impl Default for Options {
@@ -222,6 +226,7 @@ impl Default for Options {
         Self {
             stack_size: STACK_SIZE,
             qos: None,
+            static_tls_reserve: None,
         }
     }
 }
@@ -324,7 +329,9 @@ pub fn spawn_with_thread(
     // Program se zavadecem: oba na nahodne baze, auxv pro zavadec.
     let mut loader = None;
     if dynamic {
-        loader = Some(map_with_loader(&process, image, &elf, page)?);
+        let mut l = map_with_loader(&process, image, &elf, page)?;
+        l.tls_reserve = opts.static_tls_reserve;
+        loader = Some(l);
     } else {
         map_image(&process, image, &elf, page, 0, false)?;
     }
@@ -408,6 +415,8 @@ struct Loader {
     entry: u64,
     ld_base: u64,
     ld_entry: u64,
+    /// `AT_MO_TLS_RESERVE` (`None` = vychozi zavadece).
+    tls_reserve: Option<u64>,
 }
 
 impl Loader {
@@ -425,6 +434,11 @@ impl Loader {
             (AT_RANDOM, 0),
             // Misto pro tabulku zavadece (vyplni ld.so, abi::loader).
             (abi::loader::AT_MO_LOADER, 0),
+            // Rezerva statickeho TLS (bez volby AT_IGNORE).
+            match self.tls_reserve {
+                Some(r) => (abi::loader::AT_MO_TLS_RESERVE, r),
+                None => (AT_IGNORE, 0),
+            },
             (AT_NULL, 0),
         ];
         let words = 3 + 2 * pairs.len();
@@ -488,6 +502,7 @@ fn map_with_loader(process: &Process, image: &[u8], elf: &elf::ElfFile, page: u6
             entry: base + elf.entry,
             ld_base,
             ld_entry: ld_base + ld_entry,
+            tls_reserve: None,
         });
     }
     #[allow(unreachable_code)]

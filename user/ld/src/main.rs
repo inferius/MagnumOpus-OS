@@ -6,14 +6,15 @@
 //! pred startovni zpravu zpravu zavadece. Zavadec:
 //!
 //! 1. se sam zrelokuje (je static-PIE, [`start`]),
-//! 2. precte zpravu zavadece (handle procesu, initfs jen pro cteni),
-//! 3. nahraje `DT_NEEDED` do sirky z initfs (`lib/<soname>`) na nahodne
-//!    baze, kod zapecetene (W^X),
+//! 2. precte zpravu zavadece (handle procesu, spojeni s libd),
+//! 3. nahraje `DT_NEEDED` do sirky od sluzby knihoven libd na nahodne
+//!    baze,
 //! 4. rozlozi staticke TLS vsech modulu a nastavi ukazatel vlakna,
-//! 5. provede relokace (vse hned, `BIND_NOW`), RELRO prepne na jen pro
-//!    cteni, zavola inicializatory (zavislosti napred),
-//! 6. zavre sve handly, odmapuje initfs a skoci na vstup programu se stejnym
-//!    bootstrap kanalem (startovni zpravu cte az program).
+//! 5. provede relokace (vse hned, `BIND_NOW`), zapeceti kod a RELRO,
+//!    zavola inicializatory (zavislosti napred),
+//! 6. skoci na vstup programu se stejnym bootstrap kanalem (startovni zpravu
+//!    cte az program); za behu obsluhuje tabulku `abi::loader` (vlakna,
+//!    `dlopen`, `dlsym` ...).
 //!
 //! Chyba = hlaska `ld.so: ...` v logu a konec procesu s kodem
 //! `abi::auxv::EXIT_LOAD_FAILED`.
@@ -23,9 +24,11 @@
 
 extern crate alloc;
 
-mod bump;
+mod dl;
+mod heap;
 mod iface;
 mod load;
+mod module;
 mod start;
 mod tls;
 

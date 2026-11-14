@@ -16,6 +16,7 @@ pub const TESTS: &[Test] = &[
     ("dynamicke linkovani: chybejici knihovna -> kod 127", missing_library),
     ("dynamicke linkovani: vlakna libos s TLS knihoven, dl_iterate_phdr, r_debug, fini", rust_program),
     ("dynamicke linkovani: libd sdili sablony knihoven mezi procesy", libd_shares),
+    ("dynamicke linkovani: rezerva statickeho TLS z voleb spusteni (manifest)", tls_reserve),
 ];
 
 fn deadline() -> Option<u64> {
@@ -53,7 +54,12 @@ fn missing_library(s: &Startup) -> TestResult {
 fn rust_program(s: &Startup) -> TestResult {
     let code = run(s, "dltest-rs")?;
     // Bity viz user/dltest-rs/src/main.rs (E_*).
-    check_eq!(code, 0, "dltest-rs: 1 hlavni vlakno, 2 TLS vlaken, 4 tabulka zavadece, 8 dl_iterate_phdr, 16 r_debug, 32 fini, 64 vlakna, 128 dlopen/dladdr, 256 pecet kodu/RELRO");
+    check_eq!(
+        code,
+        0,
+        "dltest-rs: 1 hlavni vlakno, 2 TLS vlaken, 4 tabulka zavadece, 8 dl_iterate_phdr, 16 r_debug, 32 fini, 64 vlakna, \
+         128 dl* zaklad/dladdr, 256 pecet kodu/RELRO, 512 dlopen s TLS, 1024 line TLS ve vlaknech, 2048 chyba rezervy"
+    );
     Ok(())
 }
 
@@ -66,5 +72,20 @@ fn libd_shares(s: &Startup) -> TestResult {
     let b = libos::libd::stats().map_err(|e| fail("statistika libd", e))?;
     check_eq!(b.templates, a.templates, "zadna nova sablona pri druhem behu");
     check!(b.hits >= a.hits + 3, alloc::format!("zasahy mezipameti {} -> {}", a.hits, b.hits));
+    Ok(())
+}
+
+/// `dltest-dl` nahraje pres `dlopen` knihovnu se 4 KiB TLS initial-exec:
+/// s vychozi rezervou (2 KiB) odmitnuto s radou v `dlerror` (kod 1),
+/// s rezervou 8 KiB z voleb spusteni (`[app] static_tls_reserve`) uspech.
+fn tls_reserve(s: &Startup) -> TestResult {
+    check_eq!(run(s, "dltest-dl")?, 1, "vychozi rezerva: odmitnuto s radou static_tls_reserve");
+    let fs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
+    let image = fs.find("dltest-dl").ok_or("dltest-dl neni v initfs")?;
+    let job = libos::job::current().map_err(|e| fail("job", e))?;
+    let opts = libos::spawn::Options { static_tls_reserve: Some(8192), ..Default::default() };
+    let (p, _ch) = libos::spawn::spawn_with(&job, "dltest-dl", image, Vec::new(), opts).map_err(|e| fail("spusteni", e))?;
+    let code = p.wait_exit(deadline()).map_err(|e| fail("konec programu", e))?;
+    check_eq!(code, 0, "rezerva 8 KiB: knihovna nahrana a TLS sedi");
     Ok(())
 }

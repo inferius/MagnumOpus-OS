@@ -49,6 +49,7 @@ package without a format change (see
 [app]
 id = "org.magnumopus.netprobe"   # required: a-z A-Z 0-9 . - _
 name = "Network probe"           # for questions to the user
+static_tls_reserve = "8K"        # static TLS reserve for dlopen (default 2K, at most 64K)
 
 [limits]                         # job budget (no section = no limit)
 memory = "16M"                   # user memory
