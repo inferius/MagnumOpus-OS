@@ -9,7 +9,12 @@
 //! `compose` zaznamena do jednoho command bufferu pro kazdou operaci
 //! vazbu sady, push constants a dispatch, mezi nimi barieru na pameti
 //! shaderu; na zacatku bariera po zapisech hosta, na konci pred ctenim
-//! hostem. Odeslani s plotem, cekani `vkGetFenceStatus`.
+//! hostem. Cekani na frontu pres plot jadra (`Venus::wait_queue`).
+//!
+//! `convert_yuv` prevede snimek YUV 4:2:0 (NV12, I420) do povrchu shaderem
+//! `spirv::yuv` (stejne vzorce jako `libs/yuv` na CPU, bit po bitu):
+//! bajty YUV jdou do odkladaciho bufferu, jedna sada deskriptoru
+//! (0 = povrch, 1 = bajty YUV) se pred kazdym prevodem prepise.
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
@@ -63,6 +68,11 @@ pub struct Compositor {
     set_layout: VkDescriptorSetLayout,
     layout: VkPipelineLayout,
     pipeline: VkPipeline,
+    /// Prevod YUV: shader, pipeline (stejny layout), sada a odkladaci buffer.
+    yuv_shader: VkShaderModule,
+    yuv_pipeline: VkPipeline,
+    yuv_set: VkDescriptorSet,
+    yuv_src: Option<Buf>,
     desc_pool: VkDescriptorPool,
     cmd_pool: VkCommandPool,
     cb: VkCommandBuffer,
@@ -188,15 +198,49 @@ impl Compositor {
             )?
             .ret,
         )?;
-        let sizes = [VkDescriptorPoolSize { r#type: VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, descriptor_count: 2 * MAX_SURFACES }];
+        // Prevod YUV: druhy shader se stejnym layoutem (push constants
+        // prevodu jsou kratsi nez rozsah layoutu).
+        const _: () = assert!(spirv::yuv::PUSH_SIZE <= spirv::blend::PUSH_SIZE);
+        let yuv_code = spirv::yuv::shader();
+        let yuv_shader = VkShaderModule(v.new_id());
+        let ysmci = VkShaderModuleCreateInfo { flags: 0, code_size: (yuv_code.len() * 4) as u64, p_code: &yuv_code };
+        check(v.call(|e| cmd::create_shader_module(e, REPLY, device, &ysmci, yuv_shader), cmd::decode_create_shader_module_reply)?.ret)?;
+        let yuv_pipeline = VkPipeline(v.new_id());
+        let ycpci = [VkComputePipelineCreateInfo {
+            stage: VkPipelineShaderStageCreateInfo {
+                stage: VK_SHADER_STAGE_COMPUTE_BIT,
+                module: yuv_shader,
+                p_name: Some("main"),
+                ..Default::default()
+            },
+            layout,
+            base_pipeline_index: -1,
+            ..Default::default()
+        }];
+        check(
+            v.call(
+                |e| cmd::create_compute_pipelines(e, REPLY, device, VkPipelineCache(0), 1, &ycpci, Some(&[yuv_pipeline])),
+                cmd::decode_create_compute_pipelines_reply,
+            )?
+            .ret,
+        )?;
+        // Sady: povrchy + jedna pro prevod YUV.
+        let sizes = [VkDescriptorPoolSize { r#type: VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, descriptor_count: 2 * (MAX_SURFACES + 1) }];
         let desc_pool = VkDescriptorPool(v.new_id());
         let dpci = VkDescriptorPoolCreateInfo {
             flags: VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-            max_sets: MAX_SURFACES,
+            max_sets: MAX_SURFACES + 1,
             pool_size_count: 1,
             p_pool_sizes: &sizes,
         };
         check(v.call(|e| cmd::create_descriptor_pool(e, REPLY, device, &dpci, desc_pool), cmd::decode_create_descriptor_pool_reply)?.ret)?;
+        let yuv_set = VkDescriptorSet(v.new_id());
+        let yuv_layouts = [set_layout];
+        let ydsai = VkDescriptorSetAllocateInfo { descriptor_pool: desc_pool, descriptor_set_count: 1, p_set_layouts: &yuv_layouts };
+        check(
+            v.call(|e| cmd::allocate_descriptor_sets(e, REPLY, device, &ydsai, Some(&[yuv_set])), cmd::decode_allocate_descriptor_sets_reply)?
+                .ret,
+        )?;
         let cmd_pool = VkCommandPool(v.new_id());
         let pci = VkCommandPoolCreateInfo { flags: VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, queue_family_index: family };
         check(v.call(|e| cmd::create_command_pool(e, REPLY, device, &pci, cmd_pool), cmd::decode_create_command_pool_reply)?.ret)?;
@@ -216,6 +260,10 @@ impl Compositor {
             set_layout,
             layout,
             pipeline,
+            yuv_shader,
+            yuv_pipeline,
+            yuv_set,
+            yuv_src: None,
             desc_pool,
             cmd_pool,
             cb,
@@ -334,15 +382,75 @@ impl Compositor {
         self.v.wait_queue(1, FENCE_TIMEOUT)
     }
 
+    /// Prevede snimek YUV (`data`: bajty rovin, offsety a kroky v `push`)
+    /// do povrchu `surface` (`w` x `h` z `push`, krok povrchu) a pocka na GPU.
+    pub fn convert_yuv(&mut self, surface: u32, data: &[u8], push: spirv::yuv::Push) -> Result<()> {
+        let s = self.surfaces.get(&surface).ok_or(Error::Os(libos::Error::NotFound))?;
+        if push.w == 0 || push.h == 0 || push.w > s.w || push.h > s.h || push.dst_stride != s.stride {
+            return Err(Error::Os(libos::Error::InvalidArgs));
+        }
+        let dst = s.buf.buffer;
+        let need = (data.len() as u64).next_multiple_of(4);
+        if self.yuv_src.as_ref().is_none_or(|b| b.blob.size < need) {
+            if let Some(old) = self.yuv_src.take() {
+                free_buf(&mut self.v, self.device, old)?;
+            }
+            self.yuv_src = Some(alloc_buf(&mut self.v, self.device, self.host_type, need)?);
+        }
+        let src = self.yuv_src.as_ref().ok_or_else(err)?;
+        src.blob.map.write_bytes(0, data);
+        let src_buf = src.buffer;
+        let (device, cb, set, pipeline, layout, queue) = (self.device, self.cb, self.yuv_set, self.yuv_pipeline, self.layout, self.queue);
+        let dst_info = [VkDescriptorBufferInfo { buffer: dst, offset: 0, range: VK_WHOLE_SIZE }];
+        let src_info = [VkDescriptorBufferInfo { buffer: src_buf, offset: 0, range: VK_WHOLE_SIZE }];
+        let w0 = VkWriteDescriptorSet {
+            dst_set: set,
+            dst_binding: 0,
+            descriptor_count: 1,
+            descriptor_type: VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            p_buffer_info: &dst_info,
+            ..Default::default()
+        };
+        let w1 = VkWriteDescriptorSet { dst_binding: 1, p_buffer_info: &src_info, ..w0 };
+        let writes = [w0, w1];
+        let cbs = [cb];
+        let submit = [VkSubmitInfo { command_buffer_count: 1, p_command_buffers: &cbs, ..Default::default() }];
+        let groups = (push.w.div_ceil(spirv::yuv::LOCAL), push.h.div_ceil(spirv::yuv::LOCAL));
+        let bytes: Vec<u8> = push.words().iter().flat_map(|w| w.to_le_bytes()).collect();
+        let r = self.v.call(
+            |e| {
+                cmd::update_descriptor_sets(e, 0, device, 2, &writes, 0, &[]);
+                cmd::reset_command_buffer(e, 0, cb, 0);
+                let begin = VkCommandBufferBeginInfo { flags: VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, p_inheritance_info: None };
+                cmd::begin_command_buffer(e, 0, cb, &begin);
+                barrier(e, cb, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+                cmd::cmd_bind_pipeline(e, 0, cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+                cmd::cmd_bind_descriptor_sets(e, 0, cb, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &[set], 0, &[]);
+                cmd::cmd_push_constants(e, 0, cb, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, bytes.len() as u32, &bytes);
+                cmd::cmd_dispatch(e, 0, cb, groups.0, groups.1, 1);
+                barrier(e, cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT | VK_ACCESS_SHADER_READ_BIT);
+                cmd::end_command_buffer(e, 0, cb);
+                cmd::queue_submit(e, REPLY, queue, 1, &submit, VkFence(0));
+            },
+            cmd::decode_queue_submit_reply,
+        )?;
+        check(r.ret)?;
+        self.v.wait_queue(1, FENCE_TIMEOUT)
+    }
+
     /// Uvolni vse na GPU (bloby pred pameti) a vrati spojeni.
     pub fn destroy(mut self) -> Result<Venus> {
         for id in self.surfaces.keys().copied().collect::<Vec<_>>() {
             self.destroy_surface(id)?;
         }
         let device = self.device;
+        if let Some(b) = self.yuv_src.take() {
+            free_buf(&mut self.v, device, b)?;
+        }
         if let Some(frame) = self.frame.take() {
             free_buf(&mut self.v, device, frame)?;
         }
+        let (yuv_pipeline, yuv_shader) = (self.yuv_pipeline, self.yuv_shader);
         let (fence, cmd_pool, cb, desc_pool, pipeline, layout, set_layout, shader, instance) = (
             self.fence,
             self.cmd_pool,
@@ -360,6 +468,8 @@ impl Compositor {
             cmd::destroy_command_pool(e, 0, device, cmd_pool);
             cmd::destroy_descriptor_pool(e, 0, device, desc_pool);
             cmd::destroy_pipeline(e, 0, device, pipeline);
+            cmd::destroy_pipeline(e, 0, device, yuv_pipeline);
+            cmd::destroy_shader_module(e, 0, device, yuv_shader);
             cmd::destroy_pipeline_layout(e, 0, device, layout);
             cmd::destroy_descriptor_set_layout(e, 0, device, set_layout);
             cmd::destroy_shader_module(e, 0, device, shader);

@@ -80,6 +80,7 @@ members = [
     "libs/iova",
     "libs/bufdesc",
     "libs/renderproto",
+    "libs/yuv",
     "libs/schedcore",
     "libs/term",
     "libs/virtio",

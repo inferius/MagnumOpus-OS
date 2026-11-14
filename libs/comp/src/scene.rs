@@ -849,5 +849,8 @@ pub(crate) fn op_of(m: &ClientMsg) -> u32 {
         ClientMsg::MenuUpdate { .. } => op::MENU_UPDATE,
         ClientMsg::Clipboard { .. } => op::CLIPBOARD,
         ClientMsg::WindowSize { .. } => op::WINDOW_SIZE,
+        // Prevadi a zpracovava sluzba compd (YUV, ploty); sem nechodi.
+        ClientMsg::BufferCreateDesc { .. } => op::BUFFER_CREATE_DESC,
+        ClientMsg::SyncPoints { .. } => op::SYNC_POINTS,
     }
 }

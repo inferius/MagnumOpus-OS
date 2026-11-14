@@ -38,6 +38,10 @@ pub mod op {
     pub const CLIPBOARD: u32 = 20;
     /// Pozadovana velikost okna (`WindowSize`).
     pub const WINDOW_SIZE: u32 = 21;
+    /// Buffer s popisem `bufdesc` (BGRA, NV12, I420; `BufferCreateDesc`).
+    pub const BUFFER_CREATE_DESC: u32 = 22;
+    /// Ploty pristiho `COMMIT` okna (`SyncPoints`).
+    pub const SYNC_POINTS: u32 = 23;
     // Kompozitor -> aplikace.
     pub const WELCOME: u32 = 100;
     pub const CONFIGURE: u32 = 101;
@@ -559,6 +563,20 @@ pub enum ClientMsg {
     /// otevreni (bez probliknuti), pozdeji je to zadost o zmenu; kompozitor
     /// odpovi `CONFIGURE` (maximalizovanemu oknu ji zapamatuje na obnoveni).
     WindowSize { window: u32, w: u32, h: u32, min_w: u32, min_h: u32, max_frac_w: u16, max_frac_h: u16 },
+    /// Buffer popsany `bufdesc` (handle VMO v handlech zpravy): BGRA
+    /// (`ARGB8888`, `XRGB8888`), NV12 a I420 (`YU12`) s modifikatorem
+    /// `LINEAR`. Kompozitor popis overi proti velikosti VMO; YUV prevede pri
+    /// commitu na BGRA (BT.709, omezeny rozsah).
+    BufferCreateDesc { buffer: u32, desc: bufdesc::BufDesc },
+    /// Ploty pristiho `COMMIT` okna `window` (explicitni synchronizace).
+    /// Handly zpravy: plot ziskani (pravo `WAIT`), je-li `acquire`, pak
+    /// plot uvolneni (pravo `SIGNAL`), je-li `release`.
+    /// - ziskani: kompozitor commit pouzije, az plot dosahne hodnoty
+    ///   (producent dopsal buffery); do te doby ukazuje predchozi stav
+    ///   a dalsi zpravy aplikace cekaji za commitem,
+    /// - uvolneni: kompozitor plot posune, az buffery pripojene timto
+    ///   commitem prestane cist (YUV hned po prevodu, BGRA po `RELEASED`).
+    SyncPoints { window: u32, acquire: Option<u64>, release: Option<u64> },
 }
 
 /// Zprava kompozitor -> aplikace.
@@ -735,6 +753,21 @@ impl ClientMsg {
                 w = Writer::op(op::WINDOW_SIZE);
                 w.u32(*window).u32(*sw).u32(*h).u32(*min_w).u32(*min_h).u16(*max_frac_w).u16(*max_frac_h);
             }
+            BufferCreateDesc { buffer, desc } => {
+                w = Writer::op(op::BUFFER_CREATE_DESC);
+                w.u32(*buffer);
+                desc.write(&mut w);
+            }
+            SyncPoints { window, acquire, release } => {
+                w = Writer::op(op::SYNC_POINTS);
+                w.u32(*window);
+                for p in [acquire, release] {
+                    match p {
+                        Some(v) => w.u8(1).u64(*v),
+                        None => w.u8(0).u64(0),
+                    };
+                }
+            }
         }
         w.finish()
     }
@@ -845,6 +878,25 @@ impl ClientMsg {
                 max_frac_w: r.u16()?,
                 max_frac_h: r.u16()?,
             },
+            op::BUFFER_CREATE_DESC => BufferCreateDesc {
+                buffer: r.u32()?,
+                desc: bufdesc::BufDesc::read(&mut r).map_err(|_| Error::InvalidArgs)?,
+            },
+            op::SYNC_POINTS => {
+                let window = r.u32()?;
+                let mut point = || -> Result<Option<u64>> {
+                    let present = r.u8()?;
+                    let v = r.u64()?;
+                    match present {
+                        0 if v == 0 => Ok(None),
+                        1 => Ok(Some(v)),
+                        _ => Err(Error::InvalidArgs),
+                    }
+                };
+                let acquire = point()?;
+                let release = point()?;
+                SyncPoints { window, acquire, release }
+            }
             _ => return Err(Error::NotSupported),
         };
         if !r.is_empty() {

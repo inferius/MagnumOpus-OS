@@ -13,7 +13,7 @@ ve složce, kde pracuješ.
 - `libs/` - ~70 crate. `no_std` knihovny, většina testovatelná na hostiteli:
   - rozhraní: `abi` (jádro<->userspace), `boot-info`, `libos` (API pro programy), `osrt` (std), `*proto` (protokoly služeb), `svcclient`
   - souborový systém: `fs`, `fsproto`, `osfs-proto`, `initfs`
-  - GUI a GPU: `comp` (jádro kompozitoru), `ui`, `gfx`, `font`, `theme`, `guiproto`, `vkcomp`, `renderproto` (třída render), `bufdesc` (popis sdíleného bufferu)
+  - GUI a GPU: `comp` (jádro kompozitoru), `ui`, `gfx`, `font`, `theme`, `guiproto`, `vkcomp`, `renderproto` (třída render), `bufdesc` (popis sdíleného bufferu), `yuv` (převod videa na BGRA)
   - shell a terminál: `shlang`, `term`, `agentsh`; účty: `accounts`; ovladače: `driverkit`, `pci`, `virtio`, `nic`, ...
 - `user/` - procesy userspace: `init` (první proces, supervisor, testy userspace), služby (`fsd`, `netd`, `compd`, `gpud`, `termd`, `accountd`, `devmgr`, `inputd`, `logd`, `timed`, `launchd`, ...), ovladače (`virtio-*`, `nvme`, `ahci`, `xhci`, `e1000e`, `hda`, ...), Soubory (`gui-files` + `files-copy`), ukázky (`echo`, `gui-demo`).
 - `xtask/` - `cargo xtask`: build, obraz disku, QEMU, testy, docs, USB, VMware.

@@ -14,7 +14,7 @@ error codes in [errors.md](errors.md).
 |---|---|---|
 | 6a-1 | fence object: `u64` timeline, sticky error, abandonment when the last producer goes away, `FENCE_WAIT` (one / all items, deadline), port registration, `SIGNALED` for `OBJECT_WAIT_*`; wrappers `libos::Fence`, `libos::fence::{wait_any, wait_all}` | **[verified in QEMU]** x86_64 and aarch64 (kernel suite `objekty`, tests `plot: ...`; userspace suite `ploty`) |
 | 6a-3 | fences in `renderproto` messages (Venus: virtio fence -> kernel fence, `ring_idx > 0`) | **[designed]** |
-| 6a-4 | acquire and release fences in the window protocol (zero-copy video) | **[designed]** |
+| 6a-4 | acquire and release fences in the window protocol (`SYNC_POINTS`, [gui.md](gui.md#buffers-with-a-description-and-explicit-synchronisation-video)) | **[verified in QEMU]** x86_64 and aarch64 (suite `gui`, test `compd: video NV12 a I420 ...`) |
 | LinuxKPI | `dma_fence`, `sync_file`, `drm_syncobj` of imported C as this object | **[designed]** |
 
 ## Model

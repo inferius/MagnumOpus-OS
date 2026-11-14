@@ -21,6 +21,7 @@ mod peers;
 mod screen;
 mod snapshot;
 mod splash;
+mod video;
 
 use alloc::format;
 use alloc::string::String;
@@ -152,6 +153,10 @@ impl Service {
             if let Some(t) = src.poll(now) {
                 deadline = Some(deadline.map_or(t, |d| d.min(t)));
             }
+        }
+        // Podrzeny commit (plot ziskani): termin ACQUIRE_TIMEOUT.
+        if let Some(t) = self.peers.next_deadline() {
+            deadline = Some(deadline.map_or(t, |d| d.min(t)));
         }
         if self.peers.has_backlog() {
             // Odlozene zpravy zkusit znovu brzy (kanal nema signal "volno").

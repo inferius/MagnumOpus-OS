@@ -17,7 +17,7 @@ bod 8).
 | Venus | `SUBMIT` na frontu = `ring_idx`; dokončení jen přes ploty jádra; čekání na frontu Vulkanu (`Venus::wait_queue`) místo dotazování `vkGetFenceStatus` | **[ověřeno v QEMU]** WSL (`cargo xtask test --qemu-wsl --gpu venus`) |
 | termín zaseknutí | `HANG_TIMEOUT` 10 s: výstupní ploty `FENCE_FAILED`, log `hang` | **[implementováno]** (bez testu: renderer v QEMU se nezasekne) |
 | gpud | služba pod supervisorem; poskytovatele vydá ovladač jednou (`OPEN_PROVIDER`), init drží konec, gpud duplikát | **[ověřeno v QEMU]** (Venus ve WSL) |
-| `IMPORT_BUFFER` u Venusu | buffer klienta (VMO s právem `DMA` + `bufdesc`) jako blob `GUEST` nad `DMA_MAP` | **[navrženo]** krok 6a-4 (video do compd bez kopie) a NVK; dnes `NOT_SUPPORTED` |
+| `IMPORT_BUFFER` u Venusu | buffer klienta (VMO s právem `DMA` + `bufdesc`) jako blob `GUEST` nad `DMA_MAP` | **[navrženo]** s NVK nebo skutečnou GPU (video v 6a-4 jde do kompozitoru přes okenní protokol, ne přes GPU); dnes `NOT_SUPPORTED` |
 | oprávnění aplikací | manifest `[gpu] render = true`, kvóty na klienta, spojení přes lístky z launchd | **[navrženo]** (dnes render uzel otevírá jen init: kompozitor, testy) |
 | obnova klientů gpud | po pádu gpud se klienti připojí znovu přes lístky (`libs/svcclient`) | **[navrženo]**; dnes gpud restartuje supervisor a klienty má jen init |
 
@@ -89,7 +89,7 @@ příkazy skončí `FENCE_FAILED`.
 | `QUERY` | klíč, a, b | data | `CAPSET` (a = id, b = verze): obsah capsetu |
 | `CREATE_CONTEXT` | uAPI | `CONTEXT` | kontext s capsetem |
 | `CREATE_BUFFER` | paměť, příznaky (`MAPPABLE`...), id ovladače, velikost | `BUFFER` (id, velikost, `map_info`) + VMO, když `MAPPABLE` | blob `HOST3D`, id ovladače = `VkDeviceMemory` |
-| `IMPORT_BUFFER` | `bufdesc` + VMO v handlech | `BUFFER` | `NOT_SUPPORTED` (krok 6a-4 a NVK) |
+| `IMPORT_BUFFER` | `bufdesc` + VMO v handlech | `BUFFER` | `NOT_SUPPORTED` (přijde s NVK) |
 | `DESTROY` | buffer | `DONE` | odvolání okna, zničení blobu |
 | `BIND` | data ovladače (`VM_BIND`) | `DONE` | nic (virtio-gpu nemá adresní prostor GPU) |
 | `SUBMIT` | fronta, hodnoty plotů k čekání a k signalizaci, data (nejvýš 60 KiB, násobek 4) | `SUBMITTED` hned | fronta = `ring_idx` (0 = osa CPU, 1..63 = fronty Vulkanu) |

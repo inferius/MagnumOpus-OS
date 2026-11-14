@@ -18,6 +18,7 @@
 extern crate alloc;
 
 pub mod blend;
+pub mod yuv;
 pub mod op;
 
 #[cfg(test)]

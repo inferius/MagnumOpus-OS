@@ -108,3 +108,27 @@ fn reference_matches_gfx() {
     let p = Push { dw: 4, ..Default::default() };
     assert_eq!(p.words().len(), blend::PUSH_WORDS);
 }
+
+#[test]
+fn yuv_reference_matches_libs_yuv_exactly() {
+    // Vsechny kombinace Y, U, V: shader (bez znamenka, BIAS) = libs/yuv.
+    for y in 0..=255u8 {
+        for u in 0..=255u8 {
+            for v in 0..=255u8 {
+                assert_eq!(yuv::reference(y, u, v), ::yuv::pixel(y, u, v), "{y} {u} {v}");
+            }
+        }
+    }
+}
+
+#[test]
+fn yuv_shader_is_well_formed() {
+    let m = yuv::shader();
+    assert_eq!(m[0], 0x0723_0203, "magicke cislo");
+    let ins = instructions(&m);
+    assert_eq!(ins.last().unwrap().0, op::FUNCTION_END);
+    // Pro rucni kontrolu: spirv-val target/spirv-yuv.spv
+    let bytes: Vec<u8> = m.iter().flat_map(|w| w.to_le_bytes()).collect();
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/spirv-yuv.spv");
+    let _ = std::fs::write(path, bytes);
+}

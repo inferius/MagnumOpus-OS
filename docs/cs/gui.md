@@ -126,6 +126,39 @@ Pixel je `u32` v pořadí bajtů B, G, R, A (formát virtio-gpu
   dostala jiný buffer nebo zanikla). Knihovna `ui` proto kreslí střídavě
   do dvou bufferů a na kompozitor nikdy nečeká.
 
+### Buffery s popisem a explicitní synchronizace (video)
+
+**[ověřeno v QEMU]** krok 6a-4 (test `compd: video NV12 a I420 s ploty
+získání a uvolnění`, x86_64 i aarch64):
+
+- **`BUFFER_CREATE_DESC`** nese popis `bufdesc` ([sdilene-buffery.md](sdilene-buffery.md))
+  a handle VMO. Kompozitor bere `ARGB8888` a `XRGB8888` (BGRA, první rovina
+  na offsetu 0) a YUV 4:2:0 `NV12` a `YU12` (I420), vždy s modifikátorem
+  `LINEAR`; jiný formát je `NOT_SUPPORTED`.
+- **Ověření:** popis se ověří (`validate`) a VMO se namapuje jen pro čtení
+  přesně v potřebné velikosti. Menší VMO mapování odmítne a klient
+  dostane `ERROR`.
+- **YUV:** kompozitor drží vlastní stínový buffer BGRA (paměť
+  kompozitoru). Do něj převede snímek při commitu, který buffer připojil
+  nebo poškodil (`libs/yuv`: SIMD, BT.709 s omezeným rozsahem). Zdroj
+  YUV se pak už nečte.
+- **`SYNC_POINTS`** platí pro příští `COMMIT` okna. Handly zprávy jsou
+  plot získání (právo `WAIT`) a plot uvolnění (právo `SIGNAL`), každý
+  s hodnotou ([ploty.md](ploty.md)).
+  - **Získání:** commit (i všechny další zprávy klienta) kompozitor
+    podrží, dokud plot nedosáhne hodnoty. Mezitím ukazuje předchozí stav
+    okna a ostatní okna běží dál. Termín je 10 s, stejně jako u třídy
+    render. Když plot skončí chybou, je opuštěný nebo vyprší termín,
+    commit se použije stejně (nejhorší je nedokreslený snímek vlastního
+    okna) a klient dostane `ERROR` (`COMMIT`, kód plotu).
+  - **Uvolnění:** kompozitor plot posune, až buffery připojené tímto
+    commitem přestane číst: YUV hned po převodu, BGRA po `RELEASED`.
+- **Převod na GPU:** `vkcomp` umí převod YUV shaderem `spirv::yuv`
+  (bit po bitu stejně jako CPU, test vk-probe ve WSL). Kompozitor ho zatím
+  nepoužívá ani při skládání na GPU. U Venusu by data YUV stejně šla
+  kopií do bloba hostitele; skutečný přínos dá až import bufferu na GPU
+  (`IMPORT_BUFFER`, [render.md](render.md)) **[navrženo]**.
+
 ## Strom vrstev
 
 Okno je strom **vrstev**. Obsah vrstev kreslí aplikace, ale **posun,
@@ -1154,6 +1187,8 @@ Aplikace -> kompozitor:
 | 16 | `SYNC_GROUP` | počet účastníků |
 | 17 | `PONG` | serial |
 | 18 | `ACTION_RESULT` | volání, výsledek |
+| 22 | `BUFFER_CREATE_DESC` | buffer, popis `bufdesc` (72 B) + handle VMO |
+| 23 | `SYNC_POINTS` | okno, plot získání (příznak, hodnota), plot uvolnění (příznak, hodnota) + handly plotů |
 
 Kompozitor -> aplikace:
 

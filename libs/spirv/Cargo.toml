@@ -9,3 +9,4 @@ description = "Vlastni minimalni assembler SPIR-V a shadery systemu (skladani ko
 
 [dev-dependencies]
 gfx = { path = "../gfx" }
+yuv = { path = "../yuv" }

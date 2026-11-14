@@ -685,6 +685,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "iova",
             "--package",
+            "yuv",
+            "--package",
             "venus",
             "--package",
             "spirv",

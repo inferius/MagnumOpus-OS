@@ -32,6 +32,7 @@ mod fs_perf;
 mod fs_recovery;
 mod gui;
 mod gui_gpu;
+mod gui_video;
 mod gui_recovery;
 mod gui_palette;
 mod gui_snapshot;

@@ -1,0 +1,8 @@
+[package]
+name = "yuv"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Prevod YUV 4:2:0 (NV12, I420) na BGRA, BT.709 omezeny rozsah, SIMD"
+
+[dependencies]
