@@ -76,6 +76,30 @@ impl<M: Clone> Ui<M> {
         }
     }
 
+    /// Cast prvku `i` pod bodem okna `(x, y)`, jejiz zvyrazneni se kresli
+    /// zvlast: zalozka, radek nebo posuvnik tabulky. `None` = prvek nema
+    /// casti nebo bod neni nad zadnou.
+    pub(crate) fn hover_part(&self, i: usize, x: i32, y: i32) -> Option<u32> {
+        let (sx, sy) = self.to_space(i, x, y);
+        match self.elems[i].kind {
+            ElemKind::Tabs { .. } => self.part_rects(i).iter().position(|p| p.contains(sx, sy)).map(|k| k as u32),
+            ElemKind::Table(_) => self.table_part(i, sx, sy),
+            _ => None,
+        }
+    }
+
+    /// Prepocet najeti podle ukazatele (prvek i jeho cast); `true` = zmena,
+    /// ktera potrebuje prekresleni. Najeti se meni i pri pohybu uvnitr
+    /// jednoho prvku (z jedne zalozky na druhou), ne jen pri zmene prvku.
+    pub(crate) fn update_hover(&mut self) -> bool {
+        let (x, y) = self.pointer;
+        let h = if x >= 0 { self.hit(x, y) } else { None };
+        let part = h.and_then(|i| self.hover_part(i, x, y));
+        let changed = h != self.hover || part != self.hover_part;
+        (self.hover, self.hover_part) = (h, part);
+        changed
+    }
+
     /// Krizek zalozky `k` (jen s `on_close`).
     fn tab_close(&self, i: usize, k: usize) -> Option<Rect> {
         let ElemKind::Tabs { on_close: Some(_), .. } = &self.elems[i].kind else { return None };

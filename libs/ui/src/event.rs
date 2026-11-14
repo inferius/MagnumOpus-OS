@@ -132,11 +132,10 @@ impl<M: Clone> Ui<M> {
                 if self.field_drag(x, y) {
                     r.redraw = true;
                 }
-                let h = self.hit(x, y);
-                if h != self.hover {
-                    self.hover = h;
+                if self.update_hover() {
                     r.redraw = true;
                 }
+                let h = self.hover;
                 if self.tip_shown.is_some() && self.tip.map(|t| t.0) != h.map(|i| self.elems[i].key) {
                     r.redraw = true;
                 }
@@ -144,7 +143,7 @@ impl<M: Clone> Ui<M> {
             }
             InputEvent::PointerLeave => {
                 self.pointer = (-1, -1);
-                if self.hover.take().is_some() {
+                if self.update_hover() {
                     r.redraw = true;
                 }
             }
@@ -243,6 +242,8 @@ impl<M: Clone> Ui<M> {
                 self.dragging = None;
                 self.key_pressed = None;
                 self.hover = None;
+                self.hover_part = None;
+                self.hover_part = None;
                 self.active = false;
                 r.redraw = true;
             }
