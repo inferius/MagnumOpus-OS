@@ -240,6 +240,61 @@ v okamžiku splnění u32, rezerva u32. Prázdný port čeká do termínu
 `ACCESS_DENIED`, `WRONG_TYPE`, `TIMED_OUT`, `CANCELED`, `BAD_ADDRESS`
 (paket je pak ztracený).
 
+## Ploty
+
+Plot je časová osa `u64` pro explicitní synchronizaci mezi procesy
+(producent posouvá, spotřebitel čeká). Model, opuštění a pravidla čekání:
+[ploty.md](ploty.md). **[ověřeno v QEMU]** x86_64 i aarch64 (sada `ploty`,
+self-testy jádra `plot: ...`). Obaly: `libos::Fence`,
+`libos::fence::{wait_any, wait_all}`.
+
+### `FENCE_CREATE`
+
+`(initial, flags) -> handle`. Nový plot s hodnotou `initial` a právy
+`DUPLICATE`, `TRANSFER`, `WAIT`, `SIGNAL`; `flags` musí být 0. Spotřebiteli
+se předává duplikát bez `SIGNAL`. Chyby: `INVALID_ARGS`, `NO_RESOURCES`
+(rozpočet jádra jobu), `NO_MEMORY`.
+
+### `FENCE_SIGNAL`
+
+`(fence, value, flags) -> 0`. Bez příznaků posune hodnotu na `value`
+(musí být >= dosažené; stejná = nic). S `fence::signal::FAILED` označí bod
+`value` (větší než dosažená hodnota) za neúspěšný: trvalá chyba, čekání na
+nedosaženou hodnotu skončí `FENCE_FAILED`. Probudí čekající, jejichž
+hodnota je rozhodnutá, a nastaví `SIGNALED` (hodnota >= 1 nebo chyba).
+Vyžaduje `SIGNAL`. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`,
+`INVALID_ARGS` (hodnota zpět, chyba na dosaženém bodu, neznámý příznak),
+`BAD_STATE` (plot už skončil chybou).
+
+### `FENCE_WAIT`
+
+`(items_ptr, count, flags, deadline, out_index_ptr) -> index`. Čeká na
+položky `fence::WaitItem { handle: u32, _reserved: u32, value: u64 }`
+(1 až 64). Bez příznaků stačí jedna dosažená hodnota a výsledek je její
+index; s `fence::wait::ALL` čeká na všechny a vrací 0. Položky se
+kontrolují v pořadí; chyba plotu (`FENCE_FAILED`, `FENCE_ABANDONED`)
+čekání ukončí a index rozhodující položky se zapíše na `out_index_ptr`
+(u32, 0 = nezapisovat). `deadline` = 0: jen zkusit. Vyžaduje `WAIT`
+u všech handlů. Chyby: navíc `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`
+(handle není plot), `INVALID_ARGS` (count 0 nebo > 64, neznámý příznak),
+`TIMED_OUT`, `CANCELED`, `BAD_ADDRESS`, `NO_MEMORY`.
+
+### `FENCE_WAIT_ASYNC`
+
+`(fence, value, port, key) -> 0`. Jednorázová registrace: až bude hodnota
+`value` rozhodnutá (dosažená, chyba nebo opuštění), port dostane paket
+s `key` a signály plotu; výsledek zjistí `FENCE_QUERY`. Rozhodnutá hodnota
+= paket hned. Místo a rozpočet jako u `OBJECT_WAIT_ASYNC`. Vyžaduje `WAIT`
+na plotu a `WRITE` na portu. Chyby: `BAD_HANDLE`, `ACCESS_DENIED`,
+`WRONG_TYPE`, `NO_RESOURCES`, `NO_MEMORY`.
+
+### `FENCE_QUERY`
+
+`(fence, out_ptr) -> 0`. Zapíše `fence::Info` (24 B): dosažená hodnota
+u64, první neúspěšný bod u64 (0 = bez chyby), stav i32 (0,
+`FENCE_FAILED` nebo `FENCE_ABANDONED`), rezerva u32. Vyžaduje `WAIT`.
+Chyby: `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`, `BAD_ADDRESS`.
+
 ## Kanály
 
 Zpráva = data (max. 64 KiB) + handly (max. 64). Každý konec má vlastní

@@ -41,7 +41,7 @@ Obraz na Intelu řeší vlastní ovladač ([Nastavení obrazu](displej.md)).
 <rect class="box" x="505" y="165" width="250" height="70" rx="4"/><text class="t" x="630" y="187" text-anchor="middle">třídy zařízení</text><text class="m" x="630" y="205" text-anchor="middle">displej (jako intel-display),</text><text class="m" x="630" y="221" text-anchor="middle">render (uAPI nouveau, VM_BIND)</text>
 <rect class="warn" x="235" y="250" width="520" height="66" rx="4"/><text class="t" x="495" y="272" text-anchor="middle">driverkit: BAR (WC), MSI-X, DMA po kusech, doména IOMMU,</text><text class="m" x="495" y="290" text-anchor="middle">ploty a sdílené buffery jádra, služba firmwaru</text><text class="m" x="495" y="306" text-anchor="middle">(LinuxKPI až pro AMD a 3D na Intelu, uvnitř jejich procesu)</text>
 <path class="ln" d="M495 330 L495 358" marker-end="url(#gn1)"/>
-<rect class="box" x="10" y="360" width="760" height="50" rx="6"/><text class="t b" x="390" y="382" text-anchor="middle">jádro</text><text class="m" x="390" y="400" text-anchor="middle">Resource, BAR (WC), MSI-X, DMA po kusech, doména IOMMU, objekty plotů a bufferů, firmware z FS</text>
+<rect class="box" x="10" y="360" width="760" height="50" rx="6"/><text class="t b" x="390" y="382" text-anchor="middle">jádro</text><text class="m" x="390" y="400" text-anchor="middle">Resource, BAR (WC), MSI-X, DMA po kusech, doména IOMMU, ploty, buffery jako VMO + bufdesc, firmware z FS</text>
 <rect class="box" x="10" y="190" width="190" height="120" rx="6"/><text class="t b" x="105" y="212" text-anchor="middle">firmware</text><text class="m" x="105" y="232" text-anchor="middle">GSP-RM 570.144,</text><text class="m" x="105" y="248" text-anchor="middle">booter, FWSEC (VBIOS),</text><text class="m" x="105" y="264" text-anchor="middle">AMD: PSP, SMU,</text><text class="m" x="105" y="280" text-anchor="middle">DMCUB, VCN</text><text class="m" x="105" y="296" text-anchor="middle">služba firmwaru</text>
 <path class="ln" d="M200 250 L233 250" marker-end="url(#gn1)"/>
 </svg>
@@ -309,8 +309,8 @@ převezme hotový ovladač DRM z Linuxu (amdgpu, případně xe) v C. Vrstva
 LinuxKPI je přitom **uzavřená uvnitř procesu ovladače**:
 
 - ven z procesu jdou **jen naše rozhraní**: třída displej, třída render
-  (obálka: kontexty, buffery, ploty, kvóty), objekty plotů a sdílených
-  bufferů, služba firmwaru, protokol napájení. Žádné API Linuxu
+  (obálka: kontexty, buffery, ploty, kvóty), ploty a sdílené buffery
+  (VMO + `libs/bufdesc`), služba firmwaru, protokol napájení. Žádné API Linuxu
   (struktury jádra, čísla ioctl mimo užitečná data render uzlu, sysfs)
   nepřekročí hranici procesu;
 - uvnitř render uzlu se pro Mesu (RADV, Intel ANV) nese uAPI daného
@@ -369,7 +369,7 @@ převzít i kód, kde se hodí.
 | PCI | konfigurace, BARy, `pci_enable_device`, napájení D0/D3 | stránka konfigurace + služba napájení |
 | firmware | `request_firmware` | **služba firmwaru** |
 | i2c/DDC | `i2c_adapter`, `i2c_transfer` | v ovladači (nouveau/amdgpu mají vlastní) |
-| synchronizace | `dma_fence`, `sync_file`, `dma_resv`, `dma_buf` | **naše objekty plotů a bufferů** |
+| synchronizace | `dma_fence`, `sync_file`, `dma_resv`, `dma_buf` | **naše ploty a buffery (VMO + `libs/bufdesc`)** |
 | ladění | `printk`, `dev_*`, `WARN_ON`, debugfs | log driverkitu; debugfs ne |
 
 Odhad rozsahu (neověřeno měřením): vrstva 15-30 tisíc řádků (FreeBSD
@@ -439,8 +439,8 @@ L = víc.
 
 | # | Oblast | Změna | Proč teď | Rozsah |
 |---|---|---|---|---|
-| 1 | **objekt plotu (fence)** | objekt jádra: stav (nesplněn, splněn, chyba), časová osa (timeline, 64bit hodnota), čekání ve `wait_many`, předání handlem, signalizuje jen držitel práva `SIGNAL` | `dma-fence.c` je GPL - musíme mít vlastní; zároveň základ pro Vulkan semafory, `sync_file`, `drm_syncobj` a explicitní synchronizaci v protokolu displeje; dnes ho nemá ani Venus (ploty jen uvnitř ovladače) | M |
-| 2 | **sdílený buffer** | objekt bufferu nad VMO: velikost, umístění (systém / paměť zařízení), typ cache, formát + modifikátor (dlaždice, komprese), krok řádku, kdo smí zapisovat; předání handlem mezi aplikací, kompozitorem a ovladači; odvolání při pádu | ekvivalent `dma-buf`; rozhraní zařízení už vyžaduje „celý životní cyklus bufferu“ (bod 5) - teď ho určit jednou pro displej, Venus i budoucí GPU | M |
+| 1 | **objekt plotu (fence)** | objekt jádra: stav (nesplněn, splněn, chyba), časová osa (timeline, 64bit hodnota), čekání ve `wait_many`, předání handlem, signalizuje jen držitel práva `SIGNAL`; **[ověřeno v QEMU]** krok 6a-1 ([ploty.md](ploty.md)) | `dma-fence.c` je GPL - musíme mít vlastní; zároveň základ pro Vulkan semafory, `sync_file`, `drm_syncobj` a explicitní synchronizaci v protokolu displeje; dnes ho nemá ani Venus (ploty jen uvnitř ovladače) | M |
+| 2 | **sdílený buffer** | **rozhodnuto (6a): VMO + popis v knihovně `libs/bufdesc`, ne nový objekt jádra.** Popis: formát (fourcc) + modifikátor (dlaždice, komprese), roviny `{offset, pitch}`, šířka a výška, umístění (systém / paměť zařízení), typ cache. Kdo smí zapisovat, určují práva handlu VMO (`READ`/`MAP`, zapisovatel i `WRITE`). Příjemce popis ověří proti velikosti VMO (nedůvěryhodný vstup). Synchronizace jen explicitní: ploty získání a uvolnění ve zprávách protokolu (bod 1), žádný implicitní `dma_resv`. Odvolání: paměť zařízení je fyzická VMO a ovladač ji odvolá `VMO_REVOKE`; systémovou paměť drží handly. Linuxový `dma-buf` je objekt hlavně kvůli implicitní synchronizaci (`dma_resv`) a připojení zařízení; obojí u nás řeší ploty ve zprávách a `DMA_MAP` nad VMO (bod 4) **[navrženo]** | ekvivalent `dma-buf`; rozhraní zařízení už vyžaduje „celý životní cyklus bufferu“ (bod 5) - teď ho určit jednou pro displej, Venus i budoucí GPU | M |
 | 3 | **třída displej v2** | volitelné: buffer klienta jako snímek bez kopie (s plotem získání a uvolnění), formáty a modifikátory, více rovin (kurzor, překryv), atomický commit (režim + buffery najednou), úplné časování v `SET_MODE` | dnešní protokol kopíruje stín; GPU ovladač i Intel mohou zobrazit buffer přímo - přidat teď jako schopnosti, ať se nemění zprávy | S-M |
 | 4 | **DMA po kusech a IOMMU** | alokace velké připnuté paměti po stránkách (scatter-gather, ne jen souvislé 4 MiB), mapování rozsahu VMO do domény zařízení na IOVA zvolenou ovladačem, odmapování se synchronním vyprázdněním TLB IOMMU, kvóty DMA v GB | GPU mapuje stovky MB až GB (TTM, GTT); dnešní `dma_memory` je souvislá a malá | M |
 | 5 | **remapování přerušení** | zapnout v jádře (VT-d IR, AMD-Vi, GICv3 ITS už je) | bez něj může DMA zařízení podvrhnout MSI | M |

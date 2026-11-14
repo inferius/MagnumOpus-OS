@@ -42,7 +42,7 @@ impl Rights {
     pub const TRANSFER: Self = Self(1 << 5);
     /// Cekat na signaly objektu.
     pub const WAIT: Self = Self(1 << 6);
-    /// Menit signaly objektu (event).
+    /// Menit signaly objektu (event) nebo posouvat plot (`FENCE_SIGNAL`).
     pub const SIGNAL: Self = Self(1 << 7);
     /// Ridit objekt: spoustet a ukoncovat vlakna a procesy.
     pub const MANAGE: Self = Self(1 << 8);
@@ -158,6 +158,8 @@ pub enum ObjectType {
     SuspendToken = 10,
     /// Token vyjimky (zprava kanalu vyjimek); `EXCEPTION_RESOLVE`.
     ExceptionToken = 11,
+    /// Plot: casova osa `u64` (`FENCE_*`, `abi::fence`).
+    Fence = 12,
 }
 
 /// Zprava MSI, kterou ovladac zapise do zarizeni (vystup `INTERRUPT_CREATE`).

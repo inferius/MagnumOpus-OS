@@ -17,6 +17,7 @@ mod display;
 mod drivers;
 mod driverkit;
 mod events;
+mod fences;
 mod firewall;
 mod dynlink;
 mod fpu;
@@ -88,6 +89,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("pamet", memory_wx::TESTS),
     ("ipc", ipc::TESTS),
     ("udalosti a nahoda", events::TESTS),
+    ("ploty", fences::TESTS),
     ("procesy", process::TESTS),
     ("procesy", thread_state::TESTS),
     ("procesy", exceptions::TESTS),

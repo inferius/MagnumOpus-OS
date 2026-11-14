@@ -15,6 +15,11 @@
 //! - `tp-set:<hex>` -> (aarch64) zapise TPIDR_EL0, odpovi `ok`;
 //!   `tp-get` -> odpovi `tp:<hex>` (test, ze registr neprosakuje mezi
 //!   procesy); na x86_64 `err:NOT_SUPPORTED`
+//! - `fence-hold` + handle plotu -> drzi ho (producent), odpovi `ok`;
+//!   `fence-signal:<v>` / `fence-fail:<v>` -> posune drzeny plot nebo
+//!   nahlasi chybu, odpovi `ok` nebo `err:<JMENO_CHYBY>`
+//! - `fence-wait:<v>` + handle plotu (jen `WAIT`) -> ceka na hodnotu
+//!   (termin 5 s), odpovi `ok` nebo `err:<JMENO_CHYBY>`
 //!
 //! Konec kanalu u rodice = konec procesu s kodem 0.
 
@@ -39,6 +44,8 @@ fn overflow(depth: u64) -> u64 {
 
 fn main(startup: Startup) -> i64 {
     let channel = startup.bootstrap;
+    // Plot drzeny jako producent (`fence-hold`).
+    let mut fence: Option<libos::Fence> = None;
     loop {
         let msg = match channel.read(None) {
             Ok(m) => m,
@@ -101,6 +108,32 @@ fn main(startup: Startup) -> i64 {
             };
             if channel.write(reply.as_bytes(), Vec::new()).is_err() {
                 return 6;
+            }
+        } else if text == "fence-hold" {
+            fence = msg.handles.into_iter().next().map(libos::Fence::from_handle);
+            if channel.write(b"ok", Vec::new()).is_err() {
+                return 7;
+            }
+        } else if let Some((op, v)) = text.split_once(':')
+            && op.starts_with("fence-")
+        {
+            let v = v.parse::<u64>().unwrap_or(0);
+            let r = match op {
+                "fence-signal" => fence.as_ref().map_or(Err(Error::BadState), |f| f.signal(v)),
+                "fence-fail" => fence.as_ref().map_or(Err(Error::BadState), |f| f.fail(v)),
+                "fence-wait" => match msg.handles.into_iter().next() {
+                    Some(h) => libos::Fence::from_handle(h)
+                        .wait(v, Some(libos::time::deadline_after(core::time::Duration::from_secs(5)))),
+                    None => Err(Error::InvalidArgs),
+                },
+                _ => Err(Error::NotSupported),
+            };
+            let reply = match r {
+                Ok(()) => alloc::string::String::from("ok"),
+                Err(e) => alloc::format!("err:{}", e.name()),
+            };
+            if channel.write(reply.as_bytes(), Vec::new()).is_err() {
+                return 8;
             }
         } else if text == "sleep" {
             libos::time::sleep(core::time::Duration::from_secs(3600));

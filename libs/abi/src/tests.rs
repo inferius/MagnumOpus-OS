@@ -131,6 +131,11 @@ fn every_syscall_is_documented() {
         "EXCEPTION_RESOLVE",
         "PROCESS_THREADS",
         "EXCEPTION_HANDLER",
+        "FENCE_CREATE",
+        "FENCE_SIGNAL",
+        "FENCE_WAIT",
+        "FENCE_WAIT_ASYNC",
+        "FENCE_QUERY",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {

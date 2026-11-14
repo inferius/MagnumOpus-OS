@@ -65,7 +65,7 @@ Log sériové linky testu: `target/serial-test-<arch>-<pid>.log`. Běžící `ca
 
 ## Čísla syscallů
 
-Zdroj: `libs/abi/src/syscall.rs`, dnes `COUNT = 57` (čísla 0..56, bez děr). Nový syscall dostane číslo `COUNT` a v jednom commitu:
+Zdroj: `libs/abi/src/syscall.rs`, dnes `COUNT = 73` (čísla 0..72, bez děr; 73-75 rezervována pro DMA z kroku 6a-2). Nový syscall dostane číslo `COUNT` a v jednom commitu:
 
 1. konstanta + zvýšit `COUNT` (`libs/abi/src/syscall.rs`),
 2. jméno na správný index `NAMES` a větev v `kernel/src/syscall/mod.rs`,

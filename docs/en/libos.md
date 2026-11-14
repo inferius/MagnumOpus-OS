@@ -81,6 +81,7 @@ Each type owns a handle and closes it when dropped.
 |---|---|---|
 | `Handle` | generic handle | `duplicate(rights)`, `into_raw`, `from_raw` |
 | `Event` | signal between threads and processes | `create`, `signal`, `reset` |
+| `Fence` | fence: a timeline for explicit synchronisation ([fences.md](fences.md)) | `create`, `for_waiter`, `signal`, `fail`, `wait`, `wait_async`, `query`; `fence::wait_any`, `wait_all` |
 | `Channel` | messages with data and handles | `create`, `write`, `try_read`, `read(deadline)` |
 | `Vmo` | memory object | `create`, `read`, `write` (any length; the kernel moves 1 MiB per call, libos splits) |
 | `Process` | process | `create`, `map`, `unmap`, `start`, `kill`, `wait_exit` |

@@ -115,7 +115,7 @@ pub mod test_hook {
         }
     }
 
-    pub(super) fn run(me: &Thread, point: Point) {
+    pub(in crate::object) fn run(me: &Thread, point: Point) {
         if TARGET.load(Ordering::Relaxed) != me.id {
             return;
         }

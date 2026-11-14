@@ -5,10 +5,12 @@
 //! ktery nese prava ([`Rights`]). Kazdy objekt ma signaly ([`Signals`]),
 //! na ktere lze cekat ([`wait`]) - primo vlaknem, nebo pres port
 //! ([`port`], jednorazova registrace s paketem). Pamet objektu vytvorenych
-//! na pozadani procesu se strhava z rozpoctu jeho jobu ([`job`]).
+//! na pozadani procesu se strhava z rozpoctu jeho jobu ([`job`]). Plot
+//! ([`fence`]) ma navic cekani na hodnotu casove osy.
 
 pub mod channel;
 pub mod event;
+pub mod fence;
 pub mod exception;
 pub mod handle;
 pub mod interrupt;

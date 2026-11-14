@@ -643,3 +643,43 @@ pub fn job_info(job: u32) -> Result<abi::job::JobInfo> {
     call(nr::JOB_INFO, [job as u64, buf.as_mut_ptr() as u64, 0, 0, 0, 0])?;
     Ok(abi::job::JobInfo::decode(&buf))
 }
+
+pub fn fence_create(initial: u64) -> Result<u32> {
+    call(nr::FENCE_CREATE, [initial, 0, 0, 0, 0, 0]).map(|v| v as u32)
+}
+
+pub fn fence_signal(h: u32, value: u64, flags: u64) -> Result<()> {
+    call(nr::FENCE_SIGNAL, [h as u64, value, flags, 0, 0, 0]).map(|_| ())
+}
+
+/// `FENCE_WAIT`; pri chybe plotu vrati i index rozhodujici polozky.
+pub fn fence_wait(
+    items: &[abi::fence::WaitItem],
+    flags: u64,
+    deadline: u64,
+) -> core::result::Result<usize, (abi::Error, Option<usize>)> {
+    let mut index = u32::MAX;
+    call(
+        nr::FENCE_WAIT,
+        [
+            items.as_ptr() as u64,
+            items.len() as u64,
+            flags,
+            deadline,
+            &mut index as *mut u32 as u64,
+            0,
+        ],
+    )
+    .map(|v| v as usize)
+    .map_err(|e| (e, (index != u32::MAX).then_some(index as usize)))
+}
+
+pub fn fence_wait_async(h: u32, value: u64, port: u32, key: u64) -> Result<()> {
+    call(nr::FENCE_WAIT_ASYNC, [h as u64, value, port as u64, key, 0, 0]).map(|_| ())
+}
+
+pub fn fence_query(h: u32) -> Result<abi::fence::Info> {
+    let mut buf = [0u8; abi::fence::Info::SIZE];
+    call(nr::FENCE_QUERY, [h as u64, buf.as_mut_ptr() as u64, 0, 0, 0, 0])?;
+    Ok(abi::fence::Info::decode(&buf))
+}
