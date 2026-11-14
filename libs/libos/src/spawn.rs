@@ -7,7 +7,16 @@
 //! Proces vznika v jobu (`spawn` = stejny job jako rodic, `spawn_in` =
 //! zadany) a pamet programu (segmenty, zasobnik) se strhava z rozpoctu
 //! jobu potomka, ne rodice. Potomek dostane svuj job bez prava `WRITE`.
+//!
+//! **Sdileny kod:** program z initfs (nemenny obsah, `initfs::offset_of`)
+//! se nahraje jednou do sablony (objekt pameti na segment, na ucet
+//! spoustejiciho). Segmenty bez zapisu (kod, konstanty) se mapuji primo ze
+//! sablony - vsechny procesy stejneho programu sdileji tytez stranky.
+//! Zapisovatelne segmenty dostane kazdy proces jako klon s kopii pri
+//! zapisu (`VMO_CLONE`, na ucet jobu potomka). Program odjinud (napr.
+//! nacteny ze souboru do haldy) se nahrava jako drive, bez sdileni.
 
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use abi::bootstrap::{self, Entry, Header};
@@ -15,7 +24,69 @@ use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE};
 use abi::{Error, Result};
 
 use crate::job::{CHILD_RIGHTS, Job};
+use crate::sync::Mutex;
 use crate::{Channel, Handle, Process, Thread, Vmo};
+
+/// Segment sablony: kam patri, prava a objekt s obsahem.
+struct Segment {
+    start: u64,
+    len: u64,
+    flags: u32,
+    vmo: Vmo,
+}
+
+/// Sablona programu z initfs: klic (offset v initfs, delka obrazu,
+/// velikost stranky potomka) a segmenty.
+struct Template {
+    key: (u64, u64, u64),
+    segments: Vec<Segment>,
+}
+
+/// Sablony uz spustenych programu z initfs (zijou do konce procesu).
+static TEMPLATES: Mutex<Vec<Arc<Template>>> = Mutex::new(Vec::new());
+
+/// Pocet sablon sdilenych programu (pro testy a prehled).
+pub fn shared_images() -> usize {
+    TEMPLATES.lock().len()
+}
+
+/// Prava segmentu ELF jako `MAP_*`.
+fn segment_flags(seg: &elf::Segment) -> u32 {
+    let mut flags = MAP_READ;
+    if seg.flags & elf::PF_W != 0 {
+        flags |= MAP_WRITE;
+    }
+    if seg.flags & elf::PF_X != 0 {
+        flags |= MAP_EXECUTE;
+    }
+    flags
+}
+
+/// Sablona programu `image` (offset `off` v initfs) pro stranku `page`;
+/// vytvori ji pri prvnim spusteni.
+fn template(off: u64, image: &[u8], elf: &elf::ElfFile, page: u64) -> Result<Arc<Template>> {
+    let key = (off, image.len() as u64, page);
+    if let Some(t) = TEMPLATES.lock().iter().find(|t| t.key == key) {
+        return Ok(t.clone());
+    }
+    let mut segments = Vec::new();
+    for seg in elf.load_segments() {
+        let seg = seg.map_err(|_| Error::Corrupted)?;
+        let start = seg.vaddr & !(page - 1);
+        let end = (seg.vaddr + seg.mem_size).next_multiple_of(page);
+        let vmo = Vmo::create(end - start)?;
+        vmo.write(seg.vaddr - start, elf.segment_data(&seg))?;
+        segments.push(Segment { start, len: end - start, flags: segment_flags(&seg), vmo });
+    }
+    let t = Arc::new(Template { key, segments });
+    let mut all = TEMPLATES.lock();
+    // Soubezne spusteni stejneho programu: plati prvni sablona.
+    if let Some(other) = all.iter().find(|o| o.key == key) {
+        return Ok(other.clone());
+    }
+    all.push(t.clone());
+    Ok(t)
+}
 
 /// Vychozi velikost zasobniku hlavniho vlakna noveho procesu.
 pub const STACK_SIZE: u64 = 256 * 1024;
@@ -116,20 +187,30 @@ pub fn spawn_with(
     // mensi stranku) skonci chybou mapovani, ne smichanymi pravy.
     let page = crate::vm::page_size_of(&process)?;
 
-    for seg in elf.load_segments() {
-        let seg = seg.map_err(|_| Error::Corrupted)?;
-        let start = seg.vaddr & !(page - 1);
-        let end = (seg.vaddr + seg.mem_size).next_multiple_of(page);
-        let vmo = Vmo::create_for(end - start, &process)?;
-        vmo.write(seg.vaddr - start, elf.segment_data(&seg))?;
-        let mut flags = MAP_READ | MAP_FIXED;
-        if seg.flags & elf::PF_W != 0 {
-            flags |= MAP_WRITE;
+    match crate::initfs::offset_of(image) {
+        Some(off) => {
+            let t = template(off, image, &elf, page)?;
+            for seg in &t.segments {
+                if seg.flags & MAP_WRITE != 0 {
+                    // Data: vlastni klon s kopii pri zapisu (ucet potomka).
+                    let own = seg.vmo.clone_for(0, seg.len, &process)?;
+                    process.map(&own, 0, seg.len, seg.flags | MAP_FIXED, seg.start)?;
+                } else {
+                    // Kod a konstanty: primo sdilene stranky sablony.
+                    process.map(&seg.vmo, 0, seg.len, seg.flags | MAP_FIXED, seg.start)?;
+                }
+            }
         }
-        if seg.flags & elf::PF_X != 0 {
-            flags |= MAP_EXECUTE;
+        None => {
+            for seg in elf.load_segments() {
+                let seg = seg.map_err(|_| Error::Corrupted)?;
+                let start = seg.vaddr & !(page - 1);
+                let end = (seg.vaddr + seg.mem_size).next_multiple_of(page);
+                let vmo = Vmo::create_for(end - start, &process)?;
+                vmo.write(seg.vaddr - start, elf.segment_data(&seg))?;
+                process.map(&vmo, 0, end - start, segment_flags(&seg) | MAP_FIXED, start)?;
+            }
         }
-        process.map(&vmo, 0, end - start, flags, start)?;
     }
 
     let stack_size = opts.stack_size.max(page).next_multiple_of(page);

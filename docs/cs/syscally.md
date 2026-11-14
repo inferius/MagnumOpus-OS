@@ -285,6 +285,21 @@ příliš velký), `NO_MEMORY`, `NO_RESOURCES` (rozpočet jobu), `BAD_HANDLE`,
 se tolik paměti nedá slíbit (strop = volná RAM bez rezervy jádra a bez
 už slíbených stránek).
 
+### `VMO_CLONE`
+
+`(vmo, offset, len, process) -> handle`. Klon `len` bajtů objektu od `offset`
+s kopií při zápisu: nový objekt sdílí stránky zdroje, dokud do nich někdo
+z nich nezapíše (první zápis si udělá kopii; zdroj i klon se navzájem
+neovlivní). Klon slíbí celou svou velikost, zdroj stránku navíc za každý
+nově sdílený rámec, takže kopie při zápisu nikdy nenarazí na nedostatek
+paměti; strhne se z rozpočtu jobu procesu `process` (handle s `WRITE`;
+0 = volající). Připnuté stránky (DMA, `VMO_PHYS_ADDR`) klon dostane jako
+kopii hned. Zápisy zdroje souběžné s voláním klon může vidět. Práva:
+zdroj `READ`; klon má plná práva objektu. Jen běžné objekty. Chyby:
+`INVALID_ARGS` (nulová délka, nezarovnaný offset nebo délka),
+`OUT_OF_RANGE`, `NOT_SUPPORTED` (souvislý, DMA nebo fyzický objekt),
+`NO_MEMORY`, `NO_RESOURCES`, `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+
 ### `VMO_READ`
 
 `(handle, offset, buf_ptr, len) -> 0`. Přečte data objektu (max. 1 MiB na

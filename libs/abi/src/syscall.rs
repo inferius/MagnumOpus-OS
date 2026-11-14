@@ -214,8 +214,14 @@ pub const VM_PROTECT: u64 = 58;
 /// `READ`.
 pub const VM_QUERY: u64 = 59;
 
+/// Klon s kopii pri zapisu: `(vmo, offset, len, process) -> handle`. Novy
+/// objekt `len` bajtu sdili stranky `vmo` od `offset`; prvni zapis
+/// kterehokoli z nich si udela kopii. Strzeno z rozpoctu jobu `process`
+/// (handle s `WRITE`; 0 = volajici). Zdroj `READ`; jen bezne objekty.
+pub const VMO_CLONE: u64 = 60;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 60;
+pub const COUNT: u64 = 61;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {

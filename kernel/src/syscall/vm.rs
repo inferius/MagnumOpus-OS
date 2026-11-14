@@ -17,15 +17,32 @@ const RW_MAX: usize = 1 << 20;
 /// vytvari pamet programu (segmenty, zasobnik) na ucet potomka.
 pub fn vmo_create(a: Args) -> Result<u64> {
     let p = current_process();
-    let job = if a[1] == 0 {
-        p.job().clone()
-    } else {
-        let target = p
-            .handles()
-            .get_as::<Process>(arg_handle(a[1])?, Rights::WRITE)?;
-        target.job().clone()
-    };
+    let job = job_of(&p, a[1])?;
     let vmo = MemoryObject::new(a[0], Some(&job))?;
+    let rights = vmo.default_rights();
+    Ok(p.handles().insert(vmo, rights)?.0 as u64)
+}
+
+/// Job, na jehoz ucet jde nova pamet: procesu `handle` (pravo `WRITE`),
+/// 0 = volajiciho.
+fn job_of(p: &Process, handle: u64) -> Result<alloc::sync::Arc<crate::object::job::Job>> {
+    if handle == 0 {
+        return Ok(p.job().clone());
+    }
+    let target = p.handles().get_as::<Process>(arg_handle(handle)?, Rights::WRITE)?;
+    Ok(target.job().clone())
+}
+
+/// `VMO_CLONE(vmo, offset, len, process) -> handle`: klon s kopii pri
+/// zapisu. Zdroj staci s pravem `READ` (klon je soukroma kopie); klon ma
+/// plna prava objektu.
+pub fn vmo_clone(a: Args) -> Result<u64> {
+    let p = current_process();
+    let src = p
+        .handles()
+        .get_as::<MemoryObject>(arg_handle(a[0])?, Rights::READ)?;
+    let job = job_of(&p, a[3])?;
+    let vmo = src.clone_cow(a[1], a[2], Some(&job))?;
     let rights = vmo.default_rights();
     Ok(p.handles().insert(vmo, rights)?.0 as u64)
 }

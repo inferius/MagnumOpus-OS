@@ -123,6 +123,7 @@ fn every_syscall_is_documented() {
         "VM_RESERVE",
         "VM_PROTECT",
         "VM_QUERY",
+        "VMO_CLONE",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {

@@ -3,8 +3,27 @@
 use abi::vm::MAP_READ;
 use abi::{Error, Result};
 
+use alloc::vec::Vec;
+
 use crate::rt::Startup;
+use crate::sync::Mutex;
 use crate::{Vmo, sys};
+
+/// Namapovane obrazy initfs (zacatek, delka). Obsah initfs je nemenny
+/// (nikdo do nej nepise), takze spousteni smi programy z nej sdilet podle
+/// offsetu (`offset_of`, sablony v `spawn`).
+static MAPPED: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
+
+/// Offset obrazu `image` v initfs, lezi-li cely v nekterem namapovanem
+/// initfs; jinak `None` (obraz odjinud se nesdili).
+pub(crate) fn offset_of(image: &[u8]) -> Option<u64> {
+    let (p, len) = (image.as_ptr() as u64, image.len() as u64);
+    MAPPED
+        .lock()
+        .iter()
+        .find(|&&(a, l)| p >= a && p.checked_add(len).is_some_and(|e| e <= a + l))
+        .map(|&(a, _)| p - a)
+}
 
 /// Namapovany obraz initfs (jen pro cteni, zije do konce procesu).
 pub struct Initfs {
@@ -46,6 +65,7 @@ impl Initfs {
         // konce procesu (nikdo ho neodmapuje).
         let bytes = unsafe { core::slice::from_raw_parts(addr as *const u8, len as usize) };
         let fs = initfs::Initfs::parse(bytes).map_err(|_| Error::Corrupted)?;
+        MAPPED.lock().push((addr, len));
         Ok(Self { fs })
     }
 

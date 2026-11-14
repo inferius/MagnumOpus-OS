@@ -4,10 +4,14 @@
 //! ostatni vyvola vypadek a ten:
 //! - pri cteni nebo spusteni namapuje existujici ramec, nebo sdilenou
 //!   nulovou stranku jen pro cteni (stranka objektu dal nevznika),
-//! - pri zapisu stranku objektu vytvori (`MemoryObject::commit_page`)
+//! - pri zapisu stranku objektu vytvori (`MemoryObject::commit_page_fast`)
 //!   a namapuje ji zapisovatelne; byla-li tam nulova stranka, nejdriv ji
 //!   odmapuje (break-before-make: na aarch64 `unmap_4k` zneplatni TLB vsech
-//!   CPU hned, na x86_64 dobehne shootdown pred navratem do userspace).
+//!   CPU hned, na x86_64 dobehne shootdown pred navratem do userspace),
+//! - pri zapisu do sdileneho ramce (kopie pri zapisu) pusti zamek, zkopiruje
+//!   ramec (`MemoryObject::writable_page`) a instrukci zopakuje; dalsi
+//!   vypadek uz namapuje vlastni ramec. Sdileny ramec se mapuje jen pro
+//!   cteni.
 //!
 //! Vse se overuje znovu pod zamkem prostoru, takze soubeh dvou vlaken na
 //! stejne strance, s `VM_UNMAP` nebo s koncem procesu je bezpecny: kdo
@@ -63,21 +67,23 @@ impl AddressSpace {
                 return Ok(());
             }
             // Poradi vuci vzniku stranky: nejdriv priznak, pak kontrola
-            // (viz `MemoryObject::commit_page`).
-            let (frame, writable) = match vmo.page(off) {
-                Some(frame) => (frame, true),
+            // (viz `MemoryObject::commit_page_fast`).
+            let (frame, writable) = match vmo.page_state(off) {
+                Some(state) => state,
                 None => {
                     vmo.note_zero_mapped();
-                    match vmo.page(off) {
-                        Some(frame) => (frame, true),
-                        None => (zero_frame(), false),
-                    }
+                    vmo.page_state(off).unwrap_or((zero_frame(), false))
                 }
             };
             return map_one(table, va, frame, page_flags(&vmo, flags, writable));
         }
 
-        let (frame, fresh) = vmo.commit_page(off)?;
+        let Some((frame, fresh)) = vmo.commit_page_fast(off)? else {
+            // Sdileny ramec: kopie bez zamku prostoru, pak znovu.
+            drop(inner);
+            vmo.writable_page(off)?;
+            return Ok(());
+        };
         let mut flush = false;
         match current {
             Some(p) if p == frame => {} // planny vypadek, uz je namapovana

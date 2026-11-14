@@ -14,7 +14,7 @@ in [kernel.md](kernel.md#memory), syscalls in [syscalls.md](syscalls.md).
 |---|---|---|
 | 1 | demand paging, zero page, faults in the kernel, commit and ceiling, pins | **[verified in QEMU]** x86_64 and aarch64 (kernel self-tests `pamet`, the `pamet` suite in init) |
 | 2 | reservations (`VM_RESERVE`), partial `VM_UNMAP` and decommit, `VM_PROTECT`, `VM_QUERY`, guard regions | **[verified in QEMU]** x86_64 and aarch64 (self-tests `mm_regions`, suite `pamet`) |
-| 3 | `VMO_CLONE` (copy-on-write) and shared program code | **[designed]** |
+| 3 | `VMO_CLONE` (copy-on-write) and shared code of programs from initfs | **[verified in QEMU]** x86_64 and aarch64 (self-tests `mm_cow`, suite `pamet`) |
 | 4 | `VMO_SEAL`, W^X with a "may JIT" permission, audit | **[designed]** |
 | 5 | libos API (basis of `mmap` in `cstd`), guards below stacks | **[designed]** |
 
@@ -92,6 +92,74 @@ record in the job's kernel budget.
 - **Reservations without page tables:** page tables are charged only for
   mappings (an estimate by length at `VM_MAP`), so reserving tens of GiB
   costs hundreds of bytes.
+
+## Copy on write (CoW) and shared code
+
+`VMO_CLONE` creates a clone that **shares the source's frames**. Each frame
+has a counter of further owners in `phys` (`share`, `shares`,
+`try_unshare`); the page entry of a shared frame has the `SHARED` flag and
+is mapped read-only.
+
+<figure>
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Copy on write">
+<style>
+.box{fill:#f4f6fb;stroke:#4a5a80;stroke-width:1.2}
+.acc{fill:#e8f1e4;stroke:#3f7a3a;stroke-width:1.2}
+.t{font:14px sans-serif;fill:#1d2333}
+.m{font:12px sans-serif;fill:#3a4256}
+.b{font-weight:bold}
+.ln{stroke:#4a5a80;stroke-width:1.2;fill:none}
+@media (prefers-color-scheme: dark){
+.box{fill:#1f2533;stroke:#8fa2d0}.acc{fill:#1f2e22;stroke:#7fbf78}
+.t{fill:#e6e9f2}.m{fill:#c3c9d9}.ln{stroke:#8fa2d0}}
+</style>
+<defs><marker id="mm2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#4a5a80"/></marker></defs>
+<rect class="box" x="20" y="20" width="160" height="50" rx="6"/><text class="t b" x="100" y="44" text-anchor="middle">source</text><text class="m" x="100" y="61" text-anchor="middle">SHARED entry</text>
+<rect class="box" x="20" y="150" width="160" height="50" rx="6"/><text class="t b" x="100" y="174" text-anchor="middle">clone</text><text class="m" x="100" y="191" text-anchor="middle">SHARED entry</text>
+<rect class="acc" x="300" y="85" width="170" height="50" rx="6"/><text class="t b" x="385" y="108" text-anchor="middle">frame F</text><text class="m" x="385" y="125" text-anchor="middle">shares = 1</text>
+<rect class="box" x="560" y="20" width="190" height="64" rx="6"/><text class="t b" x="655" y="42" text-anchor="middle">clone writes</text><text class="m" x="655" y="60" text-anchor="middle">copy F -> F', shares 0</text><text class="m" x="655" y="76" text-anchor="middle">(clone's commit)</text>
+<rect class="box" x="560" y="140" width="190" height="64" rx="6"/><text class="t b" x="655" y="162" text-anchor="middle">then source writes</text><text class="m" x="655" y="180" text-anchor="middle">sole owner: F without a copy</text><text class="m" x="655" y="196" text-anchor="middle">(source's commit back)</text>
+<line class="ln" x1="180" y1="45" x2="296" y2="100" marker-end="url(#mm2)"/>
+<line class="ln" x1="180" y1="175" x2="296" y2="120" marker-end="url(#mm2)"/>
+<line class="ln" x1="470" y1="100" x2="556" y2="60" marker-end="url(#mm2)"/>
+<line class="ln" x1="470" y1="120" x2="556" y2="165" marker-end="url(#mm2)"/>
+</svg>
+<figcaption>Copy on write: only the writer copies, and only while the frame still has another owner.</figcaption>
+</figure>
+
+- **A write to a shared frame** (a fault, `VMO_WRITE`, a kernel copy,
+  `VMO_PHYS_ADDR`) goes through `MemoryObject::writable_page`, always
+  without an address space lock:
+  1. it unmaps the frame from all mappings of the object (no stale write
+     through the TLB lands in the shared frame any more);
+  2. under `cow_lock` it copies the frame and gives up its share, or - when
+     there are no further owners any more - keeps it without a copy;
+  3. it unmaps the old frame from mappings that mapped it for reading in
+     the meantime.
+- **Nobody writes into a frame with further owners**, so the copy is
+  consistent. A write fault on a shared frame drops the space lock, copies
+  and retries the instruction.
+- **Commit:** the clone commits its whole size, the source one extra page
+  for each frame shared for the first time (it may be the first to write).
+  Whoever keeps the frame in the end (the last owner) returns the commit
+  for the copy. A copy thus never runs out of memory. The source's extra
+  commit is charged to the clone's job budget.
+- **Pinned frames** (DMA, `VMO_PHYS_ADDR`) are never shared: the clone gets
+  a copy right away. `VMO_PHYS_ADDR` on a shared frame first makes its own
+  copy and pins that.
+- **Racing with a clone:** the clone may see writes to the source made
+  during the `VMO_CLONE` call; the source never loses a write.
+
+**Shared program code** (`libs/libos/src/spawn.rs`): a program from initfs
+is loaded into a template on its first start (one memory object per
+segment, on the starter's account). Code and constants are mapped into
+every process **straight from the template** (all instances share the same
+pages), writable data is a **copy-on-write clone** for each process, on its
+own job's account. Only an image inside the mapped initfs is shared
+(immutable content, keyed by the offset in initfs); a program loaded from
+elsewhere (e.g. from a file into the heap) is loaded as before, so a
+swapped image cannot slip in foreign code. Sealing templates (`VMO_SEAL`)
+comes in part 4.
 
 ## The zero page
 

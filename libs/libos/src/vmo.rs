@@ -22,6 +22,19 @@ impl Vmo {
         sys::vmo_create(size, process.handle().raw()).map(|h| Self(Handle::from_raw(h)))
     }
 
+    /// Klon `len` bajtu od `offset` s kopii pri zapisu (`VMO_CLONE`): sdili
+    /// stranky, dokud do nich nekdo z obou nezapise. Na ucet vlastniho jobu.
+    pub fn clone_range(&self, offset: u64, len: u64) -> Result<Self> {
+        sys::vmo_clone(self.handle().raw(), offset, len, 0).map(|h| Self(Handle::from_raw(h)))
+    }
+
+    /// Jako [`Vmo::clone_range`], ale na ucet jobu procesu `process`
+    /// (rodic pri spousteni programu).
+    pub fn clone_for(&self, offset: u64, len: u64, process: &crate::Process) -> Result<Self> {
+        sys::vmo_clone(self.handle().raw(), offset, len, process.handle().raw())
+            .map(|h| Self(Handle::from_raw(h)))
+    }
+
     /// Precte data objektu (libovolne dlouhy usek; jadro prenese nejvys
     /// `IO_MAX` na volani, proto po castech).
     pub fn read(&self, offset: u64, buf: &mut [u8]) -> Result<()> {

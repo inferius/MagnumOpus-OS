@@ -292,6 +292,22 @@ budget), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE` (`process`).
 `NO_MEMORY` also means that so much memory cannot be committed (ceiling =
 free RAM minus the kernel reserve minus pages already committed).
 
+### `VMO_CLONE`
+
+`(vmo, offset, len, process) -> handle`. A copy-on-write clone of `len` bytes
+of the object from `offset`: the new object shares the source's pages until
+one of them writes (the first write makes a copy; source and clone never
+affect each other). The clone commits its whole size, the source one extra
+page per newly shared frame, so a copy on write never runs out of memory;
+it is charged to the budget of the job of `process` (a handle with `WRITE`;
+0 = the caller). Pinned pages (DMA, `VMO_PHYS_ADDR`) are copied into the
+clone right away. The clone may see writes to the source made during the
+call. Rights: source `READ`; the clone has full object rights. Regular
+objects only. Errors: `INVALID_ARGS` (zero length, unaligned offset or
+length), `OUT_OF_RANGE`, `NOT_SUPPORTED` (contiguous, DMA or physical
+object), `NO_MEMORY`, `NO_RESOURCES`, `BAD_HANDLE`, `ACCESS_DENIED`,
+`WRONG_TYPE`.
+
 ### `VMO_READ`
 
 `(handle, offset, buf_ptr, len) -> 0`. Reads object data (max 1 MiB per

@@ -13,7 +13,7 @@ z fsd. Rozložení adresního prostoru a ochrany (SMAP, NX) popisuje
 |---|---|---|
 | 1 | stránky na požádání, nulová stránka, výpadek v jádře, commit a strop, piny | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy jádra `pamet`, sada `pamet` v initu) |
 | 2 | rezervace (`VM_RESERVE`), částečné `VM_UNMAP` a decommit, `VM_PROTECT`, `VM_QUERY`, ochranné oblasti | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy `mm_regions`, sada `pamet`) |
-| 3 | `VMO_CLONE` (copy-on-write) a sdílený kód programů | **[navrženo]** |
+| 3 | `VMO_CLONE` (copy-on-write) a sdílený kód programů z initfs | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy `mm_cow`, sada `pamet`) |
 | 4 | `VMO_SEAL`, W^X s oprávněním „smí JIT“, audit | **[navrženo]** |
 | 5 | API v libos (podklad `mmap` v `cstd`), guard pod zásobníky | **[navrženo]** |
 
@@ -89,6 +89,72 @@ v rozpočtu jádra jobu.
 - **Rezervace bez tabulek stránek:** tabulky se strhávají jen
   za mapování (odhad podle délky při `VM_MAP`), takže rezervace desítek GiB
   stojí stovky bajtů.
+
+## Kopie při zápisu (CoW) a sdílený kód
+
+`VMO_CLONE` vytvoří klon, který **sdílí rámce** zdroje. Každý rámec má
+v `phys` počítadlo dalších vlastníků (`share`, `shares`, `try_unshare`);
+položka stránky sdíleného rámce má příznak `SHARED` a mapuje se jen pro
+čtení.
+
+<figure>
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Kopie při zápisu">
+<style>
+.box{fill:#f4f6fb;stroke:#4a5a80;stroke-width:1.2}
+.acc{fill:#e8f1e4;stroke:#3f7a3a;stroke-width:1.2}
+.t{font:14px sans-serif;fill:#1d2333}
+.m{font:12px sans-serif;fill:#3a4256}
+.b{font-weight:bold}
+.ln{stroke:#4a5a80;stroke-width:1.2;fill:none}
+@media (prefers-color-scheme: dark){
+.box{fill:#1f2533;stroke:#8fa2d0}.acc{fill:#1f2e22;stroke:#7fbf78}
+.t{fill:#e6e9f2}.m{fill:#c3c9d9}.ln{stroke:#8fa2d0}}
+</style>
+<defs><marker id="sp2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#4a5a80"/></marker></defs>
+<rect class="box" x="20" y="20" width="160" height="50" rx="6"/><text class="t b" x="100" y="44" text-anchor="middle">zdroj</text><text class="m" x="100" y="61" text-anchor="middle">položka SHARED</text>
+<rect class="box" x="20" y="150" width="160" height="50" rx="6"/><text class="t b" x="100" y="174" text-anchor="middle">klon</text><text class="m" x="100" y="191" text-anchor="middle">položka SHARED</text>
+<rect class="acc" x="300" y="85" width="170" height="50" rx="6"/><text class="t b" x="385" y="108" text-anchor="middle">rámec F</text><text class="m" x="385" y="125" text-anchor="middle">shares = 1</text>
+<rect class="box" x="560" y="20" width="190" height="64" rx="6"/><text class="t b" x="655" y="42" text-anchor="middle">zápis klonu</text><text class="m" x="655" y="60" text-anchor="middle">kopie F -> F', shares 0</text><text class="m" x="655" y="76" text-anchor="middle">(slib klonu)</text>
+<rect class="box" x="560" y="140" width="190" height="64" rx="6"/><text class="t b" x="655" y="162" text-anchor="middle">pak zápis zdroje</text><text class="m" x="655" y="180" text-anchor="middle">jediný vlastník: F bez kopie</text><text class="m" x="655" y="196" text-anchor="middle">(slib zdroje zpět)</text>
+<line class="ln" x1="180" y1="45" x2="296" y2="100" marker-end="url(#sp2)"/>
+<line class="ln" x1="180" y1="175" x2="296" y2="120" marker-end="url(#sp2)"/>
+<line class="ln" x1="470" y1="100" x2="556" y2="60" marker-end="url(#sp2)"/>
+<line class="ln" x1="470" y1="120" x2="556" y2="165" marker-end="url(#sp2)"/>
+</svg>
+<figcaption>Kopie při zápisu: kopíruje jen ten, kdo zapisuje, dokud má rámec ještě dalšího vlastníka.</figcaption>
+</figure>
+
+- **Zápis do sdíleného rámce** (výpadek, `VMO_WRITE`, kopírování jádra,
+  `VMO_PHYS_ADDR`) jde přes `MemoryObject::writable_page`, vždy bez zámku
+  adresního prostoru:
+  1. odmapuje rámec ve všech mapováních objektu (žádný starý zápis přes
+     TLB už do sdíleného rámce nedopadne);
+  2. pod `cow_lock` rámec zkopíruje a vzdá se svého dílu, nebo - když už
+     nemá další vlastníky - si ho nechá bez kopie;
+  3. odmapuje starý rámec mapováním, která ho mezitím namapovala pro čtení.
+- **Do rámce s dalšími vlastníky nikdo nezapisuje**, takže kopie je
+  konzistentní. Výpadek zápisu na sdíleném rámci pustí zámek prostoru,
+  zkopíruje a instrukci zopakuje.
+- **Slib:** klon slíbí celou svou velikost, zdroj jednu stránku navíc za
+  každý poprvé sdílený rámec (sám může zapisovat jako první). Kdo si
+  rámec nakonec nechá (poslední vlastník), slib za kopii vrátí. Kopie tak
+  nikdy nenarazí na nedostatek paměti. Slib navíc za zdroj se strhne
+  z rozpočtu jobu klonu.
+- **Připnuté rámce** (DMA, `VMO_PHYS_ADDR`) se nesdílejí: klon dostane
+  kopii hned. `VMO_PHYS_ADDR` na sdíleném rámci nejdřív udělá vlastní
+  kopii a teprve tu připne.
+- **Souběh s klonováním:** zápisy zdroje během volání `VMO_CLONE` klon
+  může vidět; zdroj o žádný zápis nepřijde.
+
+**Sdílený kód programů** (`libs/libos/src/spawn.rs`): program z initfs se
+při prvním spuštění nahraje do šablony (objekt paměti na segment, na účet
+spouštějícího). Kód a konstanty se mapují do každého procesu **přímo ze
+šablony** (všechny instance sdílejí tytéž stránky), zapisovatelná data
+dostane každý proces jako **klon s kopií při zápisu** na účet svého jobu.
+Sdílí se jen obraz uvnitř namapovaného initfs (neměnný obsah, klíč je
+offset v initfs); program načtený odjinud (např. ze souboru do haldy) se
+nahrává jako dřív, aby záměna obrazu nemohla podstrčit cizí kód.
+Zapečetění šablon (`VMO_SEAL`) přijde v části 4.
 
 ## Nulová stránka
 
