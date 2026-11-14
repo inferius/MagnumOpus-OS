@@ -23,6 +23,7 @@ mod field_menu;
 pub mod fieldopts;
 mod caret;
 mod groups;
+mod selection;
 mod submenu;
 pub mod layout;
 pub mod look;
@@ -281,12 +282,18 @@ pub struct Ui<M> {
     /// Kurzor pole: posledni cinnost (blikani zacne znovu) a zda je videt.
     pub(crate) caret_since: u64,
     pub(crate) caret_on: bool,
+    /// Zacatek blikani bez casu (akce pristupnosti): doplni ho casovac.
+    pub(crate) caret_fresh: bool,
     /// Pole hledani a cas, kdy poslat `on_search`.
     pub(crate) search_due: Option<(Key, u64)>,
     /// Zpravy vznikle v `Ui::timer` (hledani s prodlevou), `Ui::take_msgs`.
     pub(crate) timer_msgs: Vec<M>,
     /// Hledani psanim (vyber, seznam): napsany text a cas posledniho znaku.
     pub(crate) typed: (String, u64),
+    /// Kurzor pole kresli klient do vlastni vrstvy (`Ui::caret`).
+    pub(crate) caret_layer: bool,
+    /// Seznamy s vicenasobnym vyberem: kurzor a kotva (index radku).
+    pub(crate) lists: BTreeMap<Key, (Option<usize>, Option<usize>)>,
 }
 
 /// Posouvana oblast: index prvku (prostor `index + 1` pro `Ui::draw`),
@@ -352,9 +359,12 @@ impl<M: Clone> Ui<M> {
             revealed: BTreeSet::new(),
             caret_since: 0,
             caret_on: true,
+            caret_fresh: false,
             search_due: None,
             timer_msgs: Vec::new(),
             typed: (String::new(), 0),
+            caret_layer: false,
+            lists: BTreeMap::new(),
         }
     }
 
@@ -444,6 +454,7 @@ impl<M: Clone> Ui<M> {
         self.focus = focus.or_else(|| self.default_focus_index());
         let by_key = &self.by_key;
         self.group_memory.retain(|g, _| by_key.contains_key(g));
+        self.lists.retain(|g, _| by_key.contains_key(g));
         self.pressed = find(pk);
         self.key_pressed = find(kk);
         // Textova pole prevezmou hodnotu aplikace (kurzor a historie zustanou).

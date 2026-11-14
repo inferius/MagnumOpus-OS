@@ -311,6 +311,12 @@ impl<M: Clone> Ui<M> {
                 r.trace.push(alloc::format!("prepnuti {d} na {}", if *checked { "nezaskrtnuto" } else { "zaskrtnuto" }));
                 r.msgs.push(f(!*checked));
             }
+            ElemKind::ListItem { index, list, .. } if matches!(self.elems[*list - 1].kind, ElemKind::List { multi: true, .. }) => {
+                let (l, k) = (*list - 1, *index);
+                let (ctrl, shift) = (self.mods & mods::CTRL != 0, self.mods & mods::SHIFT != 0);
+                r.trace.push(alloc::format!("vyber {d}"));
+                self.list_select(l, k, ctrl, shift, r);
+            }
             ElemKind::ListItem { index, list, .. } => {
                 if let ElemKind::List { on_select: Some(f), .. } = &self.elems[*list - 1].kind {
                     r.trace.push(alloc::format!("vyber {d}"));
@@ -339,7 +345,8 @@ impl<M: Clone> Ui<M> {
         if matches!(self.elems[f].kind, ElemKind::Radio { .. }) && self.mods & (mods::CTRL | mods::ALT | mods::META) == 0 && self.radio_key(f, code, r) {
             return true;
         }
-        if matches!(self.elems[f].kind, ElemKind::List { .. }) && self.mods & (mods::CTRL | mods::ALT | mods::META) == 0 && self.list_key(f, code, ch, r) {
+        let multi = matches!(self.elems[f].kind, ElemKind::List { multi: true, .. });
+        if matches!(self.elems[f].kind, ElemKind::List { .. }) && self.mods & (mods::ALT | mods::META) == 0 && (multi || self.mods & mods::CTRL == 0) && self.list_key(f, code, ch, r) {
             return true;
         }
         match &self.elems[f].kind {
@@ -417,6 +424,7 @@ impl<M: Clone> Ui<M> {
         if action & actions::FOCUS != 0 && self.elems[i].focusable() {
             self.focus = Some(i);
             self.kbd_focus = true;
+            self.caret_reset_untimed();
             r.redraw = true;
         }
         if action & (actions::ACTIVATE | actions::TOGGLE) != 0 {

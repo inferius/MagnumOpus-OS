@@ -1434,7 +1434,7 @@ centred).
 | `text_input`, `text_area` | click, drag, double and triple click | see [Text fields and the clipboard](#text-fields-and-the-clipboard) | `text-input`, `set-value` |
 | `password_input` | like `text_input` | like `text_input` | `password-input` without a value |
 | `checkbox` | click | space, Enter | `checkbox`, `toggle` |
-| `list` | click an item | arrows, Home, End, PgUp, PgDn, type-ahead (multi-row selection is in `table`) | `list` and `list-item` |
+| `list` | click an item; with `.multi_select(true)` Ctrl+click and Shift+click | arrows, Home, End, PgUp, PgDn, type-ahead; with `.multi_select(true)` Shift+arrows range, Ctrl+arrows cursor only, Ctrl+Space, Ctrl+A (`.selection`, `.on_selection` like `table`, row indices) | `list` and `list-item` |
 | `table` | selection, sorting, dragging, scrollbar | see [Table and list](#table-and-list-virtualization) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (value in percent) |
 | `busy` | - | - | `progress` with the `busy` state (indeterminate, animated per frame) |
@@ -1608,7 +1608,12 @@ character boundary.
   keystroke, empty text at once.
 - **The cursor blinks** (`motion.caret_blink`); after typing and moving it
   stays visible for a full period; after `motion.caret_blink_stop` (10 s)
-  without activity it stops blinking and the window stops redrawing. The
+  without activity it stops blinking. The OS client draws the cursor
+  into a small layer of its own (`Ui::caret`): blinking only changes its
+  visibility, the window is not redrawn and the compositor damages only
+  the cursor rectangle (a transaction that only changes the visibility or
+  position of a buffer layer without children does not damage the whole
+  window). The
   focus ring is drawn only after keyboard use; a clicked field has an
   accent border and the cursor.
 - **Dead keys** (acute, caron) are composed by `inputd` (`libs/keymap`):

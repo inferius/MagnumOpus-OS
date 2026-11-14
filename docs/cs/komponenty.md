@@ -172,7 +172,9 @@ Zjištěno z kódu `libs/ui/src/` a ukázky `user/gui-komponenty` (stav
    posuvníku, záložky a segmentu.
 5. ~~Pole nemají hover. Heslo nemá oko ani varování Caps Lock.~~ Hotovo
    (najetí ztmaví okraj, oko, varování Caps Lock). **[implementováno]**
-6. Seznam má jen šipky. Chybí Ctrl+Mezerník, Shift+šipky, Ctrl+A
+6. ~~Seznam má jen šipky.~~ Hotovo: `list(..).multi_select(true)` sdílí
+   logiku výběru s tabulkou (`libs/ui/src/selection.rs`). **[implementováno]**
+   Původně: seznam má jen šipky. Chybí Ctrl+Mezerník, Shift+šipky, Ctrl+A
    a hledání psaním. Tabulka to všechno už umí, ať seznam sdílí její
    logiku výběru.
 7. Nabídka nemá ~~podnabídky~~, nadpis skupiny, nebezpečnou položku

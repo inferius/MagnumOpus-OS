@@ -424,3 +424,50 @@ fn undo_merges_typing_until_cursor_moves() {
     a.key_ch(KEY_Z, Some('z'), CTRL | SHIFT);
     assert_eq!(a.text, "abc");
 }
+
+/// S vrstvou kurzoru (klient v OS) blikani nepotrebuje prekresleni okna:
+/// casovac vrati `false` a viditelnost nese `Ui::caret`; pole kurzor
+/// samo nekresli.
+#[test]
+fn caret_layer_blinks_without_redraw() {
+    let mut a = A::new();
+    a.ui.use_caret_layer(true);
+    let half = a.ui.look.theme.motion.caret_blink as u64 * MS;
+    a.click("t", 1000);
+    let t0 = 1000 * MS;
+    let (r, _, on) = a.ui.caret().expect("kurzor");
+    assert!(on && r.w == 2);
+    let f = a.rect("t");
+    assert!(f.contains(r.x, r.y), "kurzor v poli: {r:?} {f:?}");
+    assert!(!a.ui.timer(t0 + 2 * half), "bez prekresleni okna");
+    assert!(!a.ui.caret().unwrap().2, "zhasnuty");
+    assert!(!a.ui.timer(t0 + 3 * half));
+    assert!(a.ui.caret().unwrap().2);
+    // Prepis: podtrzeni sirky znaku.
+    a.key(KEY_HOME, 0);
+    a.key(KEY_INSERT, 0);
+    let (r, _, _) = a.ui.caret().unwrap();
+    assert!(r.h == 2 && r.w > 2, "{r:?}");
+    // Bez fokusu v poli zadny kurzor.
+    a.click("b", 2000);
+    assert!(a.ui.caret().is_none());
+}
+
+/// Fokus akci pristupnosti (bez casu udalosti): blikani zacne od
+/// nejblizsiho tiku casovace, ne od stareho casu posledni udalosti.
+#[test]
+fn caret_blink_starts_after_a11y_focus() {
+    let mut a = A::new();
+    a.ui.use_caret_layer(true);
+    let half = a.ui.look.theme.motion.caret_blink as u64 * MS;
+    a.click("b", 1);
+    let id = a.ui.node_id(a.idx("t"));
+    let r = a.ui.a11y_action(id, actions::FOCUS, "");
+    a.apply(r);
+    let t0 = 60_000 * MS;
+    assert!(a.ui.next_deadline().is_some_and(|d| d <= t0), "casovac hned");
+    a.ui.timer(t0);
+    assert_eq!(a.ui.next_deadline(), Some(t0 + 2 * half), "blikani od ted");
+    a.ui.timer(t0 + 2 * half);
+    assert!(!a.ui.caret().unwrap().2, "blika");
+}

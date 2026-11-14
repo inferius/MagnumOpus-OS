@@ -1376,7 +1376,7 @@ středu; pevná výška `.height(h)` má přednost (prvek je na středu).
 | `text_input`, `text_area` | klik, tah, dvojklik, trojklik | viz [Textová pole a schránka](#textová-pole-a-schránka) | `text-input`, `set-value` |
 | `password_input` | jako `text_input` | jako `text_input` | `password-input` bez hodnoty |
 | `checkbox` | klik | mezerník, Enter | `checkbox`, `toggle` |
-| `list` | klik na položku | šipky, Home, End, PgUp, PgDn, hledání psaním (výběr více řádků umí `table`) | `list` a `list-item` |
+| `list` | klik na položku; s `.multi_select(true)` Ctrl+klik a Shift+klik | šipky, Home, End, PgUp, PgDn, hledání psaním; s `.multi_select(true)` Shift+šipky rozsah, Ctrl+šipky jen kurzor, Ctrl+mezerník, Ctrl+A (`.selection`, `.on_selection` jako `table`, indexy řádků) | `list` a `list-item` |
 | `table` | výběr, řazení, tažení, posuvník | viz [Tabulka a seznam](#tabulka-a-seznam-virtualizace) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (hodnota v procentech) |
 | `busy` | - | - | `progress` se stavem `busy` (neurčitý průběh, animace po snímcích) |
@@ -1544,7 +1544,10 @@ na hranici znaku.
   (150 ms) po posledním psaní, prázdný text hned.
 - **Kurzor bliká** (`motion.caret_blink`), po psaní a pohybu je celou
   periodu vidět; po `motion.caret_blink_stop` (10 s) bez činnosti přestane
-  blikat a okno se přestane překreslovat. Prstenec fokusu se kreslí jen
+  blikat. Klient v OS kreslí kurzor do vlastní malé vrstvy (`Ui::caret`):
+  blikání mění jen její viditelnost, okno se nepřekresluje a kompozitor
+  poškodí jen obdélník kurzoru (transakce, která mění jen viditelnost
+  nebo polohu vrstvy s bufferem bez potomků, nepoškodí celé okno). Prstenec fokusu se kreslí jen
   po ovládání klávesnicí; kliknuté pole má akcentový okraj a kurzor.
 - **Mrtvé klávesy** (čárka, háček) skládá `inputd` (`libs/keymap`): pole
   dostane už složený znak. Rozpracovaný znak pole zatím neukazuje.

@@ -210,7 +210,9 @@ as of 2026-11-14. Ordered by impact.
 5. ~~Fields have no hover. The password field has no eye toggle and no
    Caps Lock warning.~~ Done (hover darkens the border, eye toggle, Caps
    Lock warning). **[implemented]**
-6. The list has arrows only. Missing:
+6. ~~The list has arrows only.~~ Done: `list(..).multi_select(true)`
+   shares the selection logic with the table (`libs/ui/src/selection.rs`).
+   **[implemented]** Originally: the list has arrows only. Missing:
    - Ctrl+Space;
    - Shift+arrows;
    - Ctrl+A;

@@ -41,6 +41,10 @@ use crate::{App, ROOT_LAYER, Ui, scroll_layers};
 /// Vrstva popoveru (nabidka a bublina nad okny), korenova.
 const POPOVER_LAYER: u32 = 2;
 
+/// Vrstva kurzoru textoveho pole: blikani meni jen jeji viditelnost
+/// (kompozitor poskodi jen jeji obdelnik, okno se neprekresluje).
+const CARET_LAYER: u32 = 3;
+
 /// Udalost okna pro aplikaci.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
@@ -192,6 +196,9 @@ pub struct Window {
     pub context: Option<WinContext>,
     /// Vrstva popoveru je videt.
     popover_shown: bool,
+    /// Vrstva kurzoru: nakresleny obdelnik a barva, viditelnost.
+    caret: Option<(Rect, u32)>,
+    caret_shown: bool,
 }
 
 /// Zapis, ktery pri plne fronte kanalu chvili pocka (kompozitor zrovna
@@ -283,6 +290,8 @@ impl Window {
             clip_formats: Vec::new(),
             context,
             popover_shown: false,
+            caret: None,
+            caret_shown: false,
         };
         win.send(ClientMsg::LayerCreate { layer: ROOT_LAYER, window: 1, parent: 0, kind: LayerKind::Buffer })?;
         win.pairs.insert(ROOT_LAYER, Pair { bufs: [None, None], front: 1 });
@@ -525,6 +534,45 @@ impl Window {
         self.draw_layer(POPOVER_LAYER, rect, f)
     }
 
+    /// Vrstva kurzoru podle `Ui::caret`: novy rozmer nebo barva = nove
+    /// pixely, jen posun = vlastnost `RECT`, blikani = jen `VISIBLE`.
+    /// Vraci, zda neco poslala (pak je treba commit).
+    pub fn set_caret(&mut self, c: Option<(Rect, u32, bool)>) -> Result<bool> {
+        let Some((r, color, on)) = c else {
+            if self.caret_shown {
+                self.caret_shown = false;
+                self.send(ClientMsg::LayerSet { layer: CARET_LAYER, props: LayerProps { mask: prop::VISIBLE, visible: false, ..Default::default() } })?;
+                return Ok(true);
+            }
+            return Ok(false);
+        };
+        let mut sent = false;
+        if !self.pairs.contains_key(&CARET_LAYER) {
+            self.send(ClientMsg::LayerCreate { layer: CARET_LAYER, window: 1, parent: 0, kind: LayerKind::Buffer })?;
+            self.send(ClientMsg::LayerSet { layer: CARET_LAYER, props: LayerProps { mask: prop::ORDER, order: 5, ..Default::default() } })?;
+            self.pairs.insert(CARET_LAYER, Pair { bufs: [None, None], front: 1 });
+        }
+        match self.caret {
+            Some((old, oc)) if (old.w, old.h, oc) == (r.w, r.h, color) => {
+                if (old.x, old.y) != (r.x, r.y) {
+                    self.send(ClientMsg::LayerSet { layer: CARET_LAYER, props: LayerProps { mask: prop::RECT, rect: r, ..Default::default() } })?;
+                    sent = true;
+                }
+            }
+            _ => {
+                self.draw_layer(CARET_LAYER, r, |cv| cv.fill(cv.bounds(), color))?;
+                sent = true;
+            }
+        }
+        self.caret = Some((r, color));
+        if on != self.caret_shown {
+            self.caret_shown = on;
+            self.send(ClientMsg::LayerSet { layer: CARET_LAYER, props: LayerProps { mask: prop::VISIBLE, visible: on, ..Default::default() } })?;
+            sent = true;
+        }
+        Ok(sent)
+    }
+
     /// Skryje vrstvu popoveru (nic otevreneho).
     pub fn hide_popover(&mut self) -> Result<()> {
         if !self.popover_shown {
@@ -680,6 +728,7 @@ pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u3
     }
     let mut ui: Ui<A::Msg> = Ui::new(crate::Look::ui_fonts(), win.w, win.h);
     ui.use_overlay_layer(true);
+    ui.use_caret_layer(true);
     set_context(&win, &mut ui);
     let mut dirty = true;
     // Trasovani vstupu: klik, ktery zmenil rozhrani, ceka na nakresleni
@@ -731,6 +780,9 @@ pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u3
                     if ui.timer(libos::time::now()) {
                         dirty = true;
                     }
+                    if !dirty && !blink(&mut win, &mut ui)? {
+                        dirty = true;
+                    }
                     for m in ui.take_msgs() {
                         app.update(m);
                         dirty = true;
@@ -762,6 +814,9 @@ pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u3
                 if ui.timer(libos::time::now()) {
                     dirty = true;
                 }
+                if !dirty && !blink(&mut win, &mut ui)? {
+                    dirty = true;
+                }
                 for m in ui.take_msgs() {
                     app.update(m);
                     dirty = true;
@@ -784,6 +839,16 @@ pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u3
             Err(Error::PeerClosed) => return Ok(()),
             Err(e) => return Err(e),
         }
+    }
+}
+
+/// Blikani kurzoru bez prekresleni: jen viditelnost vrstvy kurzoru
+/// a commit. `Ok(false)` = kompozitor se restartoval (prekreslit cele).
+fn blink<M: Clone>(win: &mut Window, ui: &mut Ui<M>) -> Result<bool> {
+    match win.set_caret(ui.caret()).and_then(|sent| if sent { win.commit(false) } else { Ok(()) }) {
+        Ok(()) => Ok(true),
+        Err(Error::ServiceRestarted) => Ok(false),
+        Err(e) => Err(e),
     }
 }
 
@@ -958,6 +1023,7 @@ fn render<M: Clone>(win: &mut Window, ui: &mut Ui<M>) -> Result<()> {
         Some(r) => win.draw_popover(r, |c| ui.draw_overlay(c, r))?,
         None => win.hide_popover()?,
     }
+    win.set_caret(ui.caret())?;
     win.set_a11y(&ui.a11y())?;
     // Titulek podle stavu aplikace ("Správce úloh (20 běží)"): v teze
     // transakci jako obsah. Ostatni vlastnosti okna vychozi (jako po

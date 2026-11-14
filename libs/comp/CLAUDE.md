@@ -20,4 +20,5 @@ Jádro kompozitoru `compd` bez závislosti na jádru OS (`no_std` + `alloc`, tes
 
 - Čas skládání po částech měří `prof.rs` (hodiny dodá `compd`, výpis v logu `compd: snimek cele obrazovky ...`). Novou drahou část kresli uvnitř změřené části nebo přidej vlastní `Part`.
 - `src/tests.rs` má přes 1700 řádků (nad limitem ~1500 se nesmí dál růst): nové testy dávej do `src/tests/`.
+- Poškození po transakci (`scene.rs`, `apply`): normálně celé okno; změna jen viditelnosti nebo polohy vrstvy s bufferem bez potomků v kořeni okna (kurzor pole, `small_layer_change`) poškodí jen její starý a nový obdélník (test `tests/caret.rs`). Nová vlastnost vrstvy, která mění pixely, nesmí do této výjimky spadnout.
 - Protokol okna a displeje je v `libs/guiproto`; změna zasahuje i `libs/ui` a `user/compd`.

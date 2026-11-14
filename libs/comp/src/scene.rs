@@ -564,19 +564,35 @@ impl Comp {
     /// Uplatni rozpracovane zpravy transakce (atomicky: mezi tim se nesklada).
     pub(crate) fn apply(&mut self, c: ClientId, ops: Vec<ClientMsg>, txn: u32, flags: u32, window: u32, serial: u32, now: u64) {
         let mut touched: Vec<u32> = Vec::new();
+        // Presne poskozeni (okno, obdelnik v obsahu): jen viditelnost
+        // nebo poloha male vrstvy bez potomku (kurzor pole) poskodi jen
+        // jeji stare a nove misto, ne cele okno.
+        let mut precise: Vec<(u32, Rect)> = Vec::new();
         for m in ops {
             let o = op_of(&m);
-            if let Err(e) = self.apply_one(c, m, now, &mut touched) {
+            let exact = self.small_layer_change(c, &m);
+            let mut t = Vec::new();
+            if let Err(e) = self.apply_one(c, m, now, &mut t) {
                 self.error(c, o, e);
             }
+            match exact {
+                Some((w, layer, old)) => {
+                    precise.push((w, old));
+                    precise.push((w, self.shown_rect(c, layer)));
+                }
+                None => touched.extend(t),
+            }
         }
+        let only_precise = touched.is_empty() && !precise.is_empty();
         let Some(cl) = self.clients.get_mut(&c) else { return };
         if flags & commit::FRAME != 0 {
             cl.frame_wanted = true;
         }
         cl.txn_waiting.push(txn);
         if let Some(&gid) = cl.windows.get(&window) {
-            touched.push(window);
+            if !only_precise {
+                touched.push(window);
+            }
             let mut became_mapped = false;
             if let Some(w) = self.windows.get_mut(&gid) {
                 if !w.mapped {
@@ -587,6 +603,7 @@ impl Comp {
                     && let Some((s, nw, nh, d)) = w.configure
                     && s == serial
                 {
+                    touched.push(window);
                     // Stara i nova plocha vcetne stinu (zmensene okno
                     // odkryje, co bylo pod nim).
                     let old = w.visual();
@@ -610,6 +627,7 @@ impl Comp {
                 }
             }
             if became_mapped {
+                touched.push(window);
                 // Fokus jen okno spustene uzivatelem (nebo kdyz zadne jine
                 // fokus nema); jinak zvyrazneni ikony (`launch.rs`).
                 self.new_window_focus(gid, now);
@@ -617,8 +635,51 @@ impl Comp {
         }
         touched.sort_unstable();
         touched.dedup();
+        for (w, r) in precise {
+            if !touched.contains(&w) {
+                self.damage_local_rect(c, w, r);
+            }
+        }
         for w in touched {
             self.damage_local_window(c, w);
+        }
+    }
+
+    /// Je `m` zmena jen viditelnosti nebo polohy vrstvy s bufferem bez
+    /// potomku v korenu okna (ne popover)? Vraci (okno, vrstva, jeji
+    /// dosavadni viditelny obdelnik v obsahu), jinak `None` = poskodit
+    /// cele okno.
+    fn small_layer_change(&self, c: ClientId, m: &ClientMsg) -> Option<(u32, u32, Rect)> {
+        let ClientMsg::LayerSet { layer, props } = m else { return None };
+        if props.mask & !(prop::VISIBLE | prop::RECT) != 0 {
+            return None;
+        }
+        let cl = self.clients.get(&c)?;
+        let l = cl.layers.get(layer)?;
+        if l.parent != 0 || l.kind != LayerKind::Buffer || l.props.popover || l.props.buffer == 0 || cl.layers.values().any(|k| k.parent == *layer) {
+            return None;
+        }
+        Some((l.window, *layer, self.shown_rect(c, *layer)))
+    }
+
+    /// Viditelny obdelnik vrstvy v obsahu okna (skryta = prazdny).
+    fn shown_rect(&self, c: ClientId, layer: u32) -> Rect {
+        match self.clients.get(&c).and_then(|cl| cl.layers.get(&layer)) {
+            Some(l) if l.props.visible => l.props.rect,
+            _ => Rect::default(),
+        }
+    }
+
+    /// Poskodi obdelnik `r` obsahu okna klienta (mistni id) na obrazovce.
+    pub(crate) fn damage_local_rect(&mut self, c: ClientId, local: u32, r: Rect) {
+        if r.w == 0 || r.h == 0 {
+            return;
+        }
+        let Some(&gid) = self.clients.get(&c).and_then(|cl| cl.windows.get(&local)) else { return };
+        let Some(w) = self.windows.get(&gid) else { return };
+        let s = Rect::new(w.rect.x + r.x, w.rect.y + r.y, r.w, r.h).intersect(&w.rect);
+        if s.w > 0 && s.h > 0 {
+            self.damage(s);
         }
     }
 

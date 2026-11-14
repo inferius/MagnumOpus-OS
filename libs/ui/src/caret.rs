@@ -22,6 +22,13 @@ impl<M: Clone> Ui<M> {
         self.caret_on = true;
     }
 
+    /// Cinnost bez casu udalosti (akce pristupnosti): `Ui::now` muze byt
+    /// stary, zacatek blikani doplni nejblizsi `Ui::timer` (hned).
+    pub(crate) fn caret_reset_untimed(&mut self) {
+        self.caret_reset();
+        self.caret_fresh = true;
+    }
+
     /// Blika kurzor (pole s fokusem v aktivnim okne, ne nedostupne)?
     fn caret_blinking(&self) -> bool {
         self.active && self.focused_field().is_some_and(|(i, _)| !self.elems[i].disabled)
@@ -45,6 +52,9 @@ impl<M: Clone> Ui<M> {
         let half = m.caret_blink as u64 * MS;
         let mut next: Option<u64> = None;
         let mut at = |t: u64| next = Some(next.map_or(t, |n| n.min(t)));
+        if self.caret_fresh {
+            at(self.now);
+        }
         if self.caret_blinking() && half > 0 {
             let since = self.now.saturating_sub(self.caret_since);
             let stop = m.caret_blink_stop as u64 * MS;
@@ -66,18 +76,23 @@ impl<M: Clone> Ui<M> {
     /// Casovac poli v case `now`; vraci, zda prekreslit.
     pub(crate) fn caret_timer(&mut self, now: u64) -> bool {
         let mut redraw = false;
+        if core::mem::take(&mut self.caret_fresh) {
+            self.caret_since = now;
+        }
         let m = self.look.theme.motion.clone();
         let half = m.caret_blink as u64 * MS;
         if self.caret_blinking() && half > 0 {
             let since = now.saturating_sub(self.caret_since);
             let on = since >= m.caret_blink_stop as u64 * MS || since < 2 * half || (since / half) % 2 == 1;
+            // S vrstvou kurzoru staci prepnout jeji viditelnost (klient
+            // podle `Ui::caret`), okno se neprekresluje.
             if on != self.caret_on {
                 self.caret_on = on;
-                redraw = true;
+                redraw |= !self.caret_layer;
             }
         } else if !self.caret_on {
             self.caret_on = true;
-            redraw = true;
+            redraw |= !self.caret_layer;
         }
         if self.autoscroll_pending() {
             let (x, y) = self.pointer;

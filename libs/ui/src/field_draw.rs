@@ -111,7 +111,7 @@ impl<M: Clone> Ui<M> {
         let (sx, sy) = self.tscroll.get(&key).copied().unwrap_or((0, 0));
         let ax = self.field_align(i);
         let s = String::from(self.field_text(i));
-        let (cur, sel, over) = self.edits.get(&key).map_or((s.len(), None, false), |e| (e.cursor(), e.selection(), e.overwrite));
+        let sel = self.edits.get(&key).and_then(|e| e.selection());
         let style = self.look.body();
         let lh = style.line as i32;
         let lines = self.field_lines(i);
@@ -191,21 +191,12 @@ impl<M: Clone> Ui<M> {
                 f.draw(c, x0, base, &s[a..e], style.size, fade(col.ink));
             }
         }
-        // Kurzor: v aktivnim okne podle blikani; prepis = podtrzeni sirky
-        // dalsiho znaku.
-        if typing && self.caret_on {
-            let (li, cx) = self.caret_pos(i, &lines, cur);
-            let y = top + li as i32 * lh - sy;
-            let (la, le) = lines[li];
-            let next = if cur < le { crate::text::next_boundary(&s, cur) } else { cur };
-            if over && next > cur && la <= cur && !opts.read_only {
-                let xs = self.line_xs(&s, la, le, secure);
-                let x_of = |o: usize| xs.iter().find(|&&(p, _)| p >= o).map_or(0, |&(_, x)| x);
-                let w = (x_of(next) - cx).max(2);
-                c.fill(Rect::new(x0 + cx, y + lh - 2, w as u32, 2), col.accent);
-            } else {
-                c.fill(Rect::new(x0 + cx, y, 2, lh as u32), col.accent);
-            }
+        // Kurzor: v aktivnim okne podle blikani. S vlastni vrstvou kurzoru
+        // (klient v OS) ho kresli vrstva, blikani pak nic neprekresluje.
+        if typing && self.caret_on && !self.caret_layer
+            && let Some(r) = self.caret_geom(i)
+        {
+            c.fill(r, col.accent);
         }
         c.set_clip(old);
         // Text chyby pod polem, jinak varovani Caps Lock.
@@ -221,6 +212,70 @@ impl<M: Clone> Ui<M> {
             let base = y + f.baseline_in(cs.size, cs.line);
             f.draw(c, b.x + th.space[2] as i32, base, &text, cs.size, ink);
         }
+    }
+
+    /// Obdelnik kurzoru pole `i` (souradnice prvku, oriznuty plochou
+    /// textu): svisla cara, v prepisu podtrzeni sirky dalsiho znaku.
+    pub(crate) fn caret_geom(&self, i: usize) -> Option<Rect> {
+        let (multi, _) = self.field_kind(i)?;
+        let key = self.elems[i].key;
+        let ed = self.edits.get(&key)?;
+        let (cur, over) = (ed.cursor(), ed.overwrite);
+        let read_only = self.field_opts(i).is_some_and(|o| o.read_only);
+        let secure = self.field_masked(i);
+        let b = self.field_box(i);
+        let inner = self.field_inner(i);
+        let (sx, sy) = self.tscroll.get(&key).copied().unwrap_or((0, 0));
+        let lh = self.look.body().line as i32;
+        let top = if multi { inner.y } else { b.y + (b.h as i32 - lh) / 2 };
+        let x0 = inner.x - sx + self.field_align(i);
+        let lines = self.field_lines(i);
+        let s = self.field_text(i);
+        let (li, cx) = self.caret_pos(i, &lines, cur);
+        let y = top + li as i32 * lh - sy;
+        let (la, le) = lines[li];
+        let next = if cur < le { crate::text::next_boundary(s, cur) } else { cur };
+        let r = if over && next > cur && la <= cur && !read_only {
+            let xs = self.line_xs(s, la, le, secure);
+            let x_of = |o: usize| xs.iter().find(|&&(p, _)| p >= o).map_or(0, |&(_, x)| x);
+            let w = (x_of(next) - cx).max(2);
+            Rect::new(x0 + cx, y + lh - 2, w as u32, 2)
+        } else {
+            Rect::new(x0 + cx, y, 2, lh as u32)
+        };
+        let clip = Rect::new(inner.x - 1, b.y + 1, inner.w + 2, b.h.saturating_sub(2));
+        let r = r.intersect(&clip);
+        (r.w > 0 && r.h > 0).then_some(r)
+    }
+
+    /// Kurzor pole s fokusem pro vrstvu kurzoru klienta: obdelnik
+    /// v souradnicich okna (oriznuty posouvanou oblasti), barva a zda je
+    /// prave videt (blikani). `None` = zadny kurzor.
+    pub fn caret(&self) -> Option<(Rect, u32, bool)> {
+        let (i, _) = self.focused_field()?;
+        if !self.active || self.elems[i].disabled {
+            return None;
+        }
+        let r = self.caret_geom(i)?;
+        let w = self.window_rect(i);
+        let e = self.elems[i].rect;
+        let mut r = Rect::new(r.x - e.x + w.x, r.y - e.y + w.y, r.w, r.h);
+        let sp = self.elems[i].space;
+        if sp != 0
+            && let Some(a) = self.scroll_areas().into_iter().find(|a| a.index + 1 == sp)
+        {
+            r = r.intersect(&a.rect);
+        }
+        if r.w == 0 || r.h == 0 {
+            return None;
+        }
+        Some((r, self.look.theme.color.accent, self.caret_on))
+    }
+
+    /// Klient kresli kurzor do vlastni vrstvy ([`Ui::caret`]); prvky ho pak
+    /// nekresli a blikani nepotrebuje prekresleni okna.
+    pub fn use_caret_layer(&mut self, on: bool) {
+        self.caret_layer = on;
     }
 
     /// Je ukazatel v obdelniku `r` prvku `i` (souradnice prvku)?

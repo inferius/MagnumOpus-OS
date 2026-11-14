@@ -7,12 +7,14 @@
 //!   napsanym textem (hledani psanim, `TYPEAHEAD` od posledniho znaku),
 //!   Home / End prvni a posledni volba;
 //! - **seznam** (`list`): Home / End, PgUp / PgDn (stranka), hledani
-//!   psanim.
+//!   psanim; s `multi_select` vyber vic radku jako v tabulce (Shift
+//!   rozsah, Ctrl prepne / jen kurzor, Ctrl+mezernik, Ctrl+A).
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use inputproto::code::*;
+use inputproto::mods;
 
 use crate::event::Response;
 use crate::layout::ElemKind;
@@ -120,11 +122,15 @@ impl<M: Clone> Ui<M> {
         true
     }
 
-    /// Klavesa na seznamu (Home, End, PgUp, PgDn, pismena); sipky resi
-    /// `event.rs`. `false` = nezpracovano.
+    /// Klavesa na seznamu: Home, End, PgUp, PgDn, hledani psanim; s
+    /// vicenasobnym vyberem i sipky (Shift rozsah, Ctrl jen kurzor),
+    /// mezernik (Ctrl+mezernik prepne radek) a Ctrl+A. Sipky jednoducheho
+    /// seznamu resi `event.rs`. `false` = nezpracovano.
     pub(crate) fn list_key(&mut self, i: usize, code: u16, ch: Option<char>, r: &mut Response<M>) -> bool {
-        let ElemKind::List { count, .. } = &self.elems[i].kind else { return false };
-        let n = *count;
+        let ElemKind::List { count, multi, .. } = &self.elems[i].kind else { return false };
+        let (n, multi) = (*count, *multi);
+        let key = self.elems[i].key;
+        let (ctrl, shift) = (self.mods & mods::CTRL != 0, self.mods & mods::SHIFT != 0);
         let items: Vec<(usize, String, bool)> = self
             .elems
             .iter()
@@ -133,29 +139,106 @@ impl<M: Clone> Ui<M> {
                 _ => None,
             })
             .collect();
-        let cur = items.iter().find(|t| t.2).map(|t| t.0);
+        let first_sel = items.iter().find(|t| t.2).map(|t| t.0);
+        let cur = if multi { self.lists.get(&key).and_then(|s| s.0).filter(|&c| c < n).or(first_sel) } else { first_sel };
         let page = (self.elems[i].rect.h / self.look.row_h().max(1)).max(1) as usize;
-        let k = match (code, ch) {
-            (KEY_HOME, _) => Some(0),
-            (KEY_END, _) => n.checked_sub(1),
-            (KEY_PAGEUP, _) => Some(cur.unwrap_or(0).saturating_sub(page)),
-            (KEY_PAGEDOWN, _) => Some((cur.map_or(0, |c| c + page)).min(n.saturating_sub(1))),
-            (_, Some(c)) if !c.is_control() && c != ' ' => {
-                let pre = self.typeahead(c);
-                let labels: Vec<String> = items.iter().map(|t| t.1.clone()).collect();
-                let start = cur.map_or(0, |c| if pre.chars().count() == 1 { c + 1 } else { c });
-                Self::find_prefix(&labels, start, &pre).map(|p| items[p].0)
-            }
-            _ => return false,
+        let last = n.saturating_sub(1);
+        let to = match code {
+            KEY_UP if multi => Some(cur.map_or(0, |c| c.saturating_sub(1))),
+            KEY_DOWN if multi => Some(cur.map_or(0, |c| (c + 1).min(last))),
+            KEY_HOME => Some(0),
+            KEY_END => Some(last),
+            KEY_PAGEUP => Some(cur.unwrap_or(0).saturating_sub(page)),
+            KEY_PAGEDOWN => Some(cur.map_or(0, |c| c + page).min(last)),
+            _ => None,
         };
-        if let Some(k) = k
-            && n > 0
-            && Some(k) != cur
+        if n == 0 {
+            return to.is_some();
+        }
+        if let Some(k) = to {
+            if multi && ctrl {
+                // Jen kurzor (vyber zustane), mezernikem pak prepnout.
+                self.lists.entry(key).or_default().0 = Some(k);
+                r.redraw = true;
+            } else if multi {
+                self.list_select(i, k, false, shift, r);
+            } else {
+                self.list_pick_single(i, k, cur, r);
+            }
+            return true;
+        }
+        if multi && code == KEY_SPACE {
+            self.list_select(i, cur.unwrap_or(0), ctrl, false, r);
+            return true;
+        }
+        let letter = ch.filter(|c| c.is_alphabetic()).map(|c| c.to_lowercase().next().unwrap_or(c)).or((code == KEY_A).then_some('a'));
+        if multi && ctrl && letter == Some('a') {
+            let all: Vec<u64> = (0..n as u64).collect();
+            self.list_emit(i, all, r);
+            return true;
+        }
+        if ctrl {
+            return false;
+        }
+        let Some(c) = ch.filter(|c| !c.is_control() && *c != ' ') else { return false };
+        let pre = self.typeahead(c);
+        let labels: Vec<String> = items.iter().map(|t| t.1.clone()).collect();
+        let start = cur.map_or(0, |c| if pre.chars().count() == 1 { c + 1 } else { c });
+        if let Some(p) = Self::find_prefix(&labels, start, &pre) {
+            let k = items[p].0;
+            if multi {
+                self.list_select(i, k, false, false, r);
+            } else {
+                self.list_pick_single(i, k, cur, r);
+            }
+        }
+        r.redraw = true;
+        true
+    }
+
+    /// Jednoduchy seznam: vybrat radek `k` (`on_select`), kdyz se zmeni.
+    fn list_pick_single(&mut self, i: usize, k: usize, cur: Option<usize>, r: &mut Response<M>) {
+        if Some(k) != cur
             && let ElemKind::List { on_select: Some(f), .. } = &self.elems[i].kind
         {
             r.msgs.push(f(k));
         }
         r.redraw = true;
-        true
+    }
+
+    /// Vyber radku `k` seznamu `i` s vicenasobnym vyberem (klik, sipky,
+    /// mezernik) podle modifikatoru; logika jako u tabulky
+    /// (`selection.rs`).
+    pub(crate) fn list_select(&mut self, i: usize, k: usize, ctrl: bool, shift: bool, r: &mut Response<M>) {
+        let key = self.elems[i].key;
+        let cur: Vec<u64> = self
+            .elems
+            .iter()
+            .filter_map(|e| match e.kind {
+                ElemKind::ListItem { index, selected: true, list, .. } if list == i + 1 => Some(index as u64),
+                _ => None,
+            })
+            .collect();
+        let anchor = self.lists.get(&key).and_then(|s| s.1);
+        let range = |a: usize, b: usize| (a.min(b) as u64..=a.max(b) as u64).collect::<Vec<u64>>();
+        let sel = crate::selection::pick(&cur, &range, anchor, k, k as u64, ctrl, shift, true);
+        let s = self.lists.entry(key).or_default();
+        s.0 = Some(k);
+        if crate::selection::moves_anchor(shift, true, s.1.is_some()) {
+            s.1 = Some(k);
+        }
+        self.list_emit(i, sel, r);
+    }
+
+    fn list_emit(&mut self, i: usize, sel: Vec<u64>, r: &mut Response<M>) {
+        if let ElemKind::List { on_selection: Some(f), .. } = &self.elems[i].kind {
+            r.msgs.push(f(sel));
+        }
+        r.redraw = true;
+    }
+
+    /// Kurzor seznamu s vicenasobnym vyberem (radek s prstencem).
+    pub(crate) fn list_cursor(&self, i: usize) -> Option<usize> {
+        self.lists.get(&self.elems[i].key).and_then(|s| s.0)
     }
 }

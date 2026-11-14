@@ -95,7 +95,9 @@ pub enum Kind<M> {
     TextInput { value: String, placeholder: String, secure: bool, multiline: bool, rows: u32, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<KeyMapFn>, suggest: Option<Box<crate::suggest::Suggest<M>>>, opts: crate::fieldopts::FieldOpts, on_search: Option<Box<dyn Fn(String) -> M>> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     /// `agents[i]` = radek patri agentovi AI (stitek a pruh barvy `ai`).
-    List { items: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>>, agents: Vec<bool> },
+    /// `multi` = vicenasobny vyber (`selection` = indexy radku, zmena
+    /// `on_selection`; Ctrl, Shift, Ctrl+A jako u tabulky).
+    List { items: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>>, agents: Vec<bool>, multi: bool, selection: Vec<u64>, on_selection: Option<Box<dyn Fn(Vec<u64>) -> M>> },
     Progress { value: u32 },
     /// Tabulka / seznam s virtualizaci (viz [`table`]).
     Table(Box<TableSpec<M>>),
@@ -346,6 +348,9 @@ pub fn list<M>(items: impl IntoIterator<Item = String>, selected: Option<usize>)
         selected,
         on_select: None,
         agents: Vec::new(),
+        multi: false,
+        selection: Vec::new(),
+        on_selection: None,
     })
 }
 
@@ -864,15 +869,21 @@ impl<M> Node<M> {
     }
 
     /// Vybrane radky (id).
+    /// Vybrane radky: tabulka id radku, seznam indexy radku.
     pub fn selection(mut self, ids: Vec<u64>) -> Self {
-        if let Some(t) = self.spec() {
+        if let Kind::List { selection, .. } = &mut self.kind {
+            *selection = ids;
+        } else if let Some(t) = self.spec() {
             t.selection = ids;
         }
         self
     }
 
+    /// Vicenasobny vyber (tabulka i seznam).
     pub fn multi_select(mut self, m: bool) -> Self {
-        if let Some(t) = self.spec() {
+        if let Kind::List { multi, .. } = &mut self.kind {
+            *multi = m;
+        } else if let Some(t) = self.spec() {
             t.multi = m;
         }
         self
@@ -893,8 +904,11 @@ impl<M> Node<M> {
         self
     }
 
+    /// Zmena vyberu (tabulka: id radku, seznam: indexy radku).
     pub fn on_selection(mut self, f: impl Fn(Vec<u64>) -> M + 'static) -> Self {
-        if let Some(t) = self.spec() {
+        if let Kind::List { on_selection, .. } = &mut self.kind {
+            *on_selection = Some(Box::new(f));
+        } else if let Some(t) = self.spec() {
             t.on_selection = Some(Box::new(f));
         }
         self
