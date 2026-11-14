@@ -184,7 +184,21 @@ Windows or vDSO + libc on Linux).
 - Applications always run sandboxed; the manifest says which capabilities
   they need (network and budget so far, see [Application manifest](firewall.md#application-manifest)).
   Files outside their space come only from the user's choice in a dialog
-  (powerbox, `GRANT`).
+  (powerbox, `GRANT`); trusted applications may use the working folders
+  without a prompt
+  ([Working folders](fs-v3-design.md#working-folders-and-protected-areas)
+  **[designed]**).
+- **Query budget** **[designed]**: prompt fatigue is a security problem
+  (the user stops reading and clicks "allow"). The system therefore asks
+  **only for an irreversible or unusual action**, the prompt is
+  **rememberable** (once is enough) and it **never asks when an application
+  launches** nor for access by intent (the Open/Save dialog). Everyday work
+  runs without prompts and security is held by mechanisms (capabilities,
+  snapshots, rollback), not by clicking. Examples:
+  [Working folders](fs-v3-design.md#working-folders-and-protected-areas),
+  [Firewall](firewall.md#asking-the-user), computer administration
+  ([Administering the computer](accounts.md#administering-the-computer):
+  only whole-computer actions).
 - **Administering the computer** without root: an action for the whole
   computer is confirmed by an authorised user in a system dialog, creating
   a capability for that one action only (account service design). Computers

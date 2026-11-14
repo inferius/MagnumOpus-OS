@@ -176,7 +176,18 @@ ve Windows nebo vDSO + libc v Linuxu).
 - Aplikace jsou vždy v sandboxu; manifest říká, jaké capabilities potřebují
   (zatím síť a rozpočet, viz [Manifest aplikace](firewall.md#manifest-aplikace)).
   Soubory mimo svůj prostor dostanou jen výběrem uživatele v dialogu
-  (powerbox, `GRANT`).
+  (powerbox, `GRANT`); důvěryhodné aplikace smějí bez dotazu do pracovních
+  složek ([Pracovní složky](navrh-fs-v3.md#pracovní-složky-a-chráněné-oblasti)
+  **[navrženo]**).
+- **Rozpočet dotazů** **[navrženo]**: únava z dotazů je bezpečnostní
+  problém (uživatel přestane číst a klikne „povolit“). Systém se proto ptá
+  **jen u nevratného nebo neobvyklého úkonu**, dotaz je **zapamatovatelný**
+  (jednou stačí) a **nikdy se neptá při spuštění aplikace** ani při přístupu
+  podle záměru (dialog Otevřít/Uložit). Běžná práce proběhne bez dotazu
+  a bezpečnost drží mechanismy (capabilities, snapshoty, vracení změn), ne
+  klikání. Příklady: [Pracovní složky](navrh-fs-v3.md#pracovní-složky-a-chráněné-oblasti),
+  [Firewall](firewall.md#dotaz-uživateli), správa počítače
+  ([Správa počítače](ucty.md#správa-počítače): jen úkony pro celý počítač).
 - **Správa počítače** bez roota: úkon pro celý počítač potvrdí oprávněný
   uživatel v systémovém dialogu a vznikne capability jen na ten úkon
   (návrh služby účtů). Počítače spravované organizací (zápis, firemní záloha

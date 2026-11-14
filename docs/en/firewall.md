@@ -80,6 +80,11 @@ ports = "8080"
 
 ## Asking the user
 
+The [query budget](architecture.md#security) applies: **everyday traffic does
+not ask**. An outgoing connection allowed by the application manifest goes
+through without a prompt (a prompt arises only for an **unexpected target**)
+and launching an application never asks about the network.
+
 A session layer with the `ask` flag is not a hard boundary: the user
 decides about a target outside its rules. A layer without `ask` is hard,
 so a parent can lock a child in and the user cannot override it.

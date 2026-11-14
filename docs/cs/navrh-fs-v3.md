@@ -343,15 +343,49 @@ Celé **[navrženo]**.
   dialog pohodlný přístup ke všem svým souborům - pohodlí uživatele
   nevyžaduje široký přístup aplikací.
 - ⚠️ Staré programy (hlavně přes vrstvu Windows) čekají přístup k celým
-  Dokumentům: jednorázový dotaz „Aplikace chce přístup k Dokumentům“, nebo
-  profil Volný jen pro tu aplikaci.
+  Dokumentům: pokud jsou důvěryhodné, mají ho v pracovních složkách bez
+  dotazu ([Pracovní složky](#pracovní-složky-a-chráněné-oblasti)); jinak
+  jen dialog výběru, nebo profil Volný jen pro tu aplikaci.
 - **Profily v nastavení systému:**
 
 | Profil | Pro koho | Chování |
 |---|---|---|
-| **Standardní** (výchozí) | běžné používání | uživatel má ke svým souborům přístup bez omezení a dotazů; aplikace jen svůj adresář + to, co jí uživatel vybral (zapamatovatelné); systémové a cizí soubory ne |
-| **Přísný** | citlivá data, firmy | aplikace v sandboxu (jen dialog výběru), trezory se zamykají při uspání, audit změn a čtení, detekce ransomwaru podle entropie (viz [Výchozí stav a profily](#výchozí-stav-a-profily)) |
-| **Volný** | vývojáři | aplikace vidí celý domov uživatele, méně potvrzování |
+| **Standardní** (výchozí) | běžné používání | uživatel má ke svým souborům přístup bez omezení a dotazů; důvěryhodné aplikace smějí bez dotazu do **pracovních složek**, ostatní jen svůj adresář + to, co jim uživatel vybral (zapamatovatelné); systémové, cizí a tajné soubory ne |
+| **Přísný** | citlivá data, firmy | aplikace v sandboxu (jen dialog výběru, i pro pracovní složky), trezory se zamykají při uspání, audit změn a čtení, detekce ransomwaru podle entropie (viz [Výchozí stav a profily](#výchozí-stav-a-profily)) |
+| **Volný** | vývojáři | aplikace vidí celý domov uživatele (kromě [vždy chráněného](#pracovní-složky-a-chráněné-oblasti)), méně potvrzování |
+
+### Pracovní složky a chráněné oblasti
+
+**Zásada:** únava z dotazů je bezpečnostní problém (uživatel začne klikat
+„povolit“ bez čtení), takže se systém **nesmí ptát při běžné práci**:
+**spuštění aplikace se neptá nikdy** a **přístup podle záměru** (dialog
+Otevřít/Uložit, přetažení, „Otevřít v“ - powerbox) se neptá nikdy, protože
+výběr souboru **je** souhlas. Obecné pravidlo o rozpočtu dotazů:
+[Bezpečnost](architektura.md#bezpečnost). Celé **[navrženo]**.
+
+- **Pracovní složky** jsou seznam v nastavení; výchozí: **Dokumenty,
+  Obrázky, Hudba, Videa, Stažené, Projekty**. Uživatel je může upravit.
+- **Standardní profil:** do pracovních složek smí **bez dotazu**
+  **důvěryhodné aplikace**: ty z oficiálního zdroje nebo podepsané, a
+  **vše, co si uživatel sám nainstaloval**. Aplikace z **neznámého zdroje**
+  (stažený a spuštěný soubor) smí jen přes **dialog výběru**, dokud
+  uživatel **jednou neřekne „důvěřovat“** (volba v nabídce aplikace nebo
+  v nastavení, ne dotaz při spuštění).
+- **Přísný profil:** jen dialog výběru, pro všechny aplikace.
+- **Volný profil:** celý domov uživatele, kromě vždy chráněného níže.
+- **Vždy chráněné, i ve Volném profilu:** **systém**, **cizí účty**
+  a **tajemství**: `~/.ssh`, klíče, hesla a klíčenky, profily prohlížečů
+  (cookies, uložená hesla, sezení), peněženky a **data jiných aplikací**.
+  **Proč:** přesně tohle krade malware. Jedna aplikace s širokým přístupem
+  jinak vyčte přihlášení do banky, kryptopeněženku nebo klíče k serverům,
+  a to i tam, kde uživatel „jen chtěl volný přístup k souborům“. K těmto
+  oblastem vede jediná cesta: výslovné oprávnění z nastavení pro konkrétní
+  aplikaci (např. SSH klient ke svým klíčům).
+- **Pojistka, proč si volnější výchozí můžeme dovolit:** [verze a snapshoty
+  FS](#snapshoty-koš-ochrana-proti-ransomwaru) a [detekce ransomwaru podle
+  entropie](#ochrana-proti-ransomwaru-detekce-chování) s obnovou. Důvěryhodná
+  aplikace, která by v pracovní složce něco rozbila nebo zašifrovala, jde
+  vrátit zpět; proto se nemusíme ptát předem.
 
 ## Šifrované trezory
 
@@ -693,9 +727,12 @@ spoléhají.
 - Každý nový soubor dostane rozšířený atribut **`sys.origin`**: odkud přišel
   (URL stažení, aplikace, která ho vytvořila, zdroj kopie, přenosný disk).
   Kopie a přesun ho přenesou; přejmenování ho nezmění.
-- **Spustitelný soubor s původem „internet“ nebo „přenosný disk“** se před
-  prvním spuštěním zeptá (jako Mark of the Web, ale nejde obejít
-  přejmenováním ani kopií uvnitř systému).
+- **Spustitelný soubor s původem „internet“ nebo „přenosný disk“** je
+  aplikace z **neznámého zdroje**: spuštění se **neptá**, ale aplikace smí
+  k souborům jen přes dialog výběru, dokud uživatel neřekne „důvěřovat“
+  ([Pracovní složky](#pracovní-složky-a-chráněné-oblasti)). Původ nejde
+  obejít přejmenováním ani kopií uvnitř systému (podobně jako Mark of
+  the Web).
 - Atribut smí nastavit jen FS a systémové služby, ne aplikace.
 
 ### Ochrana proti ransomwaru (detekce chování)
@@ -770,7 +807,7 @@ i samostatně v nastavení (pro jeden dataset nebo celý systém).
 | audit čtení | střední (záznam na otevření) | volba | citlivé datasety | volba |
 | „kdo četl můj soubor“ | podle auditu čtení | jen když je audit čtení | zapnuto | volba |
 | původ souboru | zanedbatelná (atribut při vytvoření) | zapnuto | zapnuto | zapnuto |
-| dotaz před spuštěním souboru z internetu | žádná | zapnuto | zapnuto | volba |
+| omezený přístup aplikace z neznámého zdroje (jen dialog výběru, bez dotazu při spuštění) | žádná | zapnuto | zapnuto | volba |
 | návnady proti ransomwaru | žádná | zapnuto | zapnuto | volba |
 | detekce ransomwaru podle počtu přepisů | malá (čítače) | zapnuto | zapnuto | volba |
 | detekce ransomwaru podle entropie obsahu | střední (výpočet nad vzorkem bloků) | volba | zapnuto | volba |

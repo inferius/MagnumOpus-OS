@@ -78,6 +78,11 @@ ports = "8080"
 
 ## Dotaz uživateli
 
+Platí [rozpočet dotazů](architektura.md#bezpečnost): **běžný provoz se
+neptá**. Odchozí spojení podle manifestu aplikace proběhne bez dotazu
+(dotaz vznikne až u **neočekávaného cíle**) a spuštění aplikace se nikdy
+neptá na síť.
+
 Vrstva relace s příznakem `ask` není pevná hranice: cíl mimo její pravidla
 rozhodne uživatel. Vrstva bez `ask` je pevná. Rodič tak může dítě uzavřít
 a uživatel ji nepřebije.
