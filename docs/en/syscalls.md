@@ -388,10 +388,19 @@ range (also parts; the region is split). `prot` is a subset of `MAP_READ |
 MAP_WRITE | MAP_EXECUTE`, 0 = no access. Never write and execute together
 (W^X) and never above the rights at `VM_MAP` (which checked the object
 handle's rights). Mapped pages are unmapped and a fault fills them in with
-the new rights. Requires `WRITE` on the process. Errors: `INVALID_ARGS`
-(unknown bit, W+X, alignment), `ACCESS_DENIED` (above the original
-rights), `NOT_FOUND` (a hole), `BAD_STATE` (a reservation in the range),
-`NO_RESOURCES`, `BAD_HANDLE`.
+the new rights. Requires `WRITE` on the process. **`PROT_SEAL`** in `prot`
+also **seals** the regions (like Linux `mseal`, irreversibly until the
+process ends): the rights are set to `prot` and the `max_flags` ceiling is
+lowered to them; a sealed region can then not be unmapped (`VM_UNMAP` and
+`UNMAP_DECOMMIT` = `ACCESS_DENIED`), its rights cannot change
+(`ACCESS_DENIED`), a sealed reservation cannot be filled and nothing can be
+mapped over it (`BAD_STATE`); `VM_QUERY` reports `region::ATTR_SEALED`. With
+the seal the range may contain reservations too (they are only sealed). Use:
+RELRO after relocation, library code
+([dynamic-linking.md](dynamic-linking.md)). Errors: `INVALID_ARGS` (unknown
+bit, W+X, alignment), `ACCESS_DENIED` (above the original rights, a sealed
+region), `NOT_FOUND` (a hole), `BAD_STATE` (a reservation in the range
+without the seal), `NO_RESOURCES`, `BAD_HANDLE`.
 
 ### `VM_QUERY`
 

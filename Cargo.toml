@@ -17,6 +17,7 @@ members = [
     "libs/installplan",
     "libs/cbuild",
     "libs/dynload",
+    "libs/libdproto",
     "libs/cstd",
     "libs/cstd-core",
     "libs/conf",

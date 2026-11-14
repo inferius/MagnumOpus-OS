@@ -1,0 +1,9 @@
+[package]
+name = "libdproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protokol sluzby knihoven libd (zavadec ld.so a spawn <-> libd), testy na hostiteli"
+
+[dependencies]
+abi.workspace = true

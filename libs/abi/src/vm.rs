@@ -30,6 +30,14 @@ pub const MAP_IN_RESERVATION: u32 = 1 << 4;
 /// `VM_RESERVE`: ochranna oblast (napr. pod zasobnikem). Pristup do ni
 /// ukonci proces s hlaskou o preteceni.
 pub const RESERVE_GUARD: u32 = 1 << 5;
+/// `VM_PROTECT`: oblasti v rozsahu navic **zapecetit** (jako Linux
+/// `mseal`): uz nejde zmenit prava (`VM_PROTECT`), odmapovat ani uvolnit
+/// pamet (`VM_UNMAP`, i `UNMAP_DECOMMIT`) ani nahradit rezervaci mapovanim;
+/// mapovat pres ne nejde nikdy. Nevratne do konce procesu. Prava mapovani
+/// se nastavi na `prot` jako bez pecete; rezervace v rozsahu se jen
+/// zapecetí (`prot` se jich netyka). Pouziti: RELRO po relokaci, kod
+/// knihoven, zasobnik zavadece (`docs/cs/dynamicke-linkovani.md`).
+pub const PROT_SEAL: u32 = 1 << 8;
 /// `VM_UNMAP`: mapovani v rozsahu zmenit na rezervaci (adresy zustanou
 /// zabrane, pamet se vrati; `MEM_DECOMMIT`). Rezervace zustanou.
 pub const UNMAP_DECOMMIT: u32 = 1 << 0;
@@ -46,6 +54,8 @@ pub mod region {
     pub const ATTR_GUARD: u32 = 1 << 0;
     /// Atribut: mapovani vzniklo v rezervaci (`MAP_IN_RESERVATION`).
     pub const ATTR_IN_RESERVATION: u32 = 1 << 1;
+    /// Atribut: oblast je zapecetena (`PROT_SEAL`).
+    pub const ATTR_SEALED: u32 = 1 << 2;
 }
 
 /// Vystup `VM_QUERY` (40 B, little endian: `start`, `len` u64, `kind`,

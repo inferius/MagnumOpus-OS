@@ -625,6 +625,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "dynload",
             "--package",
+            "libdproto",
+            "--package",
             "initfs",
             "--package",
             "tz",
