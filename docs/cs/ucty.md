@@ -481,6 +481,11 @@ Proč tak: potvrzuje se konkrétní úkon, který člověk vidí (stejný princi
 jako [API akcí](gui.md#api-akcí)); kdo dělá delší správu, si dialogy na
 chvíli vypne sám a ví o tom.
 
+**Počítač spravovaný organizací** (firma, škola): zápis počítače do správy,
+politiky a sledování koncových bodů jsou popsané v
+[Správě organizace](sprava-organizace.md) **[navrženo]**. Osobní počítač
+tyto funkce nikdy nemá.
+
 ## Šifrování domova
 
 Volba uživatele u jeho účtu (výchozí: vypnuto, rozhodne se při založení
@@ -522,6 +527,11 @@ krok FS**; accountd připraví klíče a rozhraní.
   nastavit nové heslo, ale u šifrovaného domova tím **nezíská** klíč
   domova (nové heslo dostane obal až po odemčení obnovovacím klíčem
   majitele).
+
+**Firemní záloha klíče domova:** na počítači zapsaném do správy organizace
+může klíč domova dostat další obal veřejným klíčem organizace (soukromá
+část mimo počítač); viz [Správa organizace](sprava-organizace.md#firemní-záloha-klíče-domova-escrow)
+**[navrženo]**.
 
 ⚠️ **Riziko ztráty dat:** kdo zapomene heslo, ztratí klíč a **nemá
 obnovovací klíč, přijde o data domova natrvalo**. Nikdo (ani správa, ani
@@ -680,6 +690,10 @@ i aarch64):
   systém).
 - ⚠️ Klíč zařízení (`/db/device.key`) i DB chrání jen oprávnění FS:
   proti procesům v systému ano, proti spuštění jiného systému z USB ne.
+- ⚠️ **Obchůzka u nešifrovaného domova:** role správy může účtu nastavit nové
+  heslo a přihlásit se jako on; u **nešifrovaného** domova tak získá jeho
+  data. U šifrovaného domova to nejde (viz [Šifrování](#šifrování-domova)).
+  Souvisí s [Správou organizace](sprava-organizace.md#rizika).
 - Bezpečnostní klíč **bez PINu klíče**: kdo ukradne klíč a zná jméno
   účtu, přihlásí se. Nastavení proto PIN klíče nabídne a bez něj varuje.
 - Přihlašovací obrazovka a dialog správy jsou jen tak bezpečné jako

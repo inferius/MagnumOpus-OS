@@ -187,7 +187,10 @@ Windows or vDSO + libc on Linux).
   (powerbox, `GRANT`).
 - **Administering the computer** without root: an action for the whole
   computer is confirmed by an authorised user in a system dialog, creating
-  a capability for that one action only (account service design).
+  a capability for that one action only (account service design). Computers
+  managed by an organization (enrollment, company home-key backup, endpoint
+  monitoring) are described in
+  [Organization management](organization-management.md) **[designed]**.
 
 **Critical components (TCB).** They hold a lot of authority, so a bug in
 them is a security bug of the whole system. That is why they stay small,

@@ -258,6 +258,9 @@ address, and it then passes the rule.
 
 ## Audit and traffic
 
+> The network audit will be one of the event sources for endpoint monitoring on
+> a computer managed by an organization: [Organization management](organization-management.md#endpoint-monitoring-edr) **[designed]**.
+
 `netd` keeps a ring of records (`audit_entries`, default 4096). A session
 with the `AUDIT` right reads them with `Net::audit(from, max)`.
 

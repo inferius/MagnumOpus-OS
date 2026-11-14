@@ -179,7 +179,9 @@ ve Windows nebo vDSO + libc v Linuxu).
   (powerbox, `GRANT`).
 - **Správa počítače** bez roota: úkon pro celý počítač potvrdí oprávněný
   uživatel v systémovém dialogu a vznikne capability jen na ten úkon
-  (návrh služby účtů).
+  (návrh služby účtů). Počítače spravované organizací (zápis, firemní záloha
+  klíče domova, sledování koncových bodů) popisuje
+  [Správa organizace](sprava-organizace.md) **[navrženo]**.
 
 **Kritické součásti (TCB).** Mají velkou autoritu, takže chyba v nich je
 bezpečnostní chyba celého systému. Proto zůstávají malé, testované

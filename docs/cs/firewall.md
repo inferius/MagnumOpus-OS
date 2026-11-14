@@ -248,6 +248,9 @@ pravidlem projde.
 
 ## Audit a provoz
 
+> Audit sítě bude jedním ze zdrojů událostí pro sledování koncových bodů na
+> počítači spravovaném organizací: [Správa organizace](sprava-organizace.md#sledování-koncových-bodů-edr) **[navrženo]**.
+
 `netd` drží kruhový seznam záznamů (`audit_entries`, výchozí 4096).
 Relace s právem `AUDIT` je čte přes `Net::audit(od, nejvíc)`.
 
