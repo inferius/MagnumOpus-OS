@@ -8,7 +8,7 @@
 //! | `dk:ping`    | `dk:pong <jmeno>` (ovladac zije, smycka udalosti bezi)         |
 //! | `dk:info`    | `dk:info <jmeno> <adresa PCI> <vendor>:<device>`               |
 //! | `dk:restart` | ovladac zastavi zarizeni a skonci kodem [`EXIT_RESTART`]; spravce zarizeni ho hned spusti znovu (nepocita se jako pad) |
-//! | `dk:crash`   | jako pad ovladace (kod [`EXIT_CRASH`]): spravce ho obnovi jako po padu; pro testy obnovy |
+//! | `dk:crash`   | jako pad ovladace (kod [`EXIT_CRASH`]): bez zastaveni a uvolneni prostredku (zarizeni zastavi jadro), spravce ho obnovi jako po padu; pro testy obnovy |
 
 /// Navratovy kod "restart na zadost" (spravce zarizeni spusti ovladac hned
 /// znovu, nepocita ho do limitu padu).

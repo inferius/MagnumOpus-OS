@@ -78,7 +78,14 @@ pub fn vmo_create_contiguous(a: Args) -> Result<u64> {
     let res = check_resource(&p, a[0])?;
     // Velikost overi `new_contiguous`; kvota se odecte az po uspechu a ve
     // skutecne velikosti (alokator pridava bloky 2^n stranek).
-    let vmo = MemoryObject::new_contiguous_dma(a[1], res.domain().cloned(), Some(p.job()))?;
+    let owner = res.device().map(|d| (d, p.id));
+    let vmo = MemoryObject::new_contiguous_dma(a[1], res.domain().cloned(), owner, Some(p.job()))?;
+    // Pamet pro DMA jen pro konkretni zarizeni: bez identity by ji jadro
+    // nemohlo pri konci ovladace zastavit (karantena DMA) ani dat do
+    // domeny IOMMU.
+    if res.device().is_none() {
+        return Err(Error::AccessDenied);
+    }
     res.charge_dma(vmo.allocated_bytes())?;
     insert(&p, vmo)
 }

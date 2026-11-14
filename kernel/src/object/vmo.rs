@@ -113,6 +113,10 @@ pub struct MemoryObject {
     /// Domena IOMMU, ve ktere je pamet namapovana pro DMA zarizeni
     /// (odmapuje se pred vracenim stranek alokatoru).
     dma: Option<crate::arch::iommu::Domain>,
+    /// Zarizeni, pro ktere pamet pro DMA vznikla (identita z prostredku),
+    /// a cislo procesu, ktery ji vytvoril (ovladac); karantena pri konci
+    /// ovladace, `quarantine.rs`.
+    device: Option<(super::quarantine::DeviceId, u64)>,
     /// Pamet pro DMA zarizeni: do procesu se mapuje s `MapFlags::DMA`
     /// a jadro pri pristupu pres primou mapu udrzuje cache (na nekoherentni
     /// platforme; na koherentni jsou `arch::dma_sync_*` prazdne).
@@ -139,6 +143,7 @@ impl MemoryObject {
             sealed: AtomicBool::new(false),
             kind,
             dma: None,
+            device: None,
             for_dma: false,
             revocable: false,
             revoked: AtomicBool::new(false),
@@ -171,11 +176,13 @@ impl MemoryObject {
     pub fn new_contiguous_dma(
         size: u64,
         domain: Option<crate::arch::iommu::Domain>,
+        device: Option<(super::quarantine::DeviceId, u64)>,
         job: Option<&Arc<Job>>,
     ) -> Result<Arc<Self>, Error> {
         let vmo = Self::new_contiguous(size, job)?;
         let mut vmo = Arc::try_unwrap(vmo).map_err(|_| Error::BadState)?;
         vmo.for_dma = true;
+        vmo.device = device;
         // Zarizeni muze do stranek zapisovat po celou dobu zivota objektu:
         // pripnout (CoW ani pager je nesmi presunout).
         for p in vmo.pages.iter() {
@@ -493,6 +500,16 @@ impl MemoryObject {
     /// Pamet pro DMA (mapuje se s `MapFlags::DMA`)?
     pub fn is_dma(&self) -> bool {
         self.for_dma
+    }
+
+    /// Zarizeni pameti pro DMA (`None` = bezna pamet nebo bez identity).
+    pub fn dma_device(&self) -> Option<super::quarantine::DeviceId> {
+        self.device.map(|(d, _)| d)
+    }
+
+    /// Cislo procesu, ktery pamet pro DMA vytvoril (ovladac zarizeni).
+    pub fn dma_creator(&self) -> Option<u64> {
+        self.device.map(|(_, pid)| pid)
     }
 
     /// Pamet pro DMA bez domeny IOMMU: zarizeni do ni smi zapisovat bez

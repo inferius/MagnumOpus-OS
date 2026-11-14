@@ -44,7 +44,7 @@ fn seal() {
     let mut b = [0u8; 3];
     vmo.read(0, &mut b).unwrap();
     assert_eq!(&b, b"kod");
-    let dma = MemoryObject::new_contiguous_dma(PAGE_SIZE, None, None).unwrap();
+    let dma = MemoryObject::new_contiguous_dma(PAGE_SIZE, None, None, None).unwrap();
     assert_eq!(dma.seal(), Err(Error::NotSupported));
 }
 

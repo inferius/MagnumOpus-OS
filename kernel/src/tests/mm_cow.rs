@@ -122,7 +122,7 @@ fn pinned_and_errors() {
     let p1 = src.expose_phys(PAGE_SIZE).unwrap();
     assert_ne!(p1, f1);
     assert!(phys::is_pinned(p1) && !phys::is_pinned(f1));
-    let dma = MemoryObject::new_contiguous_dma(PAGE_SIZE, None, None).unwrap();
+    let dma = MemoryObject::new_contiguous_dma(PAGE_SIZE, None, None, None).unwrap();
     assert_eq!(dma.clone_cow(0, PAGE_SIZE, None).err(), Some(Error::NotSupported));
     assert_eq!(src.clone_cow(PAGE_SIZE, 2 * PAGE_SIZE, None).err(), Some(Error::OutOfRange));
     assert_eq!(src.clone_cow(1, PAGE_SIZE, None).err(), Some(Error::InvalidArgs));

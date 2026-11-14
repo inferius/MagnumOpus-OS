@@ -14,6 +14,7 @@ pub mod interrupt;
 pub mod job;
 pub mod port;
 pub mod process;
+pub mod quarantine;
 pub mod resource;
 pub mod vmo;
 pub mod wait;

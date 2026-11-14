@@ -723,8 +723,12 @@ console `user/console`.
 a coherent platform (x86_64, QEMU virt) normally cached, on a non-coherent
 one (e.g. Raspberry Pi 4) uncached, so the device and the driver see the
 same data without manual cache maintenance. The driver must order writes
-towards the device with barriers (`libos::barrier`). Errors: `INVALID_ARGS`
-(0 or over 4 MiB), `NO_MEMORY` (no contiguous block), `ACCESS_DENIED`,
+towards the device with barriers (`libos::barrier`). Only from a resource
+with a device identity (`RESOURCE_CREATE` with `device`): when the driver
+ends, the kernel stops the device and releases the memory only afterwards
+(the DMA quarantine, see [kernel.md](kernel.md#iommu-dma-protection)).
+Errors: `INVALID_ARGS` (0 or over 4 MiB), `NO_MEMORY` (no contiguous
+block), `ACCESS_DENIED` (also a resource without a device identity),
 `WRONG_TYPE`.
 
 ### `VMO_CREATE_PHYSICAL`

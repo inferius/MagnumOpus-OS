@@ -129,12 +129,9 @@ Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
   dokončí, až všechna jeho vlákna syscall opustila. Operace jiných procesů
   přes handle (`VM_MAP` -> `BAD_STATE`, `VM_UNMAP` -> `NOT_FOUND`,
   `THREAD_CREATE` -> `BAD_STATE`) se serializují zámkem prostoru.
-- **Paměť pro DMA bez IOMMU** (`VMO_CREATE_CONTIGUOUS` bez domény zařízení)
-  se při konci procesu nevrací: zařízení do ní může dál zapisovat podle
-  deskriptorů mrtvého ovladače. Drží ji náhrobek a vrátí se až s posledním
-  handlem procesu (v logu varování). S IOMMU se vrací hned, protože se
-  stránky nejdřív odmapují z domény zařízení. Úplné řešení (zastavit
-  zařízení, vypnout bus master, a pak paměť vrátit) je **[navrženo]**.
+- **Paměť pro DMA řízeného zařízení** se při konci procesu nevrací hned:
+  jde do karantény DMA, jádro zařízení zastaví a paměť pustí až potom
+  (viz [IOMMU](#iommu-ochrana-dma), Karanténa DMA).
 - **Výjimka v programu** (page fault, neplatná instrukce, ...) ukončí jen
   proces, ne jádro: kód -1 000 100 - vektor, v logu adresa a typ chyby.
 - **Vstup do userspace:** vstupní bod a zásobník vlákna musí ležet v paměti
@@ -198,15 +195,32 @@ ACPI DMAR) nebo **AMD-Vi** (tabulka ACPI IVRS), na aarch64 **SMMUv3**
 - **Bez IOMMU** (stroj ji nemá, má ji vypnutou ve firmwaru, nebo
   `cargo xtask run --iommu none`) jádro zaloguje varování a DMA není
   omezené.
-- **Známé riziko bez IOMMU: zařízení po smrti ovladače.** Jádro dnes
-  zařízení nezastaví, když jeho ovladač skončí; zařízení může dál
-  zapisovat podle deskriptorů mrtvého ovladače. Paměť pro DMA proto drží
-  náhrobek procesu ovladače (viz [Procesy a vlákna](#procesy-a-vlákna)).
-  Jakmile ale zanikne poslední handle procesu (např. devmgr ho zahodí při
-  restartu), paměť se vrátí alokátoru a zápis zařízení může poškodit data
-  jiného procesu nebo jádra. Oprava **[navrženo]**: při zániku posledního
-  prostředku zařízení (nebo konci ovladače) vypnout bus master v konfiguraci
-  PCI, počkat na dokončení rozběhnutých přenosů, a teprve pak paměť vrátit.
+- **Karanténa DMA: zařízení po smrti ovladače** **[ověřeno v QEMU]**
+  (test `edu: obnova po padu`, s IOMMU i bez, x86_64 i aarch64; rozhodování
+  self-test `karantena DMA`). Zařízení může po konci ovladače dál
+  zapisovat podle jeho deskriptorů - bez IOMMU do stránek, které už dostal
+  někdo jiný. Proto (`kernel/src/object/quarantine.rs`):
+  1. když skončí proces, který zařízení **řídil** (sám pro něj vytvořil
+     paměť pro DMA), jeho paměť pro DMA toho zařízení jde do karantény;
+  2. jádro v konfiguraci PCI vypne zařízení **bus master** (zapisuje jen
+     registr COMMAND) a počká, až dokončí rozběhnuté přenosy (PCIe Device
+     Status, Transactions Pending, nejvýš sto milisekund; bez PCIe
+     schopnosti pevně deset milisekund);
+  3. teprve potom paměť pustí - a teprve potom proces dostane
+     `TERMINATED`, takže nový ovladač startuje až po zastavení. Nový
+     ovladač si bus master zapne sám (`libs/pci`).
+- **Klient** se sdíleným bufferem ovladače zařízení nezastaví: zastavuje
+  se jen zařízení, pro které umírající proces paměť pro DMA sám vytvořil.
+- **`dk:crash`** v driverkitu se chová jako skutečný pád: ovladač se
+  nezastaví a nic neuvolní, úklid a zastavení zařízení dělá jádro.
+- **Zařízení, které nejde zastavit** (není na PCI Express, nebo nedokončí
+  přenosy), si paměť nechá v karanténě navždy; jádro to zaloguje
+  s textem `karantena DMA` a `report` (balíček pro vývojáře) to ukáže
+  v náhledu a ve vlastní sekci.
+- **Paměť pro DMA jen s identitou zařízení:** `VMO_CREATE_CONTIGUOUS`
+  z prostředku bez identity zařízení vrátí `ACCESS_DENIED` (jádro by
+  zařízení nemohlo zastavit ani dát paměť do domény IOMMU). Všechny
+  ovladače dostávají od devmgr prostředek s identitou.
 - Ovladač virtio musí přijmout vlastnost `VIRTIO_F_ACCESS_PLATFORM`
   (zařízení pak používá překlad); virtio-blk to dělá.
 

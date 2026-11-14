@@ -700,9 +700,12 @@ konzoli `user/console`.
 na koherentní platformě (x86_64, QEMU virt) normálně s cache, na
 nekoherentní (např. Raspberry Pi 4) bez cache, aby zařízení i ovladač
 viděli stejná data bez ruční údržby cache. Pořadí zápisů vůči zařízení
-musí ovladač zajistit bariérami (`libos::barrier`). Chyby: `INVALID_ARGS`
-(0 nebo nad 4 MiB), `NO_MEMORY` (není souvislý blok), `ACCESS_DENIED`,
-`WRONG_TYPE`.
+musí ovladač zajistit bariérami (`libos::barrier`). Jen z prostředku
+s identitou zařízení (`RESOURCE_CREATE` s `device`): při konci ovladače
+jádro zařízení zastaví a paměť pustí až potom (karanténa DMA, viz
+[jadro.md](jadro.md#iommu-ochrana-dma)). Chyby: `INVALID_ARGS`
+(0 nebo nad 4 MiB), `NO_MEMORY` (není souvislý blok), `ACCESS_DENIED`
+(i prostředek bez identity zařízení), `WRONG_TYPE`.
 
 ### `VMO_CREATE_PHYSICAL`
 

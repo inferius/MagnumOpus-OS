@@ -248,7 +248,7 @@ Zprávy klienta začínající `dk:` vyřídí smyčka sama:
 | `dk:ping` | `dk:pong <jméno>` |
 | `dk:info` | `dk:info <jméno> <adresa PCI> <vendor>:<device>` |
 | `dk:restart` | ovladač zastaví zařízení a skončí kódem 75; devmgr ho hned spustí znovu (nepočítá se jako pád) |
-| `dk:crash` | jako pád (kód 70): devmgr ho obnoví jako po pádu; pro testy obnovy |
+| `dk:crash` | jako skutečný pád (kód 70): ovladač se nezastaví a nic neuvolní (zařízení zastaví jádro, karanténa DMA), devmgr ho obnoví jako po pádu; pro testy obnovy |
 
 ## První ovladač krok za krokem
 

@@ -20,7 +20,8 @@
 //! - **rotace**: nejvic [`KEEP_BOOTS`] logu, kazdy nejvys [`FILE_MAX`],
 //! - **pady procesu** (zprava `proc-crash` od supervisoru): vypis s duvodem
 //!   konce a poslednimi radky logu procesu do `/pady`,
-//! - **balicek pro vyvojare** (zprava `report`): `report.rs`,
+//! - **balicek pro vyvojare** (zprava `report`): `report.rs` (vcetne souhrnu
+//!   karanteny DMA),
 //! - **opakovane radky**: stejny radek (bez casu a CPU) vic nez
 //!   [`REPEAT_KEEP`]x za sebou se zapise jednou a pak `... (opakovano N x)`.
 //!
