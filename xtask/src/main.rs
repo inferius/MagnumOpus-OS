@@ -188,12 +188,51 @@ pub struct Options {
 
 fn main() -> ExitCode {
     console_utf8();
-    match run_cli() {
+    let result = run_cli();
+    remove_run_files();
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("xtask: chyba: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Docasne soubory tohoto behu v `target/` (jmeno s `<pid>`, aby si
+/// soubezne behy neprepisovaly initfs a obraz, ktery jiny beh prave cte
+/// nebo ma otevreny QEMU). Smazou se na konci `main`.
+static RUN_FILES: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// Cesta `target/<stem>-<pid>.<ext>` tohoto behu (smaze se na konci).
+pub(crate) fn run_file(stem: &str, ext: &str) -> PathBuf {
+    let p = target_dir().join(format!("{stem}-{}.{ext}", std::process::id()));
+    let mut files = RUN_FILES.lock().unwrap_or_else(|e| e.into_inner());
+    if !files.contains(&p) {
+        files.push(p.clone());
+    }
+    p
+}
+
+/// Vylucny zamek `target/<name>.lock` pro sdileny vystup (web dokumentace,
+/// sysroot std), ktery soubezne behy jinak mazaly navzajem pod rukama
+/// (os error 145). Uvolni se zavrenim souboru, i pri padu procesu.
+pub(crate) fn lock_shared(name: &str) -> Result<std::fs::File> {
+    let dir = target_dir();
+    std::fs::create_dir_all(&dir)?;
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join(format!("{name}.lock")))?;
+    f.lock()?;
+    Ok(f)
+}
+
+fn remove_run_files() {
+    let files = std::mem::take(&mut *RUN_FILES.lock().unwrap_or_else(|e| e.into_inner()));
+    for f in files {
+        let _ = std::fs::remove_file(f);
     }
 }
 
@@ -733,6 +772,8 @@ fn build_docs() -> Result<PathBuf> {
     // Stranka "Prikazy shellu" z metadat prikazu (jeden zdroj pravdy:
     // libs/shlang/src/doc); zapise se jen pri zmene.
     let root = workspace_root();
+    // Soubezne `cargo xtask test` stavi web do stejneho `target/docs`.
+    let _lock = lock_shared("docs")?;
     for (en, file) in [(false, "docs/cs/prikazy-shellu.md"), (true, "docs/en/shell-commands.md")] {
         let md = shlang::doc::markdown(en);
         let path = root.join(file);
@@ -993,7 +1034,8 @@ fn build(opts: &Options) -> Result<Artifacts> {
         .iter()
         .map(|(n, d)| (n.as_str(), d.as_slice()))
         .collect();
-    let initfs = target.join(format!("initfs-{}-{profile}.img", a.name));
+    // Vlastni soubor behu: jiny soubezny beh z nej muze prave skladat obraz.
+    let initfs = run_file(&format!("initfs-{}-{profile}", a.name), "img");
     std::fs::write(&initfs, initfs::build(&refs))?;
 
     Ok(Artifacts {
@@ -1004,12 +1046,13 @@ fn build(opts: &Options) -> Result<Artifacts> {
 }
 
 fn image_for(artifacts: &Artifacts, opts: &Options) -> Result<PathBuf> {
-    let suffix = if opts.test { "-test" } else { "" };
-    let path = target_dir().join(format!(
-        "os-{}-{}{suffix}.img",
-        opts.arch.name,
-        profile_dir(opts)
-    ));
+    // Testovaci obraz je vlastni pro beh (soubezne testy, QEMU ho ma
+    // otevreny); bezny obraz (`image`, `run`) ma pevnou cestu.
+    let path = if opts.test {
+        run_file(&format!("os-{}-{}-test", opts.arch.name, profile_dir(opts)), "img")
+    } else {
+        target_dir().join(format!("os-{}-{}.img", opts.arch.name, profile_dir(opts)))
+    };
     let files = [
         (opts.arch.boot_file, artifacts.loader.as_path()),
         ("os/kernel.elf", artifacts.kernel.as_path()),

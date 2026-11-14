@@ -94,7 +94,7 @@ pub fn start_user_thread(
 pub fn request_kill(t: &Arc<Thread>) {
     t.set_kill();
     wake(t, t.wait_seq());
-    if t.on_cpu.load(Ordering::Acquire)
+    if t.on_cpu_after_update()
         && let Some(cpu) = percpu::cpu(t.last_cpu.load(Ordering::Relaxed))
     {
         arch::send_reschedule(cpu.hw_id);

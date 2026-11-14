@@ -94,6 +94,15 @@ impl<T> RunQueue<T> {
         }
     }
 
+    /// Cekajici vlakna (bez bezicicho): Realtime, pak tridy od nejvyssi.
+    /// Jen pro diagnostiku - poradi neodpovida poradi vyberu.
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.rt
+            .iter()
+            .map(|(t, _)| t)
+            .chain(self.fair.iter().flat_map(|q| q.iter().map(|s| &s.item)))
+    }
+
     /// Pocet cekajicich vlaken (bez bezicicho).
     pub fn len(&self) -> usize {
         self.rt.len() + self.fair.iter().map(FairQueue::len).sum::<usize>()

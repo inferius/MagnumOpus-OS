@@ -215,6 +215,21 @@ ovladače):
   dobíhající vlákna přeskočí (jako `on_cpu` v Linuxu). Tuto chybu měla
   verze 2 do 2026-11-13 (občas zaseknutý test latence vstupu na
   aarch64). **[implementováno]**
+- **Probuzení během přepnutí v jednom slově**: „vlákno ještě běží“
+  (`ON_CPU`) a „čeká na něj probuzení“ (`WAKE_PENDING`) jsou příznaky
+  jednoho atomického slova vlákna a mění se jen atomickými operacemi
+  na něm (CAS v `wake`, `swap` ve `finish_switch`). Dřívější dvojice
+  samostatných příznaků (zapiš svůj, přečti cizí) spoléhala na pořadí
+  zápis -> čtení mezi dvěma adresami. Skutečný ARM ho u `stlr` + `ldar`
+  dodrží, ale QEMU TCG na x86 hostiteli ne. Výsledek: probuzení se
+  ztratilo, vlákno zůstalo RUNNABLE mimo všechny fronty a test čekající
+  na jeho událost vypršel (aarch64 pod zátěží hostitele, do 2026-11-14).
+  Diagnostický výpis při selhání testu (`sched::dump_state`: fronty
+  a časovače všech CPU, stav sledovaných vláken) tento stav zachytil.
+  Stejně se rozhoduje přerušení běžícího vlákna po změně jeho stavu
+  (ukončení, třída): ON_CPU se čte operací RMW na tomtéž slově
+  (`on_cpu_after_update`), takže buď odejde IPI, nebo vlákno změnu uvidí.
+  **[ověřeno v QEMU]**
 - **Vyvažování nečinných**: nečinné CPU si bere práci z cizích front; úsporné jádro
   bere Interactive jen z fronty, kde čekají aspoň dvě vlákna (výkonná jsou
   přetížená). Vystřídané Interactive vlákno na úsporném jádře se přesune

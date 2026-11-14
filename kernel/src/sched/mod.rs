@@ -19,6 +19,7 @@
 //! mozne a cekajici kod ho musi snest (podminku overi znovu).
 
 mod balance;
+mod debug;
 mod percpu;
 mod qos;
 mod thread;
@@ -29,6 +30,7 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
 
+pub use debug::dump_state;
 pub use percpu::{MAX_CPUS, all_cpus, cpu_count, this_cpu, try_this_cpu};
 pub use qos::{QosLoan, boost, boost_current, ipc_class, rt_admitted, set_thread_qos, thread_info};
 pub use thread::{Qos, Thread};
@@ -42,7 +44,7 @@ use crate::arch::{self, interrupts};
 use crate::mm::KernelStack;
 use crate::sync::SpinLockGuard;
 use percpu::{IDLE_CLASS, PerCpu, RunQueue, TimerEntry};
-use thread::state;
+use thread::{cpu_flag, state};
 
 /// Zaregistruje aktualni CPU v planovaci; prave bezici kontext se stane
 /// jeho idle vlaknem.
@@ -59,7 +61,7 @@ pub fn init_cpu(index: usize, hw_id: u32) -> &'static PerCpu {
         None,
     ));
     idle.set_state(state::RUNNING);
-    idle.on_cpu.store(true, Ordering::Relaxed);
+    idle.cpu_flags.store(cpu_flag::ON_CPU, Ordering::Relaxed);
     let cpu = PerCpu::install(index, hw_id, idle);
     topo::init_this_cpu(cpu);
     cpu
@@ -193,15 +195,29 @@ pub fn wake(t: &Arc<Thread>, seq: u64) {
             state::BLOCKED => {
                 if t.transition(state::BLOCKED, state::RUNNABLE) {
                     // Vlakno, ktere prave usnulo, muze jeste dobihat na svem
-                    // CPU (`on_cpu`). Do fronty ho smi dat az to CPU po
+                    // CPU (`ON_CPU`). Do fronty ho smi dat az to CPU po
                     // prepnuti: jinak by ho jine CPU vybralo a cekalo na nej
                     // se zakazanymi prerusenimi, a pokud by to CPU cekalo na
-                    // vlakno od nej, obe by stala navzdy. Kdo z obou
-                    // (`wake` / `finish_switch`) vezme `wake_pending` prvni,
-                    // ten zaradi.
-                    t.wake_pending.store(true, Ordering::SeqCst);
-                    if !t.on_cpu.load(Ordering::SeqCst) && t.wake_pending.swap(false, Ordering::SeqCst) {
-                        enqueue(t.clone(), Enq::Wake);
+                    // vlakno od nej, obe by stala navzdy. Bezi-li jeste,
+                    // nechame mu `WAKE_PENDING` a zaradi ho `finish_switch`.
+                    // Rozhodnuti je CAS na jednom slove spolu s `ON_CPU`:
+                    // bud uvidime ON_CPU shozene (prepnuti skoncilo,
+                    // zaradime sami), nebo `finish_switch` uvidi nas priznak.
+                    let mut f = t.cpu_flags.load(Ordering::Acquire);
+                    loop {
+                        if f & cpu_flag::ON_CPU == 0 {
+                            enqueue(t.clone(), Enq::Wake);
+                            break;
+                        }
+                        match t.cpu_flags.compare_exchange_weak(
+                            f,
+                            f | cpu_flag::WAKE_PENDING,
+                            Ordering::AcqRel,
+                            Ordering::Acquire,
+                        ) {
+                            Ok(_) => break,
+                            Err(now) => f = now,
+                        }
                     }
                     return;
                 }
@@ -393,6 +409,8 @@ fn switch_away(reason: Reason) {
         .store(next.process.as_ref().map_or(0, |p| p.id), Ordering::Relaxed);
     cpu.current_qos
         .store(class_now.map_or(IDLE_CLASS, |c| c as u8), Ordering::Relaxed);
+    cpu.current_tid.store(next.id, Ordering::Relaxed);
+    cpu.switches.fetch_add(1, Ordering::Relaxed);
     // Jen RUNNABLE -> RUNNING; preempcne vystridane vlakno si drzi svuj stav
     // (napr. BLOCKING), aby se probuzeni ani konec neztratily.
     next.transition(state::RUNNABLE, state::RUNNING);
@@ -404,11 +422,14 @@ fn switch_away(reason: Reason) {
     }
 
     // Jine CPU mozna jeste nedokoncilo prepnuti pryc z `next`.
-    while next.on_cpu.load(Ordering::Acquire) {
+    while next.on_cpu() {
         core::hint::spin_loop();
     }
-    next.on_cpu.store(true, Ordering::Relaxed);
+    // `last_cpu` pred ON_CPU: kdo uvidi ON_CPU, posle IPI sem (viz
+    // `on_cpu_after_update`). RMW (ne zapis), aby poradi vuci nemu urcovalo
+    // jedno slovo; SeqCst, aby se zmeny stavu vlakna (ukonceni) cetly az po nem.
     next.last_cpu.store(cpu.index, Ordering::Relaxed);
+    next.cpu_flags.fetch_or(cpu_flag::ON_CPU, Ordering::SeqCst);
 
     // Adresni prostor a zasobnik jadra pro vstup z userspace noveho vlakna.
     // Vlakna jadra nemaji spodni polovinu (`None`), aby zadne CPU nedrzelo
@@ -509,14 +530,16 @@ fn finish_switch() {
     // SAFETY: jako vyse.
     let push = unsafe { cpu.take_push() };
     if let Some(prev) = prev {
-        prev.on_cpu.store(false, Ordering::SeqCst);
+        // Shodi ON_CPU a zaroven vezme pripadne probuzeni (jedna operace,
+        // viz `wake`).
+        let flags = prev.cpu_flags.swap(0, Ordering::AcqRel);
         // Odlozeny presun na jine CPU (`requeue`): vlakno uz nebezi.
         if let Some((target, ent)) = push {
             let target = percpu::cpu(target).unwrap_or(cpu);
             enqueue_on(target, prev.clone(), ent, arch::now_ns(), false);
         }
         // Probuzeni behem prepnuti (`wake`).
-        if prev.wake_pending.swap(false, Ordering::SeqCst) {
+        if flags & cpu_flag::WAKE_PENDING != 0 {
             enqueue(prev.clone(), Enq::Wake);
         }
         // Pokud bylo DEAD a tohle byl posledni odkaz, uvolni se i jeho

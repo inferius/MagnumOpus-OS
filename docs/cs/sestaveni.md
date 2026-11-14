@@ -131,6 +131,13 @@ hosta (`hostfwd`). Podrobnosti: [sit.md](sit.md#testy).
 - Každý běh má **vlastní** testovací a datový disk (`<pid>` = číslo procesu
   xtask) a po skončení je smaže. Souběžné běhy (víc vláken na jednom stroji)
   si tak nepřepisují disky a pomocník QMP nečte značky testů z cizího logu.
+  Vlastní pro běh jsou i initfs (`initfs-<arch>-<profil>-<pid>.img`),
+  testovací obraz (`os-<arch>-<profil>-test-<pid>.img`) a kopie proměnných
+  firmwaru (`fw-<arch>-vars-<pid>.fd`, QEMU do nich zapisuje). Společný
+  sysroot std a web dokumentace (`target/docs`) připravují běhy postupně
+  pod zámky `target/std.lock` a `target/docs.lock`; sysroot se přepíše jen
+  při změně obsahu. Dřív si souběžné běhy mazaly sysroot
+  pod rukama („Adresář není prázdný“, os error 145).
 - Při panice nebo fatální výjimce xtask po skončení QEMU přeloží adresy ze
   zásobníku na jména funkcí (`llvm-nm` z komponenty `llvm-tools`).
 - Úroveň logu jádra: [jadro.md](jadro.md#logování); hlášky: [hlasky.md](hlasky.md).

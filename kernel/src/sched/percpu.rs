@@ -83,6 +83,10 @@ pub struct PerCpu {
     /// Cislo procesu bezicicho vlakna (0 = vlakno jadra nebo necinnost);
     /// pro cas CPU vcetne rozbehnuteho useku (`sched::running_ns`).
     pub current_pid: AtomicU64,
+    /// Cislo bezicicho vlakna (`Thread::id`, i idle) a pocet prepnuti -
+    /// jen pro diagnostiku (`sched::dump_state`).
+    pub current_tid: AtomicU64,
+    pub switches: AtomicU64,
     /// Pocet cekajicich ve fronte (kopie pro rozhodovani bez zamku).
     pub queued: AtomicUsize,
     /// Zatez vazena tridami (`RunQueue::weighted_load`, kopie).
@@ -135,6 +139,8 @@ impl PerCpu {
             run_start: AtomicU64::new(0),
             idle_ns: AtomicU64::new(0),
             current_pid: AtomicU64::new(0),
+            current_tid: AtomicU64::new(0),
+            switches: AtomicU64::new(0),
             queued: AtomicUsize::new(0),
             load: AtomicU64::new(0),
             replenish_at: AtomicU64::new(u64::MAX),

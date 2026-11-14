@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::{Artifacts, Options, Result, datadisk, qmp, symbolize, target_dir, testdisks};
+use crate::{Artifacts, Options, Result, datadisk, qmp, run_file, symbolize, target_dir, testdisks};
 
 /// Zvysit pri kazde zmene zarizeni PCI v QEMU (posune sloty disku).
 const DEVICE_LAYOUT: u32 = 8;
@@ -53,15 +53,29 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
     // bootovaci polozky nesedely a firmware by skoncil ve svem shellu.
     // Bez virtio-gpu (`--gpu none`) se sloty PCI take posunou.
     let no_gpu = if opts.gpu == "none" { "-nogpu" } else { "" };
-    let fw_vars = target_dir().join(format!("fw-{}-vars-{}-l{DEVICE_LAYOUT}{no_gpu}.fd", arch.name, opts.iommu));
-    if !fw_vars.exists() {
-        std::fs::copy(&fw_vars_template, &fw_vars)?;
+    let shared_vars =
+        target_dir().join(format!("fw-{}-vars-{}-l{DEVICE_LAYOUT}{no_gpu}.fd", arch.name, opts.iommu));
+    if !shared_vars.exists() {
+        // Pres docasny soubor: soubezny beh nesmi videt napul zkopirovany.
+        let tmp = run_file("fw-vars-sablona", "fd");
+        std::fs::copy(&fw_vars_template, &tmp)?;
+        if std::fs::rename(&tmp, &shared_vars).is_err() && !shared_vars.exists() {
+            return Err(format!("nelze vytvorit {}", shared_vars.display()).into());
+        }
     }
 
     // Kazdy beh ma vlastni disky a testy i vlastni log: soubezne behy
     // (vic vlaken na jednom stroji) si jinak prepisovaly datovy disk a QMP
     // pomocnik cetl znacky testu z cizi seriove linky.
     let run = RunFiles::new(arch.name, opts.test);
+    // Test zapisuje do vlastni kopie promennych firmwaru: dve QEMU nad
+    // jednim zapisovatelnym pflash souborem by si ho prepisovala.
+    let fw_vars = if opts.test {
+        std::fs::copy(&shared_vars, &run.fw_vars)?;
+        run.fw_vars.clone()
+    } else {
+        shared_vars
+    };
     let serial_log = run.serial_log.clone();
     let qmp_port = Arc::new(AtomicU16::new(0));
     match opts.power_test {
@@ -589,6 +603,7 @@ struct RunFiles {
     nvme4k: PathBuf,
     ahci: PathBuf,
     foreign: PathBuf,
+    fw_vars: PathBuf,
     serial_log: PathBuf,
 }
 
@@ -605,6 +620,7 @@ impl RunFiles {
             nvme4k: t.join(format!("nvme4k-test-{pid}.img")),
             ahci: t.join(format!("ahci-test-{pid}.img")),
             foreign: t.join(format!("foreign-{pid}.img")),
+            fw_vars: t.join(format!("fw-{arch}-vars-{pid}.fd")),
             serial_log: t.join(if test {
                 format!("serial-test-{arch}-{pid}.log")
             } else {
@@ -624,7 +640,7 @@ impl Drop for RunFiles {
             let _ = std::fs::remove_file(&self.data);
             let _ = std::fs::remove_file(&self.data_gpt);
         }
-        for f in [&self.scratch, &self.nvme, &self.nvme4k, &self.ahci, &self.foreign, &self.wav] {
+        for f in [&self.scratch, &self.nvme, &self.nvme4k, &self.ahci, &self.foreign, &self.wav, &self.fw_vars] {
             let _ = std::fs::remove_file(f);
         }
     }

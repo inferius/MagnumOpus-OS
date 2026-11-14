@@ -26,6 +26,8 @@ Mikrojádro (`no_std`, `no_main`): paměť, plánovač, objekty s handly a práv
 - Připnutý rámec (`phys::pin`: DMA, `VMO_PHYS_ADDR`) se nesmí přesunout, nahradit ani vystěhovat.
 - Po `teardown` je prostor mrtvý: `map` -> `BadState`, ostatní operace nic nenajdou; `root()` vrací `None`.
 - Plánovač: vlákno, které ještě běží (`on_cpu`), nesmí být v **cizí** frontě - jiné CPU by na něj čekalo se zakázanými přerušeními a dvě CPU by se mohla zablokovat navzájem. Přesun na jiné CPU a zařazení vlákna probuzeného během usínání dělá `finish_switch`; kradení taková vlákna přeskakuje (`sched/mod.rs`, `sched/balance.rs`).
+- Synchronizace mezi CPU nesmí stát na vzoru „zapiš svůj příznak, přečti cizí“ (dvě adresy): QEMU TCG na x86 hostiteli nedodrží pořadí `stlr` -> `ldar` a probuzení se ztratí. Stav, o kterém rozhodují dvě strany, patří do jednoho atomického slova (CAS/swap), jako `Thread::cpu_flags`, nebo pod zámek.
+- Selhaný test plánovače má vypsat stav (`sched::dump_state`: fronty, časovače, `on_cpu`) - bez něj se uváznutí nedá rozebrat.
 
 ## Testy
 
