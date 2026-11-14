@@ -185,6 +185,16 @@ impl Thread {
         self.stack.lock().is_some()
     }
 
+    /// Vrati rozpocet jobu za zasobnik jadra hned pri konci vlakna
+    /// (`sched::exit`, pred `thread_exited` a signalem TERMINATED): kdo
+    /// uvidi konec vlakna nebo procesu, vidi rozpocet zpet. Zasobnik sam
+    /// (pamet) se uvolni az v `finish_switch`, kdy uz na nem nic nebezi -
+    /// do te doby je o 64 KiB vic, nez ukazuje rozpocet (mikrosekundy).
+    pub(super) fn return_stack_charge(&self) {
+        let charge = self.stack.lock().as_mut().map(|(_, c)| core::mem::take(c));
+        drop(charge);
+    }
+
     /// Uvolni zasobnik jadra mrtveho vlakna. Volat jen, kdyz na nem uz
     /// nic nebezi: vlakno je DEAD a jeho CPU dokoncilo prepnuti pryc.
     ///

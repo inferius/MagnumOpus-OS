@@ -139,6 +139,9 @@ extern "C" fn thread_start() -> ! {
 /// Ukonci aktualni vlakno.
 pub fn exit() -> ! {
     let me = current();
+    // Rozpocet za zasobnik zpet driv, nez se o konci kdokoli dozvi
+    // (TERMINATED vlakna i procesu); pamet zasobniku az `finish_switch`.
+    me.return_stack_charge();
     if let Some(process) = &me.process {
         // Nejdriv pryc z adresniho prostoru procesu: po `thread_exited`
         // posledniho vlakna ho `Process::finish` hned zrusi. Priznak plati

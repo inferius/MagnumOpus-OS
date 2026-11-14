@@ -84,9 +84,10 @@ Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
 - **Přepnutí na vlákno procesu** nastaví jeho adresní prostor (CR3)
   a zásobník jádra pro vstup z userspace (TSS.RSP0); vlákna jádra a končící
   vlákna procesu běží v adresním prostoru jádra.
-- **Zásobník jádra mrtvého vlákna** (64 KiB) a jeho část rozpočtu jobu se
-  vrací hned, jak CPU dokončí poslední přepnutí pryč z vlákna (`finish_switch`
-  po `exit`). Objekt vlákna se signály a kódem konce žije dál, dokud ho drží
+- **Zásobník jádra mrtvého vlákna** (64 KiB) se vrací hned, jak CPU dokončí
+  poslední přepnutí pryč z vlákna (`finish_switch` po `exit`). Jeho část
+  rozpočtu jobu se vrací ještě dřív, v `exit` před signálem TERMINATED
+  vlákna i procesu: kdo uvidí konec, vidí i vrácený rozpočet. Objekt vlákna se signály a kódem konce žije dál, dokud ho drží
   handle nebo fronta futexu, a vrátí jen svou malou část rozpočtu.
   Vlákno ukončené během preempce zásobník nepouští, protože ještě poběží.
   **[ověřeno v QEMU]**
