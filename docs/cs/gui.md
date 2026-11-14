@@ -518,10 +518,12 @@ compd: snimek cele obrazovky 1280x800: 5820 us (cpu; plocha 279 us, stiny 1359 u
 okna 1479 us, rozmazani listy 0 us, nad okny 2667 us, z toho lista 2451 us, z toho dialog 0 us)
 ```
 
-**Programy jsou bez FPU** (soft-float, [architektura.md](architektura.md)):
-každá operace `f32` je volání funkce. Na hostiteli (s FPU) to vidět není,
-ve WHPX (rychlost blízká HW) a v emulaci ano. Proto se v `gfx` na pixel
-počítá jen celočíselně **[ověřeno v QEMU]**:
+**Programy byly do FPU-1 bez FPU** (soft-float, [architektura.md](architektura.md)):
+každá operace `f32` byla volání funkce. Na hostiteli (s FPU) to vidět
+nebylo, ve WHPX (rychlost blízká HW) a v emulaci ano. Proto se v `gfx` na
+pixel počítá celočíselně **[ověřeno v QEMU]**; od FPU-1 (hard-float) to
+zůstává, protože celá čísla jsou i s FPU levnější a výsledek je na obou
+architekturách bit po bitu stejný (otisky snímků):
 
 - zaoblené tvary počítají vzdálenost v `f32` jen v rohových čtvercích
   (`shape::round_rect_coverage`; jinde je pokrytí přesně 0 nebo 255, test

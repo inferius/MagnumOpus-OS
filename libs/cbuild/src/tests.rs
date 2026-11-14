@@ -3,7 +3,15 @@
 use super::*;
 
 #[test]
-fn znamy_cil_ma_priznaky_bez_fpu() {
+fn programy_maji_hard_float() {
+    let x = target_flags("x86_64-unknown-magnumopus").unwrap();
+    assert!(x.contains(&"-march=x86-64-v2") && !x.contains(&"-mgeneral-regs-only"));
+    let a = target_flags("aarch64-unknown-magnumopus").unwrap();
+    assert!(a.contains(&"-mstrict-align") && !a.contains(&"-mgeneral-regs-only"));
+}
+
+#[test]
+fn znamy_cil_jadra_ma_priznaky_bez_fpu() {
     for t in ["x86_64-unknown-none", "aarch64-unknown-none-softfloat"] {
         let f = target_flags(t).unwrap();
         assert!(f.contains(&"-mgeneral-regs-only"), "{t}");
@@ -26,10 +34,10 @@ fn spolecne_priznaky_obsahuji_ochrany() {
 #[test]
 fn vlastni_kod_ma_varovani_jako_chyby() {
     let b = Build::new("x").define("A", Some("1")).include("inc");
-    let f = b.command_flags("x86_64-unknown-none").unwrap();
+    let f = b.command_flags("x86_64-unknown-magnumopus").unwrap();
     assert!(f.iter().any(|s| s == "-Werror"));
     assert!(f.iter().any(|s| s == "-DA=1"));
     assert!(f.iter().any(|s| s == "-Iinc"));
-    let v = Build::new("y").trust(Trust::Vendored).command_flags("x86_64-unknown-none").unwrap();
+    let v = Build::new("y").trust(Trust::Vendored).command_flags("x86_64-unknown-magnumopus").unwrap();
     assert!(!v.iter().any(|s| s == "-Werror"));
 }

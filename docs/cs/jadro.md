@@ -180,7 +180,8 @@ Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
 - **Stav FPU/SSE:** každé vlákno má vlastní 512B oblast FXSAVE; přepnutí
   kontextu ji vždy uloží a obnoví. Nové vlákno začíná s výchozím stavem
   (FCW 0x037F, MXCSR 0x1F80), takže data jiného vlákna nemohou uniknout.
-  Jádro samo FPU/SSE nepoužívá (soft-float). AVX není zapnuté (instrukce
+  Jádro samo FPU/SSE nepoužívá (soft-float); programy ano (hard-float,
+  [pozadavky-hw.md](pozadavky-hw.md)). AVX není zapnuté (instrukce
   skončí výjimkou #UD).
 - **Rozpočty a meze:** paměť jádra a uživatelská paměť se strhává
   z rozpočtu jobu procesu (strom jobů, limity v bajtech), rezerva paměti

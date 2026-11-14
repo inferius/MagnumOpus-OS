@@ -82,9 +82,9 @@ a hlavičky převzatého kódu ve vlastním kódu přes `include_system`
 
 | Příznak | Proč |
 |---|---|
-| `--target=x86_64-unknown-none-elf` / `aarch64-unknown-none-elf` | stejné ABI jako cíle Rustu (ELF, bez OS) |
-| `-mgeneral-regs-only` | programy jsou soft-float (bez FPU/SIMD), stejně jako kód v Rustu |
-| `-mno-red-zone`, `-mcmodel=small` (x86) | stejný model jako cíl Rustu |
+| `--target=x86_64-unknown-none-elf` / `aarch64-unknown-none-elf` | ELF bez OS v LLVM, ABI jako cíle Rustu `*-unknown-magnumopus` |
+| `-march=x86-64-v2` (x86) / `-march=armv8-a+simd` (aarch64) | hard-float jako Rust: `float`/`double` v registrech FPU, základní úroveň CPU ([pozadavky-hw.md](pozadavky-hw.md)) |
+| `-mcmodel=small` (x86) | stejný model jako cíl Rustu |
 | `-mstrict-align` (aarch64) | jako cíl Rustu; nezarovnaný přístup do registrů zařízení = výjimka |
 | `-ffreestanding -nostdlibinc` | žádné hlavičky hostitele (Windows SDK, glibc), jen clangu a cstd |
 | `-fno-pic -fno-common -ffunction-sections -fdata-sections` | statické programy, nepoužité funkce vyhodí linker |
@@ -134,7 +134,7 @@ cstd::init_stack_guard(libos::random::u64().0);
 
 `printf` podporuje příznaky `-+ #0`, šířku a přesnost (i `*`), délky
 `hh h l ll z j t` a převody `d i u o x X c s p %`. Plovoucí čárka zatím
-není (programy jsou bez FPU, vypíše se `?`).
+v `cstd` zatím není (vypíše se `?`); programy FPU už mají.
 
 ### Plán: vlastní libc a přenos dalšího C
 

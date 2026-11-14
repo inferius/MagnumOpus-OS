@@ -22,7 +22,7 @@ use crate::display_native::{self, Kit, NATIVES};
 use crate::{check, check_eq};
 
 pub const TESTS: &[Test] = &[
-    ("startovni obraz: kresba bez FPU = reference hostitele", splash_determinism),
+    ("startovni obraz: kresba v initu (FPU) = reference hostitele", splash_determinism),
     ("bochs-display: konektory a rezimy z EDID", connectors),
     ("bochs-display: compd navaze na startovni obraz, nastavi rezim, zmena rozliseni za behu", compd_mode_change),
     ("bochs-display: pad ovladace, obnova stavu firmwaru, RESET", crash_restores_firmware),

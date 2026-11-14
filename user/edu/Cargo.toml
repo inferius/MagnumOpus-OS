@@ -15,7 +15,7 @@ bench = false
 driverkit = { path = "../../libs/driverkit" }
 
 # Program pro jadro OS: backend driverkitu nad jadrem.
-[target.'cfg(target_os = "none")'.dependencies]
+[target.'cfg(target_os = "magnumopus")'.dependencies]
 driverkit = { path = "../../libs/driverkit", features = ["os"] }
 libos = { path = "../../libs/libos" }
 

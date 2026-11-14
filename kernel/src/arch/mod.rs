@@ -241,6 +241,12 @@ pub fn breakpoint() {
     <Current as Cpu>::breakpoint()
 }
 
+/// Zakladni uroven CPU programu a co z ni chybi (viz `api::Cpu::missing_baseline`).
+pub fn missing_baseline(f: &mut dyn FnMut(&'static str)) -> &'static str {
+    <Current as Cpu>::missing_baseline(f);
+    <Current as Cpu>::BASELINE
+}
+
 /// 64 bitu z hardwaroveho generatoru CPU (viz `api::Cpu::hw_random`).
 #[inline]
 pub fn hw_random() -> Option<u64> {

@@ -44,8 +44,8 @@ pub fn coverage(d: f32) -> u32 {
 /// (uz omezenym na polovinu stran). Stejne jako
 /// `coverage(round_rect_distance(..))`, ale vzdalenost v `f32` se pocita
 /// jen v rohovych ctvercich: obdelnik ma celociselne hrany a stredy pixelu
-/// lezi na polovinach, takze jinde je pokryti presne 0 nebo 255. Programy
-/// v OS nemaji FPU (soft-float), kazda operace `f32` je volani funkce.
+/// lezi na polovinach, takze jinde je pokryti presne 0 nebo 255 (vzniklo
+/// pro soft-float; i s FPU je to levnejsi).
 #[inline]
 pub fn round_rect_coverage(x: i32, y: i32, r: Rect, rad: u32) -> u32 {
     if !r.contains(x, y) {

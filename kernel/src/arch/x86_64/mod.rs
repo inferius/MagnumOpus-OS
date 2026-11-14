@@ -111,6 +111,12 @@ impl api::Cpu for X86_64 {
         cpu::hw_random()
     }
 
+    const BASELINE: &'static str = "x86-64-v2";
+
+    fn missing_baseline(f: &mut dyn FnMut(&'static str)) {
+        cpu::missing_v2(f)
+    }
+
     fn clear_cpu_local() {
         // SAFETY: staticka promenna zije navzdy a jeji prvni slovo je 0.
         unsafe { cpu::wrmsr(MSR_GS_BASE, &raw const EMPTY_CPU_LOCAL as u64) };

@@ -223,7 +223,7 @@ bench = false
 driverkit = { path = "../../libs/driverkit" }
 
 # Program pro jadro OS: backend driverkitu nad jadrem.
-[target.'cfg(target_os = "none")'.dependencies]
+[target.'cfg(target_os = "magnumopus")'.dependencies]
 driverkit = { path = "../../libs/driverkit", features = ["os"] }
 libos = { path = "../../libs/libos" }
 
@@ -333,18 +333,18 @@ impl<P: Platform> Driver<P> for {{Type}}<P> {
 const T_MAIN: &str = r#"//! Program ovladace {{name}}: start nad jadrem. Logika je v knihovne
 //! (`src/lib.rs`), aby sla testovat v simulaci na hostiteli.
 
-#![cfg_attr(target_os = "none", no_std, no_main)]
+#![cfg_attr(target_os = "magnumopus", no_std, no_main)]
 
-#[cfg(target_os = "none")]
+#[cfg(target_os = "magnumopus")]
 libos::entry!(main);
 
-#[cfg(target_os = "none")]
+#[cfg(target_os = "magnumopus")]
 fn main(startup: libos::Startup) -> i64 {
     driverkit::os::main::<{{ident}}::{{Type}}<_>>(startup, "{{name}}")
 }
 
 /// Na hostiteli program nic nedela (testy jsou v knihovne).
-#[cfg(not(target_os = "none"))]
+#[cfg(not(target_os = "magnumopus"))]
 fn main() {}
 "#;
 

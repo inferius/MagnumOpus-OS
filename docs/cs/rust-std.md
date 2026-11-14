@@ -193,16 +193,16 @@ první věc, ještě před kódem `std`.
 |---|---|---|---|
 | `llvm-target` | `x86_64-unknown-none-elf` | `aarch64-unknown-none` | ELF bez OS v LLVM |
 | `os` / `target-family` | `magnumopus` / žádná | totéž | ne `unix`, viz varianty |
-| plovoucí čárka | SSE2 (hard-float) | NEON, `fp-armv8` (hard-float) | výkon (FFmpeg, LLVM, prohlížeč); jádro stav FPU/SIMD vláken už ukládá |
+| plovoucí čárka | x86-64-v2: SSE až SSE4.2 (hard-float, [pozadavky-hw.md](pozadavky-hw.md)) | NEON, `fp-armv8` (hard-float) | výkon (FFmpeg, LLVM, prohlížeč); jádro stav FPU/SIMD vláken už ukládá |
 | `panic-strategy` | `abort` | `abort` | unwind později (viz rustc) |
 | `relocation-model`, linker | `static`, rust-lld, `user/user.ld` | totéž | zavaděč umí jen `ET_EXEC` |
 | `has-thread-local`, `tls-model` | ano, `local-exec` | ano, `local-exec` | nativní TLS (vyžaduje změnu jádra) |
 | `max-atomic-width` | 64 | 128 | |
 
-**Pozor:** služby se dál překládají pro `*-none` se soft-float (jádro
-a služby bez SSE/NEON). Std aplikace budou **hard-float**. Je to jiný cíl,
-takže se `.rlib` nemíchají; jen sdílené crates (libos, fsproto...) se
-překládají dvakrát. AVX zatím nejde (jádro ukládá stav přes FXSAVE,
+Od FPU-1 se pro stejné cíle (`*-unknown-magnumopus`, hard-float)
+překládají i služby a programy bez std (core a alloc přes `-Zbuild-std`);
+jádro zůstává `*-none` se soft-float. Std aplikace mají vlastní sysroot,
+takže sdílené crates (libos, fsproto...) se překládají dvakrát. AVX zatím nejde (jádro ukládá stav přes FXSAVE,
 instrukce AVX skončí `#UD`); pro FFmpeg bude potřeba XSAVE v jádře.
 
 ## Mapování std na libos a služby

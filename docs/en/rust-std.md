@@ -203,16 +203,17 @@ action, before any `std` code.
 |---|---|---|---|
 | `llvm-target` | `x86_64-unknown-none-elf` | `aarch64-unknown-none` | OS-less ELF in LLVM |
 | `os` / `target-family` | `magnumopus` / none | same | not `unix`, see options |
-| floating point | SSE2 (hard-float) | NEON, `fp-armv8` (hard-float) | performance (FFmpeg, LLVM, browser); the kernel already saves thread FPU/SIMD state |
+| floating point | x86-64-v2: SSE up to SSE4.2 (hard-float, [hardware-requirements.md](hardware-requirements.md)) | NEON, `fp-armv8` (hard-float) | performance (FFmpeg, LLVM, browser); the kernel already saves thread FPU/SIMD state |
 | `panic-strategy` | `abort` | `abort` | unwind later (see rustc) |
 | `relocation-model`, linker | `static`, rust-lld, `user/user.ld` | same | the loader only handles `ET_EXEC` |
 | `has-thread-local`, `tls-model` | yes, `local-exec` | yes, `local-exec` | native TLS (requires a kernel change) |
 | `max-atomic-width` | 64 | 128 | |
 
-**Note:** services keep being built for `*-none` with soft-float (the
-kernel and services use no SSE/NEON). std applications will be
-**hard-float**. It is a different target, so `.rlib` files never mix;
-only shared crates (libos, fsproto...) are compiled twice. AVX is not
+Since FPU-1 services and programs without std are built for the same
+targets (`*-unknown-magnumopus`, hard-float; core and alloc via
+`-Zbuild-std`); the kernel stays `*-none` with soft-float. std
+applications have their own sysroot, so shared crates (libos,
+fsproto...) are compiled twice. AVX is not
 possible yet (the kernel saves state with FXSAVE, AVX instructions end
 with `#UD`); FFmpeg will need XSAVE in the kernel.
 

@@ -308,8 +308,9 @@ suppressed by at least 40 dB. At the end of `DRAIN` the converter's
 history is flushed with silence, so the last samples play too. Mixing
 sums in i64 with the stream gain, then master volume and clipping to 16
 or 24 bits (only the sum is clipped). Everything is integer (filter
-coefficients are computed once when the stream opens): programs on
-aarch64 run without an FPU.
+coefficients are computed once when the stream opens) - written when
+programs on aarch64 ran without an FPU; integers give the same result on
+both architectures.
 
 ## Shell command `audio`
 

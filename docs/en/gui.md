@@ -541,10 +541,13 @@ compd: snimek cele obrazovky 1280x800: 5820 us (cpu; plocha 279 us, stiny 1359 u
 okna 1479 us, rozmazani listy 0 us, nad okny 2667 us, z toho lista 2451 us, z toho dialog 0 us)
 ```
 
-**Programs have no FPU** (soft-float, [architecture.md](architecture.md)):
-every `f32` operation is a function call. That does not show on the host
-(which has an FPU) but it does in WHPX (close to hardware speed) and in
-emulation. So `gfx` computes per pixel with integers only **[verified in QEMU]**:
+**Programs had no FPU until FPU-1** (soft-float, [architecture.md](architecture.md)):
+every `f32` operation was a function call. That did not show on the host
+(which has an FPU) but it did in WHPX (close to hardware speed) and in
+emulation. So `gfx` computes per pixel with integers **[verified in QEMU]**;
+since FPU-1 (hard-float) this stays, because integers are cheaper even
+with an FPU and the result is bit-for-bit the same on both architectures
+(frame hashes):
 
 - rounded shapes compute the `f32` distance only in the corner squares
   (`shape::round_rect_coverage`; elsewhere the coverage is exactly 0 or

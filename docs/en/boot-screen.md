@@ -157,8 +157,10 @@ perf_numbers`, host, 1920 x 1080): loader first frame 1.4 ms, full
 fade-in frame 2.0 ms, fade into the desktop 3.2 ms, mark area
 (244 x 244 px) 0.27 ms, background computation 9.2 ms (once).
 
-⚠️ **Programs on x86_64 run without SSE** (target `x86_64-unknown-none`,
-software floating point, ~30-40x slower). That is why the picture is
+⚠️ **Programs on x86_64 ran without SSE** (target `x86_64-unknown-none`,
+software floating point, ~30-40x slower; since FPU-1 programs have an FPU,
+[hardware-requirements.md](hardware-requirements.md), the numbers below
+are from the time without it). That is why the picture is
 drawn with integers: the background per row (copy, dimming, blending)
 and the resting mark from a table (`libs/bootsplash/src/cache.rs`:
 distance, angle, ring and logo coverage per pixel). Floating point
@@ -201,9 +203,9 @@ floating point; they differ by at most 2 colour levels (test
   `reference_output_is_stable` (frame hashes for 1280 x 800, 1920 x 1080
   and 1024 x 768) and `self_check_matches`.
 - QEMU, suite `displej` **[verified in QEMU]**:
-  - `startovni obraz: kresba bez FPU = reference hostitele` - the hash of
-    `bootsplash::self_check()` in init (software floating point) equals
-    the host value,
+  - `startovni obraz: kresba v initu (FPU) = reference hostitele` - the hash of
+    `bootsplash::self_check()` in init (hardware floating point since
+    FPU-1, software before) equals the host value,
   - `bochs-display: compd navaze na startovni obraz, nastavi rezim, zmena
     rozliseni za behu` - the compositor with `splash=600`, replies during
     the hand-over, the end of the hand-over by the `splash=0` mark in

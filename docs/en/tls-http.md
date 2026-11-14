@@ -32,8 +32,8 @@ validity is checked against real time, so TLS depends on it.
 > - **The RustCrypto cryptography is not audited as a whole.** Some crates
 >   (AES-GCM, ChaCha20-Poly1305, P-256) had partial audits, not all of
 >   them. ring (audited, with assembly) cannot be built for our targets:
->   it needs a C compiler and, on aarch64, NEON, which programs without an
->   FPU do not have.
+>   it needs a C compiler for our targets and platform assembly (programs
+>   have NEON and SSE since FPU-1; adopting it is separate work).
 > - **Software AES** (no AES-NI) is slower and constant-time only through
 >   bitslicing; on a shared CPU ChaCha20-Poly1305 is the more robust choice.
 > - **Revocation is "soft-fail" only:** when the revocation status cannot
@@ -118,11 +118,11 @@ assembly and no SIMD.
 | `provider/kx.rs` | ECDHE: X25519 (rejects an all-zero shared secret), P-256/P-384 (uncompressed point only, on-curve check) |
 | `provider/verify.rs` | signature verification for webpki and the TLS scheme mapping |
 
-Programs run without SSE and NEON. `xtask` therefore builds RustCrypto in
-software only (`--cfg aes_force_soft`, `polyval_force_soft`,
+`xtask` builds RustCrypto in software only for now (since FPU-1 programs
+have SSE and NEON, but run-time AES-NI/PCLMUL detection and AES on aarch64
+come separately with measurements; x86-64-v2 does not guarantee AES-NI) (`--cfg aes_force_soft`, `polyval_force_soft`,
 `poly1305_force_soft`, `chacha20_force_soft`,
-`curve25519_dalek_backend="serial"`, the `force-soft` feature of `sha2`):
-run-time AES-NI detection would otherwise execute SIMD instructions. The
+`curve25519_dalek_backend="serial"`, the `force-soft` feature of `sha2`). The
 debug build optimizes cryptography (`opt-level = 3` in `Cargo.toml`);
 otherwise a handshake in QEMU would take tens of seconds.
 

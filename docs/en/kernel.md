@@ -192,8 +192,9 @@ Details, design comparison and measurements: [Scheduler](scheduler.md).
 - **FPU/SSE state:** each thread has its own 512 B FXSAVE area; a context
   switch always saves and restores it. A new thread starts with the default
   state (FCW 0x037F, MXCSR 0x1F80), so data of another thread cannot leak.
-  The kernel itself does not use FPU/SSE (soft-float). AVX is not enabled
-  (its instructions fault with #UD).
+  The kernel itself does not use FPU/SSE (soft-float); programs do
+  (hard-float, [hardware-requirements.md](hardware-requirements.md)). AVX
+  is not enabled (its instructions fault with #UD).
 - **Budgets and limits:** kernel memory and user memory are charged to
   the budget of the process job (a tree of jobs, limits in bytes), the
   kernel memory reserve and structural limits - see

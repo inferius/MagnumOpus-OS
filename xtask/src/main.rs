@@ -898,8 +898,27 @@ const INITFS_FILES: &[(&str, &str)] = &[
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let mut cmd = Command::new(cargo);
-    cmd.current_dir(workspace_root())
-        .args(["build", "--target", target]);
+    cmd.current_dir(workspace_root()).arg("build");
+    if user {
+        // Cil programu je JSON (hard-float, docs/cs/architektura.md);
+        // core, alloc a compiler_builtins (s memcpy) z rust-src.
+        let json = workspace_root().join("third_party/rust-std/targets").join(format!("{target}.json"));
+        cmd.arg("--target").arg(json).args([
+            "-Zjson-target-spec",
+            "-Zbuild-std=core,alloc",
+            "-Zbuild-std-features=compiler-builtins-mem",
+        ]);
+        // core, alloc a compiler_builtins vzdy optimalizovane a bez
+        // ladicich kontrol (jako predpripraveny sysroot): v ladicim buildu
+        // by memcpy a iteratory zpomalily cely userspace.
+        for krate in ["core", "alloc", "compiler_builtins"] {
+            for (k, v) in [("opt-level", "3"), ("debug-assertions", "false"), ("overflow-checks", "false")] {
+                cmd.arg("--config").arg(format!("profile.dev.package.{krate}.{k}={v}"));
+            }
+        }
+    } else {
+        cmd.args(["--target", target]);
+    }
     for p in packages {
         cmd.args(["--package", p]);
     }
@@ -928,8 +947,10 @@ fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> R
             "-Clink-arg=-T{}",
             workspace_root().join("user").join("user.ld").display()
         );
-        // Kryptografie RustCrypto (libs/tls) jen softwarove: programy bezi
-        // bez SSE/NEON a detekce AES-NI za behu by spustila instrukce SIMD.
+        // Kryptografie RustCrypto (libs/tls) zatim softwarove i s FPU/SIMD:
+        // detekce AES-NI/PCLMUL za behu (x86 CPUID) a AES na aarch64
+        // (bez HWCAP od jadra) prijdou samostatne s merenim; zakladni
+        // uroven x86-64-v2 AES-NI nezarucuje.
         let flags = [
             "-Crelocation-model=static",
             "-Cforce-frame-pointers=yes",

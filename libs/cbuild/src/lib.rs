@@ -15,8 +15,8 @@
 //! Vysledkem je staticka knihovna `lib<jmeno>.a` v `OUT_DIR`, kterou cargo
 //! prilinkuje k programu (linkuje rust-lld spolu s kodem v Rustu).
 //!
-//! Proc vlastni modul a ne crate `cc`: cile `x86_64-unknown-none`
-//! a `aarch64-unknown-none-softfloat` `cc` nezna jako "nas system", priznaky
+//! Proc vlastni modul a ne crate `cc`: cile `*-unknown-magnumopus`
+//! a `*-unknown-none*` `cc` nezna jako "nas system", priznaky
 //! by se skladaly na vic mistech a na Windows by hledal MSVC. Tady je
 //! seznam priznaku na jednom miste a popsany (`docs/cs/preklad-c.md`).
 //!
@@ -55,11 +55,28 @@ pub struct Build {
     trust: Trust,
 }
 
-/// Priznaky pro cil Rustu (`TARGET` z cargo). Programy v userspace nemaji
-/// FPU ani SIMD (stav se uklada, ale ABI cilu je soft-float), na aarch64
-/// navic striktni zarovnani jako cil Rustu.
+/// Priznaky pro cil Rustu (`TARGET` z cargo).
+///
+/// - `*-unknown-magnumopus` (programy v userspace): hard-float ABI jako
+///   Rust (x86_64: zakladni uroven x86-64-v2 = SSE4.2, POPCNT, CMPXCHG16B;
+///   aarch64: NEON), takze C a Rust si predavaji `float`/`double`
+///   v registrech FPU stejne. Jadro stav FPU vlaken uklada.
+/// - `*-unknown-none*` (jadro): bez FPU a SIMD - jadro nesmi sahat na
+///   registry FPU programu.
+///
+/// Na aarch64 vsude striktni zarovnani jako cil Rustu.
 pub fn target_flags(target: &str) -> Result<&'static [&'static str], String> {
     match target {
+        "x86_64-unknown-magnumopus" => Ok(&[
+            "--target=x86_64-unknown-none-elf",
+            "-march=x86-64-v2",
+            "-mcmodel=small",
+        ]),
+        "aarch64-unknown-magnumopus" => Ok(&[
+            "--target=aarch64-unknown-none-elf",
+            "-march=armv8-a+simd",
+            "-mstrict-align",
+        ]),
         "x86_64-unknown-none" => Ok(&[
             "--target=x86_64-unknown-none-elf",
             "-mgeneral-regs-only",
@@ -71,7 +88,9 @@ pub fn target_flags(target: &str) -> Result<&'static [&'static str], String> {
             "-mgeneral-regs-only",
             "-mstrict-align",
         ]),
-        _ => Err(format!("cbuild: cil {target} neni podporovany (jen x86_64-unknown-none a aarch64-unknown-none-softfloat)")),
+        _ => Err(format!(
+            "cbuild: cil {target} neni podporovany (programy *-unknown-magnumopus, jadro x86_64-unknown-none a aarch64-unknown-none-softfloat)"
+        )),
     }
 }
 

@@ -18,6 +18,7 @@ mod drivers;
 mod driverkit;
 mod events;
 mod firewall;
+mod fpu;
 mod fs;
 mod fs_data;
 mod fs_datasets;
@@ -81,6 +82,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("procesy", thread_state::TESTS),
     ("procesy", exceptions::TESTS),
     ("procesy", exceptions_fast::TESTS),
+    ("procesy", fpu::TESTS),
     ("joby", jobs::TESTS),
     ("ovladace", drivers::TESTS),
     ("ovladace z manifestu", driverkit::TESTS),

@@ -150,8 +150,9 @@ perf_numbers`, hostitel, 1920 x 1080): první snímek loaderu 1,4 ms, celý
 snímek rozsvícení 2,0 ms, rozplynutí do plochy 3,2 ms, oblast znaku
 (244 x 244 px) 0,27 ms, výpočet pozadí 9,2 ms (jednou).
 
-⚠️ **Programy na x86_64 běží bez SSE** (cíl `x86_64-unknown-none`,
-plovoucí čárka v softwaru, ~30-40x pomalejší). Proto se obraz kreslí
+⚠️ **Programy na x86_64 běžely bez SSE** (cíl `x86_64-unknown-none`,
+plovoucí čárka v softwaru, ~30-40x pomalejší; od FPU-1 mají programy FPU,
+[pozadavky-hw.md](pozadavky-hw.md), čísla níže jsou z doby bez FPU). Proto se obraz kreslí
 celočíselně: podklad po řádcích (kopie, ztlumení, prolnutí) a znak
 v klidu z tabulky (`libs/bootsplash/src/cache.rs`: vzdálenost, úhel,
 pokrytí prstence a loga pro každý pixel). Float zůstal jen pro konce
@@ -192,9 +193,9 @@ neviditelné.
   `reference_output_is_stable` (otisky snímků pro 1280 x 800,
   1920 x 1080 a 1024 x 768) a `self_check_matches`.
 - QEMU, sada `displej` **[ověřeno v QEMU]**:
-  - `startovni obraz: kresba bez FPU = reference hostitele` - otisk
-    `bootsplash::self_check()` v initu (plovoucí čárka v softwaru) se
-    rovná hodnotě z hostitele,
+  - `startovni obraz: kresba v initu (FPU) = reference hostitele` - otisk
+    `bootsplash::self_check()` v initu (od FPU-1 hardwarová plovoucí čárka,
+    dřív softwarová) se rovná hodnotě z hostitele,
   - `bochs-display: compd navaze na startovni obraz, nastavi rezim, zmena
     rozliseni za behu` - kompozitor s `splash=600`, odpovědi během
     přechodu, konec přechodu podle značky `splash=0` ve `status` (žádná

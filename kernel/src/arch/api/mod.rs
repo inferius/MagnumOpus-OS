@@ -132,6 +132,15 @@ pub trait Cpu {
     fn hw_random() -> Option<u64> {
         None
     }
+
+    /// Zakladni uroven CPU, pro kterou jsou prelozene programy (cile
+    /// `*-unknown-magnumopus`): x86_64 x86-64-v2, aarch64 FP a AdvSIMD.
+    const BASELINE: &'static str;
+
+    /// Pro kazdou chybejici vlastnost zakladni urovne zavola `f` s jejim
+    /// jmenem (prazdne = CPU staci). Bez ni by program spadl na neplatne
+    /// instrukci az nekde za behu.
+    fn missing_baseline(f: &mut dyn FnMut(&'static str));
 }
 
 /// Per-CPU data architektury.

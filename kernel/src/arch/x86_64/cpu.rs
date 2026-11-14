@@ -37,6 +37,28 @@ pub fn features() -> Features {
     }
 }
 
+/// Vlastnosti x86-64-v2 (CPUID.1:ECX a 0x8000_0001:ECX), na ktere jsou
+/// prelozene programy: SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, CMPXCHG16B,
+/// LAHF/SAHF v 64bitovem rezimu. SSE a SSE2 ma kazde x86_64.
+pub fn missing_v2(f: &mut dyn FnMut(&'static str)) {
+    let ecx = cpuid(1, 0).ecx;
+    let ext = if cpuid(0x8000_0000, 0).eax >= 0x8000_0001 { cpuid(0x8000_0001, 0).ecx } else { 0 };
+    let need: [(u32, u32, &'static str); 7] = [
+        (ecx, 0, "SSE3"),
+        (ecx, 9, "SSSE3"),
+        (ecx, 19, "SSE4.1"),
+        (ecx, 20, "SSE4.2"),
+        (ecx, 23, "POPCNT"),
+        (ecx, 13, "CMPXCHG16B"),
+        (ext, 0, "LAHF/SAHF"),
+    ];
+    for (reg, bit, name) in need {
+        if reg & (1 << bit) == 0 {
+            f(name);
+        }
+    }
+}
+
 /// 64 bitu z RDSEED (primo ze zdroje entropie), jinak z RDRAND (vystup
 /// DRBG v procesoru). Instrukce muze docasne selhat (CF = 0), proto par
 /// pokusu. `None` = CPU instrukce nema nebo opakovane selhaly.
