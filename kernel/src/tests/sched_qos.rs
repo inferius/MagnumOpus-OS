@@ -7,7 +7,7 @@
 //!
 //! Namerena cisla se loguji (`planovac:`) a jsou v `docs/cs/planovac.md`.
 
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
@@ -54,7 +54,7 @@ fn load(class: Qos, n: usize) -> Load {
     let threads = (0..n)
         .map(|_| {
             let (stop, ran) = (stop.clone(), ran.clone());
-            sched::spawn("zatez", class, move || {
+            spawn("zatez", class, move || {
                 let mut mine = 0;
                 let mut last = arch::now_ns();
                 while !stop.load(Ordering::Relaxed) {
@@ -89,8 +89,46 @@ fn busy(ns: u64) {
     }
 }
 
+/// Vlakna spustena testy (slabe odkazy), pro diagnosticky vypis pri
+/// selhani: kdyz udalost neprijde, je videt, kde vlakno, ktere ji melo
+/// poslat, uviznulo (fronta, `on_cpu`, stav).
+static WATCH: SpinLock<Vec<Weak<Thread>>> = SpinLock::new(Vec::new());
+
+fn watch(t: &Arc<Thread>) {
+    let mut w = WATCH.lock();
+    w.retain(|t| t.strong_count() > 0);
+    w.push(Arc::downgrade(t));
+}
+
+fn spawn(name: &str, class: Qos, f: impl FnOnce() + Send + 'static) -> Arc<Thread> {
+    let t = sched::spawn(name, class, f);
+    watch(&t);
+    t
+}
+
+fn spawn_realtime(
+    name: &str,
+    budget: u64,
+    period: u64,
+    f: impl FnOnce() + Send + 'static,
+) -> Result<Arc<Thread>, crate::error::Error> {
+    let t = sched::spawn_realtime(name, budget, period, f)?;
+    watch(&t);
+    Ok(t)
+}
+
+/// Vypise stav planovace a vlaken testu (pred panikou testu).
+fn dump() {
+    let mut threads: Vec<Arc<Thread>> = WATCH.lock().iter().filter_map(Weak::upgrade).collect();
+    threads.push(sched::current());
+    sched::dump_state(&threads);
+}
+
 fn wait_reset(e: &Event) {
-    wait::wait_one(e, Signals::SIGNALED, Some(deadline_after(Duration::from_secs(5)))).expect("udalost neprisla");
+    if let Err(err) = wait::wait_one(e, Signals::SIGNALED, Some(deadline_after(Duration::from_secs(5)))) {
+        dump();
+        panic!("udalost neprisla: {err:?}");
+    }
     e.reset();
 }
 
@@ -104,14 +142,14 @@ fn stats(v: &mut [u64]) -> (u64, u64) {
 fn input_path(rounds: usize) -> Vec<u64> {
     let (irq, to_comp, frame) = (Event::new(), Event::new(), Event::new());
     let (i1, c1) = (irq.clone(), to_comp.clone());
-    let inputd = sched::spawn("inputd", Qos::Interactive, move || {
+    let inputd = spawn("inputd", Qos::Interactive, move || {
         for _ in 0..rounds {
             wait_reset(&i1);
             c1.signal();
         }
     });
     let (c2, f2) = (to_comp.clone(), frame.clone());
-    let compd = sched::spawn("compd", Qos::Interactive, move || {
+    let compd = spawn("compd", Qos::Interactive, move || {
         for _ in 0..rounds {
             wait_reset(&c2);
             busy(200 * US);
@@ -120,7 +158,7 @@ fn input_path(rounds: usize) -> Vec<u64> {
     });
     let lat = Arc::new(SpinLock::new(Vec::new()));
     let l = lat.clone();
-    let driver = sched::spawn("ovladac", Qos::Interactive, move || {
+    let driver = spawn("ovladac", Qos::Interactive, move || {
         for _ in 0..rounds {
             wait::sleep(Duration::from_millis(3));
             let t0 = arch::now_ns();
@@ -197,7 +235,7 @@ fn migration_stress() {
             let (a, b) = (Arc::new(Event::new()), Arc::new(Event::new()));
             let class = if i % 2 == 0 { Qos::Interactive } else { Qos::Normal };
             let (a1, b1) = (a.clone(), b.clone());
-            let ping = sched::spawn("ping", class, move || {
+            let ping = spawn("ping", class, move || {
                 for r in 0..ROUNDS {
                     a1.signal();
                     wait_reset(&b1);
@@ -206,7 +244,7 @@ fn migration_stress() {
                     }
                 }
             });
-            let pong = sched::spawn("pong", class, move || {
+            let pong = spawn("pong", class, move || {
                 for _ in 0..ROUNDS {
                     wait_reset(&a);
                     busy(20 * US);
@@ -231,7 +269,7 @@ fn ipc_inheritance() {
     let after_read = Arc::new(AtomicU8::new(0xFF));
     let (w, r) = (at_wake.clone(), after_read.clone());
     let s_end = server_end.clone();
-    let server = sched::spawn("obsluha", Qos::Normal, move || {
+    let server = spawn("obsluha", Qos::Normal, move || {
         wait::wait_one(&*s_end, Signals::READABLE, Some(deadline_after(Duration::from_secs(5)))).unwrap();
         let me = sched::current();
         w.store(sched::thread_info(&me).effective, Ordering::Relaxed);
@@ -244,7 +282,7 @@ fn ipc_inheritance() {
     // Obsluha musi cekat drive, nez prijde zprava.
     wait::sleep(Duration::from_millis(20));
     let c_end = client_end.clone();
-    let client = sched::spawn("klient", Qos::Interactive, move || {
+    let client = spawn("klient", Qos::Interactive, move || {
         let mut m = Message::new(vec![1], Vec::new());
         m.qos = sched::ipc_class();
         assert_eq!(m.qos.map(|l| l.class), Some(Qos::Interactive));
@@ -260,7 +298,7 @@ fn ipc_inheritance() {
     let port = Port::new(None);
     let (a, b) = Channel::create();
     b.core().observe_async(&port, 7, Signals::READABLE).unwrap();
-    let writer = sched::spawn("zapis", Qos::Interactive, move || {
+    let writer = spawn("zapis", Qos::Interactive, move || {
         let mut m = Message::new(vec![1], Vec::new());
         m.qos = sched::ipc_class();
         a.write(m).unwrap();
@@ -277,7 +315,7 @@ fn ipc_inheritance() {
 fn boost_expires() {
     let stop = Arc::new(Event::new());
     let s = stop.clone();
-    let t = sched::spawn("spici", Qos::Background, move || wait_reset(&s));
+    let t = spawn("spici", Qos::Background, move || wait_reset(&s));
     let until = arch::now_ns() + schedcore::class::BOOST_WINDOW_NS;
     sched::boost(&t, QosLoan { class: Qos::Interactive, until });
     assert_eq!(sched::thread_info(&t).effective, Qos::Interactive as u8);
@@ -312,7 +350,7 @@ fn loan_not_renewed_by_ping_pong() {
         }
     }
     let (s1, l1) = (stop.clone(), late.clone());
-    let a = sched::spawn("ping", Qos::Normal, move || {
+    let a = spawn("ping", Qos::Normal, move || {
         // Prvni zprava od Interactive prijde po `start`.
         wait::wait_one(&*start_rx, Signals::READABLE, Some(deadline_after(Duration::from_secs(5)))).unwrap();
         let first = start_rx.read(64, 0).unwrap();
@@ -333,7 +371,7 @@ fn loan_not_renewed_by_ping_pong() {
         }
     });
     let s2 = stop.clone();
-    let b = sched::spawn("pong", Qos::Normal, move || {
+    let b = spawn("pong", Qos::Normal, move || {
         while !s2.load(Ordering::Relaxed) {
             if wait::wait_one(&*b_end, Signals::READABLE, Some(deadline_after(Duration::from_millis(200)))).is_err() {
                 break;
@@ -341,7 +379,7 @@ fn loan_not_renewed_by_ping_pong() {
             pass(&b_end);
         }
     });
-    let sender = sched::spawn("interactive", Qos::Interactive, move || {
+    let sender = spawn("interactive", Qos::Interactive, move || {
         let mut m = Message::new(vec![1], Vec::new());
         m.qos = sched::ipc_class();
         start_tx.write(m).unwrap();
@@ -369,7 +407,7 @@ fn realtime() {
     let mut refused = None;
     for _ in 0..=n {
         let g = gate.clone();
-        match sched::spawn_realtime("rt-kapacita", 5 * MS, 10 * MS, move || wait_reset(&g)) {
+        match spawn_realtime("rt-kapacita", 5 * MS, 10 * MS, move || wait_reset(&g)) {
             Ok(t) => held.push(t),
             Err(e) => {
                 refused = Some(e);
@@ -394,7 +432,7 @@ fn realtime() {
     let inter = load(Qos::Interactive, 2 * n);
     let lat = Arc::new(SpinLock::new(Vec::new()));
     let l = lat.clone();
-    let audio = sched::spawn_realtime("zvuk", MS, 4 * MS, move || {
+    let audio = spawn_realtime("zvuk", MS, 4 * MS, move || {
         let mut next = arch::now_ns() + 2 * MS;
         for _ in 0..100 {
             wait::sleep(Duration::from_nanos(next.saturating_sub(arch::now_ns())));
@@ -435,7 +473,7 @@ fn switch_benchmark() {
     let ping = Event::new();
     let pong = Event::new();
     let (p, q) = (ping.clone(), pong.clone());
-    let partner = sched::spawn("pong", Qos::Normal, move || {
+    let partner = spawn("pong", Qos::Normal, move || {
         for _ in 0..ROUNDS {
             wait_reset(&p);
             q.signal();

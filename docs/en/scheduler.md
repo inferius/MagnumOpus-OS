@@ -234,6 +234,18 @@ rt_period_us = 5000
   (`finish_switch`), and stealing skips such threads (like `on_cpu` in
   Linux). Version 2 had this bug until 2026-11-13 (an occasionally stuck
   input latency test on aarch64). **[implemented]**
+- **Wakeup during a switch in one word**: "the thread is still running"
+  (`ON_CPU`) and "a wakeup is waiting for it" (`WAKE_PENDING`) are flags of
+  one atomic word of the thread and change only through atomic operations
+  on it (a CAS in `wake`, a `swap` in `finish_switch`). The earlier pair of
+  separate flags (write your own, read the other) relied on store -> load
+  ordering between two addresses. Real ARM keeps it for `stlr` + `ldar`,
+  but QEMU TCG on an x86 host does not. Result: the wakeup was lost, the
+  thread stayed RUNNABLE outside every queue and a test waiting for its
+  event timed out (aarch64 under host load, until 2026-11-14). The
+  diagnostic dump on a test failure (`sched::dump_state`: queues and
+  timers of all CPUs, state of the watched threads) captured this state.
+  **[verified in QEMU]**
 - **Balancing idle CPUs**: an idle CPU takes work from other queues; an efficiency
   core takes Interactive only from a queue with at least two waiting
   threads (the performance cores are overloaded). A preempted Interactive

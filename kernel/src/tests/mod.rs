@@ -53,6 +53,8 @@ pub fn run_all() -> bool {
 
 /// Pocka na konec vlakna, jinak panikuje s popisem.
 fn join(t: &Arc<Thread>, timeout: Duration, what: &str) {
-    wait::wait_one(&**t, Signals::TERMINATED, Some(deadline_after(timeout)))
-        .unwrap_or_else(|e| panic!("{what}: vlakno {} neskoncilo ({e})", t.name));
+    if let Err(e) = wait::wait_one(&**t, Signals::TERMINATED, Some(deadline_after(timeout))) {
+        crate::sched::dump_state(&[t.clone(), crate::sched::current()]);
+        panic!("{what}: vlakno {} neskoncilo ({e})", t.name);
+    }
 }

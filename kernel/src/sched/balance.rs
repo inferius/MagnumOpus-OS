@@ -82,7 +82,7 @@ pub(super) fn steal(cpu: &PerCpu) -> Option<(Arc<Thread>, Ent)> {
         // zakazanymi prerusenimi.
         let got = rq.steal(
             |class, n| place::may_steal(&me, class, n, hybrid),
-            |t| !t.on_cpu.load(Ordering::Acquire),
+            |t| !t.on_cpu(),
         );
         other.sync(&rq);
         if got.is_some() {

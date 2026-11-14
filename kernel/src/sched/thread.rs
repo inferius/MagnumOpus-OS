@@ -35,6 +35,17 @@ pub(super) struct SchedState {
     pub dirty: bool,
 }
 
+/// Priznaky `Thread::cpu_flags`.
+pub(super) mod cpu_flag {
+    /// Nektere CPU jeste nedokoncilo prepnuti pryc z vlakna: kontext neni
+    /// ulozeny, vlakno nesmi spustit jine CPU ani byt v cizi fronte.
+    pub const ON_CPU: u8 = 1;
+    /// Probuzeni behem dobihajiciho prepnuti: vlakno uz je RUNNABLE, do
+    /// fronty ho zaradi jeho CPU v `finish_switch` (viz `sched::wake`).
+    /// Nastavuje se jen spolu s `ON_CPU`.
+    pub const WAKE_PENDING: u8 = 2;
+}
+
 /// Stavy vlakna.
 pub(super) mod state {
     /// Bezi na nekterem CPU.
@@ -64,9 +75,13 @@ pub struct Thread {
     pub name: String,
     pub(super) sched: SpinLock<SchedState>,
     pub(super) state: AtomicU8,
-    /// True, dokud nejake CPU nedokoncilo prepnuti pryc z tohoto vlakna
-    /// (kontext jeste neni ulozeny, nesmi ho spustit jine CPU).
-    pub(super) on_cpu: AtomicBool,
+    /// Priznaky prepinani (`cpu_flag`). Obe informace (vlakno jeste bezi /
+    /// ceka na nej probuzeni) jsou v jednom slove a meni se jen atomickymi
+    /// operacemi na nem: dvojice samostatnych priznaku (zapis jednoho, cteni
+    /// druheho) potrebuje usporadani zapis -> cteni mezi adresami, ktere
+    /// QEMU TCG na x86 hostiteli u `stlr` + `ldar` nedodrzi (ztracene
+    /// probuzeni, viz `sched::wake`).
+    pub(super) cpu_flags: AtomicU8,
     /// Poradove cislo aktualniho cekani; probuzeni se starym cislem se ignoruje.
     wait_seq: AtomicU64,
     pub(super) last_cpu: AtomicUsize,
@@ -83,10 +98,6 @@ pub struct Thread {
     /// Registr ukazatele vlakna userspace (TLS; `THREAD_SET_POINTER`).
     /// Planovac ho nahraje pri kazdem prepnuti na vlakno.
     pub(super) user_tp: AtomicU64,
-    /// Probuzeni behem dobihajiciho prepnuti: vlakno uz je RUNNABLE, ale
-    /// jeho CPU ho jeste neprepnulo pryc (`on_cpu`). Do fronty ho zaradi
-    /// to CPU v `finish_switch` (viz `sched::wake`).
-    pub(super) wake_pending: AtomicBool,
 }
 
 // SAFETY: `context` cte a zapisuje jen planovac na CPU, ktere vlakno prave
@@ -119,7 +130,7 @@ impl Thread {
                 dirty: false,
             }),
             state: AtomicU8::new(state::RUNNABLE),
-            on_cpu: AtomicBool::new(false),
+            cpu_flags: AtomicU8::new(0),
             wait_seq: AtomicU64::new(0),
             last_cpu: AtomicUsize::new(cpu),
             context: UnsafeCell::new(context),
@@ -129,7 +140,6 @@ impl Thread {
             kill: AtomicBool::new(false),
             started: AtomicBool::new(false),
             user_tp: AtomicU64::new(0),
-            wake_pending: AtomicBool::new(false),
         }
     }
 
@@ -149,6 +159,11 @@ impl Thread {
 
     pub(super) fn set_kill(&self) {
         self.kill.store(true, Ordering::Release);
+    }
+
+    /// Bezi vlakno jeste na nekterem CPU (`cpu_flag::ON_CPU`)?
+    pub(super) fn on_cpu(&self) -> bool {
+        self.cpu_flags.load(Ordering::Acquire) & cpu_flag::ON_CPU != 0
     }
 
     pub(super) fn state(&self) -> u8 {
