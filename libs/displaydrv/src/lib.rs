@@ -312,7 +312,7 @@ fn req_op(r: &Request) -> u32 {
         Request::SetMode { .. } => op::SET_MODE,
         // Bez GPU: chyba musi nest kod pozadavku, jinak ji klient
         // (kompozitor u `backend gpu`) nesparuje a ceka do vyprseni.
-        Request::OpenRender => op::OPEN_RENDER,
+        Request::OpenProvider => op::OPEN_PROVIDER,
     }
 }
 

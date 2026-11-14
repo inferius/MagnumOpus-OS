@@ -159,8 +159,8 @@ fn info_and_connectors() {
 fn open_render_is_not_supported() {
     let mut s = Server::new(Fake::new(64, 32));
     assert_eq!(
-        s.handle(Request::OpenRender, None, 0),
-        vec![Reply::Error { op: guiproto::display::op::OPEN_RENDER, code: Error::NotSupported }]
+        s.handle(Request::OpenProvider, None, 0),
+        vec![Reply::Error { op: guiproto::display::op::OPEN_PROVIDER, code: Error::NotSupported }]
     );
 }
 
