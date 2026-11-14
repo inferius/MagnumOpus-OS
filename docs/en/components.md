@@ -112,9 +112,9 @@ for `libs/ui`: sizes, key behaviour and implementation status (**yes**,
 |---|---|---|---|
 | Button: primary, secondary, danger, icon | partial | height `--k-h`, min width 2 &times; height, `s5`, pill; primary `accent`, danger `danger`; *busy* state (spinner, fixed width) | Enter, Space on release |
 | Text field, multiline | yes | `--k-h`, `radius.control`, `s4`; label above, hint / error below | arrows, Ctrl+arrows, Shift selection, clipboard, undo; multiline Ctrl+Enter submits |
-| Number | no | like a field, right aligned, unit, stepper buttons outside the Tab order | &uarr; &darr; step, PgUp / PgDn 10 steps, Home / End |
-| Password | partial | field + eye toggle (`aria-pressed`), Caps Lock warning | like a field, never suggestions |
-| Search | no | magnifier on the left, clear button only with text, filtering with a 150 ms delay | Esc clears, second Esc leaves, &darr; into the results |
+| Number | yes | like a field, right aligned, unit, stepper buttons outside the Tab order | &uarr; &darr; step, PgUp / PgDn 10 steps, Home / End |
+| Password | yes | field + eye toggle (`aria-pressed`), Caps Lock warning | like a field, never suggestions |
+| Search | yes | magnifier on the left, clear button only with text, filtering with a 150 ms delay | Esc clears, second Esc leaves, &darr; into the results |
 | Checkbox | partial | box 18 / 22 / 28, `radius.xs`, 2 px border; indeterminate state | Space |
 | Switch | yes | `switch_*`; immediate effect | Space |
 | Radio | partial | circle 18 / 22 / 28; the group is one stop | arrows select directly |
@@ -173,7 +173,9 @@ as of 2026-11-14. Ordered by impact.
    timer that pauses, and screen reader announcement.
 3. **Tree.** The file manager and settings need it. I propose building
    it on top of the list (row + level + expanded), not as a new layer.
-4. **Number field** and **search field.**
+4. ~~**Number field** and **search field.**~~ Done (`number_input`,
+   `search_input`, [Text fields and the clipboard](gui.md#text-fields-and-the-clipboard)).
+   **[implemented]**
 5. **Generic popover.** The `popup` layer only handles menus, selects
    and suggestions today.
 6. Also missing:
@@ -195,17 +197,22 @@ as of 2026-11-14. Ordered by impact.
    - *busy* state.
 2. The checkbox has no indeterminate state, no hover, and no disabled
    look (`st.disabled` is ignored).
-3. The radio does not fade its surface when disabled. The application
-   builds the radio group itself, and arrows between radios do not work.
+3. The radio does not fade its surface when disabled. ~~The application
+   builds the radio group itself, and arrows between radios do not
+   work.~~ Sibling radios are a group with one Tab stop and arrows.
+   **[implemented]**
 4. The error state exists only on text fields. It is missing on:
    - select;
    - checkbox;
    - slider;
    - tab;
    - segment.
-5. Fields have no hover. The password field has no eye toggle and no
-   Caps Lock warning.
-6. The list has arrows only. Missing:
+5. ~~Fields have no hover. The password field has no eye toggle and no
+   Caps Lock warning.~~ Done (hover darkens the border, eye toggle, Caps
+   Lock warning). **[implemented]**
+6. ~~The list has arrows only.~~ Done: `list(..).multi_select(true)`
+   shares the selection logic with the table (`libs/ui/src/selection.rs`).
+   **[implemented]** Originally: the list has arrows only. Missing:
    - Ctrl+Space;
    - Shift+arrows;
    - Ctrl+A;
@@ -213,15 +220,17 @@ as of 2026-11-14. Ordered by impact.
 
    The table already does all of this, so the list should share its
    selection logic.
-7. The menu has no submenus, group headings, danger item or type-ahead.
-8. Select: Tab in the open list closes it without a change. I propose
-   picking the active item, as other systems do.
+7. The menu has no ~~submenus~~, group headings, danger item ~~or
+   type-ahead~~. Submenus and mnemonics are done. **[implemented]**
+8. ~~Select: Tab in the open list closes it without a change.~~ Tab picks
+   the active item and moves on; a closed select has type-ahead and
+   Home, End. **[implemented]**
 9. Tabs: the selected tab is only a `surface_2` surface. In the light
    theme it has less than 3 : 1 contrast against `surface`. I propose a
    3 px `accent` underline. Disabled tabs are not skipped by the arrows.
-10. The slider changes value on the mouse wheel even without focus, so
-    scrolling the page changes the volume by accident. The track is
-    2 px; I propose 4.
+10. ~~The slider changes value on the mouse wheel even without focus.~~
+    The wheel needs focus. **[implemented]** The track is 2 px; I
+    propose 4.
 
 **Density:**
 

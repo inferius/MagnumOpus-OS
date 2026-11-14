@@ -1430,26 +1430,31 @@ centred).
 | Element | Mouse | Keyboard | Accessibility |
 |---|---|---|---|
 | `label` | - | - | `label` |
-| `button` | click | Enter, space | `button`, `activate` |
+| `button` | click (action on release; leaving with the button held cancels it) | Enter, space on release; Esc while the key is held cancels | `button`, `activate` |
 | `text_input`, `text_area` | click, drag, double and triple click | see [Text fields and the clipboard](#text-fields-and-the-clipboard) | `text-input`, `set-value` |
 | `password_input` | like `text_input` | like `text_input` | `password-input` without a value |
 | `checkbox` | click | space, Enter | `checkbox`, `toggle` |
-| `list` | click an item | up and down arrows | `list` and `list-item` |
+| `list` | click an item; with `.multi_select(true)` Ctrl+click and Shift+click | arrows, Home, End, PgUp, PgDn, type-ahead; with `.multi_select(true)` Shift+arrows range, Ctrl+arrows cursor only, Ctrl+Space, Ctrl+A (`.selection`, `.on_selection` like `table`, row indices) | `list` and `list-item` |
 | `table` | selection, sorting, dragging, scrollbar | see [Table and list](#table-and-list-virtualization) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (value in percent) |
 | `busy` | - | - | `progress` with the `busy` state (indeterminate, animated per frame) |
-| `select` | click, pick from the list | Enter, space, Alt+down, F4; closed: arrows | `combo-box`, `menu`, `menu-item` |
+| `select` | click, pick from the list | Enter, space, Alt+down, F4; closed: arrows, Home, End, type-ahead; open: Tab picks the active item and moves on | `combo-box`, `menu`, `menu-item` |
 | `image` | - | - | `image` with an `alt` description (pixels shared via `Rc`, scaled down keeping the aspect ratio, never up) |
 | `segments` | - | - | `list` with `list-item` children (full label of each segment) |
 | `switch` | click | space, Enter (on release) | `switch`, `checked`, `toggle` |
-| `radio` | click | space, Enter | `radio`, `checked` |
-| `slider` | click the track, drag, wheel | arrows (step `.step`), PgUp, PgDn (10 steps), Home, End | `slider`, value "40 (0-100)", `set-value` |
+| `radio` | click | siblings form a group and one Tab stop (the checked option); arrows pick the next and previous one, wrapping | `radio`, `checked` |
+| `slider` | click the track, drag, wheel only with focus | arrows (step `.step`), PgUp, PgDn (10 steps), Home, End | `slider`, value "40 (0-100)", `set-value` |
 | `segmented` | click a segment | left and right arrows, Home, End | `segmented` with child `radio` nodes |
-| `tabs` | click; the cross or the middle button closes (`on_close`) | arrows; Ctrl+Tab and Ctrl+Shift+Tab from anywhere in the window | `tab-list` with child `tab` nodes |
+| `tabs` | click; the cross or the middle button closes (`on_close`) | arrows; Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgDn, Ctrl+PgUp (the focused tabs, else the first in the window) | `tab-list` with child `tab` nodes |
 | `column`, `row`, `spacer` | - | - | `group` |
 | `scroll` | wheel | - | `scroll-area`, `scroll` |
 
-Tab moves the focus (Shift+Tab back). A **scroll area** (`scroll`) is a
+Tab moves the focus (Shift+Tab back). The focus ring is drawn only after
+keyboard use (not after a mouse click). **Menus** (`context_menu`) have
+submenus `submenu("Sort", items)` (right arrow, Enter or hover opens, left
+arrow and Esc close) and mnemonics `menu_item("&Copy", ..)` (underlined
+letter, pressing it picks the item; `&&` is the `&` character).
+**[implemented]** A **scroll area** (`scroll`) is a
 layer of its own: the wheel changes only the layer property `scroll` and
 the compositor moves the content; the application redraws nothing.
 
@@ -1562,14 +1567,16 @@ character boundary.
 
 | Control | What it does |
 |---|---|
-| click, Shift+click, drag | cursor, extend selection, select by dragging |
+| click, Shift+click, drag | cursor, extend selection, select by dragging (past the edge the field scrolls by itself) |
 | double click, triple click | word, line (password: double click selects all) |
-| arrows, Ctrl+arrows, Shift | by grapheme, by word, with selection |
+| arrows, Ctrl+arrows, Alt+arrows, Shift | by grapheme, by word (Ctrl as on Windows, Alt as on macOS), with selection |
 | Home, End, Ctrl+Home, Ctrl+End | start and end of line and text |
 | up, down, PgUp, PgDn | `text_area` only: visual lines, keeps the x position |
-| Backspace, Delete, Ctrl+ | character (with combining marks), word |
-| Ctrl+A, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y | select all, undo, redo (typing a word is one step) |
+| Backspace, Delete, Ctrl+ or Alt+ | character (with combining marks), word |
+| Ctrl+A, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y | select all, undo, redo (typing without moving the cursor is one step) |
 | Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Insert, Shift+Delete, Shift+Insert | clipboard |
+| Insert | overwrite (a typed character replaces the one after the cursor, the cursor is an underline) |
+| right button, Shift+F10, Menu key | menu Undo, Redo, Cut, Copy, Paste, Delete, Select all; an unavailable item says why |
 | Enter | submit (`on_submit`); in `text_area` a new line, Ctrl+Enter submits |
 | wheel | in `text_area` scrolls the field, not the window |
 
@@ -1581,8 +1588,47 @@ character boundary.
 - **Wrapping** in `text_area` by words to the field width; a word longer
   than a line breaks by graphemes. A single-line field scrolls so the
   cursor stays visible; pasted line breaks become spaces.
-- **Password:** neither copy nor cut works (not even Ctrl+Insert);
-  Ctrl+arrows jump to start and end (words would reveal the spaces).
+- **Password:** neither copy nor cut works (not even Ctrl+Insert or from
+  the menu); Ctrl+arrows jump to start and end (words would reveal the
+  spaces). The eye on the right shows the password (drawing only, it
+  never goes to the clipboard or the accessibility tree). With focus and
+  Caps Lock on, a warning shows under the field.
+- **Options** `.read_only()` (select and copy work, editing does not,
+  `surface_2` background), `.max_len(n)` (at most n graphemes, a paste is
+  cut).
+- **Number** `number_input(text).range(0.0, 100.0).num_step(5.0).unit("%")`:
+  digits only (decimal comma by the step, minus only with a negative
+  bound), arrows step on the step grid, PgUp and PgDn 10 steps, Home and
+  End the bounds, spin arrows in the field outside the Tab order, right
+  aligned.
+- **Search** `search_input(text).on_search(Msg::Search)`: magnifier on the
+  left, a cross only with text, Esc clears (a second Esc goes to the
+  application), arrow down moves to the next element (results);
+  `on_search` comes `motion.search_delay` (150 ms) after the last
+  keystroke, empty text at once.
+- **The cursor blinks** (`motion.caret_blink`); after typing and moving it
+  stays visible for a full period; after `motion.caret_blink_stop` (10 s)
+  without activity it stops blinking. The OS client draws the cursor
+  into a small layer of its own (`Ui::caret`): blinking only changes its
+  visibility, the window is not redrawn and the compositor damages only
+  the cursor rectangle (a transaction that only changes the visibility or
+  position of a buffer layer without children does not damage the whole
+  window). The
+  focus ring is drawn only after keyboard use; a clicked field has an
+  accent border and the cursor.
+- **Dead keys** (acute, caron) are composed by `inputd` (`libs/keymap`):
+  the field gets the composed character as `Text`. The pending character
+  comes in the compositor message
+  `COMPOSE { window, text, cursor_begin, cursor_end, flags }` (op 117,
+  like `preedit_string` in Wayland text-input-v3: the cursor in the text
+  in UTF-8 bytes, segment flag `UNDERLINE`, empty text = end; the format
+  is ready for IME too). The field draws it underlined after the cursor;
+  it is not in the value or in `on_change`; a password never shows it.
+  The message goes only to the focused window and only from local input,
+  never to the log (privacy). An older client drops the unknown message
+  (`decode` returns `NOT_SUPPORTED`, test
+  `unknown_server_op_is_not_supported_and_compose_validated`).
+  **[implemented]**
 - **Own key translation** `text_input(..).key_map(|code, modifiers|
   Some('z'))`: the field types by a layout other than the system one
   (trying the layout chosen in the installer). It ignores the system's

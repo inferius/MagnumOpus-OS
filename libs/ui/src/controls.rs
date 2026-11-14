@@ -9,7 +9,9 @@
 //! Klavesy: mezernik / Enter prepne prepinac a vybere volbu; posuvnik
 //! sipky (o krok), PgUp/PgDn (o 10 kroku), Home/End, kolecko; segmenty
 //! a zalozky sipky vlevo / vpravo, Home/End; Ctrl+Tab a Ctrl+Shift+Tab
-//! prepinaji prvni zalozky v okne; prostredni tlacitko zalozku zavre.
+//! (i Ctrl+PgDn / Ctrl+PgUp) prepinaji zalozky s fokusem, jinak prvni
+//! v okne; prostredni tlacitko zalozku zavre. Kolecko meni posuvnik jen
+//! s fokusem.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -270,10 +272,12 @@ impl<M: Clone> Ui<M> {
                 self.close_tab(i, k, &mut r);
                 Some(r)
             }
+            // Kolecko meni posuvnik jen s fokusem (jinak posouva stranku,
+            // at posun stranky nechtene nemeni treba hlasitost).
             InputEvent::Scroll { dy, .. } => {
                 let i = self.hit(self.pointer.0, self.pointer.1)?;
                 let ElemKind::Slider { value, min, max, step, .. } = self.elems[i].kind else { return None };
-                if self.elems[i].disabled {
+                if self.elems[i].disabled || self.focus != Some(i) {
                     return None;
                 }
                 self.slider_emit(i, (value + dy * step).clamp(min, max), &mut r);
@@ -281,14 +285,17 @@ impl<M: Clone> Ui<M> {
             }
             // Ctrl+Tab / Ctrl+Shift+Tab: dalsi / predchozi zalozka (prvni
             // zalozky v okne), at je fokus kdekoli.
-            InputEvent::Key { code: KEY_TAB, action, .. } if action != 0 && self.mods & mods::CTRL != 0 => {
-                let i = self.elems.iter().position(|e| matches!(e.kind, ElemKind::Tabs { .. }))?;
+            // Ctrl+PgUp / Ctrl+PgDn totez (predchozi / dalsi).
+            InputEvent::Key { code, action, .. } if action != 0 && self.mods & mods::CTRL != 0 && matches!(code, KEY_TAB | KEY_PAGEUP | KEY_PAGEDOWN) => {
+                // Zalozky s fokusem, jinak prvni v okne.
+                let i = self.focus.filter(|&f| matches!(self.elems[f].kind, ElemKind::Tabs { .. })).or_else(|| self.elems.iter().position(|e| matches!(e.kind, ElemKind::Tabs { .. })))?;
                 let ElemKind::Tabs { selected, labels, .. } = &self.elems[i].kind else { return None };
                 let n = labels.len();
                 if n == 0 {
                     return Some(r);
                 }
-                let k = if self.mods & mods::SHIFT != 0 { (selected + n - 1) % n } else { (selected + 1) % n };
+                let back = if code == KEY_TAB { self.mods & mods::SHIFT != 0 } else { code == KEY_PAGEUP };
+                let k = if back { (selected + n - 1) % n } else { (selected + 1) % n };
                 self.pick(i, k, &mut r);
                 Some(r)
             }

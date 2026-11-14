@@ -30,6 +30,10 @@ enum Msg {
     Text(String),
     Pass(String),
     Note(String),
+    Number(String),
+    Search(String),
+    Found(String),
+    Code(String),
     Check(bool),
     Wifi(bool),
     Theme(u8),
@@ -50,6 +54,9 @@ struct Gallery {
     text: String,
     pass: String,
     note: String,
+    number: String,
+    search: String,
+    code: String,
     check: bool,
     wifi: bool,
     theme: u8,
@@ -72,6 +79,14 @@ impl Gallery {
             row([button("Primární").on_click(Msg::Button("Primární")), button("Nedostupné").disabled(true), button("").tooltip("Nastavení").on_click(Msg::Button("Ikona")), spacer()]),
             text_input(&self.text).placeholder("Název (Ctrl+Z zpět, dvojklik vybere slovo)").on_change(Msg::Text).key("text"),
             password_input(&self.pass).placeholder("Heslo").on_change(Msg::Pass).error(if short { "Heslo je kratší než 8 znaků" } else { "" }).key("heslo"),
+            row([
+                number_input(&self.number).placeholder("Počet").range(0.0, 100.0).num_step(5.0).unit("%").on_change(Msg::Number).key("cislo"),
+                search_input(&self.search).placeholder("Hledat (Esc smaže)").on_change(Msg::Search).on_search(Msg::Found).key("hledani"),
+            ]),
+            row([
+                text_input(&self.code).placeholder("Kód, nejvýš 6 znaků (Insert = přepis)").max_len(6).on_change(Msg::Code).key("kod"),
+                text_input("Jen pro čtení: jde vybrat a kopírovat").read_only().key("cteni"),
+            ]),
             text_area(&self.note).placeholder("Víceřádková poznámka (Enter = nový řádek)").rows(4).on_change(Msg::Note).key("poznamka"),
         ])
     }
@@ -118,14 +133,15 @@ impl Gallery {
 
     fn menus(&self) -> Node<Msg> {
         column([
-            label("Pravé tlačítko nebo Shift+F10 na tlačítku otevře kontextovou nabídku."),
+            label("Pravé tlačítko nebo Shift+F10 na tlačítku otevře kontextovou nabídku (podtržené písmeno ji vybere, šipka vpravo otevře podnabídku)."),
             button("Nabídka")
                 .on_click(Msg::Button("Nabídka"))
                 .context_menu(vec![
-                    menu_item("Kopírovat", Msg::Menu("Kopírovat")).shortcut("Ctrl+C"),
-                    menu_item("Vložit", Msg::Menu("Vložit")).shortcut("Ctrl+V").disabled("Schránka je prázdná"),
+                    menu_item("&Kopírovat", Msg::Menu("Kopírovat")).shortcut("Ctrl+C"),
+                    menu_item("&Vložit", Msg::Menu("Vložit")).shortcut("Ctrl+V").disabled("Schránka je prázdná"),
+                    submenu("&Seřadit", vec![menu_item("Podle &názvu", Msg::Menu("Podle názvu")), menu_item("Podle &data", Msg::Menu("Podle data")), menu_item("Podle &velikosti", Msg::Menu("Podle velikosti"))]),
                     menu_separator(),
-                    menu_item("Zobrazit skryté", Msg::Menu("Zobrazit skryté")).checked(true),
+                    menu_item("&Zobrazit skryté", Msg::Menu("Zobrazit skryté")).checked(true),
                 ])
                 .tooltip("Má kontextovou nabídku"),
             select(LANGS.iter().map(|s| String::from(*s)), self.lang).on_pick(Msg::Lang),
@@ -181,7 +197,7 @@ impl App for Gallery {
     fn update(&mut self, m: Msg) {
         // Hodnoty poli se do vypisu nepisou (heslo).
         let line = match &m {
-            Msg::Text(_) | Msg::Note(_) => String::from("změna textu"),
+            Msg::Text(_) | Msg::Note(_) | Msg::Code(_) => String::from("změna textu"),
             Msg::Pass(_) => String::from("změna hesla"),
             other => format!("{other:?}"),
         };
@@ -190,6 +206,10 @@ impl App for Gallery {
             Msg::Text(t) => self.text = t,
             Msg::Pass(t) => self.pass = t,
             Msg::Note(t) => self.note = t,
+            Msg::Number(t) => self.number = t,
+            Msg::Search(t) => self.search = t,
+            Msg::Code(t) => self.code = t,
+            Msg::Found(_) => {}
             Msg::Check(b) => self.check = b,
             Msg::Wifi(b) => self.wifi = b,
             Msg::Theme(k) => self.theme = k,
@@ -219,6 +239,9 @@ fn main(startup: Startup) -> i64 {
         text: String::new(),
         pass: String::new(),
         note: String::new(),
+        number: String::from("40"),
+        search: String::new(),
+        code: String::new(),
         check: true,
         wifi: false,
         theme: 0,

@@ -272,6 +272,10 @@ One message is one frame, made of 32-byte records:
 | 10 `DROPPED` | `Dropped { messages }` | number of messages the client missed | | | |
 | 11 `NEW_DEVICE` | `NewDevice { source, state }` | source id | 0 pending, 1 trusted, 2 rejected | | |
 | 12 `ABSOLUTE` | `Absolute { x, y }` | x 0-65535 | y 0-65535 (fraction of the device's axis range) | | |
+| 13 `COMPOSE` | `Compose(Option<char>)` | the pending dead-key accent, 0 = end | | | |
+
+A client reads an unknown kind as `Unknown` and skips it (a new kind is
+not an incompatible change).
 
 - `flags`: `SYNTHETIC` (1) means the event comes from synthetic input.
 - `mods`: modifiers after the event. `SHIFT` 1, `CTRL` 2, `ALT` 4,
@@ -431,6 +435,16 @@ Accent + space types the accent alone, and so does the same accent twice.
 A combination that does not compose types both (`´` + `x` = `´x`). Ctrl,
 Alt and keys without a character (Enter, arrows) cancel a pending dead
 key.
+
+**Pending character** **[implemented]**: when the pending dead key
+changes, `inputd` sends `Compose(Some(accent))`, and after composing or
+cancelling `Compose(None)`, always before the `Text` of the same key
+press. It goes only to the focus owner (the compositor passes it to the
+focused window as `COMPOSE`, see
+[Graphics and windows](gui.md#text-fields-and-the-clipboard)) and only from
+local physical input. Its content is never written to the log or to the
+input trace (it may be part of a password); the trace only knows key
+presses.
 
 **Caps Lock** swaps the case of letters (Shift then types lower case). On
 the Czech top row it types capitals (`Ě`), and digits with Shift. It does

@@ -18,6 +18,14 @@ mod controls;
 pub mod draw;
 pub mod event;
 mod field;
+mod field_draw;
+mod field_menu;
+pub mod fieldopts;
+mod caret;
+mod groups;
+mod selection;
+mod compose;
+mod submenu;
 pub mod layout;
 pub mod look;
 pub mod node;
@@ -234,8 +242,10 @@ pub struct Ui<M> {
     pub(crate) dragging: Option<table::Dragging>,
     /// Faze animace neurciteho prubehu (px, roste po snimcich).
     pub(crate) busy_phase: u32,
-    /// Otevrena nabidka (vyber, kontextova).
+    /// Otevrena nabidka (vyber, kontextova); s podnabidkou ta nejhlubsi.
     pub(crate) popup: Option<popup::Popup<M>>,
+    /// Rodicovske nabidky otevrene podnabidky (od korene).
+    pub(crate) popup_stack: Vec<popup::Popup<M>>,
     /// Seznam navrhu pole s fokusem (`ui::suggest`).
     pub(crate) suggest: Option<suggest::SuggestState>,
     /// Pismo jmen v seznamu navrhu (`Ui::set_mono_fonts`).
@@ -265,6 +275,29 @@ pub struct Ui<M> {
     pub(crate) active: bool,
     /// Prvek s drzenou klavesou Enter / mezernik (akce az pri pusteni).
     pub(crate) key_pressed: Option<usize>,
+    /// Posledni ovladani bylo z klavesnice: jen tehdy se kresli prstenec
+    /// fokusu (po kliknuti mysi ne).
+    pub(crate) kbd_focus: bool,
+    /// Pole s heslem, u kterych uzivatel zapnul zobrazeni (oko).
+    pub(crate) revealed: BTreeSet<Key>,
+    /// Kurzor pole: posledni cinnost (blikani zacne znovu) a zda je videt.
+    pub(crate) caret_since: u64,
+    pub(crate) caret_on: bool,
+    /// Zacatek blikani bez casu (akce pristupnosti): doplni ho casovac.
+    pub(crate) caret_fresh: bool,
+    /// Pole hledani a cas, kdy poslat `on_search`.
+    pub(crate) search_due: Option<(Key, u64)>,
+    /// Zpravy vznikle v `Ui::timer` (hledani s prodlevou), `Ui::take_msgs`.
+    pub(crate) timer_msgs: Vec<M>,
+    /// Hledani psanim (vyber, seznam): napsany text a cas posledniho znaku.
+    pub(crate) typed: (String, u64),
+    /// Kurzor pole kresli klient do vlastni vrstvy (`Ui::caret`).
+    pub(crate) caret_layer: bool,
+    /// Seznamy s vicenasobnym vyberem: kurzor a kotva (index radku).
+    pub(crate) lists: BTreeMap<Key, (Option<usize>, Option<usize>)>,
+    /// Rozpracovany text (mrtva klavesa) u kurzoru pole: klic pole,
+    /// text, kurzor v nem (bajty), priznaky segmentu (`compose.rs`).
+    pub(crate) composing: Option<(Key, String, u32, u32, u32)>,
 }
 
 /// Posouvana oblast: index prvku (prostor `index + 1` pro `Ui::draw`),
@@ -309,6 +342,7 @@ impl<M: Clone> Ui<M> {
             dragging: None,
             busy_phase: 0,
             popup: None,
+            popup_stack: Vec::new(),
             suggest: None,
             mono: None,
             tip: None,
@@ -325,6 +359,17 @@ impl<M: Clone> Ui<M> {
             title: String::new(),
             active: true,
             key_pressed: None,
+            kbd_focus: false,
+            revealed: BTreeSet::new(),
+            caret_since: 0,
+            caret_on: true,
+            caret_fresh: false,
+            search_due: None,
+            timer_msgs: Vec::new(),
+            typed: (String::new(), 0),
+            caret_layer: false,
+            lists: BTreeMap::new(),
+            composing: None,
         }
     }
 
@@ -414,6 +459,7 @@ impl<M: Clone> Ui<M> {
         self.focus = focus.or_else(|| self.default_focus_index());
         let by_key = &self.by_key;
         self.group_memory.retain(|g, _| by_key.contains_key(g));
+        self.lists.retain(|g, _| by_key.contains_key(g));
         self.pressed = find(pk);
         self.key_pressed = find(kk);
         // Textova pole prevezmou hodnotu aplikace (kurzor a historie zustanou).
@@ -429,6 +475,7 @@ impl<M: Clone> Ui<M> {
         // Nabidka a bublina zmizelych prvku pryc.
         if self.popup.as_ref().is_some_and(|p| self.index_of(p.owner()).is_none()) {
             self.popup = None;
+            self.popup_stack.clear();
         }
         if self.tip.is_some_and(|(k, _)| self.index_of(k).is_none()) {
             self.tip = None;
@@ -496,7 +543,7 @@ impl<M: Clone> Ui<M> {
             hover: self.hover == Some(i) && !dis,
             pressed: !dis && ((self.pressed == Some(i) && self.hover == Some(i)) || self.key_pressed == Some(i)),
             focused,
-            focus_visible: focused && self.active && !dis,
+            focus_visible: focused && self.active && !dis && self.kbd_focus,
             disabled: dis,
             error: e.error.is_some(),
             selected,

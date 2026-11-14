@@ -83,6 +83,8 @@ pub(super) fn failr(what: &str, (e, got): (Error, Vec<Record>)) -> String {
             Event::Dropped { messages } => alloc::format!("D{messages}"),
             Event::Absolute { x, y } => alloc::format!("A({x},{y})"),
             Event::NewDevice { source, state } => alloc::format!("N{source}:{}", state.to_u32()),
+            // Rozpracovany znak bez obsahu (soukromi, jako v logu).
+            Event::Compose(c) => alloc::format!("C{}", c.is_some() as u8),
             Event::Unknown { kind } => alloc::format!("?{kind}"),
         };
         s.push(' ');

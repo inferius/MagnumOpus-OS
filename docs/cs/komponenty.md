@@ -97,9 +97,9 @@ tlačítko Menu = kontextová nabídka.
 |---|---|---|---|
 | Tlačítko: primární, sekundární, nebezpečné, ikonové | částečně | výška `--k-h`, min. šířka 2 &times; výška, `s5`, pilulka; primární `accent`, nebezpečné `danger`; stav *probíhá* (kolečko, pevná šířka) | Enter, Mezerník při uvolnění |
 | Textové pole, víceřádkové | ano | `--k-h`, `radius.control`, `s4`; popisek nad, nápověda / chyba pod | šipky, Ctrl+šipky, výběr se Shift, schránka, undo; víceřádkové Ctrl+Enter odešle |
-| Číslo | ne | jako pole, zarovnání vpravo, jednotka, krokovací tlačítka mimo Tab | &uarr; &darr; krok, PgUp / PgDn 10 kroků, Home / End |
-| Heslo | částečně | jako pole + oko (`aria-pressed`), varování Caps Lock | jako pole, nikdy návrhy |
-| Hledání | ne | lupa vlevo, křížek jen s textem, filtr s prodlevou 150 ms | Esc smaže, druhé Esc opustí, &darr; do výsledků |
+| Číslo | ano | jako pole, zarovnání vpravo, jednotka, krokovací tlačítka mimo Tab | &uarr; &darr; krok, PgUp / PgDn 10 kroků, Home / End |
+| Heslo | ano | jako pole + oko (`aria-pressed`), varování Caps Lock | jako pole, nikdy návrhy |
+| Hledání | ano | lupa vlevo, křížek jen s textem, filtr s prodlevou 150 ms | Esc smaže, druhé Esc opustí, &darr; do výsledků |
 | Zaškrtávátko | částečně | políčko 18 / 22 / 28, `radius.xs`, okraj 2 px; neurčitý stav | Mezerník |
 | Přepínač | ano | `switch_*`; okamžitý účinek | Mezerník |
 | Radio | částečně | kruh 18 / 22 / 28; skupina je jedna zastávka | šipky rovnou vybírají |
@@ -151,7 +151,9 @@ Zjištěno z kódu `libs/ui/src/` a ukázky `user/gui-komponenty` (stav
 3. **Strom.** Potřebuje ho správce souborů a nastavení. Navrhuji ho
    postavit na seznamu (řádek + úroveň + rozbaleno), ne jako novou
    vrstvu.
-4. **Číselné pole** a **pole hledání.**
+4. ~~**Číselné pole** a **pole hledání.**~~ Hotovo (`number_input`,
+   `search_input`, [Textová pole a schránka](gui.md#textová-pole-a-schránka)).
+   **[implementováno]**
 5. **Obecná bublina (popover).** Vrstva `popup` dnes umí jen nabídku,
    výběr a návrhy.
 6. **Drobečky, rozbalovací panel, prázdný stav, kruhové kolečko,
@@ -163,23 +165,29 @@ Zjištěno z kódu `libs/ui/src/` a ukázky `user/gui-komponenty` (stav
    přepínací (`pressed`) a stav *probíhá*.
 2. Zaškrtávátko nemá neurčitý stav, hover ani vypnutý vzhled
    (`st.disabled` se ignoruje).
-3. Radio při vypnutí neztlumí plochu. Skupinu radio skládá aplikace
-   sama a šipky mezi radio nefungují.
+3. Radio při vypnutí neztlumí plochu. ~~Skupinu radio skládá aplikace
+   sama a šipky mezi radio nefungují.~~ Sourozenci radio jsou skupina
+   s jednou zastávkou Tab a šipkami. **[implementováno]**
 4. Stav chyba je jen u textových polí. Chybí u výběru, zaškrtávátka,
    posuvníku, záložky a segmentu.
-5. Pole nemají hover. Heslo nemá oko ani varování Caps Lock.
-6. Seznam má jen šipky. Chybí Ctrl+Mezerník, Shift+šipky, Ctrl+A
+5. ~~Pole nemají hover. Heslo nemá oko ani varování Caps Lock.~~ Hotovo
+   (najetí ztmaví okraj, oko, varování Caps Lock). **[implementováno]**
+6. ~~Seznam má jen šipky.~~ Hotovo: `list(..).multi_select(true)` sdílí
+   logiku výběru s tabulkou (`libs/ui/src/selection.rs`). **[implementováno]**
+   Původně: seznam má jen šipky. Chybí Ctrl+Mezerník, Shift+šipky, Ctrl+A
    a hledání psaním. Tabulka to všechno už umí, ať seznam sdílí její
    logiku výběru.
-7. Nabídka nemá podnabídky, nadpis skupiny, nebezpečnou položku ani
-   hledání psaním.
-8. Výběr: Tab v otevřeném seznamu zavře beze změny. Navrhuji zvolit
-   aktivní položku, jako na ostatních systémech.
+7. Nabídka nemá ~~podnabídky~~, nadpis skupiny, nebezpečnou položku
+   ~~ani hledání psaním~~. Podnabídky a mnemoniky jsou hotové.
+   **[implementováno]**
+8. ~~Výběr: Tab v otevřeném seznamu zavře beze změny.~~ Tab zvolí
+   aktivní položku a jde dál; zavřený výběr umí hledání psaním a Home,
+   End. **[implementováno]**
 9. Záložky: vybraná záložka je jen plocha `surface_2`, která má ve
    světlém motivu proti `surface` kontrast pod 3 : 1. Navrhuji podtržení
    3 px `accent`. Vypnuté záložky se šipkami nepřeskakují.
-10. Posuvník mění hodnotu kolečkem i bez fokusu (posouvání stránky pak
-    nechtěně mění hlasitost). Dráha má 2 px, navrhuji 4.
+10. ~~Posuvník mění hodnotu kolečkem i bez fokusu.~~ Kolečko jen
+    s fokusem. **[implementováno]** Dráha má 2 px, navrhuji 4.
 
 **Hustota:**
 

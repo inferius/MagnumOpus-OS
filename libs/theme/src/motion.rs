@@ -59,6 +59,13 @@ pub struct Motion {
     pub unresponsive_ms: u32,
     pub badge_flash_ms: u32,
     pub dialog_guard_ms: u32,
+    /// Pulperioda blikani kurzoru a doba, po ktere blikani skonci.
+    pub caret_blink: u32,
+    pub caret_blink_stop: u32,
+    /// Prodleva filtru pole hledani.
+    pub search_delay: u32,
+    /// Krok automatickeho posunu pri tahu za okraj.
+    pub autoscroll: u32,
     pub ease_standard: Curve,
     pub ease_enter: Curve,
     pub ease_exit: Curve,
@@ -77,6 +84,10 @@ impl Motion {
             unresponsive_ms: u(t, "motion.unresponsive_ms")?,
             badge_flash_ms: u(t, "motion.badge_flash_ms")?,
             dialog_guard_ms: u(t, "motion.dialog_guard_ms")?,
+            caret_blink: u(t, "motion.caret_blink")?,
+            caret_blink_stop: u(t, "motion.caret_blink_stop")?,
+            search_delay: u(t, "motion.search_delay")?,
+            autoscroll: u(t, "motion.autoscroll")?,
             ease_standard: Curve::parse(t, "motion.ease_standard")?,
             ease_enter: Curve::parse(t, "motion.ease_enter")?,
             ease_exit: Curve::parse(t, "motion.ease_exit")?,

@@ -155,8 +155,11 @@ impl<M: Clone> Ui<M> {
                         focus_ring(c, r, th.radius.card, ring, ring_off, col.focus);
                     }
                 }
-                ElemKind::ListItem { text, selected, agent, .. } => {
+                ElemKind::ListItem { text, selected, agent, index, list } => {
                     let rad = th.radius.control;
+                    // Vyber a kurzor jsou dve veci: kurzor seznamu
+                    // s vicenasobnym vyberem ma prstenec (jen z klavesnice).
+                    let cursor = self.focus == Some(*list - 1) && self.active && self.kbd_focus && self.list_cursor(*list - 1) == Some(*index);
                     // Vyber: pozadi `accent_soft`, text normalni (tucne jen
                     // nadpisy). Radek agenta: `ai_soft` na 45 %, levy pruh
                     // `ai` a stitek "agent".
@@ -166,6 +169,9 @@ impl<M: Clone> Ui<M> {
                         c.round_fill(r, rad, gfx::scale(col.ai_soft, th.opacity.hung_content));
                     } else if hover {
                         c.round_fill(r, rad, col.surface_3);
+                    }
+                    if cursor {
+                        c.round_stroke(r, rad, ring, col.focus);
                     }
                     let old = c.clip();
                     c.set_clip(old.intersect(&r));

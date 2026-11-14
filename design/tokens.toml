@@ -429,6 +429,15 @@ unresponsive_ms = 3000
 badge_flash_ms = 3000
 # Systemovy dialog ignoruje vstup tak dlouho po zobrazeni (viz gui.md).
 dialog_guard_ms = 300
+# Kurzor textoveho pole: pulperioda blikani; po psani a pohybu je cela
+# perioda videt. Po teto dobe bez cinnosti prestane blikat (zustane videt,
+# setri prekreslovani).
+caret_blink = 530
+caret_blink_stop = 10000
+# Pole hledani: filtr az po teto dobe bez psani.
+search_delay = 150
+# Tah mysi s vyberem za okraj pole: krok automatickeho posunu.
+autoscroll = 50
 
 # Kryti (0-1). Pruhlednost jen tam, kde nesnizi kontrast textu pod limit;
 # ve vysokem kontrastu je lista vzdy plna (1).

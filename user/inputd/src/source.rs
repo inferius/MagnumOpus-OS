@@ -254,6 +254,7 @@ impl Source {
         time: u64,
         out: &mut Vec<Record>,
     ) {
+        let pending = self.keyboard.dead_pending();
         let o = self.keyboard.key(layout, code, action);
         let f = self.flags();
         out.push(Record::new(
@@ -267,6 +268,11 @@ impl Source {
             f,
             time,
         ));
+        // Rozpracovany znak (mrtva klavesa) pred textem tehoz stisku.
+        let now = self.keyboard.dead_pending();
+        if now != pending {
+            out.push(Record::new(Event::Compose(now), o.mods, f, time));
+        }
         for ch in o.text.into_iter().flatten() {
             out.push(Record::new(Event::Text(ch), o.mods, f, time));
         }

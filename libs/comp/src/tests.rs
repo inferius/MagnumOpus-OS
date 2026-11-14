@@ -18,6 +18,8 @@ use inputproto::{Action, Button, Event, Record};
 use crate::*;
 
 mod bench;
+mod caret;
+mod compose;
 mod clipboard;
 mod cull;
 mod gpu;

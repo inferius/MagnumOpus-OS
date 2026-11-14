@@ -453,6 +453,20 @@ impl Comp {
                     self.send_input(c, l, InputEvent::Text(ch), mods, syn, r.time);
                 }
             }
+            // Rozpracovany znak (mrtva klavesa): jen oknu s fokusem a jen
+            // z mistniho vstupu; systemova pole (prihlaseni, dialog,
+            // paleta) ho nezobrazuji. Obsah se nikdy neloguje.
+            Event::Compose(c) => {
+                if syn || self.greeter_visible() || self.palette.is_some() || self.dialogs.active().is_some() {
+                    return;
+                }
+                if let Some((cl, l)) = self.focused_target() {
+                    let text = c.map(alloc::string::String::from).unwrap_or_default();
+                    let end = text.len() as u32;
+                    let flags = if text.is_empty() { 0 } else { guiproto::window::compose::UNDERLINE };
+                    self.send(cl, guiproto::window::ServerMsg::Compose { window: l, text, cursor_begin: end, cursor_end: end, flags });
+                }
+            }
             Event::Injection { active } => {
                 self.input.injecting = active;
                 self.damage_panel();

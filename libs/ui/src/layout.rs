@@ -19,9 +19,9 @@ pub enum ElemKind<M> {
     /// kresleni ze sirky obdelniku (`wrap.rs`).
     Label { text: String, heading: bool, warn: bool, lines: u32 },
     Button { text: String, on_click: Option<M>, icon: Option<&'static str> },
-    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<crate::node::KeyMapFn>, suggest: Option<alloc::boxed::Box<crate::suggest::Suggest<M>>> },
+    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<crate::node::KeyMapFn>, suggest: Option<alloc::boxed::Box<crate::suggest::Suggest<M>>>, opts: crate::fieldopts::FieldOpts, on_search: Option<Box<dyn Fn(String) -> M>> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
-    List { count: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
+    List { count: usize, on_select: Option<Box<dyn Fn(usize) -> M>>, multi: bool, on_selection: Option<Box<dyn Fn(Vec<u64>) -> M>> },
     ListItem { text: String, index: usize, selected: bool, list: usize, agent: bool },
     Progress { value: u32 },
     Table(Box<crate::node::TableSpec<M>>),
@@ -305,19 +305,20 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
         Kind::Button { text, on_click, icon } => {
             push(out, ElemKind::Button { text, on_click, icon }, r);
         }
-        Kind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, key_map, suggest, .. } => {
-            push(out, ElemKind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, key_map, suggest }, r);
+        Kind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, key_map, suggest, opts, on_search, .. } => {
+            push(out, ElemKind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, key_map, suggest, opts, on_search }, r);
         }
         Kind::Checkbox { text, checked, on_toggle } => {
             push(out, ElemKind::Checkbox { text, checked, on_toggle }, r);
         }
-        Kind::List { items, selected, on_select, agents } => {
-            let id = push(out, ElemKind::List { count: items.len(), on_select }, r);
+        Kind::List { items, selected, on_select, agents, multi, selection, on_selection } => {
+            let id = push(out, ElemKind::List { count: items.len(), on_select, multi, on_selection }, r);
+            let is_sel = |i: usize| if multi { selection.contains(&(i as u64)) } else { selected == Some(i) };
             let (rh, inset) = (t.row_h(), t.theme.space[2]);
             for (i, text) in items.into_iter().enumerate() {
                 let ir = Rect::new(r.x + inset as i32, r.y + (inset + i as u32 * rh) as i32, r.w.saturating_sub(2 * inset), rh);
                 out.push(Element {
-                    kind: ElemKind::ListItem { text, index: i, selected: selected == Some(i), list: id, agent: agents.get(i).copied().unwrap_or(false) },
+                    kind: ElemKind::ListItem { text, index: i, selected: is_sel(i), list: id, agent: agents.get(i).copied().unwrap_or(false) },
                     key: key.mix(ITEM).mix(i as u64),
                     error: None,
                     skip_tab: true,

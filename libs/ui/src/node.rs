@@ -90,10 +90,14 @@ pub enum Kind<M> {
     /// `secure` = heslo: kresli se teckami, hodnota se nedava do stromu
     /// pristupnosti ani do trasovani, kompozitor pole zakryje ve snimku.
     /// `multiline` = viceradkove pole (`text_area`) s `rows` radky.
-    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, rows: u32, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<KeyMapFn>, suggest: Option<Box<crate::suggest::Suggest<M>>> },
+    /// `opts` = jen pro cteni, nejvetsi delka, druh (cislo, hledani);
+    /// `on_search` = hledani s prodlevou po psani (`search_input`).
+    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, rows: u32, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<KeyMapFn>, suggest: Option<Box<crate::suggest::Suggest<M>>>, opts: crate::fieldopts::FieldOpts, on_search: Option<Box<dyn Fn(String) -> M>> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     /// `agents[i]` = radek patri agentovi AI (stitek a pruh barvy `ai`).
-    List { items: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>>, agents: Vec<bool> },
+    /// `multi` = vicenasobny vyber (`selection` = indexy radku, zmena
+    /// `on_selection`; Ctrl, Shift, Ctrl+A jako u tabulky).
+    List { items: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>>, agents: Vec<bool>, multi: bool, selection: Vec<u64>, on_selection: Option<Box<dyn Fn(Vec<u64>) -> M>> },
     Progress { value: u32 },
     /// Tabulka / seznam s virtualizaci (viz [`table`]).
     Table(Box<TableSpec<M>>),
@@ -161,6 +165,8 @@ pub enum MenuAct<M> {
     Msg(M),
     /// Akce z manifestu (`App::action`), napr. polozka z `App::menu`.
     Action(String, Vec<guiproto::action::Arg>),
+    /// Podnabidka (sipka vpravo, Enter nebo najeti ji otevre).
+    Sub(Vec<MenuEntry<M>>),
 }
 
 /// Polozka nabidky (kontextove i rozbalovaci).
@@ -181,6 +187,12 @@ pub struct MenuEntry<M> {
 /// Polozka nabidky, ktera posle zpravu `m`.
 pub fn menu_item<M>(label: &str, m: M) -> MenuEntry<M> {
     MenuEntry { label: label.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: Some(MenuAct::Msg(m)) }
+}
+
+/// Podnabidka s polozkami `items`. `&` v textu polozky oznaci mnemoniku
+/// (`"&Soubor"`: pismeno S podtrzene, stisk S polozku vybere; `&&` = `&`).
+pub fn submenu<M>(label: &str, items: Vec<MenuEntry<M>>) -> MenuEntry<M> {
+    MenuEntry { label: label.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: Some(MenuAct::Sub(items)) }
 }
 
 /// Oddelovac skupin v nabidce.
@@ -278,7 +290,32 @@ pub fn text_input<M>(value: &str) -> Node<M> {
         key_map: None,
         on_submit: None,
         suggest: None,
+        opts: crate::fieldopts::FieldOpts::default(),
+        on_search: None,
     })
+}
+
+/// Ciselne pole: jen cislice (desetinny oddelovac podle kroku, minus pro
+/// zaporne meze), sipky nahoru / dolu krok, PgUp / PgDn 10 kroku, Home /
+/// End meze, zarovnani vpravo. Hodnota je text (`on_change`), meze
+/// `Node::range`, krok `Node::num_step`, jednotka `Node::unit`.
+pub fn number_input<M>(value: &str) -> Node<M> {
+    let mut n = text_input(value);
+    if let Kind::TextInput { opts, .. } = &mut n.kind {
+        opts.kind = crate::fieldopts::FieldKind::Number(crate::fieldopts::NumberSpec::default());
+    }
+    n
+}
+
+/// Pole hledani: lupa vlevo, krizek (smazat) jen s textem, Esc smaze text
+/// (druhe Esc pole opusti), sipka dolu prejde k vysledkum (dalsi prvek).
+/// `Node::on_search` dostane text s prodlevou po psani.
+pub fn search_input<M>(value: &str) -> Node<M> {
+    let mut n = text_input(value);
+    if let Kind::TextInput { opts, .. } = &mut n.kind {
+        opts.kind = crate::fieldopts::FieldKind::Search;
+    }
+    n
 }
 
 /// Pole s heslem (viz `Kind::TextInput::secure`).
@@ -311,6 +348,9 @@ pub fn list<M>(items: impl IntoIterator<Item = String>, selected: Option<usize>)
         selected,
         on_select: None,
         agents: Vec::new(),
+        multi: false,
+        selection: Vec::new(),
+        on_selection: None,
     })
 }
 
@@ -584,6 +624,57 @@ impl<M> Node<M> {
         self
     }
 
+    /// Jen pro cteni: text jde vybrat a kopirovat, ne menit.
+    pub fn read_only(mut self) -> Self {
+        if let Kind::TextInput { opts, .. } = &mut self.kind {
+            opts.read_only = true;
+        }
+        self
+    }
+
+    /// Nejvic `n` znaku (grafemu); vlozeni delsiho textu se zkrati.
+    pub fn max_len(mut self, n: usize) -> Self {
+        if let Kind::TextInput { opts, .. } = &mut self.kind {
+            opts.max_len = Some(n);
+        }
+        self
+    }
+
+    /// Meze ciselneho pole (`number_input`).
+    pub fn range(mut self, min: f64, max: f64) -> Self {
+        if let Kind::TextInput { opts: crate::fieldopts::FieldOpts { kind: crate::fieldopts::FieldKind::Number(n), .. }, .. } = &mut self.kind {
+            (n.min, n.max) = (min.min(max), max.max(min));
+        }
+        self
+    }
+
+    /// Krok ciselneho pole (sipky; desetinna mista podle kroku).
+    pub fn num_step(mut self, s: f64) -> Self {
+        if let Kind::TextInput { opts: crate::fieldopts::FieldOpts { kind: crate::fieldopts::FieldKind::Number(n), .. }, .. } = &mut self.kind
+            && s > 0.0
+        {
+            n.step = s;
+        }
+        self
+    }
+
+    /// Jednotka za cislem (napr. "%", "px").
+    pub fn unit(mut self, u: &str) -> Self {
+        if let Kind::TextInput { opts: crate::fieldopts::FieldOpts { kind: crate::fieldopts::FieldKind::Number(n), .. }, .. } = &mut self.kind {
+            n.unit = u.into();
+        }
+        self
+    }
+
+    /// Hledani s prodlevou: `f(text)` az po `SEARCH_DELAY` bez psani
+    /// (`search_input`; prazdny text hned).
+    pub fn on_search(mut self, f: impl Fn(String) -> M + 'static) -> Self {
+        if let Kind::TextInput { on_search, .. } = &mut self.kind {
+            *on_search = Some(Box::new(f));
+        }
+        self
+    }
+
     pub fn placeholder(mut self, p: &str) -> Self {
         if let Kind::TextInput { placeholder, .. } = &mut self.kind {
             *placeholder = p.into();
@@ -778,15 +869,21 @@ impl<M> Node<M> {
     }
 
     /// Vybrane radky (id).
+    /// Vybrane radky: tabulka id radku, seznam indexy radku.
     pub fn selection(mut self, ids: Vec<u64>) -> Self {
-        if let Some(t) = self.spec() {
+        if let Kind::List { selection, .. } = &mut self.kind {
+            *selection = ids;
+        } else if let Some(t) = self.spec() {
             t.selection = ids;
         }
         self
     }
 
+    /// Vicenasobny vyber (tabulka i seznam).
     pub fn multi_select(mut self, m: bool) -> Self {
-        if let Some(t) = self.spec() {
+        if let Kind::List { multi, .. } = &mut self.kind {
+            *multi = m;
+        } else if let Some(t) = self.spec() {
             t.multi = m;
         }
         self
@@ -807,8 +904,11 @@ impl<M> Node<M> {
         self
     }
 
+    /// Zmena vyberu (tabulka: id radku, seznam: indexy radku).
     pub fn on_selection(mut self, f: impl Fn(Vec<u64>) -> M + 'static) -> Self {
-        if let Some(t) = self.spec() {
+        if let Kind::List { on_selection, .. } = &mut self.kind {
+            *on_selection = Some(Box::new(f));
+        } else if let Some(t) = self.spec() {
             t.on_selection = Some(Box::new(f));
         }
         self

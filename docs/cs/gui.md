@@ -1372,26 +1372,31 @@ středu; pevná výška `.height(h)` má přednost (prvek je na středu).
 | Prvek | Myš | Klávesnice | Přístupnost |
 |---|---|---|---|
 | `label` | - | - | `label` |
-| `button` | klik | Enter, mezerník | `button`, `activate` |
+| `button` | klik (akce při puštění; odjetí se stisknutým tlačítkem ji zruší) | Enter, mezerník při puštění; Esc při držené klávese stisk zruší | `button`, `activate` |
 | `text_input`, `text_area` | klik, tah, dvojklik, trojklik | viz [Textová pole a schránka](#textová-pole-a-schránka) | `text-input`, `set-value` |
 | `password_input` | jako `text_input` | jako `text_input` | `password-input` bez hodnoty |
 | `checkbox` | klik | mezerník, Enter | `checkbox`, `toggle` |
-| `list` | klik na položku | šipky nahoru a dolů | `list` a `list-item` |
+| `list` | klik na položku; s `.multi_select(true)` Ctrl+klik a Shift+klik | šipky, Home, End, PgUp, PgDn, hledání psaním; s `.multi_select(true)` Shift+šipky rozsah, Ctrl+šipky jen kurzor, Ctrl+mezerník, Ctrl+A (`.selection`, `.on_selection` jako `table`, indexy řádků) | `list` a `list-item` |
 | `table` | výběr, řazení, tažení, posuvník | viz [Tabulka a seznam](#tabulka-a-seznam-virtualizace) | `table`, `column-header`, `row` |
 | `progress` | - | - | `progress` (hodnota v procentech) |
 | `busy` | - | - | `progress` se stavem `busy` (neurčitý průběh, animace po snímcích) |
-| `select` | klik, výběr ze seznamu | Enter, mezerník, Alt+dolů, F4; zavřený šipky | `combo-box`, `menu`, `menu-item` |
+| `select` | klik, výběr ze seznamu | Enter, mezerník, Alt+dolů, F4; zavřený šipky, Home, End, hledání psaním; v otevřeném Tab zvolí aktivní položku a jde dál | `combo-box`, `menu`, `menu-item` |
 | `image` | - | - | `image` s popisem `alt` (pixely sdílené přes `Rc`, zmenšení se zachováním poměru stran, nezvětšuje se) |
 | `segments` | - | - | `list` s položkami `list-item` (celý popisek každého úseku) |
 | `switch` | klik | mezerník, Enter (při puštění) | `switch`, `checked`, `toggle` |
-| `radio` | klik | mezerník, Enter | `radio`, `checked` |
-| `slider` | klik do dráhy, tah, kolečko | šipky (krok `.step`), PgUp, PgDn (10 kroků), Home, End | `slider`, hodnota „40 (0-100)“, `set-value` |
+| `radio` | klik | sourozenci jsou skupina a jedna zastávka Tab (vybraná volba); šipky vyberou další a předchozí dokola | `radio`, `checked` |
+| `slider` | klik do dráhy, tah, kolečko jen s fokusem | šipky (krok `.step`), PgUp, PgDn (10 kroků), Home, End | `slider`, hodnota „40 (0-100)“, `set-value` |
 | `segmented` | klik na segment | šipky vlevo a vpravo, Home, End | `segmented` s podřízenými `radio` |
-| `tabs` | klik, křížek nebo prostřední tlačítko zavře (`on_close`) | šipky; Ctrl+Tab a Ctrl+Shift+Tab odkudkoli v okně | `tab-list` s podřízenými `tab` |
+| `tabs` | klik, křížek nebo prostřední tlačítko zavře (`on_close`) | šipky; Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgDn, Ctrl+PgUp (záložky s fokusem, jinak první v okně) | `tab-list` s podřízenými `tab` |
 | `column`, `row`, `spacer` | - | - | `group` |
 | `scroll` | kolečko | - | `scroll-area`, `scroll` |
 
-Fokus se posouvá klávesou Tab (Shift+Tab zpět). **Posouvaná oblast**
+Fokus se posouvá klávesou Tab (Shift+Tab zpět). Prstenec fokusu se kreslí
+jen po ovládání klávesnicí (po kliknutí myší ne). **Nabídky**
+(`context_menu`) umí podnabídky `submenu("Seřadit", položky)` (šipka
+vpravo, Enter nebo najetí otevře, šipka vlevo a Esc zavře) a mnemoniky
+`menu_item("&Kopírovat", ..)` (podtržené písmeno, jeho stisk položku
+vybere; `&&` je znak `&`). **[implementováno]** **Posouvaná oblast**
 (`scroll`) je vlastní vrstva: kolečko změní jen vlastnost vrstvy
 `scroll` a obsah posune kompozitor, aplikace nic nepřekresluje.
 
@@ -1501,14 +1506,16 @@ na hranici znaku.
 
 | Ovládání | Co dělá |
 |---|---|
-| klik, Shift+klik, tah | kurzor, rozšíření výběru, výběr tahem |
+| klik, Shift+klik, tah | kurzor, rozšíření výběru, výběr tahem (za okrajem pole se pole samo posouvá) |
 | dvojklik, trojklik | slovo, řádek (heslo: dvojklik vybere vše) |
-| šipky, Ctrl+šipky, Shift | po grafémech, po slovech, s výběrem |
+| šipky, Ctrl+šipky, Alt+šipky, Shift | po grafémech, po slovech (Ctrl jako ve Windows, Alt jako v macOS), s výběrem |
 | Home, End, Ctrl+Home, Ctrl+End | začátek a konec řádku a textu |
 | nahoru, dolů, PgUp, PgDn | jen `text_area`: viditelné řádky, pamatuje si polohu x |
-| Backspace, Delete, Ctrl+ | znak (i s kombinačními znaky), slovo |
-| Ctrl+A, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y | vybrat vše, zpět, znovu (psaní slova je jeden krok) |
+| Backspace, Delete, Ctrl+ nebo Alt+ | znak (i s kombinačními znaky), slovo |
+| Ctrl+A, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y | vybrat vše, zpět, znovu (psaní bez pohybu kurzoru je jeden krok) |
 | Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Insert, Shift+Delete, Shift+Insert | schránka |
+| Insert | přepis (psaný znak nahradí znak za kurzorem, kurzor je podtržení) |
+| pravé tlačítko, Shift+F10, klávesa Menu | nabídka Zpět, Znovu, Vyjmout, Kopírovat, Vložit, Smazat, Vybrat vše; nedostupná položka řekne proč |
 | Enter | odeslat (`on_submit`); v `text_area` nový řádek, Ctrl+Enter odeslat |
 | kolečko | v `text_area` posune obsah pole, ne okno |
 
@@ -1520,8 +1527,39 @@ na hranici znaku.
 - **Zalamování** v `text_area` podle slov na šířku pole; slovo delší než
   řádek se zalomí po grafémech. Jednořádkové pole posouvá text tak, aby
   byl kurzor vidět; vložené konce řádků nahradí mezerou.
-- **Heslo:** kopírovat ani vyjmout nejde (ani Ctrl+Insert), Ctrl+šipky
-  skáčou na začátek a konec (slova by prozradila mezery).
+- **Heslo:** kopírovat ani vyjmout nejde (ani Ctrl+Insert ani z nabídky),
+  Ctrl+šipky skáčou na začátek a konec (slova by prozradila mezery). Oko
+  vpravo heslo zobrazí (jen kreslení, do schránky ani do stromu
+  přístupnosti nejde). S fokusem a zapnutým Caps Lock je pod polem
+  varování.
+- **Volby** `.read_only()` (vybrat a kopírovat jde, měnit ne, plocha
+  `surface_2`), `.max_len(n)` (nejvýš n grafémů, vložení se zkrátí).
+- **Číslo** `number_input(text).range(0.0, 100.0).num_step(5.0).unit("%")`:
+  jen číslice (desetinná čárka podle kroku, minus jen se zápornou mezí),
+  šipky krok na mřížce kroku, PgUp a PgDn 10 kroků, Home a End meze,
+  krokovací šipky v poli mimo pořadí Tab, zarovnání vpravo.
+- **Hledání** `search_input(text).on_search(Msg::Hledej)`: lupa vlevo,
+  křížek jen s textem, Esc smaže (druhé Esc dostane aplikace), šipka dolů
+  na další prvek (výsledky); `on_search` přijde až `motion.search_delay`
+  (150 ms) po posledním psaní, prázdný text hned.
+- **Kurzor bliká** (`motion.caret_blink`), po psaní a pohybu je celou
+  periodu vidět; po `motion.caret_blink_stop` (10 s) bez činnosti přestane
+  blikat. Klient v OS kreslí kurzor do vlastní malé vrstvy (`Ui::caret`):
+  blikání mění jen její viditelnost, okno se nepřekresluje a kompozitor
+  poškodí jen obdélník kurzoru (transakce, která mění jen viditelnost
+  nebo polohu vrstvy s bufferem bez potomků, nepoškodí celé okno). Prstenec fokusu se kreslí jen
+  po ovládání klávesnicí; kliknuté pole má akcentový okraj a kurzor.
+- **Mrtvé klávesy** (čárka, háček) skládá `inputd` (`libs/keymap`): pole
+  dostane už složený znak jako `Text`. Rozpracovaný znak přijde zprávou
+  kompozitoru `COMPOSE { window, text, cursor_begin, cursor_end, flags }`
+  (op 117, jako `preedit_string` ve Waylandu text-input-v3: kurzor
+  v textu v bajtech UTF-8, příznak segmentu `UNDERLINE`, prázdný text =
+  konec; formát je připravený i pro IME). Pole ho kreslí podtržený za
+  kurzorem, není v hodnotě ani v `on_change`; heslo ho neukáže. Zpráva
+  jde jen oknu s fokusem a jen z místního vstupu, nikdy do logu
+  (soukromí). Starší klient neznámou zprávu zahodí (`decode` vrátí
+  `NOT_SUPPORTED`, test `unknown_server_op_is_not_supported_and_compose_validated`).
+  **[implementováno]**
 - **Vlastní překlad kláves** `text_input(..).key_map(|kód, modifikátory|
   Some('z'))`: pole píše podle jiného rozložení než systém (zkouška
   rozložení vybraného v instalátoru). Znak od systému ignoruje, editační

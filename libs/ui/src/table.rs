@@ -250,33 +250,10 @@ impl<M: Clone> Ui<M> {
         let cur = t.selection.clone();
         let key = self.elems[i].key;
         let anchor = self.tables.get(&key).and_then(|s| s.anchor).and_then(|a| self.resolve(i, a));
-        let sel = if !multi {
-            alloc::vec![id]
-        } else if shift && let Some(a) = anchor {
-            let mut v = self.ids(i, a, k);
-            if ctrl {
-                for x in cur {
-                    if !v.contains(&x) {
-                        v.push(x);
-                    }
-                }
-            }
-            v
-        } else if ctrl {
-            let mut v = cur;
-            match v.iter().position(|&x| x == id) {
-                Some(p) => {
-                    v.remove(p);
-                }
-                None => v.push(id),
-            }
-            v
-        } else {
-            alloc::vec![id]
-        };
+        let sel = crate::selection::pick(&cur, &|a, b| self.ids(i, a, b), anchor, k, id, ctrl, shift, multi);
         let s = self.tables.entry(key).or_default();
         s.cursor = Some((k, id));
-        if !(shift && multi) || s.anchor.is_none() {
+        if crate::selection::moves_anchor(shift, multi, s.anchor.is_some()) {
             s.anchor = Some((k, id));
         }
         self.emit_selection(i, sel, r);

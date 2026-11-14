@@ -47,20 +47,26 @@ pub(crate) enum PAct<M> {
     Action(String, Vec<guiproto::action::Arg>),
     /// Volba `k` rozbalovaciho vyberu.
     Pick(usize),
+    /// Prikaz textoveho pole (`Ui::field_command`, nabidka pole).
+    Field(char),
+    /// Podnabidka (`submenu.rs`).
+    Sub(Vec<PItem<M>>),
 }
 
 #[derive(Clone)]
 pub(crate) struct PItem<M> {
-    label: String,
-    shortcut: String,
-    disabled: String,
-    checked: Option<bool>,
-    separator: bool,
-    act: Option<PAct<M>>,
+    pub(crate) label: String,
+    pub(crate) shortcut: String,
+    pub(crate) disabled: String,
+    pub(crate) checked: Option<bool>,
+    pub(crate) separator: bool,
+    pub(crate) act: Option<PAct<M>>,
+    /// Mnemonika: pismeno (male) a bajt v `label`, kde se podtrhne.
+    pub(crate) mnemonic: Option<(char, usize)>,
 }
 
 impl<M> PItem<M> {
-    fn usable(&self) -> bool {
+    pub(crate) fn usable(&self) -> bool {
         !self.separator && self.disabled.is_empty() && self.act.is_some()
     }
 }
@@ -68,18 +74,18 @@ impl<M> PItem<M> {
 /// Otevrena nabidka.
 #[derive(Clone)]
 pub(crate) struct Popup<M> {
-    owner: Key,
-    select: bool,
-    items: Vec<PItem<M>>,
+    pub(crate) owner: Key,
+    pub(crate) select: bool,
+    pub(crate) items: Vec<PItem<M>>,
     /// Obdelnik v souradnicich okna.
-    rect: Rect,
-    hi: Option<usize>,
-    scroll: i32,
+    pub(crate) rect: Rect,
+    pub(crate) hi: Option<usize>,
+    pub(crate) scroll: i32,
     /// Stisk zacal uvnitr nabidky (pusteni nad polozkou ji vybere).
-    press_inside: bool,
+    pub(crate) press_inside: bool,
     /// Ukazatel se od otevreni pohnul (stisk-tah-pusteni u vyberu).
-    moved: bool,
-    opened_at: (i32, i32),
+    pub(crate) moved: bool,
+    pub(crate) opened_at: (i32, i32),
 }
 
 impl<M> Popup<M> {
@@ -93,7 +99,7 @@ pub(crate) fn virt_id(el: u32, kind: u64, n: u64) -> u32 {
 }
 
 impl<M: Clone> Ui<M> {
-    fn row_h(&self, it: &PItem<M>) -> u32 {
+    pub(crate) fn row_h(&self, it: &PItem<M>) -> u32 {
         if it.separator { self.look.theme.space[2] + 1 } else { self.look.control_h() }
     }
 
@@ -112,7 +118,7 @@ impl<M: Clone> Ui<M> {
 
     /// Otevre nabidku s polozkami `items` u bodu / pod prvkem `anchor`
     /// (souradnice okna), sirka nejmene `min_w`.
-    fn open_popup(&mut self, owner: Key, select: bool, items: Vec<PItem<M>>, anchor: Rect, min_w: u32, hi: Option<usize>) {
+    pub(crate) fn open_popup(&mut self, owner: Key, select: bool, items: Vec<PItem<M>>, anchor: Rect, min_w: u32, hi: Option<usize>) {
         let th = &self.look.theme;
         let pad = th.space[2];
         let body = self.look.body();
@@ -152,7 +158,7 @@ impl<M: Clone> Ui<M> {
     /// Obdelnik vrstvy popoveru (souradnice okna): otevrena nabidka
     /// a zobrazena bublina; `None` = nic.
     pub fn overlay_rect(&self) -> Option<Rect> {
-        let p = self.popup.as_ref().map(|p| p.rect);
+        let p = self.popup.iter().chain(self.popup_stack.iter()).map(|p| p.rect).reduce(|a, b| a.union(&b));
         let t = self.tip_text().map(|t| self.tip_rect(&t));
         let s = self.suggest_rect();
         [p, t, s].into_iter().flatten().reduce(|a, b| a.union(&b))
@@ -175,7 +181,7 @@ impl<M: Clone> Ui<M> {
         (self.popup, self.pointer) = saved;
     }
 
-    fn popup_reveal(&mut self, k: usize) {
+    pub(crate) fn popup_reveal(&mut self, k: usize) {
         let Some(p) = &self.popup else { return };
         let pad = self.look.theme.space[2] as i32;
         let top: i32 = p.items[..k].iter().map(|i| self.row_h(i) as i32).sum();
@@ -194,7 +200,7 @@ impl<M: Clone> Ui<M> {
     }
 
     /// Polozka nabidky pod bodem okna.
-    fn popup_item_at(&self, x: i32, y: i32) -> Option<usize> {
+    pub(crate) fn popup_item_at(&self, x: i32, y: i32) -> Option<usize> {
         let p = self.popup.as_ref()?;
         if !p.rect.contains(x, y) {
             return None;
@@ -212,19 +218,24 @@ impl<M: Clone> Ui<M> {
     }
 
     /// Polozky z `MenuEntry` (kontextova nabidka).
-    fn items_from(entries: &[MenuEntry<M>]) -> Vec<PItem<M>> {
+    pub(crate) fn items_from(entries: &[MenuEntry<M>]) -> Vec<PItem<M>> {
         entries
             .iter()
-            .map(|e| PItem {
-                label: e.label.clone(),
-                shortcut: e.shortcut.clone(),
-                disabled: e.disabled.clone(),
-                checked: e.checked,
-                separator: e.separator,
-                act: e.act.clone().map(|a| match a {
-                    MenuAct::Msg(m) => PAct::Msg(m),
-                    MenuAct::Action(id, args) => PAct::Action(id, args),
-                }),
+            .map(|e| {
+                let (label, mnemonic) = crate::submenu::mnemonic(&e.label);
+                PItem {
+                    label,
+                    shortcut: e.shortcut.clone(),
+                    disabled: e.disabled.clone(),
+                    checked: e.checked,
+                    separator: e.separator,
+                    act: e.act.as_ref().map(|a| match a {
+                        MenuAct::Msg(m) => PAct::Msg(m.clone()),
+                        MenuAct::Action(id, args) => PAct::Action(id.clone(), args.clone()),
+                        MenuAct::Sub(items) => PAct::Sub(Self::items_from(items)),
+                    }),
+                    mnemonic,
+                }
             })
             .collect()
     }
@@ -235,7 +246,7 @@ impl<M: Clone> Ui<M> {
         let items = options
             .iter()
             .enumerate()
-            .map(|(k, o)| PItem { label: o.clone(), shortcut: String::new(), disabled: String::new(), checked: Some(k == *selected), separator: false, act: Some(PAct::Pick(k)) })
+            .map(|(k, o)| PItem { label: o.clone(), shortcut: String::new(), disabled: String::new(), checked: Some(k == *selected), separator: false, act: Some(PAct::Pick(k)), mnemonic: None })
             .collect();
         let sel = (*selected < options.len()).then_some(*selected);
         let r = self.window_rect(i);
@@ -264,20 +275,35 @@ impl<M: Clone> Ui<M> {
         false
     }
 
-    fn close_popup(&mut self, r: &mut Response<M>) {
+    pub(crate) fn close_popup(&mut self, r: &mut Response<M>) {
+        self.popup_stack.clear();
         if self.popup.take().is_some() {
             r.redraw = true;
         }
     }
 
     /// Vybere polozku `k` otevrene nabidky a zavre ji.
-    fn choose(&mut self, k: usize, r: &mut Response<M>) {
+    pub(crate) fn choose(&mut self, k: usize, r: &mut Response<M>) {
+        // Podnabidka se otevre, nabidka zustane.
+        if self.popup.as_ref().is_some_and(|p| matches!(p.items.get(k).filter(|i| i.usable()).and_then(|i| i.act.as_ref()), Some(PAct::Sub(_)))) {
+            self.open_submenu(k);
+            r.redraw = true;
+            return;
+        }
         let Some(p) = self.popup.take() else { return };
+        // Vlastnik vybrane polozky je koren (podnabidky maji stejneho).
+        self.popup_stack.clear();
         r.redraw = true;
         let Some(it) = p.items.get(k).filter(|i| i.usable()) else { return };
         match it.act.clone() {
             Some(PAct::Msg(m)) => r.msgs.push(m),
             Some(PAct::Action(id, args)) => r.actions.push((id, args)),
+            Some(PAct::Field(c)) => {
+                if let Some(i) = self.index_of(p.owner) {
+                    self.field_command(i, c, false, r);
+                }
+            }
+            Some(PAct::Sub(_)) => {}
             Some(PAct::Pick(n)) => {
                 if let Some(i) = self.index_of(p.owner)
                     && let ElemKind::Select { selected, on_select: Some(f), .. } = &self.elems[i].kind
@@ -291,7 +317,7 @@ impl<M: Clone> Ui<M> {
     }
 
     /// Dalsi pouzitelna polozka od `from` smerem `dir`.
-    fn step_item(&self, from: Option<usize>, dir: i32) -> Option<usize> {
+    pub(crate) fn step_item(&self, from: Option<usize>, dir: i32) -> Option<usize> {
         let p = self.popup.as_ref()?;
         let n = p.items.len() as i32;
         let mut k = match from {
@@ -324,6 +350,10 @@ impl<M: Clone> Ui<M> {
         match *ev {
             InputEvent::PointerMove { x, y } => {
                 self.pointer = (x, y);
+                // Ukazatel nad rodicovskou nabidkou: podnabidky pod ni zavrit.
+                if self.submenu_pointer(x, y) {
+                    r.redraw = true;
+                }
                 let hi = self.popup_item_at(x, y);
                 let p = self.popup.as_mut().unwrap();
                 if (x - p.opened_at.0).abs().max((y - p.opened_at.1).abs()) > 4 {
@@ -332,9 +362,16 @@ impl<M: Clone> Ui<M> {
                 if hi.is_some() && hi != p.hi {
                     p.hi = hi;
                     r.redraw = true;
+                    // Najeti na podnabidku ji otevre.
+                    if let Some(k) = hi
+                        && matches!(self.popup.as_ref().unwrap().items[k].act, Some(PAct::Sub(_)))
+                    {
+                        self.open_submenu(k);
+                    }
                 }
             }
             InputEvent::Button { pressed: true, x, y, .. } => {
+                self.submenu_pointer(x, y);
                 if self.popup.as_ref().unwrap().rect.contains(x, y) {
                     self.popup.as_mut().unwrap().press_inside = true;
                 } else {
@@ -368,7 +405,19 @@ impl<M: Clone> Ui<M> {
             }
             InputEvent::Key { code, action, ch } if action != 0 => {
                 let hi = self.popup.as_ref().unwrap().hi;
+                let sub = hi.is_some_and(|k| matches!(self.popup.as_ref().unwrap().items[k].act, Some(PAct::Sub(_))));
                 let to = match code {
+                    // Podnabidka: vpravo otevre, vlevo (a Esc) zavre.
+                    KEY_RIGHT if sub => {
+                        self.open_submenu(hi.unwrap());
+                        r.redraw = true;
+                        return Some(r);
+                    }
+                    KEY_LEFT | KEY_ESC if !self.popup_stack.is_empty() => {
+                        self.close_submenu();
+                        r.redraw = true;
+                        return Some(r);
+                    }
                     KEY_DOWN => self.step_item(hi, 1),
                     KEY_UP => self.step_item(hi, -1),
                     KEY_HOME => self.step_item(None, 1),
@@ -379,11 +428,35 @@ impl<M: Clone> Ui<M> {
                         }
                         return Some(r);
                     }
+                    // Tab ve vyberu zvoli aktivni polozku a jde dal (jako
+                    // ostatni systemy); v nabidce jen zavre.
+                    KEY_TAB if self.popup.as_ref().unwrap().select => {
+                        if let Some(k) = hi {
+                            self.choose(k, &mut r);
+                        }
+                        self.close_popup(&mut r);
+                        self.focus_step(self.mods & mods::SHIFT != 0, &mut r);
+                        return Some(r);
+                    }
                     KEY_ESC | KEY_TAB => {
                         self.close_popup(&mut r);
                         return Some(r);
                     }
                     _ => {
+                        // Mnemonika: jedina polozka s pismenem se rovnou vybere.
+                        if let Some(c) = ch.filter(|c| !c.is_control())
+                            && let Some(k) = self.mnemonic_pick(c, hi)
+                        {
+                            match k {
+                                Ok(k) => self.choose(k, &mut r),
+                                Err(k) => {
+                                    self.popup.as_mut().unwrap().hi = Some(k);
+                                    self.popup_reveal(k);
+                                }
+                            }
+                            r.redraw = true;
+                            return Some(r);
+                        }
                         // Psani: prvni pouzitelna polozka zacinajici pismenem.
                         let c = ch.filter(|c| !c.is_control()).map(|c| c.to_lowercase().collect::<String>());
                         let p = self.popup.as_ref().unwrap();
@@ -434,6 +507,13 @@ impl<M: Clone> Ui<M> {
                 if matches!(self.elems[i].kind, ElemKind::Table(_)) {
                     return None;
                 }
+                if self.field_kind(i).is_some() && !self.elems[i].disabled {
+                    self.pointer = (x, y);
+                    self.kbd_focus = false;
+                    self.open_field_menu(i, Some((x, y)));
+                    r.redraw = true;
+                    return Some(r);
+                }
                 self.pointer = (x, y);
                 if self.elems[i].focusable() {
                     self.focus = Some(i);
@@ -443,10 +523,15 @@ impl<M: Clone> Ui<M> {
                     r
                 })
             }
-            InputEvent::Key { code, action, .. } if action != 0 => {
+            InputEvent::Key { code, action, ch } if action != 0 => {
                 let i = self.focus?;
                 let shift = self.mods & mods::SHIFT != 0;
                 if code == KEY_MENU || (code == KEY_F10 && shift) {
+                    if self.field_kind(i).is_some() && !self.elems[i].disabled {
+                        self.open_field_menu(i, None);
+                        r.redraw = true;
+                        return Some(r);
+                    }
                     return self.open_context(i, None).then(|| {
                         r.redraw = true;
                         r
@@ -457,6 +542,9 @@ impl<M: Clone> Ui<M> {
                 match code {
                     KEY_ENTER | KEY_KPENTER | KEY_SPACE | KEY_F4 => {}
                     KEY_DOWN if alt => {}
+                    _ if self.mods & (mods::CTRL | mods::ALT) == 0 && (matches!(code, KEY_HOME | KEY_END) || ch.is_some_and(|c| !c.is_control() && c != ' ')) => {
+                        return self.select_key(i, code, ch, &mut r).then_some(r);
+                    }
                     KEY_UP | KEY_DOWN => {
                         let n = options.len();
                         let k = if code == KEY_UP { selected.saturating_sub(1) } else { (selected + 1).min(n.saturating_sub(1)) };
@@ -512,7 +600,14 @@ impl<M: Clone> Ui<M> {
     }
 
     fn draw_popup(&mut self, c: &mut Canvas<'_>) {
-        let Some(p) = self.popup.clone() else { return };
+        // Rodicovske nabidky pod podnabidkou.
+        let levels: Vec<Popup<M>> = self.popup_stack.iter().cloned().chain(self.popup.clone()).collect();
+        for p in levels {
+            self.draw_one_popup(c, p);
+        }
+    }
+
+    fn draw_one_popup(&mut self, c: &mut Canvas<'_>, p: Popup<M>) {
         let th = self.look.theme.clone();
         let col = &th.color;
         let edge = if th.mode == theme::Mode::Contrast { 2 } else { 1 };
@@ -549,6 +644,18 @@ impl<M: Clone> Ui<M> {
             if !it.shortcut.is_empty() {
                 let w = f.width(&it.shortcut, body.size) as i32;
                 f.draw(c, row.right() as i32 - gap - w, b, &it.shortcut, body.size, col.ink_muted);
+            }
+            // Mnemonika podtrzena, podnabidka sipkou vpravo.
+            if let Some((_, at)) = it.mnemonic
+                && at < it.label.len()
+            {
+                let x0 = x + f.width(&it.label[..at], body.size) as i32;
+                let end = it.label[at..].chars().next().map_or(at, |ch| at + ch.len_utf8());
+                let w = f.width(&it.label[at..end], body.size);
+                c.fill(Rect::new(x0, b + 2, w, 1), ink);
+            }
+            if matches!(it.act, Some(PAct::Sub(_))) {
+                self.icons.draw(c, "right", row.right() as i32 - gap - is as i32, y + (h - is as i32) / 2, is, th.icon_stroke, col.ink_muted);
             }
             y += h;
         }
@@ -610,26 +717,29 @@ impl<M: Clone> Ui<M> {
         self.popup.is_some()
     }
 
-    /// Kdy klient ma probudit `Ui::timer` (bublina), `None` = nic neceka.
+    /// Kdy klient ma probudit `Ui::timer` (bublina, kurzor a hledani
+    /// poli, `caret.rs`), `None` = nic neceka.
     pub fn next_deadline(&self) -> Option<u64> {
-        match (self.tip, self.tip_shown) {
+        let tip = match (self.tip, self.tip_shown) {
             (Some((_, t)), None) => Some(t + TIP_DELAY),
             _ => None,
-        }
+        };
+        [tip, self.caret_deadline()].into_iter().flatten().min()
     }
 
     /// Cas `now` (ns, stejne hodiny jako cas vstupu): ukaze bublinu, kdyz
     /// uplynula prodleva. Vraci, zda prekreslit.
     pub fn timer(&mut self, now: u64) -> bool {
         self.now = now;
+        let mut redraw = self.caret_timer(now);
         if let (Some((k, t)), None) = (self.tip, self.tip_shown)
             && now >= t + TIP_DELAY
             && self.popup.is_none()
         {
             self.tip_shown = Some(k);
-            return true;
+            redraw = true;
         }
-        false
+        redraw
     }
 
     /// Uzly pristupnosti otevrene nabidky a bubliny.

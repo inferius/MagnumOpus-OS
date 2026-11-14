@@ -210,13 +210,17 @@ pub struct TextEdit {
     /// Pozadovana vodorovna poloha pro pohyb nahoru a dolu (px), at kurzor
     /// pri pruchodu kratkym radkem neskace doleva.
     pub goal_x: Option<i32>,
+    /// Rezim prepisu (klavesa Insert): psany znak nahradi znak za kurzorem.
+    pub overwrite: bool,
+    /// Nejvic grafemu (`Node::max_len`).
+    pub max: Option<usize>,
 }
 
 impl TextEdit {
     pub fn new(text: &str, multiline: bool) -> Self {
         let text = if multiline { String::from(text) } else { single_line(text) };
         let n = text.len();
-        Self { text, cursor: n, anchor: n, multiline, undo: Vec::new(), redo: Vec::new(), last: EditKind::Other, goal_x: None }
+        Self { text, cursor: n, anchor: n, multiline, undo: Vec::new(), redo: Vec::new(), last: EditKind::Other, goal_x: None, overwrite: false, max: None }
     }
 
     pub fn text(&self) -> &str {
@@ -338,12 +342,27 @@ impl TextEdit {
     /// konce radku nahradi mezerou (vlozeni viceradkoveho textu).
     pub fn insert(&mut self, t: &str) {
         let t = if self.multiline { String::from(t) } else { single_line(t) };
-        if t.is_empty() && self.selection().is_none() {
+        let (a, mut b) = self.selection().unwrap_or((self.cursor, self.cursor));
+        let single = t.chars().count() == 1;
+        // Prepis: znak nahradi grafem za kurzorem (ne konec radku).
+        if self.overwrite && single && a == b && b < self.text.len() && !self.text[b..].starts_with('\n') {
+            b = next_boundary(&self.text, b);
+        }
+        // Nejvetsi delka: vlozit jen tolik grafemu, kolik se vejde.
+        let t = match self.max {
+            Some(m) => {
+                let keep = grapheme_count(&self.text) - grapheme_count(&self.text[a..b]);
+                let room = m.saturating_sub(keep);
+                let bs = boundaries(&t);
+                if bs.len().saturating_sub(1) > room { String::from(&t[..bs[room]]) } else { t }
+            }
+            None => t,
+        };
+        if t.is_empty() && a == b {
             return;
         }
-        let typing = t.chars().count() == 1 && !t.starts_with(char::is_whitespace);
+        let typing = single && t.chars().count() == 1 && !t.starts_with(char::is_whitespace);
         self.save(if typing && self.selection().is_none() { EditKind::Type } else { EditKind::Other });
-        let (a, b) = self.selection().unwrap_or((self.cursor, self.cursor));
         self.text.replace_range(a..b, &t);
         self.cursor = a + t.len();
         self.anchor = self.cursor;
