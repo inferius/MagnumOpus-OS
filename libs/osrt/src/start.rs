@@ -94,6 +94,7 @@ unsafe fn init(mut startup: Startup) {
     // TLS hlavniho vlakna jako prvni: std ho pouziva hned v `lang_start`.
     crate::tls::init_main_thread();
     let params = startup.params.take().and_then(|vmo| libos::params::Params::read(&vmo).ok());
+    let flags = params.as_ref().map_or(0, |p| p.flags);
     let take = |s: &mut Startup, tag| s.take_tagged(tag).map(Channel::from_handle);
     let stdin = take(&mut startup, abi::params::tag::STDIN);
     let stdout = take(&mut startup, abi::params::tag::STDOUT);
@@ -103,7 +104,7 @@ unsafe fn init(mut startup: Startup) {
     // SAFETY: predano volajicim.
     unsafe {
         crate::env::init(params.unwrap_or_default());
-        crate::stdio::init(stdin, stdout, stderr);
+        crate::stdio::init(stdin, stdout, stderr, flags);
         crate::fs::init(fs);
         crate::net::init(net);
         BOOTSTRAP.set(startup.bootstrap);

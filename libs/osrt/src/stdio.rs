@@ -18,6 +18,8 @@ use crate::start::Init;
 static STDIN: Init<Channel> = Init::new();
 static STDOUT: Init<Channel> = Init::new();
 static STDERR: Init<Channel> = Init::new();
+/// Priznaky `abi::params::flags` (zahodit stdout/stderr).
+static NULL: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 /// Zbytek posledni zpravy stdin, ktery se neveselo do bufferu ctenare.
 static STDIN_REST: Mutex<(Vec<u8>, usize)> = Mutex::new((Vec::new(), 0));
@@ -27,7 +29,8 @@ static LOG_LINE: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 /// # Safety
 ///
 /// Jen pri startu (viz `start::Init`).
-pub(crate) unsafe fn init(stdin: Option<Channel>, stdout: Option<Channel>, stderr: Option<Channel>) {
+pub(crate) unsafe fn init(stdin: Option<Channel>, stdout: Option<Channel>, stderr: Option<Channel>, flags: u32) {
+    NULL.store(flags & abi::params::flags::ALL, core::sync::atomic::Ordering::Relaxed);
     // SAFETY: predano volajicim.
     unsafe {
         if let Some(c) = stdin {
@@ -56,6 +59,13 @@ pub fn write(stream: Stream, buf: &[u8]) -> Result<usize> {
         Stream::Out => STDOUT.get(),
         Stream::Err => STDERR.get(),
     };
+    let null = match stream {
+        Stream::Out => abi::params::flags::STDOUT_NULL,
+        Stream::Err => abi::params::flags::STDERR_NULL,
+    };
+    if NULL.load(core::sync::atomic::Ordering::Relaxed) & null != 0 {
+        return Ok(buf.len());
+    }
     let Some(channel) = channel else {
         log_write(buf);
         return Ok(buf.len());
