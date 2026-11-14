@@ -1959,6 +1959,7 @@ dependencies = [
 name = "mosdl"
 version = "0.1.0"
 dependencies = [
+ "clipproto",
  "gfx",
  "guiproto",
  "inputproto",

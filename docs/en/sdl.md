@@ -14,7 +14,9 @@ without changes to their code.
 | build | SDL 3.4.20 (pinned version), CMake + Ninja, static `libSDL3.a` in the port prefix | **[verified in QEMU]** x86_64 and aarch64 (suite `sdl`) |
 | `libs/mosdl` | the C interface `mosdl_*` over the window from `libs/ui`, part of `libc.a` | **[verified in QEMU]** x86_64 and aarch64; event translation by host tests |
 | `magnumopus` video driver | one window, software framebuffer, keyboard (evdev codes), text, mouse, wheel, focus, resize, waiting for events with wake-up | **[verified in QEMU]** `testsprite` (pixels), `checkkeys` (injected input) |
-| audio, clipboard, cursor, relative mouse, HiDPI, fullscreen, zero-copy YUV | stage 6-2 | **[designed]** |
+| clipboard, cursor, relative mouse, fullscreen, display scale | stage 6-2: text in the clipboard, system shapes and an own 64 × 64 cursor, compositor pointer lock, fullscreen on request, scale as `SDL_GetDisplayContentScale` ([Cursor and pointer lock](gui.md#cursor-and-pointer-lock)) | **[verified in QEMU]** x86_64 and aarch64 (suite `sdl`, physical input through QMP) |
+| audio (playback, capture with permission) | stage 6-2 | **[designed]** |
+| zero-copy YUV (`BUFFER_CREATE_DESC`) | postponed to the FFmpeg step (a patch of SDL internals, estimated ~300 lines) | **[designed]** |
 | SDL example games (`snake`, `woodeneye-008`), a test with a screenshot | stage 6-3 | **[designed]** |
 | gamepads | a separate step with its own design (decision Q6 B) | **[designed]** |
 
@@ -93,8 +95,14 @@ The event time (ns since system start) is converted to SDL time.
   (`BUFFER_CREATE_DESC`) is stage 6-2.
 - **Software renderer.** Vulkan for SDL (render and the GPU API) comes with
   GPU drivers for applications ([render](render.md)).
-- **No audio and clipboard** (SDL audio driver `dummy`), cursor, relative
-  mouse, HiDPI or fullscreen: stage 6-2.
+- **No audio** (SDL audio driver `dummy`): stage 6-2.
+- **HiDPI only as a scale**: window buffers are 1:1, the compositor has no
+  scale other than 100 % and no buffer scaling yet; SDL gets the scale as
+  `SDL_GetDisplayContentScale` (pixel density 1).
+- **Clipboard text only** (`text/plain;charset=utf-8`); copy, paste,
+  pointer lock and entering fullscreen only in response to a physical
+  press (compositor rule). There is no `SDL_WarpMouse` (relative mode does
+  not need it with the lock).
 - **No gamepads** (decision Q6 B), file dialogs (Q7 A: SDL returns
   unsupported), tray (`SDL_TRAY`) or `SDL_OpenURL` (will go through the
   "open path" service).
@@ -125,6 +133,8 @@ only so far) and `inttypes.h`, empty `libm.a`, `libpthread.a`, `librt.a`.
 | `cargo test -p mosdl` | host | event translation, frame copy (cropping, padding, hostile sizes), match with `mosdl.h` |
 | `sdl: testsprite ...` | QEMU, suite `sdl` | an SDL program window in the compositor; a deterministic frame (`--iterations 0`): red corner point, green top, blue left and red bottom line on screen |
 | `sdl: checkkeys ...` | QEMU, suite `sdl` | injected input through inputd and the compositor: key A = scancode 4, text "a", right mouse button, Esc twice ends the program with code 0 |
+| `sdl: kurzor, zamek ukazatele, schranka a cela obrazovka (QMP)` | QEMU, suite `sdl` | the `testmagnumopus` program (our SDL test): display and scale as the compositor, crosshair cursor on screen; physical click = pointer lock, movement = relative motion, Super = lock cancelled, second click = copy, Ctrl+V = paste, F = fullscreen |
+| `sdl: mereni cesty videa 1080p` | QEMU, suite `sdl` | `testmagnumopus bench`: I420 1920 × 1080 -> conversion in SDL -> window (see Performance) |
 
 ```text
 cargo xtask test --only sdl

@@ -31,7 +31,18 @@ use crate::{check, check_eq};
 pub const TESTS: &[Test] = &[
     ("sdl: testsprite v okne kompozitoru (softwarovy renderer, pixely)", testsprite),
     ("sdl: checkkeys - klavesnice, text a mys pres kompozitor", checkkeys),
+    ("sdl: kurzor, zamek ukazatele, schranka a cela obrazovka (QMP)", pointer_clip_fullscreen),
+    ("sdl: mereni cesty videa 1080p (YUV v SDL, kopie do okna)", video_bench),
 ];
+
+/// Znacky pro fyzicky vstup z QEMU (musi sedet s `xtask/src/qmp.rs`, `sdl`).
+const QEMU_CLICK: &str = "init: test sdl: klik mysi na ";
+const QEMU_MOVE: &str = "init: test sdl: ceka na posun mysi";
+const QEMU_SUPER: &str = "init: test sdl: ceka na Super";
+const QEMU_CLICK2: &str = "init: test sdl: druhy klik na ";
+const QEMU_PASTE: &str = "init: test sdl: ceka na Ctrl+V";
+const QEMU_FULL: &str = "init: test sdl: ceka na F";
+const QEMU_ESC: &str = "init: test sdl: ceka na Esc";
 
 const DIR: &str = "/std-test/sdl";
 
@@ -168,6 +179,100 @@ fn checkkeys(startup: &Startup) -> TestResult {
         check!(log.contains("scancode 4 = A"), format!("klavesa A (scancode 4) v SDL; vystup: {}", log.trim()));
         check!(log.contains("Text") && log.contains("\"a\""), "text \"a\" v SDL");
         check!(log.contains("text input for window"), "klik mysi v okne SDL");
+        Ok(())
+    })
+}
+
+/// Kurzor aplikace (umely pohyb staci), pak fyzicky vstup z QEMU: klik =
+/// zamek ukazatele, posun = relativni pohyb, Super = zruseni zamku, druhy
+/// klik = kopie do schranky, Ctrl+V = vlozeni, F = cela obrazovka, Esc =
+/// konec. Bez QMP (rucni beh) test skonci na prvni znacce chybou casu.
+fn pointer_clip_fullscreen(startup: &Startup) -> TestResult {
+    ensure_gui(startup)?;
+    let input = devices().and_then(|d| d.input.as_ref()).ok_or("sluzba vstupu nebezi")?;
+    gt::with(|s| {
+        let mut app = launch(startup, s, "testmagnumopus", &[])?;
+        let r = (|| -> TestResult {
+            let t = Duration::from_secs(20);
+            let ready = app.wait_line("ready", t)?;
+            let w = wait_window(&s.inspect, "org.magnumopus.sdltest")?;
+            // Skala a rezim displeje podle kompozitoru.
+            let (sw, sh) = s.gui.size;
+            check!(ready == format!("ready {sw} {sh} 1.00"), format!("displej SDL: {ready}, kompozitor {sw}x{sh}"));
+            // Kurzor kriz nad oknem: umely pohyb ukazatele na stred obsahu.
+            let (cx, cy) = (w.rect.x + w.rect.w as i32 / 2, w.rect.y + w.rect.h as i32 / 2);
+            let inj = input.inject().map_err(|e| fail("inject", e))?;
+            inj.write(&device::encode_hello(device::caps::POINTER, "test sdl"), Vec::new()).map_err(|e| fail("predstaveni", e))?;
+            for f in [vec![RawEvent::rel(REL_X, -(sw as i32) * 2), RawEvent::rel(REL_Y, -(sh as i32) * 2), RawEvent::syn()], vec![RawEvent::rel(REL_X, cx), RawEvent::rel(REL_Y, cy), RawEvent::syn()]] {
+                inj.write(&device::encode_events(&f), Vec::new()).map_err(|e| fail("umely vstup", e))?;
+            }
+            drop(inj);
+            let end = time::deadline_after(t);
+            loop {
+                settle(&s.inspect)?;
+                // Kriz: cerny stred a cerna cara nad nim, bily obrys vedle.
+                let (c, up, side) = (pixel(&s.inspect, cx, cy)?, pixel(&s.inspect, cx, cy - 4)?, pixel(&s.inspect, cx + 1, cy - 4)?);
+                if c & 0xFF_FFFF == 0 && up & 0xFF_FFFF == 0 && side & 0xFF_FFFF == 0xFF_FFFF {
+                    break;
+                }
+                if time::now() > end {
+                    return Err(format!("kurzor kriz: stred {c:08x}, cara {up:08x}, obrys {side:08x}"));
+                }
+                time::sleep(Duration::from_millis(100));
+            }
+            // Fyzicky klik do okna: zamek ukazatele.
+            println!("{QEMU_CLICK}{} {}", cx, cy);
+            check_eq!(app.wait_line("lock", t)?, "lock 1", "zamek ukazatele po fyzickem kliku");
+            println!("{QEMU_MOVE}");
+            let rel = app.wait_line("rel", t)?;
+            check!(rel.starts_with("rel ") && rel != "rel 0 0", format!("relativni pohyb: {rel}"));
+            println!("{QEMU_SUPER}");
+            check_eq!(app.wait_line("lock", t)?, "lock 0", "Super zrusi zamek ukazatele");
+            // Druhy klik: kopie; Ctrl+V: vlozeni pres kompozitor.
+            println!("{QEMU_CLICK2}{} {}", cx, cy);
+            check_eq!(app.wait_line("copy", t)?, "copy", "kopie do schranky po fyzickem kliku");
+            println!("{QEMU_PASTE}");
+            check_eq!(app.wait_line("paste", t)?, "paste magnumopus-sdl", "vlozeni ze schranky");
+            println!("{QEMU_FULL}");
+            check_eq!(app.wait_line("fullscreen", t)?, "fullscreen 1", "cela obrazovka po klavese F");
+            let wf = wait_window(&s.inspect, "org.magnumopus.sdltest")?;
+            check!(wf.rect.w == sw && wf.rect.h == sh, format!("okno na cele obrazovce: {:?}", wf.rect));
+            println!("{QEMU_ESC}");
+            Ok(())
+        })();
+        match r {
+            Ok(()) => {
+                let run = app.finish(Duration::from_secs(20))?;
+                check_eq!(run.code, 0, "testmagnumopus skoncil po Esc");
+                Ok(())
+            }
+            Err(e) => {
+                app.kill();
+                Err(e)
+            }
+        }
+    })
+}
+
+/// Mereni dnesni cesty videa (docs/cs/sdl.md, Vykon): I420 1920x1080 ->
+/// prevod v SDL -> okno. Jen vypis do logu (cislo patri do docs s revizi
+/// sestaveni a podminkami behu); test hlida, ze mereni dobehne.
+fn video_bench(startup: &Startup) -> TestResult {
+    ensure_gui(startup)?;
+    gt::with(|s| {
+        let mut app = launch(startup, s, "testmagnumopus", &["bench"])?;
+        let line = match app.wait_line("bench", Duration::from_secs(120)) {
+            Ok(l) => l,
+            Err(e) => {
+                app.kill();
+                return Err(e);
+            }
+        };
+        let ms: f64 = line.trim_start_matches("bench ").parse().map_err(|_| format!("vystup mereni: {line}"))?;
+        println!("init: test sdl: video 1080p I420 -> okno: {ms:.2} ms na snimek");
+        let run = app.finish(Duration::from_secs(20))?;
+        check_eq!(run.code, 0, "mereni skoncilo");
+        check!(ms > 0.0, "mereni dalo cas");
         Ok(())
     })
 }

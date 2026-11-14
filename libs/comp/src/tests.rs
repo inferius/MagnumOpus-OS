@@ -21,6 +21,7 @@ mod bench;
 mod caret;
 mod compose;
 mod clipboard;
+mod pointer;
 mod cull;
 mod gpu;
 mod greeter;

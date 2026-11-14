@@ -18,6 +18,8 @@
 //! vrati `SERVICE_RESTARTED` ([`run`] pak okno nakresli znovu).
 
 mod clip;
+pub use clip::Pasted;
+mod pointer;
 mod size;
 mod restore;
 
@@ -72,6 +74,12 @@ pub enum Event {
     Place(Rect),
     /// Rozpracovany text u kurzoru (mrtva klavesa; `ServerMsg::Compose`).
     Compose { text: String, cursor_begin: u32, cursor_end: u32, flags: u32 },
+    /// Zamek ukazatele zapnut / zrusen (`Window::pointer_lock`, zruseni
+    /// systemem pri ztrate fokusu nebo systemove zkratce).
+    PointerLock(bool),
+    /// Zmenil se stav okna (`guiproto::window::wstate`: maximalizace, cela
+    /// obrazovka); fokus jde zvlast jako vstup `Focus`.
+    State(u32),
 }
 
 /// Kontext okna od kompozitoru (`WINDOW_CONTEXT`).
@@ -200,6 +208,8 @@ pub struct Window {
     popover_shown: bool,
     /// Vrstva kurzoru: nakresleny obdelnik a barva, viditelnost.
     caret: Option<(Rect, u32)>,
+    /// Stav okna z posledniho `CONFIGURE` bez fokusu (`wstate`).
+    pub state: u32,
     caret_shown: bool,
 }
 
@@ -294,6 +304,7 @@ impl Window {
             popover_shown: false,
             caret: None,
             caret_shown: false,
+            state: 0,
         };
         win.send(ClientMsg::LayerCreate { layer: ROOT_LAYER, window: 1, parent: 0, kind: LayerKind::Buffer })?;
         win.pairs.insert(ROOT_LAYER, Pair { bufs: [None, None], front: 1 });
@@ -377,8 +388,14 @@ impl Window {
                 self.send(ClientMsg::Pong { serial })?;
                 None
             }
-            ServerMsg::Configure { w, h, serial, .. } => {
+            ServerMsg::Configure { w, h, serial, state, .. } => {
                 self.ack = Some(serial);
+                // Stav bez fokusu (ten chodi jako vstup).
+                let st = state & !window::wstate::FOCUSED;
+                if st != self.state {
+                    self.state = st;
+                    self.queue.push(Event::State(st));
+                }
                 if (w, h) != (self.w, self.h) {
                     self.w = w;
                     self.h = h;
@@ -414,6 +431,7 @@ impl Window {
                 Some(Event::Context)
             }
             ServerMsg::ActionInvoke { call, action, args, caller, synthetic } => Some(Event::Action { call, id: action, args, caller, synthetic }),
+            ServerMsg::PointerLockState { locked, .. } => Some(Event::PointerLock(locked)),
             _ => None,
         })
     }
@@ -961,6 +979,8 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
             }
         }
         Event::Close => return Ok(false),
+        // Aplikace s rozhranim knihovny zamek ukazatele nezada.
+        Event::PointerLock(_) | Event::State(_) => {}
         Event::A11yAction { node, action, value } => {
             let resp = ui.a11y_action(node, action, &value);
             for m in resp.msgs {

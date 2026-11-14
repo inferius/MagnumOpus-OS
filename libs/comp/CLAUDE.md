@@ -1,6 +1,6 @@
 # libs/comp
 
-Jádro kompozitoru `compd` bez závislosti na jádru OS (`no_std` + `alloc`, testy na hostiteli). Služba `user/compd` jen převádí kanály a objekty paměti na volání `Comp` a rozesílá zprávy z `Comp::take_out`. Obsah: `scene` (klienti, okna, buffery, vrstvy, transakce), `render` (skládání snímku: dekorace, odznak důvěry, lišta, kurzor), `style` (vzhled z tokenů), `input` (rozdělení vstupu, přesun a změna velikosti), `dialog` (systémové dialogy, bezpečná obrazovka), `greeter` (přihlášení a zámek), `frame` (takt, animace, skupiny transakcí), `gpu` (seznam operací pro GPU backend `libs/vkcomp`), `menu`, `flyout`, `clipboard` (schránka, protokol `libs/clipproto`), `sysui` (paleta a spouštěč nad `libs/ui`), `services` (akce aplikací, inspekce), `output` (změna režimu displeje). Popis: `docs/cs/gui.md`, vzhled `docs/cs/vzhled.md`.
+Jádro kompozitoru `compd` bez závislosti na jádru OS (`no_std` + `alloc`, testy na hostiteli). Služba `user/compd` jen převádí kanály a objekty paměti na volání `Comp` a rozesílá zprávy z `Comp::take_out`. Obsah: `scene` (klienti, okna, buffery, vrstvy, transakce), `render` (skládání snímku: dekorace, odznak důvěry, lišta, kurzor), `style` (vzhled z tokenů), `input` (rozdělení vstupu, přesun a změna velikosti), `dialog` (systémové dialogy, bezpečná obrazovka), `greeter` (přihlášení a zámek), `frame` (takt, animace, skupiny transakcí), `gpu` (seznam operací pro GPU backend `libs/vkcomp`), `menu`, `flyout`, `clipboard` (schránka, protokol `libs/clipproto`), `pointer` (kurzor aplikace, celá obrazovka na žádost, zámek ukazatele s upozorněním), `sysui` (paleta a spouštěč nad `libs/ui`), `services` (akce aplikací, inspekce), `output` (změna režimu displeje). Popis: `docs/cs/gui.md`, vzhled `docs/cs/vzhled.md`.
 
 ## Invarianty
 
@@ -9,6 +9,7 @@ Jádro kompozitoru `compd` bez závislosti na jádru OS (`no_std` + `alloc`, tes
 - Skládají se jen poškozené oblasti a nic se nekreslí, když se nic nemění (výkon softwarového skládání, `docs/cs/gui.md`). Pod neprůhledným jádrem okna (bez rohů) se plocha ani nižší okna nekreslí (`render::visible_parts`); test `culling_keeps_pixels` hlídá stejné pixely.
 - Žádná čísla vzhledu v kódu: hodnoty jsou z tokenů `design/tokens.toml` přes `libs/theme`. Vzhled a svižnost jsou stejně důležité; efekty musí vejít do rozpočtu snímku.
 - Systémové dialogy a odznak důvěry kreslí systém, aplikace je nemůže zakrýt ani zfalšovat.
+- Celá obrazovka na žádost aplikace a zámek ukazatele jen po fyzickém stisku v okně s fokusem (`clip_take_gesture`, jednorázové gesto); zámek vždy zruší Super, ztráta fokusu, zavření okna, dialog a přihlášení (`pointer.rs`, testy `tests/pointer.rs`).
 - Po pádu kompozitoru se stav obnoví (`docs/cs/gui.md#obnova-po-pádu-kompozitoru`, `user/compd/src/snapshot.rs`).
 
 ## Testy

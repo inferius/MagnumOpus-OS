@@ -8,7 +8,8 @@
  * Etapa 6-1: jedno okno na proces, softwarovy framebuffer (snimek se pri
  * UpdateWindowFramebuffer kopiruje do bufferu okna), klavesnice (kody evdev
  * -> scancode tabulkou Linuxu), mys, kolecko, text, fokus, zmena velikosti.
- * Kurzor, relativni mys, HiDPI a cela obrazovka: etapa 6-2.
+ * Etapa 6-2 (SDL_mosextra.c): schranka, kurzory, relativni mys, cela
+ * obrazovka, skala displeje.
  */
 #include "SDL_internal.h"
 
@@ -18,7 +19,7 @@
 
 #include <mosdl.h>
 
-#include "../SDL_sysvideo.h"
+#include "SDL_mosvideo.h"
 #include "../../SDL_properties_c.h"
 #include "../../events/SDL_events_c.h"
 #include "../../events/SDL_keyboard_c.h"
@@ -132,6 +133,28 @@ static void MOS_Dispatch(const mosdl_event *ev)
     case MOSDL_EV_EXPOSE:
         SDL_SendWindowEvent(w, SDL_EVENT_WINDOW_EXPOSED, 0, 0);
         break;
+    case MOSDL_EV_RELMOTION:
+        SDL_SendMouseMotion(t, w, SDL_GLOBAL_MOUSE_ID, true, (float)ev->a, (float)ev->b);
+        break;
+    case MOSDL_EV_POINTER_LOCK:
+        /* Zruseni systemem (Super, ztrata fokusu): SDL vypne relativni
+           rezim, aby aplikace nedostavala jen absolutni pohyb v domneni,
+           ze je zamcena. */
+        if (!ev->a && SDL_GetWindowRelativeMouseMode(w)) {
+            SDL_SetWindowRelativeMouseMode(w, false);
+        }
+        break;
+    case MOSDL_EV_DISPLAY:
+        MOS_UpdateDisplay();
+        break;
+    case MOSDL_EV_STATE:
+        SDL_SendWindowEvent(w, (ev->a & MOSDL_STATE_FULLSCREEN) ? SDL_EVENT_WINDOW_ENTER_FULLSCREEN : SDL_EVENT_WINDOW_LEAVE_FULLSCREEN, 0, 0);
+        if (ev->a & MOSDL_STATE_MAXIMIZED) {
+            SDL_SendWindowEvent(w, SDL_EVENT_WINDOW_MAXIMIZED, 0, 0);
+        } else {
+            SDL_SendWindowEvent(w, SDL_EVENT_WINDOW_RESTORED, 0, 0);
+        }
+        break;
     default:
         break;
     }
@@ -176,6 +199,7 @@ static bool MOS_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Pro
         return SDL_SetError("magnumopus: okno nelze otevrit (chyba %d)", r);
     }
     mos_window = window;
+    MOS_UpdateDisplay();
     window->x = window->floating.x = 0;
     window->y = window->floating.y = 0;
     if ((int)w != window->w || (int)h != window->h) {
@@ -267,11 +291,13 @@ static bool MOS_VideoInit(SDL_VideoDevice *_this)
         mode.h = (int)d.screen_h;
         mode.refresh_rate = (float)d.refresh_mhz / 1000.0f;
     }
-    if (SDL_AddBasicVideoDisplay(&mode) == 0) {
+    MOS_display = SDL_AddBasicVideoDisplay(&mode);
+    if (MOS_display == 0) {
         return false;
     }
     SDL_AddKeyboard(SDL_DEFAULT_KEYBOARD_ID, NULL);
     SDL_AddMouse(SDL_DEFAULT_MOUSE_ID, NULL);
+    MOS_InitMouse();
     return true;
 }
 
@@ -309,6 +335,10 @@ static SDL_VideoDevice *MOS_CreateDevice(void)
     device->CreateWindowFramebuffer = MOS_CreateWindowFramebuffer;
     device->UpdateWindowFramebuffer = MOS_UpdateWindowFramebuffer;
     device->DestroyWindowFramebuffer = MOS_DestroyWindowFramebuffer;
+    device->SetWindowFullscreen = MOS_SetWindowFullscreen;
+    device->SetClipboardText = MOS_SetClipboardText;
+    device->GetClipboardText = MOS_GetClipboardText;
+    device->HasClipboardText = MOS_HasClipboardText;
     device->free = MOS_DeleteDevice;
     return device;
 }

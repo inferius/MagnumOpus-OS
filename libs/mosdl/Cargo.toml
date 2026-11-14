@@ -20,6 +20,7 @@ inputproto = { path = "../inputproto" }
 libos = { path = "../libos", default-features = false }
 ui = { path = "../ui", features = ["os"] }
 gfx = { path = "../gfx" }
+clipproto = { path = "../clipproto" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("magnumopus"))'] }

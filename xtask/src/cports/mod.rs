@@ -142,6 +142,7 @@ const PORTS: &[CPort] = &[
         data: &[
             ("testsprite.manifest.toml", "port:testsprite.manifest.toml"),
             ("checkkeys.manifest.toml", "port:checkkeys.manifest.toml"),
+            ("testmagnumopus.manifest.toml", "port:testmagnumopus.manifest.toml"),
             ("sdl-icon.png", "test/icon.png"),
         ],
         build: Build::CMake {
@@ -188,7 +189,7 @@ const PORTS: &[CPort] = &[
                 "-DSDL_DIALOG=OFF",
                 "-DSDL_TRAY=OFF",
             ],
-            programs: &[("testsprite", "test/testsprite"), ("checkkeys", "test/checkkeys")],
+            programs: &[("testsprite", "test/testsprite"), ("checkkeys", "test/checkkeys"), ("testmagnumopus", "test/testmagnumopus")],
         },
     },
 ];

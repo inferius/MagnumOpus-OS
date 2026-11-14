@@ -600,8 +600,11 @@ impl Comp {
             self.dialogs.draw(canvas, &mut self.style, self.w, self.h);
             self.prof.add(Part::Dialog, t0);
         }
+        self.draw_pointer_notice(canvas);
         match self.input.cursor {
             crate::input::Cursor::Arrow => draw_cursor(canvas, self.input.px, self.input.py),
+            crate::input::Cursor::Hidden => {}
+            crate::input::Cursor::App(g) => self.draw_app_cursor(canvas, g),
             k => draw_resize_cursor(canvas, self.input.px, self.input.py, k),
         }
     }
@@ -1156,7 +1159,7 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
 
 /// Kurzor zmeny velikosti: dvojita sipka (cerna s bilym obrysem), aktivni
 /// bod uprostred. Body cerne cary vzhledem ke stredu.
-fn resize_cursor_points(k: crate::input::Cursor) -> Vec<(i32, i32)> {
+pub(crate) fn resize_cursor_points(k: crate::input::Cursor) -> Vec<(i32, i32)> {
     use crate::input::Cursor;
     let mut v = Vec::new();
     // Vodorovna: drik a hroty na obou koncich.
@@ -1188,12 +1191,12 @@ fn resize_cursor_points(k: crate::input::Cursor) -> Vec<(i32, i32)> {
             diag(&mut v);
             v.iter_mut().for_each(|p| p.0 = -p.0);
         }
-        Cursor::Arrow => {}
+        Cursor::Arrow | Cursor::App(_) | Cursor::Hidden => {}
     }
     v
 }
 
-fn draw_resize_cursor(c: &mut Canvas<'_>, x: i32, y: i32, k: crate::input::Cursor) {
+pub(crate) fn draw_resize_cursor(c: &mut Canvas<'_>, x: i32, y: i32, k: crate::input::Cursor) {
     let pts = resize_cursor_points(k);
     for &(dx, dy) in &pts {
         c.fill(Rect::new(x + dx - 1, y + dy - 1, 3, 3), gfx::rgb(255, 255, 255));
@@ -1203,7 +1206,7 @@ fn draw_resize_cursor(c: &mut Canvas<'_>, x: i32, y: i32, k: crate::input::Curso
     }
 }
 
-fn draw_cursor(c: &mut Canvas<'_>, x: i32, y: i32) {
+pub(crate) fn draw_cursor(c: &mut Canvas<'_>, x: i32, y: i32) {
     for (row, line) in CURSOR.iter().enumerate() {
         for (col, ch) in line.bytes().enumerate() {
             let p = match ch {

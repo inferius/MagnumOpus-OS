@@ -132,3 +132,17 @@ index 8d8002f..673c50f 100644
  #ifdef SDL_VIDEO_DRIVER_OFFSCREEN
      &OFFSCREEN_bootstrap,
  #endif
+diff --git a/test/CMakeLists.txt b/test/CMakeLists.txt
+index 19706bd..1b16182 100644
+--- a/test/CMakeLists.txt
++++ b/test/CMakeLists.txt
+@@ -315,6 +315,9 @@ else()
+ endif()
+ 
+ add_sdl_test_executable(checkkeys SOURCES checkkeys.c)
++if(MAGNUMOPUS)
++  add_sdl_test_executable(testmagnumopus SOURCES testmagnumopus.c)
++endif()
+ add_sdl_test_executable(loopwave NEEDS_RESOURCES TESTUTILS MAIN_CALLBACKS SOURCES loopwave.c)
+ add_sdl_test_executable(testsurround SOURCES testsurround.c)
+ add_sdl_test_executable(testresample NEEDS_RESOURCES SOURCES testresample.c)
