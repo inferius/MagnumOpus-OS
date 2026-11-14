@@ -53,12 +53,15 @@ fn commit_ceiling() {
     let (_, total) = phys::stats();
     // Vic nez cela RAM nejde slibit ani bez rozpoctu jobu.
     assert_eq!(MemoryObject::new(2 * total * PAGE_SIZE, None).err(), Some(Error::NoMemory));
-    // Slib ubira pamet ostatnim alokacim programu.
+    // Slib ubira pamet ostatnim alokacim programu. Jeden krok (32 MiB)
+    // rezervy: ostatni CPU mezi merenim a vytvorenim muzou neco alokovat
+    // (a seznam stranek VMO je take z haldy jadra).
     let room = (1..=40)
         .map(|i| i * 32 * MIB)
         .take_while(|&s| phys::user_room(s / PAGE_SIZE))
         .last()
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .saturating_sub(32 * MIB);
     assert!(room >= 64 * MIB, "volne pameti malo na test: {room}");
     let big = MemoryObject::new(room, None).unwrap();
     assert!(!phys::user_room(room / PAGE_SIZE), "slibena pamet je dal volna");
