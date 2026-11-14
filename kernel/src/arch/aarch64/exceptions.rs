@@ -215,6 +215,17 @@ fn el0_sync(frame: &mut TrapFrame) {
         _ => FAULT_GENERAL,
     };
     let addr = if code == FAULT_PAGE { frame.far } else { 0 };
+    if code == FAULT_PAGE {
+        // Stranka na pozadani. ISS bit 6 (WnR) u data abort = zapis.
+        let access = match ec {
+            EC_IABT_LOWER => crate::mm::Access::Exec,
+            _ if iss & (1 << 6) != 0 => crate::mm::Access::Write,
+            _ => crate::mm::Access::Read,
+        };
+        if trap::user_page_fault(addr, access) {
+            return;
+        }
+    }
     trap::user_fault(code, iss, frame.elr, addr, frame.sp_el0, frame.x[29])
 }
 

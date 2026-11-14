@@ -9,6 +9,12 @@
 //! Kazde mapovani se strhne z rozpoctu jadra jobu procesu: zaznam mapovani
 //! a horni odhad tabulek stranek, ktere pro nej mohou vzniknout.
 //!
+//! Stranky na pozadani: mapovani namapuje jen stranky objektu, ktere uz
+//! existuji; ostatni doplni vypadek (`fault.rs`): cteni nulovou strankou
+//! jen pro cteni, zapis vlastnim ramcem. Kopirovani jadra z/do pameti
+//! procesu vypadek nikdy nevyvola: dosud nevzniklou stranku cte jako nuly
+//! a pred zapisem ji vytvori.
+//!
 //! Konec procesu: [`AddressSpace::teardown`] zrusi vsechna mapovani
 //! a tabulky hned (ne az s posledni referenci na proces). Potom je prostor
 //! "mrtvy": `map` vraci `BadState`, ostatni operace nic nenajdou.
@@ -26,6 +32,9 @@ use crate::error::Error;
 use crate::object::job::{Charge, Job, Pool};
 use crate::object::vmo::MemoryObject;
 use crate::sync::SpinLock;
+
+mod fault;
+pub use fault::Access;
 
 struct Mapping {
     len: u64,
@@ -63,6 +72,22 @@ pub struct AddressSpace {
 
 fn page_aligned(v: u64) -> bool {
     v.is_multiple_of(PAGE_SIZE)
+}
+
+/// Priznaky stranky mapovani s pravy `flags` (`MAP_*`) objektu `vmo`;
+/// `writable = false` pro nulovou stranku (nikdy zapisovatelna).
+fn page_flags(vmo: &MemoryObject, flags: u32, writable: bool) -> MapFlags {
+    let mut f = MapFlags::USER | vmo.cache_flags();
+    if vmo.is_dma() {
+        f = f | MapFlags::DMA;
+    }
+    if writable && flags & MAP_WRITE != 0 {
+        f = f | MapFlags::WRITE;
+    }
+    if flags & MAP_EXECUTE != 0 {
+        f = f | MapFlags::EXEC;
+    }
+    f
 }
 
 impl Inner {
@@ -234,19 +259,13 @@ impl AddressSpace {
         if vmo.is_revoked() {
             return Err(Error::AccessDenied);
         }
-        let mut map_flags = MapFlags::USER | vmo.cache_flags();
-        if vmo.is_dma() {
-            map_flags = map_flags | MapFlags::DMA;
-        }
-        if flags & MAP_WRITE != 0 {
-            map_flags = map_flags | MapFlags::WRITE;
-        }
-        if flags & MAP_EXECUTE != 0 {
-            map_flags = map_flags | MapFlags::EXEC;
-        }
+        let map_flags = page_flags(&vmo, flags, true);
         let table = inner.table.as_mut().expect("adresni prostor je zruseny");
         for off in (0..len).step_by(PAGE_SIZE as usize) {
-            let phys = vmo.page(vmo_offset + off).expect("rozsah overen vyse");
+            // Jen existujici stranky; ostatni doplni vypadek.
+            let Some(phys) = vmo.page(vmo_offset + off) else {
+                continue;
+            };
             if table
                 .map(
                     VirtAddr::new(start + off),
@@ -343,9 +362,73 @@ impl AddressSpace {
         n
     }
 
+    /// Odmapuje nulovou stranku vsude, kde mapovani objektu `vmo` ukazuje na
+    /// jeho offsety `offset..offset+len` (stranky prave vznikly). Vraci, zda
+    /// neco odmapoval (volajici pak vyprazdni TLB vsech CPU).
+    pub fn drop_zero_ptes(&self, vmo: &MemoryObject, offset: u64, len: u64) -> bool {
+        let zero = super::zero_frame();
+        let mut inner = self.inner.lock();
+        let Inner { table, mappings } = &mut *inner;
+        let Some(table) = table.as_mut() else {
+            return false;
+        };
+        let mut any = false;
+        for (&start, m) in mappings.iter() {
+            if !core::ptr::eq(Arc::as_ptr(&m.vmo), vmo) {
+                continue;
+            }
+            let lo = offset.max(m.vmo_offset);
+            let hi = (offset + len).min(m.vmo_offset + m.len);
+            let mut pos = lo & !(PAGE_SIZE - 1);
+            while pos < hi {
+                let va = VirtAddr::new(start + (pos - m.vmo_offset));
+                if table.translate(va) == Some(zero) {
+                    table.unmap_4k(va);
+                    any = true;
+                }
+                pos += PAGE_SIZE;
+            }
+        }
+        any
+    }
+
+    /// Pred zapisem jadra do rozsahu userspace vytvori jeho dosud nevznikle
+    /// stranky a odmapuje za ne nulovou stranku (tady i u ostatnich
+    /// mapperu). Mapovani overi jen zbezne; plnou kontrolu dela kopirovani.
+    fn commit_user_range(&self, addr: u64, len: usize) -> Result<(), Error> {
+        let end = addr.checked_add(len as u64).ok_or(Error::BadAddress)?;
+        let mut fresh: Vec<(Arc<MemoryObject>, u64)> = Vec::new();
+        {
+            let inner = self.inner.lock();
+            let mut pos = addr & !(PAGE_SIZE - 1);
+            while pos < end {
+                let (start, m) = inner.mapping_at(pos).ok_or(Error::BadAddress)?;
+                if m.flags & MAP_WRITE == 0 || m.vmo.is_physical() {
+                    return Err(Error::BadAddress);
+                }
+                let off = m.vmo_offset + (pos - start);
+                if m.vmo.commit_page(off)?.1 {
+                    fresh.try_reserve(1).map_err(|_| Error::NoMemory)?;
+                    fresh.push((m.vmo.clone(), off));
+                }
+                pos += PAGE_SIZE;
+            }
+        }
+        for (vmo, off) in fresh {
+            // Vlastni prostor zvlast: init (userboot) neni v seznamu mapperu.
+            if self.drop_zero_ptes(&vmo, off, PAGE_SIZE) {
+                tlb::shootdown();
+            }
+            vmo.forget_zero(off, PAGE_SIZE);
+        }
+        Ok(())
+    }
+
     /// Prelozi rozsah userspace na kousky fyzicke pameti a zavola na ne `f`
     /// (adresa v prime mape, offset v rozsahu, delka). Overi, ze je cely
-    /// rozsah namapovany s pozadovanymi pravy; jinak `BadAddress`.
+    /// rozsah namapovany s pozadovanymi pravy; jinak `BadAddress`. Dosud
+    /// nevznikla stranka se pri cteni cte z nulove stranky; zapis ji musi
+    /// predem vytvorit (`commit_user_range`).
     fn with_user_range(
         &self,
         addr: u64,
@@ -378,10 +461,12 @@ impl AddressSpace {
             let (start, m) = inner.mapping_at(pos).expect("overeno vyse");
             let in_page = (pos % PAGE_SIZE) as usize;
             let n = (PAGE_SIZE as usize - in_page).min(len - done);
-            let page: PhysAddr = m
-                .vmo
-                .page(m.vmo_offset + (pos - start))
-                .expect("overeno vyse");
+            let page: PhysAddr = match m.vmo.page(m.vmo_offset + (pos - start)) {
+                Some(page) => page,
+                // Jen pro cteni (`f` do nulove stranky nepise).
+                None if !write => super::zero_frame(),
+                None => return Err(Error::BadAddress),
+            };
             f(
                 page.to_virt().as_mut_ptr::<u8>().wrapping_add(in_page),
                 done,
@@ -405,6 +490,10 @@ impl AddressSpace {
 
     /// Zkopiruje data do pameti procesu (jen do zapisovatelnych mapovani).
     pub fn copy_to_user(&self, addr: u64, data: &[u8]) -> Result<(), Error> {
+        if data.is_empty() {
+            return Ok(());
+        }
+        self.commit_user_range(addr, data.len())?;
         let src = data.as_ptr();
         self.with_user_range(addr, data.len(), true, |dst, at, n| {
             // SAFETY: viz `copy_from_user`.

@@ -34,6 +34,7 @@ pub use qos::{QosLoan, boost, boost_current, ipc_class, rt_admitted, set_thread_
 pub use thread::{Qos, Thread};
 pub use user::{
     create_user_thread, on_return_to_user, request_kill, start_user_thread, user_fault,
+    user_page_fault,
 };
 
 use crate::arch::context::{self, Context, ThreadContext};

@@ -233,6 +233,15 @@ extern "sysv64" fn trap_dispatch(frame: &mut TrapFrame) {
     let vector = frame.vector;
     let user = from_user(frame);
     match vector {
+        // Vypadek stranky v userspace: nejdriv stranka na pozadani. Bity
+        // chyboveho kodu: 1 = zapis, 4 = nacteni instrukce.
+        v if v == VEC_PAGE_FAULT
+            && user
+            && trap::user_page_fault(cpu::read_cr2(), match frame.error_code {
+                e if e & (1 << 4) != 0 => crate::mm::Access::Exec,
+                e if e & (1 << 1) != 0 => crate::mm::Access::Write,
+                _ => crate::mm::Access::Read,
+            }) => {}
         // Vyjimka v userspace (vcetne int3): ukonci proces, ne jadro.
         v if v < 32 && user => {
             let addr = if v == VEC_PAGE_FAULT {

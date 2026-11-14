@@ -2,7 +2,11 @@
 //! zapisovat a mapovat do adresnich prostoru procesu.
 //!
 //! Druhy objektu:
-//! - bezny: stranky RAM alokovane a vynulovane hned pri vytvoreni,
+//! - bezny: stranky RAM na pozadani - pri vytvoreni se jen slibi (commit
+//!   v `phys` a rozpocet jobu), ramec vznikne pri prvnim zapisu (vypadek,
+//!   `VMO_WRITE`, kopirovani jadra). Cteni dosud nevznikle stranky vraci
+//!   nuly; do procesu se pro cteni mapuje sdilena nulova stranka jen pro
+//!   cteni (`mm::zero_frame`), kterou zapis nahradi vlastnim ramcem,
 //! - souvisly: fyzicky souvisla RAM pro DMA (ovladace zjisti fyzickou adresu),
 //! - fyzicky: okno na fyzicky rozsah mimo RAM (registry zarizeni, BAR,
 //!   framebuffer z firmwaru); stranky nepatri alokatoru. Typ cache (bez
@@ -10,8 +14,11 @@
 //!   = WC) a kazde mapovani ho zdedi. Drzitel prostredku ho muze odvolat
 //!   (`revoke`): mapovani ve vsech procesech zmizi a dalsi mapovani selze.
 //!
-//! Objekt nemeni velikost. TODO: lazy alokace pri prvnim pristupu,
-//! copy-on-write klony.
+//! Objekt nemeni velikost. Nulova stranka: kdyz ji nektere mapovani
+//! ukazuje (`zero_mapped`) a stranka pak vznikne jinou cestou, objekt ji
+//! vsem mapperum odmapuje (`AddressSpace::drop_zero_ptes`), aby nikdo
+//! necetl stare nuly misto zapsanych dat. Souvisla a fyzicka pamet je vzdy
+//! cela pritomna (DMA ji potrebuje hned a na stalych adresach).
 //!
 //! Stranky (bezne i souvisle) se strhavaji z rozpoctu uzivatelske pameti
 //! jobu, seznam stranek a objekt samotny z rozpoctu jadra - pred alokaci,
@@ -21,7 +28,7 @@
 
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use super::job::{Charge, Job, Pool, object_cost};
 use super::{Error, KernelObject, ObjectCore, ObjectType, Rights, Signals};
@@ -36,7 +43,18 @@ const PAGE: u64 = crate::arch::paging::PAGE_SIZE;
 
 /// Blok seznamu stranek (64 KiB = 8192 stranek).
 const PAGE_LIST_CHUNK: usize = 64 * 1024;
-type PageList = ChunkedVec<PhysAddr, PAGE_LIST_CHUNK>;
+/// Polozka = fyzicka adresa | `PRESENT` [| `PINNED`], 0 = stranka jeste
+/// nevznikla.
+type PageList = ChunkedVec<AtomicU64, PAGE_LIST_CHUNK>;
+const PRESENT: u64 = 1;
+/// Stranku pripnul `expose_phys` (adresu zna ovladac a muze ji dat
+/// zarizeni); odepne se v Drop.
+const PINNED: u64 = 2;
+const ENTRY_FLAGS: u64 = PAGE - 1;
+
+fn present(phys: PhysAddr) -> AtomicU64 {
+    AtomicU64::new(phys.as_u64() | PRESENT)
+}
 
 /// Strhne rozpocty za objekt s `count` strankami, z toho `user_bytes`
 /// uzivatelske pameti.
@@ -67,17 +85,18 @@ enum Kind {
     Physical { cache: u64 },
 }
 
-/// Odvolani fyzickeho objektu: priznak a procesy, ktere ho mapuji.
-struct Revocation {
-    revoked: AtomicBool,
-    /// Procesy s mapovanim objektu (slabe odkazy, mrtve se uklidi).
-    mappers: SpinLock<Vec<Weak<Process>>>,
-}
 
 pub struct MemoryObject {
     core: ObjectCore,
     size: u64,
     pages: PageList,
+    /// Slibene stranky, ktere jeste nemaji ramec (vrati se `phys` v Drop).
+    unbacked: AtomicU64,
+    /// Nektere mapovani ukazuje nulovou stranku misto dosud nevznikle.
+    zero_mapped: AtomicBool,
+    /// Procesy s mapovanim objektu (slabe odkazy, mrtve se uklidi): pro
+    /// odvolani fyzickeho objektu a odmapovani nulove stranky.
+    mappers: SpinLock<Vec<Weak<Process>>>,
     kind: Kind,
     /// Domena IOMMU, ve ktere je pamet namapovana pro DMA zarizeni
     /// (odmapuje se pred vracenim stranek alokatoru).
@@ -86,37 +105,49 @@ pub struct MemoryObject {
     /// a jadro pri pristupu pres primou mapu udrzuje cache (na nekoherentni
     /// platforme; na koherentni jsou `arch::dma_sync_*` prazdne).
     for_dma: bool,
-    /// Jen fyzicke objekty: odvolani (`revoke`).
-    revocation: Option<Revocation>,
+    /// Jen fyzicke objekty jdou odvolat (`revoke`).
+    revocable: bool,
+    revoked: AtomicBool,
     /// Strzeni z rozpoctu jadra a uzivatelske pameti jobu.
     _charges: [Charge; 2],
 }
 
 impl MemoryObject {
+    fn with(size: u64, pages: PageList, kind: Kind, unbacked: u64, charges: [Charge; 2]) -> Self {
+        Self {
+            core: ObjectCore::new(Signals::NONE),
+            size,
+            pages,
+            unbacked: AtomicU64::new(unbacked),
+            zero_mapped: AtomicBool::new(false),
+            mappers: SpinLock::new(Vec::new()),
+            kind,
+            dma: None,
+            for_dma: false,
+            revocable: false,
+            revoked: AtomicBool::new(false),
+            _charges: charges,
+        }
+    }
+
     /// Novy objekt o velikosti `size` (zaokrouhleno nahoru na stranky),
-    /// vyplneny nulami, strzeny z rozpoctu `job`.
+    /// cteny jako nuly, strzeny z rozpoctu `job`. Cela velikost se slibi
+    /// hned (rozpocet jobu i `phys::commit`), ramce vzniknou az pri zapisu.
     pub fn new(size: u64, job: Option<&Arc<Job>>) -> Result<Arc<Self>, Error> {
         if size == 0 || size > abi::vm::VMO_MAX_SIZE {
             return Err(Error::InvalidArgs);
         }
         let count = size.div_ceil(PAGE);
         let charges = charge(job, count, count * PAGE)?;
-        let mut vmo = Self {
-            core: ObjectCore::new(Signals::NONE),
-            size: count * PAGE,
-            pages: page_list(count)?,
-            kind: Kind::Pages,
-            dma: None,
-            for_dma: false,
-            revocation: None,
-            _charges: charges,
-        };
+        let mut pages = page_list(count)?;
         for _ in 0..count {
-            // Pri neuspechu se uz alokovane stranky uvolni v Drop.
-            vmo.pages
-                .push(phys::alloc_user_frame_zeroed().ok_or(Error::NoMemory)?)?;
+            // Misto je rezervovane (`page_list`), push nealokuje.
+            pages.push(AtomicU64::new(0))?;
         }
-        Ok(Arc::new(vmo))
+        if !phys::commit(count) {
+            return Err(Error::NoMemory);
+        }
+        Ok(Arc::new(Self::with(count * PAGE, pages, Kind::Pages, count, charges)))
     }
 
     /// Fyzicky souvisly objekt pro DMA (max. 4 MiB), vyplneny nulami; s
@@ -129,11 +160,16 @@ impl MemoryObject {
         let vmo = Self::new_contiguous(size, job)?;
         let mut vmo = Arc::try_unwrap(vmo).map_err(|_| Error::BadState)?;
         vmo.for_dma = true;
+        // Zarizeni muze do stranek zapisovat po celou dobu zivota objektu:
+        // pripnout (CoW ani pager je nesmi presunout).
+        for p in vmo.pages.iter() {
+            phys::pin(PhysAddr::new(p.load(Ordering::Relaxed) & !ENTRY_FLAGS));
+        }
         // Nuly zapsane pres primou mapu musi byt v pameti driv, nez je uvidi
         // zarizeni nebo mapovani bez cache v procesu.
-        arch::dma_sync_for_device(vmo.pages[0].as_u64(), vmo.allocated_bytes());
+        arch::dma_sync_for_device(vmo.first_frame().as_u64(), vmo.allocated_bytes());
         if let Some(domain) = domain {
-            domain.map(vmo.pages[0].as_u64(), vmo.allocated_bytes() / PAGE)?;
+            domain.map(vmo.first_frame().as_u64(), vmo.allocated_bytes() / PAGE)?;
             vmo.dma = Some(domain);
         }
         Ok(Arc::new(vmo))
@@ -157,18 +193,9 @@ impl MemoryObject {
         };
         for i in 0..count {
             // Misto je rezervovane (`page_list`), push nealokuje.
-            pages.push(PhysAddr::new(base.as_u64() + i * PAGE))?;
+            pages.push(present(PhysAddr::new(base.as_u64() + i * PAGE)))?;
         }
-        Ok(Arc::new(Self {
-            core: ObjectCore::new(Signals::NONE),
-            size: count * PAGE,
-            pages,
-            kind: Kind::Contiguous { order },
-            dma: None,
-            for_dma: false,
-            revocation: None,
-            _charges: charges,
-        }))
+        Ok(Arc::new(Self::with(count * PAGE, pages, Kind::Contiguous { order }, 0, charges)))
     }
 
     /// Okno na fyzicky rozsah mimo RAM s typem cache `cache`
@@ -215,21 +242,11 @@ impl MemoryObject {
         let charges = charge(job, count, 0)?;
         let mut pages = page_list(count)?;
         for i in 0..count {
-            pages.push(PhysAddr::new(phys_start + i * PAGE))?;
+            pages.push(present(PhysAddr::new(phys_start + i * PAGE)))?;
         }
-        Ok(Arc::new(Self {
-            core: ObjectCore::new(Signals::NONE),
-            size: count * PAGE,
-            pages,
-            kind: Kind::Physical { cache },
-            dma: None,
-            for_dma: false,
-            revocation: Some(Revocation {
-                revoked: AtomicBool::new(false),
-                mappers: SpinLock::new(Vec::new()),
-            }),
-            _charges: charges,
-        }))
+        let mut vmo = Self::with(count * PAGE, pages, Kind::Physical { cache }, 0, charges);
+        vmo.revocable = true;
+        Ok(Arc::new(vmo))
     }
 
     /// Kolik fyzicke pameti objekt skutecne drzi (souvisly objekt zabira
@@ -262,22 +279,28 @@ impl MemoryObject {
 
     /// Fyzicky rozsah objektu (jen fyzicke objekty, pro kontrolu prostredku).
     pub fn physical_range(&self) -> Option<(u64, u64)> {
-        self.is_physical().then(|| (self.pages[0].as_u64(), self.size))
+        self.is_physical().then(|| (self.first_frame().as_u64(), self.size))
+    }
+
+    /// Fyzicka adresa prvni stranky (jen souvisle a fyzicke objekty, ktere
+    /// jsou cele pritomne).
+    fn first_frame(&self) -> PhysAddr {
+        self.page(0).expect("souvisly objekt je cely pritomny")
     }
 
     /// Je objekt odvolany?
     pub fn is_revoked(&self) -> bool {
-        self.revocation.as_ref().is_some_and(|r| r.revoked.load(Ordering::Acquire))
+        self.revocable && self.revoked.load(Ordering::Acquire)
     }
 
-    /// Zaznamena proces, ktery objekt prave namapoval. Odvolany objekt =
+    /// Zaznamena proces, ktery objekt prave namapoval (vsechny objekty:
+    /// odvolani a odmapovani nulove stranky). Odvolany objekt =
     /// `AccessDenied` (volajici mapovani vrati). Priznak a seznam jsou pod
     /// jednim zamkem: mapovani soubezne s `revoke` bud revoke uvidi, nebo
     /// samo uvidi priznak.
     pub fn register_mapper(&self, p: &Arc<Process>) -> Result<(), Error> {
-        let Some(r) = &self.revocation else { return Ok(()) };
-        let mut m = r.mappers.lock();
-        if r.revoked.load(Ordering::Acquire) {
+        let mut m = self.mappers.lock();
+        if self.is_revoked() {
             return Err(Error::AccessDenied);
         }
         if m.len() == m.capacity() {
@@ -293,10 +316,106 @@ impl MemoryObject {
     /// Odvola objekt: dalsi mapovani selze. Vraci procesy, ve kterych je
     /// objekt namapovany (volajici jim mapovani zrusi). Jen fyzicke objekty.
     pub fn revoke(&self) -> Result<Vec<Arc<Process>>, Error> {
-        let r = self.revocation.as_ref().ok_or(Error::NotSupported)?;
-        let mut m = r.mappers.lock();
-        r.revoked.store(true, Ordering::Release);
+        if !self.revocable {
+            return Err(Error::NotSupported);
+        }
+        let mut m = self.mappers.lock();
+        self.revoked.store(true, Ordering::Release);
         Ok(core::mem::take(&mut *m).into_iter().filter_map(|w| w.upgrade()).collect())
+    }
+
+    /// Zive procesy s mapovanim objektu.
+    fn mapper_processes(&self) -> Vec<Arc<Process>> {
+        self.mappers.lock().iter().filter_map(Weak::upgrade).collect()
+    }
+
+    /// Mapovani prave dostalo nulovou stranku za dosud nevzniklou stranku.
+    /// Volat pod zamkem adresniho prostoru pred kontrolou `page` (viz
+    /// `commit_page`).
+    pub fn note_zero_mapped(&self) {
+        self.zero_mapped.store(true, Ordering::SeqCst);
+    }
+
+    /// Vytvori (je-li treba) ramec stranky na offsetu `offset`. Vraci ramec
+    /// a zda prave vznikl. Souvisle a fyzicke objekty jsou cele pritomne.
+    ///
+    /// Poradi vuci nulove strance (vse SeqCst): vznik stranky (CAS) je
+    /// pred ctenim `zero_mapped`; mapovani nulove stranky nastavi
+    /// `zero_mapped` pred ctenim polozky. Kdo nulovou stranku namapoval
+    /// po vzniku stranky, uvidel ji uz pritomnou; kdo pred, toho najde
+    /// `forget_zero` (bere zamek jeho adresniho prostoru).
+    pub fn commit_page(&self, offset: u64) -> Result<(PhysAddr, bool), Error> {
+        let slot = self.pages.get((offset / PAGE) as usize).ok_or(Error::OutOfRange)?;
+        let cur = slot.load(Ordering::SeqCst);
+        if cur != 0 {
+            return Ok((PhysAddr::new(cur & !ENTRY_FLAGS), false));
+        }
+        // Slib je dany objektem, ramec selze jen kdyz jadro vycerpalo
+        // pamet nad svou rezervu.
+        let frame = phys::alloc_committed_zeroed().ok_or(Error::NoMemory)?;
+        match slot.compare_exchange(0, frame.as_u64() | PRESENT, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => {
+                self.unbacked.fetch_sub(1, Ordering::AcqRel);
+                Ok((frame, true))
+            }
+            Err(other) => {
+                // Jine vlakno bylo rychlejsi: ramec vratit (i se slibem).
+                phys::free_committed(frame);
+                Ok((PhysAddr::new(other & !ENTRY_FLAGS), false))
+            }
+        }
+    }
+
+    /// Po vzniku stranek objektu jinou cestou nez vypadkem v danem
+    /// mapovani: odmapuje vsem mapperum nulovou stranku na `offset..+len`
+    /// (dalsi pristup uz najde skutecny ramec). Volat bez zamku adresnich
+    /// prostoru.
+    pub fn forget_zero(&self, offset: u64, len: u64) {
+        if !self.zero_mapped.load(Ordering::SeqCst) {
+            return;
+        }
+        let mut flush = false;
+        for p in self.mapper_processes() {
+            flush |= p.address_space().drop_zero_ptes(self, offset, len);
+        }
+        if flush {
+            crate::mm::tlb::shootdown();
+        }
+    }
+
+    /// Vytvori vsechny stranky rozsahu (zapis jadra). Vraci, zda nejaka
+    /// vznikla (pak volajici zavola `forget_zero`).
+    fn commit_range(&self, offset: u64, len: u64) -> Result<bool, Error> {
+        let mut any = false;
+        let mut pos = offset & !(PAGE - 1);
+        while pos < offset + len {
+            any |= self.commit_page(pos)?.1;
+            pos += PAGE;
+        }
+        Ok(any)
+    }
+
+    /// Fyzicka adresa stranky pro ovladac (`VMO_PHYS_ADDR`). Bezny objekt
+    /// stranku vytvori a pripne: adresa plati po celou dobu zivota objektu
+    /// a zadna pozdejsi operace (CoW, pager) ramec nevymeni.
+    pub fn expose_phys(&self, offset: u64) -> Result<PhysAddr, Error> {
+        if !matches!(self.kind, Kind::Pages) {
+            return self.page(offset).ok_or(Error::OutOfRange);
+        }
+        let (frame, fresh) = self.commit_page(offset)?;
+        let slot = &self.pages[(offset / PAGE) as usize];
+        if slot.fetch_or(PINNED, Ordering::AcqRel) & PINNED == 0 {
+            phys::pin(frame);
+        }
+        if fresh {
+            self.forget_zero(offset & !(PAGE - 1), PAGE);
+        }
+        Ok(frame)
+    }
+
+    /// Kolik stranek objektu ma ramec (pro testy a prehled).
+    pub fn resident_pages(&self) -> u64 {
+        self.pages.iter().filter(|p| p.load(Ordering::Relaxed) != 0).count() as u64
     }
 
     /// Pamet pro DMA (mapuje se s `MapFlags::DMA`)?
@@ -311,9 +430,13 @@ impl MemoryObject {
         self.for_dma && self.dma.is_none()
     }
 
-    /// Fyzicka stranka na offsetu `offset` (zarovnanem na stranku).
+    /// Fyzicka stranka na offsetu `offset` (zarovnanem na stranku), `None`
+    /// mimo objekt nebo kdyz jeste nevznikla.
     pub fn page(&self, offset: u64) -> Option<PhysAddr> {
-        self.pages.get((offset / PAGE) as usize).copied()
+        match self.pages.get((offset / PAGE) as usize)?.load(Ordering::SeqCst) {
+            0 => None,
+            v => Some(PhysAddr::new(v & !ENTRY_FLAGS)),
+        }
     }
 
     /// Registry zarizeni nejsou v prime mape a cteni by mohlo mit vedlejsi
@@ -333,16 +456,18 @@ impl MemoryObject {
         }
     }
 
-    /// Projde rozsah po kouscich v ramci stranek: `f(ukazatel do prime mapy,
-    /// offset v bufferu, delka)`.
+    /// Projde rozsah po kouscich v ramci stranek: `f(ukazatel do prime mapy
+    /// nebo null pro dosud nevzniklou stranku, offset v bufferu, delka)`.
     fn for_each_chunk(&self, offset: u64, len: usize, mut f: impl FnMut(*mut u8, usize, usize)) {
         let mut done = 0;
         while done < len {
             let pos = offset + done as u64;
             let in_page = (pos % PAGE) as usize;
             let n = (PAGE as usize - in_page).min(len - done);
-            let page = self.pages[(pos / PAGE) as usize];
-            let ptr = page.to_virt().as_mut_ptr::<u8>().wrapping_add(in_page);
+            let ptr = match self.page(pos - pos % PAGE) {
+                Some(page) => page.to_virt().as_mut_ptr::<u8>().wrapping_add(in_page),
+                None => core::ptr::null_mut(),
+            };
             f(ptr, done, n);
             done += n;
         }
@@ -354,6 +479,11 @@ impl MemoryObject {
         // Data mohlo zapsat zarizeni nebo proces pres mapovani bez cache.
         self.dma_sync(offset, buf.len(), arch::dma_sync_for_cpu);
         self.for_each_chunk(offset, buf.len(), |ptr, at, n| {
+            if ptr.is_null() {
+                // Stranka jeste nevznikla: cte se jako nuly.
+                buf[at..at + n].fill(0);
+                return;
+            }
             // SAFETY: `ptr..ptr+n` lezi v jedne strance tohoto objektu (prima
             // mapa); buffer je mimo pamet objektu. Soubezny zapis jineho
             // vlakna muze dat smichana data, ale ne nedefinovane chovani
@@ -366,8 +496,13 @@ impl MemoryObject {
     pub fn write(&self, offset: u64, data: &[u8]) -> Result<(), Error> {
         self.check_access()?;
         self.check_range(offset, data.len() as u64)?;
+        if self.commit_range(offset, data.len() as u64)? {
+            self.forget_zero(offset & !(PAGE - 1), (offset % PAGE + data.len() as u64).next_multiple_of(PAGE));
+        }
         self.for_each_chunk(offset, data.len(), |ptr, at, n| {
-            // SAFETY: viz `read`.
+            debug_assert!(!ptr.is_null(), "stranka vznikla v commit_range");
+            // SAFETY: viz `read`; stranky rozsahu vznikly vyse a uz
+            // nezaniknou (zije s objektem).
             unsafe { core::ptr::copy_nonoverlapping(data.as_ptr().add(at), ptr, n) }
         });
         // Zarizeni a mapovani bez cache musi zapsana data videt.
@@ -378,7 +513,7 @@ impl MemoryObject {
     /// U pameti pro DMA zavola `sync` na fyzicky rozsah (objekt je souvisly).
     fn dma_sync(&self, offset: u64, len: usize, sync: fn(u64, u64)) {
         if self.for_dma && len > 0 {
-            sync(self.pages[0].as_u64() + offset, len as u64);
+            sync(self.first_frame().as_u64() + offset, len as u64);
         }
     }
 }
@@ -387,23 +522,34 @@ impl Drop for MemoryObject {
     fn drop(&mut self) {
         // Zarizeni nejdriv ztrati pristup (IOMMU), az pak se pamet vrati.
         if let Some(d) = self.dma.take() {
-            d.unmap(self.pages[0].as_u64(), self.allocated_bytes() / PAGE);
+            d.unmap(self.first_frame().as_u64(), self.allocated_bytes() / PAGE);
         }
         // Pres mapovani bez cache se psalo mimo cache: jeji pripadne stare
         // radky (spekulativni cteni pres primou mapu) zahodit, aby dalsi
         // vlastnik stranek nevidel stara data.
         if self.for_dma {
-            arch::dma_sync_for_cpu(self.pages[0].as_u64(), self.allocated_bytes());
+            arch::dma_sync_for_cpu(self.first_frame().as_u64(), self.allocated_bytes());
+            for p in self.pages.iter() {
+                phys::unpin(PhysAddr::new(p.load(Ordering::Relaxed) & !ENTRY_FLAGS));
+            }
         }
         // Objekt uz nikdo nema namapovany (mapovani drzi Arc), takze stranky
         // smi zpet do alokatoru. Fyzicke okno alokatoru nepatri.
         match self.kind {
             Kind::Pages => {
-                for &page in self.pages.iter() {
-                    phys::free_pages(page, 0);
+                for p in self.pages.iter() {
+                    let v = p.load(Ordering::Relaxed);
+                    if v & PINNED != 0 {
+                        phys::unpin(PhysAddr::new(v & !ENTRY_FLAGS));
+                    }
+                    if v != 0 {
+                        phys::free_pages(PhysAddr::new(v & !ENTRY_FLAGS), 0);
+                    }
                 }
+                // Slib stranek, ktere nikdy nevznikly.
+                phys::uncommit(*self.unbacked.get_mut());
             }
-            Kind::Contiguous { order } => phys::free_pages(self.pages[0], order),
+            Kind::Contiguous { order } => phys::free_pages(self.first_frame(), order),
             Kind::Physical { .. } => {}
         }
     }

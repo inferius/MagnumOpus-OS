@@ -43,7 +43,9 @@ horní polovinu sdílí s jádrem):
   syscallů kopíruje přes přímou mapu podle seznamu mapování, takže v jádře
   nemůže vzniknout page fault na adrese procesu).
 - **Objekty paměti** (`object/vmo.rs`): stránky fyzické paměti, které jde
-  číst, zapisovat a mapovat; zatím alokované hned při vytvoření.
+  číst, zapisovat a mapovat. Stránky vznikají na požádání (slib při
+  vytvoření, rámec při prvním zápisu, čtení přes sdílenou nulovou stránku)
+  **[ověřeno v QEMU]**; podrobně [sprava-pameti.md](sprava-pameti.md).
 - **Adresní prostor procesu** (`mm/address_space.rs`): seznam mapování
   (objekt + offset + práva). Odmapování vyprázdní TLB na všech CPU
   (`mm/tlb.rs`) dřív, než se uvolní stránky.

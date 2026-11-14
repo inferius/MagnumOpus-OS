@@ -45,7 +45,10 @@ the upper half with the kernel):
   using the mapping list, so no page fault on a process address can happen
   in the kernel).
 - **Memory objects** (`object/vmo.rs`): physical pages that can be read,
-  written and mapped; currently allocated up front.
+  written and mapped. Pages are created on demand (commit at creation, a
+  frame on the first write, reads through the shared zero page)
+  **[verified in QEMU]**; details in
+  [memory-management.md](memory-management.md).
 - **Process address space** (`mm/address_space.rs`): a list of mappings
   (object + offset + rights). Unmapping flushes the TLB on all CPUs
   (`mm/tlb.rs`) before the pages are freed.

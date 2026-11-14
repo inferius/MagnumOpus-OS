@@ -36,6 +36,7 @@ mod input_recovery;
 mod ipc;
 mod jobs;
 mod memory;
+mod memory_lazy;
 pub mod net;
 mod nic;
 pub mod power;
@@ -64,6 +65,7 @@ type Test = (&'static str, fn(&Startup) -> TestResult);
 const SUITES: &[(&str, &[Test])] = &[
     ("zaklad", basic::TESTS),
     ("pamet", memory::TESTS),
+    ("pamet", memory_lazy::TESTS),
     ("ipc", ipc::TESTS),
     ("udalosti a nahoda", events::TESTS),
     ("procesy", process::TESTS),

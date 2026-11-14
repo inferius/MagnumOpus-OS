@@ -34,7 +34,8 @@ fn address_space() {
         .map(vmo.clone(), 0, 2 * PAGE_SIZE, MAP_READ | MAP_WRITE, 0)
         .unwrap();
     assert_eq!(space.mapping_count(), 1);
-    assert!(space.translate(VirtAddr::new(addr)).is_some());
+    // Stranky objektu vzniknou az pri zapisu (mapovani je nemapuje predem).
+    assert!(space.translate(VirtAddr::new(addr)).is_none());
 
     // Zapis pres hranici stranky se objevi v objektu pameti.
     let data: Vec<u8> = (0..100).collect();

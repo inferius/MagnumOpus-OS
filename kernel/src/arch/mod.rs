@@ -123,7 +123,7 @@ pub mod paging {
     use super::Current;
     use super::api::Memory;
 
-    pub use super::api::paging::{MapFlags, PAGE_SIZE, PageSize, PageTableOps};
+    pub use super::api::paging::{MapError, MapFlags, PAGE_SIZE, PageSize, PageTableOps};
 
     /// Tabulky stranek jednoho adresniho prostoru.
     pub type PageTable = <Current as Memory>::PageTable;

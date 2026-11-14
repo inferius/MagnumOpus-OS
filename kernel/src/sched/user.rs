@@ -119,6 +119,29 @@ const USER_FRAMES: usize = 16;
 /// `force-frame-pointers`) a ukonci proces.
 /// `code` = cislo chyby podle ABI (viz `trap::user_fault`), `pc` = adresa
 /// instrukce (v logu pod jmenem registru architektury, `arch::PC_NAME`).
+/// Vypadek stranky v userspace (viz `trap::user_page_fault`).
+pub fn user_page_fault(addr: u64, access: crate::mm::Access) -> bool {
+    let Some(process) = super::current().process.clone() else {
+        return false;
+    };
+    // Reseni muze alokovat a cekat na shootdown: s prerusenimi jako syscall.
+    interrupts::enable();
+    let result = process.address_space().resolve_fault(addr, access);
+    interrupts::disable();
+    match result {
+        Ok(()) => true,
+        Err(crate::error::Error::NoMemory) => {
+            log::error!(
+                "proces {} ({}): vypadek na {addr:#x}: nedostatek fyzicke pameti (jadro vycerpalo rezervu)",
+                process.id,
+                process.name
+            );
+            false
+        }
+        Err(_) => false,
+    }
+}
+
 pub fn user_fault(code: u8, error_code: u64, pc: u64, addr: u64, sp: u64, fp: u64) -> ! {
     let me = super::current();
     let process = me
