@@ -14,7 +14,8 @@ Obraz na Intelu řeší vlastní ovladač ([Nastavení obrazu](displej.md)).
 
 | Otázka | Rozhodnutí / doporučení |
 |---|---|
-| Ovladač NVIDIA | **rozhodnuto**: vlastní ovladač v Rustu jen pro GSP, části přeložené z nouveau (MIT), pevná verze firmwaru 570.144, definice RPC generované z hlaviček nouveau; nova (GPL) jen fakta ([srovnání](#srovnání-nouveau-v-c-nebo-vlastní-ovladač-v-rustu-pro-gsp)) |
+| Ovladač NVIDIA | **rozhodnuto**: vlastní ovladač v Rustu jen pro GSP, pevná verze firmwaru 570.144, definice RPC generované z hlaviček nouveau ([srovnání](#srovnání-nouveau-v-c-nebo-vlastní-ovladač-v-rustu-pro-gsp)) |
+| Licence ovladače NVIDIA | **rozhodnuto v návrhu**: GPL-2.0-only v části `gpl/` - start GSP, VBIOS, Falcon/FWSEC a fronty převzít z nova (Rust, GPL), zobrazení, kanály, MMU a uAPI pro NVK přeložit z nouveau (MIT) ([licence ovladače](#licence-ovladače-mit-nebo-gpl)) |
 | Generace NVIDIA | **Turing až Blackwell** (GSP: plné takty, Vulkan). Pascal a starší zatím framebuffer firmwaru; port cesty bez GSP z nouveau jen na přání |
 | Vulkan NVIDIA | **NVK** z Mesy (MIT) beze změny logiky; render uzel napodobí uAPI nouveau |
 | Ovladač AMD | **amdgpu** + display core (MIT) přes LinuxKPI, druhý krok ([strategie](#strategie-pro-amd-a-3d-na-intelu)) |
@@ -73,7 +74,7 @@ Ověřeno ve zdrojích Linuxu a Mesy (2026-11-14):
 | **nouveau** (Linux) | MIT text v hlavičkách (`nouveau_drm.c`, `nvkm/...`, `gsp/...`), modul „GPL and additional rights“ | NV04 až Ada, tabulky čipů i Blackwell (GB100/GB102, GB202 až GB207) | ano, všechny | Kepler+; od Turingu přes GSP-RM, výchozí (`NvGspRm` = true) | **zdroj překladu** (části pro GSP) |
 | **NVK** (Mesa) | MIT (jádro Mesy) | Kepler až Ada, spotřebitelské Blackwell (RTX 5000) | – | Vulkan 1.4 konformní; potřebuje nouveau z Linuxu 6.6+ (uAPI `VM_BIND`/`EXEC`) | **Vulkan** |
 | **open-gpu-kernel-modules** (NVIDIA) | soubory MIT, jako modul MIT/GPLv2 | Turing+ (jen s GSP firmwarem stejného vydání) | `nvidia-modeset` | jen s uzavřeným userspace NVIDIA | jen fakta, případně jen displej |
-| **nova** (Linux, Rust) | GPL-2.0 | GSP (Turing+) | zatím ne (seznam úkolů displej nemá) | rozpracované (GSP, FIFO, GR) | **jen fakta** |
+| **nova** (Linux, Rust) | GPL-2.0 | GSP: Turing až Blackwell (výčet TU102 až GB207) | ne (nova-drm má jen `INFO`, `GEM_CREATE`, `GEM_INFO`) | start GSP, fronta příkazů, VBIOS, Falcon/FWSEC, booter, MMU částečně; kanály ne | **zdroj převzetí** pro start GSP a fronty (ovladač pak GPL v `gpl/`) |
 
 Z toho:
 
@@ -130,7 +131,7 @@ zobrazení.
 
 **Stav: rozhodnuto 2026-11-14 - varianta B (vlastní ovladač v Rustu jen
 pro GSP).** Turing až Blackwell, části přeložené z nouveau (licence MIT
-překlad dovoluje; nova je GPL, z ní jen fakta), pevná verze firmwaru
+překlad dovoluje) a start GSP z nova (GPL, ovladač proto v `gpl/`), pevná verze firmwaru
 570.144, definice RPC generované z hlaviček nouveau. Pascal a starší
 zatím framebuffer firmwaru. LinuxKPI se odkládá na AMD a 3D na Intelu.
 Varianta A (nouveau v C přes LinuxKPI) zůstává zapsaná jako zvažovaná.
@@ -201,6 +202,57 @@ Zvolena B: pro Turing+ je menší a čistší, protože GSP dělá většinu
 práce. Cena: Pascal a starší bez akcelerace a změny z nouveau přenášíme
 sami. Body základů 1, 2, 4 a 8 platí beze změny.
 
+### Licence ovladače: MIT, nebo GPL
+
+Licenční politika projektu (schváleno 2026-11-14): kód pod GPL smí být
+převzatý nebo přeložený, ale **jen v oddělené části `gpl/`** jako
+samostatný proces ovladače pod GPL-2.0-only, který mluví naším veřejným
+protokolem; nikdy v jádře, knihovnách ani službách.
+
+Co nova (GPL-2.0, Linux master 2026-11-14) obsahuje:
+
+| Část | nova-core | nouveau |
+|---|---|---|
+| VBIOS (hledání FWSEC v tabulce PMU) | ano (`vbios.rs`) | ano |
+| Falcon, FWSEC, booter, SEC2, FSP | ano (`falcon/`, `firmware/`) | ano (FSP jen nové čipy) |
+| start GSP, sekvencer | ano (`gsp/boot.rs`, `sequencer.rs`) | ano |
+| fronta příkazů a zpráv | ano (`gsp/cmdq`) | ano |
+| definice zpráv podle verze firmwaru | rozpracované („GSP firmware abstraction“) | ano (`rm/r535`, `rm/r570`) |
+| MMU, BAR, VRAM | částečně (`mm/`, alokátor VRAM otevřený) | ano |
+| kanály, GR, CE | ne (otevřené úkoly) | ano |
+| zobrazení | ne (ani nova-drm) | ano (přes RM) |
+| uAPI pro Vulkan | ne (nova-drm 3 ioctl) | ano (`VM_BIND`, `EXEC`, ... pro NVK) |
+
+| | MIT (jen nouveau) | **GPL-2.0-only (nova + nouveau)** |
+|---|---|---|
+| umístění | kdekoli (ovladač, sdílené knihovny) | jen `gpl/`, samostatný proces |
+| start GSP a fronty | přeložit z C | převzít hotový Rust z nova (méně práce, odhad -5 až -8 tis. řádků překladu) |
+| zobrazení, kanály, MMU, uAPI NVK | přeložit z nouveau | totéž (nouveau, MIT - v GPL díle smí být) |
+| nové čipy po Blackwellu | čekat na nouveau | nova je směr upstreamu pro GSP (cíl: nahradit nouveau pro GSP); přebírat z obou |
+| sdílení kódu s ostatním systémem | volně | z ovladače nic nesmí zpět do MIT částí; společné věci (definice RPC z hlaviček nouveau, trait třídy displej) držet v MIT knihovnách |
+| závislosti | driverkit | driverkit + tenká náhrada API `kernel::` z Rustu v Linuxu (PCI, DMA, IO, firmware, devres), na které nova stojí |
+| licence binárky | MIT | GPL-2.0-only; zdroj je veřejný (projekt je open source), naše MIT knihovny v ní zůstávají MIT |
+| firmware | beze změny (licence NVIDIA pro OSI systémy) | beze změny |
+
+**Rozhodnutí v návrhu: GPL-2.0-only v `gpl/drivers/gpu-nvidia`.** Hlavní
+důvody: start GSP a fronty jsou v nova hotové v Rustu (stejný jazyk,
+podobné abstrakce jako driverkit), a nova je dlouhodobý směr upstreamu
+pro karty s GSP - nové generace se tam objeví dřív. Zbytek (zobrazení,
+kanály, MMU, uAPI pro NVK) se stejně překládá z nouveau.
+
+Důsledky a pravidla:
+
+- ovladač je **jeden proces v `gpl/`**, ven jen naše protokoly (třída
+  displej, třída render, ploty, sdílené buffery) - stejné jako u varianty
+  MIT, takže rozhodnutí jde později otočit bez změny zbytku systému;
+- **nic z `gpl/` se nelinkuje do MIT částí**; sestavení (`xtask`) to
+  hlídá (vlivy na základy, bod 12);
+- definice zpráv RPC generovat **z hlaviček nouveau (MIT)** do MIT
+  knihovny - zůstanou použitelné i mimo `gpl/`;
+- verzi firmwaru, kterou umí start GSP v nova, ověřit proti zvolené 570.144
+  (start ze VBIOS a booter jsou na verzi skoro nezávislé, zprávy RPC ne);
+- každý převzatý soubor nese původ a licenci v hlavičce a v `THIRD-PARTY.md`.
+
 ## AMD (druhý krok)
 
 | Část | Licence (ověřeno v hlavičkách) |
@@ -227,12 +279,13 @@ hlavičky:
 | `ttm/ttm_bo.c`, `drm_exec.c` | GPL-2.0 OR MIT | převzít pod MIT |
 | `drm_gpuvm.c` | GPL-2.0-only OR MIT | převzít pod MIT |
 | `dma-buf/dma-resv.c` | MIT | převzít |
-| **`dma-buf/dma-fence.c`** | **GPL-2.0-only** | **nepřevzít**: API `dma_fence_*` implementovat ve vrstvě kompatibility nad naším objektem plotu |
+| **`dma-buf/dma-fence.c`** | **GPL-2.0-only** | mimo `gpl/` nepřevzít; v ovladači pod `gpl/` smí být, ale ploty jádra jsou naše tak jako tak - `dma_fence_*` musí stejně předávat stav našemu objektu plotu |
 | `include/linux/*.h` (hlavičky jádra) | převážně GPL | nepřevzít: hlavičky LinuxKPI vlastní (vzor FreeBSD, BSD-2) |
 
-Pravidlo: **před převzetím každého souboru ověřit licenci** a GPL-only
-soubory nahradit vlastní implementací (jen podle API a dokumentace). Seznam
-se udržuje automaticky skriptem importu (hlavička SPDX / text MIT).
+Pravidlo: **před převzetím každého souboru ověřit licenci**. GPL-only
+soubory smí jen do procesu ovladače v `gpl/` (celý proces je pak
+GPL-2.0-only); mimo něj vlastní implementace podle API a dokumentace.
+Seznam se udržuje automaticky skriptem importu (hlavička SPDX / text MIT).
 
 ### Licence firmwaru
 
@@ -265,6 +318,13 @@ LinuxKPI je přitom **uzavřená uvnitř procesu ovladače**:
   totéž uAPI zachovat, aby Mesa zůstala beze změny;
 - **ovladač jde proto později nahradit vlastním v Rustu bez změny zbytku
   systému** (služby, kompozitor, aplikace, Mesa).
+
+**Licence (politika `gpl/`)**: s převzatým C ovladačem je proces AMD
+stejně kandidát na `gpl/` (amdgpu je MIT, ale vrstva by mohla převzít
+i GPL infrastrukturu Linuxu - `dma-fence`, pomocné knihovny z `lib/` -
+místo vlastní implementace). Postup: základ LinuxKPI z FreeBSD (BSD) a
+vlastní, GPL kód Linuxu jen tam, kde ušetří skutečnou práci; pak je celý
+proces AMD v `gpl/` pod GPL-2.0-only. Rozhodnout při startu AMD.
 
 **Trend k firmwaru**: stejně jako NVIDIA s GSP přesouvají i AMD a Intel
 plánování do firmwaru - AMD od RDNA 3 (GFX11) plánuje fronty mikrokódem
@@ -389,6 +449,7 @@ L = víc.
 | 8 | **třída render a služba render** | protokol render uzlu obecně (z Venusu: kontext, buffer, `VM_BIND`, submit s ploty, dotazy) + služba, která render uzel přidělí podle manifestu a hlídá kvóty | aplikace nesmí dostat capability k ovladači; Venus dnes dává render uzel přes init - sjednotit dřív, než přibude další ovladač | M |
 | 9 | **běhové prostředí převzatého C** | vlákna v procesu ovladače (kthread, workqueue), přesné časovače, čekání s timeoutem; `cstd` s vlákny | jádro DRM a amdgpu mají vlastní vlákna a časovače; stejné potřebuje Wi-Fi. Ovladač NVIDIA v Rustu to nepotřebuje - až s AMD | M |
 | 10 | **napájení zařízení** | protokol stavů napájení zařízení (D0/D3hot/D3cold) přes službu napájení; volání ACPI `_DSM`/`_PRx` z ovladače přes acpid | notebooky s Optimus vypínají dGPU; jinak baterie | S-M |
+| 12 | **oddělená část `gpl/`** | sestavení programů z `gpl/` zvlášť (licence GPL-2.0-only v manifestu a v initfs), kontrola, že žádný MIT program ani knihovna nezávisí na `gpl/`, licence ve výpisu `THIRD-PARTY.md` | politika schválená 2026-11-14; ovladač NVIDIA bude první program v `gpl/` | S |
 | 11 | **obnova GPU po pádu** | devmgr: reset funkce PCI (FLR / reset sběrnice) před novou instancí; kompozitor bez displeje vydrží (už umí) | po nastavení režimu se nelze vrátit na GOP; obnova jen resetem | S |
 
 Body 1, 2, 4 a 8 doporučuji začít hned: dotýkají se jádra a protokolů,
@@ -423,3 +484,4 @@ které už používají displej a Venus, a později by se měnily na víc míste
 | 2 | bez IOMMU | **B**: spustit s varováním, karanténa DMA, rada zapnout VT-d / AMD-Vi |
 | 3 | firmware | **A**: přibalit do obrazu po ověření licence (ověřeno, zbývá záznam GSP ve `WHENCE`) |
 | 4 | základy | body 1, 2, 4, 8 jako jaderná práce **po dynamickém linkování a před FFmpeg** (ploty a sdílené buffery využije i video) |
+| 5 | licence ovladače NVIDIA | **GPL-2.0-only v `gpl/`** (nova + nouveau), rozhodnuto v návrhu podle politiky `gpl/` ([licence ovladače](#licence-ovladače-mit-nebo-gpl)) |

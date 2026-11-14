@@ -15,7 +15,8 @@ Intel display is handled by our own driver ([Display configuration](display.md))
 
 | Question | Decision / recommendation |
 |---|---|
-| NVIDIA driver | **decided**: our own Rust driver for GSP only, parts translated from nouveau (MIT), fixed firmware version 570.144, RPC definitions generated from nouveau's headers; nova (GPL) facts only ([comparison](#comparison-nouveau-in-c-or-our-own-rust-driver-for-gsp)) |
+| NVIDIA driver | **decided**: our own Rust driver for GSP only, fixed firmware version 570.144, RPC definitions generated from nouveau's headers ([comparison](#comparison-nouveau-in-c-or-our-own-rust-driver-for-gsp)) |
+| NVIDIA driver licence | **decided in the design**: GPL-2.0-only in the `gpl/` part – GSP boot, VBIOS, Falcon/FWSEC and queues taken from nova (Rust, GPL), display, channels, MMU and the NVK uAPI translated from nouveau (MIT) ([driver licence](#driver-licence-mit-or-gpl)) |
 | NVIDIA generations | **Turing to Blackwell** (GSP: full clocks, Vulkan). Pascal and older firmware framebuffer for now; porting nouveau's non-GSP path only on request |
 | NVIDIA Vulkan | **NVK** from Mesa (MIT) with unchanged logic; the render node imitates the nouveau uAPI |
 | AMD driver | **amdgpu** + display core (MIT) over LinuxKPI, second step ([strategy](#strategy-for-amd-and-intel-3d)) |
@@ -75,7 +76,7 @@ Verified in the Linux and Mesa sources (2026-11-14):
 | **nouveau** (Linux) | MIT text in headers (`nouveau_drm.c`, `nvkm/...`, `gsp/...`), module "GPL and additional rights" | NV04 to Ada, chip tables also for Blackwell (GB100/GB102, GB202 to GB207) | yes, all | Kepler+; from Turing through GSP-RM, default (`NvGspRm` = true) | **translation source** (GSP parts) |
 | **NVK** (Mesa) | MIT (Mesa core) | Kepler to Ada, consumer Blackwell (RTX 5000) | – | conformant Vulkan 1.4; needs nouveau from Linux 6.6+ (`VM_BIND`/`EXEC` uAPI) | **Vulkan** |
 | **open-gpu-kernel-modules** (NVIDIA) | files MIT, MIT/GPLv2 as a module | Turing+ (only with GSP firmware of the same release) | `nvidia-modeset` | only with NVIDIA's closed userspace | facts only, maybe display only |
-| **nova** (Linux, Rust) | GPL-2.0 | GSP (Turing+) | not yet (no display item in its TODO list) | in progress (GSP, FIFO, GR) | **facts only** |
+| **nova** (Linux, Rust) | GPL-2.0 | GSP: Turing to Blackwell (TU102 to GB207 enum) | no (nova-drm has only `INFO`, `GEM_CREATE`, `GEM_INFO`) | GSP boot, command queue, VBIOS, Falcon/FWSEC, booter, MMU partly; no channels | **reuse source** for GSP boot and queues (the driver is then GPL in `gpl/`) |
 
 Therefore:
 
@@ -133,7 +134,7 @@ lists GB20x in its chip enum (`gpu.rs`) but has no display.
 
 **Status: decided 2026-11-14 – variant B (our own Rust driver for GSP
 only).** Turing to Blackwell, parts translated from nouveau (the MIT
-licence allows a translation; nova is GPL, facts only), fixed firmware
+licence allows a translation) and GSP boot from nova (GPL, so the driver lives in `gpl/`), fixed firmware
 version 570.144, RPC definitions generated from nouveau's headers. Pascal
 and older on the firmware framebuffer for now. LinuxKPI is postponed to
 AMD and Intel 3D. Variant A (nouveau in C over LinuxKPI) stays recorded
@@ -210,6 +211,61 @@ work. The price: Pascal and older without acceleration, and we port
 nouveau changes ourselves. Foundation points 1, 2, 4 and 8 apply
 unchanged.
 
+### Driver licence: MIT or GPL
+
+Project licence policy (approved 2026-11-14): GPL code may be reused or
+translated, but **only in the separate `gpl/` part** as a standalone
+driver process under GPL-2.0-only that speaks our public protocol; never
+in the kernel, libraries or services.
+
+What nova (GPL-2.0, Linux master 2026-11-14) contains:
+
+| Part | nova-core | nouveau |
+|---|---|---|
+| VBIOS (finding FWSEC in the PMU table) | yes (`vbios.rs`) | yes |
+| Falcon, FWSEC, booter, SEC2, FSP | yes (`falcon/`, `firmware/`) | yes (FSP new chips only) |
+| GSP boot, sequencer | yes (`gsp/boot.rs`, `sequencer.rs`) | yes |
+| command and message queue | yes (`gsp/cmdq`) | yes |
+| message definitions per firmware version | in progress ("GSP firmware abstraction") | yes (`rm/r535`, `rm/r570`) |
+| MMU, BAR, VRAM | partly (`mm/`, VRAM allocator open) | yes |
+| channels, GR, CE | no (open items) | yes |
+| display | no (nor nova-drm) | yes (through RM) |
+| uAPI for Vulkan | no (nova-drm 3 ioctls) | yes (`VM_BIND`, `EXEC`, ... for NVK) |
+
+| | MIT (nouveau only) | **GPL-2.0-only (nova + nouveau)** |
+|---|---|---|
+| location | anywhere (driver, shared libraries) | only `gpl/`, a separate process |
+| GSP boot and queues | translate from C | take ready Rust from nova (less work, estimate 5–8 k fewer lines to translate) |
+| display, channels, MMU, NVK uAPI | translate from nouveau | the same (nouveau, MIT – allowed inside a GPL work) |
+| chips after Blackwell | wait for nouveau | nova is upstream's direction for GSP (aim: supersede nouveau for GSP); take from both |
+| sharing code with the rest of the system | freely | nothing from the driver may flow back into MIT parts; shared things (RPC definitions from nouveau headers, the display class trait) stay in MIT libraries |
+| dependencies | driverkit | driverkit + a thin replacement of the Linux Rust `kernel::` API (PCI, DMA, IO, firmware, devres) nova builds on |
+| binary licence | MIT | GPL-2.0-only; the source is public (the project is open source), our MIT libraries stay MIT inside it |
+| firmware | unchanged (NVIDIA licence for OSI systems) | unchanged |
+
+**Decision in the design: GPL-2.0-only in `gpl/drivers/gpu-nvidia`.** Main
+reasons: GSP boot and queues are done in Rust in nova (same language,
+abstractions similar to driverkit), and nova is upstream's long-term
+direction for GSP cards – new generations will appear there first. The
+rest (display, channels, MMU, NVK uAPI) is translated from nouveau
+anyway.
+
+Consequences and rules:
+
+- the driver is **one process in `gpl/`**, only our protocols leave it
+  (display class, render class, fences, shared buffers) – the same as in
+  the MIT variant, so the decision can be reversed later without changing
+  the rest of the system;
+- **nothing from `gpl/` is linked into MIT parts**; the build (`xtask`)
+  enforces it (impact on the foundations, point 12);
+- RPC message definitions are generated **from nouveau's headers (MIT)**
+  into an MIT library – usable outside `gpl/` as well;
+- verify which firmware version nova's GSP boot supports against the
+  chosen 570.144 (VBIOS boot and booter are nearly version-independent,
+  RPC messages are not);
+- every reused file carries its origin and licence in its header and in
+  `THIRD-PARTY.md`.
+
 ## AMD (second step)
 
 | Part | Licence (verified in headers) |
@@ -237,13 +293,14 @@ headers:
 | `ttm/ttm_bo.c`, `drm_exec.c` | GPL-2.0 OR MIT | reuse under MIT |
 | `drm_gpuvm.c` | GPL-2.0-only OR MIT | reuse under MIT |
 | `dma-buf/dma-resv.c` | MIT | reuse |
-| **`dma-buf/dma-fence.c`** | **GPL-2.0-only** | **do not reuse**: implement the `dma_fence_*` API in the compatibility layer on our fence object |
+| **`dma-buf/dma-fence.c`** | **GPL-2.0-only** | not outside `gpl/`; allowed in a driver under `gpl/`, but kernel fences are ours anyway – `dma_fence_*` must still forward state to our fence object |
 | `include/linux/*.h` (kernel headers) | mostly GPL | do not reuse: our own LinuxKPI headers (model FreeBSD, BSD-2) |
 
-Rule: **check the licence of every file before reusing it** and replace
-GPL-only files with our own implementation (from the API and
-documentation only). The import script keeps the list automatically
-(SPDX header / MIT text).
+Rule: **check the licence of every file before reusing it**. GPL-only
+files may go only into a driver process in `gpl/` (the whole process is
+then GPL-2.0-only); outside it, our own implementation from the API and
+documentation. The import script keeps the list automatically (SPDX
+header / MIT text).
 
 ### Firmware licences
 
@@ -278,6 +335,14 @@ The LinuxKPI layer is **sealed inside the driver process**:
 - **the driver can therefore later be replaced by our own Rust driver
   without changing the rest of the system** (services, compositor,
   applications, Mesa).
+
+**Licence (`gpl/` policy)**: with a reused C driver the AMD process is a
+candidate for `gpl/` as well (amdgpu is MIT, but the layer could reuse
+Linux's GPL infrastructure – `dma-fence`, helper libraries from `lib/` –
+instead of our own implementation). Approach: the LinuxKPI base from
+FreeBSD (BSD) and our own, Linux GPL code only where it saves real work;
+then the whole AMD process lives in `gpl/` under GPL-2.0-only. Decide when
+AMD work starts.
 
 **The trend towards firmware**: like NVIDIA with GSP, AMD and Intel move
 scheduling into firmware – AMD from RDNA 3 (GFX11) schedules queues with
@@ -405,6 +470,7 @@ M = 1–2 weeks, L = more.
 | 8 | **render class and render service** | a general render node protocol (from Venus: context, buffer, `VM_BIND`, submit with fences, queries) + a service that hands render nodes out by manifest and enforces quotas | applications must not get a capability to the driver; Venus hands its render node out through init today – unify before another driver appears | M |
 | 9 | **runtime for reused C** | threads in the driver process (kthread, workqueue), precise timers, waits with timeouts; `cstd` with threads | the DRM core and amdgpu have their own threads and timers; Wi-Fi needs the same. The Rust NVIDIA driver does not need it – only with AMD | M |
 | 10 | **device power** | a protocol for device power states (D0/D3hot/D3cold) through the power service; ACPI `_DSM`/`_PRx` calls from the driver through acpid | Optimus laptops turn the dGPU off; otherwise battery drain | S–M |
+| 12 | **separate `gpl/` part** | build programs from `gpl/` separately (GPL-2.0-only licence in the manifest and the initfs), check that no MIT program or library depends on `gpl/`, licence in the `THIRD-PARTY.md` listing | policy approved 2026-11-14; the NVIDIA driver will be the first program in `gpl/` | S |
 | 11 | **GPU recovery after a crash** | devmgr: PCI function reset (FLR / bus reset) before a new instance; the compositor survives without a display (it already does) | after a mode set there is no way back to GOP; recovery only by a reset | S |
 
 I recommend starting points 1, 2, 4 and 8 right away: they touch the
@@ -444,3 +510,4 @@ they would change in more places.
 | 2 | without an IOMMU | **B**: start with a warning, DMA quarantine, advice to enable VT-d / AMD-Vi |
 | 3 | firmware | **A**: bundle into the image after verifying the licence (verified; the GSP entry in `WHENCE` remains) |
 | 4 | foundations | points 1, 2, 4, 8 as kernel work **after dynamic linking and before FFmpeg** (video uses fences and shared buffers too) |
+| 5 | NVIDIA driver licence | **GPL-2.0-only in `gpl/`** (nova + nouveau), decided in the design under the `gpl/` policy ([driver licence](#driver-licence-mit-or-gpl)) |
