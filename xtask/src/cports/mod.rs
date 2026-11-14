@@ -143,6 +143,11 @@ const PORTS: &[CPort] = &[
             ("testsprite.manifest.toml", "port:testsprite.manifest.toml"),
             ("checkkeys.manifest.toml", "port:checkkeys.manifest.toml"),
             ("testmagnumopus.manifest.toml", "port:testmagnumopus.manifest.toml"),
+            ("testkeys.manifest.toml", "port:testkeys.manifest.toml"),
+            ("testaudio.manifest.toml", "port:testaudio.manifest.toml"),
+            ("snake.manifest.toml", "port:snake.manifest.toml"),
+            ("woodeneye.manifest.toml", "port:woodeneye.manifest.toml"),
+            ("sdl-sample.wav", "test/sample.wav"),
             ("sdl-icon.png", "test/icon.png"),
         ],
         build: Build::CMake {
@@ -181,15 +186,28 @@ const PORTS: &[CPort] = &[
                 // Okna dava ovladac magnumopus, ne X11 / Wayland (jinak by
                 // konfigurace na "unixu" bez nich skoncila chybou).
                 "-DSDL_UNIX_CONSOLE_BUILD=ON",
-                // Gamepady samostatny krok (Q6 B), kamera a dialogy nejsou (Q7 A).
+                // Gamepady samostatny krok (Q6 B): bez HIDAPI a ovladacu
+                // zarizeni; kamera a dialogy nejsou (Q7 A).
                 "-DSDL_HIDAPI=OFF",
-                "-DSDL_JOYSTICK=OFF",
-                "-DSDL_HAPTIC=OFF",
+                // Subsystem joysticku a haptiky zapnuty jen s ovladacem
+                // `dummy` (zadna zarizeni): hry volaji SDL_Init s nimi.
+                "-DSDL_JOYSTICK=ON",
+                "-DSDL_HAPTIC=ON",
+                "-DSDL_VIRTUAL_JOYSTICK=OFF",
                 "-DSDL_CAMERA=OFF",
                 "-DSDL_DIALOG=OFF",
                 "-DSDL_TRAY=OFF",
             ],
-            programs: &[("testsprite", "test/testsprite"), ("checkkeys", "test/checkkeys"), ("testmagnumopus", "test/testmagnumopus")],
+            programs: &[
+                ("testsprite", "test/testsprite"),
+                ("checkkeys", "test/checkkeys"),
+                ("testkeys", "test/testkeys"),
+                ("testaudio", "test/testaudio"),
+                ("testmagnumopus", "test/testmagnumopus"),
+                // Ukazkove hry SDL (examples/demo), dukaz portu (Q9 A).
+                ("snake", "examples/demo-snake"),
+                ("woodeneye", "examples/demo-woodeneye-008"),
+            ],
         },
     },
 ];

@@ -834,7 +834,7 @@ stojí na předchozím:
 | 3 | Správa paměti: `mmap`, rezervace adresního prostoru na pevné adresy, stránky na požádání, CoW, W^X s oprávněním „smí JIT“ | Wine, prohlížeče, .NET | [ověřeno v QEMU] |
 | 4 | Dynamické linkování: zavádění sdílených knihoven (ELF `ET_DYN`) | Wine a většina C/C++ projektů | [ověřeno v QEMU] |
 | 5 | Doručení výjimek (SEH, signály) a pozastavení vlákna se čtením a zápisem kontextu | Wine, ladicí nástroje | [ověřeno v QEMU] |
-| 6 | SDL2/3 nad kompozitorem a `audiod` | jeden port otevře hry a multimediální aplikace | [navrženo] |
+| 6 | SDL 3 nad kompozitorem a `audiod` ([SDL](sdl.md)) | jeden port otevře hry a multimediální aplikace | [ověřeno v QEMU] |
 | 6a | Grafické a video základy v jádře: objekt plotu, sdílený buffer, DMA po kusech s mapováním do IOMMU, třída render ([Grafika NVIDIA a AMD](gpu-amd-nvidia.md#vlivy-na-základy), body 1, 2, 4, 8) | ploty a buffery bez kopie pro video (FFmpeg), kompozitor, Vulkan a ovladače GPU; `dma-fence` z Linuxu je GPL, potřebujeme vlastní | [ověřeno v QEMU] |
 | 7 | FFmpeg jako izolovaný proces (LGPL), pak přehrávač | multimédia | [navrženo] |
 | 7a | Běhové prostředí C++: libc++, libc++abi, libunwind, výjimky C++ (LLVM, Apache-2.0 s výjimkou LLVM) nad `cstd` a výjimkami | Wine, prohlížeče (Ladybird, SpiderMonkey v Servo), LLVM a rustc v systému | [navrženo] |

@@ -99,7 +99,7 @@ installer may not have refreshed `PATH` in an open terminal).
 |---|---|---|---|---|
 | zlib | 1.3.1 | zlib | `Sources` | `zlib-example`, `minigzip` |
 | sqlite | 3.46.1 | public domain | `Sources` | `sqlite3`, `sqltest` |
-| SDL | 3.4.20 | zlib | `CMake` | `testsprite`, `checkkeys` ([SDL](sdl.md)) |
+| SDL | 3.4.20 | zlib | `CMake` | `snake`, `woodeneye`, `testsprite`, `testaudio`, `testkeys`, `checkkeys`, `testmagnumopus` ([SDL](sdl.md)) |
 
 Port tests and limitations (sqlite without WAL and mmap I/O) are described
 in [cstd](cstd.md#c-sysroot-and-ports-part-2i).
