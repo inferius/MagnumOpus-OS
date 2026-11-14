@@ -15,6 +15,7 @@ basis for SEH in the Windows layer, signals (`SIGSEGV`, `SIGFPE`) in
 | 1 | suspending a thread (`THREAD_SUSPEND`), reading and writing its context (`THREAD_STATE`) | **[verified in QEMU]** x86_64 and aarch64 (suite `procesy`) |
 | 2 | exception channels (`EXCEPTION_CHANNEL`, `EXCEPTION_RESOLVE`), listing threads (`PROCESS_THREADS`), handler thread | **[verified in QEMU]** x86_64 and aarch64 |
 | 3 | delivery right in the thread (`EXCEPTION_HANDLER`), alternate stack, nesting limit | **[verified in QEMU]** x86_64 and aarch64 |
+| 4 | typed libos API: `Frame` (registers, PC, SP, FPU, return), `alloc_alt_stack`, `signal_class` | **[verified in QEMU]** x86_64 and aarch64 |
 | - | single-step and hardware breakpoints, delivering a Windows `PAGE_GUARD` exception | **[designed]** |
 
 ## Handler order
@@ -110,6 +111,38 @@ NEXT)`.
   channels.
 - **The handler entry** must lie in executable memory, i.e. sealed or with
   the JIT permission (W^X, [memory-management.md](memory-management.md)).
+
+### API for signals and SEH
+
+`libos::exception::Frame` is typed access to the frame (the basis for
+`ucontext_t` in `cstd` and `CONTEXT` in the Windows layer): `report()`,
+`general()` / `set_general()` (`X64General` / `A64General`), `pc()`,
+`sp()`, `fp()` and returning with `resume()` / `next()`.
+`alloc_alt_stack(size)` allocates and sets the thread's alternate stack.
+
+| Kind (`abi::exception::kind`) | `signal_class` | POSIX | SEH (Wine) |
+|---|---|---|---|
+| `PAGE_FAULT`, `GENERAL` | `Segv` | `SIGSEGV` | `EXCEPTION_ACCESS_VIOLATION` (`access`: read / write / execute) |
+| `ALIGNMENT` | `Bus` | `SIGBUS` | `EXCEPTION_DATATYPE_MISALIGNMENT` |
+| `DIVIDE` | `Fpe` | `SIGFPE` | `EXCEPTION_INT_DIVIDE_BY_ZERO` |
+| `INVALID_OPCODE` | `Ill` | `SIGILL` | `EXCEPTION_ILLEGAL_INSTRUCTION` |
+| `BREAKPOINT` | `Trap` | `SIGTRAP` | `EXCEPTION_BREAKPOINT` |
+
+Signal numbers are chosen by `cstd`, `EXCEPTION_*` codes by the Windows
+layer.
+
+```rust
+extern "C" fn on_fault(f: *mut u8) -> ! {
+    let mut fr = unsafe { libos::exception::Frame::from_raw(f) };
+    if libos::exception::signal_class(fr.report().kind) == SignalClass::Trap {
+        // aarch64: the PC is at brk
+        if cfg!(target_arch = "aarch64") { let pc = fr.pc(); fr.set_pc(pc + 4); }
+        let _ = fr.resume();
+    }
+    let _ = fr.next();
+    libos::sys::thread_exit()
+}
+```
 
 ## Suspending and context
 

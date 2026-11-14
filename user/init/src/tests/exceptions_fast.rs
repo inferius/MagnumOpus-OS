@@ -9,7 +9,10 @@ use core::time::Duration;
 use libos::abi::exception::{action, frame, kind, stage};
 use libos::abi::process::EXIT_FAULT_BASE;
 use libos::abi::vm::{MAP_EXECUTE, MAP_READ, MAP_WRITE, region};
-use libos::exception::{clear_handler, frame_report, handler_return, receive, set_alt_stack, set_handler};
+use libos::exception::{
+    Frame, SignalClass, alloc_alt_stack, clear_handler, frame_report, handler_return, receive, set_alt_stack,
+    set_handler, signal_class,
+};
 use libos::{Error, Startup, time, vm};
 
 use super::{Test, TestResult, fail};
@@ -23,6 +26,7 @@ pub const TESTS: &[Test] = &[
     ("ve vlaknu: preteceni bez alternativniho zasobniku konci cisty", overflow_clean_end),
     ("ve vlaknu: vnoreni nad limit jde na kanal procesu", nesting_limit),
     ("ve vlaknu: chybne argumenty a RETURN bez obsluhy", bad_args),
+    ("ve vlaknu: typovy ramec (breakpoint, alternativni zasobnik)", frame_api),
 ];
 
 const RW: u32 = MAP_READ | MAP_WRITE;
@@ -47,6 +51,11 @@ const M_FORGE: u64 = 2;
 const M_NEXT: u64 = 3;
 const M_OVERFLOW: u64 = 4;
 const M_NEST: u64 = 5;
+const M_FRAME: u64 = 6;
+
+/// Alternativni zasobnik testu `frame_api` (zacatek, delka).
+static ALT: AtomicU64 = AtomicU64::new(0);
+const ALT_LEN: u64 = 64 * 1024;
 
 /// Offset PC v obecnych registrech ramce.
 const PC_OFF: usize = frame::GENERAL + if cfg!(target_arch = "x86_64") { 16 * 8 } else { 32 * 8 };
@@ -83,6 +92,28 @@ extern "C" fn handler(f: *mut u8) -> ! {
         M_OVERFLOW => {
             HITS.fetch_add(1, Ordering::SeqCst);
             // Na alternativnim zasobniku: vlakno ukoncit (zasobnik je plny).
+            libos::sys::thread_exit()
+        }
+        M_FRAME if r.kind == kind::BREAKPOINT => {
+            // SAFETY: ramec od jadra.
+            let mut fr = unsafe { Frame::from_raw(f) };
+            let alt = ALT.load(Ordering::SeqCst);
+            let on_alt = (alt..alt + ALT_LEN).contains(&(f as u64));
+            let ok = fr.report().kind == kind::BREAKPOINT
+                && signal_class(fr.report().kind) == SignalClass::Trap
+                && fr.pc() == r.pc
+                && fr.sp() != 0
+                && fr.fp().len() == if cfg!(target_arch = "x86_64") { 512 } else { 528 }
+                && on_alt;
+            HITS.fetch_add(1, Ordering::SeqCst);
+            RESULT.store(if ok { 77 } else { 1 }, Ordering::SeqCst);
+            // aarch64: PC stoji na `brk`, posunout za nej (x86_64 uz je za `int3`).
+            if cfg!(target_arch = "aarch64") {
+                let pc = fr.pc();
+                fr.set_pc(pc + 4);
+            }
+            let e = fr.resume();
+            RESULT.store(e as u64 | 0x3000, Ordering::SeqCst);
             libos::sys::thread_exit()
         }
         M_NEST => {
@@ -257,5 +288,32 @@ fn bad_args(_: &Startup) -> TestResult {
     // SAFETY: bez obsluhy se nic neprovede, jen chyba.
     let e = unsafe { handler_return(core::ptr::null(), action::RESUME) };
     check_eq!(e, Error::BadState, "RETURN bez obsluhy");
+    Ok(())
+}
+
+fn frame_api(_: &Startup) -> TestResult {
+    let base = reset(M_FRAME, 1)?;
+    let w = libos::thread::spawn("breakpoint", || {
+        let Ok(alt) = alloc_alt_stack(ALT_LEN) else { return };
+        ALT.store(alt, Ordering::SeqCst);
+        // SAFETY: breakpoint; obsluha ho preskoci a vlakno pokracuje.
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            core::arch::asm!("int3");
+        }
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            core::arch::asm!("brk #0");
+        }
+        HITS.fetch_add(100, Ordering::SeqCst);
+        let _ = set_alt_stack(0, 0);
+        let _ = vm::release(alt, ALT_LEN);
+    })
+    .map_err(|e| fail("vlakno", e))?;
+    let r = w.join(deadline(5000));
+    finish(base, 1);
+    r.map_err(|e| fail("vlakno", e))?;
+    check_eq!(RESULT.load(Ordering::SeqCst), 77, "ramec: druh, trida, PC, SP, FPU, alternativni zasobnik");
+    check_eq!(HITS.load(Ordering::SeqCst), 101, "obsluha jednou, vlakno pokracovalo za breakpointem");
     Ok(())
 }
