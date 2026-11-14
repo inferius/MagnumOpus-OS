@@ -16,7 +16,7 @@ in [kernel.md](kernel.md#memory), syscalls in [syscalls.md](syscalls.md).
 | 2 | reservations (`VM_RESERVE`), partial `VM_UNMAP` and decommit, `VM_PROTECT`, `VM_QUERY`, guard regions | **[verified in QEMU]** x86_64 and aarch64 (self-tests `mm_regions`, suite `pamet`) |
 | 3 | `VMO_CLONE` (copy-on-write) and shared code of programs from initfs | **[verified in QEMU]** x86_64 and aarch64 (self-tests `mm_cow`, suite `pamet`) |
 | 4 | `VMO_SEAL`, W^X with a "may JIT" permission (job policy, manifest), audit | **[verified in QEMU]** x86_64 and aarch64 (self-tests `mm_wx`, suite `pamet`) |
-| 5 | libos API (basis of `mmap` in `cstd`), guards below stacks | **[designed]** |
+| 5 | libos API (basis of `mmap` in `cstd`), guard regions below stacks | **[verified in QEMU]** x86_64 and aarch64 (suite `pamet`) |
 
 ## Demand paging
 
@@ -196,8 +196,36 @@ executable at once (a typical memory-corruption exploit). **It does not
 protect against a process that can make syscalls:** such a process can
 write new code into an object, seal it and execute it - just like the
 program loader does. Stronger protection (execute only code sealed by a
-trusted loader, or signed) is **[designed]** as a next step; it needs a
-"may create executable code" capability for sealing.
+trusted loader, or signed) is **[designed]** and belongs to the planned
+program signatures (Secure Boot, a launch gate - see
+[architecture.md](architecture.md#security)); it needs a "may create
+executable code" capability for sealing.
+
+## The libos API
+
+Functions over the own address space (`libs/libos/src/vm.rs`), the basis
+for `mmap` in the C library (`cstd`) and for Wine:
+
+| Function | What it does | Corresponds to |
+|---|---|---|
+| `vm::reserve(len, flags)`, `vm::reserve_at(addr, len, flags)` | a reservation without memory (`RESERVE_GUARD` = a guard) | `VirtualAlloc(MEM_RESERVE)` |
+| `vm::alloc(len, prot)` | anonymous memory in a free range (demand paging) | `mmap(MAP_ANONYMOUS)` |
+| `vm::commit(addr, len, prot)` | anonymous memory into a reservation | `MEM_COMMIT` |
+| `vm::protect(addr, len, prot)` | rights (0 = no access) | `mprotect`, `VirtualProtect` |
+| `vm::decommit(addr, len)` | memory back, addresses stay reserved | `MEM_DECOMMIT` |
+| `vm::release(addr, len)` | releases also a part of a region | `munmap`, `MEM_RELEASE` |
+| `vm::query(addr)` | the region or free range | `VirtualQuery` |
+| `vm::map_stack(process, vmo, len)` | a stack with a guard region below it | - |
+
+For other processes (a loader, debugging) the same operations exist on
+`Process` (`map`, `reserve`, `protect`, `query`, `decommit`, `unmap`).
+
+**Guard regions below stacks:** a program's main stack (`spawn`) and every
+thread's stack (`thread::spawn`) have a guard reservation
+`vm::STACK_GUARD` (64 KiB, costs no memory) below them. A stack overflow
+thus ends with a fault in the guard region and the message "access to a
+guard region (stack overflow?)" instead of silently overwriting foreign
+memory. A thread's `join` releases the stack and the guard together.
 
 ## The zero page
 

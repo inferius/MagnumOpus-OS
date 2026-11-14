@@ -15,7 +15,7 @@ z fsd. Rozložení adresního prostoru a ochrany (SMAP, NX) popisuje
 | 2 | rezervace (`VM_RESERVE`), částečné `VM_UNMAP` a decommit, `VM_PROTECT`, `VM_QUERY`, ochranné oblasti | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy `mm_regions`, sada `pamet`) |
 | 3 | `VMO_CLONE` (copy-on-write) a sdílený kód programů z initfs | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy `mm_cow`, sada `pamet`) |
 | 4 | `VMO_SEAL`, W^X s oprávněním „smí JIT“ (politika jobu, manifest), audit | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy `mm_wx`, sada `pamet`) |
-| 5 | API v libos (podklad `mmap` v `cstd`), guard pod zásobníky | **[navrženo]** |
+| 5 | API v libos (podklad `mmap` v `cstd`), ochranná oblast pod zásobníky | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `pamet`) |
 
 ## Stránky na požádání
 
@@ -189,8 +189,35 @@ a spustitelná zároveň (typický exploit přes poškozenou paměť). **Nechrá
 proti procesu, který může volat syscally:** ten si může nový kód zapsat do
 objektu, zapečetit ho a spustit - stejně jako to dělá zavaděč programů.
 Silnější ochrana (spouštět jen kód zapečetěný důvěryhodným zavaděčem nebo
-podepsaný) je **[navrženo]** jako další krok; potřebuje k pečeti
-capability „smí vytvářet spustitelný kód“.
+podepsaný) je **[navrženo]** a patří k plánovaným podpisům programů
+(Secure Boot, brána spuštění - viz [architektura.md](architektura.md#bezpečnost));
+potřebuje k pečeti capability „smí vytvářet spustitelný kód“.
+
+## API v libos
+
+Funkce nad vlastním adresním prostorem (`libs/libos/src/vm.rs`), podklad
+pro `mmap` v C knihovně (`cstd`) a pro Wine:
+
+| Funkce | Co dělá | Odpovídá |
+|---|---|---|
+| `vm::reserve(len, flags)`, `vm::reserve_at(addr, len, flags)` | rezervace bez paměti (`RESERVE_GUARD` = ochranná) | `VirtualAlloc(MEM_RESERVE)` |
+| `vm::alloc(len, prot)` | anonymní paměť na volném místě (stránky na požádání) | `mmap(MAP_ANONYMOUS)` |
+| `vm::commit(addr, len, prot)` | anonymní paměť do rezervace | `MEM_COMMIT` |
+| `vm::protect(addr, len, prot)` | práva (0 = žádný přístup) | `mprotect`, `VirtualProtect` |
+| `vm::decommit(addr, len)` | paměť zpět, adresy zůstanou rezervované | `MEM_DECOMMIT` |
+| `vm::release(addr, len)` | uvolní i část oblasti | `munmap`, `MEM_RELEASE` |
+| `vm::query(addr)` | oblast nebo volné místo | `VirtualQuery` |
+| `vm::map_stack(process, vmo, len)` | zásobník s ochrannou oblastí pod sebou | - |
+
+Pro jiné procesy (zavaděč, ladění) jsou stejné operace na `Process`
+(`map`, `reserve`, `protect`, `query`, `decommit`, `unmap`).
+
+**Ochranná oblast pod zásobníky:** hlavní zásobník programu (`spawn`)
+i zásobník každého vlákna (`thread::spawn`) má pod sebou ochrannou
+rezervaci `vm::STACK_GUARD` (64 KiB, nestojí paměť). Přetečení zásobníku
+tak skončí výpadkem v ochranné oblasti s hláškou „přístup do ochranné
+oblasti (přetečení zásobníku?)“ místo tichého přepsání cizí paměti.
+`join` vlákna uvolní zásobník i ochrannou oblast najednou.
 
 ## Nulová stránka
 

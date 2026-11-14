@@ -11,6 +11,9 @@ use super::{Test, TestResult, fail};
 use crate::check_eq;
 
 pub const TESTS: &[Test] = &[
+    ("libos vm: rezervace, commit, protect, decommit, release", libos_vm_api),
+    ("ochranna oblast pod zasobnikem vlakna a procesu", stack_guards),
+    ("preteceni zasobniku skonci vypadkem v ochranne oblasti", stack_overflow),
     ("oblasti: rezervace 64 GiB a mapovani do ni (Wine)", reserve_and_commit),
     ("oblasti: castecne odmapovani a VM_PROTECT", partial_and_protect),
     ("oblasti: VM_QUERY a chyby argumentu", query_and_errors),
@@ -34,6 +37,76 @@ unsafe fn peek(addr: u64) -> u64 {
 unsafe fn poke(addr: u64, v: u64) {
     // SAFETY: predano volajicim.
     unsafe { core::ptr::write_volatile(addr as *mut u64, v) }
+}
+
+fn libos_vm_api(_: &Startup) -> TestResult {
+    use libos::vm;
+    let pg = page();
+    let base = vm::reserve(16 * pg, 0).map_err(|e| fail("reserve", e))?;
+    vm::commit(base + 4 * pg, 4 * pg, RW).map_err(|e| fail("commit", e))?;
+    // SAFETY: `base+4..base+8 stranek` je prave namapovane RW.
+    unsafe {
+        poke(base + 4 * pg, 77);
+        check_eq!(peek(base + 4 * pg), 77, "data po commitu");
+    }
+    vm::protect(base + 4 * pg, 4 * pg, MAP_READ).map_err(|e| fail("protect", e))?;
+    check_eq!(vm::query(base + 5 * pg).map_err(|e| fail("query", e))?.flags, MAP_READ, "prava");
+    vm::decommit(base + 4 * pg, 4 * pg).map_err(|e| fail("decommit", e))?;
+    let q = vm::query(base + 5 * pg).map_err(|e| fail("query", e))?;
+    check_eq!(q.kind, region::RESERVED, "po decommitu rezervace");
+    // Znovu commit: nova anonymni pamet = nuly.
+    vm::commit(base + 4 * pg, pg, RW).map_err(|e| fail("commit znovu", e))?;
+    // SAFETY: znovu namapovane RW.
+    check_eq!(unsafe { peek(base + 4 * pg) }, 0, "nova pamet po decommitu");
+    vm::release(base, 16 * pg).map_err(|e| fail("release", e))?;
+    let a = vm::alloc(2 * pg, RW).map_err(|e| fail("alloc", e))?;
+    // SAFETY: prave alokovane RW.
+    unsafe { poke(a + pg, 5) };
+    vm::release(a, 2 * pg).map_err(|e| fail("release alloc", e))?;
+    check_eq!(vm::query(a).map_err(|e| fail("query", e))?.kind, region::FREE, "po release");
+    Ok(())
+}
+
+/// Oblast tesne pod oblasti obsahujici `addr`.
+fn region_below(q: impl Fn(u64) -> Result<libos::abi::vm::RegionInfo, Error>, addr: u64) -> Result<libos::abi::vm::RegionInfo, alloc::string::String> {
+    let r = q(addr).map_err(|e| fail("dotaz", e))?;
+    q(r.start - 1).map_err(|e| fail("dotaz pod", e))
+}
+
+fn stack_guards(_: &Startup) -> TestResult {
+    // Vlakno: oblast pod jeho zasobnikem je ochranna rezervace.
+    let w = libos::thread::spawn("guard", || {
+        let local = 0u8;
+        let here = core::hint::black_box(&local) as *const u8 as u64;
+        let below = region_below(libos::vm::query, here);
+        STATE.store(
+            match below {
+                Ok(r) if r.kind == region::RESERVED && r.attrs & region::ATTR_GUARD != 0 => 1,
+                _ => 2,
+            },
+            core::sync::atomic::Ordering::SeqCst,
+        );
+    })
+    .map_err(|e| fail("vlakno", e))?;
+    w.join(Some(libos::time::deadline_after(core::time::Duration::from_secs(5))))
+        .map_err(|e| fail("join", e))?;
+    check_eq!(STATE.load(core::sync::atomic::Ordering::SeqCst), 1, "ochranna oblast pod zasobnikem vlakna");
+    Ok(())
+}
+
+static STATE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+fn stack_overflow(s: &Startup) -> TestResult {
+    let fs = libos::initfs::Initfs::open(s).map_err(|e| fail("initfs", e))?;
+    let image = fs.find("echo").ok_or("echo neni v initfs")?;
+    let (p, ch) = libos::spawn("preteceni", image, alloc::vec::Vec::new()).map_err(|e| fail("spusteni", e))?;
+    ch.write(b"overflow", alloc::vec::Vec::new()).map_err(|e| fail("overflow", e))?;
+    let code = p
+        .wait_exit(Some(libos::time::deadline_after(core::time::Duration::from_secs(20))))
+        .map_err(|e| fail("konec", e))?;
+    // Vypadek stranky (vektor 14) v ochranne oblasti, ne jina chyba.
+    check_eq!(code, libos::abi::process::EXIT_FAULT_BASE - 14, "kod konce po preteceni");
+    Ok(())
 }
 
 fn reserve_and_commit(s: &Startup) -> TestResult {

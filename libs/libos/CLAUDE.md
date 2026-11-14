@@ -13,6 +13,7 @@ Knihovna pro programy v userspace (`no_std`) a **stabilní API pro aplikace**: t
 - Aplikace volá libos, nikdy přímo čísla syscallů.
 - Typy objektů zavírají handle v `Drop`; nepřidávej cestu, která handle zdvojí nebo nechá viset.
 - Veřejné API je hotové až s ověřeným chováním na x86_64 i aarch64.
+- Zásobníky (hlavní ve `spawn` i vláken) vždy přes `vm::map_stack` s ochrannou oblastí `vm::STACK_GUARD` pod sebou; uvolnit se musí celá rezervace (`join`).
 - Spouštění sdílí kód jen programů z namapovaného initfs (`initfs::offset_of`, neměnný obsah); obraz odjinud se nahrává bez sdílení, aby záměna obrazu nepodstrčila cizí kód.
 - Žádné závislosti na službách (`fsd`, `netd`): klienti jsou v `svcclient` a `*proto`.
 

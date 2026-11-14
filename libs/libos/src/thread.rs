@@ -1,13 +1,12 @@
 //! Vlakna ve vlastnim procesu: `spawn(f)` s vlastnim zasobnikem.
 //!
-//! Zasobnik je objekt pameti namapovany do vlastniho procesu; po `join`
-//! se odmapuje. Heap je sdileny (alokator se zamkem), takze vlakno muze
+//! Zasobnik je objekt pameti namapovany do vlastniho procesu s ochrannou
+//! oblasti pod sebou (`vm::map_stack`); po `join` se uvolni oboje. Heap je sdileny (alokator se zamkem), takze vlakno muze
 //! alokovat. Panika ve vlakne ukonci cely proces (stejne jako v hlavnim).
 
 use alloc::boxed::Box;
 
 use abi::Result;
-use abi::vm::{MAP_READ, MAP_WRITE};
 
 use crate::{Process, Thread, Vmo, rt, sys};
 
@@ -71,7 +70,8 @@ fn spawn_in(me: &Process, name: &str, f: impl FnOnce() + Send + 'static) -> Resu
 fn spawn_stack(me: &Process, name: &str, stack: u64, f: impl FnOnce() + Send + 'static) -> Result<JoinHandle> {
     let len = stack.max(STACK_SIZE).next_multiple_of(crate::vm::page_size());
     let stack = Vmo::create(len)?;
-    let addr = me.map(&stack, 0, len, MAP_READ | MAP_WRITE, 0)?;
+    let (addr, total, stack_top) = crate::vm::map_stack(me, &stack, len)?;
+    let len = total;
     let thread = match Thread::create(me, name) {
         Ok(t) => t,
         Err(e) => {
@@ -80,7 +80,7 @@ fn spawn_stack(me: &Process, name: &str, stack: u64, f: impl FnOnce() + Send + '
         }
     };
     // x86_64: rsp % 16 == 8 jako po instrukci call; aarch64: sp % 16 == 0.
-    let top = if cfg!(target_arch = "x86_64") { addr + len - 8 } else { addr + len };
+    let top = if cfg!(target_arch = "x86_64") { stack_top - 8 } else { stack_top };
     let job: Box<Job> = Box::new(Box::new(f));
     let raw = Box::into_raw(job);
     if let Err(e) = thread.start(trampoline as *const () as u64, top, raw as u64, 0) {

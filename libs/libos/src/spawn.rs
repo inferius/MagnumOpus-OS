@@ -224,7 +224,8 @@ pub fn spawn_with(
 
     let stack_size = opts.stack_size.max(page).next_multiple_of(page);
     let stack = Vmo::create_for(stack_size, &process)?;
-    let stack_top = process.map(&stack, 0, stack_size, MAP_READ | MAP_WRITE, 0)? + stack_size;
+    // Pod zasobnikem ochranna oblast (preteceni = hlaska, ne cizi pamet).
+    let (_, _, stack_top) = crate::vm::map_stack(&process, &stack, stack_size)?;
 
     let (parent_end, child_end) = Channel::create()?;
     let mut data = Vec::new();
