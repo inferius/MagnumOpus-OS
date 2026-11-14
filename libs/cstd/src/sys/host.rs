@@ -537,3 +537,8 @@ pub fn vm_query(addr: u64) -> R<super::Region> {
         .map(|&(a, l)| super::Region { kind: 2, start: a, len: l, prot: 3 })
         .ok_or(errno::ENOMEM)
 }
+
+/// Zamky na hostiteli nejsou (logiku testuje `libs/fs`).
+pub fn file_lock(_fd: i32, _cmd: u8, _class: u8, _write: bool, _start: u64, _len: u64) -> R<super::LockResult> {
+    Err(errno::ENOLCK)
+}

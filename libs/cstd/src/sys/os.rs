@@ -440,3 +440,21 @@ pub fn vm_query(addr: u64) -> R<super::Region> {
     let r = rt::vm::query(addr).map_err(vm_err)?;
     Ok(super::Region { kind: r.kind, start: r.start, len: r.len, prot: r.flags & 7 })
 }
+
+// --- zamky souboru -----------------------------------------------------------
+
+use super::LockResult;
+
+pub fn file_lock(fd: i32, cmd: u8, class: u8, write: bool, start: u64, len: u64) -> R<LockResult> {
+    let d = desc(fd)?;
+    let f = d.file().ok_or(errno::EINVAL)?;
+    match f.posix_lock(cmd, class, write, start, len) {
+        Ok(fsproto_lock) => Ok(match fsproto_lock {
+            rt::fs::PosixLock::Done => LockResult::Done,
+            rt::fs::PosixLock::Conflict { write, start, len } => LockResult::Conflict { write, start, len },
+            rt::fs::PosixLock::Deadlock => LockResult::Deadlock,
+        }),
+        Err(rt::Error::ServiceRestarted) => Err(errno::ENOLCK),
+        Err(err) => Err(e(err)),
+    }
+}

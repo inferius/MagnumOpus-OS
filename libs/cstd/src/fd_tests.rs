@@ -91,3 +91,15 @@ fn pipe_ends_and_access_mode() {
     sys::close(w).unwrap();
     assert_eq!(sys::dup(5000, 0, false).map_err(|e| e == EBADF || e == EINVAL), Err(true));
 }
+
+#[test]
+fn flock_ranges() {
+    use crate::flock::{abs_range, flock};
+    let l = |w: i16, s: i64, n: i64| flock { l_type: 1, l_whence: w, l_start: s, l_len: n, l_pid: 0 };
+    assert_eq!(abs_range(&l(0, 10, 5), 0, 0), Ok((10, 5)));
+    assert_eq!(abs_range(&l(1, -2, 4), 100, 0), Ok((98, 4)), "od aktualni pozice");
+    assert_eq!(abs_range(&l(2, 0, 0), 0, 500), Ok((500, 0)), "od konce do nekonecna");
+    assert_eq!(abs_range(&l(0, 10, -4), 0, 0), Ok((6, 4)), "zaporna delka = pred startem");
+    assert_eq!(abs_range(&l(0, 2, -4), 0, 0), Err(EINVAL));
+    assert_eq!(abs_range(&l(9, 0, 0), 0, 0), Err(EINVAL));
+}

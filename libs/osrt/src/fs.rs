@@ -14,6 +14,7 @@ use fsproto::v2::{access, open_flags, share};
 use libos::Channel;
 
 pub use fsproto::perm::{Acl, EVERYONE, Grant, Permissions, rights};
+pub use fsproto::v2::PosixLock;
 pub use fsproto::{DirEntry, Stat, kind};
 
 use crate::start::Init;
@@ -162,6 +163,11 @@ impl File {
     /// Trvale ulozeni (`sync_all`/`sync_data`): fsync relace.
     pub fn sync(&self) -> Result<()> {
         session()?.fsync()
+    }
+
+    /// Zamek POSIX (`fcntl`/`flock`, viz `fsproto::v2::posix_lock`).
+    pub fn posix_lock(&self, cmd: u8, class: u8, write: bool, start: u64, len: u64) -> Result<fsproto::v2::PosixLock> {
+        session()?.posix_lock(self.handle, cmd, class, write, start, len)
     }
 
     /// Polozky otevreneho adresare.

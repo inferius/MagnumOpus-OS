@@ -151,3 +151,11 @@ pub struct Region {
     /// Prava `PROT_*` (hodnoty jako `abi::vm::MAP_*`).
     pub prot: u32,
 }
+
+/// Vysledek zamku souboru (`fcntl`, `flock`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockResult {
+    Done,
+    Conflict { write: bool, start: u64, len: u64 },
+    Deadlock,
+}

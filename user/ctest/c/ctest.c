@@ -19,6 +19,7 @@ int math_test(void);
 int net_main(void);
 int mmap_test(const char *dir);
 int signal_test(void);
+int lock_main(const char *side, const char *dir);
 
 #define CHECK(name, cond)                                              \
     do {                                                               \
@@ -122,6 +123,8 @@ static int errors(void) {
 int main(int argc, char **argv) {
     /* Rezim "net": jen sitovy test (sada "cstd sit", relace site). */
     if (argc == 2 && strcmp(argv[1], "net") == 0) return net_main();
+    /* Rezim "lock a|b DIR": zamky mezi dvema procesy. */
+    if (argc == 4 && strcmp(argv[1], "lock") == 0) return lock_main(argv[2], argv[3]);
     atexit(first_registered);
     atexit(last_words);
 

@@ -20,7 +20,8 @@ Compiling C (clang, flags, protections) is described in
 > QEMU]** (suite `cstd sit`): BSD sockets, `getaddrinfo`, `poll`, `select`,
 > `epoll`. Part 2f **[verified in QEMU]** (step `mmap`): `mmap`, `mprotect`,
 > `madvise`, `mseal`. Part 2g **[verified in QEMU]** (step `signal`):
-> signals, `setjmp`. Further parts (
+> signals, `setjmp`. File locks **[verified in QEMU]** (test `ctest lock`:
+> two processes, `EDEADLK`). Further parts (
 > signals, file locks, `libc.so`, ports) **[designed]**, see [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
 
 ## Layers
@@ -101,7 +102,7 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 | Header | Functions | Note |
 |---|---|---|
 | `unistd.h` | `close`, `read`, `write`, `pread`, `pwrite`, `lseek`, `dup`, `dup2`, `dup3`, `pipe`, `pipe2`, `isatty`, `fsync`, `fdatasync`, `ftruncate`, `truncate`, `unlink`, `rmdir`, `getcwd`, `chdir`, `access`, `sysconf`, `getpagesize` | `fork`, `vfork`, `exec*` return `ENOSYS` (see [No fork](#processes-locale-wchar)) |
-| `fcntl.h` | `open`, `openat` (only `AT_FDCWD` or an absolute path), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | `O_*` values as Linux, `O_DIRECTORY` the same on both architectures; `F_*LK` locks `ENOLCK` for now |
+| `fcntl.h` | `open`, `openat` (only `AT_FDCWD` or an absolute path), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | `O_*` values as Linux, `O_DIRECTORY` the same on both architectures; locks `F_GETLK`, `F_SETLK`, `F_SETLKW` see File locks |
 | `sys/stat.h` | `stat`, `lstat` (= `stat`), `fstat`, `mkdir`, `chmod`, `fchmod`, `umask` | `st_mode` from the kind and the session's effective rights; `chmod` has no effect (rights are FS grants) |
 | `sys/uio.h` | `readv`, `writev` | `writev` in one write |
 | `dirent.h` | `opendir`, `fdopendir`, `readdir`, `closedir`, `rewinddir`, `dirfd` | the first two entries are `.` and `..` |
@@ -252,6 +253,19 @@ Decision 6A - signals without kernel support:
 - **`getpid`:** the kernel does not give programs a process number;
   `getpid` returns a random positive number, stable for the run (temporary
   file names, `kill` of itself). `getppid` = 1.
+
+### File locks
+
+`fcntl(F_GETLK/F_SETLK/F_SETLKW)`, `flock` (`sys/file.h`) and `lockf`
+**[verified in QEMU]** (suite `cstd`, test `ctest lock`: two processes over
+one file, conflict, `F_GETLK`, deadlock, release at process exit). fsd holds
+the locks (message `POSIX_LOCK`, [file-system.md](file-system.md)): the
+`fcntl` owner is the process (FS session), the `flock` owner is the open
+file. They are released by closing the process's last fd on the file
+(`flock`: closing the fd) and by the end of the process. `F_SETLKW` and
+`flock` without `LOCK_NB` wait by retrying; fsd watches for a wait cycle
+(`EDEADLK`). `l_pid` from `F_GETLK` is -1 (fsd does not know process
+numbers).
 
 ### fd numbers
 

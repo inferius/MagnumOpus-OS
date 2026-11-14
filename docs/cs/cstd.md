@@ -19,7 +19,8 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
 > sockety BSD, `getaddrinfo`, `poll`, `select`, `epoll`. Část 2f
 > **[ověřeno v QEMU]** (krok `mmap`): `mmap`, `mprotect`, `madvise`,
 > `mseal`. Část 2g **[ověřeno v QEMU]** (krok `signal`): signály,
-> `setjmp`. Další části (zámky souborů,
+> `setjmp`. Zámky souborů **[ověřeno v QEMU]** (test `ctest lock`: dva
+> procesy, `EDEADLK`). Další části (
 > `libc.so`, porty) **[navrženo]**, viz
 > [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
 
@@ -99,7 +100,7 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 | Hlavička | Funkce | Poznámka |
 |---|---|---|
 | `unistd.h` | `close`, `read`, `write`, `pread`, `pwrite`, `lseek`, `dup`, `dup2`, `dup3`, `pipe`, `pipe2`, `isatty`, `fsync`, `fdatasync`, `ftruncate`, `truncate`, `unlink`, `rmdir`, `getcwd`, `chdir`, `access`, `sysconf`, `getpagesize` | `fork`, `vfork`, `exec*` vrací `ENOSYS` (viz [Bez fork](#procesy-locale-wchar)) |
-| `fcntl.h` | `open`, `openat` (jen `AT_FDCWD` nebo absolutní cesta), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | hodnoty `O_*` jako Linux, `O_DIRECTORY` stejné na obou architekturách; zámky `F_*LK` zatím `ENOLCK` |
+| `fcntl.h` | `open`, `openat` (jen `AT_FDCWD` nebo absolutní cesta), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | hodnoty `O_*` jako Linux, `O_DIRECTORY` stejné na obou architekturách; zámky `F_GETLK`, `F_SETLK`, `F_SETLKW` viz Zámky souborů |
 | `sys/stat.h` | `stat`, `lstat` (= `stat`), `fstat`, `mkdir`, `chmod`, `fchmod`, `umask` | `st_mode` z druhu a účinných práv relace; `chmod` nemá účinek (práva jsou granty FS) |
 | `sys/uio.h` | `readv`, `writev` | `writev` jedním zápisem |
 | `dirent.h` | `opendir`, `fdopendir`, `readdir`, `closedir`, `rewinddir`, `dirfd` | první dvě položky `.` a `..` |
@@ -243,6 +244,18 @@ Rozhodnutí 6A - signály bez podpory jádra:
 - **`getpid`:** jádro programům číslo procesu nedává; `getpid` vrací
   náhodné kladné číslo, stálé po dobu běhu (jména dočasných souborů,
   `kill` na sebe). `getppid` = 1.
+
+### Zámky souborů
+
+`fcntl(F_GETLK/F_SETLK/F_SETLKW)`, `flock` (`sys/file.h`) a `lockf`
+**[ověřeno v QEMU]** (sada `cstd`, test `ctest lock`: dva procesy nad
+jedním souborem, konflikt, `F_GETLK`, uváznutí, uvolnění koncem procesu).
+Zámky drží fsd (zpráva `POSIX_LOCK`, [souborovy-system.md](souborovy-system.md)):
+vlastník `fcntl` je proces (relace FS), `flock` otevřený soubor. Uvolní je
+zavření posledního fd procesu na souboru (`flock`: zavření fd) a konec
+procesu. `F_SETLKW` a `flock` bez `LOCK_NB` čekají opakovaným zkoušením;
+fsd přitom hlídá cyklus čekání (`EDEADLK`). `l_pid` z `F_GETLK` je -1
+(čísla procesů fsd nezná).
 
 ### Čísla fd
 
