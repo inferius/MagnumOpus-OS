@@ -68,7 +68,7 @@ Ověřeno ve zdrojích Linuxu a Mesy (2026-11-14):
 | Cesta | Licence | Generace | Obraz (KMS) | Akcelerace | Pro nás |
 |---|---|---|---|---|---|
 | **nouveau** (Linux) | MIT text v hlavičkách (`nouveau_drm.c`, `nvkm/...`, `gsp/...`), modul „GPL and additional rights“ | NV04 až Ada, tabulky čipů i Blackwell (GB100/GB102, GB202 až GB207) | ano, všechny | Kepler+; od Turingu přes GSP-RM, výchozí (`NvGspRm` = true) | **doporučeno** |
-| **NVK** (Mesa) | MIT (jádro Mesy) | Kepler až Ada, spotřebitelské Blackwell (RTX 5000) | – | Vulkan 1.4 konformní; potřebuje nouveau s `VM_BIND`/`EXEC` | **Vulkan** |
+| **NVK** (Mesa) | MIT (jádro Mesy) | Kepler až Ada, spotřebitelské Blackwell (RTX 5000) | – | Vulkan 1.4 konformní; potřebuje nouveau z Linuxu 6.6+ (uAPI `VM_BIND`/`EXEC`) | **Vulkan** |
 | **open-gpu-kernel-modules** (NVIDIA) | soubory MIT, jako modul MIT/GPLv2 | Turing+ (jen s GSP firmwarem stejného vydání) | `nvidia-modeset` | jen s uzavřeným userspace NVIDIA | jen fakta, případně jen displej |
 | **nova** (Linux, Rust) | GPL-2.0 | GSP (Turing+) | zatím ne (seznam úkolů displej nemá) | rozpracované (GSP, FIFO, GR) | **jen fakta** |
 
@@ -77,12 +77,21 @@ Z toho:
 1. **Turing (RTX 20, GTX 16) až Blackwell (RTX 50)**: nouveau + firmware
    GSP-RM (verze 570.144 v nouveau). GSP sám řídí takty a napájení, takže
    karta jede plnou rychlostí. Vulkan přes NVK. **Hlavní cíl.**
+   **Blackwell** (GB202 až GB207, RTX 50) je v nouveau jen přes GSP: i
+   zobrazování jde přes GSP-RM (`disp/gb202.c`: „GB20x is GSP-only“). Bez
+   firmwaru GSP tedy ani obraz.
 2. **Maxwell 2 (GTX 900), Pascal (GTX 10), Volta**: obraz ano, akcelerace
-   ano, ale takty nejdou zvýšit (firmware pro řízení napájení musí být
-   podepsaný NVIDIA). Na plochu stačí, na hry ne.
+   ano přes firmware podepsaný NVIDIA, který se zavádí bezpečným startem
+   ACR (`nvidia/gp108/acr`, `.../gr/*_sig.bin` v linux-firmware); NVK je
+   pro tyto generace zapnutý od dubna 2025. Takty ale nejdou zvýšit
+   (firmware pro řízení napájení NVIDIA nevydala), karta jede na
+   startovních taktech. Na plochu stačí, na hry ne.
 3. **Kepler (GTX 600/700), Maxwell 1 (GTX 750)**: obraz, akcelerace,
    ruční přetaktování, Vulkan NVK. Nízká priorita.
-4. Starší než Kepler: jen obraz, nepodporovat.
+4. **Fermi a starší** (např. GTX 560 Ti, GF114/GF110): nouveau umí obraz
+   a 3D, ale řízení napájení je rozpracované („je to pomalé“) a NVK Fermi
+   nepodporuje. Návrh: nepodporovat, nechat framebuffer firmwaru
+   (`fbdisplay`).
 
 `open-gpu-kernel-modules` dává lepší podporu nových funkcí, ale bez
 uzavřeného userspace NVIDIA nemá Vulkan ani OpenGL. Jejich zobrazovací
@@ -90,11 +99,27 @@ uzavřeného userspace NVIDIA nemá Vulkan ani OpenGL. Jejich zobrazovací
 Turing+, kdyby nouveau u konkrétní karty selhal - za cenu druhé obří
 kódové základny. Nedoporučuji.
 
-**Co potřebujeme od uživatele**: přesný seznam karet NVIDIA (model a ID
-zařízení, ve Windows Správce zařízení → Podrobnosti → ID hardwaru,
-`PCI\VEN_10DE&DEV_xxxx`), a u každé, zda je v desktopu, nebo v notebooku
-s Optimus (integrovaná Intel + NVIDIA). Podle ID se karta zařadí do
-generace výše.
+### Karty k testu a co na nich ověřit
+
+Karty uživatele (stav 2026-11-14):
+
+| Karta | Čip / generace | Cesta | Co na ní testovat |
+|---|---|---|---|
+| **RTX 4090** (aktivně, z USB) | AD102, Ada | nouveau + GSP-RM, NVK | **hlavní karta**: etapa (a) obraz (převzetí, režimy, flip, hotplug, víc monitorů), (b) kopírování, (c) Vulkan; obnova po pádu (reset GSP) |
+| **RTX 5070 Ti** | GB203, Blackwell | nouveau + GSP-RM (i obraz přes GSP), NVK | druhá karta Turing+: ověřit, že jde čistě přes GSP včetně zobrazení; nejnovější firmware GSP; Vulkan NVK |
+| RTX 2080 Ti (možná) | TU102, Turing | nouveau + GSP-RM, NVK | nejstarší generace s GSP: kompatibilita s verzí firmwaru, jinak stejné testy jako 4090 |
+| **GT 1030** (aktivně, z USB) | GP108, Pascal | nouveau bez GSP: obraz vlastním kódem nouveau, akcelerace přes podepsaný firmware ACR, bez zvýšení taktů | **cesta bez GSP**: etapa (a) obraz (jiný kód než GSP), načtení podepsaného firmwaru (služba firmwaru), (b) kopírování; Vulkan jen funkčně (pomalé) |
+| GTX 560 Ti | GF114/GF110, Fermi | nepodporovat | jen ověřit, že ovladač kartu odmítne a obraz zůstane na `fbdisplay` (bezpečný návrat) |
+
+Pořadí: nejdřív **GT 1030** a **RTX 4090** souběžně pro etapu (a) - obě
+cesty zobrazení (vlastní kód nouveau a GSP-RM) najednou ukážou, co musí
+vrstva kompatibility umět. Pak 4090 pro (b) a (c), 5070 Ti pro Blackwell.
+
+Blackwell v jednotlivých cestách: nouveau má čipy GB100/GB102 a GB202 až
+GB207 (GB203 = RTX 5070 Ti, zobrazení `gb202_disp` přes GSP-RM), NVK
+spotřebitelský Blackwell podporuje (Mesa 25.2), open-gpu-kernel-modules
+„Turing nebo novější“, nova má GB20x ve výčtu čipů (`gpu.rs`), ale bez
+zobrazení.
 
 ## AMD (druhý krok)
 
@@ -202,9 +227,9 @@ QEMU grafiku NVIDIA ani AMD neemuluje. Možnosti:
    (zámky, workqueue, DMA, ploty) a přehrávání záznamu MMIO z reálného
    běhu (záznam z našeho ovladače, ne z cizího kódu).
 
-Hardware: na Turing+ (GSP, plné takty, Vulkan) postavit etapy (a)-(c);
-jednu kartu Maxwell 2/Pascal pro ověření cesty bez GSP. Pro AMD později
-jedna karta RDNA 2 nebo novější.
+Hardware: viz [Karty k testu](#karty-k-testu-a-co-na-nich-ověřit) - RTX
+4090 (Turing+ s GSP) a GT 1030 (Pascal bez GSP) jsou k dispozici. Pro AMD
+později jedna karta RDNA 2 nebo novější (uživatel žádnou nemá).
 
 ## Vlivy na základy
 

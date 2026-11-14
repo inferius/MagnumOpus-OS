@@ -71,7 +71,7 @@ Verified in the Linux and Mesa sources (2026-11-14):
 | Path | Licence | Generations | Display (KMS) | Acceleration | For us |
 |---|---|---|---|---|---|
 | **nouveau** (Linux) | MIT text in headers (`nouveau_drm.c`, `nvkm/...`, `gsp/...`), module "GPL and additional rights" | NV04 to Ada, chip tables also for Blackwell (GB100/GB102, GB202 to GB207) | yes, all | Kepler+; from Turing through GSP-RM, default (`NvGspRm` = true) | **recommended** |
-| **NVK** (Mesa) | MIT (Mesa core) | Kepler to Ada, consumer Blackwell (RTX 5000) | – | conformant Vulkan 1.4; needs nouveau with `VM_BIND`/`EXEC` | **Vulkan** |
+| **NVK** (Mesa) | MIT (Mesa core) | Kepler to Ada, consumer Blackwell (RTX 5000) | – | conformant Vulkan 1.4; needs nouveau from Linux 6.6+ (`VM_BIND`/`EXEC` uAPI) | **Vulkan** |
 | **open-gpu-kernel-modules** (NVIDIA) | files MIT, MIT/GPLv2 as a module | Turing+ (only with GSP firmware of the same release) | `nvidia-modeset` | only with NVIDIA's closed userspace | facts only, maybe display only |
 | **nova** (Linux, Rust) | GPL-2.0 | GSP (Turing+) | not yet (no display item in its TODO list) | in progress (GSP, FIFO, GR) | **facts only** |
 
@@ -80,12 +80,21 @@ Therefore:
 1. **Turing (RTX 20, GTX 16) to Blackwell (RTX 50)**: nouveau + GSP-RM
    firmware (version 570.144 in nouveau). GSP itself manages clocks and
    power, so the card runs at full speed. Vulkan through NVK. **Main target.**
+   **Blackwell** (GB202 to GB207, RTX 50) is GSP-only in nouveau: even
+   display goes through GSP-RM (`disp/gb202.c`: "GB20x is GSP-only").
+   Without GSP firmware there is not even an image.
 2. **Maxwell 2 (GTX 900), Pascal (GTX 10), Volta**: display yes,
-   acceleration yes, but clocks cannot be raised (power management
-   firmware must be signed by NVIDIA). Fine for the desktop, not for games.
+   acceleration yes through NVIDIA-signed firmware loaded by ACR secure
+   boot (`nvidia/gp108/acr`, `.../gr/*_sig.bin` in linux-firmware); NVK
+   is enabled for these generations since April 2025. Clocks cannot be
+   raised, though (NVIDIA has not released power-management firmware),
+   so the card stays at boot clocks. Fine for the desktop, not for games.
 3. **Kepler (GTX 600/700), Maxwell 1 (GTX 750)**: display, acceleration,
    manual reclocking, NVK Vulkan. Low priority.
-4. Older than Kepler: display only, not supported.
+4. **Fermi and older** (e.g. GTX 560 Ti, GF114/GF110): nouveau has display
+   and 3D, but power management is unfinished ("it's slow") and NVK does
+   not support Fermi. Proposal: not supported, keep the firmware
+   framebuffer (`fbdisplay`).
 
 `open-gpu-kernel-modules` supports new features better, but without
 NVIDIA's closed userspace it has no Vulkan or OpenGL. Its display part
@@ -93,11 +102,27 @@ NVIDIA's closed userspace it has no Vulkan or OpenGL. Its display part
 nouveau fails on a particular card – at the cost of a second huge code
 base. Not recommended.
 
-**What we need from the user**: the exact list of NVIDIA cards (model and
-device ID; in Windows Device Manager → Details → Hardware IDs,
-`PCI\VEN_10DE&DEV_xxxx`), and for each whether it is in a desktop or in an
-Optimus laptop (integrated Intel + NVIDIA). The ID maps the card to a
-generation above.
+### Test cards and what to verify on them
+
+The user's cards (as of 2026-11-14):
+
+| Card | Chip / generation | Path | What to test on it |
+|---|---|---|---|
+| **RTX 4090** (active, from USB) | AD102, Ada | nouveau + GSP-RM, NVK | **main card**: stage (a) display (takeover, modes, flips, hotplug, multiple monitors), (b) copy, (c) Vulkan; recovery after a crash (GSP reset) |
+| **RTX 5070 Ti** | GB203, Blackwell | nouveau + GSP-RM (display through GSP too), NVK | second Turing+ card: verify it runs purely through GSP including display; newest GSP firmware; NVK Vulkan |
+| RTX 2080 Ti (maybe) | TU102, Turing | nouveau + GSP-RM, NVK | oldest GSP generation: firmware version compatibility, otherwise the same tests as the 4090 |
+| **GT 1030** (active, from USB) | GP108, Pascal | nouveau without GSP: display by nouveau's own code, acceleration through signed ACR firmware, no reclocking | **the non-GSP path**: stage (a) display (different code than GSP), loading signed firmware (firmware service), (b) copy; Vulkan functionally only (slow) |
+| GTX 560 Ti | GF114/GF110, Fermi | not supported | only check that the driver rejects the card and the display stays on `fbdisplay` (safe fallback) |
+
+Order: first the **GT 1030** and the **RTX 4090** together for stage (a)
+– both display paths (nouveau's own code and GSP-RM) show at once what
+the compatibility layer must provide. Then the 4090 for (b) and (c), the
+5070 Ti for Blackwell.
+
+Blackwell in each path: nouveau has GB100/GB102 and GB202 to GB207 (GB203
+= RTX 5070 Ti, display `gb202_disp` through GSP-RM), NVK supports consumer
+Blackwell (Mesa 25.2), open-gpu-kernel-modules "Turing or later", nova
+lists GB20x in its chip enum (`gpu.rs`) but has no display.
 
 ## AMD (second step)
 
@@ -207,9 +232,9 @@ QEMU emulates neither NVIDIA nor AMD graphics. Options:
    workqueues, DMA, fences) and replaying MMIO recordings from real runs
    (recorded from our own driver, not from foreign code).
 
-Hardware: build stages (a)–(c) on Turing+ (GSP, full clocks, Vulkan); one
-Maxwell 2/Pascal card to check the path without GSP. For AMD later one
-RDNA 2 or newer card.
+Hardware: see [Test cards](#test-cards-and-what-to-verify-on-them) – an
+RTX 4090 (Turing+ with GSP) and a GT 1030 (Pascal without GSP) are
+available. For AMD later one RDNA 2 or newer card (the user has none).
 
 ## Impact on the foundations
 
