@@ -19,7 +19,7 @@ pub enum ElemKind<M> {
     /// kresleni ze sirky obdelniku (`wrap.rs`).
     Label { text: String, heading: bool, warn: bool, lines: u32 },
     Button { text: String, on_click: Option<M>, icon: Option<&'static str> },
-    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<crate::node::KeyMapFn>, suggest: Option<alloc::boxed::Box<crate::suggest::Suggest<M>>> },
+    TextInput { value: String, placeholder: String, secure: bool, multiline: bool, on_change: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, key_map: Option<crate::node::KeyMapFn>, suggest: Option<alloc::boxed::Box<crate::suggest::Suggest<M>>>, opts: crate::fieldopts::FieldOpts, on_search: Option<Box<dyn Fn(String) -> M>> },
     Checkbox { text: String, checked: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     List { count: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
     ListItem { text: String, index: usize, selected: bool, list: usize, agent: bool },
@@ -305,8 +305,8 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
         Kind::Button { text, on_click, icon } => {
             push(out, ElemKind::Button { text, on_click, icon }, r);
         }
-        Kind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, key_map, suggest, .. } => {
-            push(out, ElemKind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, key_map, suggest }, r);
+        Kind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, key_map, suggest, opts, on_search, .. } => {
+            push(out, ElemKind::TextInput { value, placeholder, secure, multiline, on_change, on_submit, key_map, suggest, opts, on_search }, r);
         }
         Kind::Checkbox { text, checked, on_toggle } => {
             push(out, ElemKind::Checkbox { text, checked, on_toggle }, r);

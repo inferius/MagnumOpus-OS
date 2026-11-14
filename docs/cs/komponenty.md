@@ -97,9 +97,9 @@ tlačítko Menu = kontextová nabídka.
 |---|---|---|---|
 | Tlačítko: primární, sekundární, nebezpečné, ikonové | částečně | výška `--k-h`, min. šířka 2 &times; výška, `s5`, pilulka; primární `accent`, nebezpečné `danger`; stav *probíhá* (kolečko, pevná šířka) | Enter, Mezerník při uvolnění |
 | Textové pole, víceřádkové | ano | `--k-h`, `radius.control`, `s4`; popisek nad, nápověda / chyba pod | šipky, Ctrl+šipky, výběr se Shift, schránka, undo; víceřádkové Ctrl+Enter odešle |
-| Číslo | ne | jako pole, zarovnání vpravo, jednotka, krokovací tlačítka mimo Tab | &uarr; &darr; krok, PgUp / PgDn 10 kroků, Home / End |
-| Heslo | částečně | jako pole + oko (`aria-pressed`), varování Caps Lock | jako pole, nikdy návrhy |
-| Hledání | ne | lupa vlevo, křížek jen s textem, filtr s prodlevou 150 ms | Esc smaže, druhé Esc opustí, &darr; do výsledků |
+| Číslo | ano | jako pole, zarovnání vpravo, jednotka, krokovací tlačítka mimo Tab | &uarr; &darr; krok, PgUp / PgDn 10 kroků, Home / End |
+| Heslo | ano | jako pole + oko (`aria-pressed`), varování Caps Lock | jako pole, nikdy návrhy |
+| Hledání | ano | lupa vlevo, křížek jen s textem, filtr s prodlevou 150 ms | Esc smaže, druhé Esc opustí, &darr; do výsledků |
 | Zaškrtávátko | částečně | políčko 18 / 22 / 28, `radius.xs`, okraj 2 px; neurčitý stav | Mezerník |
 | Přepínač | ano | `switch_*`; okamžitý účinek | Mezerník |
 | Radio | částečně | kruh 18 / 22 / 28; skupina je jedna zastávka | šipky rovnou vybírají |
@@ -151,7 +151,9 @@ Zjištěno z kódu `libs/ui/src/` a ukázky `user/gui-komponenty` (stav
 3. **Strom.** Potřebuje ho správce souborů a nastavení. Navrhuji ho
    postavit na seznamu (řádek + úroveň + rozbaleno), ne jako novou
    vrstvu.
-4. **Číselné pole** a **pole hledání.**
+4. ~~**Číselné pole** a **pole hledání.**~~ Hotovo (`number_input`,
+   `search_input`, [Textová pole a schránka](gui.md#textová-pole-a-schránka)).
+   **[implementováno]**
 5. **Obecná bublina (popover).** Vrstva `popup` dnes umí jen nabídku,
    výběr a návrhy.
 6. **Drobečky, rozbalovací panel, prázdný stav, kruhové kolečko,
@@ -167,7 +169,8 @@ Zjištěno z kódu `libs/ui/src/` a ukázky `user/gui-komponenty` (stav
    sama a šipky mezi radio nefungují.
 4. Stav chyba je jen u textových polí. Chybí u výběru, zaškrtávátka,
    posuvníku, záložky a segmentu.
-5. Pole nemají hover. Heslo nemá oko ani varování Caps Lock.
+5. ~~Pole nemají hover. Heslo nemá oko ani varování Caps Lock.~~ Hotovo
+   (najetí ztmaví okraj, oko, varování Caps Lock). **[implementováno]**
 6. Seznam má jen šipky. Chybí Ctrl+Mezerník, Shift+šipky, Ctrl+A
    a hledání psaním. Tabulka to všechno už umí, ať seznam sdílí její
    logiku výběru.

@@ -1501,14 +1501,16 @@ na hranici znaku.
 
 | Ovládání | Co dělá |
 |---|---|
-| klik, Shift+klik, tah | kurzor, rozšíření výběru, výběr tahem |
+| klik, Shift+klik, tah | kurzor, rozšíření výběru, výběr tahem (za okrajem pole se pole samo posouvá) |
 | dvojklik, trojklik | slovo, řádek (heslo: dvojklik vybere vše) |
-| šipky, Ctrl+šipky, Shift | po grafémech, po slovech, s výběrem |
+| šipky, Ctrl+šipky, Alt+šipky, Shift | po grafémech, po slovech (Ctrl jako ve Windows, Alt jako v macOS), s výběrem |
 | Home, End, Ctrl+Home, Ctrl+End | začátek a konec řádku a textu |
 | nahoru, dolů, PgUp, PgDn | jen `text_area`: viditelné řádky, pamatuje si polohu x |
-| Backspace, Delete, Ctrl+ | znak (i s kombinačními znaky), slovo |
-| Ctrl+A, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y | vybrat vše, zpět, znovu (psaní slova je jeden krok) |
+| Backspace, Delete, Ctrl+ nebo Alt+ | znak (i s kombinačními znaky), slovo |
+| Ctrl+A, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y | vybrat vše, zpět, znovu (psaní bez pohybu kurzoru je jeden krok) |
 | Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Insert, Shift+Delete, Shift+Insert | schránka |
+| Insert | přepis (psaný znak nahradí znak za kurzorem, kurzor je podtržení) |
+| pravé tlačítko, Shift+F10, klávesa Menu | nabídka Zpět, Znovu, Vyjmout, Kopírovat, Vložit, Smazat, Vybrat vše; nedostupná položka řekne proč |
 | Enter | odeslat (`on_submit`); v `text_area` nový řádek, Ctrl+Enter odeslat |
 | kolečko | v `text_area` posune obsah pole, ne okno |
 
@@ -1520,8 +1522,28 @@ na hranici znaku.
 - **Zalamování** v `text_area` podle slov na šířku pole; slovo delší než
   řádek se zalomí po grafémech. Jednořádkové pole posouvá text tak, aby
   byl kurzor vidět; vložené konce řádků nahradí mezerou.
-- **Heslo:** kopírovat ani vyjmout nejde (ani Ctrl+Insert), Ctrl+šipky
-  skáčou na začátek a konec (slova by prozradila mezery).
+- **Heslo:** kopírovat ani vyjmout nejde (ani Ctrl+Insert ani z nabídky),
+  Ctrl+šipky skáčou na začátek a konec (slova by prozradila mezery). Oko
+  vpravo heslo zobrazí (jen kreslení, do schránky ani do stromu
+  přístupnosti nejde). S fokusem a zapnutým Caps Lock je pod polem
+  varování.
+- **Volby** `.read_only()` (vybrat a kopírovat jde, měnit ne, plocha
+  `surface_2`), `.max_len(n)` (nejvýš n grafémů, vložení se zkrátí).
+- **Číslo** `number_input(text).range(0.0, 100.0).num_step(5.0).unit("%")`:
+  jen číslice (desetinná čárka podle kroku, minus jen se zápornou mezí),
+  šipky krok na mřížce kroku, PgUp a PgDn 10 kroků, Home a End meze,
+  krokovací šipky v poli mimo pořadí Tab, zarovnání vpravo.
+- **Hledání** `search_input(text).on_search(Msg::Hledej)`: lupa vlevo,
+  křížek jen s textem, Esc smaže (druhé Esc dostane aplikace), šipka dolů
+  na další prvek (výsledky); `on_search` přijde až `motion.search_delay`
+  (150 ms) po posledním psaní, prázdný text hned.
+- **Kurzor bliká** (`motion.caret_blink`), po psaní a pohybu je celou
+  periodu vidět; po `motion.caret_blink_stop` (10 s) bez činnosti přestane
+  blikat a okno se přestane překreslovat. Prstenec fokusu se kreslí jen
+  po ovládání klávesnicí; kliknuté pole má akcentový okraj a kurzor.
+- **Mrtvé klávesy** (čárka, háček) skládá `inputd` (`libs/keymap`): pole
+  dostane už složený znak. Rozpracovaný znak pole zatím neukazuje.
+  **[implementováno]**
 - **Vlastní překlad kláves** `text_input(..).key_map(|kód, modifikátory|
   Some('z'))`: pole píše podle jiného rozložení než systém (zkouška
   rozložení vybraného v instalátoru). Znak od systému ignoruje, editační

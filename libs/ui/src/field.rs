@@ -10,23 +10,41 @@
 //! Backspace/Delete (Ctrl = slovo), Ctrl+A, Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y,
 //! Ctrl+C/X/V a Ctrl+Insert, Shift+Delete, Shift+Insert. Enter odesle
 //! jednoradkove pole, ve viceradkovem vlozi radek (Ctrl+Enter odesle).
-//! Mys: klik = kurzor, Shift+klik rozsiri vyber, tah vybira, dvojklik
-//! slovo, trojklik radek.
+//! Mys: klik = kurzor, Shift+klik rozsiri vyber, tah vybira (za okrajem
+//! s automatickym posunem, `caret.rs`), dvojklik slovo, trojklik radek.
+//! Alt+sipky a Alt+Backspace/Delete jako Ctrl (po slovech, zvyk z macOS).
+//! Insert prepina prepis. Jen pro cteni: vyber a kopirovani ano, zmena ne.
+//! Cislo: filtr znaku, sipky krok, PgUp/PgDn 10 kroku, Home/End meze.
+//! Hledani: Esc smaze text (druhe Esc pole opusti), sipka dolu na dalsi
+//! prvek. Heslo: oko prepina zobrazeni, varovani Caps Lock pod polem.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use gfx::{Canvas, Rect};
+use gfx::Rect;
 use inputproto::code::*;
 use inputproto::mods;
 
 use crate::event::{Clip, Response};
+use crate::fieldopts::{FieldKind, FieldOpts};
 use crate::layout::ElemKind;
 use crate::text::{self, Motion, TextEdit};
-use crate::{Key, State, Ui};
+use crate::{Key, Ui};
 
 /// Nejdelsi prodleva mezi kliky dvojkliku a trojkliku (ns).
 pub const MULTI_CLICK: u64 = 400_000_000;
+
+/// Tlacitko uvnitr pole (mimo poradi Tab).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FieldBtn {
+    /// Oko: zobrazit / skryt heslo.
+    Eye,
+    /// Krizek: smazat text hledani.
+    Clear,
+    /// Krokovani cisla.
+    Up,
+    Down,
+}
 
 /// Viditelny radek pole: bajtovy rozsah v textu.
 pub(crate) type Line = (usize, usize);
@@ -56,11 +74,74 @@ impl<M: Clone> Ui<M> {
         }
     }
 
+    /// Volby pole (jen pro cteni, delka, druh).
+    pub(crate) fn field_opts(&self, i: usize) -> Option<&FieldOpts> {
+        match &self.elems.get(i)?.kind {
+            ElemKind::TextInput { opts, .. } => Some(opts),
+            _ => None,
+        }
+    }
+
+    /// Kresli se pole teckami (heslo bez zapnuteho zobrazeni)?
+    pub(crate) fn field_masked(&self, i: usize) -> bool {
+        self.field_kind(i).is_some_and(|k| k.1) && !self.revealed.contains(&self.elems[i].key)
+    }
+
+    /// Lze text menit (ne jen pro cteni, ne nedostupne)?
+    pub(crate) fn field_editable(&self, i: usize) -> bool {
+        !self.elems[i].disabled && self.field_opts(i).is_some_and(|o| !o.read_only)
+    }
+
+    /// Sirka tlacitka uvnitr pole (oko, krizek, krokovani).
+    pub(crate) fn field_button_w(&self) -> u32 {
+        self.look.theme.size.icon_m + self.look.theme.space[2]
+    }
+
+    /// Mista v poli vlevo a vpravo od textu: lupa hledani; krizek hledani
+    /// (jen s textem), oko hesla, jednotka a krokovani cisla.
+    pub(crate) fn field_slots(&self, i: usize) -> (u32, u32) {
+        let Some(o) = self.field_opts(i) else { return (0, 0) };
+        let th = &self.look.theme;
+        let bw = self.field_button_w();
+        let editable = self.field_editable(i);
+        let secure = self.field_kind(i).is_some_and(|k| k.1);
+        let mut right = if secure && !self.elems[i].disabled { bw } else { 0 };
+        let left = match &o.kind {
+            FieldKind::Search => {
+                if editable && !self.field_text(i).is_empty() {
+                    right += bw;
+                }
+                th.size.icon_s + th.space[2]
+            }
+            FieldKind::Number(n) => {
+                if !n.unit.is_empty() {
+                    right += self.look.width(&n.unit, self.look.body()) + th.space[1];
+                }
+                if editable {
+                    right += bw;
+                }
+                0
+            }
+            FieldKind::Text => 0,
+        };
+        (left, right)
+    }
+
+    /// Posun textu zarovnaneho vpravo (cislo, kdyz se vejde).
+    pub(crate) fn field_align(&self, i: usize) -> i32 {
+        if !matches!(self.field_opts(i).map(|o| &o.kind), Some(FieldKind::Number(_))) {
+            return 0;
+        }
+        let w = self.field_inner(i).w as i32 - 2;
+        let tw = self.seg_w(self.field_text(i), false);
+        (w - tw).max(0)
+    }
+
     /// Ramecek pole (bez radku s chybou pod nim).
     pub(crate) fn field_box(&self, i: usize) -> Rect {
         let e = &self.elems[i];
         let mut r = e.rect;
-        if e.error.is_some() {
+        if e.error.is_some() || self.caps_warning(i) {
             let t = &self.look.theme;
             r.h = r.h.saturating_sub(t.text.caption.line + t.space[1]);
         }
@@ -73,7 +154,8 @@ impl<M: Clone> Ui<M> {
         let sp = &self.look.theme.space;
         let multi = self.field_kind(i).is_some_and(|k| k.0);
         let (px, py) = (sp[4], if multi { sp[2] } else { 0 });
-        Rect::new(b.x + px as i32, b.y + py as i32, b.w.saturating_sub(2 * px), b.h.saturating_sub(2 * py))
+        let (l, r) = self.field_slots(i);
+        Rect::new(b.x + (px + l) as i32, b.y + py as i32, b.w.saturating_sub(2 * px + l + r), b.h.saturating_sub(2 * py))
     }
 
     /// Text pole (z editoru, jinak hodnota z rozvrzeni).
@@ -133,7 +215,8 @@ impl<M: Clone> Ui<M> {
     /// zalomi po grafemech).
     pub(crate) fn field_lines(&self, i: usize) -> Vec<Line> {
         let s = self.field_text(i);
-        let Some((true, secure)) = self.field_kind(i) else { return alloc::vec![(0, s.len())] };
+        let Some((true, _)) = self.field_kind(i) else { return alloc::vec![(0, s.len())] };
+        let secure = self.field_masked(i);
         let w = self.field_inner(i).w as i32;
         let mut out = Vec::new();
         let mut start = 0;
@@ -190,7 +273,7 @@ impl<M: Clone> Ui<M> {
 
     /// Radek a x kurzoru (od zacatku plochy textu, bez posunu).
     pub(crate) fn caret_pos(&self, i: usize, lines: &[Line], at: usize) -> (usize, i32) {
-        let secure = self.field_kind(i).is_some_and(|k| k.1);
+        let secure = self.field_masked(i);
         let s = self.field_text(i);
         // Kurzor na konci zalomeneho radku patri na zacatek dalsiho.
         let li = lines.iter().rposition(|&(a, _)| a <= at).unwrap_or(0);
@@ -207,11 +290,11 @@ impl<M: Clone> Ui<M> {
         let lh = self.look.body().line as i32;
         let multi = self.field_kind(i).is_some_and(|k| k.0);
         let li = if multi { ((y - inner.y + sy).max(0) / lh) as usize } else { 0 }.min(lines.len() - 1);
-        self.offset_in_line(i, lines[li], x - inner.x + sx)
+        self.offset_in_line(i, lines[li], x - inner.x + sx - self.field_align(i))
     }
 
     fn offset_in_line(&self, i: usize, (a, b): Line, lx: i32) -> usize {
-        let secure = self.field_kind(i).is_some_and(|k| k.1);
+        let secure = self.field_masked(i);
         let xs = self.line_xs(self.field_text(i), a, b, secure);
         xs.iter().min_by_key(|&&(_, x)| (x - lx).abs()).map_or(a, |&(o, _)| o)
     }
@@ -244,8 +327,7 @@ impl<M: Clone> Ui<M> {
             } else if cx > sx + w {
                 sx = cx - w;
             }
-            let secure = self.field_kind(i).is_some_and(|k| k.1);
-            let full = self.seg_w(self.field_text(i), secure);
+            let full = self.seg_w(self.field_text(i), self.field_masked(i));
             sx = sx.clamp(0, (full - w).max(0));
         }
         self.tscroll.insert(key, (sx, sy));
@@ -324,14 +406,57 @@ impl<M: Clone> Ui<M> {
     }
 
     /// Zmena textu editorem: zprava `on_change` a odhaleni kurzoru.
-    fn field_changed(&mut self, i: usize, r: &mut Response<M>) {
+    pub(crate) fn field_changed(&mut self, i: usize, r: &mut Response<M>) {
         let key = self.elems[i].key;
         let t = self.edits.get(&key).map(|e| String::from(e.text())).unwrap_or_default();
+        let empty = t.is_empty();
         if let ElemKind::TextInput { on_change: Some(f), .. } = &self.elems[i].kind {
             r.msgs.push(f(t));
         }
+        // Hledani: prazdny text hned, jinak az po prodleve bez psani.
+        if matches!(self.field_opts(i).map(|o| &o.kind), Some(FieldKind::Search)) {
+            if empty {
+                self.search_due = None;
+                self.fire_search(key);
+                r.msgs.append(&mut self.timer_msgs);
+            } else {
+                self.search_due = Some((key, self.now + self.look.theme.motion.search_delay as u64 * 1_000_000));
+            }
+        }
+        self.caret_reset();
         self.field_reveal(i);
         r.redraw = true;
+    }
+
+    /// Nahradi cely text pole (krok cisla, smazani hledani) jako jeden
+    /// krok historie.
+    pub(crate) fn field_replace(&mut self, i: usize, t: &str, r: &mut Response<M>) {
+        let key = self.elems[i].key;
+        let Some(ed) = self.edits.get_mut(&key) else { return };
+        if ed.text() == t {
+            return;
+        }
+        ed.select_all();
+        if t.is_empty() {
+            ed.delete(true, false);
+        } else {
+            ed.insert(t);
+        }
+        self.field_changed(i, r);
+    }
+
+    /// Krok ciselneho pole o `n` kroku (zaporne dolu).
+    pub(crate) fn number_step(&mut self, i: usize, n: i32, r: &mut Response<M>) -> bool {
+        let Some(FieldKind::Number(spec)) = self.field_opts(i).map(|o| o.kind.clone()) else { return false };
+        if !self.field_editable(i) {
+            return true;
+        }
+        let t = spec.stepped(self.field_text(i), n);
+        self.field_replace(i, &t, r);
+        if let Some(ed) = self.edits.get_mut(&self.elems[i].key) {
+            ed.select_all();
+        }
+        true
     }
 
     /// Ma pole vlastni preklad klaves (`Node::key_map`)?
@@ -343,7 +468,12 @@ impl<M: Clone> Ui<M> {
     pub(crate) fn field_insert(&mut self, i: usize, ch: char, r: &mut Response<M>) {
         // S vlastnim prekladem klaves vklada pole az pri stisku klavesy;
         // heslo jen z mistniho fyzickeho vstupu.
-        if ch.is_control() || self.elems[i].disabled || self.has_key_map(i) || (self.field_kind(i).is_some_and(|k| k.1) && !self.local_input()) {
+        if ch.is_control() || !self.field_editable(i) || self.has_key_map(i) || (self.field_kind(i).is_some_and(|k| k.1) && !self.local_input()) {
+            return;
+        }
+        if let Some(FieldKind::Number(n)) = self.field_opts(i).map(|o| &o.kind)
+            && !n.accepts(ch)
+        {
             return;
         }
         let key = self.elems[i].key;
@@ -358,15 +488,20 @@ impl<M: Clone> Ui<M> {
         let mut r = Response::default();
         let Some(key) = self.paste_target.take() else { return r };
         let Some(i) = self.index_of(key) else { return r };
-        if self.focus != Some(i) || self.elems[i].disabled {
+        if self.focus != Some(i) || !self.field_editable(i) {
             return r;
         }
         // Heslo: vlozit jen na gesto z mistniho fyzickeho vstupu.
         if self.field_kind(i).is_some_and(|k| k.1) && self.paste_class != guiproto::window::input_class::LOCAL {
             return r;
         }
+        // Cislo: jen povolene znaky.
+        let data: String = match self.field_opts(i).map(|o| &o.kind) {
+            Some(FieldKind::Number(n)) => data.chars().filter(|&c| n.accepts(c)).collect(),
+            _ => String::from(data),
+        };
         if let Some(ed) = self.edits.get_mut(&key) {
-            ed.insert(data);
+            ed.insert(&data);
             self.field_changed(i, &mut r);
         }
         r
@@ -377,7 +512,7 @@ impl<M: Clone> Ui<M> {
     pub(crate) fn field_key(&mut self, i: usize, code: u16, ch: Option<char>, r: &mut Response<M>) -> bool {
         let key = self.elems[i].key;
         let Some((multi, secure)) = self.field_kind(i) else { return false };
-        let (ctrl, shift) = (self.mods & mods::CTRL != 0, self.mods & mods::SHIFT != 0);
+        let (ctrl, shift, alt) = (self.mods & mods::CTRL != 0, self.mods & mods::SHIFT != 0, self.mods & mods::ALT != 0);
         if self.elems[i].disabled {
             return false;
         }
@@ -386,76 +521,85 @@ impl<M: Clone> Ui<M> {
         if secure && !self.local_input() {
             return true;
         }
+        let editable = self.field_editable(i);
+        let kind = self.field_opts(i).map(|o| o.kind.clone()).unwrap_or_default();
+        self.caret_reset();
+        // Cislo: krok sipkami a strankou, meze Home / End.
+        if let FieldKind::Number(n) = &kind
+            && !ctrl
+            && !alt
+        {
+            let step = match code {
+                KEY_UP => Some(1),
+                KEY_DOWN => Some(-1),
+                KEY_PAGEUP => Some(10),
+                KEY_PAGEDOWN => Some(-10),
+                _ => None,
+            };
+            if let Some(k) = step {
+                return self.number_step(i, k, r);
+            }
+            let bound = match code {
+                KEY_HOME if !shift && n.min > f64::MIN => Some(n.min),
+                KEY_END if !shift && n.max < f64::MAX => Some(n.max),
+                _ => None,
+            };
+            if let Some(v) = bound {
+                if editable {
+                    let t = n.format(v);
+                    self.field_replace(i, &t, r);
+                }
+                return true;
+            }
+        }
+        // Hledani: Esc smaze text (prazdne pole Esc nechava aplikaci),
+        // sipka dolu prejde k vysledkum (dalsi prvek v poradi Tab).
+        if kind == FieldKind::Search && !ctrl && !alt {
+            if code == KEY_ESC {
+                if self.field_text(i).is_empty() || !editable {
+                    return false;
+                }
+                self.field_replace(i, "", r);
+                return true;
+            }
+            if code == KEY_DOWN {
+                return self.focus_step(false, r);
+            }
+        }
         // Zkratky s Ctrl.
         if ctrl && !matches!(code, KEY_LEFT | KEY_RIGHT | KEY_HOME | KEY_END | KEY_BACKSPACE | KEY_DELETE | KEY_ENTER | KEY_KPENTER | KEY_INSERT) {
             let Some(c) = shortcut(code, ch) else { return false };
-            let ed = self.edits.get_mut(&key).unwrap();
-            match c {
-                'a' => {
-                    ed.select_all();
-                    r.redraw = true;
-                }
-                'z' if shift => {
-                    if ed.redo() {
-                        self.field_changed(i, r);
-                    }
-                }
-                'z' => {
-                    if ed.undo() {
-                        self.field_changed(i, r);
-                    }
-                }
-                'y' => {
-                    if ed.redo() {
-                        self.field_changed(i, r);
-                    }
-                }
-                'c' | 'x' => {
-                    // Heslo se do schranky nikdy nedostane.
-                    if secure || ed.selection().is_none() {
-                        return true;
-                    }
-                    r.clipboard = Some(Clip::Copy(String::from(ed.selected_text())));
-                    if c == 'x' {
-                        ed.delete(true, false);
-                        self.field_changed(i, r);
-                    }
-                }
-                'v' => {
-                    self.paste_class = self.input_class;
-                    self.paste_target = Some(key);
-                    r.clipboard = Some(Clip::Paste);
-                }
-                _ => return false,
-            }
-            return true;
+            return self.field_command(i, c, shift, r);
         }
-        // Insert: Ctrl = kopirovat, Shift = vlozit; Shift+Delete = vyjmout.
+        // Insert: Ctrl = kopirovat, Shift = vlozit, samotny prepne prepis;
+        // Shift+Delete = vyjmout.
         if code == KEY_INSERT || (code == KEY_DELETE && shift) {
-            let ed = self.edits.get_mut(&key).unwrap();
-            if code == KEY_INSERT && shift {
-                self.paste_class = self.input_class;
-                self.paste_target = Some(key);
-                r.clipboard = Some(Clip::Paste);
-            } else if !secure && ed.selection().is_some() {
-                r.clipboard = Some(Clip::Copy(String::from(ed.selected_text())));
-                if code == KEY_DELETE {
-                    ed.delete(true, false);
-                    self.field_changed(i, r);
+            let cmd = match (code, ctrl, shift) {
+                (KEY_INSERT, true, _) => 'c',
+                (KEY_INSERT, _, true) => 'v',
+                (KEY_INSERT, _, _) => {
+                    if editable {
+                        let ed = self.edits.get_mut(&key).unwrap();
+                        ed.overwrite = !ed.overwrite;
+                        r.redraw = true;
+                    }
+                    return true;
                 }
-            }
-            return true;
+                _ => 'x',
+            };
+            return self.field_command(i, cmd, false, r);
         }
         let lines = self.field_lines(i);
         let lh = self.look.body().line as i32;
         let page = (self.field_inner(i).h as i32 / lh).max(1) as usize;
-        let word = ctrl && !secure;
+        // Po slovech s Ctrl i Alt (Windows / macOS); heslo nikdy.
+        let word = (ctrl || alt) && !secure;
         let ed = self.edits.get_mut(&key).unwrap();
         let motion = match code {
             // Heslo: Ctrl+sipky na zacatek a konec (slova by prozradila
             // mezery).
-            KEY_LEFT if ctrl && secure => Some(Motion::Start),
-            KEY_RIGHT if ctrl && secure => Some(Motion::End),
+            KEY_LEFT if (ctrl || alt) && secure => Some(Motion::Start),
+            KEY_RIGHT if (ctrl || alt) && secure => Some(Motion::End),
             KEY_LEFT if word => Some(Motion::WordLeft),
             KEY_RIGHT if word => Some(Motion::WordRight),
             KEY_LEFT => Some(Motion::Left),
@@ -472,13 +616,15 @@ impl<M: Clone> Ui<M> {
         }
         match code {
             KEY_BACKSPACE | KEY_DELETE => {
-                if ed.delete(code == KEY_BACKSPACE, word) {
+                if editable && ed.delete(code == KEY_BACKSPACE, word) {
                     self.field_changed(i, r);
                 }
             }
             KEY_ENTER | KEY_KPENTER if multi && !ctrl => {
-                ed.insert("\n");
-                self.field_changed(i, r);
+                if editable {
+                    ed.insert("\n");
+                    self.field_changed(i, r);
+                }
             }
             KEY_ENTER | KEY_KPENTER => {
                 if let ElemKind::TextInput { on_submit: Some(m), .. } = &self.elems[i].kind {
@@ -519,12 +665,14 @@ impl<M: Clone> Ui<M> {
                 r.redraw = true;
             }
             // Vlastni preklad klaves: znak z `key_map` (bez Ctrl a Alt).
-            _ if !ctrl && self.mods & mods::ALT == 0 => {
+            _ if !ctrl && !alt => {
                 let ch = match &self.elems[i].kind {
                     ElemKind::TextInput { key_map: Some(f), .. } => f(code, self.mods),
                     _ => return false,
                 };
-                if let Some(c) = ch.filter(|c| !c.is_control()) {
+                if let Some(c) = ch.filter(|c| !c.is_control())
+                    && editable
+                {
                     let mut b = [0u8; 4];
                     self.edits.get_mut(&key).unwrap().insert(c.encode_utf8(&mut b));
                     self.field_changed(i, r);
@@ -535,103 +683,69 @@ impl<M: Clone> Ui<M> {
         true
     }
 
-    /// Nakresli pole `i` (ramecek, vyber, text, kurzor, chyba).
-    pub(crate) fn draw_field(&mut self, c: &mut Canvas<'_>, i: usize, st: State) {
-        let th = self.look.theme.clone();
-        let col = &th.color;
-        let Some((multi, secure)) = self.field_kind(i) else { return };
-        let b = self.field_box(i);
-        let rad = th.radius.control;
-        let edge = if st.error {
-            col.danger
-        } else if st.focus_visible {
-            col.accent
-        } else {
-            col.border_strong
-        };
-        let k = if st.disabled { th.opacity.disabled } else { 255 };
-        let fade = |c: u32| crate::draw::fade(c, col.surface, k);
-        c.round_fill_bordered(b, rad, col.surface, fade(edge), if st.error { 2 } else { 1 });
-        if st.focus_visible {
-            crate::draw::focus_ring(c, b, rad, th.size.focus_ring, th.size.focus_offset, col.focus);
-        }
-        let inner = self.field_inner(i);
+    /// Prikaz pole (zkratka s Ctrl nebo polozka kontextove nabidky):
+    /// `a` vse, `z` zpet (`redo` = znovu), `y` znovu, `c` kopirovat,
+    /// `x` vyjmout, `v` vlozit, `d` smazat vyber. Vraci `false` pro
+    /// neznamy prikaz.
+    pub(crate) fn field_command(&mut self, i: usize, c: char, redo: bool, r: &mut Response<M>) -> bool {
         let key = self.elems[i].key;
-        let (sx, sy) = self.tscroll.get(&key).copied().unwrap_or((0, 0));
-        let s = String::from(self.field_text(i));
-        let (cur, sel) = self.edits.get(&key).map_or((s.len(), None), |e| (e.cursor(), e.selection()));
-        let style = self.look.body();
-        let lh = style.line as i32;
-        let lines = self.field_lines(i);
-        let old = c.clip();
-        c.set_clip(old.intersect(&Rect::new(inner.x - 1, b.y + 1, inner.w + 2, b.h.saturating_sub(2))));
-        let top = if multi { inner.y } else { b.y + (b.h as i32 - lh) / 2 };
-        if s.is_empty() {
-            let ph = match &self.elems[i].kind {
-                ElemKind::TextInput { placeholder, .. } => placeholder.clone(),
-                _ => String::new(),
-            };
-            let f = self.look.face(style);
-            let base = top + f.baseline_in(style.size, style.line);
-            f.draw(c, inner.x, base, &ph, style.size, fade(col.ink_muted));
-        }
-        for (li, &(a, e)) in lines.iter().enumerate() {
-            let y = top + li as i32 * lh - sy;
-            if y + lh < b.y || y > b.bottom() as i32 {
-                continue;
+        let secure = self.field_kind(i).is_some_and(|k| k.1);
+        let editable = self.field_editable(i);
+        let Some(ed) = self.edits.get_mut(&key) else { return false };
+        match c {
+            'a' => {
+                ed.select_all();
+                r.redraw = true;
             }
-            let xs = self.line_xs(&s, a, e, secure);
-            let x_of = |o: usize| xs.iter().find(|&&(p, _)| p >= o).map_or(0, |&(_, x)| x);
-            // Vyber za textem: v aktivnim poli akcent, jinak neutralni.
-            if let Some((sa, sb)) = sel
-                && sa <= e
-                && sb >= a
-            {
-                let x0 = x_of(sa.max(a));
-                let mut x1 = x_of(sb.min(e));
-                // Vybrany konec radku: kousek navic, at je vyber videt.
-                if multi && sb > e {
-                    x1 += self.dot_size() as i32;
-                }
-                if x1 > x0 {
-                    let bg = if st.focused && self.active { col.accent_soft } else { col.surface_3 };
-                    c.fill(Rect::new(inner.x - sx + x0, y, (x1 - x0) as u32, lh as u32), bg);
+            'z' | 'y' if !editable => {}
+            'z' if redo => {
+                if ed.redo() {
+                    self.field_changed(i, r);
                 }
             }
-            if secure {
-                let d = self.dot_size();
-                let step = self.dot_step();
-                for &(_, px) in &xs[..xs.len() - 1] {
-                    let dx = inner.x - sx + px + (step - d) as i32 / 2;
-                    c.round_fill(Rect::new(dx, y + (lh - d as i32) / 2, d, d), d / 2, fade(col.ink));
+            'z' => {
+                if ed.undo() {
+                    self.field_changed(i, r);
                 }
-            } else {
-                let f = self.look.face(style);
-                let base = y + f.baseline_in(style.size, style.line);
-                f.draw(c, inner.x - sx, base, &s[a..e], style.size, fade(col.ink));
             }
+            'y' => {
+                if ed.redo() {
+                    self.field_changed(i, r);
+                }
+            }
+            'c' | 'x' => {
+                // Heslo se do schranky nikdy nedostane.
+                if secure || ed.selection().is_none() {
+                    return true;
+                }
+                r.clipboard = Some(Clip::Copy(String::from(ed.selected_text())));
+                if c == 'x' && editable {
+                    ed.delete(true, false);
+                    self.field_changed(i, r);
+                }
+            }
+            'd' => {
+                if editable && ed.delete(true, false) {
+                    self.field_changed(i, r);
+                }
+            }
+            'v' => {
+                if editable {
+                    self.paste_class = self.input_class;
+                    self.paste_target = Some(key);
+                    r.clipboard = Some(Clip::Paste);
+                }
+            }
+            _ => return false,
         }
-        if st.focus_visible {
-            let (li, cx) = self.caret_pos(i, &lines, cur);
-            let y = top + li as i32 * lh - sy;
-            c.fill(Rect::new(inner.x - sx + cx, y, 2, lh as u32), col.accent);
-        }
-        c.set_clip(old);
-        // Text chyby pod polem.
-        if let Some(err) = self.elems[i].error.clone() {
-            let cs = th.text.caption;
-            let f = self.look.face(cs);
-            let y = b.bottom() as i32 + th.space[1] as i32;
-            let base = y + f.baseline_in(cs.size, cs.line);
-            f.draw(c, b.x + th.space[2] as i32, base, &err, cs.size, col.danger);
-        }
+        true
     }
 
     /// Prevezme hodnoty poli z rozvrzeni (po `rebuild`).
     pub(crate) fn sync_fields(&mut self) {
         let mut keep = Vec::new();
         for i in 0..self.elems.len() {
-            if let ElemKind::TextInput { value, multiline, .. } = &self.elems[i].kind {
+            if let ElemKind::TextInput { value, multiline, opts, .. } = &self.elems[i].kind {
                 let key = self.elems[i].key;
                 keep.push(key);
                 match self.edits.get_mut(&key) {
@@ -640,9 +754,18 @@ impl<M: Clone> Ui<M> {
                         self.edits.insert(key, TextEdit::new(value, *multiline));
                     }
                 }
+                let e = self.edits.get_mut(&key).unwrap();
+                e.max = opts.max_len;
+                if opts.read_only {
+                    e.overwrite = false;
+                }
             }
         }
         self.edits.retain(|k, _| keep.contains(k));
+        self.revealed.retain(|k| keep.contains(k));
+        if self.search_due.is_some_and(|(k, _)| !keep.contains(&k)) {
+            self.search_due = None;
+        }
         self.tscroll.retain(|k, _| keep.contains(k));
         if self.drag_field.is_some_and(|k| !keep.contains(&k)) {
             self.drag_field = None;

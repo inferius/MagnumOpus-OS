@@ -18,6 +18,10 @@ mod controls;
 pub mod draw;
 pub mod event;
 mod field;
+mod field_draw;
+mod field_menu;
+pub mod fieldopts;
+mod caret;
 pub mod layout;
 pub mod look;
 pub mod node;
@@ -265,6 +269,18 @@ pub struct Ui<M> {
     pub(crate) active: bool,
     /// Prvek s drzenou klavesou Enter / mezernik (akce az pri pusteni).
     pub(crate) key_pressed: Option<usize>,
+    /// Posledni ovladani bylo z klavesnice: jen tehdy se kresli prstenec
+    /// fokusu (po kliknuti mysi ne).
+    pub(crate) kbd_focus: bool,
+    /// Pole s heslem, u kterych uzivatel zapnul zobrazeni (oko).
+    pub(crate) revealed: BTreeSet<Key>,
+    /// Kurzor pole: posledni cinnost (blikani zacne znovu) a zda je videt.
+    pub(crate) caret_since: u64,
+    pub(crate) caret_on: bool,
+    /// Pole hledani a cas, kdy poslat `on_search`.
+    pub(crate) search_due: Option<(Key, u64)>,
+    /// Zpravy vznikle v `Ui::timer` (hledani s prodlevou), `Ui::take_msgs`.
+    pub(crate) timer_msgs: Vec<M>,
 }
 
 /// Posouvana oblast: index prvku (prostor `index + 1` pro `Ui::draw`),
@@ -325,6 +341,12 @@ impl<M: Clone> Ui<M> {
             title: String::new(),
             active: true,
             key_pressed: None,
+            kbd_focus: false,
+            revealed: BTreeSet::new(),
+            caret_since: 0,
+            caret_on: true,
+            search_due: None,
+            timer_msgs: Vec::new(),
         }
     }
 
@@ -496,7 +518,7 @@ impl<M: Clone> Ui<M> {
             hover: self.hover == Some(i) && !dis,
             pressed: !dis && ((self.pressed == Some(i) && self.hover == Some(i)) || self.key_pressed == Some(i)),
             focused,
-            focus_visible: focused && self.active && !dis,
+            focus_visible: focused && self.active && !dis && self.kbd_focus,
             disabled: dis,
             error: e.error.is_some(),
             selected,

@@ -47,16 +47,18 @@ pub(crate) enum PAct<M> {
     Action(String, Vec<guiproto::action::Arg>),
     /// Volba `k` rozbalovaciho vyberu.
     Pick(usize),
+    /// Prikaz textoveho pole (`Ui::field_command`, nabidka pole).
+    Field(char),
 }
 
 #[derive(Clone)]
 pub(crate) struct PItem<M> {
-    label: String,
-    shortcut: String,
-    disabled: String,
-    checked: Option<bool>,
-    separator: bool,
-    act: Option<PAct<M>>,
+    pub(crate) label: String,
+    pub(crate) shortcut: String,
+    pub(crate) disabled: String,
+    pub(crate) checked: Option<bool>,
+    pub(crate) separator: bool,
+    pub(crate) act: Option<PAct<M>>,
 }
 
 impl<M> PItem<M> {
@@ -112,7 +114,7 @@ impl<M: Clone> Ui<M> {
 
     /// Otevre nabidku s polozkami `items` u bodu / pod prvkem `anchor`
     /// (souradnice okna), sirka nejmene `min_w`.
-    fn open_popup(&mut self, owner: Key, select: bool, items: Vec<PItem<M>>, anchor: Rect, min_w: u32, hi: Option<usize>) {
+    pub(crate) fn open_popup(&mut self, owner: Key, select: bool, items: Vec<PItem<M>>, anchor: Rect, min_w: u32, hi: Option<usize>) {
         let th = &self.look.theme;
         let pad = th.space[2];
         let body = self.look.body();
@@ -212,7 +214,7 @@ impl<M: Clone> Ui<M> {
     }
 
     /// Polozky z `MenuEntry` (kontextova nabidka).
-    fn items_from(entries: &[MenuEntry<M>]) -> Vec<PItem<M>> {
+    pub(crate) fn items_from(entries: &[MenuEntry<M>]) -> Vec<PItem<M>> {
         entries
             .iter()
             .map(|e| PItem {
@@ -278,6 +280,11 @@ impl<M: Clone> Ui<M> {
         match it.act.clone() {
             Some(PAct::Msg(m)) => r.msgs.push(m),
             Some(PAct::Action(id, args)) => r.actions.push((id, args)),
+            Some(PAct::Field(c)) => {
+                if let Some(i) = self.index_of(p.owner) {
+                    self.field_command(i, c, false, r);
+                }
+            }
             Some(PAct::Pick(n)) => {
                 if let Some(i) = self.index_of(p.owner)
                     && let ElemKind::Select { selected, on_select: Some(f), .. } = &self.elems[i].kind
@@ -434,6 +441,13 @@ impl<M: Clone> Ui<M> {
                 if matches!(self.elems[i].kind, ElemKind::Table(_)) {
                     return None;
                 }
+                if self.field_kind(i).is_some() && !self.elems[i].disabled {
+                    self.pointer = (x, y);
+                    self.kbd_focus = false;
+                    self.open_field_menu(i, Some((x, y)));
+                    r.redraw = true;
+                    return Some(r);
+                }
                 self.pointer = (x, y);
                 if self.elems[i].focusable() {
                     self.focus = Some(i);
@@ -447,6 +461,11 @@ impl<M: Clone> Ui<M> {
                 let i = self.focus?;
                 let shift = self.mods & mods::SHIFT != 0;
                 if code == KEY_MENU || (code == KEY_F10 && shift) {
+                    if self.field_kind(i).is_some() && !self.elems[i].disabled {
+                        self.open_field_menu(i, None);
+                        r.redraw = true;
+                        return Some(r);
+                    }
                     return self.open_context(i, None).then(|| {
                         r.redraw = true;
                         r
@@ -610,26 +629,29 @@ impl<M: Clone> Ui<M> {
         self.popup.is_some()
     }
 
-    /// Kdy klient ma probudit `Ui::timer` (bublina), `None` = nic neceka.
+    /// Kdy klient ma probudit `Ui::timer` (bublina, kurzor a hledani
+    /// poli, `caret.rs`), `None` = nic neceka.
     pub fn next_deadline(&self) -> Option<u64> {
-        match (self.tip, self.tip_shown) {
+        let tip = match (self.tip, self.tip_shown) {
             (Some((_, t)), None) => Some(t + TIP_DELAY),
             _ => None,
-        }
+        };
+        [tip, self.caret_deadline()].into_iter().flatten().min()
     }
 
     /// Cas `now` (ns, stejne hodiny jako cas vstupu): ukaze bublinu, kdyz
     /// uplynula prodleva. Vraci, zda prekreslit.
     pub fn timer(&mut self, now: u64) -> bool {
         self.now = now;
+        let mut redraw = self.caret_timer(now);
         if let (Some((k, t)), None) = (self.tip, self.tip_shown)
             && now >= t + TIP_DELAY
             && self.popup.is_none()
         {
             self.tip_shown = Some(k);
-            return true;
+            redraw = true;
         }
-        false
+        redraw
     }
 
     /// Uzly pristupnosti otevrene nabidky a bubliny.

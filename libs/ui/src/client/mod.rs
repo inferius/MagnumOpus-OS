@@ -731,6 +731,10 @@ pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u3
                     if ui.timer(libos::time::now()) {
                         dirty = true;
                     }
+                    for m in ui.take_msgs() {
+                        app.update(m);
+                        dirty = true;
+                    }
                     continue;
                 }
                 Ok(Err(e)) | Err(e) => return Err(e),
@@ -756,6 +760,10 @@ pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u3
             Ok(None) => continue,
             Err(Error::TimedOut) => {
                 if ui.timer(libos::time::now()) {
+                    dirty = true;
+                }
+                for m in ui.take_msgs() {
+                    app.update(m);
                     dirty = true;
                 }
                 continue;

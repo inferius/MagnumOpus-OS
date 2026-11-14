@@ -109,9 +109,22 @@ impl<M: Clone> Ui<M> {
     }
 
     fn event_core(&mut self, ev: InputEvent, time: Option<u64>) -> Response<M> {
+        if let Some(t) = time {
+            self.now = t;
+        }
         // Pamet skupin fokusu pred zmenou (navrat do skupiny).
         if matches!(ev, InputEvent::Key { .. } | InputEvent::Button { pressed: true, .. }) {
             self.remember_focus();
+        }
+        // Prstenec fokusu jen po ovladani klavesnici (ne po kliknuti).
+        match ev {
+            InputEvent::Key { action, .. } if action != 0 => self.kbd_focus = true,
+            InputEvent::Button { pressed: true, .. } => self.kbd_focus = false,
+            _ => {}
+        }
+        // Kurzor pole: po kazde cinnosti hned videt.
+        if matches!(ev, InputEvent::Key { .. } | InputEvent::Text(_) | InputEvent::Button { pressed: true, .. } | InputEvent::Focus(true)) {
+            self.caret_reset();
         }
         // Bublina zmizi pri kliku a klavese.
         let hid = matches!(ev, InputEvent::Button { pressed: true, .. } | InputEvent::Key { .. } | InputEvent::PointerLeave | InputEvent::Focus(false)) && self.tip_hide();
@@ -166,7 +179,14 @@ impl<M: Clone> Ui<M> {
                         }
                         if self.field_kind(i).is_some() {
                             let (sx, sy) = self.to_space(i, x, y);
-                            self.field_press(i, sx, sy, time);
+                            match self.field_button_at(i, sx, sy) {
+                                // Tlacitko v poli (oko, krizek, krok): ne tah.
+                                Some(b) => {
+                                    self.field_button(i, b, &mut r);
+                                    self.pressed = None;
+                                }
+                                None => self.field_press(i, sx, sy, time),
+                            }
                         }
                     }
                     r.redraw = true;
@@ -304,21 +324,7 @@ impl<M: Clone> Ui<M> {
             return self.field_key(f, code, ch, r);
         }
         if code == KEY_TAB {
-            let n = self.elems.len();
-            let order: Vec<usize> = (0..n).filter(|&i| self.elems[i].focusable() && !self.elems[i].skip_tab).collect();
-            if order.is_empty() {
-                return false;
-            }
-            let pos = self.focus.and_then(|f| order.iter().position(|&i| i == f));
-            let back = self.mods & mods::SHIFT != 0;
-            let next = match (pos, back) {
-                (None, _) => 0,
-                (Some(p), false) => (p + 1) % order.len(),
-                (Some(p), true) => (p + order.len() - 1) % order.len(),
-            };
-            self.focus = Some(order[next]);
-            r.redraw = true;
-            return true;
+            return self.focus_step(self.mods & mods::SHIFT != 0, r);
         }
         let Some(f) = self.focus else { return false };
         if self.control_key(f, code, r) {
@@ -351,6 +357,25 @@ impl<M: Clone> Ui<M> {
         true
     }
 
+    /// Dalsi (`back` = predchozi) zastavka poradi Tab.
+    pub(crate) fn focus_step(&mut self, back: bool, r: &mut Response<M>) -> bool {
+        let n = self.elems.len();
+        let order: Vec<usize> = (0..n).filter(|&i| self.elems[i].focusable() && !self.elems[i].skip_tab).collect();
+        if order.is_empty() {
+            return false;
+        }
+        let pos = self.focus.and_then(|f| order.iter().position(|&i| i == f));
+        let next = match (pos, back) {
+            (None, _) => 0,
+            (Some(p), false) => (p + 1) % order.len(),
+            (Some(p), true) => (p + order.len() - 1) % order.len(),
+        };
+        self.focus = Some(order[next]);
+        self.kbd_focus = true;
+        r.redraw = true;
+        true
+    }
+
     /// Popis prvku pro trasovani (druh a text, ne hodnota pole: muze byt
     /// heslo).
     fn describe(&self, i: Option<usize>) -> String {
@@ -378,6 +403,7 @@ impl<M: Clone> Ui<M> {
         };
         if action & actions::FOCUS != 0 && self.elems[i].focusable() {
             self.focus = Some(i);
+            self.kbd_focus = true;
             r.redraw = true;
         }
         if action & (actions::ACTIVATE | actions::TOGGLE) != 0 {
@@ -390,6 +416,10 @@ impl<M: Clone> Ui<M> {
         // mistni fyzicka klavesnice.
         if action & actions::SET_VALUE != 0 && self.field_kind(i).is_some_and(|k| k.1) {
             r.trace.push(String::from("nastaveni hesla akci pristupnosti odmitnuto"));
+            return r;
+        }
+        if action & actions::SET_VALUE != 0 && self.field_kind(i).is_some() && !self.field_editable(i) {
+            r.trace.push(String::from("pole je jen pro cteni nebo nedostupne"));
             return r;
         }
         if action & actions::SET_VALUE != 0
