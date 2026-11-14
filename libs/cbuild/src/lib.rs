@@ -66,6 +66,8 @@ pub struct Build {
 ///
 /// Na aarch64 vsude striktni zarovnani jako cil Rustu.
 pub fn target_flags(target: &str) -> Result<&'static [&'static str], String> {
+    // Cil std jako PIC (`*-unknown-magnumopus-dyn`, libc.so): stejne CPU.
+    let target = target.strip_suffix("-dyn").unwrap_or(target);
     match target {
         "x86_64-unknown-magnumopus" => Ok(&[
             "--target=x86_64-unknown-none-elf",
@@ -308,7 +310,9 @@ impl Build {
             println!("cargo:rerun-if-changed={}", i.display());
         }
         let clang = find_clang()?;
-        let (obj_dir, objects) = self.compile_objects(&clang, &target, &out, Code::Static)?;
+        // Knihovna pro libc.so (cil `-dyn`) se preklada jako PIC.
+        let code = if target.ends_with("-dyn") { Code::Shared } else { Code::Static };
+        let (obj_dir, objects) = self.compile_objects(&clang, &target, &out, code)?;
 
         let lib = out.join(format!("lib{}.a", self.name));
         let _ = std::fs::remove_file(&lib);

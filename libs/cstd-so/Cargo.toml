@@ -1,0 +1,17 @@
+[package]
+name = "cstd-so"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Sdilena knihovna C libc.so (cstd + std + osrt jako PIC) pro programy PIE v C"
+
+[lib]
+# Vystup libc.so (SONAME libc.so, xtask stdsys::build_libc_so_locked).
+# Preklada se jen pro cil *-unknown-magnumopus-dyn (std jako PIC).
+name = "c"
+crate-type = ["cdylib"]
+test = false
+
+[dependencies]
+cstd = { path = "../cstd" }

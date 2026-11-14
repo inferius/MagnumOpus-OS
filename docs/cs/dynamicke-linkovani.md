@@ -49,7 +49,8 @@ Wine a FFmpeg (LGPL, dynamicky). Programy v Rustu zůstávají statické
 <figcaption>Spuštění programu PIE se sdílenými knihovnami (DL-2 až DL-4b; knihovny z disku a <code>$ORIGIN</code> v DL-4c).</figcaption>
 </figure>
 
-- **Zavaděč:** samostatný `ld.so` (zároveň `libc.so` ve stylu musl),
+- **Zavaděč:** samostatný `ld.so`; `libc.so` (cstd) je běžná knihovna
+  z `DT_NEEDED` (rozhodnutí 2A v [cstd.md](cstd.md)),
   program má `PT_INTERP`; zavaděč psaný v Rustu (`libs/dynload`,
   `user/ld`), sám staticky relokovaný.
 - **Formát:** ELF `ET_DYN` podle SysV gABI: `DT_GNU_HASH` i `DT_HASH`,
@@ -128,7 +129,8 @@ local-exec, cizí initial-exec), knihovny `-fPIC` (TLS general-dynamic,
 na aarch64 TLSDESC). Program PIE linkuje s `--allow-shlib-undefined`
 (funkce zavaděče jako `__tls_get_addr` při linku nikde nejsou). Testovací
 moduly jsou v `user/dltest` (minimální `crt.c`: `_start` -> `program_main`
--> konec syscallem; `cstd` jako `libc.so` zatím není).
+-> konec syscallem). Programy v C nad `libc.so` (cstd) mají `crt1.o` ze
+sysrootu C a start `__libc_start` v `osrt`, viz [cstd.md](cstd.md#libcso).
 
 ⚠️ **Omezení DL-2 (vědomá, řeší DL-3 a DL-4):**
 

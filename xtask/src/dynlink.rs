@@ -151,3 +151,28 @@ pub fn build_tests(opts: &Options) -> Result<Vec<(String, Vec<u8>)>> {
         (String::from("dltest-dl"), read(&prog_dl)?),
     ])
 }
+
+/// Test libc.so (docs/cs/cstd.md): program PIE v C `cdyn` (crt1.c ze
+/// sysrootu C + main.c) a plugin `libcplug.so`, oba nad `libc.so`.
+/// Vraci soubory do initfs.
+pub fn build_cdyn(opts: &Options, libc_so: &std::path::Path, sysroot: &std::path::Path) -> Result<Vec<(String, Vec<u8>)>> {
+    let builtins = sysroot.join("lib/libbuiltins.a");
+    let a = opts.arch;
+    let t = a.user_target;
+    let src = workspace_root().join("user").join("cdyn");
+    let out = target_dir().join("cdyn").join(a.name).join(profile_dir(opts));
+    std::fs::create_dir_all(&out)?;
+    let inc = |b: Build| b.include(workspace_root().join("libs/cstd/include")).include(workspace_root().join("libs/cstd-core/include"));
+    let plug = out.join("libcplug.so");
+    inc(Build::new("cplug")).file(src.join("plug.c")).link(t, &out, &plug, &Link::shared("libcplug.so").needs(libc_so).object(&builtins))?;
+    let prog = out.join("cdyn");
+    inc(Build::new("cdyn"))
+        .file(workspace_root().join("libs/cstd/crt/crt1.c"))
+        .file(src.join("main.c"))
+        .link(t, &out, &prog, &Link::pie().needs(libc_so).object(&builtins))?;
+    Ok(vec![
+        (String::from("cdyn"), std::fs::read(&prog)?),
+        (String::from("lib/libcplug.so"), std::fs::read(&plug)?),
+        (String::from("lib/libc.so"), std::fs::read(libc_so)?),
+    ])
+}

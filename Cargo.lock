@@ -689,6 +689,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "cstd-so"
+version = "0.1.0"
+dependencies = [
+ "cstd",
+]
+
+[[package]]
 name = "ctest"
 version = "0.1.0"
 dependencies = [

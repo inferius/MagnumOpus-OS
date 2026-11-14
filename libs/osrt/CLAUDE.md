@@ -18,6 +18,7 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 - Handle vlastního procesu se nesmí zavřít (`start::init` ho zapomene).
 - Nové vlákno nastaví TP jako první věc, před jakýmkoli kódem std.
 - `at_exit` volá funkce bez drženého zámku (smí registrovat další); `exit_now` je nevolá.
+- Cíl `*-unknown-magnumopus-dyn` (`cfg(target_env = "dyn")`, std jako PIC v `libc.so`): žádný `_start` ani vlastní blok TLS (TLS dělá `ld.so`), start je `__libc_start(main, bootstrap, sp, magic)` z `crt1.o` programu, `exit` volá `libos::loader::run_fini`. Symboly linker skriptu (`__tls_*`) jen ve statickém cíli.
 - `thread::exit_current` (C `pthread_exit`) ukončí vlákno syscallem bez destruktorů std; zásobník a TLS uvolní až `Thread::join`.
 
 ## Testy

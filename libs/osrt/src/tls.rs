@@ -20,6 +20,10 @@
 use alloc::alloc::{Layout, alloc_zeroed, dealloc};
 use core::ptr;
 
+// Program pod zavadecem (`env: dyn`, libc.so) ma TLS od ld.so (vsechny
+// moduly vcetne libc.so, docs/cs/dynamicke-linkovani.md); sablona z
+// linker skriptu tu neni.
+#[cfg(not(target_env = "dyn"))]
 unsafe extern "C" {
     /// Zacatek sablony TLS (symboly z `user/user-std.ld`).
     static __tls_template_start: u8;
@@ -29,7 +33,14 @@ unsafe extern "C" {
     static __tls_align: u8;
 }
 
+/// Pod zavadecem vlastni sablona neni (bloky TLS dela ld.so).
+#[cfg(target_env = "dyn")]
+fn template() -> (*const u8, usize, usize) {
+    (ptr::null(), 0, 1)
+}
+
 /// Sablona TLS programu: (adresa, velikost, zarovnani).
+#[cfg(not(target_env = "dyn"))]
 fn template() -> (*const u8, usize, usize) {
     // Symboly definuje linker skript; pouzivaji se jen jejich adresy.
     (
@@ -110,7 +121,13 @@ impl Drop for Block {
     }
 }
 
+/// TLS hlavniho vlakna (blok zije do konce procesu). Pod zavadecem ho
+/// pripravil ld.so (staticke TLS vsech modulu): nic.
+#[cfg(target_env = "dyn")]
+pub(crate) fn init_main_thread() {}
+
 /// TLS hlavniho vlakna (blok zije do konce procesu).
+#[cfg(not(target_env = "dyn"))]
 pub(crate) fn init_main_thread() {
     let Some(block) = Block::new() else {
         crate::debug_log("osrt: malo pameti pro TLS hlavniho vlakna");

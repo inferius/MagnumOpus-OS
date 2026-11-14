@@ -112,3 +112,113 @@ pub fn assemble(arch: &Arch, std_bin: &Path) -> Result<PathBuf> {
     write_if_changed(&root.join("clang.cfg"), cfg.as_bytes())?;
     Ok(root)
 }
+
+/// Priznaky prekladu programu PIE nad `libc.so` (bez `-ftls-model`: TLS
+/// programu urci prekladac, knihovny jdou pres zavadec).
+pub fn cflags_dyn(arch: &Arch, sysroot: &Path) -> Result<Vec<String>> {
+    let mut f = cflags(arch, sysroot)?;
+    f.retain(|x| x != "-fno-pic" && x != "-ftls-model=local-exec");
+    f.push(String::from("-fPIE"));
+    Ok(f)
+}
+
+/// Priznaky linkovani programu PIE nad `libc.so` (pravidla zavadece:
+/// `PT_INTERP`, BIND_NOW, RELRO, bez TEXTREL, segmenty 64 KiB).
+pub fn ldflags_dyn(sysroot: &Path) -> Vec<String> {
+    vec![
+        String::from("-nostdlib"),
+        String::from("-fuse-ld=lld"),
+        String::from("-Wl,-pie"),
+        String::from("-Wl,--dynamic-linker=/system/lib/ld.so"),
+        String::from("-Wl,-z,now"),
+        String::from("-Wl,-z,relro"),
+        String::from("-Wl,-z,text"),
+        String::from("-Wl,-z,max-page-size=65536"),
+        String::from("-Wl,--hash-style=both"),
+        String::from("-Wl,--allow-shlib-undefined"),
+        slash(&sysroot.join("lib/crt1.o")),
+        format!("-L{}", slash(&sysroot.join("lib"))),
+        // Ovladac clangu pro baremetal linkuje staticky (-Bstatic) a vzal by
+        // libc.a: dynamicky a primo libc.so.
+        String::from("-Wl,-Bdynamic"),
+        String::from("-l:libc.so"),
+        // Pomocne funkce prekladace (aarch64 long double __addtf3 ...,
+        // 128bitove deleni) staticky do programu, jako libgcc.a.
+        String::from("-l:libbuiltins.a"),
+    ]
+}
+
+/// Dynamicka cast sysrootu: `lib/libc.so`, `lib/crt1.o` (z
+/// `libs/cstd/crt/crt1.c`) a `clang-dyn.cfg` pro programy PIE.
+pub fn add_dynamic(arch: &Arch, root: &Path, libc_so: &Path) -> Result<()> {
+    write_if_changed(&root.join("lib/libc.so"), &std::fs::read(libc_so)?)?;
+    let clang = cbuild::find_clang()?;
+    builtins(arch, root, &clang)?;
+    let crt = root.join("lib/crt1.o");
+    let src = workspace_root().join("libs/cstd/crt/crt1.c");
+    let out = std::process::Command::new(&clang)
+        .args(cflags_dyn(arch, root)?)
+        .args(["-c", "-O2"])
+        .arg(&src)
+        .arg("-o")
+        .arg(&crt)
+        .output()?;
+    if !out.status.success() {
+        return Err(format!("crt1.o: {}", String::from_utf8_lossy(&out.stderr)).into());
+    }
+    let mut cfg = String::from("# Sysroot C MagnumOpus, programy PIE nad libc.so: clang --config=<tento soubor>.\n");
+    for f in cflags_dyn(arch, root)?.into_iter().chain(ldflags_dyn(root)) {
+        cfg.push_str(&f);
+        cfg.push('\n');
+    }
+    write_if_changed(&root.join("clang-dyn.cfg"), cfg.as_bytes())?;
+    Ok(())
+}
+
+/// Prelozi program v C jen pres `clang --config=clang-dyn.cfg` (overeni
+/// cesty pro cizi build systemy); vraci obsah binarky.
+pub fn build_with_cfg(root: &Path, src: &str, name: &str) -> Result<Vec<u8>> {
+    let clang = cbuild::find_clang()?;
+    let out = root.join("test").join(name);
+    std::fs::create_dir_all(root.join("test"))?;
+    let o = std::process::Command::new(&clang)
+        .arg(format!("--config={}", slash(&root.join("clang-dyn.cfg"))))
+        .arg("-Wno-unused-command-line-argument")
+        .arg(workspace_root().join(src))
+        .arg("-o")
+        .arg(&out)
+        .output()?;
+    if !o.status.success() {
+        return Err(format!("{name} pres clang-dyn.cfg: {}", String::from_utf8_lossy(&o.stderr)).into());
+    }
+    Ok(std::fs::read(&out)?)
+}
+
+/// `lib/libbuiltins.a`: compiler_builtins ze sysrootu std jako PIC (bez
+/// clenu `lib.rmeta`), staticky do programu PIE - libc.so pomocne funkce
+/// prekladace neexportuje (rustc je v cdylib skryva).
+fn builtins(arch: &Arch, root: &Path, clang: &Path) -> Result<()> {
+    let dir = crate::stdsys::sysroot_dir()?.join("lib/rustlib").join(crate::stdsys::target_name_dyn(arch)).join("lib");
+    let rlib = std::fs::read_dir(&dir)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .find(|p| {
+            let n = p.file_name().unwrap_or_default().to_string_lossy();
+            n.starts_with("libcompiler_builtins-") && n.ends_with(".rlib")
+        })
+        .ok_or("compiler_builtins chybi v sysrootu std jako PIC")?;
+    let out = root.join("lib/libbuiltins.a");
+    let data = std::fs::read(&rlib)?;
+    let stamp = root.join("lib/libbuiltins.stamp");
+    let id = format!("{}:{}", rlib.display(), data.len());
+    if out.exists() && std::fs::read_to_string(&stamp).ok().as_deref() == Some(id.as_str()) {
+        return Ok(());
+    }
+    std::fs::write(&out, &data)?;
+    let ar = clang.with_file_name(if cfg!(windows) { "llvm-ar.exe" } else { "llvm-ar" });
+    let ok = std::process::Command::new(&ar).arg("d").arg(&out).arg("lib.rmeta").status()?.success();
+    if !ok {
+        return Err("llvm-ar: odebrani lib.rmeta z libbuiltins.a selhalo".into());
+    }
+    std::fs::write(&stamp, id)?;
+    Ok(())
+}

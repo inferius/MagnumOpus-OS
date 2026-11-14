@@ -49,7 +49,8 @@ static (`ET_EXEC`, [rust-std.md](rust-std.md)).
 <figcaption>Starting a PIE program with shared libraries (DL-2 to DL-4b; libraries from disk and <code>$ORIGIN</code> in DL-4c).</figcaption>
 </figure>
 
-- **Loader:** a separate `ld.so` (also `libc.so` in musl style), the
+- **Loader:** a separate `ld.so`; `libc.so` (cstd) is an ordinary library
+  from `DT_NEEDED` (decision 2A in [cstd.md](cstd.md)), the
   program has `PT_INTERP`; the loader is written in Rust (`libs/dynload`,
   `user/ld`), statically relocated itself.
 - **Format:** ELF `ET_DYN` per the SysV gABI: `DT_GNU_HASH` and `DT_HASH`,
@@ -133,7 +134,9 @@ local-exec, foreign initial-exec), libraries `-fPIC` (TLS general-dynamic,
 TLSDESC on aarch64). A PIE program links with `--allow-shlib-undefined`
 (loader functions such as `__tls_get_addr` exist nowhere at link time).
 Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
-`program_main` -> exit syscall; `cstd` as `libc.so` does not exist yet).
+`program_main` -> exit syscall). C programs over `libc.so` (cstd) have
+`crt1.o` from the C sysroot and the `__libc_start` start in `osrt`, see
+[cstd.md](cstd.md#libcso).
 
 ⚠️ **Limitations of DL-2 (deliberate, solved by DL-3 and DL-4):**
 
