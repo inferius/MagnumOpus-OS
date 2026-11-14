@@ -23,6 +23,7 @@ extern crate alloc;
 pub mod a11y;
 pub mod action;
 pub mod context;
+pub mod cursor;
 pub mod control;
 pub mod display;
 pub mod menu;
@@ -34,14 +35,17 @@ pub mod window;
 mod replay_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod cursor_tests;
 
 pub use abi::{Error, Result};
 pub use wire::{Reader, Writer};
 
 /// Verze protokolu okna a displeje (2: `WINDOW_SIZE`, `WINDOW_CONTEXT`;
 /// 3: rozsireni kontextu pro tablet a TV, `context::ContextExt`;
-/// 4: seriove cislo gesta v `InputRecord`).
-pub const VERSION: u32 = 4;
+/// 4: seriove cislo gesta v `InputRecord`; 5: kurzor, zamek ukazatele
+/// a cela obrazovka na zadost aplikace, `InputEvent::PointerRelative`).
+pub const VERSION: u32 = 5;
 
 /// Nejvetsi sirka nebo vyska bufferu, okna a vystupu v pixelech.
 pub const MAX_DIM: u32 = 16384;

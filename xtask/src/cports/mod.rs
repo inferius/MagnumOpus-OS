@@ -138,10 +138,11 @@ const PORTS: &[CPort] = &[
         top: "SDL3-3.4.20",
         // Ovladac videa `magnumopus` (overlay src/video/magnumopus) nad
         // libs/mosdl; docs/cs/sdl.md.
-        patches: &["0001-video-magnumopus.patch"],
+        patches: &["0001-magnumopus.patch"],
         data: &[
             ("testsprite.manifest.toml", "port:testsprite.manifest.toml"),
             ("checkkeys.manifest.toml", "port:checkkeys.manifest.toml"),
+            ("testmagnumopus.manifest.toml", "port:testmagnumopus.manifest.toml"),
             ("sdl-icon.png", "test/icon.png"),
         ],
         build: Build::CMake {
@@ -188,7 +189,7 @@ const PORTS: &[CPort] = &[
                 "-DSDL_DIALOG=OFF",
                 "-DSDL_TRAY=OFF",
             ],
-            programs: &[("testsprite", "test/testsprite"), ("checkkeys", "test/checkkeys")],
+            programs: &[("testsprite", "test/testsprite"), ("checkkeys", "test/checkkeys"), ("testmagnumopus", "test/testmagnumopus")],
         },
     },
 ];

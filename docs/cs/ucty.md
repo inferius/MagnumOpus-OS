@@ -634,6 +634,36 @@ match login.auth(1000, Method::Password, Secret::from("heslo"))? {
 }
 ```
 
+## Povolení aplikací
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (test `sdl: zvuk - prehravani,
+nahravani s povolenim, odvolani (QMP)`; host testy `cargo test -p
+accountproto perm`).
+
+Rozhodnutí uživatele „smí aplikace X použít Y“ (dnes mikrofon,
+[Zvuk](zvuk.md#relace-aplikací-a-nahrávání)) drží služba účtů trvale po
+uživateli a aplikaci (identita z manifestu), aby se nikdo neptal znovu.
+
+- **Kde:** `/system/accounts/permissions/<uid>` (`/db/permissions/<uid>`
+  v relaci FS služby účtů, účet 902): řádky
+  `identita<TAB>povolení<TAB>allow|deny`. Aplikace ani uživatelská relace
+  FS k souboru nemají přístup; měnit ho jde jen přes službu účtů. Proč
+  tady: data účtů spravuje systém, služba účtů už má důvěryhodný kanál pro
+  systémové dialogy a rozhodnutí patří uživateli jako ostatní nastavení
+  jeho účtu.
+- **Dotaz** (kanál `permissions`, dostává ho od initu služba zařízení,
+  dnes `audiod`): uložené rozhodnutí odpoví hned; jinak systémový dialog
+  Povolení u kompozitoru s volbami **Povolit** / **Jen tentokrát** /
+  **Nepovolit** (Esc = Nepovolit). Povolit a Nepovolit se uloží, Jen
+  tentokrát platí do konce běhu aplikace. Bez kompozitoru nebo pro
+  neznámého uživatele = Nepovolit.
+- **Výpis a odvolání:** příkaz shellu `povoleni` (výpis) a
+  `povoleni odvolat <aplikace> [mikrofon]`. Shell se službou účtů
+  nemluví: požadavek jde initu (kanál napájení relace shellu) a ten se ptá
+  služby účtů jménem uživatele relace terminálu (kanál
+  `permissions-admin`). Cizí rozhodnutí tak shell nevidí. Odvolání
+  v Nastavení **[navrženo]**.
+
 ## Agent AI a identita
 
 Pracovní prostor agenta (vlákno agentů, `user/agentd`) dnes běží jako

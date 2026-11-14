@@ -40,6 +40,8 @@ pub struct Service {
     pub events: Vec<Vec<u8>>,
     /// Sprava pocitace: dialog, cekajici ukony, granty, rezim spravy.
     pub admin: crate::admin::Admin,
+    /// Povoleni aplikaci: kanal `permissions`, cekajici dotazy (`perms.rs`).
+    pub perms: crate::perms::Perms,
 }
 
 /// Realny cas v sekundach (zpomaleni po chybach).
@@ -225,6 +227,8 @@ impl Service {
             // Ukon pro cely pocitac: duveryhodny dialog kompozitoru.
             Request::Elevate { action, params } => return self.elevate(i, action, params),
             Request::WhoAmI => self.whoami(session, uid),
+            Request::PermList => self.perm_list(uid),
+            Request::PermRevoke { app_id, perm } => self.perm_revoke(uid, &app_id, perm),
             Request::SetPassword { old, new } => self.eng.set_password(uid, &old, &new, now).map(|_| Vec::new()),
             Request::SetPin { password, pin } => self.eng.set_pin(uid, &password, &pin, now).map(|_| Vec::new()),
             Request::SetPhrase { phrase } => self.eng.set_phrase(uid, &phrase).map(|_| Vec::new()),

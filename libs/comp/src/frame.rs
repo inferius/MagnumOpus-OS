@@ -147,6 +147,9 @@ impl Comp {
         if let Some(d) = self.tip_due() {
             at(d);
         }
+        if let Some(d) = self.pointer_notice_due() {
+            at(d);
+        }
         for w in self.windows.values() {
             if let Some((_, _, _, d)) = w.configure {
                 at(d);
@@ -197,6 +200,7 @@ impl Comp {
         self.max_menu_timer(now);
         self.fs_esc_timer(now);
         self.tip_timer(now);
+        self.pointer_notice_timer(now);
         self.input_now = now;
         let (late, keep): (Vec<_>, Vec<_>) = core::mem::take(&mut self.frame.groups).into_iter().partition(|g| g.deadline <= now);
         self.frame.groups = keep;

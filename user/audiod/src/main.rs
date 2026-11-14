@@ -26,6 +26,7 @@ extern crate alloc;
 
 mod device;
 mod input;
+mod perm;
 mod service;
 mod streams;
 
@@ -54,7 +55,7 @@ fn main(startup: Startup) -> i64 {
         device: None,
         rec: None,
         lost: None,
-        clients: vec![Client { chan: startup.bootstrap, open: true, privileged: true }],
+        clients: vec![Client { chan: startup.bootstrap, open: true, privileged: true, id: 0, app: None, granted: None }],
         streams: Vec::new(),
         next_id: 1,
         master: 100,
@@ -62,6 +63,10 @@ fn main(startup: Startup) -> i64 {
         mixer: Mixer::new(256),
         out: Vec::new(),
         idle_since: None,
+        perm: None,
+        pending: Vec::new(),
+        client_seq: 0,
+        ask_seq: 0,
     };
     svc.choose_default();
     if svc.device.is_none() {

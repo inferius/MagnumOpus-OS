@@ -127,6 +127,10 @@ pub trait Env {
     fn log_level(&mut self, _target: &str, _level: &str) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Povoleni aplikaci (prikaz `povoleni`); vychozi = relace je nema.
+    fn permissions(&mut self, _app: &str, _perm: &str) -> Result<String, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Sluzba "otevri cestu" (`start`, hola cesta k souboru): poslani
     /// zadosti; vychozi = relace sluzbu nema.
     fn open_send(&mut self, _path: &str, _app_only: bool) -> Result<(), abi::Error> {
@@ -558,6 +562,10 @@ impl Host for SessionHost<'_> {
 
     fn log_level(&mut self, target: &str, level: &str) -> Result<String, abi::Error> {
         self.env.log_level(target, level)
+    }
+
+    fn permissions(&mut self, app: &str, perm: &str) -> Result<String, abi::Error> {
+        self.env.permissions(app, perm)
     }
 
     fn open_path(&mut self, path: &str, app_only: bool) -> Result<Opened, abi::Error> {

@@ -5,6 +5,7 @@ První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`,
 ## Klíčové soubory
 
 - `src/main.rs` - pořadí startu; `src/system.rs`, `gui.rs`, `accounts.rs`, `session.rs`, `terminal.rs`, `audio.rs`, ... - start jednotlivých služeb.
+- `src/audio.rs` - audiod pod supervisorem; relace aplikací s receptem (`app\0` + `audioproto::session::Recipe`, `gui::audio_handles` předá štítky `AUDIO`/`AUDIO_LEASE` při spuštění aplikace), propojení s `accountd` kanálem `permissions` při každém startu audiod; `src/perms.rs` - příkaz shellu `povoleni` (kanál `permissions-admin`, uživatel podle relace terminálu).
 - `src/launch.rs` - spouštěcí služba `launchd` (std::process): start, klientské kanály (`launch::client`, štítek `LAUNCH`).
 - `src/files.rs` - `files-copy` pro každou relaci a handly okna Soubory; `src/open.rs` - služba „otevři cestu“ (asociace `[open]`, kanál pro každou relaci, volání akce přes kompozitor, spuštění aplikace v relaci).
 - `src/supervisor/` - `mod.rs` smyčka (`Supervisor::step`), `lifecycle.rs` restart a závislosti, `leases.rs` lístky (vč. `ADOPT` s limity a `queue_lease` pro lístky vydané mimo kolo supervisoru), `service.rs` adaptér služby; `src/libd.rs` - služba knihoven (adaptér `LibdService`, poskytovatel relací pro děti initu).

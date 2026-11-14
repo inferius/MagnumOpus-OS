@@ -159,7 +159,7 @@ pub(super) fn start_std_app(
     ];
     handles.extend(extra);
     let (process, _bootstrap) = libos::spawn(name, image, handles).map_err(|e| fail("spusteni", e))?;
-    Ok(Started { name: String::from(name), process, out, err })
+    Ok(Started { name: String::from(name), process, out, err, seen: Vec::new(), scanned: 0 })
 }
 
 /// Bezici program se std (viz [`start_std_app`]).
@@ -168,18 +168,45 @@ pub(super) struct Started {
     process: libos::Process,
     out: Channel,
     err: Channel,
+    /// Stdout prectene behem behu (`wait_line`); `finish` ho vrati cele.
+    seen: Vec<u8>,
+    /// Kam az `wait_line` uz radky prohledal.
+    scanned: usize,
 }
 
 impl Started {
+    /// Pocka na radek stdout, ktery zacina `prefix` (za drive nalezenymi);
+    /// radky zapise do logu. Vrati cely radek.
+    pub(super) fn wait_line(&mut self, prefix: &str, limit: Duration) -> Result<String, String> {
+        let deadline = time::deadline_after(limit);
+        loop {
+            while let Some(nl) = self.seen[self.scanned..].iter().position(|&b| b == b'\n') {
+                let line = String::from_utf8_lossy(&self.seen[self.scanned..self.scanned + nl]).into_owned();
+                self.scanned += nl + 1;
+                libos::println!("init: {}: {line}", self.name);
+                if line.starts_with(prefix) {
+                    return Ok(line);
+                }
+            }
+            match self.out.read(Some(deadline)) {
+                Ok(m) => self.seen.extend_from_slice(&m.data),
+                Err(e) => return Err(format!("{}: cekani na '{prefix}': {e}", self.name)),
+            }
+        }
+    }
+
     /// Ukonci program (testy programu, ktere samy nekonci, napr. SDL).
     pub(super) fn kill(self) {
         let _ = self.process.kill();
     }
 
     /// Precte vystup a pocka na konec (nejdele `limit`).
-    pub(super) fn finish(self, limit: Duration) -> Result<Run, String> {
+    pub(super) fn finish(mut self, limit: Duration) -> Result<Run, String> {
         let deadline = time::deadline_after(limit);
-        let stdout = read_stream(&self.out, deadline)?;
+        let mut stdout = core::mem::take(&mut self.seen);
+        stdout.extend(read_stream(&self.out, deadline)?);
+        // Radky uz zapsane do logu (`wait_line`) znovu nevypisovat.
+        let logged = self.scanned.min(stdout.len());
         let code = self.process.wait_exit(Some(deadline)).map_err(|e| fail("konec procesu", e))?;
         let stderr = read_stream(&self.err, time::deadline_after(Duration::from_secs(1))).unwrap_or_default();
         let run = Run {
@@ -187,7 +214,7 @@ impl Started {
             stdout: String::from_utf8_lossy(&stdout).into_owned(),
             stderr: String::from_utf8_lossy(&stderr).into_owned(),
         };
-        for line in run.stdout.lines() {
+        for line in String::from_utf8_lossy(&stdout[logged..]).lines() {
             libos::println!("init: {}: {line}", self.name);
         }
         Ok(run)

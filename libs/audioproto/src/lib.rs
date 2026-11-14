@@ -17,10 +17,13 @@ extern crate alloc;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod session_tests;
 
 pub mod client;
 pub mod device;
 pub mod ring;
+pub mod session;
 
 #[cfg(feature = "client")]
 pub mod conn;

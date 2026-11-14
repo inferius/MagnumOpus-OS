@@ -25,6 +25,7 @@ Nativní knihovna UI (milník 6c): jedna pro všechny aplikace. Aplikace popíš
 - Seznam návrhů u pole: jádro bez stromu `complete.rs` (`Completion`, používá ho i gui-term samostatně), napojení na pole `suggest.rs`. Klávesy, které seznam nevezme, musí jít do pole (`Outcome::Ignored`); heslo seznam nikdy nemá.
 - Nabídky: `Ui::popup` je vždy nejhlubší úroveň, rodiče podnabídek drží `Ui::popup_stack` (`submenu.rs`); kdo nabídku zavírá, volá `close_popup` (vyprázdní i zásobník), ne `popup = None`.
 - Skupina radio = sourozenci se stejným rodičem (`groups.rs`, `tab_stop`): pořadí Tab musí jít přes `tab_stop`, ne přímo přes `focusable`.
+- `client/pointer.rs`: kurzor okna, zámek ukazatele a celá obrazovka pro okna, která kreslí sama (SDL); `Event::PointerLock` a `Event::State` (stav z `CONFIGURE` bez fokusu) běhová smyčka `run` ignoruje.
 - Kurzor pole v OS kreslí klient do vrstvy `CARET_LAYER` (`client/mod.rs`, `Window::set_caret` podle `Ui::caret`); s `use_caret_layer(true)` ho pole nekreslí a blikání nevrací překreslení. Kompozitor u změny jen viditelnosti / polohy takové vrstvy poškodí jen její obdélník (`libs/comp/src/scene.rs`, `small_layer_change`).
 - Výběr řádků (klik, Ctrl, Shift, kotva) je jedna funkce `selection::pick` pro tabulku i seznam; změna pravidla platí pro oba.
 - Rozpracovaný znak (mrtvá klávesa, později IME) je `compose.rs` (`Ui::compose` ze zprávy `ServerMsg::Compose`): kreslí se jen u pole s fokusem, nikdy není v hodnotě ani v `on_change`, heslo ho nedostane; končí `Text`, klikem a ztrátou fokusu. Obsah nelogovat.

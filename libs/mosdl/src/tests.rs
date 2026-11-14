@@ -29,9 +29,29 @@ fn header_constants_match() {
         ("MOSDL_EV_RESIZE", kind::RESIZE),
         ("MOSDL_EV_CLOSE", kind::CLOSE),
         ("MOSDL_EV_EXPOSE", kind::EXPOSE),
+        ("MOSDL_EV_RELMOTION", kind::RELMOTION),
+        ("MOSDL_EV_POINTER_LOCK", kind::POINTER_LOCK),
+        ("MOSDL_EV_DISPLAY", kind::DISPLAY),
+        ("MOSDL_EV_STATE", kind::STATE),
     ] {
         assert!(h.contains(&format!("{name} = {v},")) || h.contains(&format!("{name} = {v}\n")), "{name}");
     }
+    for s in guiproto::cursor::Shape::ALL {
+        let name = format!("{s:?}").to_uppercase();
+        let name = match name.as_str() {
+            "RESIZENWSE" => String::from("RESIZE_NWSE"),
+            "RESIZENESW" => String::from("RESIZE_NESW"),
+            "RESIZEEW" => String::from("RESIZE_EW"),
+            "RESIZENS" => String::from("RESIZE_NS"),
+            "NOTALLOWED" => String::from("NOT_ALLOWED"),
+            _ => name,
+        };
+        let v = s as u8;
+        assert!(h.contains(&format!("MOSDL_CURSOR_{name} = {v},")) || h.contains(&format!("MOSDL_CURSOR_{name} = {v}\n")), "kurzor {name}");
+    }
+    use guiproto::window::wstate;
+    assert!(h.contains(&format!("MOSDL_STATE_MAXIMIZED = 1 << {},", wstate::MAXIMIZED.trailing_zeros())));
+    assert!(h.contains(&format!("MOSDL_STATE_FULLSCREEN = 1 << {}\n", wstate::FULLSCREEN.trailing_zeros())));
     use inputproto::mods;
     for (name, v) in [("SHIFT", mods::SHIFT), ("CTRL", mods::CTRL), ("ALT", mods::ALT), ("ALTGR", mods::ALTGR), ("META", mods::META), ("CAPS", mods::CAPS_LOCK), ("NUM", mods::NUM_LOCK)] {
         let bit = v.trailing_zeros();
@@ -47,6 +67,8 @@ fn input_translation() {
     assert_eq!((e.kind, e.a, e.b, e.c, e.d), (kind::BUTTON, 0x110, 1, 3, -4));
     let e = from_input(&rec(InputEvent::Scroll { dx: 0, dy: -2 }));
     assert_eq!((e.kind, e.a, e.b), (kind::WHEEL, 0, -2));
+    let e = from_input(&rec(InputEvent::PointerRelative { dx: -3, dy: 7 }));
+    assert_eq!((e.kind, e.a, e.b), (kind::RELMOTION, -3, 7));
     let e = from_input(&rec(InputEvent::Text('č')));
     assert_eq!((e.kind, e.a), (kind::TEXT, 'č' as i32));
     let mut r = rec(InputEvent::Focus(false));

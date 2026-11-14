@@ -32,6 +32,10 @@ pub enum Request {
     /// Nastavi PIN bezpecnostniho klice, ktery PIN jeste nema.
     SetKeyPin { pin: Secret },
     CreateFirst { name: String, display: String, password: Secret },
+    /// Vlastni ulozena povoleni aplikaci (`perm::encode_entries`).
+    PermList,
+    /// Odvolat vlastni rozhodnuti (aplikace se priste zepta znovu).
+    PermRevoke { app_id: String, perm: crate::perm::Perm },
 }
 
 impl Request {
@@ -54,13 +58,18 @@ impl Request {
             Request::Elevate { .. } => op::ELEVATE,
             Request::SetKeyPin { .. } => op::SET_KEY_PIN,
             Request::CreateFirst { .. } => op::CREATE_FIRST,
+            Request::PermList => op::PERM_LIST,
+            Request::PermRevoke { .. } => op::PERM_REVOKE,
         }
     }
 
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::op(self.op());
         match self {
-            Request::List | Request::WhoAmI | Request::Lock | Request::Logout => {}
+            Request::List | Request::WhoAmI | Request::Lock | Request::Logout | Request::PermList => {}
+            Request::PermRevoke { app_id, perm } => {
+                w.str(app_id).u8(*perm as u8);
+            }
             Request::Phrase { uid } => {
                 w.u64(*uid);
             }
@@ -138,6 +147,8 @@ impl Request {
             op::ENCRYPT_HOME => Request::EncryptHome { password: get_secret(&mut r)? },
             op::LOCK => Request::Lock,
             op::LOGOUT => Request::Logout,
+            op::PERM_LIST => Request::PermList,
+            op::PERM_REVOKE => Request::PermRevoke { app_id: r.str()?, perm: crate::perm::Perm::from_u8(r.u8()?)? },
             op::ELEVATE => Request::Elevate { action: r.u32()?, params: get_blob(&mut r)? },
             op::SET_KEY_PIN => Request::SetKeyPin { pin: get_secret(&mut r)? },
             op::CREATE_FIRST => Request::CreateFirst {
@@ -163,7 +174,7 @@ impl Request {
 
     /// Patri operace na kanal self?
     pub fn is_self(&self) -> bool {
-        (op::WHOAMI..=op::SET_KEY_PIN).contains(&self.op())
+        (op::WHOAMI..=op::PERM_REVOKE).contains(&self.op())
     }
 }
 

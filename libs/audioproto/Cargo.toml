@@ -15,5 +15,7 @@ client = ["dep:libos", "dep:svcclient"]
 [dependencies]
 abi = { workspace = true }
 wire = { path = "../wire" }
-libos = { path = "../libos", optional = true }
+# Bez `rt`: programy no_std maji libos primo, programy se std (SDL pres
+# `mosdl`) ho maji od std.
+libos = { path = "../libos", optional = true, default-features = false }
 svcclient = { path = "../svcclient", features = ["client"], optional = true }

@@ -259,6 +259,47 @@ AMD-Vi, SMMUv3) the device can reach it and nothing else. The position
 (`LPIB`) is converted to a monotonic frame count in the status page. A
 FIFO or descriptor error stops the stream and is reported.
 
+## Application sessions and capture
+
+**[verified in QEMU]** x86_64 and aarch64 (test `sdl: zvuk - prehravani,
+nahravani s povolenim, odvolani (QMP)`, host tests `cargo test -p
+audioproto session`, `-p accountproto perm`).
+
+Every application with a window gets a **sound service session with
+application rights** at start: init creates it through the supervisor
+(`Supervisor::session("audiod", recipe)`) and passes it as a handle tagged
+`abi::params::tag::AUDIO`, the recovery lease as `AUDIO_LEASE`. The recipe
+(`audioproto::session::Recipe`) carries the identity and name from the
+manifest, the session user and capture from the manifest; after an
+`audiod` restart the supervisor sends it again, so the rights survive
+recovery. An empty recipe is a system session (bar, shell, init) as
+before.
+
+| An application session may | Not |
+|---|---|
+| `OPEN`, `START`, `STOP`, `CLOSE`, `DRAIN` of its own streams, `STREAM_VOLUME`, `STREAM_INFO`, `STATUS`, `DEVICES` | `MASTER_VOLUME`, `MUTE`, `SELECT`, `CONNECT` (`ACCESS_DENIED`; they change the sound of the whole system and belong to the bar and settings) |
+
+**Capture** (`OPEN` of input):
+
+- without `[audio] capture = true` in the manifest `ACCESS_DENIED` at once,
+  without a question;
+- with it, `audiod` asks the account service on the first input `OPEN` in
+  the session (the `permissions` channel, `accountproto::perm` messages)
+  and replies to the application when the decision arrives: a stored one
+  at once, otherwise after the system Permission dialog (Allow / Only this
+  time / Do not allow, Esc = Do not allow). The application call waits
+  until then;
+- the decision holds for the rest of the session; "Allow" and "Do not
+  allow" are stored permanently per user and application
+  ([Accounts](accounts.md#application-permissions)), revoked with the shell
+  command `povoleni odvolat <app>`;
+- without the account service (or without the compositor for the dialog)
+  there is no capture for applications.
+
+While recording, the bar shows a **microphone in the danger colour**
+instead of the volume icon; the tooltip lists the recording applications
+(`STATUS` field `capturing`). The user always sees that recording is on.
+
 ## The `audiod` service
 
 ### Timing and latency budget

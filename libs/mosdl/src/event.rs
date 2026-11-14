@@ -16,6 +16,10 @@ pub mod kind {
     pub const RESIZE: u32 = 8;
     pub const CLOSE: u32 = 9;
     pub const EXPOSE: u32 = 10;
+    pub const RELMOTION: u32 = 11;
+    pub const POINTER_LOCK: u32 = 12;
+    pub const DISPLAY: u32 = 13;
+    pub const STATE: u32 = 14;
 }
 
 /// `mosdl_event` (rozlozeni musi sedet s `include/mosdl.h`, 40 B).
@@ -49,6 +53,7 @@ pub fn from_input(r: &InputRecord) -> MosdlEvent {
         InputEvent::Button { code, pressed, x, y } => (kind::BUTTON, code as i32, pressed as i32, x, y),
         InputEvent::Scroll { dx, dy } => (kind::WHEEL, dx, dy, 0, 0),
         InputEvent::Focus(f) => (kind::FOCUS, f as i32, 0, 0, 0),
+        InputEvent::PointerRelative { dx, dy } => (kind::RELMOTION, dx, dy, 0, 0),
     };
     MosdlEvent {
         kind,

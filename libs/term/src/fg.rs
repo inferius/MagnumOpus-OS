@@ -385,6 +385,11 @@ impl Host for LineHost {
         self.call(move |c| c.env.log_level(&t, &l)).unwrap_or(Err(abi::Error::Canceled))
     }
 
+    fn permissions(&mut self, app: &str, perm: &str) -> Result<String, abi::Error> {
+        let (a, p) = (String::from(app), String::from(perm));
+        self.call(move |c| c.env.permissions(&a, &p)).unwrap_or(Err(abi::Error::Canceled))
+    }
+
     fn task_spawn(&mut self, spec: TaskSpec) -> Option<Result<u64, ShError>> {
         let wire = match tasks::SpecWire::of(&spec) {
             Ok(w) => w,

@@ -110,7 +110,7 @@ impl Comp {
     /// kompozitor dorucil (mezi poslednimi [`GESTURES`]), jeste nebylo
     /// pouzite a neni starsi nez [`GESTURE_MAX`]. Platne gesto se tim
     /// spotrebuje (jedno gesto = jedna akce).
-    fn clip_take_gesture(&mut self, c: ClientId, serial: u32, now: u64) -> bool {
+    pub(crate) fn clip_take_gesture(&mut self, c: ClientId, serial: u32, now: u64) -> bool {
         if serial == 0 || self.focused_client() != Some(c) {
             return false;
         }

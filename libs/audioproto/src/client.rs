@@ -205,6 +205,8 @@ pub struct Status {
     pub input: bool,
     /// Index aktivniho zarizeni (`DEVICES`).
     pub device_index: u8,
+    /// Jmena aplikaci, ktere prave nahravaji (indikator v liste).
+    pub capturing: Vec<String>,
 }
 
 impl Status {
@@ -215,6 +217,10 @@ impl Status {
         w.u8(self.master).u8(self.muted as u8).u32(self.streams).u32(self.running);
         w.u64(self.hw_pos).u64(self.irqs).u64(self.device_underruns).u32(self.latency_us).u32(self.period);
         w.u8(self.input as u8).u8(self.device_index);
+        w.u32(self.capturing.len() as u32);
+        for a in &self.capturing {
+            w.str(a);
+        }
         w.finish()
     }
 
@@ -235,6 +241,18 @@ impl Status {
             period: r.u32()?,
             input: r.u8()? != 0,
             device_index: r.u8()?,
+            capturing: {
+                let n = r.u32()? as usize;
+                // Nejvys tolik, kolik muze byt streamu (ochrana pred alokaci).
+                if n > 256 {
+                    return Err(Error::InvalidArgs);
+                }
+                let mut v = Vec::with_capacity(n);
+                for _ in 0..n {
+                    v.push(r.str()?);
+                }
+                v
+            },
         })
     }
 }

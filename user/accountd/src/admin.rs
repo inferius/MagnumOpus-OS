@@ -49,6 +49,14 @@ pub struct Admin {
     mode: Vec<(u64, i64)>,
 }
 
+impl Admin {
+    /// Cislo dalsiho dialogu (sdilene se dialogy povoleni, `perms.rs`).
+    pub fn next_dialog_id(&mut self) -> u32 {
+        self.next_id = self.next_id.wrapping_add(1).max(1);
+        self.next_id
+    }
+}
+
 /// Odpoved na `ELEVATE` pro kanal self relace (az po dialogu).
 pub struct Answer {
     pub session: u64,
@@ -120,8 +128,7 @@ impl Service {
         );
         let phrase = self.eng.account(confirm_uid).map(|a| a.phrase.clone()).unwrap_or_default();
         let app = format!("Aplikace uživatele {}", self.eng.account(uid).map_or("?", |a| a.display.as_str()));
-        self.admin.next_id = self.admin.next_id.wrapping_add(1).max(1);
-        let id = self.admin.next_id;
+        let id = self.admin.next_dialog_id();
         let dialog = self.admin.dialog.as_ref()?;
         let sent = dialog
             .write(&DialogRequest::Phrase { text: phrase }.encode(), Vec::new())
@@ -155,6 +162,7 @@ impl Service {
                 Err(_) => {
                     // Kompozitor skoncil: cekajici ukony zrusit.
                     self.admin.dialog = None;
+                    self.perm_dialog_gone();
                     for p in core::mem::take(&mut self.admin.pending) {
                         out.push(Answer { session: p.session, reply: accountproto::reply_err(Error::Canceled) });
                     }
@@ -163,6 +171,12 @@ impl Service {
             };
             let r = DialogReply::decode(&m.data);
             wipe(&mut m.data);
+            // Dialog povoleni aplikace (perms.rs).
+            if let Ok(rr) = &r
+                && self.perm_dialog_reply(rr)
+            {
+                continue;
+            }
             let (id, choice, text) = match r {
                 Ok(DialogReply::Answer { id, choice, text }) => (id, choice, text),
                 Ok(DialogReply::Cancelled { id }) => (id, 1, String::new()),

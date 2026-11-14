@@ -216,6 +216,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 name = "audiod"
 version = "0.1.0"
 dependencies = [
+ "accountproto",
  "audiomix",
  "audioproto",
  "libos",
@@ -1966,6 +1967,8 @@ dependencies = [
 name = "mosdl"
 version = "0.1.0"
 dependencies = [
+ "audioproto",
+ "clipproto",
  "gfx",
  "guiproto",
  "inputproto",

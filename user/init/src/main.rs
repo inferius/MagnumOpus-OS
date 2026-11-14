@@ -34,6 +34,7 @@ mod launch;
 mod libd;
 mod logd;
 mod ntp;
+mod perms;
 mod power;
 mod render;
 mod rescue;

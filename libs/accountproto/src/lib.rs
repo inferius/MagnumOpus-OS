@@ -20,12 +20,15 @@ extern crate alloc;
 
 pub mod ctap;
 pub mod elevate;
+pub mod perm;
 mod msg;
 #[cfg(feature = "client")]
 pub mod client;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod perm_tests;
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -78,6 +81,9 @@ pub mod op {
     pub const LOGOUT: u32 = 18;
     pub const ELEVATE: u32 = 19;
     pub const SET_KEY_PIN: u32 = 20;
+    /// Vlastni rozhodnuti o povolenich aplikaci (`perm.rs`).
+    pub const PERM_LIST: u32 = 21;
+    pub const PERM_REVOKE: u32 = 22;
     // setup
     pub const CREATE_FIRST: u32 = 30;
     // grants (sluzby ukonu)

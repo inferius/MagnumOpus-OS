@@ -125,7 +125,7 @@ static PENDING: spin::Mutex<Option<(bool, Channel)>> = spin::Mutex::new(None);
 /// Zprava od relace shellu na kanalu napajeni. Vypnuti/restart se jen
 /// zaznamena (provede ho supervisor, [`run_pending`]) a kanal si init
 /// nechá; jinak odpovi hned a kanal vrati.
-pub fn request_from_shell(data: &[u8], chan: Channel) -> Option<Channel> {
+pub fn request_from_shell(data: &[u8], chan: Channel, session: Option<u64>) -> Option<Channel> {
     let reply = match Request::decode(data) {
         Ok(Request::Shutdown) | Ok(Request::Reboot) => {
             let reboot = Request::decode(data) == Ok(Request::Reboot);
@@ -149,6 +149,11 @@ pub fn request_from_shell(data: &[u8], chan: Channel) -> Option<Channel> {
             Err(e) => Reply::Failed(e),
         },
         Ok(Request::LogLevel { target, level }) => match crate::logd::log_level(&target, &level) {
+            Ok(text) => Reply::Text(text),
+            Err(e) => Reply::Failed(e),
+        },
+        // Povoleni aplikaci uzivatele relace (prikaz `povoleni`).
+        Ok(Request::Permissions { app, perm }) => match crate::perms::shell(session, &app, &perm) {
             Ok(text) => Reply::Text(text),
             Err(e) => Reply::Failed(e),
         },
