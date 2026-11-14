@@ -14,7 +14,8 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
 > testu): čísla fd, `unistd.h`, `fcntl.h`, `sys/stat.h`, `dirent.h`, `FILE`
 > nad čísly fd. Část 2b **[ověřeno v QEMU]** (krok `threads`): `pthread`.
 > Část 2c **[ověřeno v QEMU]** (krok `time`): čas, kalendář, `setenv`.
-> Další části (sockety, `math.h`, `mmap`, signály, zámky souborů,
+> Část 2d **[ověřeno v QEMU]** (krok `math`): `math.h`, plovoucí čárka
+> v `printf`, `strtod`. Další části (sockety, `mmap`, signály, zámky souborů,
 > `libc.so`, porty) **[navrženo]**, viz
 > [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
 
@@ -138,6 +139,22 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 - Spánek se nepřeruší (signály nejsou, `EINTR` nevzniká), `rem` je vždy 0;
   `nanosleep`, `sleep` a `usleep` jsou body zrušení vlákna.
 
+## Funkce (část 2d: matematika a plovoucí čárka)
+
+| Hlavička | Funkce | Poznámka |
+|---|---|---|
+| `math.h` | goniometrické, hyperbolické, `exp*`, `log*`, `pow`, `sqrt`, `cbrt`, `hypot`, zaokrouhlení (`ceil`, `floor`, `trunc`, `round`, `rint`, `lround`, ...), `fmod`, `remainder`, `remquo`, `frexp`, `ldexp`, `modf`, `fma`, `erf`, `tgamma`, `lgamma`, Besselovy funkce; varianty `*f` a `*l`; makra `isnan`, `fpclassify`, `M_PI` ... | crate `libm` (port musl libm do Rustu, MIT/Apache); `errno` a výjimky FPU funkce nenastavují (`math_errhandling` = 0) |
+| `stdio.h` | `%f %F %e %E %g %G %a %A` v rodině `printf` | číslice z `core::fmt` (přesné zaokrouhlení binární hodnoty), výstup jako glibc |
+| `stdlib.h` | `strtod`, `strtof`, `strtold`, `atof` | desítkový i šestnáctkový tvar, `inf`, `nan(...)`; `ERANGE` při přetečení i podtečení |
+
+- **`long double`** má ABI jako Linux (x86_64 80 bitů, aarch64 128 bitů),
+  funkce `*l` a `strtold` ale počítají v přesnosti `double` (rozhodnutí 9).
+  Jsou napsané v C (`libs/cstd/c/math_ld.c`, přeloží je `build.rs` jen pro
+  cíl magnumopus), protože Rust typ `long double` nezná.
+- `%Lf` (`long double` v `printf`) zatím neumíme přečíst z `VaList`:
+  vypíše `?` a argument nespotřebuje.
+- `scanf` **[navrženo]**.
+
 ### Čísla fd
 
 - Tabulka je v `osrt` (`osrt::fd`), jedna na proces; `cstd` ji vidí přes
@@ -177,9 +194,8 @@ chyba `std::io::Error` podle druhu (`errno::from_io`). Neplatný režim
 
 ## Omezení části 1
 
-- **Plovoucí čárka v `printf`** chybí (`%f`, `%g`, `%e` vypíší `?`).
-- Jen proudy `FILE`; čísla fd, vlákna, čas, sockety a `math.h` přináší
-  pokračování níže.
+- Části 2a-2d výše doplnily čísla fd, vlákna, čas, `math.h`
+  a plovoucí čárku; sockety a další přináší pokračování níže.
 
 ## Pokračování: úplná libc a POSIX (části 2-8)
 

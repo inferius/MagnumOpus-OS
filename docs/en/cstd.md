@@ -15,7 +15,8 @@ Compiling C (clang, flags, protections) is described in
 > the same test): fd numbers, `unistd.h`, `fcntl.h`, `sys/stat.h`,
 > `dirent.h`, `FILE` over fd numbers. Part 2b **[verified in QEMU]** (step
 > `threads`): `pthread`. Part 2c **[verified in QEMU]** (step `time`):
-> time, calendar, `setenv`. Further parts (sockets, `math.h`, `mmap`,
+> time, calendar, `setenv`. Part 2d **[verified in QEMU]** (step `math`):
+> `math.h`, floating point in `printf`, `strtod`. Further parts (sockets, `mmap`,
 > signals, file locks, `libc.so`, ports) **[designed]**, see [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
 
 ## Layers
@@ -140,6 +141,23 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 - Sleeping is not interrupted (no signals, no `EINTR`), `rem` is always 0;
   `nanosleep`, `sleep` and `usleep` are thread cancellation points.
 
+## Functions (part 2d: maths and floating point)
+
+| Header | Functions | Note |
+|---|---|---|
+| `math.h` | trigonometric, hyperbolic, `exp*`, `log*`, `pow`, `sqrt`, `cbrt`, `hypot`, rounding (`ceil`, `floor`, `trunc`, `round`, `rint`, `lround`, ...), `fmod`, `remainder`, `remquo`, `frexp`, `ldexp`, `modf`, `fma`, `erf`, `tgamma`, `lgamma`, Bessel functions; `*f` and `*l` variants; macros `isnan`, `fpclassify`, `M_PI` ... | the `libm` crate (a Rust port of musl libm, MIT/Apache); the functions set neither `errno` nor FPU exceptions (`math_errhandling` = 0) |
+| `stdio.h` | `%f %F %e %E %g %G %a %A` in the `printf` family | digits from `core::fmt` (exact rounding of the binary value), output like glibc |
+| `stdlib.h` | `strtod`, `strtof`, `strtold`, `atof` | decimal and hexadecimal forms, `inf`, `nan(...)`; `ERANGE` on overflow and underflow |
+
+- **`long double`** has the Linux ABI (x86_64 80 bits, aarch64 128 bits),
+  but the `*l` functions and `strtold` compute in `double` precision
+  (decision 9). They are written in C (`libs/cstd/c/math_ld.c`, compiled by
+  `build.rs` only for the magnumopus target) because Rust has no
+  `long double` type.
+- `%Lf` (`long double` in `printf`) cannot be read from a `VaList` yet: it
+  prints `?` and does not consume the argument.
+- `scanf` **[designed]**.
+
 ### fd numbers
 
 - The table is in `osrt` (`osrt::fd`), one per process; `cstd` sees it via
@@ -180,9 +198,8 @@ A system error (`abi::Error`, [errors.md](errors.md)) is mapped to `errno`
 
 ## Limitations of part 1
 
-- **Floating point in `printf`** is missing (`%f`, `%g`, `%e` print `?`).
-- Only `FILE` streams; fd numbers, threads, time, sockets and `math.h`
-  come with the continuation below.
+- Parts 2a-2d above added fd numbers, threads, time, `math.h` and
+  floating point; sockets and more come with the continuation below.
 
 ## Continuation: a complete libc and POSIX (parts 2-8)
 

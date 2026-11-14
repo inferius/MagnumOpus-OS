@@ -15,6 +15,7 @@ static int failures;
 int posix_test(const char *dir);
 int threads_test(void);
 int time_test(void);
+int math_test(void);
 
 #define CHECK(name, cond)                                              \
     do {                                                               \
@@ -134,6 +135,9 @@ int main(int argc, char **argv) {
     int tm = time_test();
     if (tm != 0) fprintf(stderr, "ctest time: krok %d errno %d\n", tm, errno);
     CHECK("time", tm == 0);
+    int mt = math_test();
+    if (mt != 0) fprintf(stderr, "ctest math: krok %d\n", mt);
+    CHECK("math", mt == 0);
     assert(failures == 0);
     fputs("chyba na stderr\n", stderr);
     fflush(stdout);
