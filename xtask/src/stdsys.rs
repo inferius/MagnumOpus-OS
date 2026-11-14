@@ -27,7 +27,7 @@ use crate::{Options, Result, target_dir, workspace_root};
 
 /// Aplikace se std, ktere se pribali do initfs (jmeno crate = jmeno
 /// souboru).
-pub const STD_PROGRAMS: &[&str] = &["hello-std"];
+pub const STD_PROGRAMS: &[&str] = &["hello-std", "std-net"];
 
 /// Pripnuty nightly z `rust-toolchain.toml` (cesty std-src a sysrootu).
 fn nightly() -> Result<String> {
@@ -117,7 +117,12 @@ pub fn prepare_sources() -> Result<PathBuf> {
         if st.success() { Ok(()) } else { Err(format!("git {} selhal", args.join(" ")).into()) }
     };
     git(&["init", "-q"])?;
-    git(&["-c", "core.autocrlf=false", "apply", "--whitespace=nowarn", &patch_path.to_string_lossy()])
+    git(&["config", "core.autocrlf", "false"])?;
+    // Vychozi commit = neupraveny rust-src: `cargo xtask std-patch` pak
+    // ulozi upravy v kopii zpet do patche (`git diff`).
+    git(&["add", "-A"])?;
+    git(&["-c", "user.name=xtask", "-c", "user.email=xtask@localhost", "commit", "-q", "-m", "rust-src"])?;
+    git(&["apply", "--whitespace=nowarn", &patch_path.to_string_lossy()])
         .map_err(|e| format!("{e}: patch std nesedi na rust-src tohoto nightly (aktualizace toolchainu = obnovit patch)"))?;
     // Cesta k osrt v patchi je relativni vuci target/ v repozitari; s jinym
     // CARGO_TARGET_DIR plati absolutni.
@@ -136,6 +141,36 @@ pub fn prepare_sources() -> Result<PathBuf> {
 /// behy xtask.
 fn lock_std() -> Result<std::fs::File> {
     crate::lock_shared("std")
+}
+
+/// Ulozi upravy v kopii zdroju std (`target/std-src/<nightly>/library`)
+/// zpet do `third_party/rust-std/std.patch` (vcetne novych souboru).
+/// Postup pri zmene lepidla: upravit kopii, `cargo xtask std` (preklad),
+/// `cargo xtask std-patch`, commit patche.
+pub fn save_patch() -> Result<PathBuf> {
+    // Kopie zdroju je spolecna soubeznym behum (viz `lock_std`).
+    let _lock = lock_std()?;
+    let library = target_dir().join("std-src").join(nightly()?).join("library");
+    let run = |args: &[&str]| -> Result<Vec<u8>> {
+        let out = Command::new("git").args(args).current_dir(&library).output()?;
+        if out.status.success() {
+            Ok(out.stdout)
+        } else {
+            Err(format!("git {} selhal: {}", args.join(" "), String::from_utf8_lossy(&out.stderr)).into())
+        }
+    };
+    run(&["rev-parse", "--verify", "HEAD"]).map_err(|_| "kopie std nema vychozi commit; spust `cargo xtask std` (pripravi ji znovu)")?;
+    run(&["add", "-A"])?;
+    let mut diff = run(&["diff", "--cached", "--binary", "HEAD"])?;
+    // Cesta k osrt v patchi je relativni (viz `prepare_sources`).
+    let osrt = workspace_root().join("libs/osrt").display().to_string().replace('\\', "/");
+    let text = String::from_utf8(diff).map_err(|_| "patch std neni UTF-8")?;
+    diff = text.replace(&format!("path = \"{osrt}\""), "path = \"../../../../../libs/osrt\"").into_bytes();
+    let patch_path = workspace_root().join("third_party/rust-std/std.patch");
+    std::fs::write(&patch_path, &diff)?;
+    // Kopie odpovida novemu patchi: otisk, aby se nepripravovala znovu.
+    std::fs::write(library.parent().unwrap().join("patch.stamp"), patch_fingerprint(&diff))?;
+    Ok(patch_path)
 }
 
 /// Sestavi sysroot std pro architekturu (inkrementalne); vraci cestu

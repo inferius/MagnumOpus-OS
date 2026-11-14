@@ -50,6 +50,7 @@ mod recovery_kit;
 mod console;
 mod shell;
 mod std_app;
+mod std_net;
 mod supervisor;
 mod tasks;
 mod time;
@@ -97,6 +98,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("synchronizace casu", clock_sync::TESTS),
     ("firewall", firewall::TESTS),
     ("sit", net::TESTS),
+    ("std sit", std_net::TESTS),
     ("TLS a HTTP", web::TESTS),
     ("sifrovane DNS", dns::TESTS),
     ("supervisor", supervisor::TESTS),

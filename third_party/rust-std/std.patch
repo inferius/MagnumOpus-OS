@@ -1,5 +1,5 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index bd63144..0f47f18 100644
+index bd63144..39e0d24 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -2,6 +2,13 @@
@@ -81,7 +81,25 @@ index bd63144..0f47f18 100644
  [[package]]
  name = "memchr"
  version = "2.8.3"
-@@ -201,6 +245,18 @@ dependencies = [
+@@ -190,6 +234,17 @@ dependencies = [
+  "rustc-std-workspace-core",
+ ]
+ 
++[[package]]
++name = "netproto"
++version = "0.1.0"
++dependencies = [
++ "abi",
++ "libos",
++ "rustc-std-workspace-alloc",
++ "rustc-std-workspace-core",
++ "wire",
++]
++
+ [[package]]
+ name = "object"
+ version = "0.39.1"
+@@ -201,6 +256,19 @@ dependencies = [
   "rustc-std-workspace-core",
  ]
  
@@ -93,6 +111,7 @@ index bd63144..0f47f18 100644
 + "dlmalloc",
 + "fsproto",
 + "libos",
++ "netproto",
 + "rustc-std-workspace-alloc",
 + "rustc-std-workspace-core",
 +]
@@ -100,7 +119,7 @@ index bd63144..0f47f18 100644
  [[package]]
  name = "panic_abort"
  version = "0.0.0"
-@@ -341,6 +397,7 @@ dependencies = [
+@@ -341,6 +409,7 @@ dependencies = [
   "miniz_oxide",
   "moto-rt",
   "object",
@@ -108,7 +127,7 @@ index bd63144..0f47f18 100644
   "panic_abort",
   "panic_unwind",
   "r-efi",
-@@ -366,6 +423,17 @@ dependencies = [
+@@ -366,6 +435,17 @@ dependencies = [
   "rustc-std-workspace-core",
  ]
  
@@ -126,7 +145,7 @@ index bd63144..0f47f18 100644
  [[package]]
  name = "sysroot"
  version = "0.0.0"
-@@ -386,6 +454,14 @@ dependencies = [
+@@ -386,6 +466,14 @@ dependencies = [
   "std",
  ]
  
@@ -141,7 +160,7 @@ index bd63144..0f47f18 100644
  [[package]]
  name = "unwind"
  version = "0.0.0"
-@@ -454,6 +530,15 @@ version = "0.0.0"
+@@ -454,6 +542,15 @@ version = "0.0.0"
  name = "windows-sys"
  version = "0.61.100"
  
@@ -158,7 +177,7 @@ index bd63144..0f47f18 100644
  name = "wit-bindgen"
  version = "0.62.0"
 diff --git a/std/Cargo.toml b/std/Cargo.toml
-index 2f21b78..979e91e 100644
+index 2f21b78..769a071 100644
 --- a/std/Cargo.toml
 +++ b/std/Cargo.toml
 @@ -70,6 +70,11 @@ fortanix-sgx-abi = { version = "0.6.1", features = [
@@ -862,6 +881,421 @@ index a56030f..995df9c 100644
 @@ -3,6 +3,10 @@ cfg_select! {
          mod hermit;
          pub use hermit::*;
+     }
++    target_os = "magnumopus" => {
++        mod magnumopus;
++        pub use magnumopus::*;
++    }
+     target_os = "motor" => {
+         mod motor;
+         pub use motor::*;
+diff --git a/std/src/sys/net/connection/magnumopus.rs b/std/src/sys/net/connection/magnumopus.rs
+new file mode 100644
+index 0000000..818cc7d
+--- /dev/null
++++ b/std/src/sys/net/connection/magnumopus.rs
+@@ -0,0 +1,394 @@
++//! Sit nad relaci site (`osrt::net`, netproto, sluzba netd).
++
++use crate::fmt;
++use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut};
++use crate::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, ToSocketAddrs};
++use crate::sync::Arc;
++use crate::sys::pal::map_error;
++use crate::sys::unsupported;
++use crate::time::Duration;
++
++use super::each_addr;
++
++fn check_timeout(t: Option<Duration>) -> io::Result<Option<Duration>> {
++    if t == Some(Duration::ZERO) {
++        return Err(io::Error::ZERO_TIMEOUT);
++    }
++    Ok(t)
++}
++
++/// Spojeni sdilene mezi `TcpStream` a jeho `try_clone` (jeden kanal netd).
++pub struct TcpStream(Arc<osrt::net::TcpStream>);
++
++impl TcpStream {
++    pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<TcpStream> {
++        each_addr(addr, |a| osrt::net::TcpStream::connect(*a, None).map_err(map_error))
++            .map(|s| TcpStream(Arc::new(s)))
++    }
++
++    pub fn connect_timeout(addr: &SocketAddr, timeout: Duration) -> io::Result<TcpStream> {
++        check_timeout(Some(timeout))?;
++        osrt::net::TcpStream::connect(*addr, Some(timeout))
++            .map(|s| TcpStream(Arc::new(s)))
++            .map_err(map_error)
++    }
++
++    pub fn set_read_timeout(&self, t: Option<Duration>) -> io::Result<()> {
++        self.0.set_read_timeout(check_timeout(t)?);
++        Ok(())
++    }
++
++    pub fn set_write_timeout(&self, t: Option<Duration>) -> io::Result<()> {
++        self.0.set_write_timeout(check_timeout(t)?);
++        Ok(())
++    }
++
++    pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
++        Ok(self.0.read_timeout())
++    }
++
++    pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
++        Ok(self.0.write_timeout())
++    }
++
++    pub fn peek(&self, _: &mut [u8]) -> io::Result<usize> {
++        unsupported()
++    }
++
++    pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
++        self.0.read(buf).map_err(map_error)
++    }
++
++    pub fn read_buf(&self, cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
++        crate::io::default_read_buf(|b| self.read(b), cursor)
++    }
++
++    pub fn read_vectored(&self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
++        crate::io::default_read_vectored(|b| self.read(b), bufs)
++    }
++
++    pub fn is_read_vectored(&self) -> bool {
++        false
++    }
++
++    pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
++        self.0.write(buf).map_err(map_error)
++    }
++
++    pub fn write_vectored(&self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
++        crate::io::default_write_vectored(|b| self.write(b), bufs)
++    }
++
++    pub fn is_write_vectored(&self) -> bool {
++        false
++    }
++
++    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
++        Ok(self.0.peer_addr())
++    }
++
++    pub fn socket_addr(&self) -> io::Result<SocketAddr> {
++        Ok(self.0.local_addr())
++    }
++
++    pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
++        match how {
++            Shutdown::Write | Shutdown::Both => self.0.shutdown_write().map_err(map_error),
++            // Ukonceni cteni netd nema: dalsi data se zahodi pri zavreni.
++            Shutdown::Read => Ok(()),
++        }
++    }
++
++    pub fn duplicate(&self) -> io::Result<TcpStream> {
++        Ok(TcpStream(self.0.clone()))
++    }
++
++    pub fn set_linger(&self, _: Option<Duration>) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn linger(&self) -> io::Result<Option<Duration>> {
++        unsupported()
++    }
++
++    pub fn set_keepalive(&self, _: bool) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn keepalive(&self) -> io::Result<bool> {
++        unsupported()
++    }
++
++    pub fn set_nodelay(&self, _: bool) -> io::Result<()> {
++        // Nagle ridi netd; aplikace ho zatim nemeni (hlasit uspech, aby
++        // bezne knihovny HTTP nepadaly na nepodstatnem nastaveni).
++        Ok(())
++    }
++
++    pub fn nodelay(&self) -> io::Result<bool> {
++        Ok(false)
++    }
++
++    pub fn set_ttl(&self, _: u32) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn ttl(&self) -> io::Result<u32> {
++        unsupported()
++    }
++
++    pub fn set_hop_limit_v6(&self, _: u8) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn hop_limit_v6(&self) -> io::Result<u8> {
++        unsupported()
++    }
++
++    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
++        Ok(None)
++    }
++
++    pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
++        if nonblocking { unsupported() } else { Ok(()) }
++    }
++}
++
++impl fmt::Debug for TcpStream {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("TcpStream").field("addr", &self.0.local_addr()).field("peer", &self.0.peer_addr()).finish()
++    }
++}
++
++pub struct TcpListener(Arc<osrt::net::TcpListener>);
++
++impl TcpListener {
++    pub fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<TcpListener> {
++        each_addr(addr, |a| osrt::net::TcpListener::bind(*a).map_err(map_error)).map(|l| TcpListener(Arc::new(l)))
++    }
++
++    pub fn socket_addr(&self) -> io::Result<SocketAddr> {
++        self.0.local_addr().map_err(map_error)
++    }
++
++    pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
++        let (s, from) = self.0.accept().map_err(map_error)?;
++        Ok((TcpStream(Arc::new(s)), from))
++    }
++
++    pub fn duplicate(&self) -> io::Result<TcpListener> {
++        Ok(TcpListener(self.0.clone()))
++    }
++
++    pub fn set_ttl(&self, _: u32) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn ttl(&self) -> io::Result<u32> {
++        unsupported()
++    }
++
++    pub fn set_hop_limit_v6(&self, _: u8) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn hop_limit_v6(&self) -> io::Result<u8> {
++        unsupported()
++    }
++
++    pub fn set_only_v6(&self, _: bool) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn only_v6(&self) -> io::Result<bool> {
++        unsupported()
++    }
++
++    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
++        Ok(None)
++    }
++
++    pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
++        if nonblocking { unsupported() } else { Ok(()) }
++    }
++}
++
++impl fmt::Debug for TcpListener {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("TcpListener").field("addr", &self.0.local_addr().ok()).finish()
++    }
++}
++
++pub struct UdpSocket(Arc<osrt::net::UdpSocket>);
++
++impl UdpSocket {
++    pub fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<UdpSocket> {
++        each_addr(addr, |a| osrt::net::UdpSocket::bind(*a).map_err(map_error)).map(|s| UdpSocket(Arc::new(s)))
++    }
++
++    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
++        self.0.peer_addr().map_err(|_| io::Error::from(io::ErrorKind::NotConnected))
++    }
++
++    pub fn socket_addr(&self) -> io::Result<SocketAddr> {
++        self.0.local_addr().map_err(map_error)
++    }
++
++    pub fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
++        self.0.recv_from(buf).map_err(map_error)
++    }
++
++    pub fn peek_from(&self, _: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
++        unsupported()
++    }
++
++    pub fn send_to(&self, buf: &[u8], to: &SocketAddr) -> io::Result<usize> {
++        self.0.send_to(buf, *to).map_err(map_error)
++    }
++
++    pub fn duplicate(&self) -> io::Result<UdpSocket> {
++        Ok(UdpSocket(self.0.clone()))
++    }
++
++    pub fn set_read_timeout(&self, t: Option<Duration>) -> io::Result<()> {
++        self.0.set_read_timeout(check_timeout(t)?);
++        Ok(())
++    }
++
++    pub fn set_write_timeout(&self, t: Option<Duration>) -> io::Result<()> {
++        // Odeslani datagramu necekaji na misto (netd ho prijme, nebo odmitne).
++        check_timeout(t).map(|_| ())
++    }
++
++    pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
++        Ok(self.0.read_timeout())
++    }
++
++    pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
++        Ok(None)
++    }
++
++    pub fn set_broadcast(&self, _: bool) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn broadcast(&self) -> io::Result<bool> {
++        Ok(false)
++    }
++
++    pub fn set_multicast_loop_v4(&self, _: bool) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn multicast_loop_v4(&self) -> io::Result<bool> {
++        unsupported()
++    }
++
++    pub fn set_multicast_ttl_v4(&self, _: u32) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn multicast_ttl_v4(&self) -> io::Result<u32> {
++        unsupported()
++    }
++
++    pub fn set_multicast_loop_v6(&self, _: bool) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn multicast_loop_v6(&self) -> io::Result<bool> {
++        unsupported()
++    }
++
++    pub fn join_multicast_v4(&self, _: &Ipv4Addr, _: &Ipv4Addr) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn join_multicast_v6(&self, _: &Ipv6Addr, _: u32) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn leave_multicast_v4(&self, _: &Ipv4Addr, _: &Ipv4Addr) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn leave_multicast_v6(&self, _: &Ipv6Addr, _: u32) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn set_ttl(&self, _: u32) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn ttl(&self) -> io::Result<u32> {
++        unsupported()
++    }
++
++    pub fn set_hop_limit_v6(&self, _: u8) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn hop_limit_v6(&self) -> io::Result<u8> {
++        unsupported()
++    }
++
++    pub fn set_multicast_hop_limit_v6(&self, _: u8) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn multicast_hop_limit_v6(&self) -> io::Result<u8> {
++        unsupported()
++    }
++
++    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
++        Ok(None)
++    }
++
++    pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
++        if nonblocking { unsupported() } else { Ok(()) }
++    }
++
++    pub fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
++        self.0.recv(buf).map_err(|e| match e {
++            osrt::Error::BadState => io::Error::from(io::ErrorKind::NotConnected),
++            e => map_error(e),
++        })
++    }
++
++    pub fn peek(&self, _: &mut [u8]) -> io::Result<usize> {
++        unsupported()
++    }
++
++    pub fn send(&self, buf: &[u8]) -> io::Result<usize> {
++        self.0.send(buf).map_err(|e| match e {
++            osrt::Error::BadState => io::Error::from(io::ErrorKind::NotConnected),
++            e => map_error(e),
++        })
++    }
++
++    pub fn connect<A: ToSocketAddrs>(&self, addr: A) -> io::Result<()> {
++        let a = addr.to_socket_addrs()?.next().ok_or(io::Error::NO_ADDRESSES)?;
++        self.0.connect(a);
++        Ok(())
++    }
++}
++
++impl fmt::Debug for UdpSocket {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("UdpSocket").field("addr", &self.0.local_addr().ok()).finish()
++    }
++}
++
++pub struct LookupHost(crate::vec::IntoIter<SocketAddr>);
++
++impl Iterator for LookupHost {
++    type Item = SocketAddr;
++    fn next(&mut self) -> Option<SocketAddr> {
++        self.0.next()
++    }
++}
++
++pub fn lookup_host(host: &str, port: u16) -> io::Result<LookupHost> {
++    let ips = osrt::net::resolve(host).map_err(map_error)?;
++    Ok(LookupHost(ips.into_iter().map(|ip| SocketAddr::new(ip, port)).collect::<Vec<_>>().into_iter()))
++}
+diff --git a/std/src/sys/net/connection/mod.rs b/std/src/sys/net/connection/mod.rs
+index 49a0f47..5707354 100644
+--- a/std/src/sys/net/connection/mod.rs
++++ b/std/src/sys/net/connection/mod.rs
+@@ -17,6 +17,10 @@ cfg_select! {
+         mod wasip1;
+         pub use wasip1::*;
      }
 +    target_os = "magnumopus" => {
 +        mod magnumopus;

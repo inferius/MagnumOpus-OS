@@ -57,6 +57,8 @@ prikazy:
   build    prelozi kernel, loader a programy userspace (i aplikace se std)
   std      jen std pro aplikace: zdroje s lepidlem a sysroot pro --arch
            (docs/cs/rust-std.md)
+  std-patch  upravy v target/std-src/<nightly>/library ulozi zpet do
+           third_party/rust-std/std.patch
   image    build + vytvori target/os-<arch>-<profil>.img (GPT, ESP FAT32)
   run      image + spusti QEMU (x86_64: q35 + OVMF, aarch64: virt + edk2)
   test     testy knihoven na hostiteli, kontrola prekladu jadra pro ostatni
@@ -380,6 +382,7 @@ fn run_cli() -> Result<()> {
 
     match command.to_str() {
         Some("build") => build(&opts).map(|_| ()),
+        Some("std-patch") => stdsys::save_patch().map(|p| println!("xtask: patch std ulozen do {}", p.display())),
         Some("std") => stdsys::build_sysroot(opts.arch).map(|p| println!("xtask: sysroot std {}", p.display())),
         Some("image") => build(&opts).and_then(|a| image_for(&a, &opts)).map(|_| ()),
         Some("run") => {
