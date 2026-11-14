@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="cs" data-density="desktop">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Knihovna komponent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/mo.css">
+<link rel="stylesheet" href="assets/komponenty.css">
+<script src="assets/tokens.js"></script>
+<script src="assets/mo.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Přeskočit na obsah</a>
+<div id="proto"></div>
+<main id="main" class="page k-c">
+<header>
+  <h1>Knihovna komponent</h1>
+  <p class="lead">Základní ovládací prvky podle <code>design/tokens.toml</code>: všechny stavy, ovládání klávesnicí, hustoty pro počítač, tablet a televizi. Ke každé komponentě krátká specifikace pro ladění <code>libs/ui</code> a rozdíl proti současné implementaci.</p>
+  <p class="note">Horní řádek každé komponenty je živý (klikejte, ovládejte klávesnicí). Pod ním jsou stavy vynucené staticky. Popis a seznam rozdílů: <code>docs/cs/komponenty.md</code>, <code>docs/en/components.md</code>. Čísla se značkou <b>navrženo</b> zatím nejsou v <code>tokens.toml</code>.</p>
+  <nav class="k-toc" aria-label="Komponenty">
+    <a href="#pravidla">Společná pravidla</a><a href="#tlacitka">Tlačítka</a><a href="#pole">Textová pole</a><a href="#volby">Zaškrtávátko, přepínač, radio</a>
+    <a href="#posuvnik">Posuvník</a><a href="#vyber">Výběr</a><a href="#zalozky">Záložky a segmenty</a><a href="#nabidky">Nabídky</a>
+    <a href="#bubliny">Bublina a popisek</a><a href="#dialog">Dialog</a><a href="#toast">Oznámení</a><a href="#seznam">Seznam a tabulka</a>
+    <a href="#strom">Strom</a><a href="#prubeh">Průběh</a><a href="#stitky">Odznaky a štítky</a><a href="#drobecky">Drobečky</a>
+    <a href="#rozbalit">Rozbalovací panel</a><a href="#prazdno">Prázdný stav</a>
+  </nav>
+</header>
+
+<div class="k-bar" role="region" aria-label="Hustota a záznam kláves">
+  <span><b>Hustota</b></span>
+  <div class="seg" role="radiogroup" aria-label="Hustota" id="dens">
+    <button role="radio" aria-checked="true" data-value="desktop">Počítač</button>
+    <button role="radio" aria-checked="false" data-value="tablet">Tablet</button>
+    <button role="radio" aria-checked="false" data-value="tv">Televize</button>
+  </div>
+  <span class="muted" id="dens-note">mys a klávesnice, ovládací prvek 36 px</span>
+  <span class="spacer"></span>
+  <span class="k-log" id="klog" aria-live="polite">Poslední akce se ukáže tady.</span>
+</div>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="pravidla">
+<h2>Společná pravidla</h2>
+<div class="k-scroll"><table class="k-tbl">
+<thead><tr><th>Stav</th><th>Vzhled</th><th>Tokeny</th><th>Poznámka</th></tr></thead>
+<tbody>
+<tr><td>Výchozí</td><td>plocha, okraj 1 px</td><td><code>surface</code>, <code>border_strong</code>, <code>ink</code></td><td>Okraj ovládacího prvku má kontrast aspoň 3 : 1 (WCAG 1.4.11).</td></tr>
+<tr><td>Najetí (hover)</td><td>ztmavení plochy</td><td><code>surface_3</code>; primární: <code>accent</code> 88 % + <code>ink</code></td><td>Jen myš a touchpad. Na tabletu a televizi se nekreslí.</td></tr>
+<tr><td>Stisk</td><td>další ztmavení, zmenšení na 98 %</td><td><code>surface_3</code> 80 % + <code>ink</code>; <code>motion.fast</code></td><td>Akce se spustí při uvolnění (myš i klávesa). Odjetí ze stisknutého prvku akci zruší.</td></tr>
+<tr><td>Fokus (klávesnice)</td><td>prstenec mimo prvek</td><td><code>focus</code>, <code>size.focus_ring</code> 2, <code>size.focus_offset</code> 2</td><td>Jen při ovládání klávesnicí nebo ovladačem (ne po kliknutí). Pole: odsazení 0 a okraj <code>accent</code>. Televize: 4 / 3 px a zvětšení 1,04 (navrženo).</td></tr>
+<tr><td>Vypnuto</td><td>krytí 50 %, žádná reakce</td><td><code>opacity.disabled</code></td><td>Tlačítko a pole nejsou v pořadí Tab. Položka nabídky ano (lze ji najít šipkami), jen nejde spustit; popisek řekne proč.</td></tr>
+<tr><td>Chyba</td><td>okraj <code>danger</code> 2 px, ikona a text pod prvkem</td><td><code>danger</code>, <code>danger_soft</code></td><td>Nikdy jen barva: vždy ikona a věta. Text chyby je spojený s prvkem (<code>aria-describedby</code>) a ohlásí se při odeslání.</td></tr>
+<tr><td>Vybráno / zapnuto</td><td>měkký akcent, u voleb plný akcent</td><td><code>accent_soft</code>, <code>accent</code>, <code>accent_ink</code></td><td>Výběr řádku (<code>accent_soft</code>) a fokus (prstenec) jsou dvě různé věci a můžou být na různých řádcích.</td></tr>
+</tbody></table></div>
+
+<h3>Hustoty</h3>
+<div class="k-scroll"><table class="k-tbl">
+<thead><tr><th>Rozměr</th><th>Počítač</th><th>Tablet (dotyk)</th><th>Televize (10 stop)</th><th>Zdroj</th></tr></thead>
+<tbody>
+<tr><td>Ovládací prvek (výška)</td><td>36</td><td>44</td><td>56</td><td><code>control_h</code>, <code>hit_min_touch</code>; TV navrženo</td></tr>
+<tr><td>Malý prvek</td><td>28</td><td>36</td><td>44</td><td><code>control_h_compact</code>; tablet a TV navrženo</td></tr>
+<tr><td>Řádek seznamu, tabulky, stromu</td><td>36</td><td>44</td><td>56</td><td><code>max(control_h, min_hit)</code> jako dnes v <code>libs/ui</code></td></tr>
+<tr><td>Položka nabídky</td><td>32</td><td>44</td><td>56</td><td>navrženo (<code>hit_min_fine</code> 32)</td></tr>
+<tr><td>Písmo těla</td><td>14 / 20</td><td>14 / 20</td><td>21 / 30</td><td><code>type.body</code>; TV &times; 1,5 navrženo</td></tr>
+<tr><td>Ikona v prvku</td><td>20</td><td>20</td><td>28</td><td><code>icon_m</code>; TV navrženo</td></tr>
+<tr><td>Zaškrtávátko, radio</td><td>18</td><td>22</td><td>28</td><td>navrženo</td></tr>
+<tr><td>Přepínač (š &times; v, jezdec)</td><td>44 &times; 26, 18</td><td>52 &times; 32, 24</td><td>64 &times; 36, 26</td><td><code>switch_*</code>; tablet a TV navrženo</td></tr>
+<tr><td>Fokus</td><td>2 / 2</td><td>2 / 2</td><td>4 / 3 + zvětšení 1,04 + stín</td><td><code>focus_ring</code>, <code>focus_offset</code>; TV navrženo</td></tr>
+<tr><td>Najetí (hover)</td><td>ano</td><td>ne</td><td>ne (fokus je jediné zvýraznění)</td><td>kontext okna: <code>pointers</code></td></tr>
+<tr><td>Popisek (tooltip)</td><td>najetí 500 ms, fokus hned</td><td>dlouhý stisk 500 ms</td><td>po 800 ms na fokusu</td><td>dnes <code>TIP_DELAY</code> v kódu</td></tr>
+</tbody></table></div>
+<p class="note">Hustotu nevolí aplikace: plyne z kontextu okna (<code>posture</code>, <code>min_hit</code>, <code>pointers</code>, <code>viewing_distance</code>). Volba nahoře jen přepíná náhled. Pro televizi vše platí i s ovladačem (šipky, OK, Zpět = Esc).</p>
+
+<h3>Klávesnice obecně</h3>
+<div class="k-scroll"><table class="k-tbl">
+<thead><tr><th>Klávesa</th><th>Význam</th></tr></thead>
+<tbody>
+<tr><td><span class="kbd">Tab</span> / <span class="kbd">Shift</span>+<span class="kbd">Tab</span></td><td>Další / předchozí <b>skupina</b>. Složené prvky (záložky, segmenty, radio, seznam, tabulka, strom, nabídka) jsou jedna zastávka a uvnitř se chodí šipkami (roving tabindex). Zastávka si pamatuje poslední prvek.</td></tr>
+<tr><td>Šipky</td><td>Pohyb uvnitř skupiny. Na televizi a u prostorové navigace (<code>spatial.rs</code>) i mezi skupinami.</td></tr>
+<tr><td><span class="kbd">Enter</span></td><td>Výchozí akce: tlačítko, odkaz, potvrzení dialogu (výchozí tlačítko), otevření položky.</td></tr>
+<tr><td><span class="kbd">Mezerník</span></td><td>Přepnutí: tlačítko, zaškrtávátko, přepínač, výběr řádku. V poli píše mezeru.</td></tr>
+<tr><td><span class="kbd">Esc</span></td><td>Zavře nejvnitřnější vrstvu (popisek &rarr; nabídka &rarr; bublina &rarr; dialog) a vrátí fokus tam, odkud vrstva vzešla. V poli hledání nejdřív smaže text.</td></tr>
+<tr><td><span class="kbd">Home</span> / <span class="kbd">End</span>, <span class="kbd">PgUp</span> / <span class="kbd">PgDn</span></td><td>První / poslední položka, o stránku (seznamy) nebo o 10 % (posuvník).</td></tr>
+<tr><td>Písmena</td><td>Hledání psaním v seznamu, nabídce, výběru a stromu (do 1 s od posledního znaku).</td></tr>
+<tr><td><span class="kbd">Shift</span>+<span class="kbd">F10</span>, klávesa Menu</td><td>Kontextová nabídka u prvku s fokusem.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="tlacitka">
+<h2>Tlačítka <span class="tag p">libs/ui: částečně</span></h2>
+<div class="k-live">
+  <button class="k-btn pri k-f" data-log="Uložit">Uložit</button>
+  <button class="k-btn k-f" data-log="Zrušit">Zrušit</button>
+  <button class="k-btn dng k-f" id="b-del">Smazat trvale</button>
+  <button class="k-btn ico ghost k-f" data-tip="Kopírovat" data-key="Ctrl+C" aria-label="Kopírovat" data-log="Kopírovat"><svg class="ic"><use href="#ic-copy"/></svg></button>
+  <button class="k-btn ico k-f" aria-pressed="false" data-tip="Připnout" aria-label="Připnout" id="b-pin"><svg class="ic"><use href="#ic-pin"/></svg></button>
+  <button class="k-btn pri k-f" id="b-busy">Odeslat</button>
+  <button class="k-btn k-f" disabled>Nedostupné</button>
+</div>
+<div class="k-cap">Primární</div><div class="k-states" data-k="btn-pri"></div>
+<div class="k-cap">Sekundární</div><div class="k-states" data-k="btn-sec"></div>
+<div class="k-cap">Nebezpečné</div><div class="k-states" data-k="btn-dng"></div>
+<div class="k-cap">Ikonové (přepínací: vybráno = <code>aria-pressed</code>)</div><div class="k-states" data-k="btn-ico"></div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Výška <code>--k-h</code> (36 / 44 / 56), min. šířka 2 &times; výška, vodorovně <code>s5</code> 16, mezera ikona-text <code>s2</code> 4, tvar pilulka (<code>radius.pill</code>). Ikonové: čtverec výška &times; výška, ikona <code>icon_m</code>. Text <code>type.body_strong</code>.</dd>
+  <dt>Varianty</dt><dd><b>Primární</b> (<code>accent</code> / <code>on_accent</code>), nejvýš jedna na plochu a je výchozí pro Enter. <b>Sekundární</b> (<code>surface</code> + okraj <code>border_strong</code>). <b>Nebezpečné</b> (<code>danger</code> / <code>on_danger</code>) jen pro nevratné akce a nikdy výchozí. <b>Ikonové</b>: plné nebo průhledné (ghost); vždy popisek a přístupné jméno.</dd>
+  <dt>Stavy</dt><dd>Hover / stisk mísí <code>ink</code> do plochy (88 % / 76 %). Probíhá: kolečko místo ikony, šířka se nemění, druhé spuštění se ignoruje. Chyba u tlačítka nemá smysl (patří k poli nebo do oznámení).</dd>
+  <dt>Klávesnice</dt><dd><span class="kbd">Enter</span> i <span class="kbd">Mezerník</span> spustí při uvolnění. <span class="kbd">Esc</span> během stisku akci zruší. Přepínací tlačítko mění <code>aria-pressed</code>.</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> je jen jeden styl (sekundární). Chybí primární, nebezpečné, ghost, přepínací (<code>pressed</code>) a stav probíhá. Vypnuté tlačítko nekreslí fokus, což je správně (není v pořadí Tab); u zaškrtávátka je to naopak.</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="pole">
+<h2>Textová pole <span class="tag p">libs/ui: částečně</span></h2>
+<div class="k-live" style="align-items:flex-start">
+  <div class="k-field"><label for="f-name">Název</label><div class="k-in"><input id="f-name" value="Dovolená 2026" aria-describedby="f-name-h"></div>
+    <span class="k-msg" id="f-name-h">Nejvýš 64 znaků.</span></div>
+  <div class="k-field"><label for="f-mail">E-mail</label><div class="k-in" id="f-mail-w"><input id="f-mail" value="pepa@" aria-describedby="f-mail-e"></div>
+    <span class="k-msg err" id="f-mail-e" hidden><svg class="ic"><use href="#ic-error"/></svg><span>Doplňte doménu, např. pepa@example.cz.</span></span></div>
+  <div class="k-field"><label for="f-num">Velikost oddílu</label><div class="k-in num"><input id="f-num" role="spinbutton" inputmode="numeric" value="64" aria-valuemin="1" aria-valuemax="512" aria-valuenow="64"><span class="unit">GiB</span>
+    <div class="k-step"><button tabindex="-1" aria-label="Více" data-d="1"><svg class="ic"><use href="#ic-up"/></svg></button><button tabindex="-1" aria-label="Méně" data-d="-1"><svg class="ic"><use href="#ic-down"/></svg></button></div></div>
+    <span class="k-msg">1 až 512, šipky &plusmn; 1, PgUp / PgDn &plusmn; 10.</span></div>
+  <div class="k-field"><label for="f-pwd">Heslo</label><div class="k-in"><input id="f-pwd" type="password" value="tajne-heslo" autocomplete="off">
+    <button class="k-inb" id="f-pwd-eye" aria-label="Zobrazit heslo" aria-pressed="false" data-tip="Zobrazit heslo"><svg class="ic"><use href="#ic-eye"/></svg></button></div>
+    <span class="k-caps" id="f-caps"><svg class="ic s"><use href="#ic-alert"/></svg>Zapnutý Caps Lock</span></div>
+  <div class="k-field"><label for="f-q" class="sr-only">Hledat</label><div class="k-in"><svg class="ic s"><use href="#ic-search"/></svg><input id="f-q" type="search" placeholder="Hledat soubory" value="faktura">
+    <button class="k-inb" id="f-q-x" aria-label="Vymazat hledání"><svg class="ic s"><use href="#ic-close"/></svg></button></div>
+    <span class="k-msg">Esc smaže text, druhé Esc opustí pole.</span></div>
+  <div class="k-field" style="max-width:420px"><label for="f-area">Poznámka</label><div class="k-in area"><textarea id="f-area" rows="3">První řádek
+Druhý řádek</textarea></div><span class="k-msg" id="f-area-c">23 / 500</span></div>
+</div>
+<div class="k-cap">Jednořádkové</div><div class="k-states" data-k="in-text"></div>
+<div class="k-cap">Číslo</div><div class="k-states" data-k="in-num"></div>
+<div class="k-cap">Heslo</div><div class="k-states" data-k="in-pwd"></div>
+<div class="k-cap">Hledání</div><div class="k-states" data-k="in-search"></div>
+<div class="k-cap">Víceřádkové</div><div class="k-states" data-k="in-area"></div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Výška <code>--k-h</code>, odsazení <code>s4</code> 12 (tablet 16, TV 20), <code>radius.control</code> 10, min. šířka 6 &times; <code>hit_min</code>. Popisek nad polem <code>type.small</code> 600, mezera <code>s2</code>. Nápověda a chyba pod polem <code>type.small</code>. Víceřádkové: min. 2,5 &times; výška, roste do 10 řádků, pak se posouvá.</dd>
+  <dt>Stavy</dt><dd>Hover: okraj <code>ink_muted</code> a plocha <code>surface_2</code>. Fokus: okraj <code>accent</code> + prstenec s odsazením 0. Chyba: okraj <code>danger</code> 2 px (stín uvnitř, rozvržení se nehýbe), ikona <code>error</code> a věta, jak to opravit. Pole jen ke čtení: bez okraje, text jde vybrat a kopírovat. Vybráno nemá smysl.</dd>
+  <dt>Číslo</dt><dd>Zarovnání vpravo, tabulkové číslice, jednotka za číslem. Krokovací tlačítka nejsou v pořadí Tab. Mimo rozsah: chyba, ne tiché oříznutí.</dd>
+  <dt>Heslo</dt><dd>Oko přepíná zobrazení (<code>aria-pressed</code>), varování Caps Lock, nikdy návrhy ani doplňování, schránka jen kopírovat ven ne.</dd>
+  <dt>Hledání</dt><dd>Ikona lupy vlevo, křížek jen když je text. Výsledky se filtrují průběžně (prodleva 150 ms).</dd>
+  <dt>Klávesnice</dt><dd>Šipky, <span class="kbd">Ctrl</span>+šipky po slovech, Home / End, výběr se Shift, <span class="kbd">Ctrl</span>+A / C / X / V / Z / Y. Číslo: <span class="kbd">&uarr;</span> <span class="kbd">&darr;</span> &plusmn; krok, PgUp / PgDn &plusmn; 10 kroků. Hledání: <span class="kbd">Esc</span> vymaže, <span class="kbd">&darr;</span> do výsledků. Víceřádkové: <span class="kbd">Enter</span> nový řádek, <span class="kbd">Ctrl</span>+<span class="kbd">Enter</span> odeslat formulář, Tab opouští pole (nepíše tabulátor).</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> text, heslo a víceřádkové existují i s chybou. Chybí <b>číselné pole</b> a <b>pole hledání</b> (ikona, křížek, Esc). Hover pole se nekreslí. Oko u hesla a varování Caps Lock chybí.</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="volby">
+<h2>Zaškrtávátko, přepínač, radio <span class="tag p">libs/ui: částečně</span></h2>
+<div class="k-live" style="align-items:flex-start">
+  <fieldset class="k-group"><legend>Synchronizovat</legend>
+    <span class="k-chk k-f" role="checkbox" tabindex="0" aria-checked="mixed" id="c-all"><span class="box"><svg class="ic y"><use href="#ic-check"/></svg></span>Vše</span>
+    <span class="k-chk k-f c-one" role="checkbox" tabindex="0" aria-checked="true" style="margin-left:28px"><span class="box"><svg class="ic y"><use href="#ic-check"/></svg></span>Dokumenty</span>
+    <span class="k-chk k-f c-one" role="checkbox" tabindex="0" aria-checked="false" style="margin-left:28px"><span class="box"><svg class="ic y"><use href="#ic-check"/></svg></span>Fotky</span>
+    <span class="k-chk k-dis" role="checkbox" aria-checked="false" aria-disabled="true" style="margin-left:28px"><span class="box"><svg class="ic y"><use href="#ic-check"/></svg></span>Hudba (bez místa)</span>
+  </fieldset>
+  <fieldset class="k-group"><legend>Síť</legend>
+    <span class="k-chk k-f sw" role="switch" tabindex="0" aria-checked="true"><span class="k-sw"></span>Wi-Fi</span>
+    <span class="k-chk k-f sw" role="switch" tabindex="0" aria-checked="false"><span class="k-sw"></span>Režim letadlo</span>
+    <span class="k-chk k-dis sw" role="switch" aria-checked="false" aria-disabled="true"><span class="k-sw"></span>Bluetooth (bez adaptéru)</span>
+  </fieldset>
+  <fieldset class="k-group" role="radiogroup" aria-label="Po zavření víka" id="r-grp"><legend>Po zavření víka</legend>
+    <span class="k-chk k-f rad" role="radio" aria-checked="true"><span class="box"></span>Uspat</span>
+    <span class="k-chk k-f rad" role="radio" aria-checked="false"><span class="box"></span>Vypnout obrazovku</span>
+    <span class="k-chk k-f rad" role="radio" aria-checked="false"><span class="box"></span>Nic nedělat</span>
+  </fieldset>
+</div>
+<div class="k-cap">Zaškrtávátko (navíc: neurčité)</div><div class="k-states" data-k="chk"></div>
+<div class="k-cap">Přepínač</div><div class="k-states" data-k="sw"></div>
+<div class="k-cap">Radio</div><div class="k-states" data-k="rad"></div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Políčko <code>--k-box</code> 18 / 22 / 28 (navrženo; dnes <code>icon_m</code> 20), okraj 2 px <code>border_strong</code>, zaškrtávátko <code>radius.xs</code>, radio kruh. Cíl kliknutí je celý řádek včetně textu, výška <code>--k-h</code>. Přepínač <code>switch_w</code> &times; <code>switch_h</code>, jezdec <code>switch_knob</code>.</dd>
+  <dt>Kdy co</dt><dd><b>Přepínač</b> = okamžitý účinek (Wi-Fi). <b>Zaškrtávátko</b> = volba, která se uplatní až potvrzením, nebo výběr více věcí. <b>Radio</b> = jedna z 2 až 5 možností; víc možností = výběr (select).</dd>
+  <dt>Stavy</dt><dd>Hover: okraj <code>accent</code> + <code>accent_soft</code>. Stisk: políčko 92 %, jezdec přepínače se protáhne o 4 px. Zapnuto: <code>accent</code>, značka <code>on_accent</code>. Neurčité: vodorovná čárka (rodič s částečně vybranými dětmi), klik ho zapne. Chyba: okraj <code>danger</code> + věta u skupiny. Fokus kolem políčka, ne kolem textu.</dd>
+  <dt>Klávesnice</dt><dd>Zaškrtávátko a přepínač: <span class="kbd">Mezerník</span>, každé je samostatná zastávka Tab. Radio: celá skupina je jedna zastávka, <span class="kbd">&uarr;</span> <span class="kbd">&darr;</span> <span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> rovnou vybírají (s cyklem), <span class="kbd">Mezerník</span> vybere zaměřené.</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> zaškrtávátko nemá neurčitý stav, hover ani vypnutý vzhled (<code>st.disabled</code> se ignoruje). Radio při vypnutí neztlumí plochu, jen okraj. Skupinu radio skládá aplikace sama, šipky mezi radio chybí. Chyba je jen u polí.</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="posuvnik">
+<h2>Posuvník <span class="tag y">libs/ui: ano</span></h2>
+<div class="k-live">
+  <span id="sl-l">Hlasitost</span>
+  <div class="k-sl k-f" id="sl" role="slider" tabindex="0" aria-labelledby="sl-l" aria-valuemin="0" aria-valuemax="100" aria-valuenow="40" data-step="1"><div class="tr"></div><div class="fl"></div><div class="kn"></div></div>
+  <span class="k-slv" id="sl-v">40 %</span>
+</div>
+<div class="k-cap">Stavy</div><div class="k-states" data-k="sl"></div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Dráha 4 px (<code>s2</code>; dnes <code>space[1]</code> 2 px, navrhuji 4 kvůli čitelnosti), <code>radius.pill</code>. Jezdec <code>switch_knob</code> s okrajem 2 px <code>accent</code>. Cíl kliknutí celá výška <code>--k-h</code>. Hodnota vpravo tabulkovými číslicemi.</dd>
+  <dt>Stavy</dt><dd>Hover: jezdec 112 %. Stisk / tah: 120 % a <code>accent_soft</code>. Chyba: výplň <code>danger</code> (např. hlasitost nad bezpečnou mez). Vybráno nemá smysl.</dd>
+  <dt>Klávesnice</dt><dd><span class="kbd">&larr;</span> <span class="kbd">&darr;</span> &minus; krok, <span class="kbd">&rarr;</span> <span class="kbd">&uarr;</span> + krok, PgUp / PgDn &plusmn; 10 %, Home / End min / max. Kolečko jen při fokusu (ať posouvání stránky nemění hodnotu).</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> klávesy i stavy sedí. Chybí stav chyba a kolečko mění hodnotu i bez fokusu. Dráha 2 px.</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="vyber">
+<h2>Výběr (select) <span class="tag y">libs/ui: ano</span></h2>
+<div class="k-live">
+  <div class="k-field"><span class="lbl" id="sel-l">Jazyk systému</span>
+  <button class="k-in k-sel k-f" id="sel" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="sel-l sel"><span class="v">Čeština</span><svg class="ic s chev"><use href="#ic-down"/></svg></button></div>
+</div>
+<div class="k-cap">Stavy (vybráno = otevřeno)</div><div class="k-states" data-k="sel"></div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Jako pole (<code>--k-h</code>, <code>radius.control</code>), šipka <code>icon_s</code> vpravo. Seznam: <code>radius.card</code>, <code>shadow.popover</code>, položka <code>--k-item</code>, nejvýš 8 položek, pak posun. Otevírá se pod prvkem (nad, když se nevejde), šířka aspoň jako prvek.</dd>
+  <dt>Stavy</dt><dd>Otevřeno: okraj <code>accent</code>, šipka otočená. Zvolená položka <code>accent_ink</code> 600 + fajfka; aktivní (pod šipkami) <code>accent_soft</code>.</dd>
+  <dt>Klávesnice</dt><dd>Zavřené: <span class="kbd">Enter</span> / <span class="kbd">Mezerník</span> / <span class="kbd">Alt</span>+<span class="kbd">&darr;</span> / F4 otevře, <span class="kbd">&uarr;</span> <span class="kbd">&darr;</span> mění hodnotu přímo, písmena hledají. Otevřené: <span class="kbd">&uarr;</span> <span class="kbd">&darr;</span> Home End, písmena, <span class="kbd">Enter</span> zvolí, <span class="kbd">Esc</span> zavře beze změny, <span class="kbd">Tab</span> zvolí aktivní a jde dál.</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> chování odpovídá. Navíc chybí hledání psaním a stav chyba. Tab v otevřeném seznamu dnes zavře beze změny; navrhuji zvolit aktivní (jako na ostatních systémech).</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="zalozky">
+<h2>Záložky a segmentový přepínač <span class="tag y">libs/ui: ano</span></h2>
+<div class="k-live col">
+  <div class="k-tabs" role="tablist" aria-label="Vlastnosti" id="tabs">
+    <button class="k-tab" role="tab" aria-selected="true" aria-controls="tp">Obecné</button>
+    <button class="k-tab" role="tab" aria-selected="false" aria-controls="tp">Oprávnění</button>
+    <button class="k-tab" role="tab" aria-selected="false" aria-controls="tp">Historie</button>
+    <button class="k-tab err" role="tab" aria-selected="false" aria-controls="tp"><span class="dot" aria-hidden="true"></span>Síť</button>
+    <button class="k-tab" role="tab" aria-selected="false" aria-controls="tp" disabled>Šifrování</button>
+  </div>
+  <div class="k-panel" id="tp" role="tabpanel" tabindex="0">Obsah záložky Obecné.</div>
+  <div class="hstack"><span>Zobrazení</span>
+  <div class="k-seg" role="radiogroup" aria-label="Zobrazení" id="seg">
+    <button role="radio" aria-checked="true"><svg class="ic s"><use href="#ic-list"/></svg>Seznam</button>
+    <button role="radio" aria-checked="false"><svg class="ic s"><use href="#ic-grid"/></svg>Mřížka</button>
+    <button role="radio" aria-checked="false"><svg class="ic s"><use href="#ic-image"/></svg>Náhledy</button>
+  </div></div>
+</div>
+<div class="k-cap">Záložka</div><div class="k-states" data-k="tab"></div>
+<div class="k-cap">Segment</div><div class="k-states" data-k="seg"></div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Záložka výška <code>--k-h</code>, odsazení <code>s5</code>, max. šířka 180 (dnes konstanta <code>TAB_MAX</code>; navrhuji token <code>size.tab_max</code>). Vybraná: text <code>accent_ink</code> 600 a podtržení 3 px <code>accent</code>. Segment: dráha <code>surface_3</code>, vybraný díl <code>surface</code> + <code>accent_ink</code>, výška <code>--k-h</code>.</dd>
+  <dt>Kdy co</dt><dd><b>Záložky</b> přepínají obsah pod sebou (panel). <b>Segmenty</b> přepínají režim téhož obsahu (2 až 5 voleb, krátké popisky).</dd>
+  <dt>Stavy</dt><dd>Chyba na záložce: tečka <code>danger</code> + text <code>danger</code> (chyba ve formuláři uvnitř). Vypnutá záložka se šipkami přeskakuje.</dd>
+  <dt>Klávesnice</dt><dd>Jedna zastávka Tab. <span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> Home End přesouvají a rovnou přepínají (automatická aktivace; panel se musí vykreslit do 1 snímku, jinak ruční s Enter). <span class="kbd">Ctrl</span>+<span class="kbd">Tab</span> / <span class="kbd">Ctrl</span>+<span class="kbd">PgDn</span> další záložka odkudkoli v okně. Tab z lišty jde do panelu.</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> vybraná záložka je plocha <code>surface_2</code> bez podtržení. Navrhuji podtržení <code>accent</code>, protože plocha je ve světlém motivu skoro neviditelná (kontrast pod 3 : 1). Chybí stav chyba a přeskakování vypnutých.</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="nabidky">
+<h2>Nabídka a kontextová nabídka <span class="tag y">libs/ui: ano</span></h2>
+<div class="k-live">
+  <button class="k-btn k-f" id="m-btn" aria-haspopup="menu" aria-expanded="false">Soubor<svg class="ic s"><use href="#ic-down"/></svg></button>
+  <div class="k-ctx-area k-f" id="ctx" tabindex="0"><span>Pravé tlačítko sem, nebo fokus a <span class="kbd">Shift</span>+<span class="kbd">F10</span></span></div>
+</div>
+<div class="k-cap">Položka</div><div class="k-states" data-k="mi"></div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Plocha <code>radius.card</code>, odsazení <code>s2</code>, <code>shadow.popover</code> (kontrast: rám 2 px). Položka výška <code>--k-item</code> 32 / 44 / 56, <code>radius.xs</code>, ikona <code>icon_m</code> v <code>ink_muted</code>, zkratka vpravo <code>type.small</code> <code>ink_muted</code>. Oddělovač 1 px <code>border</code>. Min. šířka 200.</dd>
+  <dt>Obsah</dt><dd>Skupiny oddělené čarou, nebezpečná položka (<code>danger</code>) vždy poslední a s potvrzením. Zaškrtávací položka má fajfku ve sloupci ikon. Podnabídka: šipka vpravo, otevře se po 300 ms najetí nebo <span class="kbd">&rarr;</span>.</dd>
+  <dt>Stavy</dt><dd>Hover <code>surface_3</code>, aktivní (myš i šipky) <code>accent_soft</code>; v TV navíc prstenec. Vypnutá: zaměřitelná, nespustí se, popisek s důvodem. Chyba nemá smysl.</dd>
+  <dt>Klávesnice</dt><dd>Otevření: <span class="kbd">Enter</span> / <span class="kbd">Mezerník</span> / <span class="kbd">&darr;</span> (první položka), <span class="kbd">&uarr;</span> (poslední). Uvnitř <span class="kbd">&uarr;</span> <span class="kbd">&darr;</span> s cyklem, Home End, písmena, <span class="kbd">&rarr;</span> otevře podnabídku, <span class="kbd">&larr;</span> / <span class="kbd">Esc</span> zavře podnabídku, <span class="kbd">Esc</span> zavře a vrátí fokus, <span class="kbd">Tab</span> zavře a jde dál. Kontextová: pravé tlačítko, <span class="kbd">Shift</span>+<span class="kbd">F10</span>, klávesa Menu, dlouhý stisk (tablet), tlačítko Menu ovladače (TV).</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> chybí podnabídky, nebezpečná položka, nadpis skupiny a hledání psaním. Vypnutá položka má důvod, to je dobře.</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="bubliny">
+<h2>Bublina (popover) a popisek (tooltip) <span class="tag p">libs/ui: popisek ano, bublina ne</span></h2>
+<div class="k-live">
+  <button class="k-btn k-f" data-tip="Obnovit seznam" data-key="F5" data-log="Obnovit"><svg class="ic s"><use href="#ic-refresh"/></svg>Obnovit</button>
+  <button class="k-btn ico k-f" data-tip="Nápověda k šifrování" aria-label="Nápověda" id="pv-btn" aria-expanded="false" aria-haspopup="dialog"><svg class="ic"><use href="#ic-info"/></svg></button>
+  <span class="muted">Najeďte myší nebo přejděte Tabem na první tlačítko. Druhé otevře bublinu.</span>
+</div>
+<dl class="k-spec">
+  <dt>Popisek</dt><dd>Jen text (max. 280, <code>type.small</code>), volitelně klávesová zkratka. Pozadí <code>ink</code>, text <code>surface</code>, <code>radius.xs</code>. Ukáže se po 500 ms najetí nebo hned po fokusu klávesnicí, skryje se odjetím, <span class="kbd">Esc</span> nebo kliknutím. Nikdy nenese informaci, která jinde není (výjimka: jméno ikonového tlačítka).</dd>
+  <dt>Bublina</dt><dd>Interaktivní obsah ukotvený k prvku: <code>radius.card</code>, <code>shadow.popover</code>, šipka 12 px, šířka 300, vrstva <code>layer.popover</code>. Otevírá se kliknutím / Enter, fokus jde dovnitř, <span class="kbd">Esc</span> nebo klik mimo zavře a vrátí fokus na spouštěč. Nemodální (stránka pod ní běží dál).</dd>
+  <dt>Stavy</dt><dd>Stavy má spouštěč (tlačítko). Otevřený spouštěč: <code>aria-expanded</code>.</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> popisek existuje, <code>TIP_DELAY</code> 500 a <code>TIP_MAX_W</code> 280 jsou konstanty v kódu (navrhuji tokeny <code>motion.tip_delay</code>, <code>size.tip_max_w</code>). Obecná bublina s vlastním obsahem chybí; vrstva <code>popup</code> zatím umí jen nabídku, výběr a návrhy.</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="dialog">
+<h2>Dialog <span class="tag n">libs/ui: ne</span></h2>
+<div class="k-live">
+  <button class="k-btn k-f" id="d-open">Otevřít dialog</button>
+  <div class="k-dlg static" role="group" aria-label="Ukázka dialogu" style="max-width:440px">
+    <div class="hd"><h3>Zahodit změny v dokumentu?</h3><button class="k-btn ico ghost k-f" tabindex="-1" aria-label="Zavřít"><svg class="ic s"><use href="#ic-close"/></svg></button></div>
+    <div class="bd">Dokument &bdquo;Rozpočet&ldquo; má neuložené změny. Zahozené změny najdete v historii souboru 30 dní.</div>
+    <div class="ft"><button class="k-btn k-f" tabindex="-1">Zrušit</button><button class="k-btn k-f" tabindex="-1">Zahodit</button><button class="k-btn pri k-f" tabindex="-1">Uložit</button></div>
+  </div>
+</div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Šířka <code>size.dialog_w</code> 440 (na užší obrazovce displej &minus; 24), <code>radius.window</code> 18, <code>shadow.dialog</code>, ztmavení <code>scrim</code>, vrstva <code>layer.window</code> + 1 nad vlastním oknem. Odsazení <code>s6</code> 20, nadpis <code>type.title</code>, text <code>ink_muted</code>, tlačítka vpravo, primární úplně vpravo.</dd>
+  <dt>Rozlišení</dt><dd>Toto je dialog <b>aplikace</b> (modální jen pro své okno, ostatní okna jdou ovládat). <b>Systémový</b> dialog (oprávnění, heslo, mazání) kreslí kompozitor s pruhem &bdquo;Systém&ldquo; a rámem <code>trust_border</code> (<a href="dialogy.html">dialogy.html</a>); aplikace ho nenapodobí, protože barvy <code>trust_*</code> nedostane.</dd>
+  <dt>Klávesnice</dt><dd>Po otevření fokus na první pole, jinak na nejbezpečnější tlačítko (ne nebezpečné). Tab a Shift+Tab cyklí uvnitř. <span class="kbd">Enter</span> = výchozí (primární) tlačítko, <span class="kbd">Esc</span> = Zrušit. Po zavření se fokus vrátí na spouštěč.</dd>
+  <dt>Stavy</dt><dd>Dialog nemá vlastní stavy, mají je jeho prvky. Probíhající akce: primární tlačítko ve stavu probíhá, Esc dál ruší.</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> widget dialogu chybí úplně (token <code>dialog_w</code> existuje). Potřeba: modální vrstva v okně, past fokusu, výchozí a rušicí tlačítko, návrat fokusu.</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="toast">
+<h2>Oznámení (toast) <span class="tag n">libs/ui: ne</span></h2>
+<div class="k-live">
+  <button class="k-btn k-f" id="t-ok">Uložit (úspěch)</button>
+  <button class="k-btn k-f" id="t-undo">Smazat 3 soubory (s vrácením)</button>
+  <button class="k-btn k-f" id="t-err">Selhání sítě</button>
+</div>
+<div class="k-cap">Varianty</div>
+<div class="k-states" data-k="toast"></div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Šířka nejvýš 440, min. výška 48, <code>radius.card</code>, inverzní barvy (<code>ink</code> / <code>surface</code>), dole uprostřed okna, 20 px nad okrajem; nejvýš 3 nad sebou, nové dole. Ikona 28 v barvě stavu. Tlačítko akce malé (<code>--k-h-sm</code>).</dd>
+  <dt>Chování</dt><dd>Krátká zpráva <b>uvnitř okna aplikace</b> o tom, co se právě stalo. Zmizí po 5 s (s akcí 8 s), časovač stojí při najetí a fokusu. Nejvýš jedna akce (Zpět, Zkusit znovu). Chyby, které vyžadují rozhodnutí, nepatří do toastu, ale do dialogu. Systémové notifikace (mimo okno, s historií) jsou jiná věc (<code>size.notification_w</code>, kreslí systém).</dd>
+  <dt>Klávesnice</dt><dd>Toast nebere fokus (<code>role="status"</code>, čtečka ho přečte). <span class="kbd">F6</span> přesune fokus do oblasti oznámení, pak Tab na akci, <span class="kbd">Esc</span> zavře. <span class="kbd">Ctrl</span>+<span class="kbd">Z</span> v okně má stejný účinek jako Zpět.</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> chybí. Potřeba: oblast oznámení okna, fronta, časovač s pauzou, ohlášení čtečce.</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="seznam">
+<h2>Seznam a tabulka <span class="tag y">libs/ui: ano</span></h2>
+<div class="k-live" style="align-items:flex-start">
+  <ul class="k-list" role="listbox" tabindex="0" aria-label="Složky" aria-multiselectable="true" id="lst"></ul>
+  <div style="flex:1 1 420px;min-width:0" class="k-scroll">
+  <table class="k-grid" role="grid" tabindex="0" aria-label="Procesy" aria-multiselectable="true" id="grd">
+    <thead><tr><th data-c="0" aria-sort="ascending">Název <svg class="ic"><use href="#ic-up"/></svg></th><th data-c="1" class="r" aria-sort="none">Paměť <svg class="ic"><use href="#ic-up"/></svg></th><th data-c="2" class="r" aria-sort="none">CPU <svg class="ic"><use href="#ic-up"/></svg></th><th data-c="3" aria-sort="none">Stav <svg class="ic"><use href="#ic-up"/></svg></th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+</div>
+<div class="k-cap">Řádek seznamu (fokus = prstenec uvnitř, vybráno = <code>accent_soft</code>)</div><div class="k-states" data-k="li"></div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Řádek <code>--k-row</code> 36 / 44 / 56, odsazení <code>s3</code>, <code>radius.control</code> (seznam) nebo bez zaoblení (tabulka), plocha <code>radius.card</code> s okrajem. Tabulka: hlavička <code>type.caption</code> <code>ink_muted</code> na <code>surface_2</code>, čáry 1 px <code>border</code>, čísla vpravo a tabulkovými číslicemi. Virtualizace od 200 řádků.</dd>
+  <dt>Stavy</dt><dd>Hover <code>surface_3</code>. Vybráno <code>accent_soft</code>. Aktivní řádek (kurzor) = prstenec <code>focus</code> uvnitř řádku, jen když má seznam fokus. Chyba: text a ikona <code>danger</code> (např. nereagující proces) + ikona, ne jen barva. Vypnutý řádek: krytí 50 %, nedá se vybrat, šipky ho přeskočí.</dd>
+  <dt>Klávesnice</dt><dd>Jedna zastávka Tab. <span class="kbd">&uarr;</span> <span class="kbd">&darr;</span> přesune kurzor a vybere, <span class="kbd">Ctrl</span>+šipky jen kurzor, <span class="kbd">Ctrl</span>+<span class="kbd">Mezerník</span> přidá / odebere, <span class="kbd">Shift</span>+šipky rozšíří, <span class="kbd">Ctrl</span>+<span class="kbd">A</span> vše, Home End PgUp PgDn, písmena hledají, <span class="kbd">Enter</span> otevře. Tabulka: v hlavičce <span class="kbd">Enter</span> třídí; v tomto náhledu klik na hlavičku.</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> tabulka je nejúplnější komponenta (virtualizace, třídění, vícenásobný výběr, hledání psaním). Seznam má jen šipky; chybí Ctrl+Mezerník, Shift+šipky a hledání psaním. Výška tabulky v rozvržení je pevně 8 řádků + hlavička.</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="strom">
+<h2>Strom <span class="tag n">libs/ui: ne</span></h2>
+<div class="k-live">
+  <ul class="k-tree" role="tree" aria-label="Složky" id="tree"></ul>
+  <span class="muted" style="max-width:40ch">Šipky vpravo / vlevo rozbalují a sbalují, <span class="kbd">*</span> rozbalí sourozence, Enter otevře.</span>
+</div>
+<div class="k-cap">Uzel</div><div class="k-states" data-k="tn"></div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Řádek <code>--k-row</code>, odsazení úrovně 20 px (= <code>icon_m</code>), trojúhelník <code>icon_m</code> v <code>ink_muted</code> otočený o 90&deg; při rozbalení (<code>motion.base</code>). Ikona složky <code>icon_files</code>.</dd>
+  <dt>Stavy</dt><dd>Jako řádek seznamu. Načítá se: kolečko místo trojúhelníku. Chyba (nedostupné): ikona <code>error</code> a text <code>danger</code>.</dd>
+  <dt>Klávesnice</dt><dd>Jedna zastávka Tab. <span class="kbd">&darr;</span> <span class="kbd">&uarr;</span> viditelné uzly. <span class="kbd">&rarr;</span> rozbalí, podruhé jde na první dítě. <span class="kbd">&larr;</span> sbalí, podruhé jde na rodiče. Home End, <span class="kbd">*</span> rozbalí sourozence, písmena, <span class="kbd">Enter</span> otevře.</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> chybí (správce souborů a nastavení ho budou potřebovat). Návrh: postavit na seznamu (řádky + úroveň + rozbaleno), ne jako novou vrstvu.</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="prubeh">
+<h2>Průběh a načítání <span class="tag p">libs/ui: částečně</span></h2>
+<div class="k-live">
+  <div class="k-pl" style="width:260px"><div class="row"><span>Kopírování</span><span class="num" id="pr-v">0 %</span></div>
+    <div class="k-prog" role="progressbar" aria-label="Kopírování" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="pr"><i style="width:0"></i></div></div>
+  <button class="k-btn k-f" id="pr-go">Spustit</button>
+  <div class="k-pl" style="width:200px"><div class="row"><span>Hledání zařízení</span></div><div class="k-prog ind" role="progressbar" aria-label="Hledání zařízení"><i></i></div></div>
+  <div class="k-spin" role="status" aria-label="Načítání"></div>
+  <div class="k-pl" style="width:180px" aria-hidden="true"><div class="k-skel" style="width:80%"></div><div class="k-skel"></div><div class="k-skel" style="width:60%"></div></div>
+</div>
+<div class="k-cap">Varianty</div><div class="k-states" data-k="prog"></div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Pruh 8 px (<code>s3</code>), <code>radius.pill</code>, dráha <code>surface_3</code>, výplň <code>accent</code> (<code>ai</code> pro agenta, <code>ok</code> hotovo, <code>danger</code> chyba). Kolečko 24 (v tlačítku 16, celá plocha 40), tah 3, otáčka 0,8 s. Kostra (skeleton) 12 px.</dd>
+  <dt>Kdy co</dt><dd>Do 1 s nic. 1 až 3 s kolečko. Nad 3 s pruh s procenty, a když jde, i odhadem času. Neznámý průběh: neurčitý pruh. Načítání obsahu se známým tvarem: kostra.</dd>
+  <dt>Pohyb</dt><dd>S omezeným pohybem se neurčitý pruh a kostra nehýbou (pulzují krytím), kolečko se točí pomaleji.</dd>
+  <dt>Klávesnice</dt><dd>Není zaměřitelný. Čtečce se hlásí po 10 % a na konci.</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> pruh a neurčitý pruh (<code>busy</code>, 30 % jako konstanta) existují. Chybí kruhové kolečko, kostra, varianty ok / chyba.</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="stitky">
+<h2>Odznaky a štítky <span class="tag p">libs/ui: částečně</span></h2>
+<div class="k-live">
+  <span class="hstack"><svg class="ic"><use href="#ic-bell"/></svg><span class="k-badge" aria-label="3 nová oznámení">3</span></span>
+  <span class="k-badge dng">99+</span><span class="k-badge dot" aria-label="Nové"></span>
+  <span class="k-chip">Koncept</span><span class="k-chip ok"><svg class="ic"><use href="#ic-check"/></svg>Zálohováno</span>
+  <span class="k-chip warn"><svg class="ic"><use href="#ic-alert"/></svg>Málo místa</span><span class="k-chip dng"><svg class="ic"><use href="#ic-error"/></svg>Chyba</span>
+  <span class="k-chip acc">Nové</span><span class="k-chip agent"><svg class="ic"><use href="#ic-agent"/></svg>agent</span>
+  <span id="tags" class="hstack" role="group" aria-label="Filtry"></span>
+</div>
+<div class="k-cap">Filtrovací štítek (přepínací, odstranitelný)</div><div class="k-states" data-k="tag"></div>
+<dl class="k-spec">
+  <dt>Odznak</dt><dd>Počet: výška 18, min. šířka 18, <code>radius.pill</code>, 11 px 700, <code>accent</code> (<code>danger</code> pro chyby), nad 99 &bdquo;99+&ldquo;. Tečka 8 px = &bdquo;je tu něco nového&ldquo;. Vždy s přístupným jménem (počet slovy).</dd>
+  <dt>Stavový štítek</dt><dd>Výška 24, <code>type.caption</code> 600, měkké pozadí stavu (<code>ok_soft</code>, <code>warn_soft</code>, <code>danger_soft</code>, <code>accent_soft</code>). Barva nikdy sama: ikona nebo slovo. Štítek <code>ai</code> jen pro agenta a vždy se slovem &bdquo;agent&ldquo;. Není interaktivní.</dd>
+  <dt>Filtrovací štítek</dt><dd>Výška <code>--k-h-sm</code>, okraj <code>border_strong</code>, zapnutý <code>accent_soft</code> + okraj <code>accent</code>. Křížek 20 px odstraní.</dd>
+  <dt>Klávesnice</dt><dd>Skupina štítků je jedna zastávka, <span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> mezi nimi, <span class="kbd">Mezerník</span> přepne, <span class="kbd">Delete</span> / <span class="kbd">Backspace</span> odstraní a fokus přejde na souseda.</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> jen štítek <code>warn</code> a <code>agent</code> u popisku. Chybí obecný odznak s počtem, štítky ok / chyba / akcent a filtrovací štítek.</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="drobecky">
+<h2>Drobečková navigace <span class="tag n">libs/ui: ne</span></h2>
+<div class="k-live">
+  <nav class="k-crumbs" aria-label="Umístění"><ol>
+    <li><a href="#drobecky" class="k-f"><svg class="ic"><use href="#ic-home"/></svg>Domů</a></li>
+    <li><button class="k-f" aria-label="Skryté úrovně: Dokumenty, Práce" data-tip="Dokumenty / Práce">...</button></li>
+    <li><a href="#drobecky" class="k-f">2026</a></li>
+    <li><span aria-current="page">Faktury</span></li>
+  </ol></nav>
+</div>
+<div class="k-cap">Odkaz</div><div class="k-states" data-k="crumb"></div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Odkaz výška <code>--k-h-sm</code>, odsazení <code>s3</code>, <code>radius.xs</code>, text <code>ink_muted</code>. Oddělovač &bdquo;/&ldquo; v <code>ink_faint</code>. Aktuální úroveň <code>ink</code> 600 a není odkaz. Když se nevejde: první a poslední dvě úrovně zůstanou, prostřední se schovají za &bdquo;...&ldquo; (otevře nabídku).</dd>
+  <dt>Stavy</dt><dd>Hover <code>surface_3</code> + <code>ink</code>. Chyba a vybráno nemají smysl (aktuální úroveň není vybráno, je to místo).</dd>
+  <dt>Klávesnice</dt><dd>Každý odkaz je zastávka Tab (krátký seznam). Enter přejde. Ve správci souborů lze drobečky přepnout na pole s cestou (<span class="kbd">Ctrl</span>+<span class="kbd">L</span>).</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> chybí.</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="rozbalit">
+<h2>Rozbalovací panel <span class="tag n">libs/ui: ne</span></h2>
+<div class="k-live col" id="accs">
+  <div class="k-acc"><button aria-expanded="true" aria-controls="ac1" class="k-acc-b">Úložiště<span class="muted">412 GB volných</span><svg class="ic s chev"><use href="#ic-down"/></svg></button>
+    <div class="body" id="ac1"><div><div>Disk NVMe 1 TB, souborový systém v3, šifrování zapnuté.</div></div></div></div>
+  <div class="k-acc"><button aria-expanded="false" aria-controls="ac2" class="k-acc-b">Paměť<svg class="ic s chev"><use href="#ic-down"/></svg></button>
+    <div class="body" id="ac2"><div><div>32 GB, využito 11,4 GB.</div></div></div></div>
+  <div class="k-acc err"><button aria-expanded="false" aria-controls="ac3" class="k-acc-b"><svg class="ic s"><use href="#ic-error"/></svg>Síť<span class="muted">bez připojení</span><svg class="ic s chev"><use href="#ic-down"/></svg></button>
+    <div class="body" id="ac3"><div><div>Kabel odpojen, Wi-Fi vypnutá.</div></div></div></div>
+</div>
+<div class="k-cap">Hlavička</div><div class="k-states" data-k="acc"></div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Hlavička výška <code>--k-h</code> + 12, odsazení <code>s5</code>, <code>type.body_strong</code>, shrnutí vpravo <code>ink_muted</code>, šipka <code>icon_s</code> otočená o 180&deg;. Plocha <code>radius.card</code> s okrajem. Otevírání animuje výšku <code>motion.base</code> (s omezeným pohybem jen prolnutí).</dd>
+  <dt>Stavy</dt><dd>Hover <code>surface_2</code>. Vybráno = rozbaleno. Chyba: okraj a text <code>danger</code> + ikona. Panely jsou nezávislé (víc otevřených najednou), pokud aplikace nechce režim &bdquo;jen jeden&ldquo;.</dd>
+  <dt>Klávesnice</dt><dd>Hlavička je tlačítko: Tab, <span class="kbd">Enter</span> / <span class="kbd">Mezerník</span> přepne. Ve skupině navíc <span class="kbd">&uarr;</span> <span class="kbd">&darr;</span> Home End mezi hlavičkami.</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> chybí. Animace výšky vyžaduje opakované rozvržení; v <code>libs/ui</code> navrhuji místo toho prolnutí + skok výšky (levnější, v rozpočtu snímku).</p>
+</section>
+
+<!-- ======================================================= -->
+<section class="k-sec" id="prazdno">
+<h2>Prázdný stav <span class="tag n">libs/ui: ne</span></h2>
+<div class="k-live">
+  <div class="k-empty"><div class="art"><svg class="ic"><use href="#ic-folder"/></svg></div><h4>Složka je prázdná</h4><p>Přetáhněte sem soubory nebo vytvořte nový.</p><button class="k-btn pri k-f" data-log="Nový soubor"><svg class="ic s"><use href="#ic-plus"/></svg>Nový soubor</button></div>
+  <div class="k-empty"><div class="art"><svg class="ic"><use href="#ic-search"/></svg></div><h4>Nic nenalezeno</h4><p>Pro &bdquo;fakturra&ldquo; nic není. Zkontrolujte překlep nebo zrušte filtry.</p><button class="k-btn k-f" data-log="Zrušit filtry">Zrušit filtry</button></div>
+  <div class="k-empty err"><div class="art"><svg class="ic"><use href="#ic-wifi-off"/></svg></div><h4>Nelze načíst</h4><p>Server neodpovídá. Zkusíme to znovu za 30 s.</p><button class="k-btn k-f" data-log="Zkusit znovu"><svg class="ic s"><use href="#ic-refresh"/></svg>Zkusit znovu</button></div>
+</div>
+<dl class="k-spec">
+  <dt>Rozměry</dt><dd>Ilustrace kruh 72 s ikonou <code>icon_xl</code> na <code>accent_soft</code> (chyba <code>danger_soft</code>), nadpis <code>type.title</code>, text <code>ink_muted</code> max. 34 znaků na řádek, jedna akce. Svisle uprostřed volné plochy, odsazení <code>s8</code>.</dd>
+  <dt>Varianty</dt><dd><b>Poprvé</b> (nic tu ještě není: co sem patří a jak to přidat), <b>nic nenalezeno</b> (opakuje dotaz, nabídne zrušit filtry), <b>chyba</b> (co se stalo, kdy se to zkusí znovu, tlačítko hned).</dd>
+  <dt>Klávesnice</dt><dd>Fokus na akci, když je prázdný stav celý obsah okna. Text se čtečce ohlásí jako stav.</dd>
+</dl>
+<p class="k-diff"><b>Rozdíl proti libs/ui:</b> chybí; dá se složit z existujících prvků (obrázek, popisek, tlačítko). Navrhuji hotový widget, aby texty a rozměry byly všude stejné.</p>
+</section>
+</main>
+
+<div class="k-toasts" id="toasts" role="region" aria-label="Oznámení" tabindex="-1"></div>
+<script src="assets/komponenty.js"></script>
+</body>
+</html>

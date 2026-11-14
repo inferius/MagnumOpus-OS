@@ -102,6 +102,7 @@ site menu.
 
 | Česky | English | Obsah / Contents |
 |---|---|---|
+| [Knihovna komponent](cs/komponenty.md) | [Component library](en/components.md) | základní ovládací prvky: stavy, klávesnice, hustoty počítač / tablet / TV, specifikace pro `libs/ui` a rozdíly / basic controls: states, keyboard, desktop / tablet / TV densities, spec for `libs/ui` and gaps |
 | [Vzhled a ovládání](cs/vzhled.md) | [Look and feel](en/appearance.md) | design systém a tokeny, okna a odznak důvěry, lišta, systémové dialogy, správce úloh, terminál, soubory, nastavení, přihlášení, přístupnost; prototypy a příručka grafického jazyka v `design/` / design system and tokens, windows and trust badge, bar, system dialogs, task manager, terminal, files, settings, sign-in, accessibility; prototypes and visual language handbook in `design/` |
 
 ### Síť / Network

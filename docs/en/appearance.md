@@ -30,6 +30,7 @@ reduced motion.
 |---|---|
 | `design/prirucka.html` | **visual language handbook** (cs / en) |
 | `design/design-system.html` | colors with a contrast table, typography, grid, corner radii, shadows, icons, motion, components |
+| `design/komponenty.html` | **component library**: 25 controls in all states, keyboard, desktop / tablet / TV densities, gaps in `libs/ui` ([Component library](components.md)) |
 | `design/okna.html` | window anatomy, trust badge (removing permissions), window modes, states |
 | `design/plocha.html` | bar in 6 positions, window switching, notifications, system dialogs, file picker, secure screen, task manager, agent in the bar |
 | `design/terminal.html` | output blocks, tables with a schema, type-based completion, dry run and undo, errors, task panel, notation B / C |
@@ -1127,3 +1128,4 @@ services outside the GUI (`taskd`, clones in `fsproto`, configuration).
 | v1.7 | 2026-11-12 | designs: mobile environment (stage A), system dialogs for desktop and phone, launcher and palette names, bubbles and bar panels |
 | v1.8 | 2026-11-13 | designs: tablet mode (window tiling, pen, 2-in-1), TV mode with a foundations review; compact file picker; launcher variant D |
 | v1.9 | 2026-11-13 | decisions: tablet switches automatically, stacked tiles in portrait, TV mode not developed further, content above the rating hidden from children; points 3, 5 and 6 into the foundations as a design; permission infographic and severity colours for icons |
+| v1.10 | 2026-11-14 | component library ([components.md](components.md), `design/komponenty.html`): states, keyboard, densities, spec for `libs/ui`, gaps and proposed new tokens |
