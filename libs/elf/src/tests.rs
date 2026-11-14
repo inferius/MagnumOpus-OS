@@ -244,3 +244,28 @@ fn damaged_input_does_not_panic() {
         }
     }
 }
+
+/// Modul "nahrany" do pameti (segmenty na `vaddr`, bss nuly) jako ho vidi
+/// zavadec: stejne udaje jako ze souboru.
+#[test]
+fn loaded_module_view() {
+    for (data, m) in [(X64_LIB, Machine::X86_64), (A64_RELR, Machine::Aarch64)] {
+        let file = ElfFile::parse_object(data, m).unwrap();
+        let span = file.load_segments().map(|s| s.unwrap()).map(|s| s.vaddr + s.mem_size).max().unwrap();
+        let mut mem = std::vec![0u8; span as usize];
+        for s in file.load_segments() {
+            let s = s.unwrap();
+            mem[s.vaddr as usize..(s.vaddr + s.file_size) as usize].copy_from_slice(file.segment_data(&s));
+        }
+        let elf = ElfFile::parse_loaded(&mem, m).unwrap();
+        let d = elf.dynamic().unwrap().unwrap();
+        assert_eq!(elf.dyn_str(&d, d.soname.unwrap()).unwrap(), "libfix.so.1");
+        let syms = elf.symbols(&d).unwrap();
+        let (_, v) = syms.lookup("exported_var").unwrap().unwrap();
+        assert_eq!(elf.at_vaddr(v.value, 4).unwrap(), &42u32.to_le_bytes());
+        assert_eq!(elf.relas(&d).unwrap().count(), file.relas(&file.dynamic().unwrap().unwrap()).unwrap().count());
+        let tls = elf.tls().unwrap().unwrap();
+        assert_eq!(elf.tls_data(&tls).unwrap(), &7u32.to_le_bytes());
+        assert!(elf.at_vaddr(span, 1).is_err(), "mimo modul");
+    }
+}

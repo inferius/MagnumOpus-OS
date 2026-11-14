@@ -107,6 +107,10 @@ pub fn link_flags(target: &str, link: &Link) -> Result<Vec<String>, String> {
         LinkKind::Pie => {
             f.push("-pie".into());
             f.push(format!("--dynamic-linker={INTERP}"));
+            // Knihovny odkazuji na funkce zavadece (`__tls_get_addr`), ktere
+            // pri linku nejsou v zadne knihovne; chybejici symbol ohlasi
+            // zavadec pri startu (`ld.so: nedefinovany symbol ...`).
+            f.push("--allow-shlib-undefined".into());
         }
     }
     if let Some(r) = &link.runpath {
@@ -135,7 +139,11 @@ impl Build {
     pub fn link(&self, target: &str, out_dir: &Path, out: &Path, link: &Link) -> Result<(), String> {
         let clang = find_clang()?;
         let flags = link_flags(target, link)?;
-        let (obj_dir, mut objects) = self.compile_objects(&clang, target, out_dir, true)?;
+        let code = match link.kind {
+            LinkKind::Shared { .. } => crate::Code::Shared,
+            LinkKind::Pie => crate::Code::Pie,
+        };
+        let (obj_dir, mut objects) = self.compile_objects(&clang, target, out_dir, code)?;
         let mut all = link.extra_objects.clone();
         all.append(&mut objects);
         let rsp = write_rsp(&obj_dir, &all)?;

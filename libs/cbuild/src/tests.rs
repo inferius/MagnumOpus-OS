@@ -45,9 +45,11 @@ fn vlastni_kod_ma_varovani_jako_chyby() {
 #[test]
 fn pic_prepne_fno_pic() {
     let b = Build::new("x");
-    let f = b.flags_for("x86_64-unknown-magnumopus", true).unwrap();
+    let f = b.flags_for("x86_64-unknown-magnumopus", crate::Code::Shared).unwrap();
     assert!(f.iter().any(|s| s == "-fPIC") && !f.iter().any(|s| s == "-fno-pic"));
-    let f = b.flags_for("x86_64-unknown-magnumopus", false).unwrap();
+    let f = b.flags_for("x86_64-unknown-magnumopus", crate::Code::Pie).unwrap();
+    assert!(f.iter().any(|s| s == "-fPIE"));
+    let f = b.flags_for("x86_64-unknown-magnumopus", crate::Code::Static).unwrap();
     assert!(f.iter().any(|s| s == "-fno-pic"));
 }
 

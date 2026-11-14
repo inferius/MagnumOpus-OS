@@ -5,14 +5,33 @@ use abi::{Error, Result};
 
 use alloc::vec::Vec;
 
-use crate::rt::Startup;
+use crate::rt::{Startup, self_process};
 use crate::sync::Mutex;
-use crate::{Vmo, sys};
+use crate::{Handle, Vmo, sys};
 
 /// Namapovane obrazy initfs (zacatek, delka). Obsah initfs je nemenny
 /// (nikdo do nej nepise), takze spousteni smi programy z nej sdilet podle
 /// offsetu (`offset_of`, sablony v `spawn`).
 static MAPPED: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
+
+/// Prvni namapovany initfs: obsah (zavadec `ld.so` pro `spawn` programu
+/// s `PT_INTERP`) a syrovy handle jeho objektu (zavadec potomka z nej cte
+/// knihovny, `abi::bootstrap::LOADER_MAGIC`).
+static GLOBAL: Mutex<Option<(initfs::Initfs<'static>, u32)>> = Mutex::new(None);
+
+/// Soubor `name` v initfs tohoto procesu (`None` = proces initfs nema).
+pub(crate) fn global_find(name: &str) -> Option<&'static [u8]> {
+    GLOBAL.lock().as_ref().and_then(|(fs, _)| fs.find(name).map(|f| f.data))
+}
+
+/// Novy handle na objekt initfs jen pro cteni a mapovani (pro zavadec
+/// potomka).
+pub(crate) fn global_vmo() -> Result<Handle> {
+    let raw = GLOBAL.lock().as_ref().map(|(_, h)| *h).ok_or(Error::NotFound)?;
+    let r = abi::object::Rights(abi::object::Rights::READ.0 | abi::object::Rights::MAP.0 | abi::object::Rights::BASIC.0);
+    let raw = sys::handle_duplicate(raw, Some(r.0))?;
+    Ok(Handle::from_raw(raw))
+}
 
 /// Offset obrazu `image` v initfs, lezi-li cely v nekterem namapovanem
 /// initfs; jinak `None` (obraz odjinud se nesdili).
@@ -34,10 +53,16 @@ impl Initfs {
     /// Namapuje initfs predany ve startovni zprave.
     pub fn open(startup: &Startup) -> Result<Self> {
         let vmo = startup.initfs.as_ref().ok_or(Error::NotFound)?;
-        Self::map(vmo, startup)
+        Self::map(vmo)
     }
 
-    fn map(vmo: &Vmo, startup: &Startup) -> Result<Self> {
+    /// Namapuje initfs z objektu `vmo` (zavadec `ld.so`: handle ze zpravy
+    /// zavadece, ne ze startovni zpravy).
+    pub fn from_vmo(vmo: &Vmo) -> Result<Self> {
+        Self::map(vmo)
+    }
+
+    fn map(vmo: &Vmo) -> Result<Self> {
         // Velikost zjistime z hlavicky (prvni 4 KiB), pak namapujeme cele.
         let mut header = [0u8; 4096];
         vmo.read(0, &mut header)?;
@@ -54,7 +79,7 @@ impl Initfs {
         let page = crate::vm::page_size();
         let len = end.max(page).next_multiple_of(page);
         let addr = sys::vm_map(
-            startup.process.handle().raw(),
+            self_process(),
             vmo.handle().raw(),
             0,
             len,
@@ -66,7 +91,28 @@ impl Initfs {
         let bytes = unsafe { core::slice::from_raw_parts(addr as *const u8, len as usize) };
         let fs = initfs::Initfs::parse(bytes).map_err(|_| Error::Corrupted)?;
         MAPPED.lock().push((addr, len));
+        let mut g = GLOBAL.lock();
+        if g.is_none()
+            && let Ok(raw) = sys::handle_duplicate(vmo.handle().raw(), None)
+        {
+            *g = Some((fs, raw));
+        }
         Ok(Self { fs })
+    }
+
+    /// Odmapuje initfs a zavre ulozeny handle (zavadec pred skokem do
+    /// programu: program initfs nedostane). Rezy z `find` pak neplati.
+    pub fn close(self) {
+        let start = self.fs.bytes().as_ptr() as u64;
+        let mut mapped = MAPPED.lock();
+        if let Some(i) = mapped.iter().position(|&(a, _)| a == start) {
+            let (a, l) = mapped.remove(i);
+            let _ = sys::vm_unmap(self_process(), a, l);
+        }
+        drop(mapped);
+        if let Some((_, h)) = GLOBAL.lock().take() {
+            let _ = sys::handle_close(h);
+        }
     }
 
     pub fn find(&self, name: &str) -> Option<&'static [u8]> {

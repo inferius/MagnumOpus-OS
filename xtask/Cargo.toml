@@ -12,6 +12,8 @@ fs = { workspace = true, features = ["std"] }
 shlang = { path = "../libs/shlang" }
 term = { path = "../libs/term" }
 abi = { workspace = true }
+# Sdilene knihovny a programy PIE v C (zavadec ld.so, testy dltest).
+cbuild = { path = "../libs/cbuild" }
 netproto = { path = "../libs/netproto", features = ["std", "nts"] }
 fatfs = "0.3"
 diskguard = { path = "../libs/diskguard" }

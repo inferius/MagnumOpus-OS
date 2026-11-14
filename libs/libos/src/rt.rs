@@ -21,6 +21,13 @@ pub fn self_process() -> u32 {
     SELF_PROCESS.load(Ordering::Relaxed)
 }
 
+/// Nastavi handle vlastniho procesu bez startovni zpravy. Jen pro zavadec
+/// `ld.so`: startovni zpravu necte (patri programu), handle ma ze zpravy
+/// zavadece (`abi::bootstrap::LOADER_MAGIC`).
+pub fn set_self_process(raw: u32) {
+    SELF_PROCESS.store(raw, Ordering::Relaxed);
+}
+
 /// Co proces dostal pri startu.
 pub struct Startup {
     /// Handle na vlastni proces (mapovani pameti, vlakna).

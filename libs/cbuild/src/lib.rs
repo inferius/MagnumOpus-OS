@@ -242,15 +242,21 @@ impl Build {
     }
 
     /// Vsechny priznaky prekladace pro cil (staticka knihovna, bez PIC).
+    #[cfg(test)]
     fn command_flags(&self, target: &str) -> Result<Vec<String>, String> {
-        self.flags_for(target, false)
+        self.flags_for(target, Code::Static)
     }
 
-    /// Priznaky prekladace; `pic` = kod pro sdilenou knihovnu nebo PIE
-    /// (`-fPIC` misto `-fno-pic`, `docs/cs/dynamicke-linkovani.md`).
-    pub(crate) fn flags_for(&self, target: &str, pic: bool) -> Result<Vec<String>, String> {
+    /// Priznaky prekladace pro druh kodu (`docs/cs/dynamicke-linkovani.md`):
+    /// staticky `-fno-pic`, program PIE `-fPIE`, sdilena knihovna `-fPIC`.
+    pub(crate) fn flags_for(&self, target: &str, code: Code) -> Result<Vec<String>, String> {
         let mut f: Vec<String> = target_flags(target)?.iter().map(|s| s.to_string()).collect();
-        f.extend(COMMON_FLAGS.iter().map(|s| if pic && *s == "-fno-pic" { String::from("-fPIC") } else { s.to_string() }));
+        let pic = match code {
+            Code::Static => "-fno-pic",
+            Code::Pie => "-fPIE",
+            Code::Shared => "-fPIC",
+        };
+        f.extend(COMMON_FLAGS.iter().map(|s| if *s == "-fno-pic" { String::from(pic) } else { s.to_string() }));
         match self.trust {
             Trust::Own => f.extend(["-Wall", "-Wextra", "-Werror"].map(String::from)),
             Trust::Vendored => f.push("-w".into()),
@@ -295,7 +301,7 @@ impl Build {
             println!("cargo:rerun-if-changed={}", i.display());
         }
         let clang = find_clang()?;
-        let (obj_dir, objects) = self.compile_objects(&clang, &target, &out, false)?;
+        let (obj_dir, objects) = self.compile_objects(&clang, &target, &out, Code::Static)?;
 
         let lib = out.join(format!("lib{}.a", self.name));
         let _ = std::fs::remove_file(&lib);
@@ -317,8 +323,8 @@ impl Build {
 
     /// Prelozi zdroje do objektu v `out/obj-<jmeno>[-pic]` (jen zmenene;
     /// zmena priznaku nebo hlavicky = vse). Vraci adresar a objekty.
-    pub(crate) fn compile_objects(&self, clang: &Path, target: &str, out: &Path, pic: bool) -> Result<(PathBuf, Vec<PathBuf>), String> {
-        let flags = self.flags_for(target, pic)?;
+    pub(crate) fn compile_objects(&self, clang: &Path, target: &str, out: &Path, code: Code) -> Result<(PathBuf, Vec<PathBuf>), String> {
+        let flags = self.flags_for(target, code)?;
         // Klic predchoziho buildu: priznaky + prekladac + nejnovejsi
         // hlavicka. Jiny klic = vse znovu; jinak jen zmenene zdroje.
         let mut newest = None;
@@ -330,7 +336,12 @@ impl Build {
         clang.hash(&mut h);
         newest.hash(&mut h);
         let key = format!("{:016x}", h.finish());
-        let obj_dir = out.join(format!("obj-{}{}", self.name, if pic { "-pic" } else { "" }));
+        let suffix = match code {
+            Code::Static => "",
+            Code::Pie => "-pie",
+            Code::Shared => "-pic",
+        };
+        let obj_dir = out.join(format!("obj-{}{suffix}", self.name));
         std::fs::create_dir_all(&obj_dir).map_err(|e| e.to_string())?;
         let stamp = obj_dir.join("stamp");
         let fresh = std::fs::read_to_string(&stamp).is_ok_and(|s| s == key);
@@ -394,6 +405,17 @@ impl Build {
         std::fs::write(&stamp, &key).map_err(|e| e.to_string())?;
         Ok((obj_dir, objects))
     }
+}
+
+/// Druh prekladaneho kodu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Code {
+    /// Staticka knihovna do programu v Rustu (`-fno-pic`).
+    Static,
+    /// Program PIE (`-fPIE`).
+    Pie,
+    /// Sdilena knihovna (`-fPIC`).
+    Shared,
 }
 
 /// Seznam objektu v souboru odpovedi: stovky dlouhych cest by na Windows

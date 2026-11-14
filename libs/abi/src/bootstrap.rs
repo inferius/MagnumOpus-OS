@@ -11,6 +11,13 @@
 
 /// "OSBS" v ASCII.
 pub const MAGIC: u32 = u32::from_le_bytes(*b"OSBS");
+/// "OSLD": zprava jen pro zavadec `ld.so` (program s `PT_INTERP`). Lezi ve
+/// fronte bootstrap kanalu **pred** startovni zpravou: hlavicka a polozky
+/// jako u ni (`SELF_PROCESS` = handle procesu pro mapovani, `INITFS` =
+/// obraz initfs jen pro cteni s knihovnami). Zavadec si ji precte, handly
+/// pred skokem do programu zavre; startovni zprava i kanal zustanou
+/// programu (`docs/cs/dynamicke-linkovani.md`).
+pub const LOADER_MAGIC: u32 = u32::from_le_bytes(*b"OSLD");
 pub const VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +99,12 @@ impl Header {
     }
 
     pub fn from_bytes(b: &[u8]) -> Option<Self> {
+        Self::from_bytes_with(b, MAGIC)
+    }
+
+    /// Hlavicka s magickym cislem `magic` (startovni zprava `MAGIC`,
+    /// zprava zavadece `LOADER_MAGIC`).
+    pub fn from_bytes_with(b: &[u8], magic: u32) -> Option<Self> {
         let u = |o: usize| Some(u32::from_le_bytes(b.get(o..o + 4)?.try_into().ok()?));
         let h = Self {
             magic: u(0)?,
@@ -99,7 +112,7 @@ impl Header {
             count: u(8)?,
             _reserved: 0,
         };
-        (h.magic == MAGIC && h.version == VERSION).then_some(h)
+        (h.magic == magic && h.version == VERSION).then_some(h)
     }
 }
 

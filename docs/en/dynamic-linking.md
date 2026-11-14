@@ -12,7 +12,7 @@ static (`ET_EXEC`, [rust-std.md](rust-std.md)).
 | Part | What | Status |
 |---|---|---|
 | DL-1 | the `ET_DYN` parser in `libs/elf`: program headers (`PT_INTERP`, `PT_TLS`, `PT_GNU_RELRO`, `PT_DYNAMIC`), the dynamic section, symbols with GNU and SysV hash, RELA and RELR relocations of both architectures, rejecting TEXTREL | **[implemented]** (host tests `cargo test -p elf` against files from clang and ld.lld) |
-| DL-2 | the `user/ld` + `libs/dynload` loader: `PT_INTERP` in `spawn`, ASLR, `DT_NEEDED`, `BIND_NOW`, relocations, static TLS; PIC in `cbuild`, `/system/lib` in the image | **[designed]** |
+| DL-2 | the `user/ld` + `libs/dynload` loader: `PT_INTERP` in `spawn`, ASLR, `DT_NEEDED`, `BIND_NOW`, relocations, static TLS of the main thread, read-only RELRO; PIC and linking via `ld.lld` in `cbuild`, libraries in initfs (`lib/`) | **[verified in QEMU]** x86_64 and aarch64 (`procesy` suite, `dynamicke linkovani: ...` tests) |
 | DL-3 | `dlopen`/`dlsym`/`dlclose`, dynamic TLS (`__tls_get_addr`, TLSDESC), `dl_iterate_phdr`, `r_debug` | **[designed]** |
 | DL-4 | the `libd` template service (sharing library code), the RELRO seal | **[designed]** |
 
@@ -69,6 +69,89 @@ static (`ET_EXEC`, [rust-std.md](rust-std.md)).
 - **RELRO:** after relocation `VM_PROTECT` to R-- and lowering `max_flags`
   (like `mseal`).
 
+## The `ld.so` loader (DL-2)
+
+**[verified in QEMU]** x86_64 and aarch64.
+
+**Starting a PIE program.** `spawn` (libos) recognises `ET_DYN` with
+`PT_INTERP` = `/system/lib/ld.so` (`abi::auxv::INTERP`; another loader =
+`NOT_SUPPORTED`, a library without a loader does not start):
+
+1. It maps the program and the loader (`lib/ld.so` from the caller's
+   initfs) at **random bases** (`spawn::random_base`: a reservation of the
+   whole module range in `0x2000_0000_0000..0x5000_0000_0000`, 64 KiB
+   alignment, ~29 bits); program code from initfs is still shared through
+   templates.
+2. It writes a SysV block to the top of the stack (`abi::auxv`):
+   `argc = 0`, empty `argv` and `envp`, `AT_PHDR`, `AT_PHENT`, `AT_PHNUM`,
+   `AT_PAGESZ`, `AT_BASE`, `AT_ENTRY`, `AT_RANDOM` (16 random bytes). The
+   numbers are SysV ones, so adopted `getauxval` works.
+3. It puts a **loader message** (`abi::bootstrap::LOADER_MAGIC`, "OSLD")
+   into the bootstrap channel **before** the start message: a process
+   handle and a read-only initfs (`READ | MAP`). The start message and the
+   channel stay with the program (it keeps talking to the parent through
+   it).
+4. The thread starts at the loader entry (`rdi`/`x0` = bootstrap, SP = the
+   block).
+
+**The loader** (`user/ld`, Rust, static-PIE: `relocation-model=pie`,
+`-pie --no-dynamic-linker`, only relative relocations):
+
+1. The assembly entry computes the base (`__ehdr_start`) and `_DYNAMIC`
+   PC-relatively and **relocates itself** (RELA `R_*_RELATIVE` and RELR)
+   before touching any data with pointers.
+2. It reads the loader message and auxv; it sees the program as a loaded
+   module (`ElfFile::parse_loaded`).
+3. Libraries from `DT_NEEDED` **breadth-first**, each once (name or
+   `SONAME`), from initfs `lib/<name>` (`dynload::initfs_path`;
+   `/system/lib/x` = `lib/x`, other paths are rejected). Each gets its own
+   random base; segments without write are **sealed** (W^X: only sealed
+   memory can execute).
+4. **Static TLS** of all modules (`dynload::tls_layout`: x86_64 variant II
+   with the TCB after TP, aarch64 variant I with a 16 B TCB) - the program
+   is the first module, so its local-exec matches the linker. It sets the
+   thread pointer.
+5. **Relocations**, dependencies first, the program last: `RELATIVE`,
+   `ABS64`, `GLOB_DAT`, `JUMP_SLOT` (all at once), `IRELATIVE`, TLS
+   (`DTPMOD`/`DTPOFF`/`TPOFF`, TLSDESC with a static resolver, a built-in
+   `__tls_get_addr`), RELR. Symbols in the order program, libraries (local
+   and hidden symbols belong to the module itself); an undefined weak one
+   = 0, an undefined strong one = an error.
+6. It switches RELRO to read-only (`VM_PROTECT`), calls `DT_INIT` and
+   `DT_INIT_ARRAY` (dependencies first, the program last).
+7. It unmaps initfs, closes its handles and jumps to the program entry with
+   the same bootstrap and SP (the program can read auxv).
+
+An error (missing library, symbol, bad file) = `ld.so: ...` in the log and
+the process exits with code 127 (`abi::auxv::EXIT_LOAD_FAILED`).
+
+**C programs and libraries** are built via `cbuild::Build::link`
+([c-build.md](c-build.md)): programs `-fPIE` (the program's TLS
+local-exec, foreign initial-exec), libraries `-fPIC` (TLS general-dynamic,
+TLSDESC on aarch64). A PIE program links with `--allow-shlib-undefined`
+(loader functions such as `__tls_get_addr` exist nowhere at link time).
+Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
+`program_main` -> exit syscall; `cstd` as `libc.so` does not exist yet).
+
+⚠️ **Limitations of DL-2 (deliberate, solved by DL-3 and DL-4):**
+
+- **Library code is not shared between processes**: each process copies the
+  library into its own memory (sharing through the `libd` template service
+  in DL-4).
+- **Libraries only from initfs**, and only a process that has initfs
+  (init today) may start a program with the loader; disk, application
+  `$ORIGIN` and `libd` in DL-4.
+- **TLS of the main thread only**: new threads (libos `thread::spawn`) do
+  not get the libraries' TLS block, and a runtime with its own TLS (`osrt`
+  for Rust std) would overwrite the thread pointer - an agreement between
+  the loader and libos in DL-3.
+- **`DT_FINI` and `DT_FINI_ARRAY` are not called** (the process ends with
+  a syscall).
+- **RELRO can be switched back to RW** (`VM_PROTECT`); the `max_flags` seal
+  in DL-4.
+- The loader has all of initfs (read-only) while loading; the program does
+  not get it (the loader unmaps it and closes the handles before the jump).
+
 ## The `libs/elf` parser (DL-1)
 
 **[implemented]** The file is untrusted: every read is bounds-checked, bad
@@ -105,3 +188,9 @@ not produce it on aarch64). They are built with clang and ld.lld with
 | `rejects_textrel_and_wrong_machine` | TEXTREL, another architecture, a short file |
 | `hash_functions_match_reference` | GNU and SysV hash against known values |
 | `damaged_input_does_not_panic` | truncation and random changes without panics |
+| `loaded_module_view` | a module loaded in memory (`parse_loaded`) gives the same data as the file |
+| `cargo test -p dynload` | TLS layout against linker offsets (both variants), values of all relocation kinds, library paths |
+| `cargo test -p cbuild` (`link_skutecne_moduly`) | linking a library and a PIE via `ld.lld` on both architectures |
+| QEMU `procesy`: `dynamicke linkovani: PIE s knihovnami` | `dltest`: calls through two libraries, a function pointer (ABS64), an initializer after the dependencies are relocated, library TLS (GD/TLSDESC), library TLS from the program (initial-exec), program TLS (local-exec) |
+| QEMU `procesy`: `ASLR - dva behy, ruzne baze` | two `dltest` runs have different program bases |
+| QEMU `procesy`: `chybejici knihovna -> kod 127` | `dltest-missing`: `ld.so: knihovna ... nenalezena`, code 127 |
