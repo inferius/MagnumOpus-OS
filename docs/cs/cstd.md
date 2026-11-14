@@ -238,12 +238,38 @@ Vlastního kódu ~11 000 řádků Rustu, převzatého ~14 000 řádků. Celá mu
 
 ### Procesy, locale, wchar
 
-- **`fork` nebude** (procesy jen přes `spawn`, rozhodnutí
-  [rust-std.md](rust-std.md)). `fork` vrací `ENOSYS`. `posix_spawn`
-  a `posix_spawnp` ano: aplikace s manifestem přes `launchd`, pomocné
-  programy přes `spawn` (jako `std::process`), akce souborů pro fd 0-2
-  (otázka 4), `waitpid` nad handlem procesu, `system`/`popen` přes shell
-  systému.
+- **Bez `fork`** (rozhodnutí uživatele, ani omezený `fork`): procesy jen
+  přes `spawn` ([rust-std.md](rust-std.md)). `fork()` vrací -1 s `errno`
+  = `ENOSYS`. `posix_spawn` a `posix_spawnp` s
+  `posix_spawn_file_actions_*` a `posix_spawnattr_*`: aplikace
+  s manifestem přes `launchd`, pomocné programy přes `spawn` (jako
+  `std::process`), akce souborů pro fd 0-2 (otázka 4), `waitpid` nad
+  handlem procesu, `system`/`popen` přes shell systému.
+- **`vfork`** (otázka 11): návrh A **(doporučeno)** také -1 s `ENOSYS`.
+  Alias na pomocnou funkci spawn nejde: `vfork` vrací dvakrát a dítě do
+  `exec*` běží v paměti rodiče, což bez `fork` v jádře nesplníme; tichý
+  alias by vedl ke špatnému chování místo jasné chyby. `exec*` (`execv`,
+  `execvp`, ...) bez předchozího `fork` = nahrazení procesu, nemáme ho
+  také: `ENOSYS`.
+- **Hlavičky upozorní už při překladu:** `fork`, `vfork` a `exec*` jsou
+  v `unistd.h` deklarované s `__attribute__((deprecated("MagnumOpus: use
+  posix_spawn")))`. Symboly existují (link projde, testy `configure`
+  na křížový překlad je najdou), volání za běhu vrátí `ENOSYS`.
+
+#### Jak upravit portovaný program
+
+| V programu | Úprava |
+|---|---|
+| `fork()` + `exec*()` v dítěti (spuštění příkazu) | `posix_spawn`/`posix_spawnp`; přesměrování (`dup2` v dítěti) -> `posix_spawn_file_actions_adddup2`, zavření -> `..._addclose`, `chdir` -> `..._addchdir` |
+| `fork()` + `exec` přes shell, roura na výstup | `popen` / `system` |
+| `fork()` pro paralelní práci (pracovníci) | vlákna (`pthread`), nebo spuštění sebe sama s argumentem role přes `posix_spawn` a předání dat rourou |
+| `fork()` pro démona (odpojení od terminálu) | vynechat: služby spouští a hlídá init/launchd |
+| `vfork()` + `exec*()` | stejně jako `fork` + `exec` |
+| `fork()` pro izolaci (sandbox dítěte) | `posix_spawn` jiného programu s vlastním manifestem (izolaci dává manifest, ne kopie paměti) |
+
+Úpravy se ukládají jako patche portu (`third_party/`), u programů s
+konfigurací často stačí volba (`--disable-fork`, `HAVE_FORK=0`); FFmpeg,
+sqlite, zlib a SDL `fork` nepotřebují.
 - **Locale:** jen `C` (výchozí při startu, jak chce POSIX) a `C.UTF-8`.
   `setlocale(LC_ALL, "")` vybere `C.UTF-8`; jakékoli jméno `*.UTF-8`
   se přijme jako `C.UTF-8`. Desetinná tečka vždy `.`, texty a měsíce
@@ -301,6 +327,9 @@ Vlastního kódu ~11 000 řádků Rustu, převzatého ~14 000 řádků. Celá mu
 10. **Rozsah portů v této větvi.** A **(doporučeno)** zlib a sqlite
     s testy v QEMU; SDL a FFmpeg samostatné větve. B i minimální FFmpeg
     (`--disable-everything`, pár dekodérů) jako test `libc.so`.
+11. **`vfork`.** A **(doporučeno)** -1 s `ENOSYS` jako `fork`. B `vfork`
+    vrací chybu, ale `vfork` + `exec*` v jednom makru převede hlavička na
+    `posix_spawn` (jen jednoduchý vzor bez kódu mezi nimi, křehké).
 
 ### Jádro: AVX a XSAVE
 

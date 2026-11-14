@@ -244,12 +244,39 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
 
 ### Processes, locale, wchar
 
-- **No `fork`** (processes only via `spawn`, decision in
-  [rust-std.md](rust-std.md)). `fork` returns `ENOSYS`. `posix_spawn` and
-  `posix_spawnp` yes: applications with a manifest via `launchd`, helper
-  programs via `spawn` (like `std::process`), file actions for fd 0-2
-  (question 4), `waitpid` over the process handle, `system`/`popen` via the
-  system shell.
+- **No `fork`** (the user's decision, not even a limited `fork`):
+  processes only via `spawn` ([rust-std.md](rust-std.md)). `fork()`
+  returns -1 with `errno` = `ENOSYS`. `posix_spawn` and `posix_spawnp`
+  with `posix_spawn_file_actions_*` and `posix_spawnattr_*`: applications
+  with a manifest via `launchd`, helper programs via `spawn` (like
+  `std::process`), file actions for fd 0-2 (question 4), `waitpid` over the
+  process handle, `system`/`popen` via the system shell.
+- **`vfork`** (question 11): proposal A **(recommended)** also -1 with
+  `ENOSYS`. An alias to a spawn helper is impossible: `vfork` returns twice
+  and the child runs in the parent's memory until `exec*`, which we cannot
+  provide without `fork` in the kernel; a silent alias would cause wrong
+  behaviour instead of a clear error. `exec*` (`execv`, `execvp`, ...)
+  without a prior `fork` = replacing the process, which we do not have
+  either: `ENOSYS`.
+- **The headers warn at compile time:** `fork`, `vfork` and `exec*` are
+  declared in `unistd.h` with `__attribute__((deprecated("MagnumOpus: use
+  posix_spawn")))`. The symbols exist (linking succeeds, cross-build
+  `configure` checks find them), calls return `ENOSYS` at run time.
+
+#### How to adapt a ported program
+
+| In the program | Change |
+|---|---|
+| `fork()` + `exec*()` in the child (running a command) | `posix_spawn`/`posix_spawnp`; redirection (`dup2` in the child) -> `posix_spawn_file_actions_adddup2`, close -> `..._addclose`, `chdir` -> `..._addchdir` |
+| `fork()` + `exec` via the shell, pipe to the output | `popen` / `system` |
+| `fork()` for parallel work (workers) | threads (`pthread`), or spawning itself with a role argument via `posix_spawn` and passing data over a pipe |
+| `fork()` for a daemon (detaching from the terminal) | drop it: init/launchd start and supervise services |
+| `vfork()` + `exec*()` | same as `fork` + `exec` |
+| `fork()` for isolation (sandboxing the child) | `posix_spawn` of another program with its own manifest (isolation comes from the manifest, not from a copy of memory) |
+
+Changes are stored as port patches (`third_party/`); programs with
+configuration often only need an option (`--disable-fork`, `HAVE_FORK=0`);
+FFmpeg, sqlite, zlib and SDL do not need `fork`.
 - **Locale:** only `C` (the default at start-up, as POSIX requires) and
   `C.UTF-8`. `setlocale(LC_ALL, "")` selects `C.UTF-8`; any `*.UTF-8` name
   is accepted as `C.UTF-8`. The decimal separator is always `.`, texts and
@@ -309,6 +336,10 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
     with tests in QEMU; SDL and FFmpeg in separate branches. B also a
     minimal FFmpeg (`--disable-everything`, a few decoders) as a test of
     `libc.so`.
+11. **`vfork`.** A **(recommended)** -1 with `ENOSYS` like `fork`. B
+    `vfork` returns an error, but the header turns `vfork` + `exec*` in one
+    macro into `posix_spawn` (only a simple pattern with no code in
+    between, fragile).
 
 ### Kernel: AVX and XSAVE
 
