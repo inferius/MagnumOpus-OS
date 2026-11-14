@@ -139,7 +139,7 @@ pub fn prepare_sources() -> Result<PathBuf> {
 
 /// Vylucny zamek pripravy std (zdroje, sysroot, aplikace) pro soubezne
 /// behy xtask.
-fn lock_std() -> Result<std::fs::File> {
+pub fn lock_std() -> Result<std::fs::File> {
     crate::lock_shared("std")
 }
 
@@ -263,20 +263,7 @@ pub fn build_apps(programs: &[&str], opts: &Options) -> Result<PathBuf> {
     let arch = opts.arch;
     // Zamek drzi i preklad aplikaci: cte sysroot, ktery jiny beh muze menit.
     let _lock = lock_std()?;
-    let sysroot = build_sysroot_locked(arch)?;
-    let script = workspace_root().join("user/user-std.ld");
-    let fingerprint = std::fs::read_to_string(
-        sysroot.join("lib/rustlib").join(target_name(arch)).join("lib/fingerprint"),
-    )?;
-    let flags = [
-        format!("--sysroot={}", sysroot.display()),
-        format!("-Clink-arg=-T{}", script.display()),
-        String::from("-Zunstable-options"),
-        // Zmena std/osrt = novy otisk = aplikace se prelozi znovu.
-        format!("--cfg=mo_sysroot=\"{fingerprint}\""),
-        String::from("--check-cfg=cfg(mo_sysroot,values(any()))"),
-    ]
-    .join("\u{1f}");
+    let flags = app_rustflags_locked(arch)?;
     let apps_dir = target_dir().join("std-apps");
     let mut cmd = Command::new(cargo());
     cmd.current_dir(workspace_root()).arg("build").arg("--target").arg(target_json(arch)).arg("-Zjson-target-spec");
@@ -294,4 +281,35 @@ pub fn build_apps(programs: &[&str], opts: &Options) -> Result<PathBuf> {
         return Err(format!("build aplikaci se std ({}) selhal", programs.join(", ")).into());
     }
     Ok(apps_dir.join(target_name(arch)).join(if opts.release { "release" } else { "debug" }))
+}
+
+/// Cil JSON (cesta) pro `--target`.
+pub fn target_json_path(arch: &Arch) -> PathBuf {
+    target_json(arch)
+}
+
+/// Prikaz cargo (z promenne `CARGO`).
+pub fn cargo_cmd() -> Command {
+    Command::new(cargo())
+}
+
+/// Priznaky prekladu aplikace se std (`CARGO_ENCODED_RUSTFLAGS`):
+/// sysroot (sestavi ho), linker skript a otisk sysrootu. Volajici drzi
+/// `lock_std` po celou dobu prekladu (sysroot se cte az pri linkovani).
+pub fn app_rustflags_locked(arch: &Arch) -> Result<String> {
+    let sysroot = build_sysroot_locked(arch)?;
+    let script = workspace_root().join("user/user-std.ld");
+    let fingerprint = std::fs::read_to_string(
+        sysroot.join("lib/rustlib").join(target_name(arch)).join("lib/fingerprint"),
+    )?;
+    let flags = [
+        format!("--sysroot={}", sysroot.display()),
+        format!("-Clink-arg=-T{}", script.display()),
+        String::from("-Zunstable-options"),
+        // Zmena std/osrt = novy otisk = aplikace se prelozi znovu.
+        format!("--cfg=mo_sysroot=\"{fingerprint}\""),
+        String::from("--check-cfg=cfg(mo_sysroot,values(any()))"),
+    ]
+    .join("\u{1f}");
+    Ok(flags)
 }

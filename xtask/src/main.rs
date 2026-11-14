@@ -30,6 +30,7 @@ mod nethelper;
 mod dnshelper;
 mod ntshelper;
 mod revhelper;
+mod ports;
 mod stdsys;
 mod webhelper;
 mod powertest;
@@ -1020,6 +1021,11 @@ fn build(opts: &Options) -> Result<Artifacts> {
         let data = std::fs::read(user_bin.join(name))
             .map_err(|e| format!("nelze cist program {name}: {e}"))?;
         files.push((name.to_string(), loadable_only(&data)));
+    }
+    // Prevzate aplikace (ripgrep, ...) bez uprav: overeni std v praxi.
+    for (name, path) in ports::build(a)? {
+        let data = std::fs::read(&path).map_err(|e| format!("nelze cist port {name}: {e}"))?;
+        files.push((name, loadable_only(&data)));
     }
     for name in stdsys::STD_PROGRAMS {
         let data = std::fs::read(std_bin.join(name))

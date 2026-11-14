@@ -1,0 +1,49 @@
+diff --git a/src/walk.rs b/src/walk.rs
+index 93e6cf1..a4cc18f 100644
+--- a/src/walk.rs
++++ b/src/walk.rs
+@@ -370,18 +370,15 @@ impl DirEntryRaw {
+         })
+     }
+ 
+-    // Placeholder implementation to allow compiling on non-standard platforms
+-    // (e.g. wasm32).
++    // Other platforms: no inode number or cached metadata (metadata is
++    // read on demand through `fs::metadata`, as for followed links).
+     #[cfg(not(any(windows, unix)))]
+     fn from_entry_os(
+         depth: usize,
+         ent: &fs::DirEntry,
+         ty: fs::FileType,
+     ) -> Result<DirEntryRaw, Error> {
+-        Err(Error::Io(io::Error::new(
+-            io::ErrorKind::Other,
+-            "unsupported platform",
+-        )))
++        Ok(DirEntryRaw { path: ent.path(), ty, follow_link: false, depth })
+     }
+ 
+     #[cfg(windows)]
+@@ -420,18 +417,16 @@ impl DirEntryRaw {
+         })
+     }
+ 
+-    // Placeholder implementation to allow compiling on non-standard platforms
+-    // (e.g. wasm32).
++    // Other platforms: as on Unix, without the inode number.
+     #[cfg(not(any(windows, unix)))]
+     fn from_path(
+         depth: usize,
+         pb: PathBuf,
+         link: bool,
+     ) -> Result<DirEntryRaw, Error> {
+-        Err(Error::Io(io::Error::new(
+-            io::ErrorKind::Other,
+-            "unsupported platform",
+-        )))
++        let md = fs::metadata(&pb)
++            .map_err(|err| Error::Io(err).with_depth(depth).with_path(&pb))?;
++        Ok(DirEntryRaw { path: pb, ty: md.file_type(), follow_link: link, depth })
+     }
+ }
+ 
