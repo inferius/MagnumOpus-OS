@@ -6,19 +6,20 @@ us, and **what should change in the system foundations now** so the
 driver does not have to be bolted on later (section
 [Impact on the foundations](#impact-on-the-foundations)).
 
-Order: **NVIDIA first** (NVIDIA cards are available for testing), AMD as
-the second driver in the same layer. Intel has its own Rust driver
-([Display configuration](display.md)).
+Order: **NVIDIA first** (NVIDIA cards are available for testing): **our
+own Rust driver for GSP** (decided 2026-11-14). AMD and Intel 3D later
+through an isolated LinuxKPI layer ([strategy](#strategy-for-amd-and-intel-3d)).
+Intel display is handled by our own driver ([Display configuration](display.md)).
 
 ## Summary
 
-| Question | Recommendation |
+| Question | Decision / recommendation |
 |---|---|
-| NVIDIA driver | **open** (question 1): nouveau from Linux (MIT) in C over the compatibility layer, or our own Rust driver for GSP only (Turing+) translated from nouveau – [comparison](#comparison-nouveau-in-c-or-our-own-rust-driver-for-gsp) |
-| NVIDIA generations | Kepler to Blackwell. Turing and newer through GSP-RM firmware (full clocks, Vulkan); Maxwell 2 to Volta display and slow acceleration only (the card stays at boot clocks) |
-| NVIDIA Vulkan | **NVK** from Mesa (MIT), same nouveau kernel part |
-| AMD driver | **amdgpu** + display core (MIT), same layer, second step |
-| Compatibility layer | our own "LinuxKPI" in Rust on driverkit; model: FreeBSD drm-kmod (BSD) |
+| NVIDIA driver | **decided**: our own Rust driver for GSP only, parts translated from nouveau (MIT), fixed firmware version 570.144, RPC definitions generated from nouveau's headers; nova (GPL) facts only ([comparison](#comparison-nouveau-in-c-or-our-own-rust-driver-for-gsp)) |
+| NVIDIA generations | **Turing to Blackwell** (GSP: full clocks, Vulkan). Pascal and older firmware framebuffer for now; porting nouveau's non-GSP path only on request |
+| NVIDIA Vulkan | **NVK** from Mesa (MIT) with unchanged logic; the render node imitates the nouveau uAPI |
+| AMD driver | **amdgpu** + display core (MIT) over LinuxKPI, second step ([strategy](#strategy-for-amd-and-intel-3d)) |
+| Compatibility layer | our own "LinuxKPI" in Rust on driverkit, only for AMD and Intel 3D, isolated inside the driver process; model: FreeBSD drm-kmod (BSD) |
 | Without an IOMMU | **decided**: start with a warning (like disks and network), DMA quarantine after a crash, advice to enable VT-d / AMD-Vi |
 | Foundations | **decided**: points 1, 2, 4 and 8 (fence, shared buffer, scatter-gather DMA, render class) as kernel work after dynamic linking and before FFmpeg ([architecture](architecture.md#adopting-existing-software-order)) |
 | Firmware | **decided**: bundle it into the image; the NVIDIA and AMD licences allow it (conditions below) |
@@ -28,32 +29,32 @@ the second driver in the same layer. Intel has its own Rust driver
 <figure class="diagram">
 <svg viewBox="0 0 780 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GPU driver architecture">
 <defs><marker id="ge1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
-<rect class="box" x="10" y="10" width="230" height="74" rx="6"/><text class="t b" x="125" y="34" text-anchor="middle">application (Vulkan)</text><text class="m" x="125" y="53" text-anchor="middle">Mesa NVK / RADV in the app</text><text class="m" x="125" y="69" text-anchor="middle">process, "libdrm" over a channel</text>
+<rect class="box" x="10" y="10" width="230" height="74" rx="6"/><text class="t b" x="125" y="34" text-anchor="middle">application (Vulkan)</text><text class="m" x="125" y="53" text-anchor="middle">Mesa NVK in the app process,</text><text class="m" x="125" y="69" text-anchor="middle">winsys: nouveau uAPI = messages</text>
 <rect class="acc" x="275" y="10" width="230" height="74" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">render service (gpud)</text><text class="m" x="390" y="53" text-anchor="middle">permissions, contexts, quotas,</text><text class="m" x="390" y="69" text-anchor="middle">hands out render nodes</text>
 <rect class="acc" x="540" y="10" width="230" height="74" rx="6"/><text class="t b" x="655" y="34" text-anchor="middle">compd</text><text class="m" x="655" y="53" text-anchor="middle">display class</text><text class="m" x="655" y="69" text-anchor="middle">(protocol as intel-display)</text>
 <path class="ln" d="M240 47 L273 47" marker-end="url(#ge1)"/>
 <path class="ln dash" d="M125 84 L125 150 L218 150" marker-end="url(#ge1)"/><text class="m" x="132" y="120">render node (channel)</text>
 <path class="ln" d="M390 84 L390 128" marker-end="url(#ge1)"/>
 <path class="ln" d="M655 84 L655 128" marker-end="url(#ge1)"/>
-<rect class="ok" x="220" y="130" width="550" height="200" rx="6"/><text class="t b" x="495" y="152" text-anchor="middle">gpu-nvidia process (isolated, restricted Resource, IOMMU)</text>
-<rect class="box" x="235" y="165" width="250" height="70" rx="4"/><text class="t" x="360" y="187" text-anchor="middle">nouveau + DRM core (C, MIT)</text><text class="m" x="360" y="205" text-anchor="middle">KMS, GEM, TTM, scheduler,</text><text class="m" x="360" y="221" text-anchor="middle">GSP-RM, NVK uAPI (VM_BIND)</text>
-<rect class="box" x="505" y="165" width="250" height="70" rx="4"/><text class="t" x="630" y="187" text-anchor="middle">class bridge (Rust)</text><text class="m" x="630" y="205" text-anchor="middle">display = KMS atomic,</text><text class="m" x="630" y="221" text-anchor="middle">render = DRM ioctls over a channel</text>
-<rect class="warn" x="235" y="250" width="520" height="66" rx="4"/><text class="t" x="495" y="272" text-anchor="middle">LinuxKPI (Rust, ours): memory, DMA, IOMMU, interrupts, locks, workqueues,</text><text class="m" x="495" y="290" text-anchor="middle">timers, firmware, PCI, i2c; dma-fence and dma-buf as our fence and buffer objects</text><text class="m" x="495" y="306" text-anchor="middle">on driverkit and libos (model: FreeBSD linuxkpi)</text>
+<rect class="ok" x="220" y="130" width="550" height="200" rx="6"/><text class="t b" x="495" y="152" text-anchor="middle">gpu-nvidia process (Rust, isolated, restricted Resource, IOMMU)</text>
+<rect class="box" x="235" y="165" width="250" height="70" rx="4"/><text class="t" x="360" y="187" text-anchor="middle">GSP core (from nouveau)</text><text class="m" x="360" y="205" text-anchor="middle">GSP boot, RPC r570, RM objects,</text><text class="m" x="360" y="221" text-anchor="middle">MMU, channels, display via RM</text>
+<rect class="box" x="505" y="165" width="250" height="70" rx="4"/><text class="t" x="630" y="187" text-anchor="middle">device classes</text><text class="m" x="630" y="205" text-anchor="middle">display (like intel-display),</text><text class="m" x="630" y="221" text-anchor="middle">render (nouveau uAPI, VM_BIND)</text>
+<rect class="warn" x="235" y="250" width="520" height="66" rx="4"/><text class="t" x="495" y="272" text-anchor="middle">driverkit: BAR (WC), MSI-X, scatter-gather DMA, IOMMU domain,</text><text class="m" x="495" y="290" text-anchor="middle">kernel fences and shared buffers, firmware service</text><text class="m" x="495" y="306" text-anchor="middle">(LinuxKPI only for AMD and Intel 3D, inside their process)</text>
 <path class="ln" d="M495 330 L495 358" marker-end="url(#ge1)"/>
 <rect class="box" x="10" y="360" width="760" height="50" rx="6"/><text class="t b" x="390" y="382" text-anchor="middle">kernel</text><text class="m" x="390" y="400" text-anchor="middle">Resource, BAR (WC), MSI-X, scatter-gather DMA, IOMMU domain, fence and buffer objects, firmware from FS</text>
-<rect class="box" x="10" y="190" width="190" height="120" rx="6"/><text class="t b" x="105" y="212" text-anchor="middle">firmware</text><text class="m" x="105" y="232" text-anchor="middle">GSP-RM (Turing+),</text><text class="m" x="105" y="248" text-anchor="middle">PMU/SEC2/ACR,</text><text class="m" x="105" y="264" text-anchor="middle">AMD: PSP, SMU,</text><text class="m" x="105" y="280" text-anchor="middle">DMCUB, VCN</text><text class="m" x="105" y="296" text-anchor="middle">firmware service</text>
+<rect class="box" x="10" y="190" width="190" height="120" rx="6"/><text class="t b" x="105" y="212" text-anchor="middle">firmware</text><text class="m" x="105" y="232" text-anchor="middle">GSP-RM 570.144,</text><text class="m" x="105" y="248" text-anchor="middle">booter, FWSEC (VBIOS),</text><text class="m" x="105" y="264" text-anchor="middle">AMD: PSP, SMU,</text><text class="m" x="105" y="280" text-anchor="middle">DMCUB, VCN</text><text class="m" x="105" y="296" text-anchor="middle">firmware service</text>
 <path class="ln" d="M200 250 L233 250" marker-end="url(#ge1)"/>
 </svg>
-<figcaption>An application never gets a capability to the driver: the render service hands it a render node, the image goes through the display class. The reused C runs in one process on our compatibility layer.</figcaption>
+<figcaption>An application never gets a capability to the driver: the render service hands it a render node, the image goes through the display class. The NVIDIA driver is Rust on driverkit; the GSP firmware does most of the work.</figcaption>
 </figure>
 
-- **One process per GPU** (`gpu-nvidia`, later `gpu-amd`): reused DRM code
-  (DRM core, TTM, scheduler, nouveau or amdgpu) in C with unchanged logic,
-  our compatibility layer below it, a bridge to the device classes above.
+- **One process per GPU**: `gpu-nvidia` in Rust on driverkit (GSP core
+  translated from nouveau). Later `gpu-amd` with reused C on LinuxKPI in a
+  process of its own – only our interfaces leave any of them.
 - **Display class**: the same protocol as `intel-display` and
-  `bochs-display` (connectors, modes, vsync flips, hotplug). The bridge
-  translates it to KMS atomic commits. The compositor cannot tell which
-  driver is underneath.
+  `bochs-display` (connectors, modes, vsync flips, hotplug). On Turing+ the
+  driver translates it into GSP-RM control calls and the display channel.
+  The compositor cannot tell which driver is underneath.
 - **Render class** (new): Vulkan in an application (Mesa NVK/RADV) needs
   DRM ioctls (buffer allocation, `VM_BIND`, `EXEC`, fences). They travel
   as messages over a "render node" channel. The channel is handed out by
@@ -71,16 +72,17 @@ Verified in the Linux and Mesa sources (2026-11-14):
 
 | Path | Licence | Generations | Display (KMS) | Acceleration | For us |
 |---|---|---|---|---|---|
-| **nouveau** (Linux) | MIT text in headers (`nouveau_drm.c`, `nvkm/...`, `gsp/...`), module "GPL and additional rights" | NV04 to Ada, chip tables also for Blackwell (GB100/GB102, GB202 to GB207) | yes, all | Kepler+; from Turing through GSP-RM, default (`NvGspRm` = true) | **recommended** |
+| **nouveau** (Linux) | MIT text in headers (`nouveau_drm.c`, `nvkm/...`, `gsp/...`), module "GPL and additional rights" | NV04 to Ada, chip tables also for Blackwell (GB100/GB102, GB202 to GB207) | yes, all | Kepler+; from Turing through GSP-RM, default (`NvGspRm` = true) | **translation source** (GSP parts) |
 | **NVK** (Mesa) | MIT (Mesa core) | Kepler to Ada, consumer Blackwell (RTX 5000) | – | conformant Vulkan 1.4; needs nouveau from Linux 6.6+ (`VM_BIND`/`EXEC` uAPI) | **Vulkan** |
 | **open-gpu-kernel-modules** (NVIDIA) | files MIT, MIT/GPLv2 as a module | Turing+ (only with GSP firmware of the same release) | `nvidia-modeset` | only with NVIDIA's closed userspace | facts only, maybe display only |
 | **nova** (Linux, Rust) | GPL-2.0 | GSP (Turing+) | not yet (no display item in its TODO list) | in progress (GSP, FIFO, GR) | **facts only** |
 
 Therefore:
 
-1. **Turing (RTX 20, GTX 16) to Blackwell (RTX 50)**: nouveau + GSP-RM
-   firmware (version 570.144 in nouveau). GSP itself manages clocks and
-   power, so the card runs at full speed. Vulkan through NVK. **Main target.**
+1. **Turing (RTX 20, GTX 16) to Blackwell (RTX 50)**: our driver
+   (translation of nouveau's GSP parts) + GSP-RM firmware 570.144. GSP
+   itself manages clocks and power, so the card runs at full speed. Vulkan
+   through NVK. **Chosen target.**
    **Blackwell** (GB202 to GB207, RTX 50) is GSP-only in nouveau: even
    display goes through GSP-RM (`disp/gb202.c`: "GB20x is GSP-only").
    Without GSP firmware there is not even an image.
@@ -90,8 +92,10 @@ Therefore:
    is enabled for these generations since April 2025. Clocks cannot be
    raised, though (NVIDIA has not released power-management firmware),
    so the card stays at boot clocks. Fine for the desktop, not for games.
+   **For us the firmware framebuffer for now**; porting this path from
+   nouveau only on request.
 3. **Kepler (GTX 600/700), Maxwell 1 (GTX 750)**: display, acceleration,
-   manual reclocking, NVK Vulkan. Low priority.
+   manual reclocking, NVK Vulkan. For us the firmware framebuffer.
 4. **Fermi and older** (e.g. GTX 560 Ti, GF114/GF110): nouveau has display
    and 3D, but power management is unfinished ("it's slow") and NVK does
    not support Fermi. Proposal: not supported, keep the firmware
@@ -109,16 +113,16 @@ The user's cards (as of 2026-11-14):
 
 | Card | Chip / generation | Path | What to test on it |
 |---|---|---|---|
-| **RTX 4090** (active, from USB) | AD102, Ada | nouveau + GSP-RM, NVK | **main card**: stage (a) display (takeover, modes, flips, hotplug, multiple monitors), (b) copy, (c) Vulkan; recovery after a crash (GSP reset) |
-| **RTX 5070 Ti** | GB203, Blackwell | nouveau + GSP-RM (display through GSP too), NVK | second Turing+ card: verify it runs purely through GSP including display; newest GSP firmware; NVK Vulkan |
-| RTX 2080 Ti (maybe) | TU102, Turing | nouveau + GSP-RM, NVK | oldest GSP generation: firmware version compatibility, otherwise the same tests as the 4090 |
-| **GT 1030** (active, from USB) | GP108, Pascal | nouveau without GSP: display by nouveau's own code, acceleration through signed ACR firmware, no reclocking | **the non-GSP path**: stage (a) display (different code than GSP), loading signed firmware (firmware service), (b) copy; Vulkan functionally only (slow) |
+| **RTX 4090** (active, from USB) | AD102, Ada | our GSP driver, NVK | **main card**: stage (a) display (takeover, modes, flips, hotplug, multiple monitors), (b) copy, (c) Vulkan; recovery after a crash (GSP reset) |
+| **RTX 5070 Ti** | GB203, Blackwell | our GSP driver (display through GSP too), NVK | second Turing+ card: verify it runs purely through GSP including display; newest GSP firmware; NVK Vulkan |
+| RTX 2080 Ti (maybe) | TU102, Turing | our GSP driver, NVK | oldest GSP generation: firmware version compatibility, otherwise the same tests as the 4090 |
+| **GT 1030** (active, from USB) | GP108, Pascal | firmware framebuffer (`fbdisplay`) | the driver rejects the non-GSP card and the display stays on `fbdisplay`; coexistence with a Turing+ card in one machine (two GPUs) |
 | GTX 560 Ti | GF114/GF110, Fermi | not supported | only check that the driver rejects the card and the display stays on `fbdisplay` (safe fallback) |
 
-Order: first the **GT 1030** and the **RTX 4090** together for stage (a)
-– both display paths (nouveau's own code and GSP-RM) show at once what
-the compatibility layer must provide. Then the 4090 for (b) and (c), the
-5070 Ti for Blackwell.
+Order: the **RTX 4090** for stages (a), (b) and (c); the **RTX 5070 Ti**
+for Blackwell (display through GSP only); the **RTX 2080 Ti** (if
+available) for Turing; the **GT 1030** and GTX 560 Ti only for safely
+rejecting an unsupported card.
 
 Blackwell in each path: nouveau has GB100/GB102 and GB202 to GB207 (GB203
 = RTX 5070 Ti, display `gb202_disp` through GSP-RM), NVK supports consumer
@@ -127,11 +131,13 @@ lists GB20x in its chip enum (`gpu.rs`) but has no display.
 
 ## Comparison: nouveau in C, or our own Rust driver for GSP
 
-**Status: open (question 1).** Variant B: our own Rust driver for Turing
-and newer only (GSP), translated from nouveau (the MIT licence allows a
-translation; nova is GPL, facts only). Pascal and older would stay on the
-firmware framebuffer. The compatibility layer (LinuxKPI) would be postponed
-to AMD (possibly Intel acceleration).
+**Status: decided 2026-11-14 – variant B (our own Rust driver for GSP
+only).** Turing to Blackwell, parts translated from nouveau (the MIT
+licence allows a translation; nova is GPL, facts only), fixed firmware
+version 570.144, RPC definitions generated from nouveau's headers. Pascal
+and older on the firmware framebuffer for now. LinuxKPI is postponed to
+AMD and Intel 3D. Variant A (nouveau in C over LinuxKPI) stays recorded
+as considered.
 
 ### What GSP does and what is left to the host
 
@@ -188,7 +194,7 @@ source was unreachable during the research).
 
 ### Comparing the variants
 
-| | A: nouveau in C over LinuxKPI | B: our own Rust for GSP only |
+| | A: nouveau in C over LinuxKPI (considered) | **B: our own Rust for GSP only (chosen)** |
 |---|---|---|
 | generations | Kepler to Blackwell (Maxwell 2 to Volta slow) | Turing to Blackwell; Pascal and older firmware framebuffer only |
 | our code | layer 15–30 k + reused C (hundreds of thousands) | 25–40 k of our own Rust |
@@ -199,9 +205,10 @@ source was unreachable during the research).
 | risk | size and maintenance of the layer | we fix bugs the nouveau community fixes |
 | user's cards | 4090, 5070 Ti, 2080 Ti fully; GT 1030 slowly | 4090, 5070 Ti, 2080 Ti fully; GT 1030 firmware framebuffer only |
 
-B is smaller and cleaner for Turing+ because GSP does most of the work; A
-gives wider coverage and a layer shared with AMD. Foundation points 1, 2,
-4 and 8 apply to both variants.
+B was chosen: smaller and cleaner for Turing+ because GSP does most of the
+work. The price: Pascal and older without acceleration, and we port
+nouveau changes ourselves. Foundation points 1, 2, 4 and 8 apply
+unchanged.
 
 ## AMD (second step)
 
@@ -254,7 +261,52 @@ in current linux-firmware that the GSP firmware falls under
 `/system/firmware/` with the licences next to it; `THIRD-PARTY.md` records
 the linux-firmware version.
 
+## Strategy for AMD and Intel 3D
+
+For AMD (and for Intel 3D acceleration, where we already have display in
+Rust) an existing Linux DRM driver (amdgpu, possibly xe) is reused in C.
+The LinuxKPI layer is **sealed inside the driver process**:
+
+- only **our interfaces** leave the process: the display class, the render
+  class (envelope: contexts, buffers, fences, quotas), fence and shared
+  buffer objects, the firmware service, the power protocol. No Linux API
+  (kernel structures, ioctl numbers outside the render node payload,
+  sysfs) crosses the process boundary;
+- inside the render node the driver's uAPI travels as payload for Mesa
+  (RADV, Intel ANV) – just like for NVK. A replacement driver must keep the
+  same uAPI so Mesa stays unchanged;
+- **the driver can therefore later be replaced by our own Rust driver
+  without changing the rest of the system** (services, compositor,
+  applications, Mesa).
+
+**The trend towards firmware**: like NVIDIA with GSP, AMD and Intel move
+scheduling into firmware – AMD from RDNA 3 (GFX11) schedules queues with
+the MES (Micro Engine Scheduler) microcode, Intel `xe` submits work only
+through the GuC firmware (per Linux documentation and sources; not
+verified in detail in this research). The host part for newer generations
+shrinks, and our own Rust driver (as for NVIDIA) may become cheaper than
+maintaining LinuxKPI. **Decision before AMD work starts**: compare our own
+Rust for RDNA 3+ (MES) with amdgpu over LinuxKPI again.
+
+**LinuxKPI maintenance cost**: Linux has no stable internal API – kernel
+and DRM functions change with every version (recent years added e.g.
+`drm_exec`, `drm_gpuvm`, changes to `dma-fence` and `dma-resv`). Therefore:
+
+- track **one LTS version** of Linux and move to the next once a year in
+  one big step (like FreeBSD drm-kmod, which follows Linux version by
+  version with a patch set);
+- import by a script: the list of Linux symbols used is generated and
+  watched (a new or changed symbol = work in the layer, not in the
+  driver), licence check of every file;
+- host tests of the layer (locks, workqueues, DMA, fences) in the
+  driverkit simulation;
+- estimate: moving to a new LTS = weeks of layer work plus hardware tests
+  (not measured); without it the driver ages and loses fixes and new chips.
+
 ## Compatibility layer (LinuxKPI)
+
+Applies to AMD and Intel 3D ([strategy](#strategy-for-amd-and-intel-3d)),
+not to NVIDIA.
 
 A DRM driver expects Linux kernel services. The layer is ours (Rust +
 thin C headers), modelled on FreeBSD `sys/compat/linuxkpi` (BSD), from
@@ -288,13 +340,14 @@ host tests of the layer, hardware test. Move to a new LTS once a year.
 
 | Stage | Content | Prerequisites |
 |---|---|---|
-| (a) display | display class through KMS: takeover from GOP, modes from EDID, flips, hotplug, multiple monitors | layer (without scheduler and GEM for apps), firmware (Turing+: GSP), IOMMU |
+| (a) display | display class: GSP boot, takeover from GOP, modes from EDID, flips, hotplug, multiple monitors (through RM on Turing+) | GSP core (boot, RPC r570, RM objects), firmware service, IOMMU |
 | (b) 2D/copy | buffers in GPU memory for the compositor, copy engine, zero-copy frames | shared buffers, fences |
 | (c) Vulkan | NVK/RADV in applications, render class, render service, quotas | Mesa port (languages/libc thread), render node |
 | (d) power and thermals | runtime PM (D3cold, Optimus), temperatures and fans into the power service | ACPI `_DSM`/`_PR3` via acpid |
 
-Stage (a) gives a display on every card from Kepler (for Turing+ with
-GSP). Compositor acceleration (b) pays off even without Vulkan.
+Stage (a) gives a display on Turing to Blackwell cards. Compositor
+acceleration (b) pays off even without Vulkan. The same stages for AMD
+over LinuxKPI.
 
 ## IOMMU
 
@@ -350,7 +403,7 @@ M = 1–2 weeks, L = more.
 | 6 | **firmware service** | `request_firmware` as a service: files from `/system/firmware`, checksums, licence metadata, read-only VMO hand-over; image and installer bundle the firmware | GSP-RM (tens of MB), AMD, Wi-Fi, Realtek NICs (`rtl_fw`), future audio; nothing like it exists today | S–M |
 | 7 | **GPU memory and budgets** | job budgets also for device memory (VRAM, GTT); objects the driver may evict (TTM) and pin again; VRAM mapped through the BAR as WC (cache type exists) | per-application Vulkan quotas; fairness between applications | M |
 | 8 | **render class and render service** | a general render node protocol (from Venus: context, buffer, `VM_BIND`, submit with fences, queries) + a service that hands render nodes out by manifest and enforces quotas | applications must not get a capability to the driver; Venus hands its render node out through init today – unify before another driver appears | M |
-| 9 | **runtime for reused C** | threads in the driver process (kthread, workqueue), precise timers, waits with timeouts; `cstd` with threads | the DRM core and nouveau have their own threads and timers; Wi-Fi needs the same | M |
+| 9 | **runtime for reused C** | threads in the driver process (kthread, workqueue), precise timers, waits with timeouts; `cstd` with threads | the DRM core and amdgpu have their own threads and timers; Wi-Fi needs the same. The Rust NVIDIA driver does not need it – only with AMD | M |
 | 10 | **device power** | a protocol for device power states (D0/D3hot/D3cold) through the power service; ACPI `_DSM`/`_PRx` calls from the driver through acpid | Optimus laptops turn the dGPU off; otherwise battery drain | S–M |
 | 11 | **GPU recovery after a crash** | devmgr: PCI function reset (FLR / bus reset) before a new instance; the compositor survives without a display (it already does) | after a mode set there is no way back to GOP; recovery only by a reset | S |
 
@@ -360,8 +413,13 @@ they would change in more places.
 
 ## Risks
 
-- **Size**: hundreds of thousands of lines of reused C; upstream updates
-  are permanent work (hence one LTS version and patches only in the layer).
+- **NVIDIA size**: 25–40 thousand lines of our own Rust; nouveau changes,
+  fixes and new chips are ported by hand; GSP firmware and driver must be
+  updated together (fixed version 570.144).
+- **AMD size**: hundreds of thousands of lines of reused C and LinuxKPI
+  maintenance (Linux has no stable internal API) – see
+  [strategy](#strategy-for-amd-and-intel-3d).
+- **Pascal and older** (GT 1030) without acceleration, firmware framebuffer only.
 - **NVIDIA and AMD firmware is closed** (binary; redistribution allowed,
   see [Firmware licences](#firmware-licences)). Turing+ runs nothing
   without it, not even display on Blackwell. The NVIDIA licence applies
@@ -382,7 +440,7 @@ they would change in more places.
 
 | # | Question | Decision (2026-11-14) |
 |---|---|---|
-| 1 | NVIDIA path | **open**: A nouveau in C over LinuxKPI, or B our own Rust for GSP only ([comparison](#comparison-nouveau-in-c-or-our-own-rust-driver-for-gsp)) |
+| 1 | NVIDIA path | **B**: our own Rust for GSP only (Turing to Blackwell), firmware 570.144, RPC generated from nouveau's headers; Pascal on the firmware framebuffer; LinuxKPI only for AMD and Intel 3D ([comparison](#comparison-nouveau-in-c-or-our-own-rust-driver-for-gsp)) |
 | 2 | without an IOMMU | **B**: start with a warning, DMA quarantine, advice to enable VT-d / AMD-Vi |
 | 3 | firmware | **A**: bundle into the image after verifying the licence (verified; the GSP entry in `WHENCE` remains) |
 | 4 | foundations | points 1, 2, 4, 8 as kernel work **after dynamic linking and before FFmpeg** (video uses fences and shared buffers too) |
