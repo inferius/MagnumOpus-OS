@@ -161,7 +161,7 @@ group** (employees, developers, kiosks, ...) at **three levels**
 
 - **No way around it.** Whoever may not install may **not run programs from
   user folders** either: the FS *Execute* right on data is off
-  ([No execution on a dataset](fs-v3-design.md#further-safeguards)) and the
+  ([No execution on a dataset](fs-v3-design.md#more-safeguards)) and the
   "run only installed or signed" policy enforces it also for **scripts,
   interpreters with foreign code and the Windows layer**.
 - ⚠️ **Known risk:** interpreters (Python, shell, ...) can run foreign code
