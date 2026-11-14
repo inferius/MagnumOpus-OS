@@ -55,6 +55,9 @@ pub struct TestBackend {
     pub home: String,
     /// Slozky, jejichz souhrn je skryty (relace bez `MANAGE`).
     pub hidden_tree: Vec<String>,
+    /// Slozky bez prava vypisu (relace je vidi, ale `list` vrati
+    /// `AccessDenied`; jako cizi domov v `/home`).
+    pub locked: Vec<String>,
     pub versions: BTreeMap<String, Vec<FileVersion>>,
     pub sent: Vec<ClientMsg>,
     /// Cesty poslane sluzbe "otevri cestu".
@@ -118,7 +121,7 @@ impl TestBackend {
             oid: oid(path),
             size: m.size,
             mtime: T0,
-            rights: 0xff,
+            rights: if self.locked.iter().any(|l| l == path) { fsproto::perm::rights::TRAVERSE } else { 0xff },
             tree_bytes: if tree { m.tree_bytes.unwrap_or(0) } else { 0 },
             tree_files: if tree { files } else { 0 },
             tree_dirs: if tree { dirs } else { 0 },
@@ -161,6 +164,9 @@ impl Backend for TestBackend {
     }
 
     fn list(&mut self, dir: &str) -> Result<Vec<StatEntry>> {
+        if self.locked.iter().any(|l| l == dir) {
+            return Err(abi::Error::AccessDenied);
+        }
         let names = self.fs.list(dir)?;
         names.into_iter().map(|(n, _)| self.entry(&fileops::path::join(dir, &n))).collect()
     }

@@ -117,9 +117,15 @@ Argon2id output, the home key only wrapped.
   without grants (other users cannot even see the home: `NOT_FOUND`),
   `NOEXEC` according to the profile (standard and strict: on - data are
   not programs).
-- `/home` belongs to the system and has a `TRAVERSE` grant for the
-  `uzivatele` group (pass through, not list): whoever does not know a name
-  cannot learn which homes exist.
+- `/home` belongs to the system and has a `LIST | TRAVERSE` grant
+  (the directory only, not inherited) for the `uzivatele` group. A listing
+  shows only entries the caller has some right to (`Fs::visible`), so a
+  user sees exactly their own home in `/home`: other homes and the
+  administration bin are `PROTECTED` without grants, hence invisible
+  (`NOT_FOUND`), and the names of other accounts are not revealed. init
+  adds the grant on every start (`accounts::layout`, idempotent), so
+  installations where `/home` had only `TRAVERSE` get it too (the file
+  manager showed an empty folder there).
 - Deleting an account does **not delete the home right away**; it moves to
   the administration bin (`/home/.smazane/<uid>`, `PROTECTED` without
   grants - only the system sees it; browsing for the administration role
@@ -322,8 +328,8 @@ methods; the PIN additionally has its own 5 attempts):
   gets `session open|lock|unlock|close` (hides or shows the sign-in
   screen).
 - **Basic FS rights of people:** the `uzivatele` group may list the root
-  (it sees only entries it has a right to), only pass through `/home` and
-  create in `/tmp` and `/tmp/.aside` (shell clones); the grant applies to
+  and `/home` (it sees only entries it has a right to - its own home in
+  `/home`) and create in `/tmp` and `/tmp/.aside` (shell clones); the grant applies to
   the directory only and is not inherited, so other people's files in
   `/tmp` stay invisible.
 - The session recipe in a lease (recovery after an fsd crash),
@@ -698,7 +704,7 @@ aarch64):
 | creating the first account | `CREATE_FIRST` (short password refused, a second "first" account refused), role, home `/home/alice` is a dataset owned by the uid, `PROTECTED` without grants, `NOEXEC` |
 | password sign-in | `AUTH` -> session, the session's FS writes to the home, `WHOAMI`, phrase, `ELEVATE` and `ENCRYPT_HOME` `NOT_SUPPORTED`, sign-out |
 | PIN sign-in | `SET_PIN` (wrong password refused), `PIN_WEAK` flag, a wrong PIN with attempts left, sign-in with the PIN |
-| session sees only its home | someone else's home and its files `NOT_FOUND`, `/home` cannot be listed, the account DB `NOT_FOUND` |
+| session sees only its home | someone else's home and its files `NOT_FOUND`; listing `/home` shows the own home, not others or `.smazane`; the account DB `NOT_FOUND` |
 | init does not mint a system identity | `OPEN_SESSION` for 0, 902, 999 and group 0 refused, no home for the system |
 | lock and sign-out | lock, unlock with a wrong and the right password, after sign-out the session and its FS are gone |
 | session events and job | opened/locked/unlocked/closed events, name and active session, a process in the session job, the job is gone after sign-out |

@@ -61,6 +61,12 @@ impl Item {
         matches!(self.e.kind, kind::DIR | kind::DATASET)
     }
 
+    /// Slozka, kterou relace nesmi vypsat (cizi domov): zamek v ikone.
+    /// Nezname prava (`avail::RIGHTS` chybi) se za zamek nepovazuji.
+    pub fn locked(&self) -> bool {
+        self.is_dir() && self.e.known & avail::RIGHTS != 0 && self.e.rights & fsproto::perm::rights::LIST == 0
+    }
+
     pub fn is_dataset(&self) -> bool {
         self.e.kind == kind::DATASET
     }
@@ -77,6 +83,10 @@ impl Item {
 
     /// Druh pro zobrazeni.
     pub fn kind_text(&self) -> &'static str {
+        if self.locked() {
+            // Zamek v ikone cte jen oko; ctecka obrazovky ho ma v textu druhu.
+            return "Složka bez přístupu";
+        }
         match self.e.kind {
             kind::DATASET => "Dataset s historií",
             kind::DIR => "Složka",
@@ -87,6 +97,9 @@ impl Item {
 
     /// Ikona radku (sada `gfx::icon`).
     pub fn icon(&self) -> &'static str {
+        if self.locked() {
+            return "lock";
+        }
         match self.e.kind {
             kind::DATASET => "dataset",
             kind::DIR => "folder",

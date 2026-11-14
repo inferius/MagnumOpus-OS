@@ -3,8 +3,11 @@
 //! - DB je vlastni dataset `/system/accounts`: vlastnik servisni ucet
 //!   accountd (902), popis `PROTECTED` bez grantu, zakaz spousteni.
 //!   accountd ma relaci FS jen s `/db -> /system/accounts`.
-//! - `/home` patri systemu; skupina `uzivatele` ho (a koren) smi jen
-//!   projit: kdo nezna jmeno, nedozvi se, jake domovy existuji.
+//! - `/home` patri systemu; skupina `uzivatele` ho smi vypsat a projit
+//!   (jako macOS): ve vypisu vidi domovy, cizi jsou zavrene. Systemove
+//!   polozky (`/home/.smazane`) jsou `PROTECTED` bez grantu, tedy
+//!   neviditelne. Grant se doplni pri kazdem startu (migrace instalaci,
+//!   kde `/home` mel jen pruchod).
 //! - Soukromy kanal accountd <-> init obsluhuje spravce sezeni
 //!   ([`crate::session`]) ve vlastnim vlakne s vlastni ridici relaci FS.
 //! - Profil Argon2id: `accounts-qemu` v initfs (xtask run a test) = rychly
@@ -72,12 +75,12 @@ fn layout(fs: &FsClient) -> Result<()> {
     traverse(fs, "/", ids::ACCOUNTD)?;
     traverse(fs, "/system", ids::ACCOUNTD)?;
     mkdir(fs, HOME_DIR)?;
-    // Lide: koren vypsat (vidi jen polozky, ke kterym maji pravo), `/home`
-    // jen projit, v `/tmp` zakladat (zalozene patri jim; grant se nededi,
+    // Lide: koren a `/home` vypsat (vidi jen polozky, ke kterym maji
+    // nejake pravo), v `/tmp` zakladat (zalozene patri jim; grant se nededi,
     // takze cizi soubory v `/tmp` nevidi). `/tmp/.aside` = klony shellu.
     let list = rights::LIST | rights::TRAVERSE;
     allow(fs, "/", ids::GROUP_USERS, list)?;
-    traverse(fs, HOME_DIR, ids::GROUP_USERS)?;
+    allow(fs, HOME_DIR, ids::GROUP_USERS, list)?;
     mkdir(fs, "/tmp")?;
     mkdir(fs, "/tmp/.aside")?;
     allow(fs, "/tmp", ids::GROUP_USERS, list | rights::CREATE)?;

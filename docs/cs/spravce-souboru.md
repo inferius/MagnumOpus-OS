@@ -62,6 +62,7 @@ Kód:
 | kontextová nabídka řádku (pravé tlačítko, Shift+F10, klávesa Menu) a v Koši | **[implementováno]** (host `context_menu_and_open_reply`) |
 | tažení vybraných položek na složku = přesun (v datasetu přejmenování) | **[implementováno]** (host `drop_on_folder_moves`); mezi okny a aplikacemi **[navrženo]** |
 | odpověď služby „otevři cestu“ ve stavovém řádku (druhý kanál okna) | **[implementováno]** (host `context_menu_and_open_reply`) |
+| složka bez práva výpisu (cizí domov v `/home`): ikona zámku, druh „Složka bez přístupu“; po otevření místo obsahu „Ke složce X nemáte přístup.“ (jiná chyba: „Složku X nejde otevřít: důvod.“). Odmítnutý výpis se nikdy neukáže jako „Složka je prázdná“ | **[implementováno]** (host `foreign_folder_has_lock`, `denied_listing_is_not_empty_folder`) |
 | pohled ikon (mřížka), miniatury | **[navrženo]** |
 | „Zkusit bokem“, převzetí změn, Porovnat verze, úprava práv | **[navrženo]** (prototyp `design/soubory.html`) |
 | dialog „Otevřít v…“ (`design/dialogy.html`) | **[navrženo]** - až budou systémové dialogy |

@@ -63,6 +63,7 @@ Code:
 | row context menu (right button, Shift+F10, the Menu key) and in the Trash | **[implemented]** (host `context_menu_and_open_reply`) |
 | dragging selected items onto a folder = move (a rename within a dataset) | **[implemented]** (host `drop_on_folder_moves`); between windows and apps **[designed]** |
 | the "open a path" service reply in the status line (second window channel) | **[implemented]** (host `context_menu_and_open_reply`) |
+| a folder without the list right (someone else's home in `/home`): a lock icon, kind "Folder without access" (Czech UI text "Složka bez přístupu"); opening it shows "You do not have access to folder X." instead of the contents (another error: "Folder X cannot be opened: reason."). A refused listing is never shown as "The folder is empty" | **[implemented]** (host `foreign_folder_has_lock`, `denied_listing_is_not_empty_folder`) |
 | icon view (grid), thumbnails | **[designed]** |
 | "Try aside", taking over changes, Compare versions, editing rights | **[designed]** (prototype `design/soubory.html`) |
 | "Open with..." dialog (`design/dialogy.html`) | **[designed]** - once system dialogs exist |

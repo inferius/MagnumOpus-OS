@@ -323,6 +323,7 @@ mod context;
 mod controls;
 mod field;
 mod keys;
+mod layout;
 mod popup;
 mod shots;
 mod spatial;

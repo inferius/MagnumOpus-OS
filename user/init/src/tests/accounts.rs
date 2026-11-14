@@ -141,17 +141,26 @@ fn own_home_only(_: &Startup) -> TestResult {
     sys.set_owner("/home/bob", uid + 1).map_err(|e| fail("vlastnik boba", e))?;
     sys.set_acl("/home/bob", Some(&Acl { flags: ACL_PROTECTED, grants: alloc::vec::Vec::new() })).map_err(|e| fail("acl boba", e))?;
     let _ = sys.create("/home/bob/tajne.txt", kind::FILE);
+    // Kos spravy pro domovy smazanych uctu (jako `session::delete_home`).
+    match sys.create(crate::session::DELETED_DIR, kind::DIR) {
+        Ok(()) => sys
+            .set_acl(crate::session::DELETED_DIR, Some(&Acl { flags: ACL_PROTECTED, grants: alloc::vec::Vec::new() }))
+            .map_err(|e| fail("acl kose spravy", e))?,
+        Err(Error::AlreadyExists) => {}
+        Err(e) => return Err(fail("kos spravy", e)),
+    }
     let session = sign_in(uid)?;
     let fs = crate::session::connect(session).map_err(|e| fail("relace FS", e))?;
     fs.stat("/home/alice").map_err(|e| fail("vlastni domov", e))?;
     check_eq!(fs.stat("/home/bob").err(), Some(Error::NotFound), "cizi domov");
     check_eq!(fs.stat("/home/bob/tajne.txt").err(), Some(Error::NotFound), "soubor v cizim domove");
     check_eq!(fs.read("/home/bob/tajne.txt", 0, 1).err(), Some(Error::NotFound), "cteni z ciziho domova");
-    // /home jde jen projit, ne vypsat (jmena domovu se neprozradi).
-    match fs.list("/home") {
-        Ok(l) => check!(!l.iter().any(|e| e.name == "bob"), "vypis /home neukaze cizi domov"),
-        Err(e) => check_eq!(e, Error::AccessDenied, "vypis /home"),
-    }
+    // /home jde vypsat, ale vidi se v nem jen vlastni domov: cizi domovy
+    // a kos spravy nemaji grant, takze je vypis vynecha.
+    let names: alloc::vec::Vec<String> = fs.list("/home").map_err(|e| fail("vypis /home", e))?.into_iter().map(|e| e.name).collect();
+    check!(names.iter().any(|n| n == "alice"), "vypis /home ukaze vlastni domov");
+    check!(!names.iter().any(|n| n == "bob"), "vypis /home neukaze cizi domov");
+    check!(!names.iter().any(|n| n == ".smazane"), "vypis /home neukaze kos spravy");
     // DB uctu je neviditelna.
     check_eq!(fs.stat(crate::accounts::DB_DIR).err(), Some(Error::NotFound), "DB uctu");
     check_eq!(fs.stat("/system/accounts/users").err(), Some(Error::NotFound), "zaznamy uctu");

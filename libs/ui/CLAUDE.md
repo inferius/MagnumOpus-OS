@@ -8,11 +8,12 @@ Nativní knihovna UI (milník 6c): jedna pro všechny aplikace. Aplikace popíš
 - Vzhled jen z tokenů (`libs/theme` / `look.rs`), žádná pevná čísla vzhledu v prvcích.
 - Jádro `Ui` zůstává bez závislosti na `libos`; všechno OS-specifické patří do `client/` (feature `os`).
 - Knihovna nenabízí aplikacím barvy `trust_*` (odznak důvěry, systémové dialogy) ani `ai_*` (jen agent AI); patří jen systému.
+- Rozvržení v řádku (`layout.rs`, `stretches`): kontejnery (`Column`, `Scroll`, `Table`, `List`) bez pevné výšky se natáhnou na výšku řádku, listy a vnořené řádky jsou svisle na středu, `.height()` má přednost. Změna pravidla mění vzhled všech aplikací - snímky (`--update-shots`) a test `tests/layout.rs`.
 - Protokol s kompozitorem je v `libs/guiproto`; změny drž kompatibilní s `libs/comp`.
 
 ## Testy
 
-- `cargo test -p ui` (`src/tests/`: `mod.rs` zakladni prvky, `keys.rs` klice, stav, heslo, `text.rs` editor, `field.rs` textova pole a schranka, `table.rs` tabulka, `controls.rs` prepinac, volba, posuvnik, segmenty, zalozky, graf podilu, `popup.rs` vyber, nabidky, bublina, `shots.rs` snimky vzhledu proti `tests/shots/*.png` (prepis jen `cargo xtask test --update-shots`), `context.rs` kontext okna, `spatial.rs` prostorova navigace fokusu, `suggest.rs` seznam navrhu u pole); `client/` jen s `--features os` pro cíl OS. QEMU: `cargo xtask test --only gui`.
+- `cargo test -p ui` (`src/tests/`: `mod.rs` zakladni prvky, `keys.rs` klice, stav, heslo, `text.rs` editor, `field.rs` textova pole a schranka, `table.rs` tabulka, `controls.rs` prepinac, volba, posuvnik, segmenty, zalozky, graf podilu, `popup.rs` vyber, nabidky, bublina, `shots.rs` snimky vzhledu proti `tests/shots/*.png` (prepis jen `cargo xtask test --update-shots`), `context.rs` kontext okna, `spatial.rs` prostorova navigace fokusu, `suggest.rs` seznam navrhu u pole, `layout.rs` natazeni kontejneru v radku); `client/` jen s `--features os` pro cíl OS. QEMU: `cargo xtask test --only gui`.
 
 ## Pasti
 
