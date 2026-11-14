@@ -193,7 +193,7 @@ jejíž adaptér umí zúžení prázdným zúžením):
   lístku vrátí místo rodiči,
 - `ADOPT` nemá odpověď, takže rodič chybu nevidí: služba, jejíž relace
   pro dítě může selhat, ji musí ukázat při prvním použití (libd: relaci
-  zavře, `RECONNECT` pak do 200 ms vrátí `PEER_CLOSED` jako úmyslné
+  zavře, `RECONNECT` pak do 0,2 s vrátí `PEER_CLOSED` jako úmyslné
   zavření).
 
 Lístek zanikne, když klient zavře svůj konec. Recept zmizí s ním.

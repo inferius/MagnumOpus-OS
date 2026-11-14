@@ -200,7 +200,7 @@ moduly jsou v `user/dltest` (minimální `crt.c`: `_start` -> `program_main`
   `dlopen` obnoví.
 - **Odmítnutí bez odpovědi se ukáže při prvním použití**, nikdy visením:
   - libd relaci zavře (víc než 256 relací z jedné relace = na proces, nebo
-    4096 celkem): `RECONNECT` vrátí do 200 ms `PEER_CLOSED` (instance běží
+    4096 celkem): `RECONNECT` vrátí do 0,2 s `PEER_CLOSED` (instance běží
     dál = úmyslné zavření), lístek zanikne, `dlopen`/spawn vrátí důvod
     („libd relaci odmítla (limit relací procesu)“),
   - supervisor `ADOPT` odmítne (víc než 256 živých převzatých lístků
@@ -212,20 +212,27 @@ moduly jsou v `user/dltest` (minimální `crt.c`: `_start` -> `program_main`
   `user/dlspawn`; **QEMU TCG** na Windows, 4 vCPU, debug - na skutečném
   stroji jsou časy řádově menší, poměry podobné). Průměr na jeden spawn:
 
-  | | x86_64 | aarch64 |
-  |---|---|---|
-  | spawn programu se zavaděčem, 1 spouštěč × 200 | 5975 µs | 6112 µs |
-  | z toho relace a lístek pro dítě (`Connect` + `ADOPT`) | 659 µs | 595 µs |
-  | totéž 4 spouštěče × 50 souběžně | 5473 µs | 7170 µs |
-  | statický spawn (bez libd) | 1952 µs | 1861 µs |
-  | oběh k libd (co DL-4a přidával každému spawnu) | 1342 µs | 1301 µs |
+  | | x86_64 | aarch64 | revize |
+  |---|---|---|---|
+  | spawn programu se zavaděčem, 1 spouštěč × 200 | 5975 µs | 6112 µs | `bd7e656` |
+  | z toho relace a lístek pro dítě (`Connect` + `ADOPT`) | 659 µs | 595 µs | `bd7e656` |
+  | totéž 4 spouštěče × 50 souběžně | 5473 µs | 7170 µs | `bd7e656` |
+  | statický spawn (bez libd) | 1952 µs | 1861 µs | `bd7e656` |
+  | oběh k libd (co DL-4a přidával každému spawnu) | 1342 µs | 1301 µs | `bd7e656` |
 
-  Varianta s `NARROW` (rodič čeká na odpověď initu) stála 6911 µs na
-  spawn, z toho 1830 µs `NARROW` (26 %; 4 souběžně 35 %) na x86_64 a 7639 µs,
-  z toho 1785 µs (23 %; souběžně 31 %) na aarch64 - proto `ADOPT` bez
-  odpovědi. Zbylých asi 10 % (`Connect` + `ADOPT`) jsou dvě vytvoření
-  kanálu a dva zápisy v procesu rodiče; init ani libd se na nich
-  nečeká. Čísla kolísají o ±20 % mezi běhy (TCG). DL-4a (spojení pro každé dítě) přidávala
+  Varianta s `NARROW` (rodič čeká na odpověď initu, necommitovaná
+  mezifáze na základě `df51756`) byla výrazně dražší - proto `ADOPT` bez
+  odpovědi:
+
+  | `NARROW` | x86_64 | aarch64 | revize |
+  |---|---|---|---|
+  | spawn programu se zavaděčem, 1 × 200 | 6911 µs | 7639 µs | `df51756` + A |
+  | z toho `NARROW` | 1830 µs (26 %) | 1785 µs (23 %) | `df51756` + A |
+  | podíl `NARROW` při 4 × 50 souběžně | 35 % | 31 % | `df51756` + A |
+
+  Zbytek po `ADOPT` (`Connect` + `ADOPT`, asi desetina spawnu) jsou dvě
+  vytvoření kanálu a dva zápisy v procesu rodiče; init ani libd se na nich
+  nečeká. Čísla kolísají mezi běhy asi o pětinu (TCG). DL-4a (spojení pro každé dítě) přidávala
   každému statickému spawnu jeden oběh k libd.
 
 ## dlopen a dynamické TLS (DL-4b)

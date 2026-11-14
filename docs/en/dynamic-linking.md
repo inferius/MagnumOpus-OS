@@ -213,7 +213,7 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
 - **A rejection without a reply shows at first use**, never as a hang:
   - libd closes the session (more than 256 sessions from one session = per
     process, or 4096 in total): `RECONNECT` returns `PEER_CLOSED` within
-    200 ms (the instance keeps running = a deliberate close), the lease
+    0.2 s (the instance keeps running = a deliberate close), the lease
     ends, `dlopen`/spawn return the reason ("libd relaci odmitla (limit
     relaci procesu)"),
   - the supervisor rejects `ADOPT` (more than 256 live adopted leases from
@@ -226,21 +226,28 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
   the times are an order of magnitude smaller, the ratios similar). Average
   per spawn:
 
-  | | x86_64 | aarch64 |
-  |---|---|---|
-  | spawn of a program with the loader, 1 launcher × 200 | 5975 µs | 6112 µs |
-  | of which the child's session and lease (`Connect` + `ADOPT`) | 659 µs | 595 µs |
-  | the same, 4 launchers × 50 concurrently | 5473 µs | 7170 µs |
-  | static spawn (no libd) | 1952 µs | 1861 µs |
-  | round trip to libd (what DL-4a added to every spawn) | 1342 µs | 1301 µs |
+  | | x86_64 | aarch64 | revision |
+  |---|---|---|---|
+  | spawn of a program with the loader, 1 launcher × 200 | 5975 µs | 6112 µs | `bd7e656` |
+  | of which the child's session and lease (`Connect` + `ADOPT`) | 659 µs | 595 µs | `bd7e656` |
+  | the same, 4 launchers × 50 concurrently | 5473 µs | 7170 µs | `bd7e656` |
+  | static spawn (no libd) | 1952 µs | 1861 µs | `bd7e656` |
+  | round trip to libd (what DL-4a added to every spawn) | 1342 µs | 1301 µs | `bd7e656` |
 
-  The variant with `NARROW` (the parent waits for init's reply) cost
-  6911 µs per spawn, of which 1830 µs `NARROW` (26 %; 4 concurrent 35 %)
-  on x86_64 and 7639 µs, of which 1785 µs (23 %; concurrent 31 %) on
-  aarch64 - hence `ADOPT` without a reply. The remaining ~10 %
-  (`Connect` + `ADOPT`) are two channel creations and two writes in the
-  parent process; nothing waits for init or libd. The numbers vary by
-  ±20 % between runs (TCG). DL-4a (a connection
+  The variant with `NARROW` (the parent waits for init's reply, an
+  uncommitted intermediate stage based on `df51756`) was much more
+  expensive - hence `ADOPT` without a reply:
+
+  | `NARROW` | x86_64 | aarch64 | revision |
+  |---|---|---|---|
+  | spawn of a program with the loader, 1 × 200 | 6911 µs | 7639 µs | `df51756` + A |
+  | of which `NARROW` | 1830 µs (26 %) | 1785 µs (23 %) | `df51756` + A |
+  | `NARROW` share at 4 × 50 concurrently | 35 % | 31 % | `df51756` + A |
+
+  The rest after `ADOPT` (`Connect` + `ADOPT`, about a tenth of the spawn)
+  are two channel creations and two writes in the parent process; nothing
+  waits for init or libd. The numbers vary between runs by about a fifth
+  (TCG). DL-4a (a connection
   for every child) added one round trip to libd to every static spawn.
 
 ## dlopen and dynamic TLS (DL-4b)

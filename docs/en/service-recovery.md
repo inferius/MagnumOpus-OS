@@ -205,7 +205,7 @@ service whose adapter can narrow with an empty narrowing):
   lease. When an adopted lease ends, the parent gets its slot back,
 - `ADOPT` has no reply, so the parent does not see an error: a service
   whose session for a child can fail must show it at first use (libd
-  closes the session, `RECONNECT` then returns `PEER_CLOSED` within 200 ms
+  closes the session, `RECONNECT` then returns `PEER_CLOSED` within 0.2 s
   as a deliberate close).
 
 A lease ends when the client closes its endpoint. The recipe goes with it.
