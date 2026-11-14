@@ -449,7 +449,10 @@ check shield. Init reads the key only from a manifest in initfs (the
 system image); an app from elsewhere cannot pose as the system, that is
 decided by signature and path, not by its own manifest. An unfocused window's badge has 0.6 saturation. The frame is
 1 px, 2 px in high contrast. A new window is placed in the work area
-(screen minus the bar); it gets under the bar only by dragging.
+(screen minus the bar) whole, also horizontally: the cascade of further
+windows does not push it past the right edge of a small screen
+(800 × 600, `cascade_keeps_wide_window_on_screen`); it gets under the bar
+only by dragging.
 
 **App elements** (`libs/ui`): the AI agent has the reserved `ai_*` colors
 and always the agent icon and the word "agent" (`.agent()` chip, a list

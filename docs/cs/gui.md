@@ -429,7 +429,9 @@ s fajfkou. Init klíč čte jen z manifestu v initfs (obraz systému);
 aplikace odjinud se za systém vydávat nemůže, o tom rozhodne podpis
 a cesta, ne její manifest. Okno bez fokusu má odznak se sytostí 0,6. Rám je 1 px, ve
 vysokém kontrastu 2 px. Nové okno se umístí do pracovní plochy
-(obrazovka bez lišty); pod lištu se dostane jen tažením.
+(obrazovka bez lišty) celé i na šířku: kaskáda dalších oken ho na malé
+obrazovce (800 × 600) nevysune za pravý okraj
+(`cascade_keeps_wide_window_on_screen`); pod lištu se dostane jen tažením.
 
 **Prvky aplikací** (`libs/ui`): agent AI má vyhrazené barvy `ai_*`
 a vždy ikonu agenta a slovo „agent“ (štítek `.agent()`, řádek seznamu

@@ -78,16 +78,16 @@ pub fn run_gui(opts: &mut Options) -> Result<()> {
 /// otevre samo, QMP klikne do pole casoveho pasma, Ctrl+A, napise `utc`
 /// a klikne na Pokracovat. Overi zalogovane pasmo a druhy krok.
 ///
-/// Souradnice jsou z rozvrzeni okna 900 x 680 na obrazovce 1280 x 800;
-/// kompozitor ho klade na x 168-204 podle poctu oken plochy, body jsou
-/// zvolene tak, aby pole i tlacitko trefily v cele te sirce (snimky
-/// `vstup-*.png` ukazuji, kam se klika).
+/// Kam klikat, zjisti init inspekci kompozitoru (`rozhrani =
+/// "gui-vstup"`, radek `init: test vstupu instalatoru: pasmo X,Y;
+/// pokracovat X,Y`): rozliseni se lisi (x86_64 VGA 1280 x 800, aarch64
+/// ramfb 800 x 600) a poloha okna zavisi na poctu oken plochy. Rozmer
+/// obrazovky pro absolutni souradnice tabletu je ze snimku `vstup-1.png`
+/// (snimky `vstup-*.png` ukazuji, kam se klika).
 fn real_input(opts: &mut Options) -> Result<()> {
-    const ZONE: (i32, i32) = (800, 216);
-    const NEXT: (i32, i32) = (1030, 697);
-    const SCREEN: (i32, i32) = (1280, 800);
     let arch: &Arch = opts.arch;
-    let usb = live_image(opts, None)?;
+    let usb = live_image(opts, Some(String::from("rozhrani = \"gui-vstup\"
+")))?;
     let dir = target_dir().join("shots").join(format!("instalace-gui-{}", arch.name));
     std::fs::create_dir_all(&dir)?;
     let shot = |port: u16, name: &str| {
@@ -107,8 +107,8 @@ fn real_input(opts: &mut Options) -> Result<()> {
     let abs = |axis: &str, v: i32, max: i32| format!(r#"{{"type":"abs","data":{{"axis":"{axis}","value":{}}}}}"#, v * 0x7fff / max);
     let btn = |down: bool| format!(r#"{{"type":"btn","data":{{"down":{down},"button":"left"}}}}"#);
     let key = |k: &str, down: bool| format!(r#"{{"type":"key","data":{{"down":{down},"key":{{"type":"qcode","data":"{k}"}}}}}}"#);
-    let click = |port: u16, (x, y): (i32, i32)| {
-        send(port, &[abs("x", x, SCREEN.0), abs("y", y, SCREEN.1)]);
+    let click = |port: u16, (x, y): (i32, i32), (sw, sh): (i32, i32)| {
+        send(port, &[abs("x", x, sw), abs("y", y, sh)]);
         send(port, &[btn(true)]);
         send(port, &[btn(false)]);
     };
@@ -118,6 +118,7 @@ fn real_input(opts: &mut Options) -> Result<()> {
         if done || !text.contains("gui-install: krok 1 ") {
             return;
         }
+        let Some((zone, next)) = targets(text) else { return };
         // Debug build pod TCG okno otevira a kresli nekolik sekund.
         let at = *opened.get_or_insert_with(std::time::Instant::now);
         if at.elapsed() < std::time::Duration::from_secs(15) {
@@ -125,7 +126,9 @@ fn real_input(opts: &mut Options) -> Result<()> {
         }
         done = true;
         shot(port, "vstup-1");
-        click(port, ZONE);
+        let screen = png_size(&dir.join("vstup-1.png")).unwrap_or((1280, 800));
+        println!("xtask: obrazovka {}x{}, pasmo {zone:?}, Pokracovat {next:?}", screen.0, screen.1);
+        click(port, zone, screen);
         send(port, &[key("ctrl", true)]);
         send(port, &[key("a", true)]);
         send(port, &[key("a", false)]);
@@ -137,7 +140,7 @@ fn real_input(opts: &mut Options) -> Result<()> {
         // Snimek po prekresleni (ladici build pod TCG kresli sekundy).
         std::thread::sleep(std::time::Duration::from_secs(8));
         shot(port, "vstup-2");
-        click(port, NEXT);
+        click(port, next, screen);
     };
     let r = boot::boot_with(arch, &usb, &[], Some(&mut hook), "skutecny vstup v okne instalatoru", |t| {
         ["gui-install: klavesnice cz, pasmo utc", "gui-install: krok 2 "].into_iter().filter(|m| !t.contains(m)).collect()
@@ -148,12 +151,31 @@ fn real_input(opts: &mut Options) -> Result<()> {
     Ok(())
 }
 
-/// Obraz ziveho USB; `answers` = (zpusob, gui) pro soubor odpovedi.
-fn live_image(opts: &mut Options, answers_for: Option<(&str, bool)>) -> Result<PathBuf> {
+/// Cile kliku z logu initu: (pole pasma, tlacitko Pokracovat).
+fn targets(log: &str) -> Option<((i32, i32), (i32, i32))> {
+    let l = log.lines().find_map(|l| l.split("init: test vstupu instalatoru: pasmo ").nth(1))?;
+    let (zone, next) = l.split_once("; pokracovat ")?;
+    let xy = |s: &str| -> Option<(i32, i32)> {
+        let (x, y) = s.trim().split_once(',')?;
+        Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+    };
+    Some((xy(zone)?, xy(next)?))
+}
+
+/// Sirka a vyska obrazku PNG (hlavicka IHDR).
+fn png_size(path: &Path) -> Option<(i32, i32)> {
+    let b = std::fs::read(path).ok()?;
+    let be = |i: usize| -> Option<i32> { Some(u32::from_be_bytes(b.get(i..i + 4)?.try_into().ok()?) as i32) };
+    (b.get(12..16)? == b"IHDR").then_some(())?;
+    Some((be(16)?, be(20)?))
+}
+
+/// Obraz ziveho USB; `answers` = text souboru odpovedi testu.
+fn live_image(opts: &mut Options, answers: Option<String>) -> Result<PathBuf> {
     with_dev_profile(opts);
     opts.extra_initfs.retain(|(n, _)| n != INSTALL_ANSWERS);
-    if let Some((mode, gui)) = answers_for {
-        opts.extra_initfs.push((String::from(INSTALL_ANSWERS), answers(mode, gui).into_bytes()));
+    if let Some(text) = answers {
+        opts.extra_initfs.push((String::from(INSTALL_ANSWERS), text.into_bytes()));
     }
     let artifacts = crate::build(opts);
     opts.extra_initfs.retain(|(n, _)| n != INSTALL_ANSWERS);
@@ -239,7 +261,7 @@ fn shots(arch: &Arch) -> Result<impl FnMut(&str, u16)> {
 
 fn whole_disk(opts: &mut Options, gui: bool) -> Result<()> {
     let arch: &Arch = opts.arch;
-    let usb = live_image(opts, Some(("cely-disk", gui)))?;
+    let usb = live_image(opts, Some(answers("cely-disk", gui)))?;
     let target = target_dir().join(format!("install-target-{}.img", std::process::id()));
     sparse(&target, TARGET)?;
     let r = (|| -> Result<()> {
@@ -386,7 +408,7 @@ fn windows_snapshot(path: &Path) -> Result<Vec<u8>> {
 
 fn next_to_windows(opts: &mut Options) -> Result<()> {
     let arch: &Arch = opts.arch;
-    let usb = live_image(opts, Some(("volne-misto", false)))?;
+    let usb = live_image(opts, Some(answers("volne-misto", false)))?;
     let target = target_dir().join(format!("install-windows-{}.img", std::process::id()));
     windows_disk(&target)?;
     let before = windows_snapshot(&target)?;

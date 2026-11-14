@@ -100,12 +100,16 @@ flashky). Stav: **[ověřeno v QEMU]** (x86_64, `--only instalace-gui`).
   kroků vlevo a nahoře je jen „Krok N z 8: ...“.
 
 Test v QEMU (`cargo xtask test --only instalace-gui`) má dvě části.
-Nejdřív **skutečný vstup**: živé USB bez souboru odpovědí, okno se po
+Nejdřív **skutečný vstup**: živé USB se souborem odpovědí jen
+s `rozhrani = "gui-vstup"` (instalátor běží bez autopilota). Okno se po
 přihlášení otevře samo a QMP pošle skutečné události přes `usb-tablet`
 a `usb-kbd`. Test klikne do pole časového pásma, stiskne Ctrl+A, napíše
 `utc` a klikne na *Pokračovat*. Ověří zalogované pásmo a druhý krok;
-snímky jsou `vstup-1.png` a `vstup-2.png`. Souřadnice platí pro okno
-900 × 680 na obrazovce 1280 × 800.
+snímky jsou `vstup-1.png` a `vstup-2.png`. Kam klikat, zjistí init
+inspekcí kompozitoru (poloha okna a strom přístupnosti) a zaloguje
+střed pole a tlačítka na obrazovce. Rozlišení se totiž liší: x86_64 má
+1280 × 800, aarch64 z živého USB jen ramfb 800 × 600. Rozměr obrazovky
+pro souřadnice tabletu xtask čte ze snímku `vstup-1.png`.
 
 Pak **celý průchod**: soubor odpovědí
 s `rozhrani = "gui"` dostane okno instalátoru místo textové cesty.
