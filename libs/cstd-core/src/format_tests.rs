@@ -10,7 +10,7 @@ enum A<'a> {
     I(i64),
     S(Option<&'a str>),
     P(usize),
-    D,
+    D(f64),
 }
 
 struct List<'a>(Vec<A<'a>>, usize);
@@ -58,8 +58,11 @@ impl Args for List<'_> {
             _ => panic!("cekal retezec"),
         }
     }
-    fn skip_double(&mut self) {
-        assert!(matches!(self.next(), A::D));
+    fn double(&mut self) -> f64 {
+        match self.next() {
+            A::D(v) => v,
+            _ => panic!("cekal double"),
+        }
     }
 }
 
@@ -118,7 +121,7 @@ fn bezpecne_chovani() {
     // Neznamy prevod se vypise doslova a nic nespotrebuje.
     assert_eq!(f("%q %d", &[A::I(1)]), "%q 1");
     // Plovouci carka zatim neni: otaznik.
-    assert_eq!(f("%f", &[A::D]), "?");
+    assert_eq!(f("%Lf", &[]), "?");
     // Obrovska sirka je omezena (zadne gigabajty mezer).
     let s = f("%2000000000d", &[A::I(1)]);
     assert!(s.len() <= 512);
@@ -134,4 +137,23 @@ fn oriznuti_a_celkova_delka() {
     assert_eq!(out.total, 6);
     assert_eq!(out.pos, 4);
     assert_eq!(&buf, b"1234");
+}
+
+/// Ocekavane vysledky jsou z glibc (printf v Linuxu).
+#[test]
+fn floats_like_glibc() {
+    let d = |v: f64| A::D(v);
+    assert_eq!(f("%f", &[d(3.14159)]), "3.141590");
+    assert_eq!(f("%.2f|%.0f|%#.0f", &[d(2.675), d(2.5), d(3.0)]), "2.67|2|3.");
+    assert_eq!(f("%8.3f|%-8.1f|%+08.2f", &[d(-1.5), d(2.25), d(3.14159)]), "  -1.500|2.2     |+0003.14");
+    assert_eq!(f("%e|%.2E|%.0e", &[d(12345.678), d(0.000123), d(5e300)]), "1.234568e+04|1.23E-04|5e+300");
+    assert_eq!(f("%g|%g|%g|%g", &[d(100000.0), d(1000000.0), d(0.0001), d(0.00001)]), "100000|1e+06|0.0001|1e-05");
+    assert_eq!(f("%g|%.3g|%#g|%G", &[d(3.14159), d(1234.5), d(1.0), d(1.5e-10)]), "3.14159|1.23e+03|1.00000|1.5E-10");
+    assert_eq!(f("%.10g|%g", &[d(0.1), d(0.0)]), "0.1|0");
+    assert_eq!(f("%a|%A|%.1a|%a", &[d(1.0), d(-0.5), d(1.5), d(0.0)]), "0x1p+0|-0X1P-1|0x1.8p+0|0x0p+0");
+    assert_eq!(f("%f|%F|%5.1f|%e", &[d(f64::INFINITY), d(f64::NAN), d(f64::NEG_INFINITY), d(-0.0)]), "inf|NAN| -inf|-0.000000e+00");
+    assert_eq!(f("%010.3e", &[d(-1.0)]), "-1.000e+00");
+    assert_eq!(f("%.3f %d", &[d(1e-10), A::I(7)]), "0.000 7");
+    // Velke cislo: vsechny cislice celeho cisla.
+    assert_eq!(f("%.0f", &[d(1e22)]), "10000000000000000000000");
 }

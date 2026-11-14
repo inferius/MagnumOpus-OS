@@ -44,6 +44,17 @@ impl Pipe {
         Ok(buf.len())
     }
 
+    /// Handle kanalu (cekani v `poll`).
+    pub fn handle(&self) -> &libos::Handle {
+        self.ch.handle()
+    }
+
+    /// Ma konec prectena, ale nevydana data (zbytek zpravy)?
+    pub fn has_buffered(&self) -> bool {
+        let r = self.rest.lock();
+        r.1 < r.0.len()
+    }
+
     /// Duplikat konce (ctou nebo pisou oba; zbytek zpravy se nesdili).
     pub fn try_clone(&self) -> Result<Pipe> {
         Ok(Pipe::from_channel(Channel::from_handle(self.ch.handle().duplicate(None)?)))

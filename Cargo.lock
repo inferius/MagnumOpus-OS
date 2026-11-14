@@ -668,7 +668,11 @@ version = "0.1.0"
 name = "cstd"
 version = "0.1.0"
 dependencies = [
+ "abi",
+ "cbuild",
  "cstd-core",
+ "libm",
+ "tz",
 ]
 
 [[package]]

@@ -4,7 +4,7 @@ Základ knihovny C v Rustu (`no_std`, ABI C): řetězce, `ctype`, `malloc` nad a
 
 ## Klíčové soubory
 
-- `src/format.rs` - formátovací stroj `printf` (`Out`, `Args`, `VaArgs`); `src/string.rs`, `src/ctype.rs`, `src/stdlib.rs`, `src/stdio.rs`, `src/ssp.rs`.
+- `src/format.rs` - formátovací stroj `printf` (`Out`, `Args`, `VaArgs`); `src/float.rs` - `%f %e %g %a` přes `core::fmt` do bufferu na zásobníku (~4,4 KiB); `src/string.rs`, `src/ctype.rs`, `src/stdlib.rs`, `src/stdio.rs`, `src/ssp.rs`.
 - `include/` - základní hlavičky (`_cstd.h` s makry, `string.h`, `stdlib.h`, `stdio.h`, `ctype.h`, `assert.h`).
 
 ## Invarianty
@@ -19,4 +19,5 @@ Základ knihovny C v Rustu (`no_std`, ABI C): řetězce, `ctype`, `malloc` nad a
 
 ## Pasti
 
-- Plovoucí čárka ve formátovacím stroji chybí (`%f` = `?`).
+- Plovoucí čárka předpokládá hard-float (všechny programy v userspace): `VaArgs::double` čte `f64` z `VaList` podle ABI. `%Lf` = `?`.
+- `parse_float` (`stdlib.rs`) je čistá logika `strtod`; symbol `strtod` s `errno` exportuje až `cstd`.

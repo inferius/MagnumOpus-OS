@@ -1,5 +1,5 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index bd63144..88db81f 100644
+index bd63144..65a8fb8 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -2,6 +2,13 @@
@@ -48,7 +48,7 @@ index bd63144..88db81f 100644
  [[package]]
  name = "getopts"
  version = "0.2.24"
-@@ -151,6 +176,23 @@ dependencies = [
+@@ -151,6 +176,33 @@ dependencies = [
   "rustc-std-workspace-core",
  ]
  
@@ -69,13 +69,31 @@ index bd63144..88db81f 100644
 + "wire",
 +]
 +
++[[package]]
++name = "leaseproto"
++version = "0.1.0"
++dependencies = [
++ "abi",
++ "rustc-std-workspace-alloc",
++ "rustc-std-workspace-core",
++ "wire",
++]
++
  [[package]]
  name = "libc"
  version = "0.2.191"
-@@ -160,6 +202,18 @@ dependencies = [
+@@ -160,6 +212,28 @@ dependencies = [
   "rustc-std-workspace-core",
  ]
  
++[[package]]
++name = "libdproto"
++version = "0.1.0"
++dependencies = [
++ "rustc-std-workspace-alloc",
++ "rustc-std-workspace-core",
++]
++
 +[[package]]
 +name = "libos"
 +version = "0.1.0"
@@ -83,6 +101,8 @@ index bd63144..88db81f 100644
 + "abi",
 + "elf",
 + "initfs",
++ "leaseproto",
++ "libdproto",
 + "rustc-std-workspace-alloc",
 + "rustc-std-workspace-core",
 + "tz",
@@ -91,7 +111,7 @@ index bd63144..88db81f 100644
  [[package]]
  name = "memchr"
  version = "2.8.3"
-@@ -190,6 +244,17 @@ dependencies = [
+@@ -190,6 +264,17 @@ dependencies = [
   "rustc-std-workspace-core",
  ]
  
@@ -109,7 +129,7 @@ index bd63144..88db81f 100644
  [[package]]
  name = "object"
  version = "0.39.1"
-@@ -201,6 +266,20 @@ dependencies = [
+@@ -201,6 +286,20 @@ dependencies = [
   "rustc-std-workspace-core",
  ]
  
@@ -130,7 +150,7 @@ index bd63144..88db81f 100644
  [[package]]
  name = "panic_abort"
  version = "0.0.0"
-@@ -341,6 +420,7 @@ dependencies = [
+@@ -341,6 +440,7 @@ dependencies = [
   "miniz_oxide",
   "moto-rt",
   "object",
@@ -138,7 +158,7 @@ index bd63144..88db81f 100644
   "panic_abort",
   "panic_unwind",
   "r-efi",
-@@ -366,6 +446,17 @@ dependencies = [
+@@ -366,6 +466,18 @@ dependencies = [
   "rustc-std-workspace-core",
  ]
  
@@ -147,6 +167,7 @@ index bd63144..88db81f 100644
 +version = "0.1.0"
 +dependencies = [
 + "abi",
++ "leaseproto",
 + "libos",
 + "rustc-std-workspace-alloc",
 + "rustc-std-workspace-core",
@@ -156,7 +177,7 @@ index bd63144..88db81f 100644
  [[package]]
  name = "sysroot"
  version = "0.0.0"
-@@ -386,6 +477,14 @@ dependencies = [
+@@ -386,6 +498,14 @@ dependencies = [
   "std",
  ]
  
@@ -171,7 +192,7 @@ index bd63144..88db81f 100644
  [[package]]
  name = "unwind"
  version = "0.0.0"
-@@ -454,6 +553,15 @@ version = "0.0.0"
+@@ -454,6 +574,15 @@ version = "0.0.0"
  name = "windows-sys"
  version = "0.61.100"
  
@@ -363,10 +384,10 @@ index 0000000..78f53c6
 +}
 diff --git a/std/src/os/magnumopus/mod.rs b/std/src/os/magnumopus/mod.rs
 new file mode 100644
-index 0000000..90ca713
+index 0000000..facfd70
 --- /dev/null
 +++ b/std/src/os/magnumopus/mod.rs
-@@ -0,0 +1,17 @@
+@@ -0,0 +1,23 @@
 +//! Rozsireni std pro MagnumOpus.
 +
 +#![stable(feature = "rust1", since = "1.0.0")]
@@ -376,6 +397,12 @@ index 0000000..90ca713
 +pub mod fs;
 +pub mod process;
 +pub mod rt;
++
++/// Behove prostredi procesu (crate `osrt`): interni rozhrani pro knihovny
++/// nad std ve stejnem procesu, hlavne knihovnu C `cstd` (tabulka fd,
++/// vlakna, cas). Aplikace ho nepouzivaji; API se muze menit.
++#[unstable(feature = "magnumopus_runtime", issue = "none")]
++pub use osrt as runtime;
 +
 +/// Rozsirujici traity (`use std::os::magnumopus::prelude::*`).
 +#[stable(feature = "rust1", since = "1.0.0")]
@@ -1029,7 +1056,7 @@ index e15841b..91299c3 100644
          use motor as imp;
 diff --git a/std/src/sys/io/error/magnumopus.rs b/std/src/sys/io/error/magnumopus.rs
 new file mode 100644
-index 0000000..514403a
+index 0000000..d1b2245
 --- /dev/null
 +++ b/std/src/sys/io/error/magnumopus.rs
 @@ -0,0 +1,60 @@

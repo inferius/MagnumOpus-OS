@@ -12,6 +12,12 @@
 
 static int failures;
 
+int posix_test(const char *dir);
+int threads_test(void);
+int time_test(void);
+int math_test(void);
+int net_main(void);
+
 #define CHECK(name, cond)                                              \
     do {                                                               \
         if (cond) {                                                    \
@@ -112,6 +118,8 @@ static int errors(void) {
 }
 
 int main(int argc, char **argv) {
+    /* Rezim "net": jen sitovy test (sada "cstd sit", relace site). */
+    if (argc == 2 && strcmp(argv[1], "net") == 0) return net_main();
     atexit(first_registered);
     atexit(last_words);
 
@@ -123,6 +131,16 @@ int main(int argc, char **argv) {
     CHECK("memory", memory());
     CHECK("files", dir != NULL && files(dir));
     CHECK("errno", errors());
+    CHECK("posix", dir != NULL && posix_test(dir) == 0);
+    int th = threads_test();
+    if (th != 0) fprintf(stderr, "ctest threads: krok %d\n", th);
+    CHECK("threads", th == 0);
+    int tm = time_test();
+    if (tm != 0) fprintf(stderr, "ctest time: krok %d errno %d\n", tm, errno);
+    CHECK("time", tm == 0);
+    int mt = math_test();
+    if (mt != 0) fprintf(stderr, "ctest math: krok %d\n", mt);
+    CHECK("math", mt == 0);
     assert(failures == 0);
     fputs("chyba na stderr\n", stderr);
     fflush(stdout);

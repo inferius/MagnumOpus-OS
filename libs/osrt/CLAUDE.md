@@ -7,6 +7,8 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 - `src/start.rs` - `_start`, startovní zpráva, rozdělení handlů podle štítků `abi::params::tag`; volá `main(argc, argv)` (z rustc nebo z programu v C, `c_argv`).
 - `src/lib.rs` - `exit` (nejdřív funkce `at_exit` v obráceném pořadí), `exit_now` (bez nich, C `_Exit`), `at_exit` (max 1024; C `atexit` a vyprázdnění stdio knihovny `cstd`, v std `os::magnumopus::rt`).
 - `src/tls.rs` - bloky TLS (local-exec, varianta II x86_64 / I aarch64; posuny musí sedět s lld).
+- `src/fd.rs` - tabulka čísel fd pro cstd (popis otevření: soubor, stdio, roura; `dup` sdílí popis); std ji vystavuje jako `std::os::magnumopus::runtime` (re-export celého crate, nestabilní).
+- `src/sock.rs` - sockety pro tabulku fd (stav nový/TCP/naslouchání/UDP nad netproto, neblokující = `Deadline::TRY`); `src/poll.rs` - čekání na více fd (signály kanálů, připravenost socketů, do 64 `OBJECT_WAIT_MANY`, víc port).
 - `src/stdio.rs`, `src/pipe.rs` - protokol proudu bajtů; `src/process.rs` - `LAUNCH` ke launchd; `src/net.rs` - std::net (zámky do netproto v2).
 
 ## Invarianty
@@ -15,6 +17,7 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 - Handle vlastního procesu se nesmí zavřít (`start::init` ho zapomene).
 - Nové vlákno nastaví TP jako první věc, před jakýmkoli kódem std.
 - `at_exit` volá funkce bez drženého zámku (smí registrovat další); `exit_now` je nevolá.
+- `thread::exit_current` (C `pthread_exit`) ukončí vlákno syscallem bez destruktorů std; zásobník a TLS uvolní až `Thread::join`.
 
 ## Testy
 

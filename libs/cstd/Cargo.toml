@@ -17,6 +17,15 @@ test = true
 # Retezce, ctype, malloc (nad alokatorem std), snprintf a SSP bez vystupu
 # do logu (ten maji jen sluzby no_std).
 cstd-core = { path = "../cstd-core", default-features = false }
+# Kalendar (prevody dni) a casova pasma pro time.h (cista logika, bez stavu).
+abi.workspace = true
+tz = { path = "../tz" }
+# math.h (port musl libm do Rustu, MIT/Apache).
+libm = "0.2.16"
+
+[build-dependencies]
+# Cast knihovny v C (long double) jen pro cil magnumopus.
+cbuild = { path = "../cbuild" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("magnumopus"))'] }

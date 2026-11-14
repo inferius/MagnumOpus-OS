@@ -117,6 +117,17 @@ pub fn read(buf: &mut [u8]) -> Result<usize> {
     }
 }
 
+/// Handle kanalu proudu (cekani v `poll`); `None` = bez kanalu.
+pub fn handle(stream: Stream) -> Option<&'static libos::Handle> {
+    channel(stream).map(Channel::handle)
+}
+
+/// Ma stdin prectena, ale nevydana data?
+pub fn stdin_buffered() -> bool {
+    let r = STDIN_REST.lock();
+    r.1 < r.0.len()
+}
+
 /// Ma proces kanal pro dany proud (jinak jde vystup do logu jadra)?
 pub fn has_channel(stream: Stream) -> bool {
     channel(stream).is_some()

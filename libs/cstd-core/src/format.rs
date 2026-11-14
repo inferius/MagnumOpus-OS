@@ -7,8 +7,8 @@
 //! - `%n` nic nezapise (klasicka bezpecnostni dira printf), jen spotrebuje
 //!   argument,
 //! - neznamy prevod se vypise doslova (`%q` -> `%q`) a nic nespotrebuje,
-//! - plovouci carka (`%f`, `%e`, `%g`) zatim neni: programy bezi bez FPU;
-//!   argument se spotrebuje a vypise se `?`.
+//! - plovouci carka `%f %e %g %a` (modul `float`); `long double` (`%Lf`)
+//!   neumime precist z `VaList` - vypise se `?` (viz docs/cs/cstd.md).
 //!
 //! Zdroj argumentu je rozhrani [`Args`]: v systemu `VaList` z C, v testech
 //! seznam hodnot - samotne formatovani je tak testovatelne na hostiteli.
@@ -37,8 +37,8 @@ pub trait Args {
     /// Dalsi argument jako retezec; cte nejvys `max` bajtu (presnost).
     /// `None` = nulovy ukazatel. Volajici bajty preda `out` po jednom.
     fn string(&mut self, max: usize, out: &mut dyn FnMut(u8)) -> bool;
-    /// Dalsi argument typu `double` (jen spotrebovat, viz modul).
-    fn skip_double(&mut self);
+    /// Dalsi argument typu `double` (i `float`, C ho povysi na `double`).
+    fn double(&mut self) -> f64;
 }
 
 /// Kam formatovani pise.
@@ -65,21 +65,21 @@ impl Out for Buf<'_> {
 }
 
 #[derive(Default, Clone, Copy)]
-struct Spec {
-    left: bool,
-    plus: bool,
-    space: bool,
-    alt: bool,
-    zero: bool,
-    width: usize,
-    prec: Option<usize>,
+pub(crate) struct Spec {
+    pub(crate) left: bool,
+    pub(crate) plus: bool,
+    pub(crate) space: bool,
+    pub(crate) alt: bool,
+    pub(crate) zero: bool,
+    pub(crate) width: usize,
+    pub(crate) prec: Option<usize>,
 }
 
 /// Rozumny strop sirky a presnosti: `%2000000000d` nesmi zablokovat program
 /// zapisem gigabajtu mezer (vystup by stejne oriznul buffer).
-const MAX_WIDTH: usize = 4096;
+pub(crate) const MAX_WIDTH: usize = 4096;
 
-fn pad(out: &mut dyn Out, n: usize, c: u8) {
+pub(crate) fn pad(out: &mut dyn Out, n: usize, c: u8) {
     for _ in 0..n {
         out.put(c);
     }
@@ -189,6 +189,7 @@ pub fn format(out: &mut dyn Out, fmt: &[u8], args: &mut dyn Args) {
             }
         }
         let mut len = Len::Int;
+        let mut long_double = false;
         match c {
             Some(b'h') => {
                 c = next(&mut i);
@@ -210,7 +211,10 @@ pub fn format(out: &mut dyn Out, fmt: &[u8], args: &mut dyn Args) {
                 c = next(&mut i);
                 len = Len::Long;
             }
-            Some(b'L') => c = next(&mut i),
+            Some(b'L') => {
+                c = next(&mut i);
+                long_double = true;
+            }
             _ => {}
         }
         match c {
@@ -276,9 +280,14 @@ pub fn format(out: &mut dyn Out, fmt: &[u8], args: &mut dyn Args) {
             Some(b'n') => {
                 let _ = args.pointer();
             }
-            Some(b'f' | b'F' | b'e' | b'E' | b'g' | b'G' | b'a' | b'A') => {
-                args.skip_double();
-                out.put(b'?');
+            Some(conv @ (b'f' | b'F' | b'e' | b'E' | b'g' | b'G' | b'a' | b'A')) => {
+                if long_double {
+                    // `long double` neni v VaList Rustu citelny (x86_64 ho
+                    // predava v pameti po 16 B): radsi nic nespotrebovat.
+                    out.put(b'?');
+                } else {
+                    crate::float::format_float(out, s, conv, args.double());
+                }
             }
             Some(_) | None => {
                 // Neznamy prevod: vypsat doslova (az po konec formatu).
@@ -343,10 +352,10 @@ impl Args for VaArgs<'_, '_> {
         true
     }
 
-    fn skip_double(&mut self) {
-        // Bez FPU (soft-float ABI) se `double` predava v obecnych registrech
-        // a na zasobniku jako 64bitove slovo.
+    fn double(&mut self) -> f64 {
+        // Vsechny programy jsou hard-float: `double` jde ve vektorovych
+        // registrech (SSE / V), VaList ho cte podle ABI.
         // SAFETY: dtto.
-        let _ = unsafe { self.0.next_arg::<u64>() };
+        unsafe { self.0.next_arg::<f64>() }
     }
 }

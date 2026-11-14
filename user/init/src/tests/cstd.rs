@@ -2,7 +2,9 @@
 //! argumenty, getenv, formatovani, malloc, soubory pres FILE, errno,
 //! stderr a atexit s vyprazdnenim stdout pri konci procesu.
 
+use alloc::string::String;
 use alloc::vec;
+use alloc::vec::Vec;
 use core::time::Duration;
 
 use libos::Startup;
@@ -27,13 +29,64 @@ fn ctest(s: &Startup) -> TestResult {
         s,
         "ctest",
         &["jedna", "dva"],
-        &["CTEST_DIR=/std-test", "CTEST_HELLO=svet"],
+        &["CTEST_DIR=/std-test", "CTEST_HELLO=svet", "TZ=Europe/Prague"],
         vec![StartHandle::tagged(tag::FS, own.into_channel().into_handle())],
         Duration::from_secs(120),
     )?;
-    run.expect("ctest", &["args", "getenv", "format", "memory", "files", "errno"])?;
+    run.expect("ctest", &["args", "getenv", "format", "memory", "files", "errno", "posix", "threads", "time", "math"])?;
     check!(run.stdout.ends_with("ctest: hotovo\n"), "atexit v obracenem poradi a vyprazdneni pri konci");
     check!(run.stderr.contains("chyba na stderr\n"), "stderr");
     check!(run.stderr.contains("ctest perror: Invalid argument\n"), "perror");
     Ok(())
+}
+
+pub const NET_TESTS: &[Test] = &[("ctest net: sockety, getaddrinfo, poll, select, epoll, accept", ctest_net)];
+
+/// Sockety knihovny C proti pomocnym serverum hostitele (jako `std sit`):
+/// relace jen s porty testu, naslouchani pro zpetne spojeni.
+fn ctest_net(s: &Startup) -> TestResult {
+    use alloc::format;
+    use netproto::{Policy, Rule, Target, proto, rights};
+
+    use super::net::{HOST, configured, host, net, ports};
+
+    let Some(p) = ports(s, "ctest net")? else {
+        return Ok(());
+    };
+    let root = net()?;
+    configured(root)?;
+    // Prichozi spojeni pusti jen profil home.
+    super::firewall::ensure_home()?;
+    let target = Target::Net { addr: HOST, prefix: 32 };
+    let mut policy = Policy::only(vec![
+        Rule::port(proto::TCP, target.clone(), p.echo),
+        Rule::port(proto::TCP, target.clone(), p.closed),
+        Rule::port(proto::TCP, target.clone(), p.callback),
+        Rule::port(proto::UDP, target, p.udp_echo),
+    ]);
+    // Naslouchat smi jen na portu presmerovanem z hostitele.
+    policy.bind = Some(vec![(p.forwarded, p.forwarded)]);
+    let session = root
+        .restrict(rights::CLIENT | rights::TCP_LISTEN, &policy)
+        .map_err(|e| fail("restrict", e))?;
+    let env = [
+        format!("ECHO={}", host(p.echo)),
+        format!("UDP_ECHO={}", host(p.udp_echo)),
+        format!("CLOSED={}", host(p.closed)),
+        format!("REFUSES={}", u8::from(p.refuses)),
+        format!("CALLBACK={}", host(p.callback)),
+        format!("FORWARDED={}", p.forwarded),
+        String::from("NAME=echo.magnumopus"),
+    ];
+    let env: Vec<&str> = env.iter().map(|e| e.as_str()).collect();
+    let ch = session.into_channel().map_err(|e| format!("predani site: {e:?}"))?;
+    let run = run_std_app(
+        s,
+        "ctest",
+        &["net"],
+        &env,
+        vec![StartHandle::tagged(tag::NET, ch.into_handle())],
+        Duration::from_secs(120),
+    )?;
+    run.expect("ctest", &["tcp", "udp", "dns", "refused", "accept"])
 }

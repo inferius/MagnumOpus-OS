@@ -62,7 +62,7 @@ pub(super) struct Ports {
     pub dns: u16,
     pub closed: u16,
     /// Hlasi slirp odmitnuti spojeni na hostitele (RST)? Na Windows ne.
-    refuses: bool,
+    pub refuses: bool,
     reset: u16,
     pub callback: u16,
     /// Port v hostovi, na ktery slirp presmeruje spojeni z hostitele
