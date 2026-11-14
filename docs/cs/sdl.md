@@ -130,12 +130,40 @@ jen typy) a `inttypes.h`, prázdné `libm.a`, `libpthread.a`, `librt.a`.
 | `sdl: testsprite ...` | QEMU, sada `sdl` | okno programu SDL v kompozitoru; deterministický snímek (`--iterations 0`): červený bod v rohu, zelená horní, modrá levá a červená dolní čára na obrazovce |
 | `sdl: checkkeys ...` | QEMU, sada `sdl` | umělý vstup přes inputd a kompozitor: klávesa A = scancode 4, text „a“, pravé tlačítko myši, dvakrát Esc ukončí program kódem 0 |
 | `sdl: kurzor, zámek ukazatele, schránka a celá obrazovka (QMP)` | QEMU, sada `sdl` | program `testmagnumopus` (náš test v SDL): displej a škála jako kompozitor, kurzor kříž na obrazovce; fyzický klik = zámek ukazatele, posun = relativní pohyb, Super = zrušení zámku, druhý klik = kopie, Ctrl+V = vložení, F = celá obrazovka |
-| `sdl: měření cesty videa 1080p` | QEMU, sada `sdl` | `testmagnumopus bench`: I420 1920 × 1080 -> převod v SDL -> okno (výkon: oddíl Výkon) |
+| `sdl: měření cesty videa 1080p` | QEMU, sada `sdl` | `testmagnumopus bench`: I420 1920 × 1080 -> převod v SDL -> okno ([Výkon](#výkon)) |
 
 ```text
 cargo xtask test --only sdl
 cargo xtask test --arch aarch64 --only sdl
 ```
+
+## Výkon
+
+Dnešní cesta videa přes SDL (podklad pro rozhodnutí o YUV bez kopie):
+textura I420 1920 × 1080 -> `SDL_UpdateYUVTexture` (převod na RGB v SDL)
+-> `SDL_RenderTexture` do okna 960 × 540 -> `SDL_RenderPresent` (kopie
+do bufferu okna přes `mosdl`). Průměr 60 snímků po 10 zahřívacích
+(`testmagnumopus bench`, test `sdl: měření cesty videa 1080p`).
+
+| Architektura | Sestavení systému | ms na snímek |
+|---|---|---|
+| x86_64 | ladicí (`cargo xtask test`) | 139,6 |
+| x86_64 | release (`--release`) | 102,0 |
+| aarch64 | ladicí | 150,4 |
+
+Podmínky: revize `5ab30f2`, QEMU 11.1.0 bez akcelerace (TCG), `-cpu max`
+(aarch64 `cortex-a76`), `-smp 4`, `-m 1G`, hostitel AMD Ryzen 9 9950X3D,
+Windows 11. SDL přeložené jako Release (CMake), na 1 vlákně. Čísla
+z emulace TCG jsou pro srovnání cest, ne pro skutečný stroj; na hardwaru
+**[navrženo]** změřit s KVM/WHPX.
+
+**YUV bez kopie** (snímek jako NV12/I420 přes `BUFFER_CREATE_DESC`,
+převod SIMD v kompozitoru, později GPU) je navazující krok spolu
+s FFmpegem: záplata `SDL_render.c` (nepřevedená YUV textura u okna
+magnumopus, v `RenderPresent` poznat jedinou YUV texturu přes celé okno),
+`ui::Window::present_yuv` a test; odhad ~300 řádků záplaty SDL
+**[navrženo]**. Přehrávač systému jde přes `mediad` a okna s `bufdesc`
+přímo, SDL a `ffplay` jsou vedlejší cesta.
 
 ## Rozhodnutí (2026-11-14)
 

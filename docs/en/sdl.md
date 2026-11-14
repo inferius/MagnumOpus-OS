@@ -134,12 +134,42 @@ only so far) and `inttypes.h`, empty `libm.a`, `libpthread.a`, `librt.a`.
 | `sdl: testsprite ...` | QEMU, suite `sdl` | an SDL program window in the compositor; a deterministic frame (`--iterations 0`): red corner point, green top, blue left and red bottom line on screen |
 | `sdl: checkkeys ...` | QEMU, suite `sdl` | injected input through inputd and the compositor: key A = scancode 4, text "a", right mouse button, Esc twice ends the program with code 0 |
 | `sdl: kurzor, zamek ukazatele, schranka a cela obrazovka (QMP)` | QEMU, suite `sdl` | the `testmagnumopus` program (our SDL test): display and scale as the compositor, crosshair cursor on screen; physical click = pointer lock, movement = relative motion, Super = lock cancelled, second click = copy, Ctrl+V = paste, F = fullscreen |
-| `sdl: mereni cesty videa 1080p` | QEMU, suite `sdl` | `testmagnumopus bench`: I420 1920 × 1080 -> conversion in SDL -> window (see Performance) |
+| `sdl: mereni cesty videa 1080p` | QEMU, suite `sdl` | `testmagnumopus bench`: I420 1920 × 1080 -> conversion in SDL -> window ([Performance](#performance)) |
 
 ```text
 cargo xtask test --only sdl
 cargo xtask test --arch aarch64 --only sdl
 ```
+
+## Performance
+
+Today's video path through SDL (input for the zero-copy YUV decision): an
+I420 1920 × 1080 texture -> `SDL_UpdateYUVTexture` (conversion to RGB in
+SDL) -> `SDL_RenderTexture` into a 960 × 540 window -> `SDL_RenderPresent`
+(copy into the window buffer through `mosdl`). Mean of 60 frames after 10
+warm-up frames (`testmagnumopus bench`, test `sdl: mereni cesty videa
+1080p`).
+
+| Architecture | System build | ms per frame |
+|---|---|---|
+| x86_64 | debug (`cargo xtask test`) | 139.6 |
+| x86_64 | release (`--release`) | 102.0 |
+| aarch64 | debug | 150.4 |
+
+Conditions: revision `5ab30f2`, QEMU 11.1.0 without acceleration (TCG),
+`-cpu max` (aarch64 `cortex-a76`), `-smp 4`, `-m 1G`, host AMD Ryzen 9
+9950X3D, Windows 11. SDL built as Release (CMake), on 1 thread. Numbers
+from TCG emulation are for comparing paths, not for a real machine;
+measuring on hardware with KVM/WHPX is **[designed]**.
+
+**Zero-copy YUV** (the frame as NV12/I420 through `BUFFER_CREATE_DESC`,
+SIMD conversion in the compositor, later on the GPU) is a follow-up step
+together with FFmpeg: a patch of `SDL_render.c` (an unconverted YUV texture
+for the magnumopus window, detecting a single YUV texture over the whole
+window in `RenderPresent`), `ui::Window::present_yuv` and a test; estimated
+~300 lines of SDL patch **[designed]**. The system player goes through
+`mediad` and windows with `bufdesc` directly, SDL and `ffplay` are a side
+path.
 
 ## Decisions (2026-11-14)
 
