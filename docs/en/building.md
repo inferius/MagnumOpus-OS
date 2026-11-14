@@ -136,6 +136,14 @@ port from the host into the guest (`hostfwd`). Details:
   process id) and deletes them when it ends. Concurrent runs (several
   threads on one machine) therefore do not overwrite each other's disks, and
   the QMP helper does not read test markers from someone else's log.
+  The initfs (`initfs-<arch>-<profile>-<pid>.img`), the test image
+  (`os-<arch>-<profile>-test-<pid>.img`) and the copy of the firmware
+  variables (`fw-<arch>-vars-<pid>.fd`, QEMU writes to it) are per run too.
+  Runs prepare the shared std sysroot and the documentation site
+  (`target/docs`) one at a time under the `target/std.lock` and
+  `target/docs.lock` locks; the sysroot is rewritten only when its content
+  changes. Concurrent runs used to delete the sysroot under each other
+  ("Directory not empty", os error 145).
 - On a panic or fatal exception, xtask translates the stack trace addresses
   into function names after QEMU exits (`llvm-nm` from `llvm-tools`).
 - Kernel log levels: [kernel.md](kernel.md#logging); messages: [messages.md](messages.md).

@@ -148,7 +148,7 @@ pub fn set_thread_qos(t: &Arc<Thread>, class: Qos, rt: Option<(u64, u64)>) -> Re
 
 /// Bezi-li vlakno na jinem CPU, preplanuje ho (zmena tridy hned).
 fn kick(t: &Thread) {
-    if t.on_cpu()
+    if t.on_cpu_after_update()
         && let Some(cpu) = percpu::cpu(t.last_cpu.load(Ordering::Relaxed))
     {
         arch::send_reschedule(cpu.hw_id);

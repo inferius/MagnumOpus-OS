@@ -413,8 +413,11 @@ fn switch_away(reason: Reason) {
     while next.on_cpu() {
         core::hint::spin_loop();
     }
-    next.cpu_flags.fetch_or(cpu_flag::ON_CPU, Ordering::Relaxed);
+    // `last_cpu` pred ON_CPU: kdo uvidi ON_CPU, posle IPI sem (viz
+    // `on_cpu_after_update`). RMW (ne zapis), aby poradi vuci nemu urcovalo
+    // jedno slovo; SeqCst, aby se zmeny stavu vlakna (ukonceni) cetly az po nem.
     next.last_cpu.store(cpu.index, Ordering::Relaxed);
+    next.cpu_flags.fetch_or(cpu_flag::ON_CPU, Ordering::SeqCst);
 
     // Adresni prostor a zasobnik jadra pro vstup z userspace noveho vlakna.
     // Vlakna jadra nemaji spodni polovinu (`None`), aby zadne CPU nedrzelo

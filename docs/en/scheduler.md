@@ -245,6 +245,10 @@ rt_period_us = 5000
   event timed out (aarch64 under host load, until 2026-11-14). The
   diagnostic dump on a test failure (`sched::dump_state`: queues and
   timers of all CPUs, state of the watched threads) captured this state.
+  Interrupting a running thread after a change of its state (kill, class)
+  is decided the same way: ON_CPU is read by an RMW operation on the same
+  word (`on_cpu_after_update`), so either the IPI goes out or the thread
+  sees the change.
   **[verified in QEMU]**
 - **Balancing idle CPUs**: an idle CPU takes work from other queues; an efficiency
   core takes Interactive only from a queue with at least two waiting

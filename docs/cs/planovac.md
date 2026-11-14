@@ -226,6 +226,9 @@ ovladače):
   na jeho událost vypršel (aarch64 pod zátěží hostitele, do 2026-11-14).
   Diagnostický výpis při selhání testu (`sched::dump_state`: fronty
   a časovače všech CPU, stav sledovaných vláken) tento stav zachytil.
+  Stejně se rozhoduje přerušení běžícího vlákna po změně jeho stavu
+  (ukončení, třída): ON_CPU se čte operací RMW na tomtéž slově
+  (`on_cpu_after_update`), takže buď odejde IPI, nebo vlákno změnu uvidí.
   **[ověřeno v QEMU]**
 - **Vyvažování nečinných**: nečinné CPU si bere práci z cizích front; úsporné jádro
   bere Interactive jen z fronty, kde čekají aspoň dvě vlákna (výkonná jsou

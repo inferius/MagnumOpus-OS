@@ -13,7 +13,7 @@
 
 ## Invarianty
 
-- Každý běh má vlastní testovací a datový disk (`<pid>`), aby šlo pouštět víc vláken souběžně. Nesdílej pevné cesty v `target/`.
+- Každý běh má vlastní testovací a datový disk (`<pid>`), aby šlo pouštět víc vláken souběžně. Nesdílej pevné cesty v `target/`: soubor jen pro běh přes `run_file` (`<pid>` v názvu, smaže se na konci `main`), sdílený výstup (sysroot std, web dokumentace) jen pod zámkem (`lock_shared`) a přepsat jen při změně obsahu.
 - `cargo xtask test` = host testy -> `check` ostatních architektur -> docs -> jádro a userspace v QEMU. Vybrané sady userspace: `--only <sada>[,<sada>]`; jména sad jsou `SUITES` v `user/init/src/tests/mod.rs` (mezery v názvech ponech, např. `"ovladace z manifestu"`).
 - Obraz USB má dva initfs: `os/initfs.img` (živé, vývojový profil) a `os/instfs.img` (pro instalaci, bez `DEV_PROFILE` a `install-answers`). Instalovaný systém nikdy nedostane automatické přihlášení.
 - Chybný odkaz, kotva nebo neznámá značka stavu v docs je chyba sestavení (`docs_check.rs`).

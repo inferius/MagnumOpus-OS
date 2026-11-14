@@ -11,6 +11,11 @@
 //!    Cargo prekresli jen to, co se zmenilo (osrt, libos, patch).
 //! 3. Aplikace: bezny `cargo build --target <json>` se `--sysroot`
 //!    a linker skriptem `user/user-std.ld`.
+//!
+//! Kopie zdroju i sysroot jsou spolecne vsem behum xtask nad stejnym
+//! `target/`. Soubezne behy (`cargo xtask test` vickrat najednou) se proto
+//! stridaji pres zamek `target/std.lock` a sysroot se prepise jen pri zmene
+//! obsahu - jinak si behy mazaly adresar pod rukama (os error 145).
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -127,9 +132,20 @@ pub fn prepare_sources() -> Result<PathBuf> {
     Ok(library)
 }
 
+/// Vylucny zamek pripravy std (zdroje, sysroot, aplikace) pro soubezne
+/// behy xtask.
+fn lock_std() -> Result<std::fs::File> {
+    crate::lock_shared("std")
+}
+
 /// Sestavi sysroot std pro architekturu (inkrementalne); vraci cestu
 /// sysrootu pro `--sysroot`.
 pub fn build_sysroot(arch: &Arch) -> Result<PathBuf> {
+    let _lock = lock_std()?;
+    build_sysroot_locked(arch)
+}
+
+fn build_sysroot_locked(arch: &Arch) -> Result<PathBuf> {
     let library = prepare_sources()?;
     let target = target_name(arch);
     let mut cmd = Command::new(cargo());
@@ -173,28 +189,39 @@ pub fn build_sysroot(arch: &Arch) -> Result<PathBuf> {
     }
     let sysroot = sysroot_dir()?;
     let dir = sysroot.join("lib/rustlib").join(&target).join("lib");
-    if dir.exists() {
-        std::fs::remove_dir_all(&dir)?;
-    }
-    std::fs::create_dir_all(&dir)?;
     // Otisk obsahu knihoven: cargo zmenu sysrootu u aplikaci nesleduje,
     // proto jde otisk do jejich priznaku prekladu (`build_apps`).
     let mut h = DefaultHasher::new();
     libs.sort();
+    let mut data = Vec::new();
     for lib in &libs {
-        let data = std::fs::read(lib)?;
+        let bytes = std::fs::read(lib)?;
         lib.file_name().hash(&mut h);
-        data.hash(&mut h);
-        std::fs::write(dir.join(lib.file_name().unwrap()), data)?;
+        bytes.hash(&mut h);
+        data.push((lib.file_name().unwrap().to_owned(), bytes));
     }
-    std::fs::write(dir.join("fingerprint"), format!("{:016x}", h.finish()))?;
+    let fp = format!("{:016x}", h.finish());
+    // Stejny obsah = nic neprepisovat (soubory i casy zustanou).
+    if std::fs::read_to_string(dir.join("fingerprint")).is_ok_and(|s| s == fp) {
+        return Ok(sysroot);
+    }
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir)?;
+    }
+    std::fs::create_dir_all(&dir)?;
+    for (name, bytes) in data {
+        std::fs::write(dir.join(name), bytes)?;
+    }
+    std::fs::write(dir.join("fingerprint"), fp)?;
     Ok(sysroot)
 }
 
 /// Prelozi aplikace se std; vraci adresar s binarkami.
 pub fn build_apps(programs: &[&str], opts: &Options) -> Result<PathBuf> {
     let arch = opts.arch;
-    let sysroot = build_sysroot(arch)?;
+    // Zamek drzi i preklad aplikaci: cte sysroot, ktery jiny beh muze menit.
+    let _lock = lock_std()?;
+    let sysroot = build_sysroot_locked(arch)?;
     let script = workspace_root().join("user/user-std.ld");
     let fingerprint = std::fs::read_to_string(
         sysroot.join("lib/rustlib").join(target_name(arch)).join("lib/fingerprint"),

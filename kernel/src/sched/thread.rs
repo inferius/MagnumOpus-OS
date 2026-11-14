@@ -161,6 +161,20 @@ impl Thread {
         self.kill.store(true, Ordering::Release);
     }
 
+    /// Bezi vlakno na nekterem CPU? Pro toho, kdo prave zmenil stav vlakna
+    /// (pozadavek na ukonceni, trida) a chce ho prerusit, kdyz bezi.
+    ///
+    /// Cteni je atomicka operace RMW na `cpu_flags` (ne obycejne cteni):
+    /// CPU, ktere vlakno spousti, nastavuje ON_CPU take RMW a zmenu cte az
+    /// po nem. Operace RMW na jednom slove maji jedno poradi, takze bud
+    /// uvidime ON_CPU (a posleme IPI), nebo vlakno uvidi zmenu. Obycejne
+    /// cteni po zapisu jineho priznaku by pod QEMU TCG na x86 hostiteli
+    /// mohlo predbehnout zapis (`stlr` -> `ldar`) a IPI by se neposlalo
+    /// (ukonceni vlakna az pri pristim vstupu do jadra).
+    pub(super) fn on_cpu_after_update(&self) -> bool {
+        self.cpu_flags.fetch_or(0, Ordering::SeqCst) & cpu_flag::ON_CPU != 0
+    }
+
     /// Bezi vlakno jeste na nekterem CPU (`cpu_flag::ON_CPU`)?
     pub(super) fn on_cpu(&self) -> bool {
         self.cpu_flags.load(Ordering::Acquire) & cpu_flag::ON_CPU != 0
