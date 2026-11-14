@@ -162,7 +162,9 @@ kiosky, ...) právo „instalovat aplikace“ na **třech úrovních**
   [Aplikace](architektura.md#aplikace-instalace-aktualizace-odinstalace-návrh)).
   Role správy může **jinému účtu nastavit úroveň** (rodičovská kontrola:
   „Z katalogu“ nebo „Žádné“ + žádost rodiči); je to úkon správy počítače
-  ([Správa počítače](ucty.md#správa-počítače)).
+  ([Správa počítače](ucty.md#správa-počítače)). Rozšířený režim (časové
+  limity, filtr webu, přehled) je na stránce
+  [Rodičovská kontrola](rodicovska-kontrola.md).
 - **Vývojáři:** úroveň **Volně** + profil souborů **Volný**
   ([Profily](navrh-fs-v3.md#oprávnění-a-viditelnost)); tajemství a cizí
   účty zůstávají chráněné i tam.

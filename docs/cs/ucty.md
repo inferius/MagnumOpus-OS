@@ -493,7 +493,7 @@ politiky a sledování koncových bodů jsou popsané v
 [Správě organizace](sprava-organizace.md) **[navrženo]**, včetně práva
 [instalovat aplikace](sprava-organizace.md#právo-instalovat-aplikace)
 (Volně / Z katalogu / Žádné; role správy ho může nastavit jinému účtu,
-např. rodičovská kontrola). Osobní počítač tyto funkce nikdy nemá.
+např. [rodičovská kontrola](rodicovska-kontrola.md)). Osobní počítač tyto funkce nikdy nemá.
 
 ## Šifrování domova
 
