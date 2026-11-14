@@ -328,3 +328,268 @@ fn png_roundtrip_and_compression() {
     let _ = crate::png::decode(&bad);
     assert!(crate::png::decode(&png[..40]).is_none());
 }
+
+/// Pokryti zaobleneho obdelniku bez `f32` mimo rohy dava presne stejne
+/// hodnoty jako vzdalenost v `f32` pro kazdy pixel (snimky se nezmeni).
+#[test]
+fn round_rect_coverage_matches_float() {
+    use crate::shape::{coverage, round_rect_coverage, round_rect_distance};
+    for &(x, y, w, h) in &[(0, 0, 10, 10), (3, -2, 17, 9), (100, 700, 1264, 56), (5, 5, 1, 1), (-7, 4, 31, 30), (2, 3, 0, 5)] {
+        let r = Rect::new(x, y, w, h);
+        for radius in [0u32, 1, 3, 8, 12, 15, 40] {
+            let rad = radius.min(r.w / 2).min(r.h / 2);
+            for py in y - 2..y + h as i32 + 2 {
+                for px in x - 2..x + w as i32 + 2 {
+                    let f = if r.is_empty() { 0 } else { coverage(round_rect_distance(px as f32 + 0.5, py as f32 + 0.5, r, rad as f32)) };
+                    assert_eq!(round_rect_coverage(px, py, r, rad), f, "{r:?} r={rad} ({px},{py})");
+                }
+            }
+        }
+    }
+}
+
+/// Puvodni rozmazani v `f32` jako reference celociselneho.
+mod blur_ref {
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    use crate::Rect;
+    use crate::shadow::box_sizes;
+
+    pub(super) fn blurred_f32(src: &[u32], stride: u32, area: Rect, sigma: f32) -> Vec<u32> {
+        let (w, h) = (area.w as usize, area.h as usize);
+        if w == 0 || h == 0 {
+            return Vec::new();
+        }
+        let (hw, hh) = (w.div_ceil(2), h.div_ceil(2));
+        // Polovicni rozliseni: prumer 2x2, ctyri kanaly v f32.
+        let mut ch = vec![[0f32; 4]; hw * hh];
+        for y in 0..hh {
+            for x in 0..hw {
+                let mut acc = [0f32; 4];
+                let mut n = 0.0;
+                for dy in 0..2 {
+                    for dx in 0..2 {
+                        let (sx, sy) = (2 * x + dx, 2 * y + dy);
+                        if sx >= w || sy >= h {
+                            continue;
+                        }
+                        let p = src[(area.y as usize + sy) * stride as usize + area.x as usize + sx];
+                        for (k, a) in acc.iter_mut().enumerate() {
+                            *a += (p >> (24 - 8 * k) & 0xFF) as f32;
+                        }
+                        n += 1.0;
+                    }
+                }
+                ch[y * hw + x] = acc.map(|v| v / n);
+            }
+        }
+        for bw in box_sizes((sigma / 2.0).max(0.5)) {
+            box_pass_f32(&mut ch, hw, hh, bw, true);
+            box_pass_f32(&mut ch, hw, hh, bw, false);
+        }
+        // Zpet do plneho rozliseni (bilinearne).
+        let mut out = Vec::with_capacity(w * h);
+        for y in 0..h {
+            let fy = (y as f32 - 0.5) / 2.0;
+            let y0 = (fy.max(0.0) as usize).min(hh - 1);
+            let y1 = (y0 + 1).min(hh - 1);
+            let ty = (fy - y0 as f32).clamp(0.0, 1.0);
+            for x in 0..w {
+                let fx = (x as f32 - 0.5) / 2.0;
+                let x0 = (fx.max(0.0) as usize).min(hw - 1);
+                let x1 = (x0 + 1).min(hw - 1);
+                let tx = (fx - x0 as f32).clamp(0.0, 1.0);
+                let (a, b, c, d) = (ch[y0 * hw + x0], ch[y0 * hw + x1], ch[y1 * hw + x0], ch[y1 * hw + x1]);
+                let mut px = 0u32;
+                for k in 0..4 {
+                    let top = a[k] + (b[k] - a[k]) * tx;
+                    let bot = c[k] + (d[k] - c[k]) * tx;
+                    let v = (top + (bot - top) * ty + 0.5).clamp(0.0, 255.0) as u32;
+                    px |= v << (24 - 8 * k);
+                }
+                out.push(px);
+            }
+        }
+        out
+    }
+    
+    /// Krabickovy filtr sirky `bw` po radcich (`rows`) nebo sloupcich, okraje
+    /// prodlouzene.
+    fn box_pass_f32(a: &mut [[f32; 4]], w: usize, h: usize, bw: u32, rows: bool) {
+        let r = (bw / 2) as isize;
+        let (n, lines) = if rows { (w, h) } else { (h, w) };
+        let mut line = vec![[0f32; 4]; n];
+        let inv = 1.0 / bw as f32;
+        for l in 0..lines {
+            let idx = |i: usize| if rows { l * w + i } else { i * w + l };
+            for (i, v) in line.iter_mut().enumerate() {
+                *v = a[idx(i)];
+            }
+            let at = |i: isize| line[i.clamp(0, n as isize - 1) as usize];
+            let mut acc = [0f32; 4];
+            for i in -r..=r {
+                let v = at(i);
+                for k in 0..4 {
+                    acc[k] += v[k];
+                }
+            }
+            for i in 0..n as isize {
+                a[idx(i as usize)] = acc.map(|v| v * inv);
+                let (add, sub) = (at(i + r + 1), at(i - r));
+                for k in 0..4 {
+                    acc[k] += add[k] - sub[k];
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn blur_int_matches_float() {
+    let (w, h) = (97u32, 61u32);
+    let mut src = alloc::vec![0u32; (w * h) as usize];
+    let mut s = 12345u32;
+    for (i, p) in src.iter_mut().enumerate() {
+        s = s.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+        // Nahodne pruhledne pixely (premultiplied) a ostre hrany.
+        let a = if i % 7 == 0 { 255 } else { s >> 24 };
+        let c = |sh: u32| ((s >> sh) & 0xFF) * a / 255;
+        *p = a << 24 | c(16) << 16 | c(8) << 8 | c(0);
+    }
+    for (area, sigma) in [(Rect::new(0, 0, w, h), 16.0f32), (Rect::new(3, 5, 40, 17), 4.0), (Rect::new(10, 10, 1, 1), 16.0), (Rect::new(0, 0, w, h), 1.0)] {
+        let a = crate::blur::blurred_region(&src, w, area, sigma);
+        let b = blur_ref::blurred_f32(&src, w, area, sigma);
+        assert_eq!(a.len(), b.len());
+        for (i, (x, y)) in a.iter().zip(&b).enumerate() {
+            for sh in [24, 16, 8, 0] {
+                let d = ((x >> sh) & 0xFF).abs_diff((y >> sh) & 0xFF);
+                assert!(d <= 1, "{area:?} pixel {i}: {x:08x} vs {y:08x}");
+            }
+        }
+    }
+}
+
+/// Puvodni plocha s body mrizky v `f32` jako reference celociselne.
+mod backdrop_ref {
+    use alloc::vec::Vec;
+
+    use crate::backdrop::Radial;
+
+    const STEP: u32 = 4;
+    const BAYER_I: [[i32; 4]; 4] = {
+        const B: [[i32; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+        let mut o = [[0i32; 4]; 4];
+        let mut y = 0;
+        while y < 4 {
+            let mut x = 0;
+            while x < 4 {
+                o[y][x] = (B[y][x] * 2 + 1) * 128;
+                x += 1;
+            }
+            y += 1;
+        }
+        o
+    };
+
+    pub(super) fn render_f32(w: u32, h: u32, base: u32, layers: &[Radial]) -> Vec<u32> {
+        let (wf, hf) = (w as f32, h as f32);
+        // Pro kazdy prechod: stred v px a delka paprsku na konec.
+        let geo: Vec<(f32, f32, f32, [f32; 4])> = layers
+            .iter()
+            .map(|l| {
+                let (cx, cy) = (l.cx * wf, l.cy * hf);
+                let fx = cx.max(wf - cx);
+                let fy = cy.max(hf - cy);
+                let far = crate::sqrtf(fx * fx + fy * fy);
+                let c = l.color;
+                let ch = [(c >> 24 & 0xFF) as f32, (c >> 16 & 0xFF) as f32, (c >> 8 & 0xFF) as f32, (c & 0xFF) as f32];
+                (cx, cy, (far * l.stop).max(1.0), ch)
+            })
+            .collect();
+        let b = [255.0f32, (base >> 16 & 0xFF) as f32, (base >> 8 & 0xFF) as f32, (base & 0xFF) as f32];
+        // Presna barva (premultiplied, float) v bode.
+        let exact = |x: f32, y: f32| -> [f32; 4] {
+            let mut p = b;
+            for &(cx, cy, len, col) in geo.iter().rev() {
+                let (dx, dy) = (x - cx, y - cy);
+                let t = sqrt2(dx * dx + dy * dy) / len;
+                if t >= 1.0 {
+                    continue;
+                }
+                let k = 1.0 - t;
+                // src-over: s*k + d*(1 - a*k)
+                let inv = 1.0 - col[0] / 255.0 * k;
+                for i in 0..4 {
+                    p[i] = col[i] * k + p[i] * inv;
+                }
+            }
+            p
+        };
+        let (gw, gh) = (w / STEP + 2, h / STEP + 2);
+        // Body mrizky presne (float), pak uz jen cela cisla: programy bez FPU
+        // (x86_64 bez SSE) by float interpolaci kazdeho pixelu pocitaly
+        // stovky ms az sekundy. Kanal v mrizce je v 1/256 urovne.
+        let mut grid: Vec<[i32; 3]> = Vec::with_capacity((gw * gh) as usize);
+        for gy in 0..gh {
+            for gx in 0..gw {
+                let p = exact((gx * STEP) as f32 + 0.5, (gy * STEP) as f32 + 0.5);
+                grid.push([(p[1] * 256.0 + 0.5) as i32, (p[2] * 256.0 + 0.5) as i32, (p[3] * 256.0 + 0.5) as i32]);
+            }
+        }
+        // Bilinearni vahy (soucet STEP * STEP = 16) a rozptyl ve stejnych
+        // jednotkach (1/4096 urovne): (B + 0,5) / 16 urovne.
+        const S: i32 = STEP as i32;
+        let mut out = Vec::with_capacity((w as usize) * (h as usize));
+        for y in 0..h {
+            let (gy, fy) = (y / STEP, (y % STEP) as i32);
+            let row = (gy * gw) as usize;
+            let brow = &BAYER_I[(y & 3) as usize];
+            for x in 0..w {
+                let (gx, fx) = (x / STEP, (x % STEP) as i32);
+                let i = row + gx as usize;
+                let (a, bb, c, d) = (&grid[i], &grid[i + 1], &grid[i + gw as usize], &grid[i + gw as usize + 1]);
+                let (wa, wb, wc, wd) = ((S - fx) * (S - fy), fx * (S - fy), (S - fx) * fy, fx * fy);
+                let dither = brow[(x & 3) as usize];
+                let mut px = 0xFF00_0000u32;
+                for (k, sh) in [(0usize, 16u32), (1, 8), (2, 0)] {
+                    let v = (a[k] * wa + bb[k] * wb + c[k] * wc + d[k] * wd + dither) >> 12;
+                    px |= (v.clamp(0, 255) as u32) << sh;
+                }
+                out.push(px);
+            }
+        }
+        out
+    }
+    
+    /// Odmocnina pro body mrizky: odhad z exponentu a dva kroky Newtonovy
+    /// metody (relativni chyba pod 1e-6; `crate::sqrtf` dela ctyri kroky,
+    /// v programech bez FPU je kazde deleni drahe).
+    fn sqrt2(x: f32) -> f32 {
+        if !(x > 0.0) || !x.is_finite() {
+            return 0.0;
+        }
+        let mut y = f32::from_bits((x.to_bits() >> 1) + 0x1FBB_4F2E);
+        y = 0.5 * (y + x / y);
+        0.5 * (y + x / y)
+    }
+}
+
+#[test]
+fn backdrop_int_matches_float() {
+    let layers = [
+        backdrop::Radial { cx: 0.18, cy: 0.22, stop: 0.52, color: 0xCC33_6699 },
+        backdrop::Radial { cx: 0.82, cy: 0.72, stop: 0.56, color: 0x8040_2010 },
+    ];
+    for (w, h) in [(1280u32, 800u32), (333, 197)] {
+        let a = backdrop::render(w, h, 0xFFF4_F1EC, &layers);
+        let b = backdrop_ref::render_f32(w, h, 0xFFF4_F1EC, &layers);
+        let mut worst = 0;
+        for (x, y) in a.iter().zip(&b) {
+            for sh in [16, 8, 0] {
+                worst = worst.max(((x >> sh) & 0xFF).abs_diff((y >> sh) & 0xFF));
+            }
+        }
+        assert!(worst <= 1, "{w}x{h}: rozdil {worst} urovni");
+    }
+}

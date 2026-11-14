@@ -510,16 +510,61 @@ test `gpu_list_matches_cpu_frame` dál porovnává snímek pixel po pixelu.
   (`[size]`, `[opacity]`) a kód je čte odtud.
 
 **Cena snímku na CPU:** `compd` píše do logu čas skládání celé obrazovky
-a po 300 snímcích průměr a maximum (`compd: snimek cele obrazovky ...`).
+s rozpadem po částech (`libs/comp/src/prof.rs`) a po 300 snímcích průměr
+a maximum:
 
-| Kde | Celá obrazovka | Poznámka |
-|---|---|---|
-| hostitel, 800x600 (test `look_snapshots`) | 3,5 ms, první 11 ms | první s výpočtem plochy, stínů a rozmazání |
-| hostitel, 1280x800 (test `bench_frame`, revize 9472b51) | debug 4,8 ms, release 4,0 ms | plocha 0,1 ms, horní vrstva (lišta, stíny, kurzor) ~2 ms; comp, gfx a ui mají i v debug opt-level 2 |
-| QEMU na Windows (emulace CPU), 1280x800 | 0,5-1,8 s | emulace bez akcelerace je ~100x pomalejší; běžné snímky jsou jen poškozené oblasti |
-| QEMU na Windows s `--accel whpx`, 1280x800 (revize 9472b51) | 29-175 ms | sady `vstup,gui` projdou; rozdíl proti hostiteli dělá virtualizace, ne kód |
+```
+compd: snimek cele obrazovky 1280x800: 5820 us (cpu; plocha 279 us, stiny 1359 us,
+okna 1479 us, rozmazani listy 0 us, nad okny 2667 us, z toho lista 2451 us, z toho dialog 0 us)
+```
+
+**Programy jsou bez FPU** (soft-float, [architektura.md](architektura.md)):
+každá operace `f32` je volání funkce. Na hostiteli (s FPU) to vidět není,
+ve WHPX (rychlost blízká HW) a v emulaci ano. Proto se v `gfx` na pixel
+počítá jen celočíselně **[ověřeno v QEMU]**:
+
+- zaoblené tvary počítají vzdálenost v `f32` jen v rohových čtvercích
+  (`shape::round_rect_coverage`; jinde je pokrytí přesně 0 nebo 255, test
+  `round_rect_coverage_matches_float` hlídá stejné hodnoty),
+- rozmazání pod lištou je v pevné řádové čárce 8.8 (`blur.rs`, nejvýš
+  ±1 úroveň proti `f32`, test `blur_int_matches_float`),
+- body mřížky plochy jsou celočíselné (`backdrop.rs`, test
+  `backdrop_int_matches_float`).
+
+**Vynechání zakrytých oblastí** **[ověřeno v QEMU]**: tělo okna je
+neprůhledné (výplň `surface` pod obsahem), takže pod jádrem okna (bez
+zaoblených rohů) se plocha ani nižší okna nekreslí
+(`Comp::visible_parts`). Test `culling_keeps_pixels` porovná snímek
+s kreslením všeho odspodu nahoru pixel po pixelu. Stín lišty se nekreslí
+pod jejím tělem, které celé překryje neprůhledné rozmazané pozadí.
+
+Měřeno sadou `gui` (16 snímků celé obrazovky 1280x800 během testu:
+start, dialogy, motivy, okna, restart kompozitoru), před = revize
+3e5f791, po = 170a035:
+
+| Kde | Před (min / medián / max) | Po (min / medián / max) | Poznámka |
+|---|---|---|---|
+| QEMU na Windows s `--accel whpx`, release | 40 / 96 / 205 ms | 5,8 / 18 / 116 ms | běžný snímek plochy s okny 40 ms -> 6-15 ms (rozpočet 16 ms); lišta 36 ms -> 2,5 ms (`3e5f791` -> `170a035`) |
+| QEMU na Windows (emulace TCG), debug | 470 / 1246 / 2465 ms | 78 / 280 / 508 ms | test vzhledu 57 s -> 29 s, test Souborů 170 s -> 63 s (`3e5f791` -> `170a035`) |
+| hostitel, test `bench_frame` | debug 4,9 ms, release 3,9 ms | debug 5,2 ms, release 3,1 ms | hostitel má FPU, soft-float tu nevadil (`3e5f791` -> `170a035`) |
+| hostitel, 800x600 (test `look_snapshots`) | 3,5 ms, první 11 ms | - | první s výpočtem plochy, stínů a rozmazání |
 
 Měření na hostiteli: `cargo test -p comp [--release] bench_frame -- --ignored --nocapture`.
+V QEMU: `cargo xtask test --only gui [--release] [--accel whpx]` a řádky
+`compd: snimek cele obrazovky` v `target/serial-test-*.log`.
+
+⚠️ **Co je pořád nad rozpočtem 16 ms** (WHPX, release, revize `170a035`):
+
+- otevření systémového dialogu 21-50 ms (`170a035`): ztlumení a mezibuffer přes celou obrazovku, zalamování textu se šířkami v `f32`,
+- změna motivu 12-24 ms (`170a035`): nový obraz plochy,
+- první snímky po startu nebo restartu kompozitoru 30-116 ms (`170a035`): glyfy a ikony se rasterizují v `f32` do mezipaměti.
+
+Kopie do zadního bufferu se neměří v `compd`: virtio-gpu i `fbdisplay`
+kopírují jen poškozené obdélníky a jednou, takže stáří bufferu
+([rozhrani-zarizeni.md](rozhrani-zarizeni.md#displej-bez-zbytečné-kopie))
+tu nic neušetří. Největší zbývající páka je překládat programy s SSE/NEON
+(jádro stav FPU už ukládá); to je rozhodnutí milníku jazyků, ne
+kompozitoru.
 
 Kompozitor se proto při připojení displeje nejdřív ukáže jen barvou
 pozadí a celý snímek složí v dalším taktu (start nečeká na skládání).

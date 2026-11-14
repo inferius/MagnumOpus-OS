@@ -532,17 +532,63 @@ dialog, cursor) goes through a scratch buffer on the CPU too. So the
   dialog width, 14 px icons, the bar mark) are now in the tokens
   (`[size]`, `[opacity]`) and the code reads them from there.
 
-**CPU frame cost:** `compd` logs the full-screen compose time and, every
-300 frames, the average and maximum (`compd: snimek cele obrazovky ...`).
+**CPU frame cost:** `compd` logs the full-screen compose time with a
+per-part breakdown (`libs/comp/src/prof.rs`) and, every 300 frames, the
+average and maximum:
 
-| Where | Full screen | Note |
-|---|---|---|
-| host, 800x600 (`look_snapshots` test) | 3.5 ms, first 11 ms | the first one computes the desktop, shadows and blur |
-| host, 1280x800 (`bench_frame` test, revision 9472b51) | debug 4.8 ms, release 4.0 ms | desktop 0.1 ms, top layer (bar, shadows, cursor) ~2 ms; comp, gfx and ui use opt-level 2 even in debug |
-| QEMU on Windows (CPU emulation), 1280x800 | 0.5-1.8 s | emulation without acceleration is ~100x slower; regular frames are only damaged areas |
-| QEMU on Windows with `--accel whpx`, 1280x800 (revision 9472b51) | 29-175 ms | the `vstup,gui` suites pass; the gap to the host comes from virtualization, not the code |
+```
+compd: snimek cele obrazovky 1280x800: 5820 us (cpu; plocha 279 us, stiny 1359 us,
+okna 1479 us, rozmazani listy 0 us, nad okny 2667 us, z toho lista 2451 us, z toho dialog 0 us)
+```
+
+**Programs have no FPU** (soft-float, [architecture.md](architecture.md)):
+every `f32` operation is a function call. That does not show on the host
+(which has an FPU) but it does in WHPX (close to hardware speed) and in
+emulation. So `gfx` computes per pixel with integers only **[verified in QEMU]**:
+
+- rounded shapes compute the `f32` distance only in the corner squares
+  (`shape::round_rect_coverage`; elsewhere the coverage is exactly 0 or
+  255, the `round_rect_coverage_matches_float` test checks equal values),
+- the blur under the bar is in 8.8 fixed point (`blur.rs`, at most ±1
+  level from `f32`, `blur_int_matches_float` test),
+- the desktop grid points are integer (`backdrop.rs`,
+  `backdrop_int_matches_float` test).
+
+**Skipping covered areas** **[verified in QEMU]**: a window body is opaque
+(the `surface` fill under the content), so under a window core (without
+the rounded corners) neither the desktop nor lower windows are drawn
+(`Comp::visible_parts`). The `culling_keeps_pixels` test compares the
+frame pixel by pixel with drawing everything bottom-up. The bar shadow is
+not drawn under the bar body, which the opaque blurred background fully
+covers.
+
+Measured with the `gui` suite (16 full-screen 1280x800 frames during the
+test: start, dialogs, themes, windows, compositor restart), before =
+revision 3e5f791, after = 170a035:
+
+| Where | Before (min / median / max) | After (min / median / max) | Note |
+|---|---|---|---|
+| QEMU on Windows with `--accel whpx`, release | 40 / 96 / 205 ms | 5.8 / 18 / 116 ms | a regular desktop frame with windows 40 ms -> 6-15 ms (budget 16 ms); bar 36 ms -> 2.5 ms (`3e5f791` -> `170a035`) |
+| QEMU on Windows (TCG emulation), debug | 470 / 1246 / 2465 ms | 78 / 280 / 508 ms | look test 57 s -> 29 s, Files test 170 s -> 63 s (`3e5f791` -> `170a035`) |
+| host, `bench_frame` test | debug 4.9 ms, release 3.9 ms | debug 5.2 ms, release 3.1 ms | the host has an FPU, soft-float did not matter here (`3e5f791` -> `170a035`) |
+| host, 800x600 (`look_snapshots` test) | 3.5 ms, first 11 ms | - | the first one computes the desktop, shadows and blur |
 
 Host measurement: `cargo test -p comp [--release] bench_frame -- --ignored --nocapture`.
+In QEMU: `cargo xtask test --only gui [--release] [--accel whpx]` and the
+`compd: snimek cele obrazovky` lines in `target/serial-test-*.log`.
+
+⚠️ **What is still over the 16 ms budget** (WHPX, release, revision `170a035`):
+
+- opening a system dialog 21-50 ms (`170a035`): full-screen dimming and scratch buffer, text wrapping with `f32` widths,
+- a theme change 12-24 ms (`170a035`): a new desktop image,
+- the first frames after a start or a compositor restart 30-116 ms (`170a035`): glyphs and icons are rasterized with `f32` into the cache.
+
+The copy into a back buffer is not measured in `compd`: virtio-gpu and
+`fbdisplay` copy only the damaged rectangles, once, so buffer age
+([device-interfaces.md](device-interfaces.md#display-without-a-needless-copy))
+saves nothing here. The biggest remaining lever is compiling programs
+with SSE/NEON (the kernel already saves the FPU state); that is a
+decision for the languages milestone, not the compositor.
 
 So on display attach the compositor first shows just the background
 color and composes the full frame on the next tick (start does not wait

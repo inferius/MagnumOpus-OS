@@ -56,34 +56,37 @@ pub fn render(w: u32, h: u32, base: u32, layers: &[Radial]) -> Vec<u32> {
             (cx, cy, (far * l.stop).max(1.0), ch)
         })
         .collect();
-    let b = [255.0f32, (base >> 16 & 0xFF) as f32, (base >> 8 & 0xFF) as f32, (base & 0xFF) as f32];
-    // Presna barva (premultiplied, float) v bode.
-    let exact = |x: f32, y: f32| -> [f32; 4] {
-        let mut p = b;
-        for &(cx, cy, len, col) in geo.iter().rev() {
-            let (dx, dy) = (x - cx, y - cy);
-            let t = sqrt2(dx * dx + dy * dy) / len;
-            if t >= 1.0 {
-                continue;
-            }
-            let k = 1.0 - t;
-            // src-over: s*k + d*(1 - a*k)
-            let inv = 1.0 - col[0] / 255.0 * k;
-            for i in 0..4 {
-                p[i] = col[i] * k + p[i] * inv;
-            }
-        }
-        p
-    };
     let (gw, gh) = (w / STEP + 2, h / STEP + 2);
-    // Body mrizky presne (float), pak uz jen cela cisla: programy bez FPU
-    // (x86_64 bez SSE) by float interpolaci kazdeho pixelu pocitaly
-    // stovky ms az sekundy. Kanal v mrizce je v 1/256 urovne.
+    // Body mrizky celociselne (programy bez FPU by `f32` v kazdem bode
+    // pocitaly stovky ms): souradnice v 1/16 px, `t` v 1/65536, kanal
+    // v 1/256 urovne. Proti vypoctu v `f32` nejvys o jednu uroven
+    // (test `backdrop_int_matches_float`).
+    let geo16: Vec<(i64, i64, u64, [i64; 4])> = geo
+        .iter()
+        .map(|&(cx, cy, len, ch)| ((cx * 16.0 + 0.5) as i64, (cy * 16.0 + 0.5) as i64, ((len * 16.0 + 0.5) as u64).max(1), ch.map(|v| v as i64)))
+        .collect();
+    let base_ch = [(base >> 16 & 0xFF) as i64 * 256, (base >> 8 & 0xFF) as i64 * 256, (base & 0xFF) as i64 * 256];
     let mut grid: Vec<[i32; 3]> = Vec::with_capacity((gw * gh) as usize);
     for gy in 0..gh {
         for gx in 0..gw {
-            let p = exact((gx * STEP) as f32 + 0.5, (gy * STEP) as f32 + 0.5);
-            grid.push([(p[1] * 256.0 + 0.5) as i32, (p[2] * 256.0 + 0.5) as i32, (p[3] * 256.0 + 0.5) as i32]);
+            // Stred pixelu (`* STEP + 0,5`) v 1/16 px.
+            let (x16, y16) = ((gx * STEP) as i64 * 16 + 8, (gy * STEP) as i64 * 16 + 8);
+            let mut p = base_ch;
+            for &(cx, cy, len, col) in geo16.iter().rev() {
+                let (dx, dy) = (x16 - cx, y16 - cy);
+                let d = isqrt((dx * dx + dy * dy) as u64);
+                if d >= len {
+                    continue;
+                }
+                // k = 1 - d / len (1/65536).
+                let k = 65536 - (d * 65536 / len) as i64;
+                // src-over: s*k + d*(1 - a*k)
+                let inv = 65536 - col[0] * k / 255;
+                for i in 0..3 {
+                    p[i] = (col[i + 1] * 256 * k + p[i] * inv + 32768) >> 16;
+                }
+            }
+            grid.push([p[0] as i32, p[1] as i32, p[2] as i32]);
         }
     }
     // Bilinearni vahy (soucet STEP * STEP = 16) a rozptyl ve stejnych
@@ -111,14 +114,22 @@ pub fn render(w: u32, h: u32, base: u32, layers: &[Radial]) -> Vec<u32> {
     out
 }
 
-/// Odmocnina pro body mrizky: odhad z exponentu a dva kroky Newtonovy
-/// metody (relativni chyba pod 1e-6; `crate::sqrtf` dela ctyri kroky,
-/// v programech bez FPU je kazde deleni drahe).
-fn sqrt2(x: f32) -> f32 {
-    if !(x > 0.0) || !x.is_finite() {
-        return 0.0;
+/// Cela cast odmocniny (bit po bitu, bez FPU).
+fn isqrt(n: u64) -> u64 {
+    let mut x = n;
+    let mut r = 0u64;
+    let mut bit = 1u64 << 62;
+    while bit > n {
+        bit >>= 2;
     }
-    let mut y = f32::from_bits((x.to_bits() >> 1) + 0x1FBB_4F2E);
-    y = 0.5 * (y + x / y);
-    0.5 * (y + x / y)
+    while bit != 0 {
+        if x >= r + bit {
+            x -= r + bit;
+            r = (r >> 1) + bit;
+        } else {
+            r >>= 1;
+        }
+        bit >>= 2;
+    }
+    r
 }

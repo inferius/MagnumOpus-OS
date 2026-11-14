@@ -189,7 +189,12 @@ impl Service {
                 c.resize(w, h, now);
                 c
             }
-            None => Comp::new(w, h, ui_fonts(), Box::new(token)),
+            None => {
+                let mut c = Comp::new(w, h, ui_fonts(), Box::new(token));
+                // Rozpad casu skladani do logu (cena: dve cteni hodin na cast).
+                c.prof.set_clock(Some(libos::time::now));
+                c
+            }
         };
         let mut comp = comp;
         // Pri pripojeni jen plna barva pozadi (rychly start i v emulaci;
