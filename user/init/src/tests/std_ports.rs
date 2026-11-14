@@ -110,7 +110,7 @@ fn http(s: &Startup) -> TestResult {
         "std-http",
         &[],
         &[base.as_str()],
-        vec![StartHandle::tagged(tag::NET, session.into_channel().into_handle())],
+        vec![StartHandle::tagged(tag::NET, session.into_channel().map_err(|e| format!("predani site: {e:?}"))?.into_handle())],
         Duration::from_secs(120),
     )?;
     run.expect("std-http", &["hello", "echo", "parallel"])

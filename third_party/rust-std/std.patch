@@ -1032,7 +1032,7 @@ new file mode 100644
 index 0000000..514403a
 --- /dev/null
 +++ b/std/src/sys/io/error/magnumopus.rs
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,58 @@
 +use crate::{fmt, io};
 +
 +/// MagnumOpus nema `errno`: chyby vraci kazde volani primo.

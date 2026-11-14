@@ -54,7 +54,7 @@ fn std_proc(s: &Startup) -> TestResult {
         &env,
         vec![
             StartHandle::tagged(tag::FS, own_fs.into_channel().into_handle()),
-            StartHandle::tagged(tag::NET, session.into_channel().into_handle()),
+            StartHandle::tagged(tag::NET, session.into_channel().map_err(|e| format!("predani site: {e:?}"))?.into_handle()),
             StartHandle::tagged(tag::LAUNCH, launch.into_handle()),
         ],
         Duration::from_secs(180),

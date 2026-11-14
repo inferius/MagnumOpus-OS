@@ -200,7 +200,7 @@ pub fn launch(d: &mut Launchd, r: &mut Reader, handles: Vec<Handle>) -> Result<V
             None => Some(ch),
             Some(None) => None,
             Some(Some(rule)) => Some(
-                Net::new(ch).restrict_with(rule).map_err(|e| fail(e, "zuzeni site podle manifestu"))?.into_channel(),
+                Net::new(ch).restrict_with(rule).map_err(|e| fail(e, "zuzeni site podle manifestu"))?.into_channel().map_err(|e| fail(e, "predani site podle manifestu"))?,
             ),
         };
         if let Some(ch) = ch {
