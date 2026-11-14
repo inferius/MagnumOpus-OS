@@ -314,6 +314,19 @@ O(n) in the threads of one class on a CPU, versus O(1) before.
 The latency maximum (~15 ms) matches one Background slice (12 ms) on TCG,
 where IPIs and the timer are delivered late; the median is below 1 ms.
 
+Under TCG the Realtime period lateness depends on how much time the host
+withholds from the vCPU. The test measures this itself: nothing in the
+guest preempts the Realtime thread during its work (300 µs per period), so
+gaps above 50 µs between clock reads are host time. The median bound is
+10 ms / (1 - host share), at most 100 ms. Measurement 2026-11-14 (3x x86_64
++ 1x aarch64 concurrently, 4 rounds): the host took 1-631 ‰, the median
+lateness stayed at 1.2-2.5 ms, and the maximum grew with the host share up
+to 30 ms. The one-off 28 ms median from the full suite therefore matches an
+overloaded host, not a Realtime scheduling bug. The stolen time is also
+charged to the Realtime budget (the kernel cannot tell it from running),
+and the thread then runs as Interactive until the replenishment; real
+hardware does not have this problem. **[verified in QEMU]**
+
 ## Known issues
 
 From the design review (2026-11-08), to be fixed in this order:

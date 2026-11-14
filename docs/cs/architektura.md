@@ -1297,4 +1297,5 @@ Co zatím funguje jednodušeji, než návrh popisuje (a proč to nevadí teď):
   ne ve vlastních vláknech.
 - **Mezi třídami QoS přísná priorita** (nižší třídy mohou hladovět).
 - **Paměť po ukončených vláknech** (zásobníky jádra) se používá znovu, ale
-  nevrací se.
+  nevrací se do volných rámců: zásobník (a rozpočet jobu) se uvolní hned po
+  konci vlákna a další vlákno dostane jeho slot i se stránkami.

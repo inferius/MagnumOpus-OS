@@ -71,6 +71,9 @@ pub struct PerCpu {
     /// Odlozeny presun predchoziho vlakna na jine CPU (index cile a stav
     /// ve fronte): provede se az v `finish_switch`, kdy vlakno uz nebezi.
     push: UnsafeCell<Option<(usize, schedcore::Ent)>>,
+    /// Predchozi vlakno skoncilo (`exit`, ne preempce v nem): jeho zasobnik
+    /// jadra uvolni `finish_switch`, az z nej CPU odejde.
+    exited: UnsafeCell<bool>,
     pub need_resched: AtomicBool,
     pub is_idle: AtomicBool,
     /// Trida bezicicho vlakna (`Qos as u8`, [`IDLE_CLASS`] = necinne).
@@ -132,6 +135,7 @@ impl PerCpu {
             idle: UnsafeCell::new(Some(idle)),
             prev: UnsafeCell::new(None),
             push: UnsafeCell::new(None),
+            exited: UnsafeCell::new(false),
             need_resched: AtomicBool::new(false),
             is_idle: AtomicBool::new(true),
             current_qos: AtomicU8::new(IDLE_CLASS),
@@ -216,6 +220,22 @@ impl PerCpu {
     pub unsafe fn take_push(&self) -> Option<(usize, schedcore::Ent)> {
         // SAFETY: predano volajicim.
         unsafe { (*self.push.get()).take() }
+    }
+
+    /// # Safety
+    ///
+    /// Volat jen na vlastnim CPU se zakazanymi prerusenimi.
+    pub unsafe fn set_exited(&self) {
+        // SAFETY: predano volajicim.
+        unsafe { *self.exited.get() = true };
+    }
+
+    /// # Safety
+    ///
+    /// Volat jen na vlastnim CPU se zakazanymi prerusenimi.
+    pub unsafe fn take_exited(&self) -> bool {
+        // SAFETY: predano volajicim.
+        unsafe { core::mem::take(&mut *self.exited.get()) }
     }
 }
 

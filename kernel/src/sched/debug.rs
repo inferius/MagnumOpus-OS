@@ -92,11 +92,13 @@ fn describe(t: &Thread) -> String {
     let mut s = String::new();
     let _ = write!(
         s,
-        "vlakno {}#{}: {st} on_cpu {} wake_pending {} last_cpu {} wait_seq {}",
+        "vlakno {}#{}: {st} on_cpu {} wake_pending {} user_gone {} zasobnik {} last_cpu {} wait_seq {}",
         t.name,
         t.id,
         t.on_cpu(),
         t.cpu_flags.load(Ordering::Relaxed) & cpu_flag::WAKE_PENDING != 0,
+        t.user_gone.load(Ordering::Relaxed),
+        t.has_kernel_stack(),
         t.last_cpu.load(Ordering::Relaxed),
         t.wait_seq(),
     );

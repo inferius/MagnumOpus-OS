@@ -21,11 +21,11 @@ pub fn create_user_thread(process: &Arc<Process>, name: &str) -> Result<Arc<Thre
     if !crate::mm::phys::user_room(crate::mm::KERNEL_STACK_SIZE / crate::arch::paging::PAGE_SIZE) {
         return Err(Error::NoMemory);
     }
-    // Vlakno a jeho zasobnik jadra plati job procesu.
-    let charge = process.job().charge(
-        crate::object::job::Pool::Kernel,
-        crate::object::job::object_cost::<Thread>() + crate::mm::KERNEL_STACK_SIZE,
-    )?;
+    // Vlakno a jeho zasobnik jadra plati job procesu, zvlast: zasobnik se
+    // vraci uz pri konci vlakna, objekt az se zahodi posledni handle.
+    let job = process.job();
+    let charge = job.charge(crate::object::job::Pool::Kernel, crate::object::job::object_cost::<Thread>())?;
+    let stack_charge = job.charge(crate::object::job::Pool::Kernel, crate::mm::KERNEL_STACK_SIZE)?;
     let stack = KernelStack::new().ok_or(Error::NoMemory)?;
     // SAFETY: zasobnik je novy a patri jen tomuto vlaknu.
     let ctx = unsafe { Context::new(stack.top(), thread_start) };
@@ -41,6 +41,7 @@ pub fn create_user_thread(process: &Arc<Process>, name: &str) -> Result<Arc<Thre
         Some(process.clone()),
     ));
     crate::object::KernelObject::core(&*t).set_charge(charge);
+    t.set_stack_charge(stack_charge);
     process.add_thread(&t)?;
     // Trida z `PROCESS_SET`. Realtime nad kapacitu: vlakno pobezi jako
     // Interactive (proces se nezastavi kvuli vycerpanemu Realtime).
@@ -85,6 +86,30 @@ pub fn start_user_thread(
         // jeho procesu a nastavil zasobnik jadra pro navrat z userspace.
         unsafe { arch::enter_user(entry, stack, arg0, arg1) }
     }));
+    enqueue(t.clone(), super::Enq::New);
+    Ok(())
+}
+
+/// Spusti vlakno procesu s funkci jadra `f` misto vstupu do userspace
+/// (testy jadra: zivot a konec vlakna procesu bez programu). Po `f` vlakno
+/// skonci beznym `exit`. `first` jako u [`start_user_thread`].
+pub fn start_user_thread_in_kernel(
+    t: &Arc<Thread>,
+    first: bool,
+    f: impl FnOnce() + Send + 'static,
+) -> Result<(), Error> {
+    let process = t.process.as_ref().ok_or(Error::WrongType)?;
+    if t.started
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Err(Error::BadState);
+    }
+    if let Err(e) = process.thread_starting(first) {
+        t.started.store(false, Ordering::Release);
+        return Err(e);
+    }
+    *t.entry.lock() = Some(Box::new(f));
     enqueue(t.clone(), super::Enq::New);
     Ok(())
 }

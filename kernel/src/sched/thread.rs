@@ -8,6 +8,7 @@ use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering}
 
 use crate::arch::context::Context;
 use crate::mm::KernelStack;
+use crate::object::job::Charge;
 use crate::object::process::Process;
 use crate::object::{KernelObject, ObjectCore, ObjectType, Rights, Signals};
 use crate::sync::SpinLock;
@@ -86,7 +87,14 @@ pub struct Thread {
     wait_seq: AtomicU64,
     pub(super) last_cpu: AtomicUsize,
     pub(super) context: UnsafeCell<Context>,
-    stack: Option<KernelStack>,
+    /// Vrchol zasobniku jadra (`None` = idle vlakno na zasobniku od startu).
+    /// Pevny i po uvolneni zasobniku - mrtve vlakno se uz nespusti.
+    stack_top: Option<u64>,
+    /// Zasobnik jadra a jeho strzeni z rozpoctu jobu. Uvolni se hned po
+    /// poslednim prepnuti pryc z mrtveho vlakna (`finish_switch`), ne az
+    /// se zahodi posledni odkaz (handle, fronta futexu): objekt vlakna se
+    /// signaly a kodem konce muze zit dlouho, 64 KiB zasobniku ne.
+    stack: SpinLock<Option<(KernelStack, Charge)>>,
     pub(super) entry: SpinLock<Option<Box<dyn FnOnce() + Send>>>,
     /// Proces, do ktereho vlakno patri (`None` = vlakno jadra).
     pub process: Option<Arc<Process>>,
@@ -138,7 +146,8 @@ impl Thread {
             wait_seq: AtomicU64::new(0),
             last_cpu: AtomicUsize::new(cpu),
             context: UnsafeCell::new(context),
-            stack,
+            stack_top: stack.as_ref().map(KernelStack::top),
+            stack: SpinLock::new(stack.map(|s| (s, Charge::none()))),
             entry: SpinLock::new(entry),
             process,
             kill: AtomicBool::new(false),
@@ -155,7 +164,27 @@ impl Thread {
 
     /// Vrchol zasobniku jadra (`None` u idle vlaken na zasobniku od startu).
     pub fn kernel_stack_top(&self) -> Option<u64> {
-        self.stack.as_ref().map(KernelStack::top)
+        self.stack_top
+    }
+
+    /// Strzeni rozpoctu jobu za zasobnik jadra (vrati se s uvolnenim
+    /// zasobniku, ne az se zrusi objekt vlakna).
+    pub(super) fn set_stack_charge(&self, charge: Charge) {
+        if let Some((_, c)) = &mut *self.stack.lock() {
+            *c = charge;
+        }
+    }
+
+    /// Ma vlakno jeste zasobnik jadra (pro testy)?
+    pub fn has_kernel_stack(&self) -> bool {
+        self.stack.lock().is_some()
+    }
+
+    /// Uvolni zasobnik jadra mrtveho vlakna. Volat jen, kdyz na nem uz
+    /// nic nebezi: vlakno je DEAD a jeho CPU dokoncilo prepnuti pryc.
+    pub(super) fn release_stack(&self) {
+        let stack = self.stack.lock().take();
+        drop(stack);
     }
 
     pub fn kill_requested(&self) -> bool {

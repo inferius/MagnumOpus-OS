@@ -457,7 +457,7 @@ Two budgets in bytes (`abi::job::pool`):
 
 | Budget | What is charged |
 |---|---|
-| `KERNEL` (0) - kernel memory | the process (structure + root page table), objects (event, channel, port, memory object, interrupt, resource, job), handle slots, port registrations (64 B), messages in channel queues (charged to the sender), mappings (record + upper estimate of page tables), threads (structure + 64 KiB kernel stack), page lists of memory objects |
+| `KERNEL` (0) - kernel memory | the process (structure + root page table), objects (event, channel, port, memory object, interrupt, resource, job), handle slots, port registrations (64 B), messages in channel queues (charged to the sender), mappings (record + upper estimate of page tables), threads (structure + 64 KiB kernel stack; the stack is returned right when the thread ends), page lists of memory objects |
 | `USER` (1) - user memory | pages of memory objects (`VMO_CREATE`, `VMO_CREATE_CONTIGUOUS`, DMA memory too) |
 
 - A charge is returned automatically when the thing holding it goes away.

@@ -446,7 +446,7 @@ Dva rozpočty v bajtech (`abi::job::pool`):
 
 | Rozpočet | Co se strhává |
 |---|---|
-| `KERNEL` (0) – paměť jádra | proces (struktura + kořenová tabulka stránek), objekty (event, kanál, port, objekt paměti, přerušení, prostředek, job), sloty handlů, registrace portů (64 B), zprávy ve frontách kanálů (strhne se odesílateli), mapování (záznam + horní odhad tabulek stránek), vlákna (struktura + 64 KiB zásobníku jádra), seznamy stránek objektů paměti |
+| `KERNEL` (0) – paměť jádra | proces (struktura + kořenová tabulka stránek), objekty (event, kanál, port, objekt paměti, přerušení, prostředek, job), sloty handlů, registrace portů (64 B), zprávy ve frontách kanálů (strhne se odesílateli), mapování (záznam + horní odhad tabulek stránek), vlákna (struktura + 64 KiB zásobníku jádra; zásobník se vrátí hned po konci vlákna), seznamy stránek objektů paměti |
 | `USER` (1) – uživatelská paměť | stránky objektů paměti (`VMO_CREATE`, `VMO_CREATE_CONTIGUOUS`, i paměť pro DMA) |
 
 - Strženo se vrací automaticky se zánikem věci, která ho drží.

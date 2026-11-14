@@ -8,13 +8,66 @@ use core::time::Duration;
 use super::join;
 use crate::arch;
 use crate::object::wait;
+use crate::mm::KERNEL_STACK_SIZE;
+use crate::object::event::Event;
+use crate::object::job::Job;
+use crate::object::Signals;
+use crate::object::process::Process;
 use crate::sched::{self, Qos};
 
 pub const TESTS: &[(&str, fn())] = &[
     ("cas: sleep 20 ms", sleep_timing),
     ("vlakna: 16 vlaken na vice CPU", threads_on_all_cpus),
     ("vlakna: preempce (vic vlaken nez CPU)", preemption),
+    ("vlakna: mrtve vlakno vrati zasobnik jadra a rozpocet jobu", dead_thread_frees_stack),
 ];
+
+/// Ceka, az CPU, na kterem vlakno skoncilo, dokonci prepnuti pryc z nej
+/// (signal TERMINATED prichazi uz pred poslednim `schedule`).
+fn wait_stack_released(t: &sched::Thread) {
+    let deadline = arch::now_ns() + 5_000_000_000;
+    while t.has_kernel_stack() {
+        assert!(arch::now_ns() < deadline, "vlakno {} po konci drzi zasobnik jadra", t.name);
+        wait::sleep(Duration::from_millis(1));
+    }
+}
+
+/// Zasobnik jadra (64 KiB) a jeho cast rozpoctu jobu se vraci hned po konci
+/// vlakna, i kdyz objekt vlakna (handle) zije dal; objekt se vrati az se
+/// zahodi posledni odkaz.
+fn dead_thread_frees_stack() {
+    let t = sched::spawn("kratke", Qos::Normal, || {});
+    join(&t, Duration::from_secs(5), "kratke");
+    wait_stack_released(&t);
+
+    // Prvni vlakno drzi proces nazivu (konec posledniho vlakna by uklidil
+    // i adresni prostor procesu a cisla rozpoctu by se smichala).
+    let job = Job::new_root();
+    let p = Process::new("test-zasobnik", job.clone()).unwrap();
+    let go = Event::new();
+    let holder = sched::create_user_thread(&p, "drzi").unwrap();
+    let g = go.clone();
+    sched::start_user_thread_in_kernel(&holder, true, move || {
+        let _ = wait::wait_one(&*g, Signals::SIGNALED, Some(wait::deadline_after(Duration::from_secs(10))));
+    })
+    .unwrap();
+
+    let before = job.info().kernel.used;
+    let th = sched::create_user_thread(&p, "zasobnik").unwrap();
+    let alive = job.info().kernel.used;
+    assert!(alive >= before + KERNEL_STACK_SIZE, "vlakno nestrhlo zasobnik: {before} -> {alive}");
+    sched::start_user_thread_in_kernel(&th, false, || {}).unwrap();
+    join(&th, Duration::from_secs(5), "zasobnik");
+    wait_stack_released(&th);
+    // Handle (`th`) drzi objekt vlakna: zpet je presne zasobnik.
+    assert_eq!(alive - job.info().kernel.used, KERNEL_STACK_SIZE);
+    drop(th);
+    assert_eq!(job.info().kernel.used, before, "objekt vlakna nevratil rozpocet");
+
+    go.signal();
+    join(&holder, Duration::from_secs(5), "drzi");
+    wait_stack_released(&holder);
+}
 
 fn sleep_timing() {
     let start = arch::now_ns();

@@ -1359,4 +1359,6 @@ fine for now):
 - **Shell background jobs run cooperatively** (when the shell is idle), not
   in their own threads.
 - **Strict priority between QoS classes** (lower classes can starve).
-- **Memory of finished threads** (kernel stacks) is reused but not returned.
+- **Memory of finished threads** (kernel stacks) is reused but not returned
+  to the free frames: the stack (and the job budget) is released right when
+  the thread ends and the next thread gets its slot including the pages.
