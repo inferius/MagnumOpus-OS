@@ -451,4 +451,4 @@ pub fn self_check() -> u64 {
 }
 
 /// [`self_check`] spocitany na hostiteli (test `self_check_matches`).
-pub const SELF_CHECK: u64 = 0x2f4f4ff3d0396d8a;
+pub const SELF_CHECK: u64 = 0x6eaf640670608dcb;

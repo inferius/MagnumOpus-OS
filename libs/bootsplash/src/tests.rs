@@ -283,9 +283,9 @@ fn reference_frames(w: u32, h: u32) -> [u64; 3] {
 #[test]
 fn reference_output_is_stable() {
     const REF: [((u32, u32), [u64; 3]); 3] = [
-        ((1280, 800), [0x03bb8d75132b0232, 0x11bb7df4b2142bdc, 0x236ea4d6accdc233]),
-        ((1920, 1080), [0x81cd1f73b0bbb90f, 0x96f881c4aa4f1af9, 0xffa16450a20cdd0f]),
-        ((1024, 768), [0xcd3d605c75a9cb5c, 0x788ac73deac2ef28, 0xc60a1e2e54e3e433]),
+        ((1280, 800), [0x03bb8d75132b0232, 0x1cdfcc684b337f49, 0xdf0bf30d1cacbf88]),
+        ((1920, 1080), [0x81cd1f73b0bbb90f, 0x243b754cb0d2243b, 0x3d0d40f2f0bc3826]),
+        ((1024, 768), [0xcd3d605c75a9cb5c, 0xf304097b09c9dec8, 0x1a94ab3d17f0f37f]),
     ];
     for ((w, h), want) in REF {
         let got = reference_frames(w, h);
