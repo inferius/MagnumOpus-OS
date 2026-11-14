@@ -35,8 +35,8 @@ pub use percpu::{MAX_CPUS, all_cpus, cpu_count, this_cpu, try_this_cpu};
 pub use qos::{QosLoan, boost, boost_current, ipc_class, rt_admitted, set_thread_qos, thread_info};
 pub use thread::{Qos, Thread};
 pub use user::{
-    create_user_thread, on_return_to_user, request_kill, start_user_thread, user_fault,
-    user_page_fault,
+    create_user_thread, on_return_to_user, request_kill, start_user_thread, start_user_thread_in_kernel,
+    user_fault, user_page_fault,
 };
 
 use crate::arch::context::{self, Context, ThreadContext};
@@ -372,8 +372,12 @@ fn switch_away(reason: Reason) {
             }
         }
         _ => {
-            // DEAD: z fronty pryc.
+            // DEAD (dobrovolne z `exit`): z fronty pryc a po prepnuti uvolnit
+            // zasobnik jadra. Preempce DEAD vlakna (pred jeho `schedule`)
+            // jde vetvi `Preempt` a zasobnik zustane - vlakno jeste pobezi.
             rq.take_curr(now);
+            // SAFETY: vlastni CPU, preruseni zakazana.
+            unsafe { cpu.set_exited() };
         }
     }
 
@@ -529,6 +533,8 @@ fn finish_switch() {
     let prev = unsafe { cpu.take_prev() };
     // SAFETY: jako vyse.
     let push = unsafe { cpu.take_push() };
+    // SAFETY: jako vyse.
+    let exited = unsafe { cpu.take_exited() };
     if let Some(prev) = prev {
         // Shodi ON_CPU a zaroven vezme pripadne probuzeni (jedna operace,
         // viz `wake`).
@@ -537,6 +543,13 @@ fn finish_switch() {
         if let Some((target, ent)) = push {
             let target = percpu::cpu(target).unwrap_or(cpu);
             enqueue_on(target, prev.clone(), ent, arch::now_ns(), false);
+        }
+        // Mrtve vlakno: kontext uz je ulozeny a nikdy se nenahraje, na
+        // zasobniku nic nebezi (bezime na zasobniku `next`). Zasobnik
+        // a jeho cast rozpoctu jobu jdou zpet hned; objekt vlakna (signaly,
+        // kod konce) zije dal, dokud ho nekdo drzi.
+        if exited {
+            prev.release_stack();
         }
         // Probuzeni behem prepnuti (`wake`).
         if flags & cpu_flag::WAKE_PENDING != 0 {
