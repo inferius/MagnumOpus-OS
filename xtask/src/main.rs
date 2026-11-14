@@ -40,6 +40,7 @@ mod powertest;
 mod qmp;
 mod symbolize;
 mod testdisks;
+mod unicode;
 mod usb;
 mod vmware;
 mod venus;
@@ -79,6 +80,9 @@ prikazy:
            zazalohuje a nahradi <slozka>/magnumopus.vmdk; --dir <slozka>
            nebo MO_VMWARE_DIR; bezici VM odmitne
   docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
+  unicode-tables
+           tabulky libs/uniprop (tridy znaku, velikost pismen, sirka)
+           z Unicode Character Database (HTTPS + SHA-256)
   new-driver <jmeno> --pci <vendor:device>
            kostra ovladace na driverkitu: kod, manifest, model a test
            v simulaci, stranka dokumentace cs+en (docs/cs/ovladace.md)
@@ -401,6 +405,7 @@ fn run_cli() -> Result<()> {
             let _lock = stdsys::lock_std()?;
             stdsys::build_libc_so_locked(opts.arch, &opts).map(|p| println!("xtask: libc.so {}", p.display()))
         }
+        Some("unicode-tables") => unicode::generate(),
         Some("image") => build(&opts).and_then(|a| image_for(&a, &opts)).map(|_| ()),
         Some("run") => {
             // Okno QEMU ukazuje prvni grafickou kartu (VGA, framebuffer
@@ -676,6 +681,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "launchproto",
             "--package",
             "cstd-core",
+            "--package",
+            "uniprop",
             "--package",
             "cstd",
             "--package",

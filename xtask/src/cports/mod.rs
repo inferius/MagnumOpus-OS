@@ -19,7 +19,7 @@
 
 mod cmake;
 mod configure;
-mod fetch;
+pub(crate) mod fetch;
 mod sources;
 mod tools;
 
