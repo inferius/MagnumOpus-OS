@@ -244,3 +244,29 @@ fn exception_frame_layout() {
     assert!(A64_FP >= GENERAL + A64General::SIZE && A64_FP % 64 == 0);
     assert!(A64_SIZE >= A64_FP + A64_FP_SIZE && A64_SIZE % 64 == 0);
 }
+
+/// Dlouha zprava DEBUG_LOG se deli (jadro by ji odmitla celou): kusy
+/// nejvys `max` bajtu, hranice znaku, prednostne za koncem radku.
+#[test]
+fn debug_log_chunks_split_long_text() {
+    use crate::syscall::debug_log_chunks;
+    fn parts(t: &str, m: usize) -> std::vec::Vec<&str> {
+        debug_log_chunks(t, m).collect()
+    }
+    assert_eq!(parts("", 8), std::vec::Vec::<&str>::new());
+    assert_eq!(parts("kratke", 8), ["kratke"]);
+    assert_eq!(parts("abcdefghij", 4), ["abcd", "efgh", "ij"]);
+    assert_eq!(parts("ab\ncdefgh", 6), ["ab\n", "cdefgh"]);
+    // Viceajtove znaky se nerozpuli.
+    let t = "čččč";
+    for p in parts(t, 3) {
+        assert!(p.len() <= 3 && !p.is_empty());
+    }
+    assert_eq!(parts(t, 3).concat(), t);
+    // Mez mensi nez znak: aspon cely znak.
+    assert_eq!(parts("čč", 1), ["č", "č"]);
+    let long: std::string::String = (0..3000).map(|i| if i % 70 == 69 { '\n' } else { 'x' }).collect();
+    let ps = parts(&long, crate::syscall::DEBUG_LOG_MAX);
+    assert!(ps.len() >= 3 && ps.iter().all(|p| p.len() <= crate::syscall::DEBUG_LOG_MAX));
+    assert_eq!(ps.concat(), long);
+}
