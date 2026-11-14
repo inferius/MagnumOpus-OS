@@ -82,7 +82,7 @@ pub enum Error {
     /// vzdal.
     ServiceUnavailable = -34,
     /// Mistni adresa nepatri zadnemu rozhrani (naslouchani, socket UDP).
-    AddressNotAvailable = -35,
+    AddressNotAvailable = -36,
 }
 
 /// Vsechny chyby (pro dokumentaci a testy).

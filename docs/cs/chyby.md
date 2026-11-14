@@ -50,7 +50,7 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -32 | `ADDRESS_IN_USE` | adresa nebo port už se používá |
 | -33 | `SERVICE_RESTARTED` | služba se během požadavku restartovala, nevíme, jestli ho provedla |
 | -34 | `SERVICE_UNAVAILABLE` | služba neběží (restart se nepovedl do lhůty nebo ho supervisor vzdal) |
-| -35 | `ADDRESS_NOT_AVAILABLE` | místní adresa nepatří žádnému rozhraní |
+| -36 | `ADDRESS_NOT_AVAILABLE` | místní adresa nepatří žádnému rozhraní |
 
 ## Podrobně
 
@@ -434,7 +434,7 @@ kanálu; odpověď `RECONNECT` na lístku.
 důvod), a zkusit to později: další volání zkusí obnovu znovu. Dávková
 úloha si může nastavit delší čekání (`Conn::set_wait`).
 
-### `ADDRESS_NOT_AVAILABLE` (-35)
+### `ADDRESS_NOT_AVAILABLE` (-36)
 
 **Význam:** místní adresa naslouchání nebo socketu UDP nepatří žádnému
 rozhraní služby sítě.
