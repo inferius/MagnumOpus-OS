@@ -21,8 +21,12 @@
 //!
 //! **Piny:** pocitadlo na kazdy ramec RAM (`pin`/`unpin`). Pripnuty ramec
 //! pouziva zarizeni (DMA): nesmi se presunout, nahradit kopii (CoW) ani
-//! vystehovat. Dnes pripina jen souvisla pamet pro DMA po celou dobu zivota
-//! objektu; pouziji ho CoW a pager.
+//! vystehovat. Pripina souvisla pamet pro DMA po celou dobu zivota objektu
+//! a `VMO_PHYS_ADDR`; respektuje ho CoW (pripnuty ramec se nesdili).
+//!
+//! **Sdileni:** druhe pocitadlo na kazdy ramec = pocet *dalsich* vlastniku
+//! (objekty pameti sdilejici ramec po `VMO_CLONE`). 0 = ramec ma jednoho
+//! vlastnika a smi do nej zapisovat; jinak se pri zapisu kopiruje.
 
 use core::sync::atomic::{AtomicPtr, AtomicU16, AtomicU64, Ordering};
 
@@ -66,6 +70,8 @@ static ALLOCATOR: SpinLock<Option<Buddy>> = SpinLock::new(None);
 /// Pocitadla pinu (jedno na ramec od fyzicke adresy 0), v pameti za
 /// bitmapami alokatoru.
 static PINS: AtomicPtr<AtomicU16> = AtomicPtr::new(core::ptr::null_mut());
+/// Pocitadla dalsich vlastniku (sdileni CoW), za piny.
+static SHARES: AtomicPtr<AtomicU16> = AtomicPtr::new(core::ptr::null_mut());
 static PIN_FRAMES: AtomicU64 = AtomicU64::new(0);
 
 const fn block_bytes(order: usize) -> u64 {
@@ -204,8 +210,9 @@ pub fn init(regions: &[MemoryRegion]) {
     let pages = max_addr / PAGE_SIZE;
 
     let words: u64 = (0..=MAX_ORDER).map(|k| bitmap_words(pages, k)).sum();
-    let pins_bytes = pages * core::mem::size_of::<AtomicU16>() as u64;
-    // Bitmapy a za nimi pocitadla pinu, vse v jednom bloku.
+    // Piny a sdileni: dve pole po jednom AtomicU16 na ramec.
+    let pins_bytes = 2 * pages * core::mem::size_of::<AtomicU16>() as u64;
+    // Bitmapy a za nimi pocitadla pinu a sdileni, vse v jednom bloku.
     let bitmap_bytes = (words * 8 + pins_bytes).next_multiple_of(PAGE_SIZE);
     let bitmap_region = regions
         .iter()
@@ -226,7 +233,9 @@ pub fn init(regions: &[MemoryRegion]) {
         offset += bitmap_words(pages, k);
     }
     // Vynulovane bajty = platna AtomicU16 s hodnotou 0.
-    PINS.store(base.wrapping_add(offset as usize).cast(), Ordering::Release);
+    let pins: *mut AtomicU16 = base.wrapping_add(offset as usize).cast();
+    PINS.store(pins, Ordering::Release);
+    SHARES.store(pins.wrapping_add(pages as usize), Ordering::Release);
     PIN_FRAMES.store(pages, Ordering::Release);
 
     let mut buddy = Buddy {
@@ -362,12 +371,37 @@ pub fn committed_pages() -> u64 {
     ALLOCATOR.lock().as_ref().map_or(0, |b| b.committed)
 }
 
-fn pin_slot(frame: PhysAddr) -> &'static AtomicU16 {
+fn frame_slot(array: &AtomicPtr<AtomicU16>, frame: PhysAddr) -> &'static AtomicU16 {
     let idx = frame.as_u64() / PAGE_SIZE;
-    assert!(idx < PIN_FRAMES.load(Ordering::Acquire), "pin: ramec {:#x} mimo RAM", frame.as_u64());
-    // SAFETY: pole ma `PIN_FRAMES` prvku (nastavene v `init` pred prvni
-    // alokaci) a zije po celou dobu behu jadra.
-    unsafe { &*PINS.load(Ordering::Acquire).add(idx as usize) }
+    assert!(idx < PIN_FRAMES.load(Ordering::Acquire), "ramec {:#x} mimo RAM", frame.as_u64());
+    // SAFETY: obe pole maji `PIN_FRAMES` prvku (nastavene v `init` pred
+    // prvni alokaci) a zijou po celou dobu behu jadra.
+    unsafe { &*array.load(Ordering::Acquire).add(idx as usize) }
+}
+
+fn pin_slot(frame: PhysAddr) -> &'static AtomicU16 {
+    frame_slot(&PINS, frame)
+}
+
+/// Prida ramci dalsiho vlastnika (sdileni po `VMO_CLONE`). `false` =
+/// pocitadlo je plne (volajici ramec zkopiruje).
+pub fn share(frame: PhysAddr) -> bool {
+    frame_slot(&SHARES, frame)
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |v| v.checked_add(1))
+        .is_ok()
+}
+
+/// Pocet dalsich vlastniku ramce (0 = jediny vlastnik).
+pub fn shares(frame: PhysAddr) -> u16 {
+    frame_slot(&SHARES, frame).load(Ordering::Acquire)
+}
+
+/// Vlastnik se vzdava sdileneho ramce: `true` = ramec dal drzi jini (nic
+/// neuvolnovat), `false` = volajici je jediny vlastnik (pocitadlo uz bylo 0).
+pub fn try_unshare(frame: PhysAddr) -> bool {
+    frame_slot(&SHARES, frame)
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |v| v.checked_sub(1))
+        .is_ok()
 }
 
 /// Pripne ramec RAM (zarizeni do nej muze zapisovat): nesmi se presunout,

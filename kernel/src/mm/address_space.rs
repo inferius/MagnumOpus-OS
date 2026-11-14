@@ -315,13 +315,14 @@ impl AddressSpace {
         if vmo.is_revoked() {
             return Err(Error::AccessDenied);
         }
-        let map_flags = page_flags(&vmo, flags, true);
         let table = inner.table.as_mut().expect("adresni prostor je zruseny");
         for off in (0..len).step_by(PAGE_SIZE as usize) {
-            // Jen existujici stranky; ostatni doplni vypadek.
-            let Some(phys) = vmo.page(vmo_offset + off) else {
+            // Jen existujici stranky; ostatni doplni vypadek. Sdileny ramec
+            // (kopie pri zapisu) jen pro cteni.
+            let Some((phys, own)) = vmo.page_state(vmo_offset + off) else {
                 continue;
             };
+            let map_flags = page_flags(&vmo, flags, own);
             if table
                 .map(
                     VirtAddr::new(start + off),
@@ -392,11 +393,11 @@ impl AddressSpace {
         n
     }
 
-    /// Odmapuje nulovou stranku vsude, kde mapovani objektu `vmo` ukazuje na
-    /// jeho offsety `offset..offset+len` (stranky prave vznikly). Vraci, zda
-    /// neco odmapoval (volajici pak vyprazdni TLB vsech CPU).
-    pub fn drop_zero_ptes(&self, vmo: &MemoryObject, offset: u64, len: u64) -> bool {
-        let zero = super::zero_frame();
+    /// Odmapuje stranky mapovani objektu `vmo` na jeho offsetech
+    /// `offset..offset+len`: jen ty, ktere ukazuji na ramec `frame` (nulova
+    /// stranka, stary sdileny ramec), nebo vsechny (`None`). Vraci, zda neco
+    /// odmapoval (volajici pak vyprazdni TLB vsech CPU).
+    pub fn drop_frame_ptes(&self, vmo: &MemoryObject, offset: u64, len: u64, frame: Option<PhysAddr>) -> bool {
         let mut inner = self.inner.lock();
         let Inner { table, mappings } = &mut *inner;
         let Some(table) = table.as_mut() else {
@@ -412,7 +413,8 @@ impl AddressSpace {
             let mut pos = lo & !(PAGE_SIZE - 1);
             while pos < hi {
                 let va = VirtAddr::new(start + (pos - m.vmo_offset));
-                if table.translate(va) == Some(zero) {
+                let cur = table.translate(va);
+                if cur.is_some() && (frame.is_none() || cur == frame) {
                     table.unmap_4k(va);
                     any = true;
                 }
@@ -422,12 +424,13 @@ impl AddressSpace {
         any
     }
 
-    /// Pred zapisem jadra do rozsahu userspace vytvori jeho dosud nevznikle
-    /// stranky a odmapuje za ne nulovou stranku (tady i u ostatnich
-    /// mapperu). Mapovani overi jen zbezne; plnou kontrolu dela kopirovani.
+    /// Pred zapisem jadra do rozsahu userspace pripravi jeho stranky pro
+    /// zapis (vytvori dosud nevznikle, zkopiruje sdilene) a odmapuje
+    /// nahrazene ramce (tady i u ostatnich mapperu). Mapovani overi jen
+    /// zbezne; plnou kontrolu dela kopirovani.
     fn commit_user_range(&self, addr: u64, len: usize) -> Result<(), Error> {
         let end = addr.checked_add(len as u64).ok_or(Error::BadAddress)?;
-        let mut fresh: Vec<(Arc<MemoryObject>, u64)> = Vec::new();
+        let mut need: Vec<(Arc<MemoryObject>, u64)> = Vec::new();
         {
             let inner = self.inner.lock();
             let mut pos = addr & !(PAGE_SIZE - 1);
@@ -438,19 +441,22 @@ impl AddressSpace {
                     return Err(Error::BadAddress);
                 }
                 let off = m.vmo_offset + (pos - start);
-                if vmo.commit_page(off)?.1 {
-                    fresh.try_reserve(1).map_err(|_| Error::NoMemory)?;
-                    fresh.push((vmo.clone(), off));
+                if !matches!(vmo.page_state(off), Some((_, true))) {
+                    need.try_reserve(1).map_err(|_| Error::NoMemory)?;
+                    need.push((vmo.clone(), off));
                 }
                 pos += PAGE_SIZE;
             }
         }
-        for (vmo, off) in fresh {
-            // Vlastni prostor zvlast: init (userboot) neni v seznamu mapperu.
-            if self.drop_zero_ptes(&vmo, off, PAGE_SIZE) {
-                tlb::shootdown();
+        // Bez zamku prostoru (kopie pri zapisu odmapovava v ostatnich).
+        for (vmo, off) in need {
+            if let (_, Some(old)) = vmo.writable_page(off)? {
+                // Vlastni prostor zvlast: init (userboot) neni v seznamu
+                // mapperu.
+                if self.drop_frame_ptes(&vmo, off, PAGE_SIZE, Some(old)) {
+                    tlb::shootdown();
+                }
             }
-            vmo.forget_zero(off, PAGE_SIZE);
         }
         Ok(())
     }

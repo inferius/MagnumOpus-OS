@@ -14,6 +14,9 @@
 //!   = WC) a kazde mapovani ho zdedi. Drzitel prostredku ho muze odvolat
 //!   (`revoke`): mapovani ve vsech procesech zmizi a dalsi mapovani selze.
 //!
+//! Kopie pri zapisu (`VMO_CLONE`, `cow.rs`): klon sdili ramce zdroje,
+//! prvni zapis kterehokoli vlastnika si udela kopii.
+//!
 //! Objekt nemeni velikost. Nulova stranka: kdyz ji nektere mapovani
 //! ukazuje (`zero_mapped`) a stranka pak vznikne jinou cestou, objekt ji
 //! vsem mapperum odmapuje (`AddressSpace::drop_zero_ptes`), aby nikdo
@@ -50,7 +53,13 @@ const PRESENT: u64 = 1;
 /// Stranku pripnul `expose_phys` (adresu zna ovladac a muze ji dat
 /// zarizeni); odepne se v Drop.
 const PINNED: u64 = 2;
+/// Ramec je (nebo byl) sdileny s klonem: zapis ho musi zkopirovat, pokud
+/// ma jeste dalsi vlastniky (`phys::shares`). Polozka se SHARED je soucasti
+/// `unbacked` (zapis muze potrebovat novy ramec).
+const SHARED: u64 = 4;
 const ENTRY_FLAGS: u64 = PAGE - 1;
+
+mod cow;
 
 fn present(phys: PhysAddr) -> AtomicU64 {
     AtomicU64::new(phys.as_u64() | PRESENT)
@@ -97,6 +106,9 @@ pub struct MemoryObject {
     /// Procesy s mapovanim objektu (slabe odkazy, mrtve se uklidi): pro
     /// odvolani fyzickeho objektu a odmapovani nulove stranky.
     mappers: SpinLock<Vec<Weak<Process>>>,
+    /// Serializuje zmeny sdilenych polozek (klonovani, kopie pri zapisu,
+    /// pripnuti). Nikdy se nedrzi pri shootdownu ani se zamkem prostoru.
+    cow_lock: SpinLock<()>,
     kind: Kind,
     /// Domena IOMMU, ve ktere je pamet namapovana pro DMA zarizeni
     /// (odmapuje se pred vracenim stranek alokatoru).
@@ -121,6 +133,7 @@ impl MemoryObject {
             unbacked: AtomicU64::new(unbacked),
             zero_mapped: AtomicBool::new(false),
             mappers: SpinLock::new(Vec::new()),
+            cow_lock: SpinLock::new(()),
             kind,
             dma: None,
             for_dma: false,
@@ -336,19 +349,24 @@ impl MemoryObject {
         self.zero_mapped.store(true, Ordering::SeqCst);
     }
 
-    /// Vytvori (je-li treba) ramec stranky na offsetu `offset`. Vraci ramec
-    /// a zda prave vznikl. Souvisle a fyzicke objekty jsou cele pritomne.
+    /// Ramec pro zapis na offsetu `offset` bez cekani: dosud nevznikla
+    /// stranka vznikne (vraci `fresh = true`), vlastni ramec se vrati.
+    /// Sdileny ramec (kopie pri zapisu) vraci `None`: volajici pusti zamky
+    /// a zavola `writable_page`. Smi se volat pod zamkem prostoru.
     ///
     /// Poradi vuci nulove strance (vse SeqCst): vznik stranky (CAS) je
     /// pred ctenim `zero_mapped`; mapovani nulove stranky nastavi
     /// `zero_mapped` pred ctenim polozky. Kdo nulovou stranku namapoval
     /// po vzniku stranky, uvidel ji uz pritomnou; kdo pred, toho najde
     /// `forget_zero` (bere zamek jeho adresniho prostoru).
-    pub fn commit_page(&self, offset: u64) -> Result<(PhysAddr, bool), Error> {
+    pub fn commit_page_fast(&self, offset: u64) -> Result<Option<(PhysAddr, bool)>, Error> {
         let slot = self.pages.get((offset / PAGE) as usize).ok_or(Error::OutOfRange)?;
         let cur = slot.load(Ordering::SeqCst);
+        if cur & SHARED != 0 {
+            return Ok(None);
+        }
         if cur != 0 {
-            return Ok((PhysAddr::new(cur & !ENTRY_FLAGS), false));
+            return Ok(Some((PhysAddr::new(cur & !ENTRY_FLAGS), false)));
         }
         // Slib je dany objektem, ramec selze jen kdyz jadro vycerpalo
         // pamet nad svou rezervu.
@@ -356,13 +374,23 @@ impl MemoryObject {
         match slot.compare_exchange(0, frame.as_u64() | PRESENT, Ordering::SeqCst, Ordering::SeqCst) {
             Ok(_) => {
                 self.unbacked.fetch_sub(1, Ordering::AcqRel);
-                Ok((frame, true))
+                Ok(Some((frame, true)))
             }
-            Err(other) => {
-                // Jine vlakno bylo rychlejsi: ramec vratit (i se slibem).
+            Err(_) => {
+                // Jine vlakno bylo rychlejsi: ramec vratit (i se slibem)
+                // a podivat se znovu (ramec mohl mezitim i zacit sdilet).
                 phys::free_committed(frame);
-                Ok((PhysAddr::new(other & !ENTRY_FLAGS), false))
+                self.commit_page_fast(offset)
             }
+        }
+    }
+
+    /// Stav stranky: ramec a zda ho objekt vlastni sam (smi se mapovat pro
+    /// zapis). `None` = stranka jeste nevznikla.
+    pub fn page_state(&self, offset: u64) -> Option<(PhysAddr, bool)> {
+        match self.pages.get((offset / PAGE) as usize)?.load(Ordering::SeqCst) {
+            0 => None,
+            v => Some((PhysAddr::new(v & !ENTRY_FLAGS), v & SHARED == 0)),
         }
     }
 
@@ -371,28 +399,32 @@ impl MemoryObject {
     /// (dalsi pristup uz najde skutecny ramec). Volat bez zamku adresnich
     /// prostoru.
     pub fn forget_zero(&self, offset: u64, len: u64) {
-        if !self.zero_mapped.load(Ordering::SeqCst) {
-            return;
+        if self.zero_mapped.load(Ordering::SeqCst) {
+            self.forget_frame(offset, len, crate::mm::zero_frame());
         }
+    }
+
+    /// Odmapuje vsem mapperum ramec `frame` na offsetech `offset..+len`
+    /// (stranka dostala jiny ramec). Volat bez zamku prostoru a `cow_lock`.
+    fn forget_frame(&self, offset: u64, len: u64, frame: PhysAddr) {
         let mut flush = false;
         for p in self.mapper_processes() {
-            flush |= p.address_space().drop_zero_ptes(self, offset, len);
+            flush |= p.address_space().drop_frame_ptes(self, offset, len, Some(frame));
         }
         if flush {
             crate::mm::tlb::shootdown();
         }
     }
 
-    /// Vytvori vsechny stranky rozsahu (zapis jadra). Vraci, zda nejaka
-    /// vznikla (pak volajici zavola `forget_zero`).
-    fn commit_range(&self, offset: u64, len: u64) -> Result<bool, Error> {
-        let mut any = false;
+    /// Vytvori vsechny stranky rozsahu pro zapis jadra (vcetne kopie pri
+    /// zapisu); ostatnim mapovanim odmapuje stare ramce.
+    fn commit_range(&self, offset: u64, len: u64) -> Result<(), Error> {
         let mut pos = offset & !(PAGE - 1);
         while pos < offset + len {
-            any |= self.commit_page(pos)?.1;
+            self.writable_page(pos)?;
             pos += PAGE;
         }
-        Ok(any)
+        Ok(())
     }
 
     /// Fyzicka adresa stranky pro ovladac (`VMO_PHYS_ADDR`). Bezny objekt
@@ -402,15 +434,21 @@ impl MemoryObject {
         if !matches!(self.kind, Kind::Pages) {
             return self.page(offset).ok_or(Error::OutOfRange);
         }
-        let (frame, fresh) = self.commit_page(offset)?;
-        let slot = &self.pages[(offset / PAGE) as usize];
-        if slot.fetch_or(PINNED, Ordering::AcqRel) & PINNED == 0 {
-            phys::pin(frame);
+        let slot = self.pages.get((offset / PAGE) as usize).ok_or(Error::OutOfRange)?;
+        loop {
+            // Vlastni ramec (sdileny se nejdriv zkopiruje); pripnuti pod
+            // `cow_lock`, aby ho klonovani mezitim nezacalo sdilet.
+            let (frame, _) = self.writable_page(offset)?;
+            let _g = self.cow_lock.lock();
+            let cur = slot.load(Ordering::SeqCst);
+            if cur & SHARED != 0 || cur & !ENTRY_FLAGS != frame.as_u64() {
+                continue;
+            }
+            if slot.fetch_or(PINNED, Ordering::AcqRel) & PINNED == 0 {
+                phys::pin(frame);
+            }
+            return Ok(frame);
         }
-        if fresh {
-            self.forget_zero(offset & !(PAGE - 1), PAGE);
-        }
-        Ok(frame)
     }
 
     /// Kolik stranek objektu ma ramec (pro testy a prehled).
@@ -496,9 +534,7 @@ impl MemoryObject {
     pub fn write(&self, offset: u64, data: &[u8]) -> Result<(), Error> {
         self.check_access()?;
         self.check_range(offset, data.len() as u64)?;
-        if self.commit_range(offset, data.len() as u64)? {
-            self.forget_zero(offset & !(PAGE - 1), (offset % PAGE + data.len() as u64).next_multiple_of(PAGE));
-        }
+        self.commit_range(offset, data.len() as u64)?;
         self.for_each_chunk(offset, data.len(), |ptr, at, n| {
             debug_assert!(!ptr.is_null(), "stranka vznikla v commit_range");
             // SAFETY: viz `read`; stranky rozsahu vznikly vyse a uz
@@ -539,11 +575,13 @@ impl Drop for MemoryObject {
             Kind::Pages => {
                 for p in self.pages.iter() {
                     let v = p.load(Ordering::Relaxed);
+                    let frame = PhysAddr::new(v & !ENTRY_FLAGS);
                     if v & PINNED != 0 {
-                        phys::unpin(PhysAddr::new(v & !ENTRY_FLAGS));
+                        phys::unpin(frame);
                     }
-                    if v != 0 {
-                        phys::free_pages(PhysAddr::new(v & !ENTRY_FLAGS), 0);
+                    // Sdileny ramec drzi dal ostatni vlastnici.
+                    if v != 0 && !(v & SHARED != 0 && phys::try_unshare(frame)) {
+                        phys::free_pages(frame, 0);
                     }
                 }
                 // Slib stranek, ktere nikdy nevznikly.

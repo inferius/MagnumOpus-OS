@@ -38,6 +38,7 @@ mod jobs;
 mod memory;
 mod memory_lazy;
 mod memory_regions;
+mod memory_cow;
 pub mod net;
 mod nic;
 pub mod power;
@@ -68,6 +69,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("pamet", memory::TESTS),
     ("pamet", memory_lazy::TESTS),
     ("pamet", memory_regions::TESTS),
+    ("pamet", memory_cow::TESTS),
     ("ipc", ipc::TESTS),
     ("udalosti a nahoda", events::TESTS),
     ("procesy", process::TESTS),
