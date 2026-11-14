@@ -28,6 +28,7 @@ class! {
     isgraph => |b: u8| (0x21..0x7F).contains(&b);
     iscntrl => |b: u8| b < 0x20 || b == 0x7F;
     ispunct => |b: u8| b.is_ascii_punctuation();
+    isblank => |b: u8| b == b' ' || b == 0x09;
 }
 
 #[cfg_attr(not(test), unsafe(no_mangle))]

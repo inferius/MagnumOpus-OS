@@ -43,6 +43,10 @@ struct Stream {
     err: bool,
     readable: bool,
     writable: bool,
+    /// Orientace (`fwide`): 0 = zatim zadna, < 0 bajtova, > 0 siroka.
+    orient: i8,
+    /// Rozpracovany vicebajtovy znak sirokeho cteni (`fgetwc`).
+    wstate: cstd_core::mb::MbState,
 }
 
 /// Proud C (`FILE *`).
@@ -63,6 +67,8 @@ impl FILE {
                 err: false,
                 readable,
                 writable,
+                orient: 0,
+                wstate: cstd_core::mb::MbState::INITIAL,
             }),
         }
     }
@@ -207,6 +213,7 @@ impl Stream {
         self.flush()?;
         self.drop_read()?;
         self.eof = false;
+        self.wstate = cstd_core::mb::MbState::INITIAL;
         sys::seek(self.fd, pos)
     }
 
@@ -215,6 +222,72 @@ impl Stream {
         let p = p as i64 - (self.rbuf.len() - self.rpos) as i64 + self.wbuf.len() as i64;
         u64::try_from(p).map_err(|_| errno::EINVAL)
     }
+}
+
+/// Zamceny proud pro siroky vstup a vystup (`wchar::wio`).
+pub(crate) struct Locked<'a>(MutexGuard<'a, Stream>);
+
+impl Locked<'_> {
+    /// Dalsi bajt (`None` = konec nebo chyba, priznaky nastavene).
+    pub(crate) fn getc(&mut self) -> Option<u8> {
+        self.0.getc()
+    }
+
+    /// Vrati bajty zpet pred dalsi cteni (`ungetwc`).
+    pub(crate) fn unget(&mut self, bytes: &[u8]) {
+        let s = &mut *self.0;
+        if s.rpos >= bytes.len() {
+            s.rpos -= bytes.len();
+            let at = s.rpos;
+            s.rbuf[at..at + bytes.len()].copy_from_slice(bytes);
+        } else {
+            let rest = s.rbuf.split_off(s.rpos);
+            s.rbuf.clear();
+            s.rbuf.extend_from_slice(bytes);
+            s.rbuf.extend_from_slice(&rest);
+            s.rpos = 0;
+        }
+        s.eof = false;
+    }
+
+    pub(crate) fn write(&mut self, data: &[u8]) -> R<()> {
+        self.0.write(data)
+    }
+
+    /// `fwide`: kladny `mode` = siroka, zaporny = bajtova, 0 = jen dotaz.
+    /// Orientace se nastavi jen jednou.
+    pub(crate) fn orient(&mut self, mode: c_int) -> c_int {
+        if self.0.orient == 0 && mode != 0 {
+            self.0.orient = if mode > 0 { 1 } else { -1 };
+        }
+        self.0.orient as c_int
+    }
+
+    pub(crate) fn wstate(&mut self) -> &mut cstd_core::mb::MbState {
+        &mut self.0.wstate
+    }
+
+    pub(crate) fn set_error(&mut self) {
+        self.0.err = true;
+    }
+}
+
+/// Zamkne proud (`None` = nulovy ukazatel).
+///
+/// # Safety
+///
+/// `f` je nulovy nebo platny `FILE *`.
+pub(crate) unsafe fn lock_file<'a>(f: *mut FILE) -> Option<Locked<'a>> {
+    // SAFETY: kontrakt funkce.
+    unsafe { file(f) }.map(|f| {
+        ensure_exit_hook();
+        Locked(f.lock())
+    })
+}
+
+/// `stdout` jako `FILE *`.
+pub fn stdout_ptr() -> *mut FILE {
+    &STDOUT as *const FILE as *mut FILE
 }
 
 static STDIN: FILE = FILE::new(0, Buffering::Full, true, false);
@@ -700,8 +773,13 @@ pub unsafe extern "C" fn vfprintf(f: *mut FILE, fmt: *const c_char, mut ap: VaLi
     let (Some(file), fmt) = (unsafe { file(f) }, unsafe { c_bytes(fmt) }) else { return -1 };
     ensure_exit_hook();
     let mut out = FileOut { buf: Vec::new() };
-    format::format(&mut out, fmt, &mut VaArgs(&mut ap));
+    let r = format::format_enc(&mut out, fmt, &mut VaArgs(&mut ap), crate::locale::ctype());
+    // Vystup do chyby prevodu (`%ls` se znakem mimo kodovani) se zapise.
     match file.lock().write(&out.buf) {
+        Ok(()) if r.is_err() => {
+            errno::set(errno::EILSEQ);
+            -1
+        }
         Ok(()) => c_int::try_from(out.buf.len()).unwrap_or(c_int::MAX),
         Err(e) => {
             errno::set(e);

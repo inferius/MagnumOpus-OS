@@ -41,6 +41,7 @@ extern crate alloc;
 pub mod ctype;
 mod float;
 pub mod format;
+pub mod mb;
 pub mod ssp;
 pub mod stdio;
 pub mod stdlib;
@@ -66,3 +67,5 @@ mod format_tests;
 mod string_tests;
 #[cfg(test)]
 mod stdlib_tests;
+#[cfg(test)]
+mod mb_tests;

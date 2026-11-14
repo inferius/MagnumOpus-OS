@@ -14,7 +14,7 @@ fn main() {
     println!("cargo::rerun-if-changed=c");
     println!("cargo::rerun-if-changed=include");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("magnumopus") {
-        let mut b = cbuild::Build::new("cstd_c").trust(cbuild::Trust::Own).file("c/math_ld.c");
+        let mut b = cbuild::Build::new("cstd_c").trust(cbuild::Trust::Own).file("c/math_ld.c").file("c/wchar_ld.c");
         // libc.so (cil -dyn): mem* musi byt exportovane z knihovny; ve
         // staticke libc.a je dava compiler_builtins.
         if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("dyn") {

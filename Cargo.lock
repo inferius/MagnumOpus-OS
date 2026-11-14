@@ -675,6 +675,7 @@ dependencies = [
  "cstd-core",
  "libm",
  "tz",
+ "uniprop",
 ]
 
 [[package]]

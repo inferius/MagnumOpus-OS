@@ -45,6 +45,27 @@ long random(void);
 void srandom(unsigned seed);
 int system(const char *cmd);
 
+/* Vicebajtove znaky podle LC_CTYPE (wchar.h ma stavove varianty). */
+size_t __ctype_get_mb_cur_max(void);
+#define MB_CUR_MAX (__ctype_get_mb_cur_max())
+int mblen(const char *s, size_t n);
+int mbtowc(wchar_t *pwc, const char *s, size_t n);
+int wctomb(char *s, wchar_t wc);
+size_t mbstowcs(wchar_t *dst, const char *src, size_t n);
+size_t wcstombs(char *dst, const wchar_t *src, size_t n);
+
+#ifndef _CSTD_LOCALE_T
+#define _CSTD_LOCALE_T
+typedef struct __locale_struct *locale_t;
+#endif
+double strtod_l(const char *s, char **end, locale_t l);
+float strtof_l(const char *s, char **end, locale_t l);
+long double strtold_l(const char *s, char **end, locale_t l);
+long strtol_l(const char *s, char **end, int base, locale_t l);
+long long strtoll_l(const char *s, char **end, int base, locale_t l);
+unsigned long strtoul_l(const char *s, char **end, int base, locale_t l);
+unsigned long long strtoull_l(const char *s, char **end, int base, locale_t l);
+
 _CSTD_END
 
 #endif

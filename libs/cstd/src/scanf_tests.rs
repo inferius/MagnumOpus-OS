@@ -19,6 +19,9 @@ impl Sink for Rec {
     fn bytes(&mut self, b: &[u8], _nul: bool) {
         self.strs.push(b.to_vec());
     }
+    fn wide(&mut self, w: &[u32], _nul: bool) {
+        self.strs.push(w.iter().map(|&c| c as u8).collect());
+    }
     fn ptr(&mut self, v: usize) {
         self.ints.push((9, v as i64));
     }
