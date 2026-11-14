@@ -8,10 +8,15 @@
 //!
 //! Kazde mapovani se strhne z rozpoctu jadra jobu procesu: zaznam mapovani
 //! a horni odhad tabulek stranek, ktere pro nej mohou vzniknout.
+//!
+//! Konec procesu: [`AddressSpace::teardown`] zrusi vsechna mapovani
+//! a tabulky hned (ne az s posledni referenci na proces). Potom je prostor
+//! "mrtvy": `map` vraci `BadState`, ostatni operace nic nenajdou.
 
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use abi::vm::{MAP_EXECUTE, MAP_FIXED, MAP_READ, MAP_WRITE, USER_ALLOC_BASE, USER_MAX, USER_MIN};
 
@@ -40,16 +45,20 @@ fn page_table_cost(len: u64) -> u64 {
 }
 
 struct Inner {
+    /// `None` = prostor zruseny (`teardown`) nebo uz rusi.
     table: Option<PageTable>,
     /// Mapovani podle pocatecni adresy (neprekryvaji se).
     mappings: BTreeMap<u64, Mapping>,
 }
 
 pub struct AddressSpace {
-    root: u64,
+    /// Fyzicka adresa korenove tabulky, 0 po `teardown`.
+    root: AtomicU64,
     inner: SpinLock<Inner>,
     /// Job procesu (rozpocet mapovani); `None` = adresni prostor jadra/testu.
     job: Option<Arc<Job>>,
+    /// Strzeni za korenovou tabulku (vrati se s `teardown`).
+    root_charge: SpinLock<Charge>,
 }
 
 fn page_aligned(v: u64) -> bool {
@@ -94,21 +103,70 @@ impl Inner {
 }
 
 impl AddressSpace {
-    pub fn new(job: Option<Arc<Job>>) -> Option<Self> {
-        let table = new_address_space()?;
-        Some(Self {
-            root: table.root(),
+    /// Novy prazdny prostor; korenova tabulka se strhne z rozpoctu jadra
+    /// `job`.
+    pub fn new(job: Option<Arc<Job>>) -> Result<Self, Error> {
+        let root_charge = match &job {
+            Some(j) => j.charge(Pool::Kernel, PAGE_SIZE)?,
+            None => Charge::none(),
+        };
+        let table = new_address_space().ok_or(Error::NoMemory)?;
+        Ok(Self {
+            root: AtomicU64::new(table.root()),
             inner: SpinLock::new(Inner {
                 table: Some(table),
                 mappings: BTreeMap::new(),
             }),
             job,
+            root_charge: SpinLock::new(root_charge),
         })
     }
 
-    /// Fyzicka adresa korenove tabulky (pro `arch::switch_user_space`).
-    pub fn root(&self) -> u64 {
-        self.root
+    /// Fyzicka adresa korenove tabulky (pro `arch::switch_user_space`);
+    /// `None` po `teardown`.
+    pub fn root(&self) -> Option<u64> {
+        match self.root.load(Ordering::Acquire) {
+            0 => None,
+            r => Some(r),
+        }
+    }
+
+    /// Zrusi vsechna mapovani a tabulky stranek (konec procesu). Objekty
+    /// pameti, pro ktere `park` vrati true, se neuvolni: vrati se volajicimu
+    /// (pamet pro DMA bez IOMMU, viz `Process::finish`). Ostatni objekty
+    /// a strzeni mapovani i korenove tabulky se vrati hned. Dalsi volani nic
+    /// nedela.
+    ///
+    /// # Safety
+    ///
+    /// Prostor nesmi byt aktivni na zadnem CPU ani ho nesmi zadne CPU
+    /// aktivovat pozdeji: vsechna vlakna procesu skoncila a pred koncem se
+    /// prepnula na koren jadra (`sched::exit`), planovac pro ne koren
+    /// procesu nepouzije.
+    pub unsafe fn teardown(&self, park: impl Fn(&MemoryObject) -> bool) -> Vec<Arc<MemoryObject>> {
+        let (table, mappings) = {
+            let mut inner = self.inner.lock();
+            let Some(table) = inner.table.take() else {
+                return Vec::new();
+            };
+            self.root.store(0, Ordering::Release);
+            (table, core::mem::take(&mut inner.mappings))
+        };
+        // Zaznamy TLB a cache prekladu (i spekulativni) zahodit na vsech
+        // CPU, nez se tabulky a stranky vrati alokatoru.
+        tlb::shootdown();
+        // SAFETY: predano volajicim (prostor neni a nebude aktivni); TLB
+        // vyprazdnene vyse.
+        unsafe { table.destroy() };
+        let mut parked = Vec::new();
+        for (_, m) in mappings {
+            if park(&m.vmo) && !parked.iter().any(|p| Arc::ptr_eq(p, &m.vmo)) {
+                parked.push(m.vmo.clone());
+            }
+            // `m` (Arc na objekt a strzeni mapovani) se uvolni tady.
+        }
+        drop(core::mem::take(&mut *self.root_charge.lock()));
+        parked
     }
 
     /// Velikost stranky tohoto adresniho prostoru (syscall `VM_PAGE_SIZE`):
@@ -156,6 +214,10 @@ impl AddressSpace {
             None => Charge::none(),
         };
         let mut inner = self.inner.lock();
+        // Proces skoncil (prostor zruseny): nic noveho.
+        if inner.table.is_none() {
+            return Err(Error::BadState);
+        }
         let start = if flags & MAP_FIXED != 0 {
             let end = addr.checked_add(len).ok_or(Error::InvalidArgs)?;
             if !page_aligned(addr) || addr < USER_MIN || end > USER_MAX {

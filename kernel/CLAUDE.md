@@ -19,6 +19,9 @@ Mikrojádro (`no_std`, `no_main`): paměť, plánovač, objekty s handly a práv
 - Žádný root: proces smí jen to, na co dostal handle s právem. Nová operace = kontrola práva handlu, ne identity.
 - Syscally: čísla patří do `libs/abi/src/syscall.rs`, postup přidání je v kořenovém `CLAUDE.md`. Návratová hodnota je číslo nebo záporný kód `abi::Error`.
 - Obsluha přerušení smí brát jen `SpinLock` (zakazuje přerušení), jinak hrozí deadlock.
+- Konec procesu (`Process::finish`) hned zruší adresní prostor (`AddressSpace::teardown`), handly a futexy; zůstane náhrobek. Předpoklad: žádné CPU nemá prostor aktivní - `sched::exit` nastaví `user_gone` a přepne na kořen jádra **před** `thread_exited`, plánovač vláknu s `user_gone` kořen procesu nenahraje. Nová cesta ke konci vlákna musí jít přes `sched::exit`.
+- Paměť pro DMA bez IOMMU (`MemoryObject::is_unprotected_dma`) se při konci procesu nevrací alokátoru (zařízení může dál zapisovat); drží ji náhrobek (`Process::parked`) do posledního handlu.
+- Po `teardown` je prostor mrtvý: `map` -> `BadState`, ostatní operace nic nenajdou; `root()` vrací `None`.
 - Plánovač: vlákno, které ještě běží (`on_cpu`), nesmí být v **cizí** frontě - jiné CPU by na něj čekalo se zakázanými přerušeními a dvě CPU by se mohla zablokovat navzájem. Přesun na jiné CPU a zařazení vlákna probuzeného během usínání dělá `finish_switch`; kradení taková vlákna přeskakuje (`sched/mod.rs`, `sched/balance.rs`).
 
 ## Testy

@@ -5,8 +5,15 @@
 //! 2. rodic namapuje pamet a spusti prvni vlakno (`start`),
 //! 3. proces konci, kdyz skonci posledni vlakno; `terminate` (exit nebo
 //!    kill) nastavi navratovy kod a pozada vsechna vlakna o ukonceni.
-//! 4. Po skonceni: signal `TERMINATED`, tabulka handlu se vyprazdni (objekty
-//!    se uvolni), adresni prostor zanikne s posledni referenci na proces.
+//! 4. Po skonceni (`finish`) se hned uvolni vse, co proces drzi: adresni
+//!    prostor (mapovani, objekty pameti, tabulky stranek), handly (kanaly
+//!    a dalsi objekty) a fronty futexu; rozpocty jobu se vrati. Pak signal
+//!    `TERMINATED` - kdo na nej ceka, uz vidi pamet vracenou.
+//! 5. Zustane jen "nahrobek" (tahle struktura bez prostoru a handlu): cislo,
+//!    jmeno, kod ukonceni, cas CPU a signaly pro `JOB_PROCESSES` a cekani.
+//!    Zanikne s poslednim handlem. Vyjimka: pamet pro DMA bez IOMMU
+//!    (`MemoryObject::is_unprotected_dma`) drzi nahrobek, protoze zarizeni
+//!    do ni muze dal zapisovat.
 
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::String;
@@ -15,6 +22,7 @@ use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use super::job::{Job, Pool, object_cost};
+use super::vmo::MemoryObject;
 use super::{Error, HandleTable, KernelObject, ObjectCore, ObjectType, Rights, Signals};
 use crate::log;
 use crate::mm::AddressSpace;
@@ -52,6 +60,12 @@ pub struct Process {
     /// cekajici vlakna (vlakno, poradove cislo cekani) v poradi prichodu.
     /// Polozek je nejvys tolik, kolik ma proces vlaken.
     pub futex: SpinLock<BTreeMap<u64, VecDeque<(Arc<Thread>, u64)>>>,
+    /// Po skonceni: pamet pro DMA bez IOMMU, kterou proces mel namapovanou
+    /// nebo za handlem. Zarizeni do ni muze zapisovat i po smrti ovladace,
+    /// proto se vrati alokatoru az se zanikem nahrobku (jako pred
+    /// uvolnovanim pri konci).
+    #[allow(dead_code, reason = "jen drzi objekty nazivu, nikdo je necte")]
+    parked: SpinLock<Vec<Arc<MemoryObject>>>,
 }
 
 /// Vsechny procesy (slabe odkazy) pro `JOB_PROCESSES`. Mrtve se uklidi pri
@@ -63,15 +77,15 @@ pub fn live_processes() -> Vec<Arc<Process>> {
     REGISTRY.lock().iter().filter_map(|w| w.upgrade()).collect()
 }
 
-/// Pamet jadra za proces mimo jeho objekty: struktura a korenova tabulka
-/// stranek.
-const PROCESS_COST: u64 = object_cost::<Process>() + crate::arch::paging::PAGE_SIZE;
+/// Pamet jadra za proces mimo jeho objekty: struktura (nahrobek). Korenovou
+/// tabulku strhava a pri konci vraci adresni prostor.
+const PROCESS_COST: u64 = object_cost::<Process>();
 
 impl Process {
     /// Novy proces v jobu `job` (strhne se z jeho rozpoctu jadra).
     pub fn new(name: &str, job: Arc<Job>) -> Result<Arc<Self>, Error> {
         let charge = job.charge(Pool::Kernel, PROCESS_COST)?;
-        let space = AddressSpace::new(Some(job.clone())).ok_or(Error::NoMemory)?;
+        let space = AddressSpace::new(Some(job.clone()))?;
         let table = HandleTable::new(job.charge(Pool::Kernel, 0)?);
         let p = Arc::new(Self {
             core: ObjectCore::new(Signals::NONE),
@@ -90,6 +104,7 @@ impl Process {
             cpu_ns: AtomicU64::new(0),
             qos: SpinLock::new((schedcore::Class::Normal, None)),
             futex: SpinLock::new(BTreeMap::new()),
+            parked: SpinLock::new(Vec::new()),
         });
         p.core.set_charge(charge);
         {
@@ -229,11 +244,38 @@ impl Process {
             self.name,
             abi::process::describe_exit(code)
         );
-        // Uvolnit vsechny objekty, na ktere proces drzel handly. Tabulku
-        // vymenime za prazdnou a zrusime ji az mimo zamek (Drop objektu
-        // muze budit dalsi vlakna).
+        // 1. Adresni prostor: mapovani, objekty pameti, tabulky stranek.
+        // SAFETY: `finish` bezi jednou, az kdyz zadne vlakno procesu nebezi
+        // (`live == 0`, novych uz nepribude: `exit_code` je nastaveny). Kazde
+        // vlakno se pred `thread_exited` prepnulo na koren jadra a planovac
+        // mu koren procesu uz nenahraje (`sched::exit`); nespusteny proces
+        // svuj prostor nikdy neaktivoval.
+        let mut parked = unsafe { self.space.teardown(MemoryObject::is_unprotected_dma) };
+        // 2. Objekty za handly. Tabulku vymenime za prazdnou a zrusime ji az
+        // mimo zamek (Drop objektu muze budit dalsi vlakna).
         let table = core::mem::take(&mut *self.handles.lock());
+        for object in table.objects() {
+            let any: Arc<dyn core::any::Any + Send + Sync> = object.clone();
+            if let Ok(vmo) = any.downcast::<MemoryObject>()
+                && vmo.is_unprotected_dma()
+                && !parked.iter().any(|p| Arc::ptr_eq(p, &vmo))
+            {
+                parked.push(vmo);
+            }
+        }
         drop(table);
+        // 3. Fronty futexu (vlakna uz neexistuji) a seznam vlaken.
+        drop(core::mem::take(&mut *self.futex.lock()));
+        self.state.lock().threads = Vec::new();
+        if !parked.is_empty() {
+            log::warn!(
+                "proces {} ({}): {} objektu pameti pro DMA bez IOMMU zustava do zaniku procesu (zarizeni muze dal zapisovat)",
+                self.id,
+                self.name,
+                parked.len()
+            );
+            *self.parked.lock() = parked;
+        }
         if crate::console::process_finished(self.id) {
             log::info!("framebuffer: proces {} skoncil, vracen jadru", self.id);
         }

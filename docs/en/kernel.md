@@ -74,8 +74,8 @@ Details, design comparison and measurements: [Scheduler](scheduler.md).
   number is ignored. Spurious wake-ups are allowed; the waiting code
   re-checks its condition.
 - **Switching to a process thread** activates its address space (CR3) and
-  the kernel stack for entries from userspace (TSS.RSP0); kernel threads run
-  in the kernel address space.
+  the kernel stack for entries from userspace (TSS.RSP0); kernel threads and
+  exiting process threads run in the kernel address space.
 
 ## Objects, handles, rights
 
@@ -113,9 +113,33 @@ Details, design comparison and measurements: [Scheduler](scheduler.md).
   exception) or the last thread ending. All threads get a termination
   request (waiting ones end with `CANCELED`, ones running elsewhere are
   interrupted by an IPI) and exit on return to userspace. The last thread
-  finishes the process: handles are closed (objects freed) and the process
-  gets `TERMINATED`. The address space goes away with the last reference to
-  the process.
+  finishes the process.
+- **A finished process's memory is returned at once** **[verified in
+  QEMU]** (test `job: pamet skonceneho procesu se vrati hned`, x86_64 and
+  aarch64): on finishing, the address space is torn down (mappings, memory
+  objects held only by a mapping, page tables including the root), handles
+  are closed (channels and other objects) and futex queues emptied; job
+  budgets are returned. Only then does the process get `TERMINATED`, so a
+  waiter already sees the memory returned. Whoever holds a handle to a
+  finished process (parent, supervisor) holds only a small **tombstone**:
+  number, name, exit code, CPU time and signals for `PROCESS_EXIT_CODE`,
+  `JOB_PROCESSES` and waiting. It goes away with the last handle.
+- **Ordering for races:** an exiting thread first switches its CPU to the
+  kernel address space and the scheduler no longer loads the process space
+  for it; only then does it decrement the live thread count. When the last
+  thread ends, no CPU has the process space active and the kernel may tear
+  it down (after a TLB flush on all CPUs). Another thread's syscall cannot
+  overtake the end: the process finishes only after all its threads left
+  their syscalls. Operations of other processes through a handle (`VM_MAP`
+  -> `BAD_STATE`, `VM_UNMAP` -> `NOT_FOUND`, `THREAD_CREATE` ->
+  `BAD_STATE`) are serialized by the address space lock.
+- **DMA memory without an IOMMU** (`VMO_CREATE_CONTIGUOUS` without a device
+  domain) is not returned when the process ends: the device may keep
+  writing into it from the dead driver's descriptors. The tombstone keeps
+  it and it is returned with the last handle to the process (a warning in
+  the log). With an IOMMU it is returned at once, because its pages are
+  unmapped from the device domain first. The full fix (stop the device,
+  clear bus mastering, then return the memory) is **[designed]**.
 - **An exception in a program** (page fault, invalid opcode, ...) ends only
   that process, not the kernel: code -1,000,100 - vector, address and fault
   type in the log.
@@ -181,6 +205,16 @@ and the rest of the kernel does not distinguish them (`arch::iommu::Domain`):
 - **Without an IOMMU** (the machine has none, has it disabled in the
   firmware, or `cargo xtask run --iommu none`) the kernel logs a warning and
   DMA is not restricted.
+- **Known risk without an IOMMU: a device after its driver dies.** The
+  kernel does not stop a device today when its driver ends; the device may
+  keep writing from the dead driver's descriptors. DMA memory is therefore
+  kept by the driver process's tombstone (see [Processes and
+  threads](#processes-and-threads)). Once the last handle to that process
+  goes away (e.g. devmgr drops it on a restart), the memory returns to the
+  allocator and a device write can corrupt data of another process or of
+  the kernel. Fix **[designed]**: when the last resource of the device goes
+  away (or its driver ends), clear bus mastering in the PCI configuration,
+  wait for in-flight transfers to finish, and only then return the memory.
 - A virtio driver must accept the `VIRTIO_F_ACCESS_PLATFORM` feature (the
   device then uses translation); virtio-blk does.
 

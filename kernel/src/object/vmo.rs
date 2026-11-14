@@ -304,6 +304,13 @@ impl MemoryObject {
         self.for_dma
     }
 
+    /// Pamet pro DMA bez domeny IOMMU: zarizeni do ni smi zapisovat bez
+    /// omezeni, dokud ho nekdo nezastavi. Po konci procesu ovladace se proto
+    /// nevraci alokatoru hned (viz `Process::finish`).
+    pub fn is_unprotected_dma(&self) -> bool {
+        self.for_dma && self.dma.is_none()
+    }
+
     /// Fyzicka stranka na offsetu `offset` (zarovnanem na stranku).
     pub fn page(&self, offset: u64) -> Option<PhysAddr> {
         self.pages.get((offset / PAGE) as usize).copied()
