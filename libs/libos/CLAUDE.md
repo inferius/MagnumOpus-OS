@@ -18,6 +18,7 @@ Knihovna pro programy v userspace (`no_std`) a **stabilní API pro aplikace**: t
 - Zásobníky (hlavní ve `spawn` i vláken) vždy přes `vm::map_stack` s ochrannou oblastí `vm::STACK_GUARD` pod sebou; uvolnit se musí celá rezervace (`join`). Jediná výjimka: `thread::spawn_on_stack` (C `pthread_attr_setstack`) - zásobník i ochranná oblast patří volajícímu, `JoinHandle` má `stack_len` 0 a `join` nic neodmapuje.
 - Spouštění sdílí kód jen programů z namapovaného initfs (`initfs::offset_of`, neměnný obsah); obraz odjinud se nahrává bez sdílení, aby záměna obrazu nepodstrčila cizí kód.
 - `Vmo::create_resizable`/`set_size`/`size` (`VMO_RESIZABLE`, `VMO_SET_SIZE`, `VMO_SIZE`); `exception::signal_class_of(&Report)` = `Bus` pro výpadek za koncem zvětšitelného objektu (`reason::BEYOND_END`), knihovny mapují signály přes ni, ne přes `signal_class(kind)`.
+- `Waiter` (`waiter.rs`): port + jednorázové registrace s jedinečnými klíči (nikdy znovu, neznámý klíč = ignorovat). Služba s proměnným počtem klientů čeká přes něj, ne přes `wait_many` (limit 64; `docs/cs/libos.md`).
 - Žádné závislosti na službách (`fsd`, `netd`): klienti jsou v `svcclient` a `*proto`.
 
 ## Testy

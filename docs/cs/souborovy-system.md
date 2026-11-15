@@ -1468,7 +1468,8 @@ match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
 - **Relace:** `CONNECT` vrátí nový kanál; každá relace má vlastní handly
   (handle cizí relace = `BAD_HANDLE`). Zavření kanálu zavře všechny
   handly relace: sirotci zmizí, zámky se uvolní, dočasné soubory
-  podmíněného uložení se smažou. Nejvýš 64 relací (`NO_RESOURCES`). Zavření
+  podmíněného uložení se smažou. Počet relací omezuje jen paměť: smyčka fsd
+  čeká přes port (`libos::Waiter`), ne přes `OBJECT_WAIT_MANY`. Zavření
   hlavního kanálu (ze startovní zprávy) službu ukončí.
 - **Zápis = přijato:** odpověď `WRITE_H` říká, kolik bajtů služba přijala
   (jsou v bufferu, trvalé až po `FSYNC`). Zápis rozdělený do více zpráv je

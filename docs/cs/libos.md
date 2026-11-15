@@ -101,6 +101,35 @@ let status: u32 = map.read(0x14);
 map.write::<u32>(0x14, status | 1);
 ```
 
+### Čekání na mnoho klientů: `Waiter`
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (fsd, test „v2: 200 soucasnych
+relaci a proud" v sadě `souborovy system`).
+
+`wait_many` (`OBJECT_WAIT_MANY`) bere nejvýš 64 objektů (`WAIT_MANY_MAX`,
+pole na zásobníku jádra). **Pravidlo: služba s proměnným počtem klientů
+nečeká přes `wait_many` nad seznamem klientů, ale přes port** - jinak
+65. klient smyčku zastaví nebo ho služba musí odmítnout. Počet klientů pak
+omezuje jen paměť (rozpočet jobu: registrace a paket na portu jsou
+strženy jako paměť jádra).
+
+`libos::Waiter` obaluje `Port` a jednorázové registrace
+(`OBJECT_WAIT_ASYNC`):
+
+- `key()` - nový jedinečný klíč (nikdy 0, nikdy znovu). Paket zavřeného
+  objektu (registrace mohla zůstat) tak nikdy nepatří jinému klientovi;
+  neznámý klíč se ignoruje.
+- `arm(handle, key, mask)` - jednorázová registrace. Když už signály
+  sedí, paket přijde hned (žádné ztracené probuzení mezi obsluhou
+  a registrací).
+- `wait(deadline)` - čeká na první paket, další připravené vybere bez
+  čekání; prázdný výsledek = termín uplynul.
+
+Smyčka: zaregistrovat každý objekt bez registrace -> `wait` -> u klíčů
+z paketů zrušit příznak registrace a obsloužit jen ty objekty (vyčíst vše
+do `SHOULD_WAIT`) -> znovu. Zavření objektu registraci uklidí jádro
+(vrátí rezervaci portu).
+
 Funkce: `wait_one`, `wait_many` (čekání na signály), `time::now`,
 `time::deadline_after`, `time::sleep`, `time::wall`, `time::local` (místní
 čas v pásmu z `time::zone`), `exit(kód)`, `println!` (log jádra). Viz

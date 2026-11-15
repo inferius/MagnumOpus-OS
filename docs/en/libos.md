@@ -104,6 +104,36 @@ let status: u32 = map.read(0x14);
 map.write::<u32>(0x14, status | 1);
 ```
 
+### Waiting for many clients: `Waiter`
+
+**[verified in QEMU]** x86_64 and aarch64 (fsd, test "v2: 200 soucasnych
+relaci a proud" in the suite `souborovy system`).
+
+`wait_many` (`OBJECT_WAIT_MANY`) takes at most 64 objects
+(`WAIT_MANY_MAX`, an array on the kernel stack). **Rule: a service with a
+variable number of clients does not wait via `wait_many` over its client
+list, but via a port** - otherwise the 65th client stops the loop or the
+service has to refuse it. The number of clients is then limited only by
+memory (the job budget: a registration and a packet on the port are
+charged as kernel memory).
+
+`libos::Waiter` wraps a `Port` and one-shot registrations
+(`OBJECT_WAIT_ASYNC`):
+
+- `key()` - a new unique key (never 0, never reused). A packet of a
+  closed object (its registration may have stayed) thus never belongs to
+  another client; an unknown key is ignored.
+- `arm(handle, key, mask)` - a one-shot registration. When the signals
+  already match, the packet arrives at once (no lost wakeup between
+  serving and registering).
+- `wait(deadline)` - waits for the first packet, picks the other ready
+  ones without waiting; an empty result = the deadline passed.
+
+The loop: register every object without a registration -> `wait` -> for
+the keys of the packets clear the registration flag and serve only those
+objects (read everything until `SHOULD_WAIT`) -> again. Closing an object
+cleans its registration up in the kernel (returns the port reservation).
+
 Functions: `wait_one`, `wait_many` (waiting for signals), `time::now`,
 `time::deadline_after`, `time::sleep`, `time::wall`, `time::local` (local
 time in a zone from `time::zone`), `exit(code)`, `println!` (kernel log). See

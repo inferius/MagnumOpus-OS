@@ -100,9 +100,6 @@ pub struct Service {
     pub posix: fs::posix_lock::PosixLocks,
     /// Soubory jako proudy bajtu (`OPEN_STREAM`, `stream.rs`).
     pub streams: Vec<crate::stream::Stream>,
-    /// Pocet otevrenych relaci (smycka ho obnovi kazde kolo); relace
-    /// a proudy sdili `stream::WAIT_BUDGET`.
-    pub sessions_open: usize,
 }
 
 /// Klic rozpracovaneho vypisu: (dataset, snapshot) u vypisu snapshotu

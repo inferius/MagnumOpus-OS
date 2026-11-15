@@ -1511,8 +1511,9 @@ match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
 - **Sessions:** `CONNECT` returns a new channel; every session has its own
   handles (a handle of another session = `BAD_HANDLE`). Closing the channel
   closes all handles of the session: orphans disappear, locks are released,
-  temporary files of a conditional save are deleted. At most 64 sessions
-  (`NO_RESOURCES`). Closing the main channel (from the startup message)
+  temporary files of a conditional save are deleted. The number of
+  sessions is limited only by memory: the fsd loop waits via a port
+  (`libos::Waiter`), not via `OBJECT_WAIT_MANY`. Closing the main channel (from the startup message)
   ends the service.
 - **Write = accepted:** the `WRITE_H` reply says how many bytes the service
   accepted (they are in the buffer, durable only after `FSYNC`). A write

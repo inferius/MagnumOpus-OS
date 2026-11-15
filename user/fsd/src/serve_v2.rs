@@ -19,9 +19,6 @@ use crate::serve::{ListCache, Service, entries, stat};
 /// Kolik cisel docasneho jmena zkusit, nez REPLACE_BEGIN to vzda.
 const TEMP_TRIES: usize = 64;
 
-/// Nejvic soucasnych relaci (ochrana sluzby pred zahlcenim).
-pub const MAX_SESSIONS: usize = 64;
-
 /// Rozpracovane podminene ulozeni (handle docasneho souboru).
 pub struct Replace {
     target: String,
@@ -45,6 +42,10 @@ pub struct Session {
     pub control: bool,
     /// Odlozene `JOURNAL_WATCH` (odpoved posle hlavni smycka).
     pub watch: Option<crate::serve_hist::Watch>,
+    /// Klic registrace na portu hlavni smycky (0 = jeste nedostala).
+    pub key: u64,
+    /// Ceka registrace na portu (po paketu `false` -> obslouzit a obnovit).
+    pub armed: bool,
 }
 
 impl Session {
@@ -59,6 +60,8 @@ impl Session {
             mounts,
             control: false,
             watch: None,
+            key: 0,
+            armed: false,
         }
     }
 
@@ -323,8 +326,7 @@ impl Service {
                 };
                 // Proud smi jen to, co handle klienta.
                 fs.check_access_h(h, need)?;
-                let waits = self.sessions_open + self.streams.len();
-                if self.streams.len() >= crate::stream::MAX_STREAMS || waits >= crate::stream::WAIT_BUDGET {
+                if self.streams.len() >= crate::stream::MAX_STREAMS {
                     return Err(Error::NoResources);
                 }
                 // Vlastni handle tehoz objektu: proud prezije zavreni relace.
