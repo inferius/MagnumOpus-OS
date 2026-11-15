@@ -194,10 +194,12 @@ pub mod futex_op {
     pub const WAKE: u64 = 1;
 }
 
-/// Ukazatel vlakna pro TLS: `(value) -> 0`. Nastavi registr ukazatele
-/// vlakna aktualniho vlakna (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`); jadro
-/// ho uklada a obnovuje pri kazdem prepnuti. Nove vlakno zacina s 0.
-/// Na x86_64 musi byt `value` kanonicka adresa userspace.
+/// Ukazatel vlakna: `(value, which) -> 0`. `which` = [`thread_pointer::TLS`]
+/// (0): registr pro TLS (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`);
+/// [`thread_pointer::SECOND`] (1): druhy ukazatel vlakna (x86_64 baze GS,
+/// napr. TEB Windows vrstvy; aarch64 `NOT_SUPPORTED`). Jadro hodnotu
+/// uklada a obnovuje pri kazdem prepnuti; nove vlakno zacina s 0. Musi
+/// byt adresa userspace.
 pub const THREAD_SET_POINTER: u64 = 56;
 
 /// Rezervace adres: `(process, addr, len, flags) -> addr`. Zabere rozsah
@@ -305,6 +307,15 @@ pub const DMA_SEGMENTS: u64 = 74;
 /// Udrzba cache mapovani: `(map, offset, len, direction) -> 0`
 /// (`dma::sync`); na koherentnich platformach nedela nic. Pravo `READ`.
 pub const DMA_SYNC: u64 = 75;
+
+/// Registr pro `THREAD_SET_POINTER`.
+pub mod thread_pointer {
+    /// Ukazatel pro TLS (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`).
+    pub const TLS: u64 = 0;
+    /// Druhy ukazatel vlakna: x86_64 baze GS (`gs:` v programu), aarch64
+    /// nema (`NOT_SUPPORTED`; Windows ARM64 pouziva `x18`, ten je v kontextu).
+    pub const SECOND: u64 = 1;
+}
 
 /// Pocet definovanych syscallu (pro tabulky a testy).
 pub const COUNT: u64 = 76;

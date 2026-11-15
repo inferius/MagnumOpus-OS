@@ -259,6 +259,12 @@ impl api::Threads for Aarch64 {
         unsafe { msr!("tpidr_el0", next) };
     }
 
+    const HAS_SECOND_POINTER: bool = false;
+
+    /// aarch64 druhy ukazatel nema (Windows ARM64 drzi TEB v `x18`).
+    #[inline]
+    unsafe fn set_second_pointer(_value: u64) {}
+
     #[inline]
     unsafe fn set_thread_pointer(value: u64) {
         // SAFETY: viz `switch_thread_pointer`.

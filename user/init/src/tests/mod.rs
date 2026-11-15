@@ -58,6 +58,7 @@ mod nic;
 pub mod power;
 mod process;
 mod thread_state;
+mod second_pointer;
 mod exceptions;
 mod exceptions_fast;
 mod reboot;
@@ -101,6 +102,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("dma", dma::TESTS),
     ("procesy", process::TESTS),
     ("procesy", thread_state::TESTS),
+    ("procesy", second_pointer::TESTS),
     ("procesy", exceptions::TESTS),
     ("procesy", exceptions_fast::TESTS),
     ("procesy", fpu::TESTS),

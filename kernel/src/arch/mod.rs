@@ -301,6 +301,20 @@ pub unsafe fn set_thread_pointer(value: u64) {
     unsafe { <Current as Threads>::set_thread_pointer(value) }
 }
 
+/// Viz `api::Threads::HAS_SECOND_POINTER`.
+pub const HAS_SECOND_POINTER: bool = <Current as Threads>::HAS_SECOND_POINTER;
+
+/// Viz `api::Threads::set_second_pointer`.
+///
+/// # Safety
+///
+/// Viz `api::Threads::set_second_pointer`.
+#[inline]
+pub unsafe fn set_second_pointer(value: u64) {
+    // SAFETY: predano volajicim.
+    unsafe { <Current as Threads>::set_second_pointer(value) }
+}
+
 /// Kontext uzivatelskeho vlakna (`THREAD_STATE`), viz `api::UserState`.
 pub mod ustate {
     use super::Current;
@@ -321,9 +335,9 @@ pub mod ustate {
     /// # Safety
     ///
     /// Viz `api::UserState::read_general`.
-    pub unsafe fn read_general(stack_top: u64, tp: u64, out: &mut [u8]) {
+    pub unsafe fn read_general(stack_top: u64, tp: u64, tp2: u64, out: &mut [u8]) {
         // SAFETY: predano volajicim.
-        unsafe { <Current as UserState>::read_general(stack_top, tp, out) }
+        unsafe { <Current as UserState>::read_general(stack_top, tp, tp2, out) }
     }
 
     pub fn check_general(buf: &[u8]) -> bool {
@@ -333,7 +347,7 @@ pub mod ustate {
     /// # Safety
     ///
     /// Viz `api::UserState::write_general`.
-    pub unsafe fn write_general(stack_top: u64, buf: &[u8]) -> u64 {
+    pub unsafe fn write_general(stack_top: u64, buf: &[u8]) -> (u64, u64) {
         // SAFETY: predano volajicim.
         unsafe { <Current as UserState>::write_general(stack_top, buf) }
     }

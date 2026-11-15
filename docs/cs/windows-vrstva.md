@@ -256,7 +256,7 @@ Rozhodnutí uživatele a koordinátora (15. 11. 2026):
 
 | Kde | Co | Etapa |
 |---|---|---|
-| jádro | GS programu pro každé vlákno, GS v kontextu (`THREAD_STATE`) | W1 |
+| jádro | GS programu pro každé vlákno, GS v kontextu (`THREAD_STATE`): `THREAD_SET_POINTER` se `SECOND` ([syscally](syscally.md#thread_set_pointer)) **[ověřeno v QEMU]** x86_64 i aarch64 (`NOT_SUPPORTED`) | W1 |
 | jádro | 32bitový segment kódu ring 3, výjimky z režimu compat | W6 |
 | správa paměti | oprávnění `wx_compat` (podle Q6) | W1 |
 | fsd | dataset s casefold (podle Q7) | W2 |

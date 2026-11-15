@@ -58,6 +58,18 @@ const MSR_STAR: u32 = 0xC000_0081;
 const MSR_LSTAR: u32 = 0xC000_0082;
 const MSR_FMASK: u32 = 0xC000_0084;
 const MSR_KERNEL_GS_BASE: u32 = 0xC000_0102;
+
+/// Baze GS programu (druhy ukazatel vlakna). V jadre je GS prohozene
+/// (`swapgs`), takze GS programu ceka v `KERNEL_GS_BASE`.
+///
+/// # Safety
+///
+/// Jen v jadre na vlastnim CPU se zakazanymi prerusenimi; `value` je
+/// kanonicka adresa userspace.
+pub unsafe fn set_user_gs(value: u64) {
+    // SAFETY: predano volajicim.
+    unsafe { cpu::wrmsr(MSR_KERNEL_GS_BASE, value) }
+}
 const EFER_SCE: u64 = 1 << 0;
 
 /// Priznaky RFLAGS, ktere `syscall` vynuluje: IF (preruseni zapne az jadro

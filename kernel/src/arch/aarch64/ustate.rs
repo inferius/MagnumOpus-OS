@@ -46,7 +46,7 @@ impl UserState for Aarch64 {
         FP_HEADER
     }
 
-    unsafe fn read_general(stack_top: u64, tp: u64, out: &mut [u8]) {
+    unsafe fn read_general(stack_top: u64, tp: u64, _tp2: u64, out: &mut [u8]) {
         // SAFETY: predano volajicim (ramec stojiciho vlakna).
         let f = unsafe { &*frame(stack_top) };
         let g = A64General { x: f.x, sp: f.sp_el0, pc: f.elr, pstate: f.spsr, tpidr: tp };
@@ -57,7 +57,7 @@ impl UserState for Aarch64 {
         general(buf).is_some_and(|g| g.pc < USER_MAX && g.sp <= USER_MAX && g.tpidr < USER_MAX)
     }
 
-    unsafe fn write_general(stack_top: u64, buf: &[u8]) -> u64 {
+    unsafe fn write_general(stack_top: u64, buf: &[u8]) -> (u64, u64) {
         let g = general(buf).expect("overeno v check_general");
         // SAFETY: predano volajicim (vlastni ramec, zakazana preruseni).
         let f = unsafe { &mut *frame(stack_top) };
@@ -66,7 +66,8 @@ impl UserState for Aarch64 {
         f.elr = g.pc;
         // Rezim (EL0t) a masky preruseni se nemeni: jen NZCV.
         f.spsr = g.pstate & PSTATE_NZCV;
-        g.tpidr
+        // Druhy ukazatel aarch64 nema.
+        (g.tpidr, 0)
     }
 
     fn read_fp(ctx: &Context, out: &mut [u8]) {

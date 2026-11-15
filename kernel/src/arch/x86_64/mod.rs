@@ -230,6 +230,16 @@ impl api::Threads for X86_64 {
         unsafe { cpu::wrmsr(cpu::MSR_FS_BASE, value) }
     }
 
+    const HAS_SECOND_POINTER: bool = true;
+
+    /// GS programu: v jadre (po `swapgs`) lezi v `KERNEL_GS_BASE`, navrat
+    /// do userspace ho `swapgs` prohodi zpet.
+    #[inline]
+    unsafe fn set_second_pointer(value: u64) {
+        // SAFETY: predano volajicim (kanonicka adresa userspace, jadro).
+        unsafe { user::set_user_gs(value) }
+    }
+
     unsafe fn enter_user(entry: u64, stack: u64, arg0: u64, arg1: u64) -> ! {
         // SAFETY: predano volajicim.
         unsafe { user::enter_user(entry, stack, arg0, arg1) }

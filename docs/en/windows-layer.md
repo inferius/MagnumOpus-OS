@@ -271,7 +271,7 @@ Decisions of the user and the coordinator (15 Nov 2026):
 
 | Where | What | Stage |
 |---|---|---|
-| kernel | a per-thread program GS, GS in the context (`THREAD_STATE`) | W1 |
+| kernel | a per-thread program GS, GS in the context (`THREAD_STATE`): `THREAD_SET_POINTER` with `SECOND` ([syscalls](syscalls.md#thread_set_pointer)) **[verified in QEMU]** x86_64 and aarch64 (`NOT_SUPPORTED`) | W1 |
 | kernel | a ring 3 32-bit code segment, exceptions from compat mode | W6 |
 | memory management | the `wx_compat` permission (per Q6) | W1 |
 | fsd | a casefold dataset (per Q7) | W2 |

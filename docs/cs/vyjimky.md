@@ -168,8 +168,10 @@ extern "C" fn on_fault(f: *mut u8) -> ! {
   kontrolou v kódu.
 - **Breakpoint:** na x86_64 je PC už za `int3`, na aarch64 na `brk` -
   obsluha ho posune o 4.
-- **TEB přes GS** (Windows vrstva) je samostatný úkol; v kontextu je zatím
-  jen báze FS / `TPIDR_EL0`.
+- **TEB přes GS** (Windows vrstva): x86_64 má druhý ukazatel vlákna (báze
+  GS, `THREAD_SET_POINTER` se `SECOND`, [syscally](syscally.md#thread_set_pointer)),
+  v kontextu `gs_base`; obsluha výjimky ve vlákně GS nemění. aarch64 ho
+  nemá (Windows ARM64 drží TEB v `x18`).
 
 ## Klíčové soubory
 

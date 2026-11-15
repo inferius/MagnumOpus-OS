@@ -106,6 +106,9 @@ pub struct Thread {
     /// Registr ukazatele vlakna userspace (TLS; `THREAD_SET_POINTER`).
     /// Planovac ho nahraje pri kazdem prepnuti na vlakno.
     pub(super) user_tp: AtomicU64,
+    /// Druhy ukazatel vlakna (x86_64 baze GS; `THREAD_SET_POINTER` SECOND).
+    /// Planovac ho nahraje pri kazdem prepnuti; aarch64 ho nema (0).
+    pub(super) user_tp2: AtomicU64,
     /// Vlakno konci (`sched::exit`): planovac mu uz nenahraje adresni
     /// prostor procesu (bezi s korenem jadra), aby ho proces mohl zrusit
     /// hned po konci posledniho vlakna.
@@ -156,6 +159,7 @@ impl Thread {
             kill: AtomicBool::new(false),
             started: AtomicBool::new(false),
             user_tp: AtomicU64::new(0),
+            user_tp2: AtomicU64::new(0),
             user_gone: AtomicBool::new(false),
             stop: SpinLock::new(super::suspend::Stop::default()),
         }

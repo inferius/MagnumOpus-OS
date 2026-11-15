@@ -680,13 +680,26 @@ class.
 
 ### `THREAD_SET_POINTER`
 
-`(value) -> 0`, number 56. Sets the thread pointer register of the current thread for
-TLS (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`). The kernel stores the value in
-the thread and loads it on every switch; a new thread starts with 0, so the
-value never leaks into another thread or process (on aarch64 a program may
-write `TPIDR_EL0` itself, so the kernel saves it on a switch). Errors:
-`INVALID_ARGS` (`value` outside user space). In libos
-`sys::thread_set_pointer`; used by the `std` runtime ([Rust std](rust-std.md)).
+`(value, which) -> 0`, number 56. Sets a thread pointer of the current
+thread according to `which` (`abi::syscall::thread_pointer`):
+
+| `which` | Register | Use |
+|---|---|---|
+| `TLS` (0) | x86_64 `FS_BASE`, aarch64 `TPIDR_EL0` | TLS (the `std` runtime, `libc.so`) |
+| `SECOND` (1) | x86_64 the program GS base; aarch64 none | a second thread pointer, e.g. the TEB of the [Windows layer](windows-layer.md) (`gs:[0x30]`) |
+
+The kernel stores the value in the thread and loads it on every switch; a
+new thread starts with 0, so the value never leaks into another thread or
+process (on aarch64 a program may write `TPIDR_EL0` itself, so the kernel
+saves it on a switch). In the kernel the GS base sits in `KERNEL_GS_BASE`
+after `swapgs`; the program cannot change it itself (`CR4.FSGSBASE` is
+off). Both values are in the `THREAD_STATE` context (`fs_base`, `gs_base`
+on x86_64). Errors: `INVALID_ARGS` (`value` outside user space, unknown
+`which`), `NOT_SUPPORTED` (`SECOND` on aarch64 - Windows ARM64 keeps the
+TEB in `x18`, an ordinary register in the context). In libos
+`sys::thread_set_pointer` and `sys::thread_set_second_pointer`; the `std`
+runtime uses TLS ([Rust std](rust-std.md)). **[verified in QEMU]** x86_64
+and aarch64 (suite `procesy`, test `druhy ukazatel vlakna`).
 
 ## Futex
 

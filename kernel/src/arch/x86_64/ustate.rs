@@ -61,7 +61,7 @@ impl UserState for X86_64 {
         header()
     }
 
-    unsafe fn read_general(stack_top: u64, tp: u64, out: &mut [u8]) {
+    unsafe fn read_general(stack_top: u64, tp: u64, tp2: u64, out: &mut [u8]) {
         // SAFETY: predano volajicim (ramec stojiciho vlakna).
         let f = unsafe { &*frame(stack_top) };
         let g = X64General {
@@ -84,18 +84,18 @@ impl UserState for X86_64 {
             rip: f.rip,
             rflags: f.rflags,
             fs_base: tp,
-            gs_base: 0,
+            gs_base: tp2,
         };
         out.copy_from_slice(&g.encode());
     }
 
     fn check_general(buf: &[u8]) -> bool {
-        // RIP, RSP a FS baze kanonicke v userspace: jinak by iretq nebo
-        // zapis FS_BASE vyvolaly vyjimku jeste v jadre.
-        general(buf).is_some_and(|g| g.rip < USER_MAX && g.rsp <= USER_MAX && g.fs_base < USER_MAX)
+        // RIP, RSP, baze FS a GS kanonicke v userspace: jinak by iretq nebo
+        // zapis FS_BASE / KERNEL_GS_BASE vyvolaly vyjimku jeste v jadre.
+        general(buf).is_some_and(|g| g.rip < USER_MAX && g.rsp <= USER_MAX && g.fs_base < USER_MAX && g.gs_base < USER_MAX)
     }
 
-    unsafe fn write_general(stack_top: u64, buf: &[u8]) -> u64 {
+    unsafe fn write_general(stack_top: u64, buf: &[u8]) -> (u64, u64) {
         let g = general(buf).expect("overeno v check_general");
         // SAFETY: predano volajicim (vlastni ramec, zakazana preruseni).
         let f = unsafe { &mut *frame(stack_top) };
@@ -118,7 +118,7 @@ impl UserState for X86_64 {
         f.rip = g.rip;
         // CS a SS se nemeni; z priznaku jen uzivatelske bity.
         f.rflags = (g.rflags & RFLAGS_USER) | RFLAGS_FIXED;
-        g.fs_base
+        (g.fs_base, g.gs_base)
     }
 
     fn read_fp(ctx: &Context, out: &mut [u8]) {

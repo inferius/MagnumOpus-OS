@@ -654,13 +654,26 @@ s `WRITE` se nikomu jinému nedává.
 
 ### `THREAD_SET_POINTER`
 
-`(value) -> 0`, číslo 56. Nastaví registr ukazatele vlákna aktuálního vlákna pro
-TLS (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`). Jádro hodnotu ukládá ve
-vlákně a nahraje ji při každém přepnutí; nové vlákno začíná s 0, takže
-hodnota nikdy nepřeteče do jiného vlákna ani procesu (na aarch64 si
-program `TPIDR_EL0` může zapsat i sám, jádro ho proto při přepnutí
-ukládá). Chyby: `INVALID_ARGS` (`value` mimo userspace). V libos
-`sys::thread_set_pointer`; používá ho runtime `std` ([Rust std](rust-std.md)).
+`(value, which) -> 0`, číslo 56. Nastaví ukazatel vlákna aktuálního vlákna
+podle `which` (`abi::syscall::thread_pointer`):
+
+| `which` | Registr | Použití |
+|---|---|---|
+| `TLS` (0) | x86_64 `FS_BASE`, aarch64 `TPIDR_EL0` | TLS (runtime `std`, `libc.so`) |
+| `SECOND` (1) | x86_64 báze GS programu; aarch64 není | druhý ukazatel vlákna, např. TEB [Windows vrstvy](windows-vrstva.md) (`gs:[0x30]`) |
+
+Jádro hodnotu ukládá ve vlákně a nahraje ji při každém přepnutí; nové
+vlákno začíná s 0, takže hodnota nikdy nepřeteče do jiného vlákna ani
+procesu (na aarch64 si program `TPIDR_EL0` může zapsat i sám, jádro ho
+proto při přepnutí ukládá). Báze GS je v jádře po `swapgs`
+v `KERNEL_GS_BASE`, program ji sám měnit nemůže (`CR4.FSGSBASE` je
+vypnuté). Obě hodnoty jsou v kontextu `THREAD_STATE` (`fs_base`,
+`gs_base` na x86_64). Chyby: `INVALID_ARGS` (`value` mimo userspace,
+neznámé `which`), `NOT_SUPPORTED` (`SECOND` na aarch64 - Windows ARM64
+drží TEB v `x18`, ten je v kontextu jako běžný registr). V libos
+`sys::thread_set_pointer` a `sys::thread_set_second_pointer`; TLS používá
+runtime `std` ([Rust std](rust-std.md)). **[ověřeno v QEMU]** x86_64
+i aarch64 (sada `procesy`, test `druhy ukazatel vlakna`).
 
 ## Futex
 

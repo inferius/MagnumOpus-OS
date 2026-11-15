@@ -449,7 +449,13 @@ pub fn futex_wake(addr: &core::sync::atomic::AtomicU32, count: u32) -> u32 {
 
 /// Nastavi registr ukazatele vlakna (TLS) aktualniho vlakna.
 pub fn thread_set_pointer(value: u64) -> Result<()> {
-    call(nr::THREAD_SET_POINTER, [value, 0, 0, 0, 0, 0]).map(|_| ())
+    call(nr::THREAD_SET_POINTER, [value, nr::thread_pointer::TLS, 0, 0, 0, 0]).map(|_| ())
+}
+
+/// Nastavi druhy ukazatel vlakna (x86_64 baze GS, napr. TEB Windows
+/// vrstvy); na aarch64 `Err(NotSupported)`.
+pub fn thread_set_second_pointer(value: u64) -> Result<()> {
+    call(nr::THREAD_SET_POINTER, [value, nr::thread_pointer::SECOND, 0, 0, 0, 0]).map(|_| ())
 }
 
 /// Volani neexistujiciho syscallu (pro testy rozhrani).

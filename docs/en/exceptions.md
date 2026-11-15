@@ -179,8 +179,11 @@ extern "C" fn on_fault(f: *mut u8) -> ! {
   it by checking in code.
 - **Breakpoint:** on x86_64 the PC is already past `int3`, on aarch64 at
   `brk` - the handler advances it by 4.
-- **TEB through GS** (Windows layer) is a separate task; the context has
-  only the FS / `TPIDR_EL0` base for now.
+- **TEB through GS** (Windows layer): x86_64 has a second thread pointer
+  (the GS base, `THREAD_SET_POINTER` with `SECOND`,
+  [syscalls](syscalls.md#thread_set_pointer)), `gs_base` in the context;
+  an in-thread exception handler does not change GS. aarch64 has none
+  (Windows ARM64 keeps the TEB in `x18`).
 
 ## Key files
 
