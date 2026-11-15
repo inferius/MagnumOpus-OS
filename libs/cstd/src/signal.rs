@@ -213,7 +213,7 @@ mod sync {
         // SAFETY: ramec od jadra.
         let f = unsafe { ex::Frame::from_raw(frame) };
         let r = f.report();
-        let sig = match ex::signal_class(r.kind) {
+        let sig = match ex::signal_class_of(&r) {
             ex::SignalClass::Segv => SIGSEGV,
             ex::SignalClass::Bus => SIGBUS,
             ex::SignalClass::Fpe => SIGFPE,

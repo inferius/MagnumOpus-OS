@@ -242,6 +242,21 @@ pub fn dma_sync(map: u32, offset: u64, len: u64, direction: u64) -> Result<()> {
     call(nr::DMA_SYNC, [map as u64, offset, len, direction, 0, 0]).map(|_| ())
 }
 
+/// `VMO_CREATE` s `VMO_RESIZABLE`: pocatecni velikost a kapacita.
+pub fn vmo_create_resizable(size: u64, capacity: u64, process: u32) -> Result<u32> {
+    call(nr::VMO_CREATE, [size, process as u64, abi::vm::VMO_RESIZABLE, capacity, 0, 0]).map(|v| v as u32)
+}
+
+/// `VMO_SET_SIZE` (pravo `RESIZE`).
+pub fn vmo_set_size(vmo: u32, size: u64) -> Result<()> {
+    call(nr::VMO_SET_SIZE, [vmo as u64, size, 0, 0, 0, 0]).map(|_| ())
+}
+
+/// `VMO_SIZE`: aktualni velikost objektu pameti.
+pub fn vmo_size(vmo: u32) -> Result<u64> {
+    call(nr::VMO_SIZE, [vmo as u64, 0, 0, 0, 0, 0])
+}
+
 pub fn vmo_seal(vmo: u32) -> Result<()> {
     call(nr::VMO_SEAL, [vmo as u64, 0, 0, 0, 0, 0]).map(|_| ())
 }

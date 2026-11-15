@@ -343,7 +343,7 @@ are written to `out_actual_ptr`), `BAD_HANDLE`, `ACCESS_DENIED`,
 
 ### `VMO_CREATE`
 
-`(size, process, flags) -> handle`. A memory object of `size` bytes
+`(size, process, flags, capacity) -> handle`. A memory object of `size` bytes
 (rounded up to 4 KiB, max 1 TiB), zero-filled. The whole size is committed at once
 (the job's user-memory budget and the global ceiling of program memory);
 frames come into existence on the first write
@@ -352,9 +352,11 @@ user-memory budget of the job of `process` (a handle
 with `WRITE`; 0 = the caller). A parent thus creates a program's memory
 (segments, stack) on the child's account. `flags`: 0, or `vm::VMO_PINNED`
 (1) = all pages at once and pinned for DMA; the `DMA` budget is charged
-as well and the object cannot be sealed ([dma.md](dma.md#pinned-memory)).
+as well and the object cannot be sealed ([dma.md](dma.md#pinned-memory)),
+or `vm::VMO_RESIZABLE` (2) = a resizable object with capacity `capacity`
+(see [`VMO_SET_SIZE`](#vmo_set_size); not with `VMO_PINNED`).
 Rights: `DUPLICATE`, `TRANSFER`, `WAIT`, `READ`, `WRITE`, `MAP`, `EXECUTE`,
-`DMA`. Errors: `INVALID_ARGS` (0, too large, unknown flag), `NO_MEMORY`, `NO_RESOURCES` (job
+`DMA`, for a resizable object also `RESIZE`. Errors: `INVALID_ARGS` (0, too large, unknown flag), `NO_MEMORY`, `NO_RESOURCES` (job
 budget), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE` (`process`).
 `NO_MEMORY` also means that so much memory cannot be committed (ceiling =
 free RAM minus the kernel reserve minus pages already committed).
@@ -386,6 +388,38 @@ executed (see [memory-management.md](memory-management.md)). Requires
 `WRITE`. Errors: `BAD_STATE` (the object has a mapping that may write -
 even only as a maximum right), `NOT_SUPPORTED` (contiguous, DMA or physical
 object), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+
+### `VMO_SET_SIZE`
+
+**[verified in QEMU]** (kernel self-tests `pamet`: resizable object).
+`(vmo, size) -> 0`. Changes the size of a resizable object
+(`vm::VMO_RESIZABLE`) to `size` bytes, at most the capacity. The page list
+has the length of the capacity from creation (the kernel pays 8 B per
+capacity page), the commitment and the job's user memory budget cover only
+the current size: **growing** commits the new pages at once (shortage =
+`NO_MEMORY` / `NO_RESOURCES`, never an OOM on a fault), **shrinking**
+unmaps the pages past the end in all mappings (the mapping itself stays),
+flushes the TLB and only then frees the frames and the commitment. A
+mapping may cover the whole capacity; an access past the current size is a
+`PAGE_FAULT` exception with reason `reason::BEYOND_END` (C: `SIGBUS`, like
+an access past the end of a file in `mmap`), kernel reads and writes
+(`VMO_READ`/`VMO_WRITE`) past the end are `OUT_OF_RANGE`. A part that comes
+back after shrinking and growing is zero. Requires `RESIZE` (only the
+default handle of a resizable object has it; a read-only recipient does not
+get it). Errors: `NOT_SUPPORTED` (object without `VMO_RESIZABLE`),
+`OUT_OF_RANGE` (above the capacity), `BAD_STATE` (a pinned page past the
+new end, `VMO_PHYS_ADDR`), `ACCESS_DENIED` (sealed object, missing right),
+`NO_MEMORY`, `NO_RESOURCES`, `BAD_HANDLE`, `WRONG_TYPE`.
+
+Numbers 76 and 77 are reserved for other branches (`THREAD_INTERRUPT`,
+`PROCESS_MEMORY`); without them the kernel returns `BAD_SYSCALL`.
+
+### `VMO_SIZE`
+
+**[verified in QEMU]** (kernel self-tests `pamet`). `(vmo) -> size`. The
+current size of a memory object in bytes (fixed for an ordinary object, for
+a resizable one as set by `VMO_SET_SIZE`; C `fstat` of a memory fd in
+another process). Any right is enough. Errors: `BAD_HANDLE`, `WRONG_TYPE`.
 
 ### `VMO_READ`
 

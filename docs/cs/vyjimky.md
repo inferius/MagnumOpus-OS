@@ -123,6 +123,7 @@ alokuje a nastaví alternativní zásobník vlákna.
 |---|---|---|---|
 | `PAGE_FAULT`, `GENERAL` | `Segv` | `SIGSEGV` | `EXCEPTION_ACCESS_VIOLATION` (`access`: čtení / zápis / spuštění) |
 | `ALIGNMENT` | `Bus` | `SIGBUS` | `EXCEPTION_DATATYPE_MISALIGNMENT` |
+| `PAGE_FAULT` s `reason` = `BEYOND_END` (za koncem zvětšitelného objektu paměti, [správa paměti](sprava-pameti.md#zvětšitelný-objekt-paměti); `signal_class_of`) | `Bus` | `SIGBUS` | `EXCEPTION_IN_PAGE_ERROR` |
 | `DIVIDE` | `Fpe` | `SIGFPE` | `EXCEPTION_INT_DIVIDE_BY_ZERO` |
 | `INVALID_OPCODE` | `Ill` | `SIGILL` | `EXCEPTION_ILLEGAL_INSTRUCTION` |
 | `BREAKPOINT` | `Trap` | `SIGTRAP` | `EXCEPTION_BREAKPOINT` |

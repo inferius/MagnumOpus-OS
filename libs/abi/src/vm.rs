@@ -140,5 +140,12 @@ pub const VMO_MAX_SIZE: u64 = 1 << 40;
 /// se z rozpoctu uzivatelske pameti i z rozpoctu `DMA` jobu
 /// (`job::pool::DMA`). Pripnuty objekt nejde zapecetit.
 pub const VMO_PINNED: u64 = 1 << 0;
+/// Volba `VMO_CREATE`: zvetsitelny objekt (C `memfd`). Ctvrty argument je
+/// kapacita (nejvetsi velikost; seznam stranek se alokuje na ni hned),
+/// `size` je pocatecni velikost. Slib a rozpocet uzivatelske pameti jen za
+/// aktualni velikost (`VMO_SET_SIZE`); mapovani smi pokryt celou kapacitu,
+/// pristup za aktualni velikost = vyjimka `BEYOND_END`. Vychozi handle ma
+/// pravo `RESIZE`. Nejde s `VMO_PINNED`.
+pub const VMO_RESIZABLE: u64 = 1 << 1;
 /// Vsechny zname volby `VMO_CREATE`.
-pub const VMO_CREATE_FLAGS: u64 = VMO_PINNED;
+pub const VMO_CREATE_FLAGS: u64 = VMO_PINNED | VMO_RESIZABLE;

@@ -22,13 +22,31 @@ pub fn vmo_create(a: Args) -> Result<u64> {
     }
     let p = current_process();
     let job = job_of(&p, a[1])?;
-    let vmo = if a[2] & abi::vm::VMO_PINNED != 0 {
-        MemoryObject::new_pinned(a[0], Some(&job))?
-    } else {
-        MemoryObject::new(a[0], Some(&job))?
+    let (pinned, resizable) = (a[2] & abi::vm::VMO_PINNED != 0, a[2] & abi::vm::VMO_RESIZABLE != 0);
+    let vmo = match (pinned, resizable) {
+        (true, true) => return Err(Error::InvalidArgs),
+        (true, false) => MemoryObject::new_pinned(a[0], Some(&job))?,
+        (false, true) => MemoryObject::new_resizable(a[0], a[3], Some(&job))?,
+        (false, false) => MemoryObject::new(a[0], Some(&job))?,
     };
     let rights = vmo.default_rights();
     Ok(p.handles().insert(vmo, rights)?.0 as u64)
+}
+
+/// `VMO_SET_SIZE(vmo, size)`: velikost zvetsitelneho objektu (pravo
+/// `RESIZE`), viz `MemoryObject::set_size`.
+pub fn vmo_set_size(a: Args) -> Result<u64> {
+    let p = current_process();
+    let vmo = p.handles().get_as::<MemoryObject>(arg_handle(a[0])?, Rights::RESIZE)?;
+    vmo.set_size(a[1])?;
+    Ok(0)
+}
+
+/// `VMO_SIZE(vmo) -> size`: aktualni velikost (jakekoli pravo).
+pub fn vmo_size(a: Args) -> Result<u64> {
+    let p = current_process();
+    let vmo = p.handles().get_as::<MemoryObject>(arg_handle(a[0])?, Rights::NONE)?;
+    Ok(vmo.size())
 }
 
 /// Job, na jehoz ucet jde nova pamet: procesu `handle` (pravo `WRITE`),

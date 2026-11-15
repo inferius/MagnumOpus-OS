@@ -139,6 +139,11 @@ fn every_syscall_is_documented() {
         "DMA_MAP",
         "DMA_SEGMENTS",
         "DMA_SYNC",
+        // 76, 77 rezervovane (jine vetve)
+        "",
+        "",
+        "VMO_SET_SIZE",
+        "VMO_SIZE",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {
@@ -242,7 +247,7 @@ fn thread_context_roundtrip() {
 #[test]
 fn exception_report_roundtrip() {
     use crate::exception::Report;
-    let r = Report { kind: 14, stage: 3, access: 1, _reserved: 0, pid: 7, tid: 9, pc: 0x40_1000, addr: 0x1234, code: 6 };
+    let r = Report { kind: 14, stage: 3, access: 1, reason: crate::exception::reason::BEYOND_END, pid: 7, tid: 9, pc: 0x40_1000, addr: 0x1234, code: 6 };
     assert_eq!(Report::decode(&r.encode()), Some(r));
     assert_eq!(Report::decode(&[0u8; 10]), None);
 }
