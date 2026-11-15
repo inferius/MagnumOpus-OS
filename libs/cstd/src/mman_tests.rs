@@ -20,6 +20,10 @@ fn argument_checks() {
     // Sdileny zapis: rozhodne `map` podle druhu fd (pametovy fd ano, soubor ENOTSUP).
     assert!(check(0, 10, PROT_READ | PROT_WRITE, MAP_SHARED, 3, 0, PAGE).unwrap().shared);
     assert!(check(0, 10, PROT_READ, MAP_SHARED, 3, 0, PAGE).unwrap().shared);
+    // Zapis nebo spusteni bez cteni = i cteni (Linux x86_64/aarch64).
+    assert_eq!(check(0, 10, PROT_WRITE, MAP_SHARED, 3, 0, PAGE).unwrap().prot, (PROT_READ | PROT_WRITE) as u32);
+    assert_eq!(readable(PROT_EXEC), PROT_READ | PROT_EXEC);
+    assert_eq!(readable(PROT_NONE), PROT_NONE);
 }
 
 #[test]

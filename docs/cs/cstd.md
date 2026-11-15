@@ -557,7 +557,9 @@ Vlastního kódu ~11 000 řádků Rustu, převzatého ~14 000 řádků. Celá mu
    JIT z manifestu (W^X, [sprava-pameti.md](sprava-pameti.md)), jinak
    `EACCES`. `mmap` souboru: `MAP_PRIVATE` jen pro čtení načtením do
    anonymní paměti; `MAP_SHARED` souboru = `ENOTSUP`, dokud fsd nedá VMO
-   souboru.
+   souboru. `PROT_WRITE` nebo `PROT_EXEC` bez `PROT_READ` (v `mmap`
+   i `mprotect`) znamená i čtení jako na Linuxu x86_64 a aarch64 (jádro
+   stránku jen pro zápis nemá; wineserver tak mapuje `KUSER_SHARED_DATA`).
 7. **libc.a a libc.so** (otázky 1 a 2): `libc.a` (Rust `staticlib`)
    a `libc.so` (`cdylib`, `SONAME` `libc.so`), `crt1.o`/`crti.o`/`crtn.o`,
    hlavičky. xtask z nich složí **sysroot C** (`target/c-sysroot/<arch>`),

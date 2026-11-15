@@ -579,6 +579,10 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
    [memory-management.md](memory-management.md)), otherwise `EACCES`.
    File `mmap`: read-only `MAP_PRIVATE` by reading into anonymous memory;
    file `MAP_SHARED` = `ENOTSUP` until fsd provides a file VMO.
+   `PROT_WRITE` or `PROT_EXEC` without `PROT_READ` (in `mmap` and
+   `mprotect`) also means reading, as on Linux x86_64 and aarch64 (the
+   kernel has no write-only page; wineserver maps `KUSER_SHARED_DATA` this
+   way).
 7. **libc.a and libc.so** (questions 1 and 2): `libc.a` (Rust
    `staticlib`) and `libc.so` (`cdylib`, `SONAME` `libc.so`),
    `crt1.o`/`crti.o`/`crtn.o`, headers. xtask assembles a **C sysroot**
