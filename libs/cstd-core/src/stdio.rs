@@ -122,12 +122,14 @@ pub unsafe extern "C" fn vsnprintf(buf: *mut c_char, n: size_t, fmt: *const c_ch
     };
     let cap = dst.len().saturating_sub(1);
     let mut out = Buf { buf: &mut dst[..cap], pos: 0, total: 0 };
-    format::format(&mut out, f, &mut VaArgs(&mut ap));
+    let r = format::format_enc(&mut out, f, &mut VaArgs(&mut ap), crate::mb::current());
     let (pos, total) = (out.pos, out.total);
     if !dst.is_empty() {
         dst[pos] = 0;
     }
-    clamp(total)
+    // Znak, ktery nejde zakodovat (`%ls`): -1 (errno nastavuje az cstd
+    // ve svych funkcich, tady neni).
+    if r.is_err() { -1 } else { clamp(total) }
 }
 
 #[cfg_attr(not(test), unsafe(no_mangle))]

@@ -21,6 +21,7 @@ members = [
     "libs/libdproto",
     "libs/cstd",
     "libs/cstd-core",
+    "libs/uniprop",
     "libs/cstd-libc",
     "libs/cstd-so",
     "libs/mosdl",

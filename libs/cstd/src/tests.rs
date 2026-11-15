@@ -118,7 +118,7 @@ fn errno_header_matches() {
 
 #[test]
 fn langinfo_header_matches() {
-    use crate::misc::{langinfo, nl};
+    use crate::locale::{langinfo, nl};
     let h = include_str!("../include/langinfo.h");
     for (name, v) in [("CODESET", nl::CODESET), ("D_FMT", nl::D_FMT), ("T_FMT", nl::T_FMT), ("RADIXCHAR", nl::RADIXCHAR), ("DAY_1", nl::DAY_1), ("ABDAY_1", nl::ABDAY_1), ("MON_1", nl::MON_1), ("ABMON_1", nl::ABMON_1), ("CRNCYSTR", nl::CRNCYSTR)] {
         assert!(h.contains(&format!("#define {name} {v}\n")), "{name}");

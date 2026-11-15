@@ -212,6 +212,15 @@ against the C sysroot (`xtask/src/cports/`).
   `sdl-sample.wav` (z / from `test/`).
 - **Popis / Description:** `docs/cs/sdl.md`, `docs/en/sdl.md`.
 
+## Unicode Character Database
+
+- **Název / Name:** Unicode Character Database (`UnicodeData.txt`, `DerivedCoreProperties.txt`, `PropList.txt`, `EastAsianWidth.txt`)
+- **Verze / Version:** 18.0.0 (= `core::char::UNICODE_VERSION` překladače / of the compiler)
+- **Zdroj / Source:** https://www.unicode.org/Public/18.0.0/ucd/ (stahuje / downloaded by `cargo xtask unicode-tables`, SHA-256 v / in `xtask/src/unicode.rs`)
+- **Licence / Licence:** Unicode License v3 (Unicode-3.0), plný text / full text: `libs/uniprop/UNICODE-LICENSE.txt`
+- **Cesta / Path:** `libs/uniprop/src/tables.rs` (odvozené tabulky, ne soubory UCD / derived tables, not the UCD files)
+- **Popis / Description:** `docs/cs/cstd.md`, `docs/en/cstd.md` (kapitola Široké znaky a locale / chapter Wide characters and locale).
+
 ## Písmo Tuffy / Tuffy font
 
 - **Název / Name:** Tuffy Regular

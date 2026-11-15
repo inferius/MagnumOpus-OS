@@ -23,7 +23,7 @@
 
 mod cmake;
 mod configure;
-mod fetch;
+pub(crate) mod fetch;
 mod meson;
 mod sources;
 mod tools;

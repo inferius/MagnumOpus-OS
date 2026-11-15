@@ -43,3 +43,14 @@ long double remquol(long double x, long double y, int *q) {
     return (long double)remquo((double)x, (double)y, q);
 }
 long double strtold(const char *s, char **end) { return (long double)strtod(s, end); }
+
+/* wchar.h a locale.h s long double (stejny objekt jako strtold: libc.so
+ * vtahuje z archivu jen objekty, na ktere neco odkazuje). */
+#include <locale.h>
+#include <wchar.h>
+
+long double wcstold(const wchar_t *s, wchar_t **end) { return (long double)wcstod(s, end); }
+long double strtold_l(const char *s, char **end, locale_t l) {
+    (void)l;
+    return (long double)strtod(s, end);
+}
