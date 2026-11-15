@@ -218,6 +218,11 @@ pub fn dup2(old: i32, new: i32, cloexec: bool) -> R<i32> {
     Ok(new)
 }
 
+/// Otevrena cisla s `FD_CLOEXEC` (`posix_spawn`).
+pub fn fd_list() -> Vec<(i32, bool)> {
+    with(|v| v.iter().enumerate().filter_map(|(i, s)| s.as_ref().map(|s| (i as i32, s.cloexec))).collect())
+}
+
 pub fn cloexec(fd: i32) -> R<bool> {
     let i = usize::try_from(fd).map_err(|_| errno::EBADF)?;
     with(|v| v.get(i).and_then(|s| s.as_ref()).map(|s| s.cloexec).ok_or(errno::EBADF))

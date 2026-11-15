@@ -22,6 +22,7 @@ int signal_test(void);
 int lock_main(const char *side, const char *dir);
 int wchar_test(const char *dir);
 int posix2_test(const char *dir);
+int inherit_test(const char *dir);
 int termios_test(const char *dir);
 int memfd_test(void);
 int memfd_main(const char *side);
@@ -168,6 +169,9 @@ int main(int argc, char **argv) {
     int p2 = dir != NULL ? posix2_test(dir) : -1;
     if (p2 != 0) fprintf(stderr, "ctest posix2: krok %d errno %d\n", p2, errno);
     CHECK("posix2", p2 == 0);
+    int ih = dir != NULL ? inherit_test(dir) : -1;
+    if (ih != 0) fprintf(stderr, "ctest inherit: krok %d errno %d\n", ih, errno);
+    CHECK("inherit", ih == 0);
     int tt = dir != NULL ? termios_test(dir) : -1;
     if (tt != 0) fprintf(stderr, "ctest termios: krok %d errno %d\n", tt, errno);
     CHECK("termios", tt == 0);

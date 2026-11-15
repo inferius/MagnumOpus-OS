@@ -92,7 +92,7 @@ fn prepare(f: &FsClient) -> TestResult {
 }
 
 fn params() -> Result<StartHandle, String> {
-    Params { cwd: HOME.as_bytes().to_vec(), args: vec![], env: vec![], flags: 0 }.start_handle().map_err(|e| fail("parametry", e))
+    Params { cwd: HOME.as_bytes().to_vec(), args: vec![], env: vec![], flags: 0, ..Default::default() }.start_handle().map_err(|e| fail("parametry", e))
 }
 
 fn user_fs(f: &FsClient) -> Result<Channel, String> {
@@ -263,7 +263,7 @@ pub fn copier_resume(startup: &Startup) -> TestResult {
     }
     let start = |f: &FsClient| -> Result<(crate::apps::App, Channel, Channel), String> {
         let (ctl, theirs) = Channel::create().map_err(|e| fail("kanal", e))?;
-        let p = Params { cwd: home.as_bytes().to_vec(), args: vec![], env: vec![], flags: 0 }.start_handle().map_err(|e| fail("parametry", e))?;
+        let p = Params { cwd: home.as_bytes().to_vec(), args: vec![], env: vec![], flags: 0, ..Default::default() }.start_handle().map_err(|e| fail("parametry", e))?;
         let app = crate::apps::spawn_in(startup, "files-copy", vec![StartHandle::user(user_fs(f)?.into_handle()), StartHandle::user(theirs.into_handle()), p], None).map_err(|e| fail("files-copy", e))?;
         let (mine, client) = Channel::create().map_err(|e| fail("kanal", e))?;
         ctl.write(b"client", vec![mine.into_handle()]).map_err(|e| fail("klient", e))?;

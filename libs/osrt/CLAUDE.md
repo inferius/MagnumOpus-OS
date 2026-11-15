@@ -13,6 +13,7 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 - `src/fs.rs` - soubory nad fsproto; `File::path` (absolutní cesta při otevření, `openat` v cstd), `volume_space` (C `statvfs`).
 - `src/memfd.rs` - paměťový fd (`fd::Object::Memory`): zvětšitelný objekt paměti s pozicí, pečetě, `map` (MAP_SHARED přímo na objekt), `export`/`import` handlu (jen pro čtení = bez `WRITE` a `RESIZE`). Výchozí kapacita 64 MiB.
 - `src/vm.rs` - re-export `libos::vm` a příznaků `abi::vm` pro `mmap` v cstd.
+- `src/inherit.rs` - dědění fd potomkem `posix_spawn`: `export` (popis -> položka `abi::params::Fd` + handle; socket/`epoll` = `NotSupported`), `import` při startu po relaci FS (soubor `fsproto::v2::Identity` + `REOPEN`, nepovedený se přeskočí); `process::spawn_with_fds`.
 - `src/stdio.rs`, `src/pipe.rs` - protokol proudu bajtů; `src/process.rs` - `LAUNCH` ke launchd, `wait_any` (C `waitpid(-1)`); `src/net.rs` - std::net (zámky do netproto v2), `interface` (C `getifaddrs`).
 - `src/fs.rs` - soubory nad fsproto v2; `File::path` (cesta z doby otevření, C `fchdir`), `volume` (C `statfs`); `src/thread.rs` - `spawn`, `spawn_on` (vlákno na zásobníku volajícího, C `pthread_attr_setstack`).
 

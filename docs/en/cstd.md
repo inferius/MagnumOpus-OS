@@ -412,7 +412,7 @@ sysroot is built only when std or osrt changes):
   position, the process stdio (0, 1, 2 from start-up) or a pipe end. `dup`
   shares the description and the position.
 - At most 4096 numbers (`EMFILE`). `FD_CLOEXEC` is stored (for
-  `posix_spawn`, the child gets only 0-2).
+  `posix_spawn`: the child inherits numbers without it).
 - A pipe is a channel pair; the read end cannot be written (`EBADF`), a
   pipe has no position (`ESPIPE`).
 - On the host (`cargo test -p cstd`) the same rules over `std::fs`
@@ -584,7 +584,7 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
   returns -1 with `errno` = `ENOSYS`. `posix_spawn` and `posix_spawnp`
   with `posix_spawn_file_actions_*` and `posix_spawnattr_*`: applications
   with a manifest via `launchd`, helper programs via `spawn` (like
-  `std::process`), file actions for fd 0-2 (question 4), `waitpid` over the
+  `std::process`), file actions for fd 0-2 (question 4; since T4 all fds without `FD_CLOEXEC`), `waitpid` over the
   process handle (done, see [POSIX additions](#processes-posix_spawn-and-waitpid)),
   `system`/`popen` via the system shell **[designed]**. Starting a PIE
   program (dynamic process) needs a libd session in the spawner
@@ -799,7 +799,7 @@ under Unicode-3.0 (file `THIRD-PARTY.md` in the repository root).
 
 ## POSIX additions for ports and the Windows layer
 
-**[verified in QEMU]** x86_64 and aarch64 (step `posix2` of the `ctest`
+**[verified in QEMU]** x86_64 and aarch64 (steps `posix2` and `inherit` (fd inheritance) of the `ctest`
 test, suite `cstd`; host tests `posix_tests.rs` and `spawn_tests.rs` in
 `cargo test -p cstd`). Functions that ports and Wine need on top of what
 the library already had (Windows layer = step 8), and `termios.h` (see
@@ -812,11 +812,11 @@ the library already had (Windows layer = step 8), and `termios.h` (see
 <defs><marker id="ce9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
 <rect class="box" x="10" y="10" width="230" height="90" rx="6"/><text class="t b" x="125" y="34" text-anchor="middle">parent: fd table</text><text class="m" x="125" y="54" text-anchor="middle">0 stdin, 1 stdout, 2 stderr</text><text class="m" x="125" y="72" text-anchor="middle">5, 6 pipe, 7 file ...</text><text class="m" x="125" y="90" text-anchor="middle">file actions (adddup2 ...)</text>
 <path class="ln" d="M240 55 L288 55" marker-end="url(#ce9)"/>
-<rect class="acc" x="290" y="10" width="200" height="90" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">plan (cstd)</text><text class="m" x="390" y="54" text-anchor="middle">only fd 0-2: stream channel,</text><text class="m" x="390" y="72" text-anchor="middle">/dev/null or nothing;</text><text class="m" x="390" y="90" text-anchor="middle">otherwise ENOTSUP</text>
+<rect class="acc" x="290" y="10" width="200" height="90" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">plan (cstd)</text><text class="m" x="390" y="54" text-anchor="middle">fds without FD_CLOEXEC:</text><text class="m" x="390" y="72" text-anchor="middle">0-2 streams, above 2</text><text class="m" x="390" y="90" text-anchor="middle">inherited fds (handles)</text>
 <path class="ln" d="M490 55 L538 55" marker-end="url(#ce9)"/>
 <rect class="box" x="540" y="10" width="230" height="90" rx="6"/><text class="t b" x="655" y="34" text-anchor="middle">launchd</text><text class="m" x="655" y="54" text-anchor="middle">program, manifest, job,</text><text class="m" x="655" y="72" text-anchor="middle">FS and network sessions</text><text class="m" x="655" y="90" text-anchor="middle">(like std::process)</text>
 <path class="ln" d="M655 100 L655 148" marker-end="url(#ce9)"/>
-<rect class="ok" x="540" y="150" width="230" height="90" rx="6"/><text class="t b" x="655" y="174" text-anchor="middle">child</text><text class="m" x="655" y="194" text-anchor="middle">new process in a child job,</text><text class="m" x="655" y="212" text-anchor="middle">fd 0-2 from the parameter block,</text><text class="m" x="655" y="230" text-anchor="middle">default signals</text>
+<rect class="ok" x="540" y="150" width="230" height="90" rx="6"/><text class="t b" x="655" y="174" text-anchor="middle">child</text><text class="m" x="655" y="194" text-anchor="middle">new process in a child job,</text><text class="m" x="655" y="212" text-anchor="middle">fds from the parameter block,</text><text class="m" x="655" y="230" text-anchor="middle">default signals</text>
 <path class="ln" d="M538 195 L242 195" marker-end="url(#ce9)"/>
 <rect class="box" x="10" y="150" width="230" height="90" rx="6"/><text class="t b" x="125" y="174" text-anchor="middle">parent: child table</text><text class="m" x="125" y="194" text-anchor="middle">pid_t from cstd -> process handle</text><text class="m" x="125" y="212" text-anchor="middle">waitpid, wait4, waitid,</text><text class="m" x="125" y="230" text-anchor="middle">kill (termination)</text>
 </svg>
@@ -827,31 +827,52 @@ There is no `fork` in the system (the user's decision, see [Processes,
 locale, wchar](#processes-locale-wchar)). `posix_spawn` and `posix_spawnp`
 start the child through launchd exactly like `std::process::Command`
 ([Rust std](rust-std.md)): a child job, a new FS session with the same
-identity, a network session and three standard streams. The child has no other
-fd (decision 4A), so file actions are evaluated in the parent:
+identity, a network session and three standard streams. The child also
+**inherits the parent's fds without `FD_CLOEXEC`** at the same numbers
+(decision T4A, as in POSIX; formerly 4A only 0-2). File actions are
+evaluated in the parent over a copy of its fd table and numbers with
+`FD_CLOEXEC` are dropped at the end:
 
 | Action | Result |
 |---|---|
-| `addclose(0-2)` | the stream is not passed (empty input, discarded output) |
-| `addclose(> 2)` | nothing (the child has no higher numbers) |
-| `adddup2(x, 0-2)` | the child's stream = the description behind `x` in the parent (stdio, also another stream after `dup2`, a pipe or a file) or 0-2 after the previous actions; a socket is `ENOTSUP` |
-| `addopen(0-2, "/dev/null")` | empty input / discarded output |
-| `addopen(0-2, file)` | the parent opens the file (path relative to the child's directory at that step, `open` flags) and passes it as a stream |
-| anything with a target > 2 | `ENOTSUP` (the parameter block only carries three streams) |
-
-**A file as a stream** (fsd message `OPEN_STREAM`, [file system](file-system.md#the-fsproto-protocol)):
-the parameter block only carries byte-stream channels, so fsd "plays" the
-file into the channel (stdin: from the current position to the end, then
-end of stream) or writes from the channel (stdout/stderr: from the current
-position, with `O_APPEND` at the end). fsd opens its own handle of the
-same file, so the stream survives closing the fd and the end of the
-parent. Difference from POSIX: the child has **its own position** in the
-file (a shared position of an open file description between processes does
-not exist); the child's writes are in the file once fsd has processed them
-(shortly after the child ends, not necessarily at once). An fsd restart ends
-the stream.
+| `addclose(n)`, `addclosefrom_np(n)` | the child does not get the number (numbers from `n`); a closed stream 0-2 = empty input / discarded output |
+| `adddup2(x, y)` | the child's `y` = the description behind `x` (in the parent or after previous actions), without `FD_CLOEXEC`; `x == y` only clears `FD_CLOEXEC`; a closed `x` = `EBADF` |
+| `addopen(0-2, "/dev/null")` | empty input / discarded output (above 2 `ENOTSUP`) |
+| `addopen(y, file)` | the parent opens the file (path relative to the child's directory at that step, `open` flags; with `O_CLOEXEC` it is not passed) |
 | `addchdir(_np)`, `addfchdir(_np)` | the child's working directory (relative to the previous one); a missing one makes `posix_spawn` fail |
-| `addclosefrom_np(n)` | closes 0-2 from `n` on |
+
+**Fds 0-2 as streams** (fsd message `OPEN_STREAM`, [file system](file-system.md#the-fsproto-protocol)):
+the child's standard streams are byte-stream channels, so fsd "plays" a
+file on 0-2 into the channel (stdin: from the current position to the
+end, then end of stream) or writes from the channel (stdout/stderr: from
+the current position, with `O_APPEND` at the end). fsd opens its own handle
+of the same file, so the stream survives closing the fd and the end of the
+parent. The child's writes are in the file once fsd has processed them
+(shortly after the child ends, not necessarily at once). An fsd restart
+ends the stream.
+
+**Fds above 2** go in the parameter block (`abi::params`, version 3: `Fd`
+entries + handles with the tag `tag::FD`, launchd passes them unchanged)
+and the child's runtime (`osrt::inherit`) puts them into the fd table
+before `main`:
+
+| Kind | How it is passed |
+|---|---|
+| pipe, the parent's stdio under another number | a duplicate of the stream channel (both processes write/read the same channel) |
+| memory fd (`memfd_create`) | a duplicate of the memory object, seals, a copy of the position |
+| file, directory | the durable identity of the object (dataset, oid, generation); the child opens it in its own FS session with `REOPEN` - fsd checks the rights and the session's mounted paths again |
+| socket, `epoll` | **not inherited** (the connection to netd belongs to the parent's session); an inherited number is skipped, `adddup2` of a socket = `ENOTSUP` |
+
+Differences from POSIX (explicitly): the file position is **not shared**
+between the parent and the child - the child starts at the parent's
+position and then has its own (a shared open file description between
+processes does not exist, also for 0-2); an inherited file that has
+disappeared in the meantime (or that the child's session cannot see) is
+missing in the child (`EBADF`). There are at most `abi::params::MAX_FDS` =
+48 inherited fds above 2 (more = `EMFILE`), because the handles go in one
+start-up message together with stdio and sessions (channel message limit
+64 handles). `AF_UNIX` sockets (step T1) will be inheritable.
+
 
 - **The child's network:** inherited as in POSIX when the parent has one
   (unlike `std::process::Command`, where only with `network(true)`). An

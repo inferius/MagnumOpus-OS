@@ -202,6 +202,22 @@ impl File {
         &self.path
     }
 
+    /// Rezim pripojovani (`O_APPEND`).
+    pub fn is_append(&self) -> bool {
+        self.append
+    }
+
+    /// Trvala identita pro jinou relaci (dedeni fd, [`crate::inherit`]).
+    pub fn identity(&self) -> Result<fsproto::v2::Identity> {
+        session()?.identity(self.handle)
+    }
+
+    /// Otevre objekt z identity jine relace (`REOPEN`) na pozici `pos`.
+    pub fn from_identity(id: &fsproto::v2::Identity, pos: u64, append: bool, path: String) -> Result<File> {
+        let opened = session()?.open_identity(id)?;
+        Ok(File { handle: opened.handle, pos: AtomicU64::new(pos), append, path })
+    }
+
     /// Polozky otevreneho adresare.
     pub fn list(&self) -> Result<Vec<DirEntry>> {
         session()?.list_h(self.handle)

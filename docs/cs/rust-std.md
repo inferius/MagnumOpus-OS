@@ -247,8 +247,8 @@ Formát `abi::params`, čtení a vytvoření `libos::params::Params`, předání
 ve startovní zprávě jako `kind::PARAMS` **[ověřeno v QEMU]** (hello-std;
 testy formátu na hostiteli `cargo test -p abi params`). Standardní
 handly mají štítky `abi::params::tag` (`STDIN`, `STDOUT`, `STDERR`, `FS`,
-`NET`, `LAUNCH`); formát v2 má příznaky `STDOUT_NULL`/`STDERR_NULL`
-(`Stdio::null`). Podrobnosti a příklad: [libos](libos.md#blok-parametrů-procesu).
+`NET`, `LAUNCH`, `FD`); formát v2 má příznaky `STDOUT_NULL`/`STDERR_NULL`
+(`Stdio::null`), v3 zděděné fd (`posix_spawn`). Podrobnosti a příklad: [libos](libos.md#blok-parametrů-procesu).
 
 ### Protokol proudu bajtů
 

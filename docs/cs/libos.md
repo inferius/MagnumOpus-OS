@@ -196,7 +196,11 @@ a její lístek, [Zvuk](zvuk.md#relace-aplikací-a-nahrávání), `TTY` = řídi
 kanál terminálu, protokol `ttyproto`, [termios](cstd.md#termios)). Štítky, které
 runtime std sám nepoužije, si nechá pro knihovny
 (`osrt::start::take_tagged`). Formát v2 má pole příznaků (`abi::params::flags`:
-`STDOUT_NULL`, `STDERR_NULL` = výstup zahodit, `Stdio::null`).
+`STDOUT_NULL`, `STDERR_NULL` = výstup zahodit, `Stdio::null`). Formát v3
+přidal zděděné fd (`Params::fds`, `abi::params::Fd`: číslo, druh
+`fd_kind`, stav, data; nejvýš `MAX_FDS` = 48) - handly položek jdou se
+štítkem `FD` v pořadí položek ([posix_spawn](cstd.md#procesy-posix_spawn-a-waitpid)).
+**[ověřeno v QEMU]** (krok `inherit` testu `ctest`, sada `cstd`).
 
 ```rust
 use libos::params::Params;
@@ -205,6 +209,7 @@ let params = Params {
     cwd: b"/".to_vec(),
     args: vec![b"hello-std".to_vec(), b"alfa".to_vec()],
     env: vec![b"HELLO=svet".to_vec()],
+    ..Default::default()
 };
 let (out, out_child) = Channel::create()?;
 let handles = vec![

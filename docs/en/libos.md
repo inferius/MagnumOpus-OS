@@ -204,7 +204,11 @@ session of the sound service with application rights and its lease,
 control channel, protocol `ttyproto`, [termios](cstd.md#termios)). Tags the std runtime
 does not use itself are kept for libraries (`osrt::start::take_tagged`). Format v2 has a flags field
 (`abi::params::flags`: `STDOUT_NULL`, `STDERR_NULL` = discard the output,
-`Stdio::null`).
+`Stdio::null`). Format v3 added inherited fds (`Params::fds`,
+`abi::params::Fd`: number, kind `fd_kind`, status, data; at most `MAX_FDS`
+= 48) - the entries' handles go with the tag `FD` in the order of the
+entries ([posix_spawn](cstd.md#processes-posix_spawn-and-waitpid)).
+**[verified in QEMU]** (step `inherit` of the `ctest` test, suite `cstd`).
 
 ```rust
 use libos::params::Params;
@@ -213,6 +217,7 @@ let params = Params {
     cwd: b"/".to_vec(),
     args: vec![b"hello-std".to_vec(), b"alfa".to_vec()],
     env: vec![b"HELLO=svet".to_vec()],
+    ..Default::default()
 };
 let (out, out_child) = Channel::create()?;
 let handles = vec![

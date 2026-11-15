@@ -116,6 +116,10 @@ pub struct SpawnReq {
     /// Absolutni pracovni adresar potomka.
     pub cwd: Vec<u8>,
     pub io: [ChildIo; 3],
+    /// Zdedene fd nad 2: (cislo v potomkovi, `ChildIo::Parent` nebo
+    /// `Null`, z akce souboru). Druh, ktery zdedit nejde (socket), se
+    /// u zdedeneho fd preskoci, u akce je to `ENOTSUP`.
+    pub fds: Vec<(c_int, ChildIo, bool)>,
 }
 
 /// Sitove rozhrani mimo smycku (`ifaddrs.rs`).

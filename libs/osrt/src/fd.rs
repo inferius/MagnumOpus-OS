@@ -251,7 +251,23 @@ pub fn dup(fd: i32, min: i32, cloexec: bool) -> Result<i32> {
 /// se zavre.
 pub fn dup2(old: i32, new: i32, cloexec: bool) -> Result<i32> {
     let desc = get(old)?;
-    let n = index(new)?;
+    dup_into(new, desc, cloexec)?;
+    Ok(new)
+}
+
+/// Otevrena cisla s priznakem `FD_CLOEXEC` (vzestupne; `posix_spawn`).
+pub fn list() -> Vec<(i32, bool)> {
+    with(|v| v.iter().enumerate().filter_map(|(i, s)| s.as_ref().map(|s| (i as i32, s.cloexec))).collect())
+}
+
+/// Vlozi popis presne na cislo `fd` (zdedene fd pri startu); predchozi
+/// obsah se zavre.
+pub(crate) fn install(fd: i32, desc: Arc<Description>) -> Result<()> {
+    dup_into(fd, desc, false)
+}
+
+fn dup_into(fd: i32, desc: Arc<Description>, cloexec: bool) -> Result<()> {
+    let n = index(fd)?;
     let prev = with(|v| {
         if v.len() <= n {
             v.resize(n + 1, None);
@@ -259,7 +275,7 @@ pub fn dup2(old: i32, new: i32, cloexec: bool) -> Result<i32> {
         v[n].replace(Slot { desc, cloexec })
     });
     drop(prev);
-    Ok(new)
+    Ok(())
 }
 
 /// Priznak `FD_CLOEXEC` cisla.

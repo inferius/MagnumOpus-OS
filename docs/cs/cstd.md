@@ -393,7 +393,7 @@ sysroot se staví jen při změně std nebo osrt):
 - Číslo ukazuje na popis otevření: soubor relace FS s pozicí, stdio procesu
   (0, 1, 2 od startu) nebo konec roury. `dup` sdílí popis i pozici.
 - Nejvýš 4096 čísel (`EMFILE`). `FD_CLOEXEC` se ukládá (pro
-  `posix_spawn`, potomek dostává jen 0-2).
+  `posix_spawn`: potomek dědí čísla bez něj).
 - Roura je dvojice kanálů; čtecí konec nejde psát (`EBADF`), roura nemá
   pozici (`ESPIPE`).
 - Na hostiteli (`cargo test -p cstd`) stejná pravidla nad `std::fs`
@@ -562,7 +562,7 @@ Vlastního kódu ~11 000 řádků Rustu, převzatého ~14 000 řádků. Celá mu
   = `ENOSYS`. `posix_spawn` a `posix_spawnp` s
   `posix_spawn_file_actions_*` a `posix_spawnattr_*`: aplikace
   s manifestem přes `launchd`, pomocné programy přes `spawn` (jako
-  `std::process`), akce souborů pro fd 0-2 (otázka 4), `waitpid` nad
+  `std::process`), akce souborů pro fd 0-2 (otázka 4; od T4 všechna fd bez `FD_CLOEXEC`), `waitpid` nad
   handlem procesu (hotovo, viz [Doplněk POSIX](#procesy-posix_spawn-a-waitpid)),
   `system`/`popen` přes shell systému **[navrženo]**. Spuštění programu
   PIE (dynamický proces) potřebuje u spouštějícího relaci s libd
@@ -768,7 +768,7 @@ licencí Unicode-3.0 (soubor `THIRD-PARTY.md` v kořeni repozitáře).
 
 ## Doplněk POSIX pro porty a Windows vrstvu
 
-**[ověřeno v QEMU]** x86_64 i aarch64 (krok `posix2` testu `ctest`, sada
+**[ověřeno v QEMU]** x86_64 i aarch64 (kroky `posix2` a `inherit` (dědění fd) testu `ctest`, sada
 `cstd`; host testy `posix_tests.rs` a `spawn_tests.rs` v `cargo test -p
 cstd`). Funkce, které chtějí porty a Wine
 nad tím, co už knihovna měla (Windows vrstva = krok 8), a `termios.h`
@@ -781,11 +781,11 @@ nad tím, co už knihovna měla (Windows vrstva = krok 8), a `termios.h`
 <defs><marker id="cs9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
 <rect class="box" x="10" y="10" width="230" height="90" rx="6"/><text class="t b" x="125" y="34" text-anchor="middle">rodič: tabulka fd</text><text class="m" x="125" y="54" text-anchor="middle">0 stdin, 1 stdout, 2 stderr</text><text class="m" x="125" y="72" text-anchor="middle">5, 6 roura, 7 soubor ...</text><text class="m" x="125" y="90" text-anchor="middle">akce souborů (adddup2 ...)</text>
 <path class="ln" d="M240 55 L288 55" marker-end="url(#cs9)"/>
-<rect class="acc" x="290" y="10" width="200" height="90" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">plán (cstd)</text><text class="m" x="390" y="54" text-anchor="middle">jen fd 0-2: kanál proudu,</text><text class="m" x="390" y="72" text-anchor="middle">/dev/null nebo nic;</text><text class="m" x="390" y="90" text-anchor="middle">jinak ENOTSUP</text>
+<rect class="acc" x="290" y="10" width="200" height="90" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">plán (cstd)</text><text class="m" x="390" y="54" text-anchor="middle">fd bez FD_CLOEXEC:</text><text class="m" x="390" y="72" text-anchor="middle">0-2 proudy, nad 2</text><text class="m" x="390" y="90" text-anchor="middle">zděděné fd (handly)</text>
 <path class="ln" d="M490 55 L538 55" marker-end="url(#cs9)"/>
 <rect class="box" x="540" y="10" width="230" height="90" rx="6"/><text class="t b" x="655" y="34" text-anchor="middle">launchd</text><text class="m" x="655" y="54" text-anchor="middle">program, manifest, job,</text><text class="m" x="655" y="72" text-anchor="middle">relace FS a sítě</text><text class="m" x="655" y="90" text-anchor="middle">(jako std::process)</text>
 <path class="ln" d="M655 100 L655 148" marker-end="url(#cs9)"/>
-<rect class="ok" x="540" y="150" width="230" height="90" rx="6"/><text class="t b" x="655" y="174" text-anchor="middle">potomek</text><text class="m" x="655" y="194" text-anchor="middle">nový proces v podřízeném jobu,</text><text class="m" x="655" y="212" text-anchor="middle">fd 0-2 z bloku parametrů,</text><text class="m" x="655" y="230" text-anchor="middle">výchozí signály</text>
+<rect class="ok" x="540" y="150" width="230" height="90" rx="6"/><text class="t b" x="655" y="174" text-anchor="middle">potomek</text><text class="m" x="655" y="194" text-anchor="middle">nový proces v podřízeném jobu,</text><text class="m" x="655" y="212" text-anchor="middle">fd z bloku parametrů,</text><text class="m" x="655" y="230" text-anchor="middle">výchozí signály</text>
 <path class="ln" d="M538 195 L242 195" marker-end="url(#cs9)"/>
 <rect class="box" x="10" y="150" width="230" height="90" rx="6"/><text class="t b" x="125" y="174" text-anchor="middle">rodič: tabulka potomků</text><text class="m" x="125" y="194" text-anchor="middle">pid_t z cstd -> handle procesu</text><text class="m" x="125" y="212" text-anchor="middle">waitpid, wait4, waitid,</text><text class="m" x="125" y="230" text-anchor="middle">kill (ukončení)</text>
 </svg>
@@ -796,29 +796,48 @@ nad tím, co už knihovna měla (Windows vrstva = krok 8), a `termios.h`
 wchar](#procesy-locale-wchar)). `posix_spawn` a `posix_spawnp` spouští
 potomka přes launchd stejně jako `std::process::Command`
 ([Rust std](rust-std.md)): podřízený job, nová relace FS se stejnou
-identitou, relace sítě a tři standardní proudy. Ostatní fd potomek nemá (rozhodnutí 4A), proto se
-akce souborů vyhodnotí už v rodiči:
+identitou, relace sítě a tři standardní proudy. Potomek navíc **dědí fd
+rodiče bez `FD_CLOEXEC`** na stejných číslech (rozhodnutí T4A, jako POSIX;
+dřív 4A jen 0-2). Akce souborů se vyhodnotí už v rodiči nad kopií jeho
+tabulky fd a na konci se zahodí čísla s `FD_CLOEXEC`:
 
 | Akce | Výsledek |
 |---|---|
-| `addclose(0-2)` | proud se nepředá (vstup prázdný, výstup zahozený) |
-| `addclose(> 2)` | nic (potomek vyšší čísla nemá) |
-| `adddup2(x, 0-2)` | proud potomka = popis za `x` v rodiči (stdio, i jiný proud po `dup2`, roura nebo soubor) nebo 0-2 po předchozích akcích; socket `ENOTSUP` |
-| `addopen(0-2, "/dev/null")` | prázdný vstup / zahozený výstup |
-| `addopen(0-2, soubor)` | rodič soubor otevře (cesta vůči adresáři potomka v tom kroku, příznaky `open`) a předá ho jako proud |
-| cokoli s cílem > 2 | `ENOTSUP` (blok parametrů předává jen tři proudy) |
+| `addclose(n)`, `addclosefrom_np(n)` | číslo (čísla od `n`) potomek nedostane; zavřený proud 0-2 = prázdný vstup / zahozený výstup |
+| `adddup2(x, y)` | `y` potomka = popis za `x` (v rodiči nebo po předchozích akcích), bez `FD_CLOEXEC`; `x == y` jen zruší `FD_CLOEXEC`; neotevřené `x` = `EBADF` |
+| `addopen(0-2, "/dev/null")` | prázdný vstup / zahozený výstup (nad 2 `ENOTSUP`) |
+| `addopen(y, soubor)` | rodič soubor otevře (cesta vůči adresáři potomka v tom kroku, příznaky `open`; s `O_CLOEXEC` se nepředá) |
+| `addchdir(_np)`, `addfchdir(_np)` | pracovní adresář potomka (relativní vůči předchozímu); neexistující = chyba `posix_spawn` |
 
-**Soubor jako proud** (zpráva fsd `OPEN_STREAM`, [souborový systém](souborovy-system.md#protokol-fsproto)):
-blok parametrů nese jen kanály proudu bajtů, proto fsd soubor
-„přehrává“ do kanálu (stdin: od aktuální pozice do konce, pak konec
+**Fd 0-2 jako proudy** (zpráva fsd `OPEN_STREAM`, [souborový systém](souborovy-system.md#protokol-fsproto)):
+standardní proudy potomka jsou kanály proudu bajtů, proto fsd soubor na
+0-2 „přehrává“ do kanálu (stdin: od aktuální pozice do konce, pak konec
 proudu) nebo z kanálu zapisuje (stdout/stderr: od aktuální pozice, u
 `O_APPEND` na konec). fsd si otevře vlastní handle téhož souboru, takže
-proud přežije zavření fd i konec rodiče. Rozdíl proti POSIX: potomek má
-**vlastní pozici** v souboru (sdílená pozice popisu otevření mezi
-procesy není); zápis potomka je v souboru, jakmile ho fsd zpracuje (po
-skončení potomka chvíli, ne nutně hned). Restart fsd proud ukončí.
-| `addchdir(_np)`, `addfchdir(_np)` | pracovní adresář potomka (relativní vůči předchozímu); neexistující = chyba `posix_spawn` |
-| `addclosefrom_np(n)` | zavře 0-2 od `n` |
+proud přežije zavření fd i konec rodiče. Zápis potomka je v souboru,
+jakmile ho fsd zpracuje (po skončení potomka chvíli, ne nutně hned).
+Restart fsd proud ukončí.
+
+**Fd nad 2** jdou v bloku parametrů (`abi::params`, verze 3: položky
+`Fd` + handly se štítkem `tag::FD`, launchd je předá beze změny) a runtime
+potomka (`osrt::inherit`) je vloží do tabulky fd ještě před `main`:
+
+| Druh | Jak se předá |
+|---|---|
+| roura, stdio rodiče pod jiným číslem | duplikát kanálu proudu (oba procesy píšou/čtou tentýž kanál) |
+| paměťový fd (`memfd_create`) | duplikát objektu paměti, pečetě, kopie pozice |
+| soubor, adresář | trvalá identita objektu (dataset, oid, generace); potomek ho otevře ve své relaci FS operací `REOPEN` - fsd znovu ověří práva a připojené cesty relace |
+| socket, `epoll` | **nedědí se** (spojení s netd patří relaci rodiče); zděděné číslo se přeskočí, `adddup2` socketu = `ENOTSUP` |
+
+Rozdíly proti POSIX (výslovně): pozice souboru se mezi rodičem a potomkem
+**nesdílí** - potomek začíná na pozici rodiče a dál má vlastní (sdílený
+popis otevření mezi procesy není, platí i pro 0-2); zděděný soubor, který
+mezitím zmizel (nebo ho relace potomka nevidí), potomek nemá (`EBADF`).
+Zděděných fd nad 2 s handlem i bez je nejvýš `abi::params::MAX_FDS` = 48
+(víc = `EMFILE`), protože handly jdou jednou startovní zprávou spolu se
+stdio a relacemi (limit zprávy kanálu 64 handlů). Sockety `AF_UNIX`
+(krok T1) dědit půjde.
+
 
 - **Síť potomka:** jako POSIX se dědí, má-li ji rodič (jinak než
   `std::process::Command`, kde jen s `network(true)`). Aplikace s vlastním

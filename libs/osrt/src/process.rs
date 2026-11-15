@@ -135,12 +135,27 @@ fn stdio_for(spec: StdioSpec, s: Stream, flags: &mut u32) -> Result<(Option<Chan
 
 /// Spusti program pres launchd.
 pub fn spawn(s: Spawn) -> Result<(Child, Pipes), Fail> {
+    spawn_with_fds(s, Vec::new())
+}
+
+/// Jako [`spawn`] se zdedenymi fd ([`crate::inherit::export`], C
+/// `posix_spawn`); nejvic `abi::params::MAX_FDS`.
+pub fn spawn_with_fds(s: Spawn, fds: Vec<crate::inherit::Export>) -> Result<(Child, Pipes), Fail> {
+    if fds.len() > abi::params::MAX_FDS {
+        return Err((Error::NoResources, String::from("prilis mnoho zdedenych fd")));
+    }
     let launch = LAUNCH.get().ok_or((Error::NotSupported, String::from("proces nema kanal ke spousteci sluzbe")))?;
     let mut flags = 0;
     let (stdin, p_in) = stdio_for(s.stdin, Stream::In, &mut flags)?;
     let (stdout, p_out) = stdio_for(s.stdout, Stream::Out, &mut flags)?;
     let (stderr, p_err) = stdio_for(s.stderr, Stream::Err, &mut flags)?;
-    let params = libos::params::Params { cwd: s.cwd, args: s.args, env: s.env, flags }.encode().map_err(fail)?;
+    let mut fd_entries = Vec::with_capacity(fds.len());
+    let mut fd_handles = Vec::new();
+    for e in fds {
+        fd_entries.push(e.entry);
+        fd_handles.extend(e.handle);
+    }
+    let params = libos::params::Params { cwd: s.cwd, args: s.args, env: s.env, flags, fds: fd_entries }.encode().map_err(fail)?;
 
     let mut roles = Vec::new();
     let mut handles = Vec::new();
@@ -163,6 +178,10 @@ pub fn spawn(s: Spawn) -> Result<(Child, Pipes), Fail> {
             roles.push(role);
             handles.push(ch.into_handle());
         }
+    }
+    for h in fd_handles {
+        roles.push(Role::Fd);
+        handles.push(h);
     }
     let req = Launch { program: s.program, flags: 0, roles, params }.encode(NEXT_ID.fetch_add(1, Ordering::Relaxed)).map_err(fail)?;
     let (_, mut hs) = call(&launch.lock(), &req, handles)?;

@@ -117,6 +117,11 @@ pub fn dup2(old: i32, new: i32, cloexec: bool) -> R<i32> {
     fd::dup2(old, new, cloexec).map_err(e)
 }
 
+/// Otevrena cisla s `FD_CLOEXEC` (`posix_spawn`).
+pub fn fd_list() -> Vec<(i32, bool)> {
+    fd::list()
+}
+
 pub fn cloexec(fd: i32) -> R<bool> {
     fd::cloexec(fd).map_err(e)
 }
