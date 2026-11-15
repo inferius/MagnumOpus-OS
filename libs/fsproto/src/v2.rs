@@ -108,6 +108,10 @@ pub mod op {
     /// Kanonicka cesta relace po vyreseni odkazu, `.` a `..` (C `realpath`):
     /// cesta str -> cesta str. Objekt musi existovat.
     pub const REALPATH: u32 = 128;
+    /// Cteni do objektu pameti klienta: handle u64, offset u64, delka u32
+    /// (nejvys `VMO_IO`) + handle VMO (pravo `WRITE`) -> precteno u32. fsd
+    /// zapise data od zacatku VMO; jedna zprava misto mnoha po `MAX_IO`.
+    pub const READ_VMO: u32 = 129;
 }
 
 /// Prihlaseni klienta ve zprave posluchaci socketu (`SOCKET_CONNECT`):
@@ -520,6 +524,17 @@ impl FsClient {
     /// Precte az `len` bajtu (po kusech `MAX_IO`).
     pub fn read_h(&self, h: u64, offset: u64, len: usize) -> Result<Vec<u8>> {
         let mut out = Vec::new();
+        // Velke cteni po `VMO_IO` pres objekt pameti; sluzba bez `READ_VMO`
+        // (NOT_SUPPORTED) = po zpravach.
+        while len - out.len() > crate::MAX_IO {
+            let n = (len - out.len()).min(crate::VMO_IO);
+            match self.read_vmo(h, offset + out.len() as u64, n, &mut out) {
+                Ok(got) if got < n => return Ok(out),
+                Ok(_) => {}
+                Err(Error::NotSupported) => break,
+                Err(e) => return Err(e),
+            }
+        }
         while out.len() < len {
             let n = (len - out.len()).min(crate::MAX_IO);
             let at = offset + out.len() as u64;
@@ -535,6 +550,35 @@ impl FsClient {
             }
         }
         Ok(out)
+    }
+
+    /// Jedno cteni `READ_VMO` (nejvys `VMO_IO`); prida data do `out`, vraci
+    /// kolik. Po restartu sluzby handle otevre znovu a zopakuje (cteni nema
+    /// ucinek).
+    fn read_vmo(&self, local: u64, at: u64, n: usize, out: &mut Vec<u8>) -> Result<usize> {
+        let mut guard = self.io_vmo.lock();
+        if guard.is_none() {
+            *guard = Some(libos::Vmo::create(crate::VMO_IO as u64)?);
+        }
+        let vmo = guard.as_ref().ok_or(Error::NoMemory)?;
+        for _ in 0..3 {
+            let fsd = self.resolve(local)?;
+            let mut w = Self::req(op::READ_VMO);
+            w.u64(fsd).u64(at).u32(n as u32);
+            let h = vmo.handle().duplicate(Some(libos::Rights::BASIC | libos::Rights::READ | libos::Rights::WRITE))?;
+            match self.call_sending(Kind::Effect, &w.finish(), alloc::vec![h]) {
+                Ok((body, _)) => {
+                    let got = (Reader::new(&body).u32()? as usize).min(n);
+                    let start = out.len();
+                    out.resize(start + got, 0);
+                    vmo.read(0, &mut out[start..])?;
+                    return Ok(got);
+                }
+                Err(Error::ServiceRestarted | Error::BadHandle) if self.stale(local) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Err(Error::ServiceRestarted)
     }
 
     /// Zapise `data` po kusech. `Ok(n)` = prijato vse (`n == data.len()`);

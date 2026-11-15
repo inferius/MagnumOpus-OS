@@ -35,6 +35,19 @@ impl Service {
         match opcode {
             op::SOCKET_BIND => Some(self.sock_bind(sess, r, handles)),
             op::SOCKET_CONNECT => Some(self.sock_connect(sess, r, handles)),
+            op::READ_VMO => Some((|| {
+                let h = r.u64()?;
+                if !sess.handles.contains(&h) {
+                    return Err(Error::BadHandle);
+                }
+                let (off, n) = (r.u64()?, (r.u32()? as usize).min(fsproto::VMO_IO));
+                let vmo = libos::Vmo::from_handle(handles.pop().ok_or(Error::InvalidArgs)?);
+                let data = self.fs.as_mut().ok_or(Error::IoError)?.read_h(h, off, n)?;
+                vmo.write(0, &data)?;
+                let mut w = fsproto::Writer::new();
+                w.u32(data.len() as u32);
+                Ok(Reply::body(w))
+            })()),
             op::SET_MODE => Some((|| {
                 let fs = self.fs.as_mut().ok_or(Error::IoError)?;
                 let path = sess.resolve(fs, &r.str()?, true, true)?;

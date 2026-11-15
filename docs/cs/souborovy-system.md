@@ -1491,7 +1491,7 @@ match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
 | 31 | `CONNECT` | - | nový kanál relace (handle ve zprávě) |
 | 32 | `OPEN` | cesta, přístup u8, sdílení u8, příznaky u8 (`CREATE` 1, `EXCL` 2, `TRUNCATE` 4, `DIR` 8) | handle u64, `Stat`, `Revision` |
 | 33 | `CLOSE` | handle | - |
-| 34 | `READ_H` | handle, offset u64, délka u32 | data |
+| 34 | `READ_H` | handle, offset u64, délka u32 (nejvýš `MAX_IO` = 32 KiB; větší čtení klient dělá po 1 MiB přes `READ_VMO`) | data |
 | 35 | `WRITE_H` | handle, offset u64, data | **přijato u32** |
 | 36 | `SET_LEN` | handle, velikost u64 | - |
 | 37 | `STAT_H` | handle | `Stat`, `Revision` |
@@ -1765,6 +1765,7 @@ zůstávají. Z receptu systému se nezužuje. Jinak `ACCESS_DENIED`.
 | 126 | `READLINK` | cesta | cíl str (`WRONG_TYPE`, když není odkaz) |
 | 127 | `LSTAT` | cesta | `Stat` odkazu samotného |
 | 128 | `REALPATH` | cesta | kanonická cesta relace (odkazy, `.`, `..` vyřešené) |
+| 129 | `READ_VMO` | handle u64, offset u64, délka u32 (nejvýš `VMO_IO` = 1 MiB) + handle VMO klienta (`WRITE`) | přečteno u32; data od začátku VMO |
 
 **`OPEN_STREAM`** **[ověřeno v QEMU]** (sada `cstd`, krok `posix2`:
 výstup potomka `posix_spawn` do souboru a 200 000 bajtů souboru na jeho

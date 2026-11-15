@@ -1540,7 +1540,7 @@ match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
 | 31 | `CONNECT` | - | a new session channel (a handle in the message) |
 | 32 | `OPEN` | path, access u8, share u8, flags u8 (`CREATE` 1, `EXCL` 2, `TRUNCATE` 4, `DIR` 8) | handle u64, `Stat`, `Revision` |
 | 33 | `CLOSE` | handle | - |
-| 34 | `READ_H` | handle, offset u64, length u32 | data |
+| 34 | `READ_H` | handle, offset u64, length u32 (at most `MAX_IO` = 32 KiB; the client does larger reads by 1 MiB through `READ_VMO`) | data |
 | 35 | `WRITE_H` | handle, offset u64, data | **accepted u32** |
 | 36 | `SET_LEN` | handle, size u64 | - |
 | 37 | `STAT_H` | handle | `Stat`, `Revision` |
@@ -1825,6 +1825,7 @@ groups stay. A system recipe cannot be narrowed. Otherwise `ACCESS_DENIED`.
 | 126 | `READLINK` | path | target str (`WRONG_TYPE` when not a link) |
 | 127 | `LSTAT` | path | `Stat` of the link itself |
 | 128 | `REALPATH` | path | the canonical session path (links, `.`, `..` resolved) |
+| 129 | `READ_VMO` | handle u64, offset u64, length u32 (at most `VMO_IO` = 1 MiB) + the client's VMO handle (`WRITE`) | read u32; data from the start of the VMO |
 
 **`OPEN_STREAM`** **[verified in QEMU]** (suite `cstd`, step `posix2`: the
 output of a `posix_spawn` child into a file and 200 000 bytes of a file on

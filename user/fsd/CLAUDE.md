@@ -4,7 +4,7 @@ Služba souborového systému nad knihovnou `libs/fs`. Startovní zpráva (kind 
 
 ## Klíčové soubory
 
-- `src/main.rs` - smyčka a konfigurace; `blkdev.rs` - adaptér ovladače disku na `BlockDevice`; `serve.rs` + `serve_data.rs`, `serve_hist.rs` (historie), `serve_perm.rs` (oprávnění), `serve_v2.rs`; `tasks.rs` (přehled úloh); `stream.rs` - soubory jako proudy bajtů (`OPEN_STREAM`, stdin/stdout potomka `posix_spawn`); `serve_sock.rs` - uzly socketů `AF_UNIX` (`SOCKET_BIND`/`SOCKET_CONNECT`, mapa uzel -> kanál posluchače jen v paměti), `WHOAMI` a `SET_MODE` (`chmod`); mód při vytvoření (`CREATE` s módem, `OPEN` s `open_flags::MODE`) se uplatní ve stejném požadavku jako vytvoření.
+- `src/main.rs` - smyčka a konfigurace; `blkdev.rs` - adaptér ovladače disku na `BlockDevice`; `serve.rs` + `serve_data.rs`, `serve_hist.rs` (historie), `serve_perm.rs` (oprávnění), `serve_v2.rs`; `tasks.rs` (přehled úloh); `stream.rs` - soubory jako proudy bajtů (`OPEN_STREAM`, stdin/stdout potomka `posix_spawn`); `serve_sock.rs` - uzly socketů `AF_UNIX` (`SOCKET_BIND`/`SOCKET_CONNECT`, mapa uzel -> kanál posluchače jen v paměti), `WHOAMI`, `SET_MODE` (`chmod`) a `READ_VMO` (čtení až 1 MiB do VMO klienta); mód při vytvoření (`CREATE` s módem, `OPEN` s `open_flags::MODE`) se uplatní ve stejném požadavku jako vytvoření.
 - Protokol: `libs/fsproto`; klient `libs/fsproto` (`FsClient`).
 
 ## Invarianty

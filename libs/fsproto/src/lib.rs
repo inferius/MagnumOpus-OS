@@ -31,6 +31,10 @@ pub use codec::{Reader, Writer};
 
 /// Nejvic bajtu dat v jedne zprave (rezerva pro hlavicku v limitu kanalu).
 pub const MAX_IO: usize = 32 * 1024;
+/// Nejvic bajtu jednoho cteni pres objekt pameti (`v2::op::READ_VMO`):
+/// data nejdou zpravou, fsd je zapise do VMO klienta (jedna cesta tam
+/// a zpet misto 32 zprav po `MAX_IO`).
+pub const VMO_IO: usize = 1024 * 1024;
 /// Nejvetsi telo odpovedi (stranka vypisu se do nej musi vejit).
 pub const MAX_REPLY: usize = 60 * 1024;
 
@@ -367,6 +371,9 @@ pub fn reply(result: Result<Writer>) -> Vec<u8> {
 pub struct FsClient {
     conn: svcclient::Conn,
     handles: libos::sync::Mutex<recover::Table>,
+    /// Objekt pameti pro velka cteni (`READ_VMO`, `VMO_IO` bajtu), zalozi
+    /// se pri prvnim; zamek = jedno cteni najednou.
+    io_vmo: libos::sync::Mutex<Option<libos::Vmo>>,
 }
 
 impl FsClient {
@@ -383,6 +390,7 @@ impl FsClient {
         Self {
             conn,
             handles: libos::sync::Mutex::new(recover::Table::default()),
+            io_vmo: libos::sync::Mutex::new(None),
         }
     }
 
