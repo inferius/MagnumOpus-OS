@@ -47,6 +47,9 @@ pub enum Object {
     Memory(crate::memfd::Memory),
     /// Socket `AF_UNIX` ([`crate::unix`]).
     Unix(crate::unix::UnixSocket),
+    /// `/dev/null`: cteni = konec, zapis se zahodi (i zdedeny prazdny
+    /// proud rodice, `inherit`).
+    Null,
     /// Objekt knihovny nad std (napr. mnozina `epoll` v cstd); cteni
     /// a zapis nejdou.
     User(alloc::boxed::Box<dyn core::any::Any + Send + Sync>),
@@ -100,6 +103,7 @@ impl Description {
             Object::Memory(m) => m.read(buf),
             // Fd ze zpravy cteni pres read zahodi (jako Linux).
             Object::Unix(u) => u.recv(buf, 0, self.nonblock()).map(|r| r.len),
+            Object::Null => Ok(0),
         }
     }
 
@@ -115,6 +119,7 @@ impl Description {
             Object::Socket(s) => s.send(data, self.nonblock()),
             Object::Memory(m) => m.write(data),
             Object::Unix(u) => u.send(data, &[], self.nonblock()),
+            Object::Null => Ok(data.len()),
         }
     }
 

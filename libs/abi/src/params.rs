@@ -92,6 +92,9 @@ pub mod fd_kind {
     /// `uzivatel u64, skupina u64, pid u32, jmeno druhe strany`, pak vlastni
     /// jmeno; jmeno = `delka u32 + bajty` (0 = bez jmena).
     pub const UNIX: u8 = 4;
+    /// Prazdny fd jako `/dev/null` (cteni = konec, zapis se zahodi), bez
+    /// handlu a dat: stdio rodice bez kanalu (`Stdio::null`) a `/dev/null`.
+    pub const NULL: u8 = 5;
 
     /// Ma polozka handle ve startovni zprave?
     pub const fn has_handle(kind: u8) -> bool {

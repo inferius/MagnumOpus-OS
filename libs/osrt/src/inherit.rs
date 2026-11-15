@@ -13,6 +13,8 @@
 //!   na pozici rodice. Pozice se **nesdili** (POSIX ji sdili): kazdy proces
 //!   ma od spusteni vlastni.
 //!
+//! - prazdny fd (`/dev/null`, stdio rodice bez kanalu): bez handlu,
+//!   potomek ma zase `/dev/null`,
 //! - socket `AF_UNIX`: duplikat kanalu spojeni nebo posluchace (stejny
 //!   tvar jde i v `SCM_RIGHTS`, [`crate::unix`]).
 //!
@@ -70,8 +72,10 @@ pub fn export(child_fd: i32, desc: &Description) -> Result<Export> {
         Object::Pipe(p) => Export { entry: entry(fd_kind::PIPE, Vec::new()), handle: Some(p.try_clone()?.into_channel().into_handle()) },
         Object::Stdio(s) => match crate::stdio::inherit(*s)? {
             Inherit::Channel(c) => Export { entry: entry(fd_kind::PIPE, Vec::new()), handle: Some(c.into_handle()) },
-            Inherit::Null | Inherit::None => return Err(Error::NotSupported),
+            // Proud bez kanalu (zahozeny nebo zadny): jako /dev/null.
+            Inherit::Null | Inherit::None => Export { entry: entry(fd_kind::NULL, Vec::new()), handle: None },
         },
+        Object::Null => Export { entry: entry(fd_kind::NULL, Vec::new()), handle: None },
         Object::Memory(m) => {
             let mut w = Vec::with_capacity(13);
             w.push(u8::from(m.writable()));
@@ -120,6 +124,7 @@ pub(crate) fn object(e: &Fd, handle: Option<Handle>) -> Result<Object> {
             let path = String::from_utf8(r.0.to_vec()).map_err(|_| Error::Corrupted)?;
             Ok(Object::File(File::from_identity(&id, pos, append, path)?))
         }
+        fd_kind::NULL => Ok(Object::Null),
         fd_kind::UNIX => Ok(Object::Unix(crate::unix::UnixSocket::import(&e.data, handle.ok_or(Error::Corrupted)?)?)),
         _ => Err(Error::NotSupported),
     }

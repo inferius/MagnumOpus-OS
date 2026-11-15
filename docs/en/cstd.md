@@ -839,7 +839,7 @@ evaluated in the parent over a copy of its fd table and numbers with
 |---|---|
 | `addclose(n)`, `addclosefrom_np(n)` | the child does not get the number (numbers from `n`); a closed stream 0-2 = empty input / discarded output |
 | `adddup2(x, y)` | the child's `y` = the description behind `x` (in the parent or after previous actions), without `FD_CLOEXEC`; `x == y` only clears `FD_CLOEXEC`; a closed `x` = `EBADF` |
-| `addopen(0-2, "/dev/null")` | empty input / discarded output (above 2 `ENOTSUP`) |
+| `addopen(y, "/dev/null")` | empty input / discarded output (above 2 an empty fd) |
 | `addopen(y, file)` | the parent opens the file (path relative to the child's directory at that step, `open` flags; with `O_CLOEXEC` it is not passed) |
 | `addchdir(_np)`, `addfchdir(_np)` | the child's working directory (relative to the previous one); a missing one makes `posix_spawn` fail |
 
@@ -862,6 +862,7 @@ before `main`:
 |---|---|
 | pipe, the parent's stdio under another number | a duplicate of the stream channel (both processes write/read the same channel) |
 | memory fd (`memfd_create`) | a duplicate of the memory object, seals, a copy of the position |
+| `/dev/null`, the parent's stdio without a channel | an empty fd without a handle (reading = end, writes are discarded) |
 | file, directory | the durable identity of the object (dataset, oid, generation); the child opens it in its own FS session with `REOPEN` - fsd checks the rights and the session's mounted paths again |
 | socket, `epoll` | **not inherited** (the connection to netd belongs to the parent's session); an inherited number is skipped, `adddup2` of a socket = `ENOTSUP` |
 
@@ -957,7 +958,7 @@ Wine and other ports (X11, D-Bus, Wayland) stays unchanged.
   `SIGPIPE` is sent).
 - **`SCM_RIGHTS`:** at most 32 fds in a message. Fds are passed as with
   inheritance ([posix_spawn](#processes-posix_spawn-and-waitpid)): a pipe
-  and `AF_UNIX` = a duplicate of the channel, a memory fd = a duplicate of
+  and `AF_UNIX` = a duplicate of the channel, `/dev/null` and stdio without a channel = an empty fd, a memory fd = a duplicate of
   the memory object, a file and a directory = the durable identity +
   `REOPEN` in the receiver's session (the receiver must see the path; the
   position is not shared). TCP/UDP sockets and `epoll` cannot be passed

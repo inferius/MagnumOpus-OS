@@ -807,7 +807,7 @@ tabulky fd a na konci se zahodí čísla s `FD_CLOEXEC`:
 |---|---|
 | `addclose(n)`, `addclosefrom_np(n)` | číslo (čísla od `n`) potomek nedostane; zavřený proud 0-2 = prázdný vstup / zahozený výstup |
 | `adddup2(x, y)` | `y` potomka = popis za `x` (v rodiči nebo po předchozích akcích), bez `FD_CLOEXEC`; `x == y` jen zruší `FD_CLOEXEC`; neotevřené `x` = `EBADF` |
-| `addopen(0-2, "/dev/null")` | prázdný vstup / zahozený výstup (nad 2 `ENOTSUP`) |
+| `addopen(y, "/dev/null")` | prázdný vstup / zahozený výstup (nad 2 prázdný fd) |
 | `addopen(y, soubor)` | rodič soubor otevře (cesta vůči adresáři potomka v tom kroku, příznaky `open`; s `O_CLOEXEC` se nepředá) |
 | `addchdir(_np)`, `addfchdir(_np)` | pracovní adresář potomka (relativní vůči předchozímu); neexistující = chyba `posix_spawn` |
 
@@ -828,6 +828,7 @@ potomka (`osrt::inherit`) je vloží do tabulky fd ještě před `main`:
 |---|---|
 | roura, stdio rodiče pod jiným číslem | duplikát kanálu proudu (oba procesy píšou/čtou tentýž kanál) |
 | paměťový fd (`memfd_create`) | duplikát objektu paměti, pečetě, kopie pozice |
+| `/dev/null`, stdio rodiče bez kanálu | prázdný fd bez handlu (čtení = konec, zápis se zahodí) |
 | soubor, adresář | trvalá identita objektu (dataset, oid, generace); potomek ho otevře ve své relaci FS operací `REOPEN` - fsd znovu ověří práva a připojené cesty relace |
 | socket, `epoll` | **nedědí se** (spojení s netd patří relaci rodiče); zděděné číslo se přeskočí, `adddup2` socketu = `ENOTSUP` |
 
@@ -915,7 +916,7 @@ a dalších portů (X11, D-Bus, Wayland) zůstal beze změny.
   `POLLHUP`/`POLLIN` a `recv` 0, `send` = `EPIPE` (`SIGPIPE` se neposílá).
 - **`SCM_RIGHTS`:** nejvýš 32 fd ve zprávě. Fd se předají jako při dědění
   ([posix_spawn](#procesy-posix_spawn-a-waitpid)): roura a `AF_UNIX` =
-  duplikát kanálu, paměťový fd = duplikát objektu paměti, soubor
+  duplikát kanálu, `/dev/null` a stdio bez kanálu = prázdný fd, paměťový fd = duplikát objektu paměti, soubor
   a adresář = trvalá identita + `REOPEN` v relaci příjemce (příjemce musí
   cestu vidět; pozice se nesdílí). Sockety TCP/UDP a `epoll` předat nejde
   (`ENOTSUP`); fd, který příjemce otevřít nemůže, se vynechá. Příjemce

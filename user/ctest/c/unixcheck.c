@@ -132,6 +132,15 @@ static int pairs(void) {
     close(got);
     if (read(p[0], b, sizeof b) != 5 || memcmp(b, "roura", 5) != 0) return 6;
     close(p[0]);
+    /* /dev/null a stdin (i bez kanalu, jako Wine posila 0-2) jdou predat. */
+    int nul = open("/dev/null", O_RDWR);
+    if (nul < 0 || read(nul, b, 1) != 0 || write(nul, "abc", 3) != 3) return 16;
+    if (send_fd(sv[0], "n", 1, nul) != 1 || recv_fd(sv[1], b, sizeof b, &got) != 1 || got < 0) return 17;
+    if (read(got, b, 1) != 0) return 18;
+    close(got);
+    close(nul);
+    if (send_fd(sv[0], "0", 1, 0) != 1 || recv_fd(sv[1], b, sizeof b, &got) != 1 || got < 0) return 19;
+    close(got);
     /* Hranice zprav s fd a data bez fd. */
     if (send(sv[0], "abc", 3, 0) != 3 || send(sv[0], "de", 2, 0) != 2) return 7;
     int n = 0, k;

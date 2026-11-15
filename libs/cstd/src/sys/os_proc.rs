@@ -35,6 +35,7 @@ fn spec(io: ChildIo, target: Stream) -> R<StdioSpec> {
             Inherit::Null | Inherit::None => Ok(StdioSpec::Null),
         },
         Object::Pipe(p) => Ok(StdioSpec::Channel(p.try_clone().map_err(e)?.into_channel())),
+        Object::Null => Ok(StdioSpec::Null),
         Object::File(f) => match f.open_stream(target != Stream::In) {
             Ok(ch) => Ok(StdioSpec::Channel(ch)),
             // Handle bez prava pro smer proudu (soubor jen pro cteni na
@@ -51,8 +52,12 @@ fn spec(io: ChildIo, target: Stream) -> R<StdioSpec> {
 fn inherited(fds: &[(crate::c_int, ChildIo, bool)]) -> R<Vec<rt::inherit::Export>> {
     let mut out = Vec::new();
     for &(child, io, explicit) in fds {
-        let ChildIo::Parent(fd) = io else { return Err(errno::ENOTSUP) };
-        let d = rt::fd::get(fd).map_err(|_| errno::EBADF)?;
+        let d = match io {
+            ChildIo::Parent(fd) => rt::fd::get(fd).map_err(|_| errno::EBADF)?,
+            // addopen(n, "/dev/null") nad 2.
+            ChildIo::Null => rt::fd::Description::new(Object::Null, crate::sys::status::RDWR),
+            _ => return Err(errno::ENOTSUP),
+        };
         match rt::inherit::export(child, &d) {
             Ok(x) => out.push(x),
             Err(rt::Error::NotSupported) if !explicit => {}
