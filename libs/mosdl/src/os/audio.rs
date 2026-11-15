@@ -142,6 +142,17 @@ pub unsafe extern "C" fn mosdl_audio_read(id: i32, data: *mut u8, bytes: u32) ->
     (frames as usize * s.0.ring().frame_bytes() as usize) as i32
 }
 
+/// Pocka, az se do bufferu vejde `bytes` bajtu (nejdel `timeout_ns`, < 0 =
+/// bez limitu); 0 = misto je, zaporne = chyba (`TIMED_OUT`: sluzba stoji).
+/// SDL ho vola z `WaitDevice` mimo zamek zarizeni, `mosdl_audio_write`
+/// pak neceka.
+#[unsafe(no_mangle)]
+pub extern "C" fn mosdl_audio_wait_space(id: i32, bytes: u32, timeout_ns: i64) -> i32 {
+    let Some(s) = stream(id) else { return code(Error::NotFound) };
+    let deadline = (timeout_ns >= 0).then(|| libos::time::now().saturating_add(timeout_ns as u64));
+    s.0.wait_space(bytes as usize, deadline).map_or_else(code, |_| 0)
+}
+
 /// Pocka na udalost streamu (misto v bufferu / nova data).
 #[unsafe(no_mangle)]
 pub extern "C" fn mosdl_audio_wait(id: i32, timeout_ns: i64) -> i32 {

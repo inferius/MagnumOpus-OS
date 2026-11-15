@@ -3,8 +3,10 @@
  * (relace aplikace, include/mosdl.h). Kod MagnumOpus, licence zlib jako
  * SDL. Popis: docs/cs/sdl.md, docs/cs/zvuk.md.
  *
- * Prehravani: SDL plni blok (perioda sluzby) a PlayDevice ho zapise do
- * sdileneho kruhoveho bufferu (pri plnem bufferu ceka na misto).
+ * Prehravani: WaitDevice ceka na misto pro jeden blok v sdilenem kruhovem
+ * bufferu (mimo zamek zarizeni), PlayDevice blok jen zapise - SDL ho vola
+ * pod zamkem zarizeni a nesmi blokovat (jinak SDL_ResumeAudioDevice,
+ * zavreni streamu a dalsi volani hlavniho vlakna cekaji na zamek sekundy).
  * Nahravani: OPEN vstupu muze cekat na rozhodnuti uzivatele (dialog
  * povoleni); zamitnuti = SDL_OpenAudioDevice selze. Jedno vychozi zarizeni
  * kazdeho smeru (vyber karty je vec systemu, ne aplikace).
@@ -83,14 +85,15 @@ static bool MOS_OpenDevice(SDL_AudioDevice *device)
 
 static bool MOS_WaitDevice(SDL_AudioDevice *device)
 {
-    /* Cekani na misto dela PlayDevice (zapis ceka, kdyz je buffer plny). */
-    return true;
+    /* Misto pro cely blok; nejdel 1 s: sluzba stoji (zadne zarizeni) =
+       chyba zarizeni v SDL. */
+    return mosdl_audio_wait_space(device->hidden->stream, (uint32_t)device->buffer_size, 1000000000) >= 0;
 }
 
 static bool MOS_PlayDevice(SDL_AudioDevice *device, const Uint8 *buffer, int buflen)
 {
-    /* Nejdel 1 s: sluzba stoji (zadne zarizeni) = chyba zarizeni v SDL. */
-    return mosdl_audio_write(device->hidden->stream, buffer, (uint32_t)buflen, 1000000000) >= 0;
+    /* Misto zajistil WaitDevice: zapis bez cekani (pod zamkem zarizeni). */
+    return mosdl_audio_write(device->hidden->stream, buffer, (uint32_t)buflen, 0) >= 0;
 }
 
 static Uint8 *MOS_GetDeviceBuf(SDL_AudioDevice *device, int *buffer_size)

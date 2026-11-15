@@ -178,6 +178,10 @@ int mosdl_audio_write(int id, const void *data, uint32_t bytes, int64_t timeout_
 int mosdl_audio_read(int id, void *data, uint32_t bytes);
 /* Ceka na udalost streamu (misto / nova data). */
 int mosdl_audio_wait(int id, int64_t timeout_ns);
+/* Ceka, az se do bufferu vejde `bytes` bajtu (nejdel timeout_ns, < 0 bez
+   limitu); 0 = misto je. Plny buffer nespusteneho streamu ho spusti.
+   Ovladac SDL: cekat tady (WaitDevice, mimo zamek), zapis pak neblokuje. */
+int mosdl_audio_wait_space(int id, uint32_t bytes, int64_t timeout_ns);
 int mosdl_audio_start(int id);
 void mosdl_audio_close(int id);
 
