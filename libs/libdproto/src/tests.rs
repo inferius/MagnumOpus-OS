@@ -22,7 +22,12 @@ fn names() {
 
 #[test]
 fn request_roundtrip_and_rejects() {
-    for r in [Request::Open { name: String::from("libdltest.so.1") }, Request::Connect, Request::Stats] {
+    for r in [
+        Request::Open { name: String::from("libdltest.so.1") },
+        Request::OpenImage { name: String::from("ntdll.so"), len: 4096 },
+        Request::Connect,
+        Request::Stats,
+    ] {
         assert_eq!(Request::decode(&r.encode()), Some(r));
     }
     // Jmeno s lomitkem se nedekoduje ani kdyz ho klient posle.
@@ -38,6 +43,29 @@ fn request_roundtrip_and_rejects() {
 }
 
 #[test]
+fn open_image_rejects() {
+    let ok = Request::OpenImage { name: String::from("libx.so"), len: 10 }.encode();
+    // Delka 0, nad MAX_FILE, prebytecny bajt, chybejici delka, jmeno s lomitkem.
+    let with_len = |len: u64| {
+        let mut b = ok[..ok.len() - 8].to_vec();
+        b.extend_from_slice(&len.to_le_bytes());
+        b
+    };
+    assert_eq!(Request::decode(&with_len(0)), None);
+    assert_eq!(Request::decode(&with_len(MAX_FILE + 1)), None);
+    assert!(Request::decode(&with_len(MAX_FILE)).is_some());
+    let mut extra = ok.clone();
+    extra.push(0);
+    assert_eq!(Request::decode(&extra), None);
+    assert_eq!(Request::decode(&ok[..ok.len() - 1]), None);
+    let mut slash = vec![4u8];
+    slash.extend_from_slice(&3u16.to_le_bytes());
+    slash.extend_from_slice(b"a/b");
+    slash.extend_from_slice(&1u64.to_le_bytes());
+    assert_eq!(Request::decode(&slash), None);
+}
+
+#[test]
 fn reply_roundtrip_and_limits() {
     let lib = Library {
         span: 0x40000,
@@ -46,7 +74,7 @@ fn reply_roundtrip_and_limits() {
             Segment { start: 0x20000, len: 0x10000, prot: 3, kind: kind::DATA },
         ],
     };
-    for r in [Reply::Library(lib.clone()), Reply::Ok, Reply::Stats(Stats { templates: 2, opens: 5, hits: 3, connections: 4 }), Reply::Error(-8)] {
+    for r in [Reply::Library(lib.clone()), Reply::Ok, Reply::Stats(Stats { templates: 2, opens: 5, hits: 3, connections: 4, disk_templates: 1, evicted: 7 }), Reply::Error(-8)] {
         assert_eq!(Reply::decode(&r.encode()), Some(r));
     }
     // Segment za koncem rozsahu, neznamy druh, zadny segment.

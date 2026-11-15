@@ -16,7 +16,7 @@ Wine a FFmpeg (LGPL, dynamicky). Programy v Rustu zůstávají statické
 | DL-3 | tabulka zavaděče (`abi::loader`, `dl*` v ABI už teď), TLS nových vláken (libos, osrt), DTV a generace, statická rezerva TLS, `fini`, `dl_iterate_phdr`, `dladdr`, `r_debug` | **[ověřeno v QEMU]** x86_64 i aarch64 (test `dynamicke linkovani: vlakna libos ...`) |
 | DL-4a | služba knihoven `libd` (zapečetěné šablony, sdílení kódu knihoven mezi procesy), spojení s libd pro každý proces (program se zavaděčem spustí kdokoli), pečeť oblastí (`PROT_SEAL`, jako `mseal`) pro kód a RELRO | **[ověřeno v QEMU]** x86_64 i aarch64 (sady `pamet`, `procesy`) |
 | DL-4b | `dlopen`/`dlsym`/`dlclose` přes libd (dynamické TLS: líná alokace přes DTV, dynamický TLSDESC), rezerva statického TLS z manifestu (`[app] static_tls_reserve`) a měření | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `procesy`) |
-| DL-4c | knihovny z disku a `$ORIGIN` (až budou aplikace z disku `/apps/<id>/`) | **[navrženo]** |
+| DL-4c | knihovny z disku a `$ORIGIN`: čte je zavaděč relací FS procesu, libd jen šablony podle obsahu (`OpenImage`), `DT_RUNPATH`, absolutní cesty a `dlopen` z disku | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `procesy`) |
 | T5 | rezervace adres před zavedením (`AT_MO_RESERVE`, manifest `[app] reserve`) pro Windows vrstvu | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `procesy`) |
 
 ## Návrh (schválené volby)
@@ -47,7 +47,7 @@ Wine a FFmpeg (LGPL, dynamicky). Programy v Rustu zůstávají statické
 <text class="m" x="5" y="130">Kód knihoven ze zapečetěných šablon (libd, sdílené stránky), data a GOT jako kopie při zápisu.</text>
 <text class="m" x="5" y="150">DL-1 (tato část): parser libs/elf, ze kterého ld.so čte hlavičky, symboly a relokace.</text>
 </svg>
-<figcaption>Spuštění programu PIE se sdílenými knihovnami (DL-2 až DL-4b; knihovny z disku a <code>$ORIGIN</code> v DL-4c).</figcaption>
+<figcaption>Spuštění programu PIE se sdílenými knihovnami (DL-2 až DL-4c; knihovny z disku a <code>$ORIGIN</code> viz <a href="#knihovny-z-disku-a-origin-dl-4c">DL-4c</a>).</figcaption>
 </figure>
 
 - **Zavaděč:** samostatný `ld.so`; `libc.so` (cstd) je běžná knihovna
@@ -136,7 +136,7 @@ sysrootu C a start `__libc_start` v `osrt`, viz [cstd.md](cstd.md#libcso).
 ⚠️ **Omezení DL-2 (vědomá, řeší DL-3 a DL-4):**
 
 - Sdílení kódu knihoven a spouštění kýmkoli řeší DL-4a (`libd`, výše); knihovny
-  z disku a `$ORIGIN` DL-4c.
+  z disku a `$ORIGIN` [DL-4c](#knihovny-z-disku-a-origin-dl-4c).
 - TLS nových vláken a fini řeší DL-3a (výše).
 - RELRO je od DL-4a zapečetěné (`PROT_SEAL`).
 - Initfs je pro zavaděč dostupný celý (jen pro čtení) po dobu zavádění;
@@ -243,7 +243,7 @@ sysrootu C a start `__libc_start` v `osrt`, viz [cstd.md](cstd.md#libcso).
 **[ověřeno v QEMU]** x86_64 i aarch64.
 
 - **`dlopen(cesta, příznaky)`**: cesta jen `/system/lib/<jméno>` nebo
-  `<jméno>` (knihovny od `libd`; disk a `$ORIGIN` až DL-4c), null = program
+  `<jméno>` (knihovny od `libd`), absolutní cesta na disku ([DL-4c](#knihovny-z-disku-a-origin-dl-4c)), null = program
   (globální rozsah). Už nahraný modul (jméno nebo `SONAME`) vrátí tentýž
   handle a zvýší počítadlo. Nový modul a jeho chybějící závislosti se
   nahrají od libd, **relokují hned** (`LAZY` = `NOW`) v rozsahu globální
@@ -323,6 +323,64 @@ sysrootu C a start `__libc_start` v `osrt`, viz [cstd.md](cstd.md#libcso).
   starších modulech); kód v C, který volá `__tls_get_addr` se zásobníkem
   nezarovnaným na 16 B (starý GCC), by na pomalé cestě mohl spadnout
   (clang je v pořádku).
+
+## Knihovny z disku a `$ORIGIN` (DL-4c)
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (sada `procesy`).
+
+Pro aplikace a běhová prostředí z disku (`/apps/<id>/`, Wine v
+[windows-vrstva.md](windows-vrstva.md)). Knihovny ze `/system/lib` se dál
+berou od libd podle jména (initfs).
+
+- **Kdo čte disk:** zavaděč, **relací FS procesu** - se stejnou identitou
+  a připojenými cestami jako program, s právem `READ | EXECUTE` (stejné
+  pravidlo jako `launchd` u programů: co by proces sám nepřečetl,
+  nedostane). **libd disk nikdy nečte a relaci FS nemá:** zavaděč jí
+  pošle obsah souboru jako VMO (`libdproto::Request::OpenImage`), libd si
+  ho zkopíruje k sobě (klient ho pak už nezmění), spočítá BLAKE3, ověří
+  ELF a šablonu sdílí podle obsahu jako u `/system/lib`. Jméno
+  z `OpenImage` je jen pro hlášky a do hledání podle jména se nedostane,
+  takže podvržený soubor se jménem systémové knihovny jiným procesům nic
+  nepodstrčí.
+- **Relace pro zavaděč:** spouštěč vloží do zprávy zavaděče položku
+  `bootstrap::kind::FS` (handle relace, `arg` = délka cesty) a za položky
+  absolutní cestu programu (`libos::spawn::Origin`, `spawn_from`).
+  `launchd` ji dá každému programu se zavaděčem spuštěnému ze souboru
+  (`CONNECT` na relaci volajícího = nová relace se stejnou identitou).
+  Zavaděč si relaci drží do konce procesu (`dlopen` z disku za běhu).
+  Program z initfs relaci nemá a knihovny z disku nenajde.
+- **Hledání** (`dynload::search`, jako glibc s `DT_RUNPATH`):
+  - jméno s lomítkem: jen absolutní cesta (normalizovaná, `..` a `.`
+    pryč); `/system/lib/<jméno>` = od libd, jinak soubor na disku;
+    relativní cesta s lomítkem = chyba,
+  - holé jméno: už nahraný modul (jméno, `SONAME`), pak adresáře
+    z `DT_RUNPATH` modulu, který závislost chce (`$ORIGIN` / `${ORIGIN}` =
+    adresář toho modulu; program = adresář jeho souboru), pak
+    `/system/lib`; chybějící soubor = další místo,
+  - `DT_RUNPATH` platí jen pro přímé závislosti modulu; `DT_RPATH` se
+    čte, jen když `DT_RUNPATH` chybí; `$LIB`, `$PLATFORM` a
+    `LD_LIBRARY_PATH` nejsou,
+  - `dlopen` holého jména hledá jen nahrané moduly a `/system/lib`,
+    absolutní cesta i disk; závislosti modulu z `dlopen` podle jeho
+    `DT_RUNPATH`.
+- **Paměť šablon z disku nese job libd:** nejvýš
+  `libdproto::MAX_DISK_TEMPLATES` (512) šablon a `MAX_DISK_BYTES`
+  (512 MiB); nad mez libd zahodí nejdéle nepoužitou (procesy, které ji
+  mapují, mají vlastní handly; další proces dostane novou). Šablona, kterou
+  používá i initfs, se nezahazuje.
+
+⚠️ **Omezení DL-4c (vědomá):**
+
+- **Každý start procesu čte své knihovny z disku znovu** (zavaděč celý
+  soubor po 32 KiB přes fsd, libd ho zkopíruje a spočítá hash): klíči
+  podle cesty nebo čísla objektu od klienta nejde věřit, podvržený obsah
+  by pak dostali jiní. U Wine je to asi 4,7 MB unixových `.so` na proces
+  (knihovny PE čte `ntdll` sám mimo libd). Odpadne, až fsd dá zapečetěné
+  VMO souboru s identitou obsahu (systémový dataset `/system` jen pro
+  čtení, [návrh FS v3](navrh-fs-v3.md)).
+- Po restartu fsd relace zavaděče zanikne: `dlopen` z disku pak vrátí
+  chybu (knihovny ze startu i z `/system/lib` fungují dál).
+- Soubor se čte celý najednou (nejvýš `libdproto::MAX_FILE`, 256 MiB).
 
 ## Rezervace adres před zavedením (T5)
 
@@ -448,7 +506,8 @@ a commitují se, testy clang nepotřebují.
 | `hash_functions_match_reference` | GNU a SysV hash proti známým hodnotám |
 | `damaged_input_does_not_panic` | zkrácení a náhodné změny bez paniky |
 | `loaded_module_view` | modul načtený v paměti (`parse_loaded`) dává stejné údaje jako soubor |
-| `cargo test -p dynload` | rozložení TLS proti posunům linkeru (obě varianty), hodnoty všech druhů relokací, cesty knihoven |
+| `cargo test -p dynload` | rozložení TLS proti posunům linkeru (obě varianty), hodnoty všech druhů relokací, cesty knihoven, hledání z disku (`search_tests.rs`: normalizace, `$ORIGIN`, pořadí míst) |
+| `cargo test -p libdproto` (`open_image_rejects`) | `OpenImage`: délka 0 a nad `MAX_FILE`, přebytečné bajty, jméno s lomítkem se nedekódují |
 | `cargo test -p cbuild` (`link_skutecne_moduly`) | link knihovny a PIE přes `ld.lld` na obou architekturách |
 | QEMU `procesy`: `dynamicke linkovani: PIE s knihovnami` | `dltest`: volání přes dvě knihovny, ukazatel na funkci (ABS64), inicializátor po relokaci závislostí, TLS knihoven (GD/TLSDESC), TLS knihovny z programu (initial-exec), TLS programu (local-exec) |
 | QEMU `procesy`: `ASLR - dva behy, ruzne baze` | dva běhy `dltest` mají různou bázi programu |
@@ -457,6 +516,9 @@ a commitují se, testy clang nepotřebují.
 | `cargo test -p dynload` (`tls_surplus_after_modules`) | rezerva TLS za moduly nemění jejich posuny |
 | QEMU `procesy`: `obnova po padu libd pres listky (spawn i dlopen)` | spouštěč běžící před pádem libd spustí po restartu další programy (`RECONNECT`), init spouští z nového kořene, `dltest-rs` (`dlopen`) projde |
 | QEMU `procesy`: `pad libd pred prevzetim listku (ADOPT)` | dítě spouštěče nahraje knihovny, libd spadne dřív, než supervisor zpracuje `ADOPT`; `dlopen` dítěte počká na lístek a po restartu projde |
+| QEMU `procesy`: `knihovny z disku ($ORIGIN, dlopen cesty) relaci FS procesu` | `dltest-origin` z `/dl4c/bin`: knihovna z `$ORIGIN/../lib`, její závislost přes `$ORIGIN` knihovny, systémová `libdltest2` od libd; `dlopen` absolutní cesty (s `..`), tatáž cesta jinak zapsaná = tentýž handle, nahraná knihovna podle `SONAME`, holé jméno knihovny z disku = chyba |
+| QEMU `procesy`: `knihovny z disku sdili sablony, initfs bez relace je nenajde` | druhý běh bez nové šablony (zásahy mezipaměti), aspoň 3 šablony z disku; tentýž program z initfs bez relace FS = kód 127 |
+| QEMU `procesy`: `launchd preda zavadeci relaci FS programu ze souboru` | `LAUNCH` absolutní cesty přes `launchd`: program se zavaděčem dostane relaci a projde |
 | QEMU `procesy`: `rezie spawnu a propustnost initu` | 200 spawnů z jednoho spouštěče a 4 × 50 souběžně bez chyby, čísla do logu (tabulka výše) |
 | `cargo test -p svcclient` (`adopt_*`) | `ADOPT` = op 4 bez dat; omezovač: dávka, doplňování za sekundu, živé lístky |
 | QEMU `procesy`: `rezerva statickeho TLS z voleb spusteni (manifest)` | `dltest-dl`: `dlopen` knihovny se 4 KiB initial-exec s výchozí rezervou selže s radou v `dlerror`, s `static_tls_reserve` 8 KiB uspěje a TLS sedí |

@@ -9,7 +9,7 @@ První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`,
 - `src/launch.rs` - spouštěcí služba `launchd` (std::process): start, klientské kanály (`launch::client`, štítek `LAUNCH`).
 - `src/files.rs` - `files-copy` pro každou relaci a handly okna Soubory; `src/open.rs` - služba „otevři cestu“ (asociace `[open]`, kanál pro každou relaci, volání akce přes kompozitor, spuštění aplikace v relaci).
 - `src/supervisor/` - `mod.rs` smyčka (`Supervisor::step`), `lifecycle.rs` restart a závislosti, `leases.rs` lístky (vč. `ADOPT` s limity a `queue_lease` pro lístky vydané mimo kolo supervisoru), `service.rs` adaptér služby; `src/libd.rs` - služba knihoven (adaptér `LibdService`, poskytovatel relací pro děti initu).
-- `src/tests/mod.rs` - `SUITES` (jména sad pro `--only`), makra `check!` / `check_eq!`; jeden soubor na oblast (`gui.rs`, `net.rs`, `fs.rs`, ...).
+- `src/tests/mod.rs` - `SUITES` (jména sad pro `--only`), makra `check!` / `check_eq!`; jeden soubor na oblast (`gui.rs`, `net.rs`, `fs.rs`, ...); `dynlink_disk.rs` knihovny z disku (DL-4c, sada `procesy`, kopíruje `dl4c/` z initfs do `/dl4c` na disku).
 
 ## Invarianty
 

@@ -246,6 +246,25 @@ impl Default for Options {
     }
 }
 
+/// Potrebuje obraz zavadec (`ET_DYN` s `PT_INTERP`)? Spoustec podle toho
+/// pozna, jestli ma pripravit [`Origin`] (napr. novou relaci FS).
+pub fn needs_loader(image: &[u8]) -> bool {
+    elf::ElfFile::parse_object(image, elf::Machine::NATIVE)
+        .is_ok_and(|e| e.elf_type == elf::ElfType::Dyn && e.interp().ok().flatten().is_some())
+}
+
+/// Program ze souboru (DL-4c): relace FS pro zavadec (knihovny z disku,
+/// `$ORIGIN`) a absolutni cesta programu. Relace ma mit identitu a cesty
+/// potomka (typicky `CONNECT` na relaci, kterou potomek dostane); zavadec
+/// s ni cte knihovny s pravy aplikace. Jen program se zavadecem (statickemu
+/// se nepreda nic).
+pub struct Origin {
+    /// Konec kanalu relace FS.
+    pub fs: Handle,
+    /// Absolutni cesta souboru programu (nejvys `bootstrap::MAX_ORIGIN_PATH`).
+    pub path: alloc::string::String,
+}
+
 /// Handle predavany novemu procesu ve startovni zprave.
 pub struct StartHandle {
     pub kind: u32,
@@ -326,6 +345,25 @@ pub fn spawn_with_thread(
     handles: Vec<StartHandle>,
     opts: Options,
 ) -> Result<(Process, Thread, Channel)> {
+    spawn_from(job, name, image, handles, opts, None)
+}
+
+/// Jako [`spawn_with_thread`] pro program ze souboru: zavadec dostane
+/// `origin` (relaci FS a cestu programu) a nahraje knihovny i z disku
+/// (`DT_RUNPATH` s `$ORIGIN`, absolutni cesty; `docs/cs/dynamicke-linkovani.md`).
+pub fn spawn_from(
+    job: &Job,
+    name: &str,
+    image: &[u8],
+    handles: Vec<StartHandle>,
+    opts: Options,
+    origin: Option<Origin>,
+) -> Result<(Process, Thread, Channel)> {
+    if let Some(o) = &origin
+        && (o.path.len() > bootstrap::MAX_ORIGIN_PATH || !o.path.starts_with('/'))
+    {
+        return Err(Error::InvalidArgs);
+    }
     let elf = elf::ElfFile::parse_object(image, elf::Machine::NATIVE).map_err(|_| Error::Corrupted)?;
     // Sdilena knihovna (ET_DYN bez zavadece) neni program.
     let dynamic = elf.elf_type == elf::ElfType::Dyn;
@@ -374,14 +412,22 @@ pub fn spawn_with_thread(
     if loader.is_some() {
         // Zprava zavadece pred startovni zpravou: handle procesu a spojeni
         // s libd (knihovny). Startovni zprava a kanal zustanou programu.
+        // Program ze souboru: navic relace FS a za polozkami jeho cesta.
         let mut d = Vec::new();
         let (session, lease) = child_libd()?;
-        let h = Header { magic: bootstrap::LOADER_MAGIC, version: bootstrap::VERSION, count: 3, _reserved: 0 };
+        let count = if origin.is_some() { 4 } else { 3 };
+        let h = Header { magic: bootstrap::LOADER_MAGIC, version: bootstrap::VERSION, count, _reserved: 0 };
         d.extend_from_slice(&h.to_bytes());
         d.extend_from_slice(&Entry { kind: bootstrap::kind::SELF_PROCESS, arg: 0 }.to_bytes());
         d.extend_from_slice(&Entry { kind: bootstrap::kind::LIBD, arg: 0 }.to_bytes());
         d.extend_from_slice(&Entry { kind: bootstrap::kind::LIBD, arg: 1 }.to_bytes());
-        parent_end.write(&d, alloc::vec![process.handle().duplicate(None)?, session, lease])?;
+        let mut hs = alloc::vec![process.handle().duplicate(None)?, session, lease];
+        if let Some(o) = origin {
+            d.extend_from_slice(&Entry { kind: bootstrap::kind::FS, arg: o.path.len() as u32 }.to_bytes());
+            d.extend_from_slice(o.path.as_bytes());
+            hs.push(o.fs);
+        }
+        parent_end.write(&d, hs)?;
     }
     // Spoustec (staticky program s volbou): relace a listek ve startovni
     // zprave.

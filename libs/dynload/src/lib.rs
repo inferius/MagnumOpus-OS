@@ -9,7 +9,9 @@
 //! - [`Surplus`]: misto pro staticke TLS modulu z `dlopen` (initial-exec)
 //!   v rezerve za moduly ze startu,
 //! - [`system_name`]: jmeno knihovny v `/system/lib` z `DT_NEEDED` nebo
-//!   cesty `dlopen`.
+//!   cesty `dlopen`,
+//! - [`search`]: kde hledat knihovnu (`DT_RUNPATH`, `$ORIGIN`, absolutni
+//!   cesty na disku, DL-4c).
 //!
 //! Popis: `docs/cs/dynamicke-linkovani.md`.
 
@@ -22,6 +24,10 @@ use alloc::vec::Vec;
 use elf::Machine;
 use elf::reloc::Kind;
 
+pub mod search;
+
+#[cfg(test)]
+mod search_tests;
 #[cfg(test)]
 mod tests;
 

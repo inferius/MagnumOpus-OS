@@ -107,7 +107,8 @@ pub struct Interface {
     /// `dl_iterate_phdr` (glibc): projde nahrane moduly.
     pub dl_iterate_phdr: unsafe extern "C" fn(cb: PhdrCallback, data: *mut u8) -> i32,
     /// `dlopen(cesta, rtld::*)` -> handle, null = chyba (`dlerror`).
-    /// Cesta jen `/system/lib/<jmeno>` nebo `<jmeno>` (knihovny od libd);
+    /// Cesta `/system/lib/<jmeno>` nebo `<jmeno>` (knihovny od libd),
+    /// absolutni cesta jinam = soubor na disku (DL-4c, relaci FS procesu);
     /// null = program (globalni rozsah). `LAZY` = `NOW`.
     pub dlopen: unsafe extern "C" fn(path: *const u8, flags: i32) -> *mut u8,
     /// `dlsym(handle, jmeno)` -> adresa, null = nenalezeno.

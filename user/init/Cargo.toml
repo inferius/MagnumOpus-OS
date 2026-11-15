@@ -19,6 +19,7 @@ bootsplash = { path = "../../libs/bootsplash" }
 libos = { path = "../../libs/libos" }
 blockproto = { path = "../../libs/blockproto" }
 fsproto = { path = "../../libs/fsproto" }
+launchproto = { path = "../../libs/launchproto" }
 inputproto = { path = "../../libs/inputproto" }
 guiproto = { path = "../../libs/guiproto" }
 renderproto = { path = "../../libs/renderproto" }

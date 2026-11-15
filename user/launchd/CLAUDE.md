@@ -12,6 +12,7 @@ Spouštěcí služba pro `std::process::Command` (protokol `libs/launchproto`, p
 - launchd nemá kořenová práva a nic nepřidává: job, relaci FS, relaci sítě a stdio dodává volající v požadavku. Potomek = podjob jobu volajícího, síť = relace volajícího zúžená manifestem (netd nikdy nerozšíří), manifest bez `[network]` = bez sítě.
 - Handly zděděných fd (role `Fd`, smí se opakovat) předá potomkovi beze změny se štítkem `abi::params::tag::FD` ve stejném pořadí; položky jsou v bloku parametrů, launchd je nečte.
 - Program se čte relací FS volajícího (nikdy vlastní), takže potomek nespustí nic, co by rodič sám nepřečetl.
+- Program se zavaděčem ze souboru (`Source::Path`, `spawn::needs_loader`) dostane pro zavaděč novou relaci z relace volajícího (`CONNECT`) a svou cestu (`spawn::Origin`, DL-4c): knihovny z disku a `$ORIGIN` čte zavaděč s právy volajícího.
 - Chyba nese popis pro uživatele (`launchproto::reply`), u odpojeného svazku kód `NOT_MOUNTED`.
 
 ## Testy

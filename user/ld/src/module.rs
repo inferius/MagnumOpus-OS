@@ -1,4 +1,6 @@
-//! Moduly (program a knihovny): nahrani od libd, relokace v rozsahu
+//! Moduly (program a knihovny): nahrani od libd (z `/system/lib` podle
+//! jmena, z disku pres `disk.rs` a `OpenImage`), hledani zavislosti
+//! (`DT_RUNPATH`, `$ORIGIN`, `dynload::search`), relokace v rozsahu
 //! symbolu, pecet kodu a RELRO, inicializatory. Spolecne pro start
 //! programu (`load.rs`) a `dlopen` (`dl.rs`): chyby vraci jako text (start
 //! je ukonci, `dlopen` je preda do `dlerror`).
@@ -9,6 +11,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use abi::vm::{MAP_FIXED, MAP_IN_RESERVATION, MAP_READ};
+use dynload::search::Source;
 use dynload::{Apply, Def};
 use elf::dynamic::Dynamic;
 use elf::reloc::Kind;
@@ -37,9 +40,16 @@ pub enum TlsPlace {
 
 /// Nahrany modul.
 pub struct Module {
-    /// Jmeno v `/system/lib` (program: "program").
+    /// Jmeno v `/system/lib`, u knihovny z disku absolutni cesta (program:
+    /// "program").
     pub name: String,
     pub soname: Option<String>,
+    /// Jmena, pod kterymi ho chtela zavislost (hole jmeno z `DT_NEEDED`
+    /// u knihovny z disku bez `SONAME`).
+    pub aliases: Vec<String>,
+    /// Adresar souboru (`$ORIGIN`): knihovna z disku a program ze souboru;
+    /// `None` = knihovna od libd z `/system/lib`, program z initfs.
+    pub dir: Option<String>,
     /// Jmeno jako C retezec (`dl_iterate_phdr`, `dladdr`, `r_debug`;
     /// program = "").
     pub cname: Vec<u8>,
@@ -60,7 +70,15 @@ pub struct Module {
 impl Module {
     /// Odpovida jmenu z `DT_NEEDED` nebo `dlopen`?
     pub fn is(&self, name: &str) -> bool {
-        self.name == name || self.soname.as_deref() == Some(name)
+        self.name == name || self.soname.as_deref() == Some(name) || self.aliases.iter().any(|a| a == name)
+    }
+
+    /// `DT_RUNPATH` (nebo `DT_RPATH`, kdyz RUNPATH chybi).
+    pub fn runpath(&self) -> Res<Option<String>> {
+        match self.dynamic.runpath {
+            Some(o) => ctx(self.elf.dyn_str(&self.dynamic, o), &self.name).map(|s| Some(s.to_string())),
+            None => Ok(None),
+        }
     }
 
     /// TLS pro `dynload::Def` (dynamicky modul: posun 0, TP relativni
@@ -123,6 +141,8 @@ pub fn module(name: &str, base: u64, mem: &'static [u8]) -> Res<Module> {
     Ok(Module {
         name: name.to_string(),
         soname,
+        aliases: Vec::new(),
+        dir: None,
         cname,
         base,
         span: mem.len() as u64,
@@ -135,27 +155,92 @@ pub fn module(name: &str, base: u64, mem: &'static [u8]) -> Res<Module> {
     })
 }
 
-/// Nahraje knihovnu `name` (jmeno v `/system/lib`) od sluzby knihoven libd
-/// na nahodnou bazi: kod primo ze zapecetene sablony (sdilene stranky), data
-/// jako klon s kopii pri zapisu. Kod se zapeceti az po uspesne relokaci
-/// ([`seal`]); do te doby jde modul zahodit ([`discard`]).
-pub fn load_library(process: &Process, name: &str) -> Res<Module> {
-    let (lib, vmos) = match libos::libd::open(name) {
-        Ok(r) => r,
-        Err(libos::Error::NotFound) => return Err(format!("knihovna {name} nenalezena")),
-        Err(libos::Error::ServiceUnavailable) => {
-            return Err(format!("knihovna {name}: sluzba knihoven libd nedostupna (nebezi, nebo proces nema platny listek)"));
+/// Text chyby libd pro knihovnu `name`.
+fn libd_error(name: &str, e: libos::Error) -> String {
+    match e {
+        libos::Error::NotFound => format!("knihovna {name} nenalezena"),
+        libos::Error::ServiceUnavailable => {
+            format!("knihovna {name}: sluzba knihoven libd nedostupna (nebezi, nebo proces nema platny listek)")
         }
-        Err(libos::Error::PeerClosed) => {
-            return Err(format!("knihovna {name}: libd relaci odmitla (limit relaci procesu)"));
-        }
-        Err(e) => return Err(format!("knihovna {name}: {e}")),
+        libos::Error::PeerClosed => format!("knihovna {name}: libd relaci odmitla (limit relaci procesu)"),
+        e => format!("knihovna {name}: {e}"),
+    }
+}
+
+/// Nahraje zavislost `needed` modulu `req` (`None` = `dlopen` bez
+/// volajiciho: hole jmeno jen z `/system/lib`): uz nahrany modul vrati jako
+/// `Ok(index)`, novy jako `Err(modul)` (volajici ho zaradi). Mista
+/// v poradi `dynload::search::candidates`; chybejici soubor = dalsi misto.
+pub fn resolve(process: &Process, mods: &[Module], req: Option<usize>, needed: &str) -> Res<Result<usize, Module>> {
+    if !needed.contains('/')
+        && let Some(i) = mods.iter().position(|m| m.is(needed))
+    {
+        return Ok(Ok(i));
+    }
+    let (runpath, origin) = match req {
+        Some(r) => (mods[r].runpath()?, mods[r].dir.clone()),
+        None => (None, None),
     };
+    let list = dynload::search::candidates(needed, runpath.as_deref(), origin.as_deref()).map_err(|e| format!("{needed}: {e}"))?;
+    let mut last = format!("knihovna {needed} nenalezena");
+    for src in list {
+        match src {
+            Source::System(name) => {
+                if !libdproto::valid_name(&name) {
+                    last = format!("knihovna {name}: neplatne jmeno v /system/lib");
+                    continue;
+                }
+                if let Some(i) = mods.iter().position(|m| m.is(&name)) {
+                    return Ok(Ok(i));
+                }
+                match libos::libd::open(&name) {
+                    Ok((lib, vmos)) => {
+                        let mut m = map_library(process, &name, &lib, &vmos)?;
+                        if name != needed && !needed.contains('/') {
+                            m.aliases.push(needed.to_string());
+                        }
+                        return Ok(Err(m));
+                    }
+                    Err(libos::Error::NotFound) => {}
+                    Err(e) => return Err(libd_error(&name, e)),
+                }
+            }
+            Source::Disk(path) => {
+                if let Some(i) = mods.iter().position(|m| m.name == path) {
+                    return Ok(Ok(i));
+                }
+                if !crate::disk::available() {
+                    last = format!("knihovna {needed}: {path} - proces nema relaci FS (knihovny jen z /system/lib)");
+                    continue;
+                }
+                match crate::disk::fetch(&path) {
+                    Ok((lib, vmos)) => {
+                        let mut m = map_library(process, &path, &lib, &vmos)?;
+                        m.dir = Some(dynload::search::dir_of(&path).to_string());
+                        if !needed.contains('/') {
+                            m.aliases.push(needed.to_string());
+                        }
+                        return Ok(Err(m));
+                    }
+                    Err((libos::Error::NotFound | libos::Error::AccessDenied | libos::Error::NotADirectory, msg)) => last = msg,
+                    Err((_, msg)) => return Err(msg),
+                }
+            }
+        }
+    }
+    Err(last)
+}
+
+/// Namapuje sablonu knihovny od libd na nahodnou bazi: kod primo ze
+/// zapecetene sablony (sdilene stranky), data jako klon s kopii pri zapisu.
+/// Kod se zapeceti az po uspesne relokaci ([`seal`]); do te doby jde modul
+/// zahodit ([`discard`]).
+fn map_library(process: &Process, name: &str, lib: &libdproto::Library, vmos: &[libos::Vmo]) -> Res<Module> {
     let base = ctx(libos::spawn::random_base(process, lib.span), "misto pro knihovnu")?;
     let fixed = MAP_FIXED | MAP_IN_RESERVATION;
     let mut seal = Vec::new();
     let mapped = (|| -> Res<()> {
-        for (seg, vmo) in lib.segments.iter().zip(&vmos) {
+        for (seg, vmo) in lib.segments.iter().zip(vmos) {
             if seg.kind == libdproto::kind::SHARED {
                 ctx(process.map(vmo, 0, seg.len, seg.prot | fixed, base + seg.start), "mapovani knihovny")?;
                 seal.push((base + seg.start, seg.len, seg.prot));
@@ -387,7 +472,16 @@ pub fn group(mods: &[Module], root: usize) -> Res<Vec<usize>> {
     let mut k = 0;
     while k < g.len() {
         for n in mods[g[k]].needed()? {
-            let n = dynload::system_name(&n).unwrap_or(&n).to_string();
+            // Hole jmeno: jmeno, SONAME nebo alias; cesta: normalizovana
+            // (knihovna z disku) nebo jmeno v /system/lib.
+            let n = if n.contains('/') {
+                match dynload::search::candidates(&n, None, None).ok().and_then(|c| c.into_iter().next()) {
+                    Some(Source::System(x) | Source::Disk(x)) => x,
+                    None => n,
+                }
+            } else {
+                n
+            };
             if let Some(j) = mods.iter().position(|m| m.is(&n))
                 && !g.contains(&j)
             {

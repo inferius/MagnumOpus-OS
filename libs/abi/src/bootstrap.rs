@@ -88,7 +88,18 @@ pub mod kind {
     /// `spawn` programu se zavadecem (spojeni pro potomka vytvori pres nej);
     /// ve zprave zavadece = spojeni, ze ktereho zavadec bere knihovny.
     pub const LIBD: u32 = 10;
+    /// Jen ve zprave zavadece (DL-4c): relace FS procesu pro knihovny
+    /// z disku (`DT_RUNPATH`, `$ORIGIN`, absolutni cesty, `dlopen`). `arg` =
+    /// delka cesty programu v bajtech (UTF-8, absolutni; 0 = program neni
+    /// ze souboru, `$ORIGIN` programu nejde); cesta lezi ve zprave hned za
+    /// vsemi polozkami. Relace ma stejnou identitu a cesty jako relace
+    /// programu (dava ji spoustec, napr. `launchd`), zavadec s ni cte jen
+    /// to, co by precetl program sam.
+    pub const FS: u32 = 11;
 }
+
+/// Nejdelsi cesta programu ve zprave zavadece ([`kind::FS`]).
+pub const MAX_ORIGIN_PATH: usize = 4096;
 
 pub const HEADER_SIZE: usize = core::mem::size_of::<Header>();
 pub const ENTRY_SIZE: usize = core::mem::size_of::<Entry>();

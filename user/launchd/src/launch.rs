@@ -12,7 +12,7 @@ use libos::abi::bootstrap::kind;
 use libos::abi::params::{self, tag};
 use libos::initfs::Initfs;
 use libos::job::{Job, pool};
-use libos::spawn::{Options, StartHandle};
+use libos::spawn::{Options, Origin, StartHandle};
 use libos::{Channel, Error, Handle, Rights, Vmo};
 use manifest::Manifest;
 use netproto::Net;
@@ -186,6 +186,16 @@ pub fn launch(d: &mut Launchd, r: &mut Reader, handles: Vec<Handle>) -> Result<V
         }
     };
 
+    // Program ze souboru se zavadecem: zavadec dostane vlastni relaci FS se
+    // stejnou identitou a cestami (CONNECT na relaci volajiciho) a cestu
+    // programu - knihovny z disku a $ORIGIN cte s pravy aplikace (DL-4c).
+    let origin = match (&source, fs.as_ref()) {
+        (Source::Path(path), Some(fs)) if libos::spawn::needs_loader(&image) => {
+            let own = fs.connect().map_err(|e| fail(e, "relace FS pro zavadec"))?;
+            Some(Origin { fs: own.into_channel().into_handle(), path: path.clone() })
+        }
+        _ => None,
+    };
     let job = child_job(&parent_job, manifest.as_ref())?;
     let mut start = alloc::vec![StartHandle::new(kind::PARAMS, 0, params_vmo(&req.params)?.into_handle())];
     for (t, h) in stdio {
@@ -219,8 +229,8 @@ pub fn launch(d: &mut Launchd, r: &mut Reader, handles: Vec<Handle>) -> Result<V
     if let Some(s) = manifest.as_ref().and_then(|m| m.limits.stack) {
         opts.stack_size = s;
     }
-    let (process, control) =
-        libos::spawn::spawn_with(&job, &name, &image, start, opts).map_err(|e| fail(e, format!("{name}: spusteni")))?;
+    let (process, _, control) = libos::spawn::spawn_from(&job, &name, &image, start, opts, origin)
+        .map_err(|e| fail(e, format!("{name}: spusteni")))?;
     // Job zije s procesem (proces drzi svuj job); handle tu neni potreba.
     drop(job);
     Ok(alloc::vec![process.into_handle(), control.into_handle()])

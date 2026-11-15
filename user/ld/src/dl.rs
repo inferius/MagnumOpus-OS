@@ -122,9 +122,14 @@ pub unsafe extern "C" fn dlopen(path: *const u8, flags: i32) -> *mut u8 {
 
 /// Nahraje knihovnu `path` (a zavislosti), vraci handle.
 fn open(path: &str, flags: i32) -> Res<*mut u8> {
-    let name = dynload::system_name(path)
-        .filter(|n| libdproto::valid_name(n))
-        .ok_or_else(|| format!("{path}: jen knihovny z /system/lib (disk a $ORIGIN zatim ne)"))?;
+    // Hole jmeno = /system/lib, absolutni cesta = /system/lib nebo disk
+    // (relace FS procesu); nahrany modul se hleda podle normalizovaneho
+    // jmena.
+    let key = match dynload::search::candidates(path, None, None).map_err(|e| format!("{path}: {e}"))?.into_iter().next() {
+        Some(dynload::search::Source::System(n) | dynload::search::Source::Disk(n)) => n,
+        None => return Err(format!("{path}: neplatna cesta")),
+    };
+    let name = key.as_str();
     let page = libos::vm::page_size();
     let (root, inits) = {
         let mut g = STATE.lock();
@@ -173,16 +178,14 @@ fn make_global(s: &mut State, i: usize) -> Res<()> {
 /// TLS, relokuje, zapeceti a zaregistruje. Vraci inicializatory (zavislosti
 /// napred). Pri chybe zahodi volajici moduly od `first` a vrati rezervu.
 fn load_new(s: &mut State, name: &str, first: usize, flags: i32, page: u64) -> Res<Vec<Init>> {
-    s.mods.push(module::load_library(&s.process, name)?);
+    match module::resolve(&s.process, &s.mods, None, name)? {
+        Err(m) => s.mods.push(m),
+        Ok(_) => return Err(format!("{name}: uz nahrany")),
+    }
     let mut k = first;
     while k < s.mods.len() {
         for n in s.mods[k].needed()? {
-            let n = dynload::system_name(&n)
-                .filter(|x| libdproto::valid_name(x))
-                .ok_or_else(|| format!("{}: zavislost {n} neni v /system/lib", s.mods[k].name))?
-                .to_string();
-            if s.find(&n).is_none() {
-                let m = module::load_library(&s.process, &n)?;
+            if let Err(m) = module::resolve(&s.process, &s.mods, Some(k), &n)? {
                 s.mods.push(m);
             }
         }

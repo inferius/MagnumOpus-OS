@@ -23,6 +23,7 @@ mod dma;
 mod fences;
 mod firewall;
 mod dynlink;
+mod dynlink_disk;
 mod fpu;
 mod fpu_avx;
 mod fs;
@@ -110,6 +111,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("procesy", interrupt::TESTS),
     ("procesy", fpu::TESTS),
     ("procesy", dynlink::TESTS),
+    ("procesy", dynlink_disk::TESTS),
     ("joby", jobs::TESTS),
     ("ovladace", drivers::TESTS),
     ("ovladace z manifestu", driverkit::TESTS),

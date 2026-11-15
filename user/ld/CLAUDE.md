@@ -4,12 +4,13 @@ Zavaděč sdílených knihoven `ld.so` (v initfs `lib/ld.so`, `PT_INTERP` = `/sy
 
 ## Klíčové soubory
 
-- `src/start.rs` - vstup v asembleru a samorelokace; `src/load.rs` - zpráva zavaděče, auxv, start programu; `src/module.rs` - modul: nahrání od libd, relokace v rozsahu, pečeť, init (chyby vrací); `src/dl.rs` - `dlopen`/`dlsym`/`dlclose`/`dlerror`; `src/tls.rs` - `__tls_get_addr` a resolvery TLSDESC (statický, dynamický v asm); `src/iface.rs` - stav (`STATE`), tabulka zavaděče, bloky TLS vláken, fini, `dl_iterate_phdr`, `r_debug`; `src/heap.rs` - alokátor.
+- `src/start.rs` - vstup v asembleru a samorelokace; `src/load.rs` - zpráva zavaděče, auxv, start programu; `src/module.rs` - modul: hledání a nahrání od libd (`resolve`), relokace v rozsahu, pečeť, init (chyby vrací); `src/disk.rs` - relace FS a čtení knihovny z disku pro libd (DL-4c); `src/dl.rs` - `dlopen`/`dlsym`/`dlclose`/`dlerror`; `src/tls.rs` - `__tls_get_addr` a resolvery TLSDESC (statický, dynamický v asm); `src/iface.rs` - stav (`STATE`), tabulka zavaděče, bloky TLS vláken, fini, `dl_iterate_phdr`, `r_debug`; `src/heap.rs` - alokátor.
 
 ## Invarianty
 
 - Před `relocate_self` žádný přístup k datům s ukazateli (vtabulky, statické ukazatele, formátování): jen čtení/zápis přes ukazatele.
-- Zavaděč nečte startovní zprávu (patří programu): jen první zprávu `LOADER_MAGIC` (proces, spojení s libd). Knihovny jen od `libd` (initfs nemá); kód knihoven, RELRO všech modulů i své vlastní zapečetí (`PROT_SEAL`).
+- Zavaděč nečte startovní zprávu (patří programu): jen první zprávu `LOADER_MAGIC` (proces, spojení s libd, volitelně relace FS + cesta programu `bootstrap::kind::FS`). Knihovny vždy přes `libd` (šablony): `/system/lib` podle jména, z disku soubor přečtený relací FS procesu (`disk.rs`, `READ | EXECUTE`) a poslaný jako `OpenImage` - nikdy jinou relací ani bez libd. Kód knihoven, RELRO všech modulů i své vlastní zapečetí (`PROT_SEAL`).
+- Hledání závislostí jen přes `module::resolve` (`dynload::search::candidates`: absolutní cesta, `DT_RUNPATH` s `$ORIGIN` modulu, který ji chce, pak `/system/lib`); start, `dlopen` i `group` musí hledat stejně. Modul z disku má `name` = normalizovaná cesta, `dir` = jeho adresář, holé jméno, pod kterým ho chtěli, v `aliases`.
 - Tabulka `iface::INTERFACE` (`abi::loader`) se volá z vláken programu: stav pod `iface::STATE`, `dl*` navíc pod rekurzivním zámkem `dl::DL`. Inicializátory, callback `dl_iterate_phdr` a resolver IFUNC z `dlsym` běží **bez** `STATE` (smí volat zavaděč a sahat na TLS).
 - `dlopen` nesmí nechat polovičatý stav: nové moduly se zapečetí a TLS zapíše do vláken až po úspěšné relokaci; při chybě `module::discard` a vrácení rezervy.
 - Resolver dynamického TLSDESC (`tls.rs`) mění jen `rax`/`x0` a příznaky: pomalá cesta ukládá všechny registry, které smí měnit Rust (x86_64 GPR + `xmm0-15`, zavaděč bez AVX; aarch64 `x1-x18`, `q0-q31`).

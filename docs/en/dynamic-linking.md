@@ -16,7 +16,7 @@ static (`ET_EXEC`, [rust-std.md](rust-std.md)).
 | DL-3 | the loader table (`abi::loader`, `dl*` already in the ABI), TLS of new threads (libos, osrt), DTV and generations, static TLS surplus, `fini`, `dl_iterate_phdr`, `dladdr`, `r_debug` | **[verified in QEMU]** x86_64 and aarch64 (test `dynamicke linkovani: vlakna libos ...`) |
 | DL-4a | the `libd` library service (sealed templates, sharing library code between processes), a libd connection for every process (anyone can start a program with the loader), region sealing (`PROT_SEAL`, like `mseal`) for code and RELRO | **[verified in QEMU]** x86_64 and aarch64 (`pamet`, `procesy` suites) |
 | DL-4b | `dlopen`/`dlsym`/`dlclose` via libd (dynamic TLS: lazy allocation via the DTV, dynamic TLSDESC), static TLS reserve from the manifest (`[app] static_tls_reserve`) and measurement | **[verified in QEMU]** x86_64 and aarch64 (`procesy` suite) |
-| DL-4c | libraries from disk and `$ORIGIN` (once applications run from disk `/apps/<id>/`) | **[designed]** |
+| DL-4c | libraries from disk and `$ORIGIN`: read by the loader with the process's FS session, libd only builds templates by contents (`OpenImage`), `DT_RUNPATH`, absolute paths and `dlopen` from disk | **[verified in QEMU]** x86_64 and aarch64 (`procesy` suite) |
 | T5 | address reservations before loading (`AT_MO_RESERVE`, manifest `[app] reserve`) for the Windows layer | **[verified in QEMU]** x86_64 and aarch64 (`procesy` suite) |
 
 ## Design (approved choices)
@@ -47,7 +47,7 @@ static (`ET_EXEC`, [rust-std.md](rust-std.md)).
 <text class="m" x="5" y="130">Library code from sealed templates (libd, shared pages), data and GOT as copy-on-write.</text>
 <text class="m" x="5" y="150">DL-1 (this part): the libs/elf parser from which ld.so reads headers, symbols and relocations.</text>
 </svg>
-<figcaption>Starting a PIE program with shared libraries (DL-2 to DL-4b; libraries from disk and <code>$ORIGIN</code> in DL-4c).</figcaption>
+<figcaption>Starting a PIE program with shared libraries (DL-2 to DL-4c; libraries from disk and <code>$ORIGIN</code> see <a href="#libraries-from-disk-and-origin-dl-4c">DL-4c</a>).</figcaption>
 </figure>
 
 - **Loader:** a separate `ld.so`; `libc.so` (cstd) is an ordinary library
@@ -142,7 +142,7 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
 ⚠️ **Limitations of DL-2 (deliberate, solved by DL-3 and DL-4):**
 
 - Sharing library code and starting by anyone is solved by DL-4a (`libd`,
-  above); libraries from disk and `$ORIGIN` by DL-4c.
+  above); libraries from disk and `$ORIGIN` by [DL-4c](#libraries-from-disk-and-origin-dl-4c).
 - TLS of new threads and fini are solved by DL-3a (above).
 - RELRO is sealed since DL-4a (`PROT_SEAL`).
 - The loader has all of initfs (read-only) while loading; the program does
@@ -259,7 +259,7 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
 **[verified in QEMU]** x86_64 and aarch64.
 
 - **`dlopen(path, flags)`**: the path only `/system/lib/<name>` or
-  `<name>` (libraries from `libd`; disk and `$ORIGIN` in DL-4c), null = the
+  `<name>` (libraries from `libd`), an absolute path on disk ([DL-4c](#libraries-from-disk-and-origin-dl-4c)), null = the
   program (global scope). An already loaded module (name or `SONAME`)
   returns the same handle and increments the counter. A new module and its
   missing dependencies are loaded from libd, **relocated immediately**
@@ -342,6 +342,68 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
   only at process end and in load order (not by dependencies on older
   modules); C code calling `__tls_get_addr` with a stack not aligned to
   16 B (old GCC) could crash on the slow path (clang is fine).
+
+## Libraries from disk and `$ORIGIN` (DL-4c)
+
+**[verified in QEMU]** x86_64 and aarch64 (`procesy` suite).
+
+For applications and runtimes from disk (`/apps/<id>/`, Wine in
+[windows-layer.md](windows-layer.md)). Libraries from `/system/lib` still
+come from libd by name (initfs).
+
+- **Who reads the disk:** the loader, **with the process's FS session** -
+  the same identity and mounted paths as the program, with the
+  `READ | EXECUTE` right (the same rule as `launchd` for programs: what the
+  process could not read itself, it does not get). **libd never reads the
+  disk and has no FS session:** the loader sends it the file contents as a
+  VMO (`libdproto::Request::OpenImage`), libd copies it (the client can no
+  longer change it), computes BLAKE3, checks the ELF and shares the
+  template by contents as for `/system/lib`. The name from `OpenImage` is
+  only for messages and never enters lookup by name, so a forged file with
+  the name of a system library cannot slip anything into other processes.
+- **The session for the loader:** the launcher puts a
+  `bootstrap::kind::FS` entry into the loader message (the session handle,
+  `arg` = path length) and the program's absolute path after the entries
+  (`libos::spawn::Origin`, `spawn_from`). `launchd` gives it to every
+  program with the loader started from a file (`CONNECT` on the caller's
+  session = a new session with the same identity). The loader keeps the
+  session until the process ends (`dlopen` from disk at run time). A
+  program from initfs has no session and does not find libraries on disk.
+- **Lookup** (`dynload::search`, like glibc with `DT_RUNPATH`):
+  - a name with a slash: an absolute path only (normalised, `..` and `.`
+    removed); `/system/lib/<name>` = from libd, otherwise a file on disk;
+    a relative path with a slash = error,
+  - a bare name: an already loaded module (name, `SONAME`), then the
+    directories from `DT_RUNPATH` of the module that needs the dependency
+    (`$ORIGIN` / `${ORIGIN}` = that module's directory; for the program
+    the directory of its file), then `/system/lib`; a missing file = the
+    next place,
+  - `DT_RUNPATH` applies only to the module's direct dependencies;
+    `DT_RPATH` is read only when `DT_RUNPATH` is missing; `$LIB`,
+    `$PLATFORM` and `LD_LIBRARY_PATH` do not exist,
+  - `dlopen` of a bare name looks only at loaded modules and
+    `/system/lib`, an absolute path also at the disk; dependencies of a
+    module from `dlopen` follow its `DT_RUNPATH`.
+- **The memory of disk templates is charged to libd's job:** at most
+  `libdproto::MAX_DISK_TEMPLATES` (512) templates and `MAX_DISK_BYTES`
+  (512 MiB); above the limit libd drops the least recently used one
+  (processes that map it keep their own handles; the next process gets a
+  new one). A template also used by initfs is never dropped.
+
+⚠️ **Limitations of DL-4c (deliberate):**
+
+- **Every process start reads its libraries from disk again** (the loader
+  reads the whole file in 32 KiB pieces through fsd, libd copies it and
+  computes the hash): keys by path or object number from the client
+  cannot be trusted, others would then get forged contents. For Wine this
+  is about 4.7 MB of unix `.so` files per process (PE libraries are read
+  by `ntdll` itself, outside libd). It goes away once fsd provides a sealed
+  VMO of the file with a content identity (the read-only system dataset
+  `/system`, [FS v3 design](fs-v3-design.md)).
+- After an fsd restart the loader's session is gone: `dlopen` from disk
+  then returns an error (start-up libraries and `/system/lib` keep
+  working).
+- The file is read whole at once (at most `libdproto::MAX_FILE`, 256 MiB).
 
 ## Address reservations before loading (T5)
 
@@ -478,7 +540,8 @@ not produce it on aarch64). They are built with clang and ld.lld with
 | `hash_functions_match_reference` | GNU and SysV hash against known values |
 | `damaged_input_does_not_panic` | truncation and random changes without panics |
 | `loaded_module_view` | a module loaded in memory (`parse_loaded`) gives the same data as the file |
-| `cargo test -p dynload` | TLS layout against linker offsets (both variants), values of all relocation kinds, library paths |
+| `cargo test -p dynload` | TLS layout against linker offsets (both variants), values of all relocation kinds, library paths, lookup on disk (`search_tests.rs`: normalisation, `$ORIGIN`, order of places) |
+| `cargo test -p libdproto` (`open_image_rejects`) | `OpenImage`: length 0 and above `MAX_FILE`, extra bytes, a name with a slash are not decoded |
 | `cargo test -p cbuild` (`link_skutecne_moduly`) | linking a library and a PIE via `ld.lld` on both architectures |
 | QEMU `procesy`: `dynamicke linkovani: PIE s knihovnami` | `dltest`: calls through two libraries, a function pointer (ABS64), an initializer after the dependencies are relocated, library TLS (GD/TLSDESC), library TLS from the program (initial-exec), program TLS (local-exec) |
 | QEMU `procesy`: `ASLR - dva behy, ruzne baze` | two `dltest` runs have different program bases |
@@ -487,6 +550,9 @@ not produce it on aarch64). They are built with clang and ld.lld with
 | `cargo test -p dynload` (`tls_surplus_after_modules`) | the TLS surplus after the modules does not change their offsets |
 | QEMU `procesy`: `obnova po padu libd pres listky (spawn i dlopen)` | a launcher running before the libd crash starts more programs after the restart (`RECONNECT`), init starts from the new root, `dltest-rs` (`dlopen`) passes |
 | QEMU `procesy`: `pad libd pred prevzetim listku (ADOPT)` | the launcher's child loads its libraries, libd crashes before the supervisor processes `ADOPT`; the child's `dlopen` waits for the lease and passes after the restart |
+| QEMU `procesy`: `knihovny z disku ($ORIGIN, dlopen cesty) relaci FS procesu` | `dltest-origin` from `/dl4c/bin`: a library from `$ORIGIN/../lib`, its dependency via the library's `$ORIGIN`, the system `libdltest2` from libd; `dlopen` of an absolute path (with `..`), the same path written differently = the same handle, a loaded library by `SONAME`, a bare name of a disk library = error |
+| QEMU `procesy`: `knihovny z disku sdili sablony, initfs bez relace je nenajde` | the second run without a new template (cache hits), at least 3 disk templates; the same program from initfs without an FS session = code 127 |
+| QEMU `procesy`: `launchd preda zavadeci relaci FS programu ze souboru` | `LAUNCH` of an absolute path via `launchd`: the program with the loader gets the session and passes |
 | QEMU `procesy`: `rezie spawnu a propustnost initu` | 200 spawns from one launcher and 4 × 50 concurrently without an error, numbers in the log (table above) |
 | `cargo test -p svcclient` (`adopt_*`) | `ADOPT` = op 4 without data; the limiter: burst, refill per second, live leases |
 | QEMU `procesy`: `rezerva statickeho TLS z voleb spusteni (manifest)` | `dltest-dl`: `dlopen` of a library with 4 KiB initial-exec fails with the default reserve with advice in `dlerror`, succeeds with `static_tls_reserve` 8 KiB and the TLS is right |

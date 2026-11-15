@@ -2,7 +2,6 @@
 //! relokace, pecet, inicializatory. Moduly a jejich operace jsou
 //! v `module.rs` (spolecne s `dlopen`); chyba tady = konec procesu.
 
-use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -36,11 +35,22 @@ fn or_fail<T>(r: Res<T>) -> T {
     r.unwrap_or_else(|e| fail(&e))
 }
 
-/// Zprava zavadece (`abi::bootstrap::LOADER_MAGIC`): handle procesu,
-/// relace s libd a listek k ni.
-fn loader_message(bootstrap: u64) -> (u32, u32, u32) {
-    let mut data = [0u8; 64];
-    let mut handles = [0u32; 4];
+/// Zprava zavadece (`abi::bootstrap::LOADER_MAGIC`).
+struct LoaderMessage {
+    process: u32,
+    libd: u32,
+    lease: u32,
+    /// Relace FS a cesta programu (DL-4c, `bootstrap::kind::FS`); jen
+    /// program spusteny ze souboru.
+    fs: Option<(u32, String)>,
+}
+
+/// Zprava zavadece: handle procesu, relace s libd a listek k ni, volitelne
+/// relace FS a cesta programu (za polozkami).
+fn loader_message(bootstrap: u64) -> LoaderMessage {
+    // Na zasobniku: heap zavadece potrebuje handle procesu (je az ve zprave).
+    let mut data = [0u8; bootstrap::HEADER_SIZE + 8 * bootstrap::ENTRY_SIZE + bootstrap::MAX_ORIGIN_PATH];
+    let mut handles = [0u32; 8];
     let (r, (dlen, hlen)) = sys::channel_read(bootstrap as u32, &mut data, &mut handles);
     if r.is_err() {
         fail("chybi zprava zavadece (program spusteny bez spawn?)");
@@ -48,22 +58,35 @@ fn loader_message(bootstrap: u64) -> (u32, u32, u32) {
     let Some(h) = Header::from_bytes_with(&data[..dlen], bootstrap::LOADER_MAGIC) else {
         fail("neplatna zprava zavadece");
     };
-    let (mut process, mut libd, mut lease) = (None, None, None);
-    for (i, &raw) in handles[..(h.count as usize).min(hlen)].iter().enumerate() {
+    let count = (h.count as usize).min(hlen);
+    // Cesta programu lezi za vsemi polozkami.
+    let tail = bootstrap::HEADER_SIZE + h.count as usize * bootstrap::ENTRY_SIZE;
+    let (mut process, mut libd, mut lease, mut fs) = (None, None, None, None);
+    for (i, &raw) in handles[..count].iter().enumerate() {
         let off = bootstrap::HEADER_SIZE + i * bootstrap::ENTRY_SIZE;
         match data.get(off..dlen).and_then(Entry::from_bytes).map(|e| (e.kind, e.arg)) {
             Some((bootstrap::kind::SELF_PROCESS, _)) => process = Some(raw),
             Some((bootstrap::kind::LIBD, 0)) => libd = Some(raw),
             Some((bootstrap::kind::LIBD, 1)) => lease = Some(raw),
+            Some((bootstrap::kind::FS, len)) if fs.is_none() => {
+                let end = tail + len as usize;
+                if end > dlen || core::str::from_utf8(&data[tail..end]).is_err() {
+                    fail("zprava zavadece: vadna cesta programu");
+                }
+                fs = Some((raw, end));
+            }
             _ => {
                 let _ = sys::handle_close(raw);
             }
         }
     }
-    match (process, libd, lease) {
-        (Some(p), Some(s), Some(l)) => (p, s, l),
-        _ => fail("zprava zavadece bez procesu, relace s libd nebo listku"),
-    }
+    let (Some(process), Some(libd), Some(lease)) = (process, libd, lease) else {
+        fail("zprava zavadece bez procesu, relace s libd nebo listku");
+    };
+    // Heap potrebuje handle procesu: cesta do String az po nem.
+    libos::rt::set_self_process(process);
+    let fs = fs.map(|(raw, end)| (raw, String::from_utf8_lossy(&data[tail..end]).into_owned()));
+    LoaderMessage { process, libd, lease, fs }
 }
 
 /// auxv za argc, argv a envp (`abi::auxv`).
@@ -216,7 +239,8 @@ fn debug_hook(mods: &[Module], ldbase: u64) {
 
 /// Zavede program; vraci jeho vstupni bod (skok dela `_start`).
 pub extern "C" fn main(sp: *const u64, bootstrap: u64) -> u64 {
-    let (process_raw, libd_raw, lease_raw) = loader_message(bootstrap);
+    let msg = loader_message(bootstrap);
+    let (process_raw, libd_raw, lease_raw) = (msg.process, msg.libd, msg.lease);
     libos::rt::set_self_process(process_raw);
     let process = Process::from_handle(Handle::from_raw(process_raw));
     // Relaci s libd a listek si zavadec nechava (dlopen, obnova po padu
@@ -231,18 +255,20 @@ pub extern "C" fn main(sp: *const u64, bootstrap: u64) -> u64 {
 
     // Program a zavislosti do sirky (kazda knihovna jednou, podle jmena
     // z DT_NEEDED nebo SONAME).
-    let mut mods = alloc::vec![or_fail(program(&aux))];
+    // Program ze souboru: relace FS pro knihovny z disku a jeho adresar
+    // ($ORIGIN). Bez relace jen /system/lib.
+    let mut prog = or_fail(program(&aux));
+    if let Some((raw, path)) = msg.fs {
+        crate::disk::set_session(raw);
+        prog.dir = dynload::search::normalize(&path).map(|p| dynload::search::dir_of(&p).to_string());
+    }
+    let mut mods = alloc::vec![prog];
     let mut next = 0;
     while next < mods.len() {
         for n in or_fail(mods[next].needed()) {
-            let Some(name) = dynload::system_name(&n).filter(|x| libdproto::valid_name(x)) else {
-                fail(&format!("knihovna {n}: jen jmeno v /system/lib"));
-            };
-            let name: String = name.to_string();
-            if mods.iter().any(|m| m.is(&name)) {
-                continue;
+            if let Err(m) = or_fail(module::resolve(&process, &mods, Some(next), &n)) {
+                mods.push(m);
             }
-            mods.push(or_fail(module::load_library(&process, &name)));
         }
         next += 1;
     }
