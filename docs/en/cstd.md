@@ -966,6 +966,14 @@ Wine and other ports (X11, D-Bus, Wayland) stays unchanged.
   gets the fds with the first `recvmsg` that starts reading the message;
   `recv`/`read` drop them. `MSG_CMSG_CLOEXEC` sets `FD_CLOEXEC`, too little
   room in `msg_control` = `MSG_CTRUNC` (extra fds are closed).
+- **Passing a socket with messages in its queue** (inheritance and
+  `SCM_RIGHTS`; Wine: the server sends the request pipe before the child
+  starts): the kernel does not allow sending a channel end whose queue holds
+  a channel (cycle protection, `BAD_STATE`). `osrt` first reads the queue
+  into memory and the receiver gets a copy of it (handle duplicates) and the
+  partly read data and fds; a write that still hits `BAD_STATE` is retried.
+  Messages waiting at the moment of passing are thus seen by both processes
+  (the sender usually closes its end right away).
 - **`SO_PEERCRED`:** the side that accepted the connection gets the
   client's user and group verified by fsd from the identity of its
   session, and the process number (the client's `getpid`, not verified);

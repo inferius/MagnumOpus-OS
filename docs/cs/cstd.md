@@ -923,6 +923,13 @@ a dalších portů (X11, D-Bus, Wayland) zůstal beze změny.
   dostane fd prvním `recvmsg`, které zprávu načne; `recv`/`read` fd
   zahodí. `MSG_CMSG_CLOEXEC` nastaví `FD_CLOEXEC`, málo místa v
   `msg_control` = `MSG_CTRUNC` (přebytečné fd se zavřou).
+- **Předání socketu se zprávami ve frontě** (dědění i `SCM_RIGHTS`; Wine:
+  server pošle rouru požadavku dřív, než se potomek spustí): jádro konec
+  kanálu, v jehož frontě leží kanál, poslat nedovolí (ochrana proti
+  cyklům, `BAD_STATE`). `osrt` frontu nejdřív vyčte do paměti a příjemce
+  dostane její kopii (duplikáty handlů) i rozečtená data a fd; zápis, který
+  přesto narazí na `BAD_STATE`, se zopakuje. Zprávy čekající v okamžiku
+  předání tak vidí oba procesy (odesílatel konec obvykle hned zavře).
 - **`SO_PEERCRED`:** strana, která přijala spojení, dostane uživatele
   a skupinu klienta ověřené fsd z identity jeho relace a číslo procesu
   (`getpid` klienta, neověřené); klient o posluchači ví jen nuly

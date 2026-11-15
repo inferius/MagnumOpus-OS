@@ -73,24 +73,33 @@ fn inherited(fds: &[(crate::c_int, ChildIo, bool)]) -> R<Vec<rt::inherit::Export
 /// Spusti potomka. Relaci site dostane, ma-li ji rodic (POSIX: potomek
 /// dedi prostredi rodice); co smi, urci manifest potomka v launchd.
 pub fn spawn_child(r: SpawnReq) -> R<Child> {
-    let fds = inherited(&r.fds)?;
-    let s = Spawn {
-        program: r.program,
-        args: r.args,
-        env: r.env,
-        cwd: r.cwd,
-        stdin: spec(r.io[0], Stream::In)?,
-        stdout: spec(r.io[1], Stream::Out)?,
-        stderr: spec(r.io[2], Stream::Err)?,
-        network: rt::net::available(),
-    };
-    match rt::process::spawn_with_fds(s, fds) {
-        Ok((c, _)) => Ok(Child(c)),
-        Err((err, _)) => Err(match err {
-            // Proces bez kanalu ke launchd potomky spoustet nemuze.
-            rt::Error::NotSupported => errno::ENOSYS,
-            err => e(err),
-        }),
+    // Predani socketu AF_UNIX s kanalem ve fronte muze narazit na BAD_STATE
+    // (druha strana mezitim poslala kanal): export se zopakuje
+    // (`osrt::unix`, vyctena fronta jde s nim).
+    let mut tries = 0;
+    loop {
+        let fds = inherited(&r.fds)?;
+        let s = Spawn {
+            program: r.program.clone(),
+            args: r.args.clone(),
+            env: r.env.clone(),
+            cwd: r.cwd.clone(),
+            stdin: spec(r.io[0], Stream::In)?,
+            stdout: spec(r.io[1], Stream::Out)?,
+            stderr: spec(r.io[2], Stream::Err)?,
+            network: rt::net::available(),
+        };
+        match rt::process::spawn_with_fds(s, fds) {
+            Ok((c, _)) => return Ok(Child(c)),
+            Err((rt::Error::BadState, _)) if !r.fds.is_empty() && tries < 16 => tries += 1,
+            Err((err, _)) => {
+                return Err(match err {
+                    // Proces bez kanalu ke launchd potomky spoustet nemuze.
+                    rt::Error::NotSupported => errno::ENOSYS,
+                    err => e(err),
+                });
+            }
+        }
     }
 }
 
