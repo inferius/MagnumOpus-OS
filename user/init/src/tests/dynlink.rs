@@ -245,12 +245,8 @@ fn libd_recovery(s: &Startup) -> TestResult {
 
 /// Zabije libd a pocka (s rizenim supervisoru) na novou generaci.
 fn kill_libd(s: &Startup, wait_restart: bool) -> TestResult {
-    let gen1 = {
-        let sup = crate::supervisor::SUPERVISOR.lock();
-        let p = sup.process("libd").ok_or("libd nebezi")?;
-        libos::sys::process_kill(p.raw()).map_err(|e| fail("ukonceni libd", e))?;
-        sup.generation("libd").ok_or("libd neni v registru")?
-    };
+    // Zamerne ukonceni: pod --repeat se nepocita do limitu padu supervisoru.
+    let gen1 = crate::supervisor::SUPERVISOR.lock().kill_for_test("libd").map_err(|e| fail("ukonceni libd", e))?;
     if !wait_restart {
         return Ok(());
     }

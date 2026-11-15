@@ -14,7 +14,7 @@ První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`,
 ## Invarianty
 
 - init drží kořenová práva a z nich vytváří užší pro služby (job s limity podle manifestu); služba nedostane víc, než potřebuje.
-- Služba s restartem se po pádu spustí znovu s odkladem 100 ms, 200 ms, ... (max 5 s); víc než 5 restartů za 60 s = vzdá to. Klienti se k nové instanci připojují přes lístky (`libs/svcclient`).
+- Služba s restartem se po pádu spustí znovu s odkladem 100 ms, 200 ms, ... (max 5 s); víc než 5 restartů za 60 s = vzdá to. Záměrné ukončení testem (`Supervisor::kill_for_test`) restartuje stejně, ale do limitu se nepočítá (jinak `--repeat` službu vzdá). Klienti se k nové instanci připojují přes lístky (`libs/svcclient`).
 - Po pádu `compd` se spustí záložní konzole; po pádu `termd` zůstanou relace (`shsess`).
 - Instalátor (`src/install.rs`): `installd` se spouští až na první `OpenInstaller` a jen jednou dostane raw kanály disků (`Devices.raw`). Při startu se čte `/system/config/system.toml` (pásmo pro timed, rozložení klávesnice pro inputd); chybějící soubor = výchozí. Soubor `install-answers` v initfs spustí test instalace (jen obraz testu, nikdy instalovaný initfs); s `rozhrani = "gui"` ho dostane grafický instalátor (autopilot) místo textové cesty. S `rozhrani = "gui-vstup"` init jen najde inspekcí kompozitoru pole pásma a tlačítko Pokračovat a zaloguje jejich střed na obrazovce (klik QMP v `xtask/src/usb/install_test.rs`). Grafický instalátor `gui-install` je aplikace plochy jen na živém USB (`gui::desktop_apps`, `Devices.stick`) a dostane kanál k installd; installd dostane kanál producenta do taskd.
 - Uživatelská čísla služeb: ACCOUNTD 902, LOGD 903 - nové číslo nesmí kolidovat.

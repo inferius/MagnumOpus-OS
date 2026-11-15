@@ -56,7 +56,9 @@ impl Supervisor {
         let now = time::now();
         let window = RESTART_WINDOW.as_nanos() as u64;
         e.history.retain(|&t| now.saturating_sub(t) < window);
-        if e.history.len() >= RESTART_MAX {
+        // Zamerne ukonceni testem: restart bez zapoctu do limitu padu.
+        let counted = !core::mem::take(&mut e.test_kill);
+        if counted && e.history.len() >= RESTART_MAX {
             println!(
                 "init: sluzba {} spadla {}x za {} s, vzdavam to",
                 e.name,
@@ -69,8 +71,11 @@ impl Supervisor {
         let delay = (RESTART_DELAY.as_nanos() as u64)
             .saturating_mul(1 << e.history.len())
             .min(RESTART_DELAY_MAX.as_nanos() as u64);
-        // Do limitu se pocitaji jen vlastni pady (ne restart kvuli zavislosti).
-        e.history.push(now);
+        // Do limitu se pocitaji jen vlastni pady (ne restart kvuli zavislosti
+        // ani zamerne ukonceni testem).
+        if counted {
+            e.history.push(now);
+        }
         e.phase = Phase::Backoff {
             at: now.saturating_add(delay),
         };

@@ -123,6 +123,10 @@ struct Entry {
     /// Instance se ukoncuje kvuli padu zavislosti (konec se nepocita jako
     /// pad sluzby).
     stopping_for: Option<&'static str>,
+    /// Instanci ukoncil test zamerne ([`Supervisor::kill_for_test`]):
+    /// restart probehne normalne, ale nepocita se do limitu padu (jinak by
+    /// `--repeat` po nekolika kolech sluzbu vzdal).
+    test_kill: bool,
 }
 
 impl Entry {
@@ -244,6 +248,7 @@ impl Supervisor {
             last_exit: None,
             reason: None,
             stopping_for: None,
+            test_kill: false,
         });
     }
 
@@ -457,6 +462,18 @@ impl Supervisor {
     /// Handle procesu bezici instance (testy: ukonceni sluzby).
     pub fn process(&self, name: &str) -> Option<&Handle> {
         self.find(name).and_then(|i| self.entries[i].process.as_ref())
+    }
+
+    /// Zamerne ukonci bezici instanci sluzby (testy obnovy): restart jako
+    /// po padu, ale bez zapoctu do limitu [`RESTART_MAX`] za
+    /// [`RESTART_WINDOW`]. Vraci generaci ukoncene instance.
+    pub fn kill_for_test(&mut self, name: &str) -> Result<u64, libos::Error> {
+        let i = self.find(name).ok_or(libos::Error::NotFound)?;
+        let e = &mut self.entries[i];
+        let p = e.process.as_ref().ok_or(libos::Error::BadState)?;
+        libos::sys::process_kill(p.raw())?;
+        e.test_kill = true;
+        Ok(e.generation)
     }
 
     /// Stav vsech sluzeb (prehled uloh, testy).

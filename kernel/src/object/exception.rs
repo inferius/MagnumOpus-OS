@@ -186,11 +186,15 @@ fn offer(me: &Arc<Thread>, channel: &Arc<Channel>, report: &Report) -> Option<u3
             (token as Arc<dyn KernelObject>, Rights::BASIC),
         ],
     );
+    // Ve vyjimce uz pred odeslanim: obsluha na jinem CPU muze zpravu precist
+    // a volat THREAD_STATE driv, nez toto vlakno usne (jinak BAD_STATE;
+    // cteni pocka, az vlakno opravdu stoji mimo CPU).
+    sched::suspend::set_in_exception(me, true);
     if channel.write(msg).is_err() {
+        sched::suspend::set_in_exception(me, false);
         // Obsluha nebezi nebo nestiha (plna fronta): dalsi obsluha.
         return Some(action::NEXT);
     }
-    sched::suspend::set_in_exception(me, true);
     let r = super::wait::wait_one(&*pending, Signals::SIGNALED, None);
     sched::suspend::set_in_exception(me, false);
     match r {
