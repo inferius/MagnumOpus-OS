@@ -9,8 +9,8 @@ games over adopted Wine. **Status: [designed]**, questions decided on 15 Nov 202
 
 | Part | What | Status |
 |---|---|---|
-| W0 | building Wine 11 (PE DLLs, tools), port of the Unix side over `libc.so` | all of Wine via `cargo xtask wine` in WSL **[implemented]**: 602 DLLs as PE, 25 Unix `.so` over `libc.so` (`ntdll.so` with `libunwind.so`), the `wine` loader and `wineserver`; running in the system not verified yet |
-| W1 | console `.exe` (`cmd`, `hostname`, our own test): lower `ntdll`, TEB via GS, SEH, memory, files, `wineserver` as a process | in progress: GS in the kernel and `ucontext_t` in `cstd` **[verified in QEMU]**; the exception patch `signal_x86_64.c` compiles **[implemented]**; the rest of `ntdll/unix` waits for POSIX parts in `cstd` **[designed]** |
+| W0 | building Wine 11 (PE DLLs, tools), port of the Unix side over `libc.so` | all of Wine via `cargo xtask wine` in WSL **[implemented]**: 602 DLLs as PE, 25 Unix `.so` over `libc.so` (`ntdll.so` with `libunwind.so`), the `wine` loader and `wineserver`; `wine --version` in the system **[verified in QEMU]** ([Wine on disk](#wine-on-disk-w1)) |
+| W1 | console `.exe` (`cmd`, `hostname`, our own test): lower `ntdll`, TEB via GS, SEH, memory, files, `wineserver` as a process | in progress: GS in the kernel and `ucontext_t` in `cstd` **[verified in QEMU]**; the exception patch `signal_x86_64.c` compiles **[implemented]**; Wine on the data disk as an application (`/apps/org.winehq.wine`), the `wine` loader from disk loads `ntdll.so` ([DL-4c](dynamic-linking.md#libraries-from-disk-and-origin-dl-4c)) **[verified in QEMU]**; the connection to `wineserver`, `virtual.c` and the first `.exe` **[designed]** |
 | W2 | several processes of one application, registry, named objects, `winecfg` without windows | **[designed]** |
 | W3 | windows: a Wine driver over the compositor (`guiproto`), GDI, `notepad`, `winecfg`, clipboard, input | **[designed]** |
 | W4 | sound over `audiod`, a simple game (GDI: `winemine`, then a game via SDL or Direct3D 9) | **[designed]** |
@@ -266,6 +266,32 @@ Decisions of the user and the coordinator (15 Nov 2026):
 | Q10 | A: WoW64, the 32-bit code segment in stage W6 |
 | Q11 | A: x86_64 only; aarch64 = a documented limitation, `NOT_SUPPORTED` in the API |
 | Q12 | A: building in WSL via `tools/wsl` |
+
+## Wine on disk (W1)
+
+**[verified in QEMU]** x86_64 (`wine` suite).
+
+- `cargo xtask wine` puts the result into `target/wine/x86_64/tree` in the
+  layout of an application directory: `bin/wineserver`,
+  `lib/wine/x86_64-unix` (Unix `.so` files and the `wine` loader),
+  `lib/wine/x86_64-windows` (PE DLLs), `share/wine` (`nls`, `wine.inf`).
+  It is installed by `make install`, without debug information
+  (`llvm-strip`) and without `.a` import libraries: 145 MB, 871 files
+  (previously 454 MB for the DLLs alone).
+- `cargo xtask run|test --wine` puts the tree on the data disk into
+  `/apps/org.winehq.wine` (like a future package installation into
+  `/apps/<id>`). The disk then has 512 MiB and is created once as a
+  template (`target/wine/x86_64/datadisk-<key>.img`, key = the contents of
+  the tree); a run gets a copy.
+- Wine finds its directories relative to `ntdll.so`, no prefix is needed
+  at build time. The `wine` loader finds `ntdll.so` through
+  `realpath(argv[0])` (we have no `/proc/self/exe`): it is therefore
+  started by an absolute path (`launchd`), `ntdll.so` is loaded by
+  `dlopen` of an absolute path
+  ([DL-4c](dynamic-linking.md#libraries-from-disk-and-origin-dl-4c)).
+- Test (`cargo xtask test --only wine --wine`): `wine --version` via
+  `launchd` prints `wine-11.0`. The `wine` suite runs only on request (the
+  full run skips it without `--wine`).
 
 ## W1: server connection and processes (questions T1-T5)
 

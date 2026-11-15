@@ -98,6 +98,8 @@ prepinace:
   --arch <arch>    architektura: x86_64 (vychozi), aarch64
   --gdb            (run) QEMU ceka na GDB na localhost:1234
   --headless       (run) bez okna, jen seriova linka v terminalu
+  --wine           (run, test; x86_64) datovy disk s Wine v /apps/org.winehq.wine
+                   (strom z `cargo xtask wine`, sablona disku se dela jednou)
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
   --res <SxV>      (run, x86_64) vychozi rozliseni, napr. 1920x1080
   --cpu <model>    (run, test) model CPU QEMU misto vychoziho (x86_64 max,
@@ -199,6 +201,9 @@ pub struct Options {
     /// Datovy disk sdileny vic behy QEMU (`boottest`); `None` = novy disk
     /// pro kazdy beh.
     data_image: Option<PathBuf>,
+    /// Datovy disk s Wine v `/apps/org.winehq.wine` (`--wine`, jen x86_64;
+    /// predpoklad `cargo xtask wine`).
+    wine: bool,
     /// Zvlastni beh testu zaznamu padu (`crashtest`): QEMU bez
     /// `-no-reboot` (jadro po panice restartuje).
     crash_test: bool,
@@ -305,6 +310,7 @@ fn run_cli() -> Result<()> {
         net_helper: std::cell::RefCell::new(None),
         power_test: None,
         data_image: None,
+        wine: false,
         crash_test: false,
     };
     let mut gpu_set = false;
@@ -379,6 +385,7 @@ fn run_cli() -> Result<()> {
             }
             Some("--gdb") => opts.gdb = true,
             Some("--headless") => opts.headless = true,
+            Some("--wine") => opts.wine = true,
             Some("--accel") => {
                 let value = args.next().ok_or("--accel ocekava hodnotu")?;
                 opts.accel = Some(

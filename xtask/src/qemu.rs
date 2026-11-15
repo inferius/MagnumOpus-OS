@@ -254,10 +254,19 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
     let drive = |id: &str, path: &Path| format!("if=none,id={id},format=raw,discard=unmap{cache},file={}", path.display());
     // Sdileny datovy disk pres vic behu (`boottest`): vytvori se jen
     // poprve a beh ho nesmaze; jinak novy disk pro kazdy beh.
+    let wine = if opts.wine {
+        let tree = crate::wine::out_dir(opts.arch).join("tree");
+        if !tree.join("bin").is_dir() {
+            return Err(format!("--wine: chybi strom Wine {} (nejdriv `cargo xtask wine`)", tree.display()).into());
+        }
+        Some(tree)
+    } else {
+        None
+    };
     let raw = match &opts.data_image {
         Some(p) if p.exists() => p.clone(),
-        Some(p) => datadisk::create(p)?,
-        None => datadisk::create(&run.data)?,
+        Some(p) => datadisk::create_with(p, wine.as_deref())?,
+        None => datadisk::create_with(&run.data, wine.as_deref())?,
     };
     // Na NVMe a AHCI jako na skutecnem pocitaci: GPT s nasim oddilem.
     let data = match opts.data_disk.as_str() {

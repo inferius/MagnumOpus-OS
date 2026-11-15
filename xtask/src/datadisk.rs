@@ -3,6 +3,11 @@
 //! kompatibilitu formatu mezi hostitelem a systemem).
 //!
 //! Disk se pri kazdem behu vytvori znovu (testy do nej zapisuji).
+//!
+//! S `--wine` je na disku i Wine v rozlozeni aplikace
+//! (`/apps/org.winehq.wine`, docs/cs/windows-vrstva.md): disk je pak vetsi
+//! a vznika jednou jako sablona (`target/wine/<arch>/datadisk-<klic>.img`,
+//! klic = obsah stromu Wine); beh dostane jeji kopii.
 
 use std::path::{Path, PathBuf};
 
@@ -10,6 +15,10 @@ use fs::{Algo, FileDevice, FormatOptions, Fs, Kind};
 
 /// Velikost datoveho disku.
 const SIZE: u64 = 64 * 1024 * 1024;
+/// Velikost datoveho disku s Wine (strom ~115 MB + misto pro prefix).
+const SIZE_WINE: u64 = 512 * 1024 * 1024;
+/// Adresar aplikace Wine na disku.
+pub const WINE_APP: &str = "/apps/org.winehq.wine";
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -17,11 +26,59 @@ fn fs_err(what: &str, e: fs::Error) -> Box<dyn std::error::Error> {
     format!("datovy disk: {what}: {e:?}").into()
 }
 
-/// Vytvori datovy disk `path` s ukazkovym obsahem; vraci cestu.
-pub fn create(path: &Path) -> Result<PathBuf> {
+/// Vytvori datovy disk `path` s ukazkovym obsahem; vraci cestu. `wine` =
+/// strom Wine (`target/wine/<arch>/tree`), ktery se zkopiruje do
+/// [`WINE_APP`] (pres sablonu, viz modul).
+pub fn create_with(path: &Path, wine: Option<&Path>) -> Result<PathBuf> {
+    let Some(tree) = wine else { return build(path, SIZE, None) };
+    let key = tree_key(tree)?;
+    let template = tree.parent().unwrap_or(tree).join(format!("datadisk-{key:016x}.img"));
+    if !template.is_file() {
+        println!("xtask: datovy disk s Wine (sablona {})", template.display());
+        let tmp = template.with_extension("tmp");
+        build(&tmp, SIZE_WINE, Some(tree))?;
+        std::fs::rename(&tmp, &template)?;
+    }
+    std::fs::copy(&template, path)?;
+    Ok(path.to_path_buf())
+}
+
+/// Klic stromu: relativni cesty, velikosti a casy zmeny vsech souboru.
+fn tree_key(tree: &Path) -> Result<u64> {
+    use std::hash::{Hash, Hasher};
+    let mut files = Vec::new();
+    walk(tree, tree, &mut files)?;
+    files.sort();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    SIZE_WINE.hash(&mut h);
+    for (rel, full) in &files {
+        let m = std::fs::metadata(full)?;
+        rel.hash(&mut h);
+        m.len().hash(&mut h);
+        m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).hash(&mut h);
+    }
+    Ok(h.finish())
+}
+
+/// Soubory stromu: (relativni cesta s `/`, plna cesta).
+fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<()> {
+    for e in std::fs::read_dir(dir)? {
+        let e = e?;
+        let p = e.path();
+        if e.file_type()?.is_dir() {
+            walk(root, &p, out)?;
+        } else {
+            let rel = p.strip_prefix(root).map_err(|_| "cesta mimo strom")?.to_string_lossy().replace('\\', "/");
+            out.push((rel, p));
+        }
+    }
+    Ok(())
+}
+
+fn build(path: &Path, size: u64, wine: Option<&Path>) -> Result<PathBuf> {
     let path = path.to_path_buf();
     let file = std::fs::File::create(&path)?;
-    file.set_len(SIZE)?;
+    file.set_len(size)?;
     drop(file);
     let dev = FileDevice::open(&path)?;
     let opts = FormatOptions {
@@ -50,6 +107,31 @@ pub fn create(path: &Path) -> Result<PathBuf> {
     for (p, data) in files {
         fs.create(p, Kind::File).map_err(|e| fs_err(p, e))?;
         fs.write(p, 0, data).map_err(|e| fs_err(p, e))?;
+    }
+    if let Some(tree) = wine {
+        let mut list = Vec::new();
+        walk(tree, tree, &mut list)?;
+        list.sort();
+        let mut dirs = std::collections::BTreeSet::new();
+        for (rel, full) in &list {
+            let target = format!("{WINE_APP}/{rel}");
+            // Adresare cesty (od korene) jednou.
+            let mut at = 0;
+            while let Some(i) = target[at + 1..].find('/') {
+                let d = &target[..at + 1 + i];
+                if dirs.insert(d.to_string()) {
+                    match fs.create(d, Kind::Dir) {
+                        Ok(()) | Err(fs::Error::AlreadyExists) => {}
+                        Err(e) => return Err(fs_err(d, e)),
+                    }
+                }
+                at += 1 + i;
+            }
+            let data = std::fs::read(full)?;
+            fs.create(&target, Kind::File).map_err(|e| fs_err(&target, e))?;
+            fs.write(&target, 0, &data).map_err(|e| fs_err(&target, e))?;
+        }
+        println!("xtask: Wine na datovem disku: {} souboru v {WINE_APP}", list.len());
     }
     fs.commit().map_err(|e| fs_err("commit", e))?;
     let report = fs.check(true).map_err(|e| fs_err("kontrola", e))?;

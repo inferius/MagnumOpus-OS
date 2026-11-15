@@ -28,7 +28,7 @@ První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`,
 
 - Testy userspace jsou v QEMU, ne na hostiteli: `cargo xtask test --only <sada>[,<sada>]` (jména sad viz `SUITES`, např. `gui`, `sit`, `firewall`, `shell`, `supervisor`, `obnova sluzeb`). `--repeat N` hledá nestabilní testy.
 - Nový test: funkce v `src/tests/<oblast>.rs`, zapsat do `TESTS` oblasti a do `SUITES`. Selhání vrací `Err(String)`, nepanikaří.
-- Plný běh (všechny sady, obě architektury) pouští koordinátor.
+- Plný běh (všechny sady, obě architektury) pouští koordinátor. Sady v `ON_REQUEST` (`tests/mod.rs`, např. `wine` s diskem z `--wine`) běží jen s `--only`.
 
 ## Pasti
 

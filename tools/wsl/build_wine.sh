@@ -78,13 +78,31 @@ else
     make -j"$(nproc)" > "$W/logs/make.log" 2>&1 || { grep -m 20 "error" "$W/logs/make.log"; echo "xtask-wine: log $W/logs/make.log"; exit 1; }
 fi
 
-# Vysledek do target/wine/<arch>: DLL PE a unixove knihovny.
-mkdir -p "$WINE_OUT/x86_64-windows" "$WINE_OUT/x86_64-unix"
-cp -u dlls/*/x86_64-windows/*.dll "$WINE_OUT/x86_64-windows/" 2>/dev/null || true
-cp -u dlls/*/*.so "$WINE_OUT/x86_64-unix/" 2>/dev/null || true
-# Zavadec Wine (PIE nad ld.so) a server.
-mkdir -p "$WINE_OUT/bin"
-for f in loader/wine server/wineserver; do
-    [ -f "$f" ] && cp -u "$f" "$WINE_OUT/bin/"
+# Vysledek do target/wine/<arch>/tree: rozlozeni adresare aplikace
+# (/apps/org.winehq.wine): bin/wineserver, lib/wine/x86_64-unix (i zavadec
+# `wine`; bin/wine je v instalaci Wine jen odkaz na nej),
+# lib/wine/x86_64-windows, share/wine (nls, wine.inf). Wine hleda sve
+# adresare relativne k ntdll.so, takze prefix neni potreba. Bez ladicich
+# informaci (llvm-strip).
+INST="$W/install-$WINE_KEY"
+rm -rf "$INST"
+make install DESTDIR="$INST" > "$W/logs/install.log" 2>&1 || { tail -20 "$W/logs/install.log"; exit 1; }
+P="$INST/usr/local"
+T="$WINE_OUT/tree.new"
+rm -rf "$T"
+mkdir -p "$T/bin" "$T/lib" "$T/share"
+for f in wine wineserver; do
+    [ -f "$P/bin/$f" ] && cp "$P/bin/$f" "$T/bin/"
 done
+cp -r "$P/lib/wine" "$T/lib/"
+cp -r "$P/share/wine" "$T/share/"
+# Importni knihovny (.a) jen pro vyvoj; ostatni bez symbolu a ladicich
+# informaci (PE i ELF; dynamicke symboly ELF zustanou). Soubor, ktery
+# neni objekt (data), llvm-strip odmitne a zustane beze zmeny.
+find "$T/lib" -name '*.a' -delete
+find "$T/bin" "$T/lib" -type f -exec llvm-strip {} \; 2>/dev/null || true
+rm -rf "$WINE_OUT/tree" "$WINE_OUT/x86_64-windows" "$WINE_OUT/x86_64-unix" "$WINE_OUT/bin"
+mv "$T" "$WINE_OUT/tree"
+rm -rf "$INST"
+echo "xtask-wine: strom $(du -sh "$WINE_OUT/tree" | cut -f1), soubory: $(find "$WINE_OUT/tree" -type f | wc -l)"
 echo "xtask-wine: hotovo"

@@ -24,6 +24,7 @@ mod fences;
 mod firewall;
 mod dynlink;
 mod dynlink_disk;
+mod wine;
 mod fpu;
 mod fpu_avx;
 mod fs;
@@ -138,6 +139,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("sit", net::TESTS),
     ("std sit", std_net::TESTS),
     ("std procesy", std_proc::TESTS),
+    ("wine", wine::TESTS),
     ("std porty", std_ports::TESTS),
     ("cstd", cstd::TESTS),
     ("cstd sit", cstd::NET_TESTS),
@@ -205,6 +207,11 @@ fn filter(startup: &Startup) -> (Vec<String>, usize) {
     (suites, repeat)
 }
 
+/// Sady jen na vyzadani (`--only`): potrebuji zvlastni beh (`wine` =
+/// datovy disk s Wine, `cargo xtask test --only wine --wine`), plny beh je
+/// preskoci.
+const ON_REQUEST: &[&str] = &["wine"];
+
 /// Spusti vsechny testy, vraci pocet selhanych.
 pub fn run_all(startup: &Startup) -> usize {
     let (only, repeat) = filter(startup);
@@ -216,6 +223,9 @@ pub fn run_all(startup: &Startup) -> usize {
         }
         for (suite, tests) in SUITES {
             if !only.is_empty() && !only.iter().any(|s| s == suite) {
+                continue;
+            }
+            if only.is_empty() && ON_REQUEST.contains(suite) {
                 continue;
             }
             for (name, test) in *tests {

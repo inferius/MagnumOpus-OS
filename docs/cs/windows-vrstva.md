@@ -9,8 +9,8 @@ z Wine, spodní naše“): aplikace a hry pro Windows nad převzatým Wine.
 
 | Část | Co | Stav |
 |---|---|---|
-| W0 | sestavení Wine 11 (DLL PE, nástroje), port unixové části nad `libc.so` | celé Wine přes `cargo xtask wine` ve WSL **[implementováno]**: 602 DLL jako PE, 25 unixových `.so` nad `libc.so` (`ntdll.so` s `libunwind.so`), zavaděč `wine` a `wineserver`; běh v systému zatím neověřen |
-| W1 | konzolové `.exe` (`cmd`, `hostname`, vlastní test): spodní `ntdll`, TEB přes GS, SEH, paměť, soubory, `wineserver` jako proces | rozpracováno: GS v jádře a `ucontext_t` v `cstd` **[ověřeno v QEMU]**; záplata výjimek `signal_x86_64.c` se přeloží **[implementováno]**; zbytek `ntdll/unix` čeká na části POSIX v `cstd` **[navrženo]** |
+| W0 | sestavení Wine 11 (DLL PE, nástroje), port unixové části nad `libc.so` | celé Wine přes `cargo xtask wine` ve WSL **[implementováno]**: 602 DLL jako PE, 25 unixových `.so` nad `libc.so` (`ntdll.so` s `libunwind.so`), zavaděč `wine` a `wineserver`; `wine --version` v systému **[ověřeno v QEMU]** ([Wine na disku](#wine-na-disku-w1)) |
+| W1 | konzolové `.exe` (`cmd`, `hostname`, vlastní test): spodní `ntdll`, TEB přes GS, SEH, paměť, soubory, `wineserver` jako proces | rozpracováno: GS v jádře a `ucontext_t` v `cstd` **[ověřeno v QEMU]**; záplata výjimek `signal_x86_64.c` se přeloží **[implementováno]**; Wine na datovém disku jako aplikace (`/apps/org.winehq.wine`), zavaděč `wine` z disku nahraje `ntdll.so` ([DL-4c](dynamicke-linkovani.md#knihovny-z-disku-a-origin-dl-4c)) **[ověřeno v QEMU]**; spojení s `wineserver`, `virtual.c` a první `.exe` **[navrženo]** |
 | W2 | víc procesů jedné aplikace, registry, pojmenované objekty, `winecfg` v režimu bez oken | **[navrženo]** |
 | W3 | okna: ovladač Wine nad kompozitorem (`guiproto`), GDI, `notepad`, `winecfg`, schránka, vstup | **[navrženo]** |
 | W4 | zvuk nad `audiod`, jednoduchá hra (GDI: `winemine`, pak hra přes SDL nebo Direct3D 9) | **[navrženo]** |
@@ -251,6 +251,30 @@ Rozhodnutí uživatele a koordinátora (15. 11. 2026):
 | Q10 | A: WoW64, 32bitový segment kódu v etapě W6 |
 | Q11 | A: jen x86_64; aarch64 = zdokumentované omezení, `NOT_SUPPORTED` v API |
 | Q12 | A: sestavení ve WSL přes `tools/wsl` |
+
+## Wine na disku (W1)
+
+**[ověřeno v QEMU]** x86_64 (sada `wine`).
+
+- `cargo xtask wine` dá výsledek do `target/wine/x86_64/tree` v rozložení
+  adresáře aplikace: `bin/wineserver`, `lib/wine/x86_64-unix` (unixové
+  `.so` a zavaděč `wine`), `lib/wine/x86_64-windows` (DLL PE),
+  `share/wine` (`nls`, `wine.inf`). Instaluje ho `make install`, bez
+  ladicích informací (`llvm-strip`) a bez importních knihoven `.a`:
+  145 MB, 871 souborů (před tím 454 MB jen DLL).
+- `cargo xtask run|test --wine` dá strom na datový disk do
+  `/apps/org.winehq.wine` (jako budoucí instalace balíčku do
+  `/apps/<id>`). Disk má pak 512 MiB a vzniká jednou jako šablona
+  (`target/wine/x86_64/datadisk-<klíč>.img`, klíč = obsah stromu); běh
+  dostane kopii.
+- Wine hledá své adresáře relativně k `ntdll.so`, prefix při sestavení
+  není potřeba. Zavaděč `wine` najde `ntdll.so` přes `realpath(argv[0])`
+  (`/proc/self/exe` u nás není): spouští se proto absolutní cestou
+  (`launchd`), `ntdll.so` nahraje `dlopen` absolutní cesty
+  ([DL-4c](dynamicke-linkovani.md#knihovny-z-disku-a-origin-dl-4c)).
+- Test (`cargo xtask test --only wine --wine`): `wine --version` přes
+  `launchd` vypíše `wine-11.0`. Sada `wine` je jen na vyžádání (plný běh
+  ji bez `--wine` přeskočí).
 
 ## W1: spojení se serverem a procesy (otázky T1-T5)
 
