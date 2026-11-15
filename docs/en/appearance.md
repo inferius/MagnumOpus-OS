@@ -195,25 +195,49 @@ set all day (polar night would otherwise mean a dark theme at noon too).
 An automatic change waits while the user is typing (2 s after the last
 key, at most 2 minutes); a manual choice starts at once.
 
-**Smooth transition.** The colors of everything at once (desktop, the
-bar with its blurred background, frames, shadows, dialogs, windows) flow
-from the old mode to the new one along the `ease_in_out` curve (slow
-start and end): a manual switch over `motion.theme` = 600 ms, the
+**Smooth transition.** On the next frame the compositor stores the
+display content as the old frame, switches the mode (applications get the
+final `THEME` at once and redraw once, the blur under the bar is computed
+once for the new state) and composes the new state normally, only the
+damaged areas, into its own buffer. Every frame it then mixes both frames
+per pixel **in linear light** (a gamma table sRGB -> 12-bit linear ->
+sRGB, `libs/comp/src/fade.rs`): the middle of the transition is neither
+dark nor "muddy" as when mixing sRGB values. The `ease_in_out` curve
+(slow start and end), a manual switch over `motion.theme` = 600 ms, the
 automatic one at sunrise and sunset slowly over `motion.theme_auto` = 3 s
-(it should not disturb). Work goes on normally during the transition:
-the compositor always handles input first and mixes frame by frame, so a
-window that redraws meanwhile (a click, typing) is composed into the
-mixed frame already (the QEMU test clicks into a window mid-transition). Mixing happens in **OKLab** (a perceptually
-uniform space): the midpoint of white and dark has half the perceived
-lightness and the colors do not turn gray or "muddy" on the way as in
-sRGB. Shadows have the same geometry in all modes, only their color is
-mixed; towards contrast the shadows fade out.
+(it should not disturb). Work goes on normally during the transition: the
+compositor always handles input first and a window that redraws meanwhile
+(a click, typing) shows up in the new frame at once (the QEMU test clicks
+into a window mid-transition). The GPU backend switches at once for now;
+mixing in a `vkcomp` shader is queued.
+
+Why not mixing tokens frame by frame: the first version mixed the token
+colors in OKLab and composed the whole screen every frame; in QEMU that
+gave about 11 frames/s (the bar blur and the desktop image were computed
+again and again). Mixing finished frames costs one pass over the screen
+regardless of what is on it.
+
+**Measurement** (revision `cd8b6524`; QEMU 11.1 TCG on Windows 11,
+x86_64, 4 CPUs, release, 1280×800, the test "appearance choice: smooth
+color transition" in the `gui` suite; host: `cargo test -p comp --release
+bench_theme_fade -- --ignored`):
+
+| Where | Transition frame | Of that mixing | Frames/s |
+|---|---|---|---|
+| QEMU TCG, 1280×800 | 15.6-21.4 ms (median ~18.5 ms); first frame 129 ms (composing the new state and the blur) | 15.6-21.4 ms | ~54 |
+| QEMU TCG, 1920×1080 (estimate ×2.03 pixels) | ~38 ms | ~37 ms | ~26 |
+| host natively, 1920×1080 | 4.3 ms | 3.7 ms | ~230 |
+
+The whole 600 ms transition in QEMU: 20 frames in 592 ms. The target of
+30 frames/s at 1080p in TCG is narrowly missed (~26); TCG is emulation,
+on real HW the mixing is about 8× faster according to the host
+measurement. A tried variant with all three channels in one `u64` (two
+multiplications instead of six) was slower in TCG (20-22 ms).
 
 | Who | How often | Why |
 |---|---|---|
-| compositor | every frame | it composes its layers anyway; it costs only the frame composition (the whole screen for the duration of the transition; the QEMU test logs the frame count and average time) |
-| applications (`libs/ui`, terminal) | a `THEME_MIX` step every `motion.theme_app_step` = 100 ms, `THEME` at the end | redrawing an application window costs more than composing; 3 steps are enough to keep the content in step |
-| older applications | only the final `THEME` | they drop the unknown message (test `unknown_server_op_is_not_supported_and_compose_validated`) |
+| compositor | mixes the old and the new frame every frame; composes the new state only in damaged areas | one pass over the screen, the cost does not depend on the content |
+| applications (`libs/ui`, terminal) | once: the final `THEME` right at the start | redrawing a window is expensive; the compositor provides the smoothness |
 
 An application with its own look (a player, an image viewer) finds the
 target mode in the window context (`ui::Context::mode`) and picks its
@@ -234,10 +258,9 @@ kontrast = ne        # ano | ne
 omezit_pohyb = ne    # ano | ne
 ```
 
-Tests: `libs/theme` (`mix_ends_and_oklab_midpoint`,
-`pref_text_roundtrip_and_resolve`), `libs/comp` (`tests/appearance.rs`:
-sunrise and sunset in Prague, polar night, the fade with steps for
-applications, Reduce motion, the system and user choice, the bar card,
+Tests: `libs/theme` (`pref_text_roundtrip_and_resolve`), `libs/comp`
+(`tests/appearance.rs`: sunrise and sunset in Prague, polar night, frame
+mixing in linear light, an application redraw during the transition, Reduce motion, the system and user choice, the bar card,
 deferral while typing), `libs/shlang` (`tests/appearance.rs`), QEMU suite
 `gui` ("appearance choice: smooth color transition": the badge passes
 through intermediate colors, the application window redraws dark; storage

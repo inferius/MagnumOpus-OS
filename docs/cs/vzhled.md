@@ -187,24 +187,48 @@ nevyjde nebo nezapadne (polární noc by jinak znamenala tmavý motiv
 i v poledne). Automatická změna počká, dokud uživatel píše (2 s od
 poslední klávesy, nejdéle 2 minuty); ruční volba se rozběhne hned.
 
-**Plynulý přechod.** Barvy všeho najednou (plocha, lišta s rozmazaným
-pozadím, rámy, stíny, dialogy, okna) se po křivce `ease_in_out` (pomalý
-začátek i konec) přelijí ze starého režimu do nového: ruční přepnutí
-za `motion.theme` = 600 ms, automatické při východu a západu slunce
-pomalu za `motion.theme_auto` = 3 s (nemá rušit). Během přechodu se dá
-normálně pracovat: kompozitor má vstup vždy první a prolíná snímek po
-snímku, takže okno, které se mezitím překreslí (klik, psaní), se skládá
-už v prolnutém snímku (QEMU test kliká do okna uprostřed přechodu). Prolíná
-se v **OKLab** (vnímově rovnoměrný prostor): střed bílé a tmavé má
-vnímanou polovinu světlosti a barvy cestou nešednou ani „nešpiní“ jako
-v sRGB. Stíny mají ve všech režimech stejnou geometrii, prolíná se jen
-barva; do kontrastu se stíny rozplynou.
+**Plynulý přechod.** Kompozitor při dalším snímku uloží obsah displeje
+jako starý snímek, přepne režim (aplikace hned dostanou konečný `THEME`
+a překreslí se jednou, rozmazání pod lištou se spočítá jednou pro nový
+stav) a nový stav skládá normálně, jen poškozená místa, do vlastního
+bufferu. Každý snímek pak oba snímky smíchá po pixelech **v lineárním
+světle** (gamma tabulka sRGB -> 12 bitů lineárně -> sRGB, `libs/comp/src/fade.rs`):
+střed přechodu není tmavý ani „špinavý“ jako při míchání hodnot sRGB.
+Křivka `ease_in_out` (pomalý začátek i konec), ruční přepnutí za
+`motion.theme` = 600 ms, automatické při východu a západu slunce pomalu
+za `motion.theme_auto` = 3 s (nemá rušit). Během přechodu se dá normálně
+pracovat: kompozitor má vstup vždy první a okno, které se mezitím
+překreslí (klik, psaní), se do nového snímku promítne hned (QEMU test
+kliká do okna uprostřed přechodu). GPU backend zatím přepne hned;
+míchání shaderem ve `vkcomp` je ve frontě.
+
+Proč ne prolínání tokenů snímek po snímku: první verze míchala barvy
+tokenů v OKLab a skládala celou obrazovku každý snímek; v QEMU to dalo
+asi 11 snímků/s (rozmazání pod lištou a obraz plochy se počítaly pořád
+znovu). Míchání hotových snímků stojí jeden průchod obrazovkou bez
+ohledu na to, co na ní je.
+
+**Měření** (revize `cd8b6524`; QEMU 11.1 TCG na Windows 11, x86_64,
+4 CPU, release, 1280×800, test „volba vzhledu: plynulý přechod barev“
+v sadě `gui`; hostitel: `cargo test -p comp --release bench_theme_fade
+-- --ignored`):
+
+| Kde | Snímek přechodu | Z toho míchání | Snímků/s |
+|---|---|---|---|
+| QEMU TCG, 1280×800 | 15,6-21,4 ms (medián ~18,5 ms); první snímek 129 ms (složení nového stavu a rozmazání) | 15,6-21,4 ms | ~54 |
+| QEMU TCG, 1920×1080 (odhad ×2,03 pixelů) | ~38 ms | ~37 ms | ~26 |
+| hostitel nativně, 1920×1080 | 4,3 ms | 3,7 ms | ~230 |
+
+Celý přechod 600 ms v QEMU: 20 snímků za 592 ms. Cíl 30 snímků/s při
+1080p v TCG těsně nesplněn (~26); TCG je emulace, na skutečném HW je
+míchání podle měření na hostiteli asi 8× rychlejší. Zkoušená varianta se
+všemi třemi kanály v jednom `u64` (dvě násobení místo šesti) byla v TCG
+pomalejší (20-22 ms).
 
 | Kdo | Jak často | Proč |
 |---|---|---|
-| kompozitor | každý snímek | svoje vrstvy skládá stejně, stojí jen složení snímku (celá obrazovka po dobu přechodu; QEMU test zapíše počet snímků a průměrný čas) |
-| aplikace (`libs/ui`, terminál) | mezikrok `THEME_MIX` každých `motion.theme_app_step` = 100 ms, na konci `THEME` | překreslení okna aplikace je dražší než složení; 3 mezikroky stačí, aby obsah nezůstal pozadu |
-| starší aplikace | jen konečný `THEME` | neznámou zprávu zahodí (test `unknown_server_op_is_not_supported_and_compose_validated`) |
+| kompozitor | každý snímek smíchá starý a nový snímek; nový stav skládá jen v poškozených místech | jeden průchod obrazovkou, cena nezávisí na obsahu |
+| aplikace (`libs/ui`, terminál) | jednou: konečný `THEME` hned na začátku | překreslení okna je drahé; plynulost dělá kompozitor |
 
 Aplikace s vlastním vzhledem (přehrávač, prohlížeč obrázků) najde
 cílový režim v kontextu okna (`ui::Context::mode`) a barvy si zvolí
@@ -224,9 +248,9 @@ kontrast = ne        # ano | ne
 omezit_pohyb = ne    # ano | ne
 ```
 
-Testy: `libs/theme` (`mix_ends_and_oklab_midpoint`,
-`pref_text_roundtrip_and_resolve`), `libs/comp` (`tests/appearance.rs`:
-východ a západ v Praze, polární noc, prolnutí s mezikroky pro aplikace,
+Testy: `libs/theme` (`pref_text_roundtrip_and_resolve`), `libs/comp`
+(`tests/appearance.rs`: východ a západ v Praze, polární noc, míchání
+snímků v lineárním světle, překreslení aplikace během přechodu,
 Omezit pohyb, systémová a uživatelská volba, karta v liště, odklad při
 psaní), `libs/shlang` (`tests/appearance.rs`), QEMU sada `gui`
 („volba vzhledu: plynulý přechod barev“: odznak projde mezibarvami,
