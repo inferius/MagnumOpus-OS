@@ -195,10 +195,12 @@ pub mod futex_op {
     pub const WAKE: u64 = 1;
 }
 
-/// Ukazatel vlakna pro TLS: `(value) -> 0`. Nastavi registr ukazatele
-/// vlakna aktualniho vlakna (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`); jadro
-/// ho uklada a obnovuje pri kazdem prepnuti. Nove vlakno zacina s 0.
-/// Na x86_64 musi byt `value` kanonicka adresa userspace.
+/// Ukazatel vlakna: `(value, which) -> 0`. `which` = [`thread_pointer::TLS`]
+/// (0): registr pro TLS (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`);
+/// [`thread_pointer::SECOND`] (1): druhy ukazatel vlakna (x86_64 baze GS,
+/// napr. TEB Windows vrstvy; aarch64 `NOT_SUPPORTED`). Jadro hodnotu
+/// uklada a obnovuje pri kazdem prepnuti; nove vlakno zacina s 0. Musi
+/// byt adresa userspace.
 pub const THREAD_SET_POINTER: u64 = 56;
 
 /// Rezervace adres: `(process, addr, len, flags) -> addr`. Zabere rozsah
@@ -307,8 +309,31 @@ pub const DMA_SEGMENTS: u64 = 74;
 /// (`dma::sync`); na koherentnich platformach nedela nic. Pravo `READ`.
 pub const DMA_SYNC: u64 = 75;
 
-// 76 a 77 jsou rezervovane pro jine vetve (THREAD_INTERRUPT, PROCESS_MEMORY):
-// jadro je tady jeste nema (NOT_SUPPORTED).
+/// Preruseni vlakna: `(thread, code) -> 0`. Nastavi cekajici preruseni
+/// `code` (0..63, `INTERRUPT_CODES`; stejny kod se slouci) a probudi vlakno
+/// z blokujiciho cekani, ktere vrati `INTERRUPTED`. Pri navratu do
+/// userspace dostane vlakno doruceni na obsluhu ve vlakne
+/// (`EXCEPTION_HANDLER`) s druhem `exception::kind::INTERRUPT` a kodem
+/// v `Report::code` (nejnizsi cekajici kod prvni). Obecny zaklad pro
+/// `kill`/`pthread_kill` mezi procesy, Ctrl+C, `SIGCHLD` a pozastaveni
+/// vlaken Windows vrstvy. Pravo `MANAGE`; proces vlakna bez obsluhy ve
+/// vlakne = `BAD_STATE`.
+pub const THREAD_INTERRUPT: u64 = 76;
+
+/// Pocet kodu preruseni (`THREAD_INTERRUPT`).
+pub const INTERRUPT_CODES: u64 = 64;
+
+/// Registr pro `THREAD_SET_POINTER`.
+pub mod thread_pointer {
+    /// Ukazatel pro TLS (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`).
+    pub const TLS: u64 = 0;
+    /// Druhy ukazatel vlakna: x86_64 baze GS (`gs:` v programu), aarch64
+    /// nema (`NOT_SUPPORTED`; Windows ARM64 pouziva `x18`, ten je v kontextu).
+    pub const SECOND: u64 = 1;
+}
+
+// 77 je rezervovane pro PROCESS_MEMORY (etapa W2 Windows vrstvy, pamet
+// jineho procesu): jadro ho jeste nema (BAD_SYSCALL).
 
 /// Zmeni velikost zvetsitelneho objektu pameti: `(vmo, size) -> 0`
 /// (`vm::VMO_RESIZABLE`, nejvys kapacita; pravo `RESIZE`). Zvetseni slibi

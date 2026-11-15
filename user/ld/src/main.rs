@@ -8,7 +8,9 @@
 //! 1. se sam zrelokuje (je static-PIE, [`start`]),
 //! 2. precte zpravu zavadece (handle procesu, spojeni s libd),
 //! 3. nahraje `DT_NEEDED` do sirky od sluzby knihoven libd na nahodne
-//!    baze,
+//!    baze (z `/system/lib` podle jmena; z disku podle `DT_RUNPATH`
+//!    s `$ORIGIN` nebo absolutni cesty - soubor cte zavadec relaci FS
+//!    procesu a obsah da libd, DL-4c),
 //! 4. rozlozi staticke TLS vsech modulu a nastavi ukazatel vlakna,
 //! 5. provede relokace (vse hned, `BIND_NOW`), zapeceti kod a RELRO,
 //!    zavola inicializatory (zavislosti napred),
@@ -25,6 +27,7 @@
 extern crate alloc;
 
 mod dl;
+mod disk;
 mod heap;
 mod iface;
 mod load;

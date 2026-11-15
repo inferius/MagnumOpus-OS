@@ -1,0 +1,80 @@
+diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
+index 62be480..3c2205d 100644
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -96,11 +96,30 @@ static USHORT fs32_sel;  /* selector for %fs in 32-bit mode */
+ /***********************************************************************
+  * signal context platform-specific definitions
+  */
+-#ifdef linux
++#if defined(linux) || defined(__magnumopus__)
+ 
++#ifdef __magnumopus__
++/* MagnumOpus: TEB v GS jako na Linuxu, FS = TLS knihovny C (nemeni se).
++ * Baze GS pres rozsireni cstd (THREAD_SET_POINTER se SECOND v jadre). */
++#include <errno.h>
++#include <magnumopus/thread.h>
++#define ARCH_SET_GS 0x1001
++#define ARCH_GET_GS 0x1004
++static inline int arch_prctl( int func, void *ptr )
++{
++    switch (func)
++    {
++    case ARCH_SET_GS: return mos_thread_set_second_pointer( ptr );
++    case ARCH_GET_GS: *(void **)ptr = mos_thread_get_second_pointer(); return 0;
++    default: errno = EINVAL; return -1;
++    }
++}
++#else
+ #include <asm/prctl.h>
+ static inline int arch_prctl( int func, void *ptr ) { return syscall( __NR_arch_prctl, func, ptr ); }
++#endif
+ 
++#ifndef __magnumopus__
+ extern int alloc_fs_sel( int sel, void *base );
+ __ASM_GLOBAL_FUNC( alloc_fs_sel,
+                    /* switch to 32-bit stack */
+@@ -162,6 +181,7 @@ __ASM_GLOBAL_FUNC( modify_ldt,
+                    "popq %r12\n\t"
+                    "popq %rbx\n\t"
+                    "ret" );
++#endif /* !__magnumopus__ */
+ 
+ #ifndef FP_XSTATE_MAGIC1
+ #define FP_XSTATE_MAGIC1 0x46505853
+@@ -525,7 +545,7 @@ static unsigned int frame_size;
+ static unsigned int xstate_size = sizeof(XSAVE_AREA_HEADER);
+ static UINT64 xstate_extended_features;
+ 
+-#if defined(__linux__) || defined(__APPLE__)
++#if defined(__linux__) || defined(__APPLE__) || defined(__magnumopus__)
+ static inline TEB *get_current_teb(void)
+ {
+     unsigned long rsp;
+@@ -2320,6 +2340,8 @@ static inline BOOL check_invalid_gsbase( ucontext_t *ucontext )
+     sysarch( X86_64_GET_GSBASE, &cur_gsbase );
+ #elif defined(__APPLE__)
+     /* init_handler() has already reset GSBASE, we can't determine what it was before the signal */
++#elif defined(__magnumopus__)
++    arch_prctl( ARCH_GET_GS, &cur_gsbase );
+ #endif
+ 
+     if (cur_gsbase == (ULONG_PTR)teb) return FALSE;
+@@ -2381,6 +2403,8 @@ static inline BOOL check_invalid_gsbase( ucontext_t *ucontext )
+     sysarch( X86_64_SET_GSBASE, &teb );
+ #elif defined(__APPLE__)
+     /* leave_handler() will set GSBASE to the TEB */
++#elif defined(__magnumopus__)
++    arch_prctl( ARCH_SET_GS, teb );
+ #endif
+     return TRUE;
+ }
+@@ -2917,6 +2941,8 @@ void init_syscall_frame( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend,
+     sysarch( X86_64_SET_GSBASE, &teb );
+ #elif defined (__APPLE__)
+     thread_data->pthread_teb = mac_thread_gsbase();
++#elif defined(__magnumopus__)
++    arch_prctl( ARCH_SET_GS, teb );
+ #else
+ # error Please define setting %gs for your architecture
+ #endif

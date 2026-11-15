@@ -86,6 +86,11 @@ pub fn spawn_with_libd(startup: &Startup, name: &str, handles: Vec<StartHandle>,
         opts.stack_size = s;
     }
     opts.static_tls_reserve = manifest.as_ref().and_then(|m| m.static_tls_reserve);
+    if let Some(m) = &manifest {
+        for (slot, r) in opts.reserve.iter_mut().zip(m.reserve.iter()) {
+            *slot = *r;
+        }
+    }
     let (process, control) = libos::spawn::spawn_with(&job, name, image, handles, opts)?;
     if let Some(m) = &manifest {
         let mem = |v: Option<u64>| v.map_or(String::from("bez limitu"), |b| format!("{} MiB", b >> 20));

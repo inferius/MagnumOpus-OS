@@ -4,9 +4,28 @@
 
 use core::sync::atomic::{AtomicPtr, Ordering};
 
-use abi::loader::{AT_MO_LOADER, ENTRY_MAGIC, Interface};
+use abi::loader::{AT_MO_LOADER, AT_MO_RESERVE, ENTRY_MAGIC, Interface, RESERVE_MAX};
 
 static INTERFACE: AtomicPtr<Interface> = AtomicPtr::new(core::ptr::null_mut());
+/// Tabulka `AT_MO_RESERVE` v bloku auxv (null = zadne rezervace).
+static RESERVE: AtomicPtr<u64> = AtomicPtr::new(core::ptr::null_mut());
+
+/// Rozsahy adres `(zacatek, delka)`, ktere `spawn` rezervoval pred
+/// namapovanim programu (`spawn::Options::reserve`, manifest `[app]
+/// reserve`). Rezervace patri programu: mapuje do ni s
+/// `MAP_IN_RESERVATION` (nebo ji uvolni). Bez zavadece vzdy prazdne.
+pub fn reserved() -> alloc::vec::Vec<(u64, u64)> {
+    let p = RESERVE.load(Ordering::Acquire);
+    if p.is_null() {
+        return alloc::vec::Vec::new();
+    }
+    // SAFETY: tabulku zapsal spawn do bloku auxv na vrcholu zasobniku
+    // hlavniho vlakna (zije do konce procesu): pocet a dvojice slov.
+    unsafe {
+        let n = (p.read() as usize).min(RESERVE_MAX);
+        (0..n).map(|i| (p.add(1 + 2 * i).read(), p.add(2 + 2 * i).read())).collect()
+    }
+}
 
 /// Tabulka zavadece, bezi-li program pod nim.
 pub fn interface() -> Option<&'static Interface> {
@@ -43,6 +62,9 @@ pub unsafe fn init(sp: u64, magic: u64) {
             }
             if t == AT_MO_LOADER && v != 0 {
                 INTERFACE.store(v as *mut Interface, Ordering::Release);
+            }
+            if t == AT_MO_RESERVE && v != 0 {
+                RESERVE.store(v as *mut u64, Ordering::Release);
             }
             p = p.add(2);
         }

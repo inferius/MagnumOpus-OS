@@ -168,14 +168,24 @@ fn ensure(c: &mut Conn) -> Result<()> {
 
 /// Zadost a odpoved (spojeni je pod zamkem, odpovedi se nemichaji). Po padu
 /// libd jednou obnovi relaci pres listek a zadost zopakuje (vsechny zadosti
-/// klienta jsou idempotentni a bez handlu).
+/// klienta jsou idempotentni).
 fn call(req: &Request) -> Result<(Reply, Vec<Handle>)> {
+    call_with(req, None)
+}
+
+/// Jako [`call`], s VMO prilozenym k zadosti (pri kazdem pokusu duplikat,
+/// aby slo zadost po padu libd zopakovat).
+fn call_with(req: &Request, vmo: Option<&Vmo>) -> Result<(Reply, Vec<Handle>)> {
     let mut c = CONN.lock();
     ensure(&mut c)?;
     let data = req.encode();
     let once = |c: &Conn| -> Result<crate::Message> {
         let ch = c.session.as_ref().ok_or(Error::NotFound)?;
-        ch.write(&data, Vec::new())?;
+        let handles = match vmo {
+            Some(v) => alloc::vec![v.handle().duplicate(None)?],
+            None => Vec::new(),
+        };
+        ch.write(&data, handles)?;
         ch.read(Some(crate::time::deadline_after(TIMEOUT)))
     };
     let msg = match once(&c) {
@@ -238,6 +248,21 @@ pub fn open(name: &str) -> Result<(Library, Vec<Vmo>)> {
         return Err(Error::InvalidArgs);
     }
     match call(&Request::Open { name: alloc::string::String::from(name) })? {
+        (Reply::Library(l), handles) if handles.len() == l.segments.len() => {
+            Ok((l, handles.into_iter().map(Vmo::from_handle).collect()))
+        }
+        _ => Err(Error::Corrupted),
+    }
+}
+
+/// Knihovna z disku (DL-4c): obsah souboru (prvnich `len` bajtu `image`)
+/// precetl volajici svou relaci FS; libd si ho zkopiruje a vrati sablonu
+/// (sdilenou mezi procesy se stejnym obsahem). `name` je jen pro hlasky.
+pub fn open_image(name: &str, image: &Vmo, len: u64) -> Result<(Library, Vec<Vmo>)> {
+    if !libdproto::valid_name(name) || len == 0 || len > libdproto::MAX_FILE {
+        return Err(Error::InvalidArgs);
+    }
+    match call_with(&Request::OpenImage { name: alloc::string::String::from(name), len }, Some(image))? {
         (Reply::Library(l), handles) if handles.len() == l.segments.len() => {
             Ok((l, handles.into_iter().map(Vmo::from_handle).collect()))
         }

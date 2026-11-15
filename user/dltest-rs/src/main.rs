@@ -49,6 +49,9 @@ const E_DLTLS: i64 = 1024;
 /// Prilis velke initial-exec TLS: `dlopen` nesmi uspet a `dlerror` musi
 /// radit `static_tls_reserve`.
 const E_RESERVE: i64 = 2048;
+/// Rezervace adres z auxv (`AT_MO_RESERVE`) nejsou v pameti procesu jako
+/// cele volne rezervace. Pocet rezervaci vraci program v bitech od 16.
+const E_RESERVED: i64 = 4096;
 
 libos::entry!(main);
 
@@ -73,6 +76,7 @@ fn main(mut s: Startup) -> i64 {
     bad |= dl(iface);
     bad |= sealed();
     bad |= dlopen_tls();
+    bad |= reservations();
     // Konec programu vola fini (rt_own); tady explicitne a overit.
     libos::loader::run_fini();
     // SAFETY: funkce knihovny.
@@ -80,6 +84,22 @@ fn main(mut s: Startup) -> i64 {
         bad |= E_FINI;
     }
     bad
+}
+
+/// Rezervace od spawn: kazda je v pameti procesu cela jako rezervace (zadny
+/// modul ani zasobnik v ni); pocet v bitech od 16.
+fn reservations() -> i64 {
+    let r = libos::loader::reserved();
+    for &(start, len) in &r {
+        match libos::vm::query(start) {
+            Ok(i) if i.kind == abi::vm::region::RESERVED && i.start == start && i.len == len => {}
+            other => {
+                libos::println!("dltest-rs: rezervace {start:#x}+{len:#x}: {other:?}");
+                return E_RESERVED;
+            }
+        }
+    }
+    (r.len() as i64) << 16
 }
 
 /// Ctyri vlakna: kazde ma vlastni cerstvou kopii TLS knihovny (100), zmena

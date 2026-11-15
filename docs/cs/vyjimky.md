@@ -127,6 +127,7 @@ alokuje a nastaví alternativní zásobník vlákna.
 | `DIVIDE` | `Fpe` | `SIGFPE` | `EXCEPTION_INT_DIVIDE_BY_ZERO` |
 | `INVALID_OPCODE` | `Ill` | `SIGILL` | `EXCEPTION_ILLEGAL_INSTRUCTION` |
 | `BREAKPOINT` | `Trap` | `SIGTRAP` | `EXCEPTION_BREAKPOINT` |
+| `INTERRUPT` (přerušení vlákna, `THREAD_INTERRUPT`) | - (číslo signálu je `Report::code`) | podle kódu (`kill`, `pthread_kill`, Ctrl+C, `SIGCHLD`) | pozastavení vlákna serverem (`SIGUSR1` Wine) |
 
 Čísla signálů určuje `cstd`, kódy `EXCEPTION_*` Windows vrstva.
 
@@ -169,8 +170,10 @@ extern "C" fn on_fault(f: *mut u8) -> ! {
   kontrolou v kódu.
 - **Breakpoint:** na x86_64 je PC už za `int3`, na aarch64 na `brk` -
   obsluha ho posune o 4.
-- **TEB přes GS** (Windows vrstva) je samostatný úkol; v kontextu je zatím
-  jen báze FS / `TPIDR_EL0`.
+- **TEB přes GS** (Windows vrstva): x86_64 má druhý ukazatel vlákna (báze
+  GS, `THREAD_SET_POINTER` se `SECOND`, [syscally](syscally.md#thread_set_pointer)),
+  v kontextu `gs_base`; obsluha výjimky ve vlákně GS nemění. aarch64 ho
+  nemá (Windows ARM64 drží TEB v `x18`).
 
 ## Klíčové soubory
 

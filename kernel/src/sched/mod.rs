@@ -36,8 +36,8 @@ pub use percpu::{MAX_CPUS, all_cpus, cpu_count, this_cpu, try_this_cpu};
 pub use qos::{QosLoan, boost, boost_current, ipc_class, rt_admitted, set_thread_qos, thread_info};
 pub use thread::{Qos, Thread};
 pub use user::{
-    create_user_thread, on_return_to_user, request_kill, start_user_thread, start_user_thread_in_kernel,
-    user_exception, user_fault, user_page_fault,
+    create_user_thread, interrupt, on_return_to_user, request_kill, start_user_thread, start_user_thread_in_kernel,
+    user_exception, user_fault, user_page_fault, wait_interrupted,
 };
 
 use crate::arch::context::{self, Context, ThreadContext};
@@ -175,6 +175,21 @@ pub fn set_user_thread_pointer(value: u64) {
     current().user_tp.store(value, Ordering::Relaxed);
     // SAFETY: vlastni CPU, preruseni zakazana, hodnotu zkontroloval syscall.
     unsafe { arch::set_thread_pointer(value) };
+    interrupts::restore(irq);
+}
+
+/// Druhy ukazatel vlakna (x86_64 baze GS).
+pub fn user_second_pointer(t: &Thread) -> u64 {
+    t.user_tp2.load(Ordering::Relaxed)
+}
+
+/// Nastavi druhy ukazatel vlakna aktualniho vlakna (jen kde ho
+/// architektura ma, `arch::HAS_SECOND_POINTER`).
+pub fn set_user_second_pointer(value: u64) {
+    let irq = interrupts::disable();
+    current().user_tp2.store(value, Ordering::Relaxed);
+    // SAFETY: vlastni CPU, preruseni zakazana, hodnotu zkontroloval syscall.
+    unsafe { arch::set_second_pointer(value) };
     interrupts::restore(irq);
 }
 
@@ -471,6 +486,9 @@ fn switch_away(reason: Reason) {
     // SAFETY: vlastni CPU, preruseni zakazana; hodnotu nastavil jen
     // `THREAD_SET_POINTER` (kontrola adresy userspace) nebo je 0.
     unsafe { arch::switch_thread_pointer(&prev.user_tp, next.user_tp.load(Ordering::Relaxed)) };
+    // Druhy ukazatel (x86_64 GS programu) stejne: vzdy hodnota noveho vlakna.
+    // SAFETY: jako vyse, hodnotu nastavil jen `THREAD_SET_POINTER` nebo je 0.
+    unsafe { arch::set_second_pointer(next.user_tp2.load(Ordering::Relaxed)) };
 
     let from = prev.context.get();
     let to = next.context.get() as *const Context;

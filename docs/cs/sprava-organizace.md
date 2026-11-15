@@ -165,6 +165,12 @@ kiosky, ...) právo „instalovat aplikace“ na **třech úrovních**
   ([Správa počítače](ucty.md#správa-počítače)). Rozšířený režim (časové
   limity, filtr webu, přehled) je na stránce
   [Rodičovská kontrola](rodicovska-kontrola.md).
+- **JIT pro aplikace** **[navrženo]**: relace uživatele smějí JIT
+  udělovat (`jit::GRANT`), dostanou ho jen aplikace s `[app] jit = true`
+  v manifestu (brána je `launchd`,
+  [Správa paměti](sprava-pameti.md#wx-pečeť-a-oprávnění-jit)). Politika
+  organizace nebo rodičovská kontrola může `GRANT` relacím skupiny
+  odebrat (aplikace s JIT, např. Wine nebo prohlížeč, pak nepoběží).
 - **Vývojáři:** úroveň **Volně** + profil souborů **Volný**
   ([Profily](navrh-fs-v3.md#oprávnění-a-viditelnost)); tajemství a cizí
   účty zůstávají chráněné i tam.

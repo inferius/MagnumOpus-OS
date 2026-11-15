@@ -411,6 +411,13 @@ pub fn process_threads(process: u32, out: &mut [u32]) -> Result<usize> {
     .map(|v| v as usize)
 }
 
+/// Preruseni vlakna (`THREAD_INTERRUPT`): kod 0..63 se doruci obsluze ve
+/// vlakne pri navratu do userspace; blokujici cekani vlakna vrati
+/// `Err(Interrupted)`. Pravo `MANAGE`.
+pub fn thread_interrupt(thread: u32, code: u32) -> Result<()> {
+    call(nr::THREAD_INTERRUPT, [thread as u64, u64::from(code), 0, 0, 0, 0]).map(|_| ())
+}
+
 pub fn thread_suspend(thread: u32) -> Result<u32> {
     call(nr::THREAD_SUSPEND, [thread as u64, 0, 0, 0, 0, 0]).map(|v| v as u32)
 }
@@ -464,7 +471,13 @@ pub fn futex_wake(addr: &core::sync::atomic::AtomicU32, count: u32) -> u32 {
 
 /// Nastavi registr ukazatele vlakna (TLS) aktualniho vlakna.
 pub fn thread_set_pointer(value: u64) -> Result<()> {
-    call(nr::THREAD_SET_POINTER, [value, 0, 0, 0, 0, 0]).map(|_| ())
+    call(nr::THREAD_SET_POINTER, [value, nr::thread_pointer::TLS, 0, 0, 0, 0]).map(|_| ())
+}
+
+/// Nastavi druhy ukazatel vlakna (x86_64 baze GS, napr. TEB Windows
+/// vrstvy); na aarch64 `Err(NotSupported)`.
+pub fn thread_set_second_pointer(value: u64) -> Result<()> {
+    call(nr::THREAD_SET_POINTER, [value, nr::thread_pointer::SECOND, 0, 0, 0, 0]).map(|_| ())
 }
 
 /// Volani neexistujiciho syscallu (pro testy rozhrani).

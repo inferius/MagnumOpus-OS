@@ -37,6 +37,9 @@ fn wait(addr: u64, expected: u32, deadline: u64) -> Result<u64> {
     if me.kill_requested() {
         return Err(Error::Canceled);
     }
+    if sched::wait_interrupted(&me) {
+        return Err(Error::Interrupted);
+    }
     let seq = {
         let mut table = p.futex.lock();
         let mut value = [0u8; 4];
@@ -78,6 +81,9 @@ fn wait(addr: u64, expected: u32, deadline: u64) -> Result<u64> {
     if me.kill_requested() {
         return Err(Error::Canceled);
     }
+    if sched::wait_interrupted(&me) {
+        return Err(Error::Interrupted);
+    }
     if deadline.is_some_and(|d| arch::now_ns() >= d) {
         return Err(Error::TimedOut);
     }
@@ -104,14 +110,20 @@ fn wake(addr: u64, count: u64) -> Result<u64> {
     Ok(woken as u64)
 }
 
-/// `THREAD_SET_POINTER(value)`: registr ukazatele vlakna (TLS).
+/// `THREAD_SET_POINTER(value, which)`: registr ukazatele vlakna (TLS) nebo
+/// druhy ukazatel vlakna (x86_64 baze GS).
 pub fn set_thread_pointer(a: Args) -> Result<u64> {
-    let value = a[0];
-    // Na x86_64 zpusobi zapis nekanonicke adresy do FS_BASE #GP v jadre;
-    // mimo userspace ho nepovolime ani na aarch64 (jednotne chovani).
+    let (value, which) = (a[0], a[1]);
+    // Na x86_64 zpusobi zapis nekanonicke adresy do FS_BASE / GS #GP
+    // v jadre; mimo userspace ho nepovolime ani na aarch64 (jednotne).
     if value >= abi::vm::USER_MAX {
         return Err(Error::InvalidArgs);
     }
-    sched::set_user_thread_pointer(value);
+    match which {
+        abi::syscall::thread_pointer::TLS => sched::set_user_thread_pointer(value),
+        abi::syscall::thread_pointer::SECOND if crate::arch::HAS_SECOND_POINTER => sched::set_user_second_pointer(value),
+        abi::syscall::thread_pointer::SECOND => return Err(Error::NotSupported),
+        _ => return Err(Error::InvalidArgs),
+    }
     Ok(0)
 }

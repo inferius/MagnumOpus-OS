@@ -177,6 +177,22 @@ Zapečetění šablon (`VMO_SEAL`) přijde v části 4.
   (`jit::GRANT`), odebrání platí hned i pro potomky. Init dá právo
   udělovat jobům relací a `jit::RUN` aplikaci, která má v manifestu
   `[app] jit = true` (prohlížeč, .NET).
+- **Brána je `launchd`** **[ověřeno v QEMU]** x86_64: program spuštěný
+  přes `launchd` dostane `jit::RUN` jen s `[app] jit = true` v manifestu
+  (`<program>.manifest.toml`; oprávnění viditelné při instalaci).
+  Podjob programu dostane i `jit::GRANT`, aby aplikace s JIT spouštěla
+  své procesy (Wine: `start.exe`, `wineboot`). Jádro obojí povolí jen pod
+  jobem s `GRANT` (relace uživatele, init): kdo JIT udělovat nesmí,
+  dostane u programu s `jit = true` chybu, program bez manifestu poběží
+  bez JIT. Nativní programy bez manifestu JIT nedostanou. Politika
+  organizace nebo rodičovská kontrola může `GRANT` relacím odebrat
+  ([Správa organizace](sprava-organizace.md#právo-instalovat-aplikace)).
+- ⚠️ **Omezení brány:** proces v jobu s `GRANT` si umí udělat podjob
+  a JIT mu zapnout sám (jádro kontroluje jen příznak rodiče, ne kdo
+  žádá). Brána přes `launchd` tedy platí pro poctivé programy, ne proti
+  škodlivému procesu - ten by ale i bez JIT kód zapsal, zapečetil
+  a spustil (viz omezení níže). Vynucení (udělovat smí jen držitel
+  zvláštního práva k jobu s `GRANT`) je otevřený bod.
 - **Audit:** první spustitelná nezapečetěná paměť procesu se zaloguje
   (varování s adresou a délkou) a `JOB_PROCESSES` ukáže
   `proc_flags::JIT_USED`.

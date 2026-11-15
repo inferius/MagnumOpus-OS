@@ -241,7 +241,14 @@ Rozhodnutí 6A - signály bez podpory jádra:
   `si_addr` z výjimky. Návrat z obsluhy = pokračovat (instrukce se
   zopakuje - vzor GC a JIT: `mprotect` v obsluze), `SIG_DFL` = další
   obsluha a konec procesu. Odchod `siglongjmp` funguje. `ucontext_t`
-  (třetí argument) zatím vyplněný není (nuly) **[navrženo]**. Na aarch64
+  (třetí argument, `sys/ucontext.h`) **[ověřeno v QEMU]** x86_64
+  i aarch64 (`ctest`, krok `signal`): registry z rámce výjimky
+  v rozložení jako Linux (x86_64 `uc_mcontext.gregs[REG_*]`, `fpregs` na
+  obraz FXSAVE, `REG_CR2` = adresa výpadku; aarch64 `regs`, `sp`, `pc`,
+  `pstate`, `fault_address`, záznam `fpsimd_context` v `__reserved`).
+  Změny registrů a FPU v obsluze se po návratu použijí (oprava registru
+  a opakování instrukce - Wine, JIT). Signál bez výjimky (`raise`)
+  dostane prázdný kontext. Na aarch64
   dělení nulou `SIGFPE` nedá (CPU ho nehlásí).
 - **`raise`, `kill` na vlastní proces:** obsluha běží hned ve volajícím
   vlákně; blokovaný signál čeká a doručí se po odblokování.
@@ -286,6 +293,9 @@ držitele (klient ho posílá s každým zámkem, fsd ho neověřuje; neznámé
 | `sys/statvfs.h` | `statvfs`, `fstatvfs` | velikost a volné bloky svazku relace fsd; počty inodů 0 |
 | `sys/sendfile.h` | `sendfile` | kopie přes buffer 64 KiB v procesu |
 | `stdio.h` | `setbuf` | jako `setvbuf` (`NULL` = bez bufferu); `std::filebuf` |
+| `strings.h`, `string.h` | `ffs`, `ffsl`, `ffsll` | index nejnižšího bitu od 1 |
+| `signal.h` | kódy `si_code` (`SEGV_*`, `BUS_*`, `FPE_*`, `ILL_*`, `TRAP_*`) | hodnoty jako Linux |
+| `magnumopus/thread.h` (rozšíření, ne POSIX) | `mos_thread_set_second_pointer`, `mos_thread_get_second_pointer` | druhý ukazatel vlákna (x86_64 báze GS, TEB [Windows vrstvy](windows-vrstva.md)); aarch64 -1 a `ENOTSUP` |
 | `limits.h` | `PATH_MAX` (4096), `NAME_MAX` (255) | |
 | `link.h`, `elf.h` | `dl_iterate_phdr`, `struct dl_phdr_info`, typy ELF64 | statický program: jeden modul ze symbolů linker skriptu (`PT_LOAD`, `PT_GNU_EH_FRAME`) |
 | (ABI C++) | `__cxa_atexit`, `__cxa_finalize`, `__cxa_thread_atexit_impl`, `__dso_handle` | `atexit` a `__cxa_atexit` mají jeden seznam (společné obrácené pořadí) |
@@ -547,7 +557,9 @@ Vlastního kódu ~11 000 řádků Rustu, převzatého ~14 000 řádků. Celá mu
    JIT z manifestu (W^X, [sprava-pameti.md](sprava-pameti.md)), jinak
    `EACCES`. `mmap` souboru: `MAP_PRIVATE` jen pro čtení načtením do
    anonymní paměti; `MAP_SHARED` souboru = `ENOTSUP`, dokud fsd nedá VMO
-   souboru.
+   souboru. `PROT_WRITE` nebo `PROT_EXEC` bez `PROT_READ` (v `mmap`
+   i `mprotect`) znamená i čtení jako na Linuxu x86_64 a aarch64 (jádro
+   stránku jen pro zápis nemá; wineserver tak mapuje `KUSER_SHARED_DATA`).
 7. **libc.a a libc.so** (otázky 1 a 2): `libc.a` (Rust `staticlib`)
    a `libc.so` (`cdylib`, `SONAME` `libc.so`), `crt1.o`/`crti.o`/`crtn.o`,
    hlavičky. xtask z nich složí **sysroot C** (`target/c-sysroot/<arch>`),

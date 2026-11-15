@@ -35,6 +35,18 @@
   nasm meson pkgconf`. Verified with MSYS2 2026-09-27 (nasm 3.02, Meson
   1.12.1, Ninja 1.13.2). The `SH`, `MAKE`, `NASM`, `MESON`, `PKG_CONFIG`
   variables set a tool directly.
+- **WSL Ubuntu 24.04 with LLVM 23** only for the Windows layer (`cargo
+  xtask wine`, [Windows layer](windows-layer.md)): Wine builds in WSL
+  because its `configure` and tools want a Unix host. In WSL, the official
+  LLVM repository `apt.llvm.org` (`llvm-toolchain-noble-23` with its
+  signing key) and `sudo apt install clang-23 lld-23 llvm-23 flex bison
+  make gcc`. LLVM 23 has the same major release as the host clang (ABI of
+  the headers and the C sysroot). xtask checks the tools in WSL
+  (`clang-23 --version`, at least 23.1) and otherwise stops with advice.
+  Verified on 2026-11-15 with clang and LLD 23.1.6 (Ubuntu 24.04.4).
+  Another distribution: the variable `WINE_WSL_DISTRO` (default
+  `Ubuntu`). The build runs on the WSL ext4 in `~/.cache/magnumopus-wine`,
+  the result goes to `target/wine/<arch>`.
 - Optionally **GDB** for debugging.
 
 xtask looks for QEMU in `PATH` and common install locations, and for the

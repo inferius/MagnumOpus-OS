@@ -11,12 +11,12 @@ První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`,
 - `src/supervisor/` - `mod.rs` smyčka (`Supervisor::step`), `lifecycle.rs` restart a závislosti, `leases.rs` lístky (vč. `ADOPT` s limity a `queue_lease` pro lístky vydané mimo kolo supervisoru), `service.rs` adaptér služby; `src/libd.rs` - služba knihoven (adaptér `LibdService`, poskytovatel relací pro děti initu).
 - `src/appearance.rs` - volba vzhledu: `/system/config/vzhled/{system,<uid>}.toml` (jen system, bez grantů), předání kompozitoru (`appearance ...` před `session open`, po pádu v `give_accounts`), změna z lišty (kanál `launcher`), příkaz `theme` (`powerproto::Request::Appearance`; shell převádí svá anglická slova do uloženého tvaru `schema svetly`; systémová volba jen přes `ELEVATE` `APPEARANCE_SYSTEM` ve vlákně, grant ověří na `grants`).
 - `src/sysfiles.rs` - služba úkonu `SYSTEM_FILE` (příkaz `system`: zápis, smazání, složka v `/system`): kontrola cesty (`/system/accounts` nikdy), `ELEVATE` za relaci shellu ve vlákně, grant na `grants`, pak změna relací FS initu. Jiná cesta lidí do `/system` není.
-- `src/tests/mod.rs` - `SUITES` (jména sad pro `--only`), makra `check!` / `check_eq!`; jeden soubor na oblast (`gui.rs`, `net.rs`, `fs.rs`, ...).
+- `src/tests/mod.rs` - `SUITES` (jména sad pro `--only`), makra `check!` / `check_eq!`; jeden soubor na oblast (`gui.rs`, `net.rs`, `fs.rs`, ...); `dynlink_disk.rs` knihovny z disku (DL-4c, sada `procesy`, kopíruje `dl4c/` z initfs do `/dl4c` na disku).
 
 ## Invarianty
 
 - init drží kořenová práva a z nich vytváří užší pro služby (job s limity podle manifestu); služba nedostane víc, než potřebuje.
-- Služba s restartem se po pádu spustí znovu s odkladem 100 ms, 200 ms, ... (max 5 s); víc než 5 restartů za 60 s = vzdá to. Klienti se k nové instanci připojují přes lístky (`libs/svcclient`).
+- Služba s restartem se po pádu spustí znovu s odkladem 100 ms, 200 ms, ... (max 5 s); víc než 5 restartů za 60 s = vzdá to. Záměrné ukončení testem (`Supervisor::kill_for_test`) restartuje stejně, ale do limitu se nepočítá (jinak `--repeat` službu vzdá). Klienti se k nové instanci připojují přes lístky (`libs/svcclient`).
 - Po pádu `compd` se spustí záložní konzole; po pádu `termd` zůstanou relace (`shsess`).
 - Instalátor (`src/install.rs`): `installd` se spouští až na první `OpenInstaller` a jen jednou dostane raw kanály disků (`Devices.raw`). Při startu se čte `/system/config/system.toml` (pásmo pro timed, rozložení klávesnice pro inputd); chybějící soubor = výchozí. Soubor `install-answers` v initfs spustí test instalace (jen obraz testu, nikdy instalovaný initfs); s `rozhrani = "gui"` ho dostane grafický instalátor (autopilot) místo textové cesty. S `rozhrani = "gui-vstup"` init jen najde inspekcí kompozitoru pole pásma a tlačítko Pokračovat a zaloguje jejich střed na obrazovce (klik QMP v `xtask/src/usb/install_test.rs`). Grafický instalátor `gui-install` je aplikace plochy jen na živém USB (`gui::desktop_apps`, `Devices.stick`) a dostane kanál k installd; installd dostane kanál producenta do taskd.
 - Uživatelská čísla služeb: ACCOUNTD 902, LOGD 903 - nové číslo nesmí kolidovat.
@@ -30,7 +30,7 @@ První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`,
 
 - Testy userspace jsou v QEMU, ne na hostiteli: `cargo xtask test --only <sada>[,<sada>]` (jména sad viz `SUITES`, např. `gui`, `sit`, `firewall`, `shell`, `supervisor`, `obnova sluzeb`). `--repeat N` hledá nestabilní testy.
 - Nový test: funkce v `src/tests/<oblast>.rs`, zapsat do `TESTS` oblasti a do `SUITES`. Selhání vrací `Err(String)`, nepanikaří.
-- Plný běh (všechny sady, obě architektury) pouští koordinátor.
+- Plný běh (všechny sady, obě architektury) pouští koordinátor. Sady v `ON_REQUEST` (`tests/mod.rs`, např. `wine` s diskem z `--wine`) běží jen s `--only`.
 
 ## Pasti
 

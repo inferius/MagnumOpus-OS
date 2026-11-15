@@ -55,6 +55,7 @@ pub fn check(addr: u64, len: size_t, prot: c_int, flags: c_int, fd: c_int, off: 
     if len == 0 || prot & !(PROT_READ | PROT_WRITE | PROT_EXEC) != 0 {
         return Err(errno::EINVAL);
     }
+    let prot = readable(prot);
     let kind = flags & (MAP_SHARED | MAP_PRIVATE);
     if kind == 0 || kind == (MAP_SHARED | MAP_PRIVATE) {
         return Err(errno::EINVAL);
@@ -83,6 +84,14 @@ pub fn check(addr: u64, len: size_t, prot: c_int, flags: c_int, fd: c_int, off: 
         file,
         shared: kind == MAP_SHARED,
     })
+}
+
+/// Zapis nebo spusteni bez `PROT_READ` = i cteni (jako Linux na x86_64
+/// a aarch64: stranka jen pro zapis nebo spusteni neexistuje; jadro
+/// `MAP_WRITE` bez `MAP_READ` odmitne). Wineserver mapuje
+/// `KUSER_SHARED_DATA` jen `PROT_WRITE`.
+pub fn readable(prot: c_int) -> c_int {
+    if prot & (PROT_WRITE | PROT_EXEC) != 0 { prot | PROT_READ } else { prot }
 }
 
 /// Anonymni pamet (nebo rezervace pro `PROT_NONE`) podle pozadavku.
@@ -184,6 +193,7 @@ pub unsafe extern "C" fn mprotect(addr: *mut c_void, len: size_t, prot: c_int) -
     if prot & !(PROT_READ | PROT_WRITE | PROT_EXEC) != 0 {
         return errno::ret(Err(errno::EINVAL));
     }
+    let prot = readable(prot);
     let r = range(addr, len).and_then(|(a, l)| {
         let end = a + l;
         let mut at = a;

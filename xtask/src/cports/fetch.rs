@@ -20,7 +20,7 @@ pub fn sha256(data: &[u8]) -> String {
 }
 
 /// Stazeny a overeny archiv portu.
-fn fetch(p: &CPort) -> Result<PathBuf> {
+pub(crate) fn fetch(p: &CPort) -> Result<PathBuf> {
     fetch_file(p.url, p.file, p.sha256)
 }
 

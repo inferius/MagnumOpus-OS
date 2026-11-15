@@ -15,6 +15,8 @@ char *strtok_r(char *s, const char *delim, char **save);
 /* Stav per vlakno (TLS), jinak jako strtok_r. */
 char *strtok(char *s, const char *delim);
 char *strdup(const char *s);
+/* Jako glibc i ve string.h (POSIX: strings.h). */
+int ffs(int v);
 char *strndup(const char *s, size_t n);
 char *stpcpy(char *dst, const char *src);
 int strcoll(const char *a, const char *b);

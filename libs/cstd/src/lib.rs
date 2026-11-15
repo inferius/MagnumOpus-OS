@@ -40,6 +40,7 @@ pub mod math;
 pub mod memfd;
 pub mod misc;
 pub mod mman;
+pub mod mosthread;
 pub mod poll;
 pub mod scanf;
 pub mod semaphore;
@@ -47,8 +48,8 @@ pub mod setjmp;
 pub mod signal;
 pub mod pthread;
 pub mod stat;
-pub mod statfs;
 pub mod statvfs;
+pub mod statfs;
 pub mod stdio;
 pub mod stdlib;
 pub mod socket;
@@ -56,6 +57,7 @@ pub mod spawn;
 pub mod sys;
 pub mod termios;
 pub mod time;
+pub mod ucontext;
 pub mod unistd;
 pub mod unix;
 pub mod wchar;
@@ -84,6 +86,8 @@ mod fenv_tests;
 mod cxxsup_tests;
 #[cfg(test)]
 mod fsat_tests;
+#[cfg(test)]
+mod ucontext_tests;
 #[cfg(test)]
 mod locale_tests;
 #[cfg(test)]

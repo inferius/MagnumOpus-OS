@@ -1,0 +1,38 @@
+#!/bin/bash
+# Prekladac C pro MagnumOpus pro cizi build systemy ve WSL (Wine): programy
+# PIE a sdilene knihovny nad libc.so ze sysrootu C (xtask/src/csysroot.rs).
+#
+# Rezim podle argumentu: preklad (-c, -E, -S, -M), sdilena knihovna
+# (-shared) nebo program PIE. Knihovna C az za objekty. Priznaky musi
+# odpovidat csysroot::cflags_dyn / ldflags_dyn / ldflags_so.
+#
+# Promenne: MOS_SYSROOT (cesta k target/c-sysroot/x86_64 ve WSL),
+# MOS_CLANG (vychozi clang-23).
+S=${MOS_SYSROOT:?MOS_SYSROOT neni nastaveny}
+CC=${MOS_CLANG:-clang-23}
+CFLAGS=(--target=x86_64-unknown-none-elf -march=x86-64-v2 -mcmodel=small -nostdlibinc
+    -fno-common -ffunction-sections -fdata-sections -funwind-tables
+    -fstack-protector-strong -mstack-protector-guard=global -ftrivial-auto-var-init=zero
+    -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -D__magnumopus__=1
+    -isystem "$S/include" -isystem "$S/include-core")
+# Ovladac clangu pro baremetal linkuje od zacatku -Bstatic: sdilene
+# knihovny na prikazove radce (ntdll.so pro dalsi unixove knihovny Wine)
+# by bral jako staticke.
+LD=(-nostdlib -fuse-ld=lld -Wl,-Bdynamic -Wl,-z,now -Wl,-z,relro -Wl,-z,text -Wl,-z,max-page-size=65536
+    -Wl,--hash-style=both -Wl,--eh-frame-hdr -L"$S/lib")
+# libunwind.so (jeden unwinder na proces, jako libgcc_s): DT_NEEDED jen
+# kdyz modul pouziva _Unwind_* (--as-needed).
+LIBS=(-Wl,-Bdynamic -l:libc.so -Wl,--as-needed -l:libunwind.so -Wl,--no-as-needed -l:libbuiltins.a)
+mode=exe
+for a in "$@"; do
+    case "$a" in
+        -c|-E|-S|-M|-MM) mode=compile ;;
+        -shared) [ $mode = exe ] && mode=shared ;;
+    esac
+done
+case $mode in
+    compile) exec "$CC" "${CFLAGS[@]}" -fPIC "$@" ;;
+    shared) exec "$CC" "${CFLAGS[@]}" -fPIC "${LD[@]}" -Wl,-shared "$S/lib/crtdso.o" "$@" "${LIBS[@]}" ;;
+    exe) exec "$CC" "${CFLAGS[@]}" -fPIE "${LD[@]}" -Wl,-pie -Wl,--dynamic-linker=/system/lib/ld.so \
+        -Wl,--allow-shlib-undefined "$S/lib/crt1.o" "$@" "${LIBS[@]}" ;;
+esac

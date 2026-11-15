@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use core::time::Duration;
 
 use libos::initfs::Initfs;
-use libos::{Startup, time};
+use libos::{Error, Startup, time};
 
 use super::{Test, TestResult, fail};
 use crate::{check, check_eq};
@@ -17,6 +17,7 @@ pub const TESTS: &[Test] = &[
     ("dynamicke linkovani: vlakna libos s TLS knihoven, dl_iterate_phdr, r_debug, fini", rust_program),
     ("dynamicke linkovani: libd sdili sablony knihoven mezi procesy", libd_shares),
     ("dynamicke linkovani: rezerva statickeho TLS z voleb spusteni (manifest)", tls_reserve),
+    ("dynamicke linkovani: rezervace adres pred zavedenim (AT_MO_RESERVE)", address_reserve),
     ("dynamicke linkovani: obnova po padu libd pres listky (spawn i dlopen)", libd_recovery),
     ("dynamicke linkovani: pad libd pred prevzetim listku (ADOPT) - dite obnovi dlopen", libd_crash_before_adopt),
     ("dynamicke linkovani: rezie spawnu a propustnost initu (davka 200, 4 x 50 soubezne)", spawn_batch),
@@ -91,6 +92,35 @@ fn tls_reserve(s: &Startup) -> TestResult {
     let (p, _ch) = libos::spawn::spawn_with(&job, "dltest-dl", image, Vec::new(), opts).map_err(|e| fail("spusteni", e))?;
     let code = p.wait_exit(deadline()).map_err(|e| fail("konec programu", e))?;
     check_eq!(code, 0, "rezerva 8 KiB: knihovna nahrana a TLS sedi");
+    Ok(())
+}
+
+/// Rozsahy Windows vrstvy (dolni 2 GiB, obvykla baze PE) rezervovane
+/// spawnem: program je najde v auxv a v pameti jsou cele jako rezervace;
+/// chybne rozsahy spawn odmitne.
+fn address_reserve(s: &Startup) -> TestResult {
+    let fs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
+    let image = fs.find("dltest-rs").ok_or("dltest-rs neni v initfs")?;
+    let job = libos::job::current().map_err(|e| fail("job", e))?;
+    let spawn = |reserve: &[(u64, u64)]| {
+        let mut opts = libos::spawn::Options::default();
+        opts.reserve[..reserve.len()].copy_from_slice(reserve);
+        libos::spawn::spawn_with(&job, "dltest-rs", image, Vec::new(), opts)
+    };
+    let (p, _ch) = spawn(&[(0x1_0000, 0x7ffe_0000), (0x1_4000_0000, 0x1000_0000)]).map_err(|e| fail("spusteni", e))?;
+    let code = p.wait_exit(deadline()).map_err(|e| fail("konec programu", e))?;
+    check_eq!(code & 0xFFFF, 0, "dltest-rs s rezervacemi bez chyby (4096 = rezervace nesedi)");
+    check_eq!(code >> 16, 2, "program videl obe rezervace");
+    check_eq!(spawn(&[(0x1_0000, 0x2_0000), (0x2_0000, 0x1_0000)]).err(), Some(Error::InvalidArgs), "prekryv");
+    check_eq!(spawn(&[(0x1_0800, 0x1_0000)]).err(), Some(Error::InvalidArgs), "nezarovnany zacatek");
+    let st = fs.find("echo").ok_or("echo neni v initfs")?;
+    let mut opts = libos::spawn::Options::default();
+    opts.reserve[0] = (0x1_0000, 0x1_0000);
+    check_eq!(
+        libos::spawn::spawn_with(&job, "echo", st, Vec::new(), opts).err(),
+        Some(Error::NotSupported),
+        "staticky program rezervace nedostane"
+    );
     Ok(())
 }
 
@@ -215,12 +245,8 @@ fn libd_recovery(s: &Startup) -> TestResult {
 
 /// Zabije libd a pocka (s rizenim supervisoru) na novou generaci.
 fn kill_libd(s: &Startup, wait_restart: bool) -> TestResult {
-    let gen1 = {
-        let sup = crate::supervisor::SUPERVISOR.lock();
-        let p = sup.process("libd").ok_or("libd nebezi")?;
-        libos::sys::process_kill(p.raw()).map_err(|e| fail("ukonceni libd", e))?;
-        sup.generation("libd").ok_or("libd neni v registru")?
-    };
+    // Zamerne ukonceni: pod --repeat se nepocita do limitu padu supervisoru.
+    let gen1 = crate::supervisor::SUPERVISOR.lock().kill_for_test("libd").map_err(|e| fail("ukonceni libd", e))?;
     if !wait_restart {
         return Ok(());
     }

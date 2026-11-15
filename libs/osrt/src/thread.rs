@@ -79,6 +79,12 @@ pub fn exit_current() -> ! {
     libos::sys::thread_exit()
 }
 
+/// Druhy ukazatel aktualniho vlakna (x86_64 baze GS, TEB Windows vrstvy);
+/// aarch64 `Err(NotSupported)`.
+pub fn set_second_pointer(value: u64) -> Result<()> {
+    libos::sys::thread_set_second_pointer(value)
+}
+
 pub fn yield_now() {
     libos::sys::thread_yield();
 }

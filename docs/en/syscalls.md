@@ -411,8 +411,8 @@ get it). Errors: `NOT_SUPPORTED` (object without `VMO_RESIZABLE`),
 new end, `VMO_PHYS_ADDR`), `ACCESS_DENIED` (sealed object, missing right),
 `NO_MEMORY`, `NO_RESOURCES`, `BAD_HANDLE`, `WRONG_TYPE`.
 
-Numbers 76 and 77 are reserved for other branches (`THREAD_INTERRUPT`,
-`PROCESS_MEMORY`); without them the kernel returns `BAD_SYSCALL`.
+Number 76 is [`THREAD_INTERRUPT`](#thread_interrupt), 77 is reserved for
+`PROCESS_MEMORY` (stage W2); the kernel returns `BAD_SYSCALL` for it for now.
 
 ### `VMO_SIZE`
 
@@ -601,6 +601,38 @@ win: a suspended thread ends. Requires `MANAGE` on the thread. Errors:
 `WRONG_TYPE` (kernel thread), `BAD_STATE` (the thread has ended),
 `NO_RESOURCES`, `BAD_HANDLE`, `ACCESS_DENIED`.
 
+### `THREAD_INTERRUPT`
+
+**[verified in QEMU]** `(thread, code) -> 0`. Thread interruption (number
+76): sets a pending interruption with code `code` (0..63, the same code is
+merged) and wakes the thread. A blocking wait (`OBJECT_WAIT_ONE`, `OBJECT_WAIT_MANY`,
+`FUTEX` WAIT, `FENCE_WAIT`) returns [`INTERRUPTED`](errors.md#interrupted--39)
+- like `EINTR`; kernel waits inside exception delivery cannot be
+interrupted. A running thread is interrupted by the kernel (IPI). On return
+to userspace the thread gets a delivery on its in-thread handler
+(`EXCEPTION_HANDLER`) with kind `exception::kind::INTERRUPT` (256), stage
+`IN_THREAD` and the code in `Report::code`; several pending codes go from
+the lowest, **one per return** (the next on return from a syscall of the
+handler, typically `EXCEPTION_HANDLER` RETURN), so deliveries never nest
+on top of each other. NEXT from an interruption handler just resumes -
+exception channels do not get interruptions. If the frame does not fit on
+the stack, the interruption is dropped. A suspended thread gets the
+interruption only after it is resumed. Interrupting an ended thread does
+nothing.
+
+It is the generic basis of asynchronous signals: `kill`/`pthread_kill`
+between processes, terminal Ctrl+C, `SIGCHLD` and thread suspension in the
+Windows layer ([windows-layer.md](windows-layer.md)). `cstd` takes the code
+as the signal number (a blocked signal stays pending in the mask). Requires
+`MANAGE` on the thread (the same right as `THREAD_SUSPEND`). Errors:
+`INVALID_ARGS` (code above 63), `BAD_STATE` (the thread's process has no
+in-thread handler - the interruption would hang and waits would keep
+returning `INTERRUPTED`), `WRONG_TYPE` (kernel thread), `BAD_HANDLE`,
+`ACCESS_DENIED`.
+
+Number 77 is reserved for `PROCESS_MEMORY` (stage W2, reading and writing
+another process's memory through the kernel).
+
 ### `THREAD_STATE`
 
 `(thread, op, kind, ptr, len) -> 0`. Reads (`thread::op::READ`, right
@@ -714,13 +746,26 @@ class.
 
 ### `THREAD_SET_POINTER`
 
-`(value) -> 0`, number 56. Sets the thread pointer register of the current thread for
-TLS (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`). The kernel stores the value in
-the thread and loads it on every switch; a new thread starts with 0, so the
-value never leaks into another thread or process (on aarch64 a program may
-write `TPIDR_EL0` itself, so the kernel saves it on a switch). Errors:
-`INVALID_ARGS` (`value` outside user space). In libos
-`sys::thread_set_pointer`; used by the `std` runtime ([Rust std](rust-std.md)).
+`(value, which) -> 0`, number 56. Sets a thread pointer of the current
+thread according to `which` (`abi::syscall::thread_pointer`):
+
+| `which` | Register | Use |
+|---|---|---|
+| `TLS` (0) | x86_64 `FS_BASE`, aarch64 `TPIDR_EL0` | TLS (the `std` runtime, `libc.so`) |
+| `SECOND` (1) | x86_64 the program GS base; aarch64 none | a second thread pointer, e.g. the TEB of the [Windows layer](windows-layer.md) (`gs:[0x30]`) |
+
+The kernel stores the value in the thread and loads it on every switch; a
+new thread starts with 0, so the value never leaks into another thread or
+process (on aarch64 a program may write `TPIDR_EL0` itself, so the kernel
+saves it on a switch). In the kernel the GS base sits in `KERNEL_GS_BASE`
+after `swapgs`; the program cannot change it itself (`CR4.FSGSBASE` is
+off). Both values are in the `THREAD_STATE` context (`fs_base`, `gs_base`
+on x86_64). Errors: `INVALID_ARGS` (`value` outside user space, unknown
+`which`), `NOT_SUPPORTED` (`SECOND` on aarch64 - Windows ARM64 keeps the
+TEB in `x18`, an ordinary register in the context). In libos
+`sys::thread_set_pointer` and `sys::thread_set_second_pointer`; the `std`
+runtime uses TLS ([Rust std](rust-std.md)). **[verified in QEMU]** x86_64
+and aarch64 (suite `procesy`, test `druhy ukazatel vlakna`).
 
 ## Futex
 

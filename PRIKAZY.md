@@ -63,6 +63,7 @@ příkaz `report`.
 | testy ARM | `cargo xtask test --arch aarch64` |
 | jen vybrané sady testů | `cargo xtask test --only gui,sit` |
 | jen start v release | `cargo xtask test --only release` |
+| Wine na datovém disku (`/apps/org.winehq.wine`) a jeho test | `cargo xtask wine`, pak `cargo xtask test --only wine --wine` |
 | dokumentace (HTML do target/docs) | `cargo xtask docs` |
 | přeložit adresy v záznamu pádu | `cargo xtask symbolize <soubor>` |
 | kostra nového ovladače | `cargo xtask new-driver muj --pci 1234:5678` |

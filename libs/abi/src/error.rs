@@ -92,8 +92,11 @@ pub enum Error {
     /// Plot byl opusten: zavrel se posledni handle s pravem `SIGNAL` (pad
     /// producenta) a hodnota, na kterou se ceka, nebyla dosazena.
     FenceAbandoned = -38,
+    /// Blokujici cekani prerusilo `THREAD_INTERRUPT`; vlakno dostane
+    /// doruceni preruseni pri navratu do userspace (jako `EINTR`).
+    Interrupted = -39,
     /// Prilis mnoho symbolickych odkazu pri hledani cesty (vic nez 40, nebo
-    /// smycka); C `ELOOP`. (-39 je vyhrazene pro vetev Windows vrstvy.)
+    /// smycka); C `ELOOP`.
     TooManyLinks = -40,
 }
 
@@ -137,6 +140,7 @@ pub const ALL: &[Error] = &[
     Error::AddressNotAvailable,
     Error::FenceFailed,
     Error::FenceAbandoned,
+    Error::Interrupted,
     Error::TooManyLinks,
 ];
 
@@ -192,6 +196,7 @@ impl Error {
             Self::AddressNotAvailable => "ADDRESS_NOT_AVAILABLE",
             Self::FenceFailed => "FENCE_FAILED",
             Self::FenceAbandoned => "FENCE_ABANDONED",
+            Self::Interrupted => "INTERRUPTED",
             Self::TooManyLinks => "TOO_MANY_LINKS",
         }
     }
@@ -237,6 +242,7 @@ impl Error {
             Self::AddressNotAvailable => "mistni adresa nepatri zadnemu rozhrani",
             Self::FenceFailed => "plot skoncil chybou",
             Self::FenceAbandoned => "plot byl opusten (producent zavrel posledni handle s pravem SIGNAL)",
+            Self::Interrupted => "cekani prerusilo preruseni vlakna (THREAD_INTERRUPT)",
             Self::TooManyLinks => "prilis mnoho symbolickych odkazu (smycka)",
         }
     }

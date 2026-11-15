@@ -13,6 +13,14 @@
 //! a jmena (jen soubor v `/system/lib`), tady meze souboru, segmentu
 //! a poctu spojeni (na relaci = na proces, a celkem), ELF pres `libs/elf`
 //! (TEXTREL a REL odmitnuty).
+//!
+//! Knihovny z disku (DL-4c, `OpenImage`): libd disk necte a relaci FS nema.
+//! Obsah posle klient (zavadec ho precetl relaci FS procesu, tedy s pravy
+//! aplikace) jako VMO; libd ho zkopiruje k sobe jednou, spocita BLAKE3
+//! a dal pracuje jen s kopii. Jmeno z `OpenImage` se do mapy jmen nedava
+//! (hledani podle jmena = jen initfs). Sablon z disku je nejvys
+//! `MAX_DISK_TEMPLATES` a `MAX_DISK_BYTES`, nad mez se zahodi nejdele
+//! nepouzita (procesy maji sve handly, stranky zustanou jim).
 
 #![no_std]
 #![no_main]
@@ -26,7 +34,10 @@ use alloc::vec::Vec;
 
 use abi::object::Rights;
 use abi::vm::{MAP_EXECUTE, MAP_READ, MAP_WRITE};
-use libdproto::{Library, MAX_CHILD_CONNECTIONS, MAX_CONNECTIONS, MAX_FILE, MAX_SEGMENTS, Reply, Request, Segment, Stats, kind};
+use libdproto::{
+    Library, MAX_CHILD_CONNECTIONS, MAX_CONNECTIONS, MAX_DISK_BYTES, MAX_DISK_TEMPLATES, MAX_FILE, MAX_SEGMENTS, Reply, Request, Segment, Stats,
+    kind,
+};
 use libos::initfs::Initfs;
 use libos::{Channel, Error, Handle, Port, Result, Signals, Startup, Vmo, println};
 
@@ -36,6 +47,19 @@ libos::entry!(main);
 struct Template {
     lib: Library,
     vmos: Vec<Vmo>,
+}
+
+impl Template {
+    /// Pamet sablony (soucet delek VMO segmentu).
+    fn bytes(&self) -> u64 {
+        self.lib.segments.iter().map(|s| s.len).sum()
+    }
+}
+
+/// Sablona z disku: posledni pouziti (pocitadlo `Libd::clock`) a velikost.
+struct DiskUse {
+    last: u64,
+    bytes: u64,
 }
 
 /// Spojeni klienta.
@@ -56,6 +80,12 @@ struct Libd {
     /// Jmeno -> hash obsahu, hash -> sablona.
     names: BTreeMap<String, [u8; 32]>,
     templates: BTreeMap<[u8; 32], Arc<Template>>,
+    /// Sablony jen z disku (`OpenImage`) a jejich pouziti; sablona, kterou
+    /// pouziva i initfs (`names`), tu neni a nezahazuje se.
+    disk: BTreeMap<[u8; 32], DiskUse>,
+    disk_bytes: u64,
+    clock: u64,
+    evicted: u64,
     conns: BTreeMap<u64, Conn>,
     next_id: u64,
     port: Port,
@@ -84,6 +114,10 @@ fn main(mut s: Startup) -> i64 {
         page: libos::vm::page_size(),
         names: BTreeMap::new(),
         templates: BTreeMap::new(),
+        disk: BTreeMap::new(),
+        disk_bytes: 0,
+        clock: 0,
+        evicted: 0,
         conns: BTreeMap::new(),
         next_id: 0,
         port,
@@ -159,6 +193,16 @@ impl Libd {
                 },
                 Err(e) => return err(e),
             },
+            Some(Request::OpenImage { name, len }) if handles.len() == 1 => {
+                let vmo = Vmo::from_handle(handles.remove(0));
+                match self.open_image(&name, &vmo, len) {
+                    Ok(t) => match share(&t) {
+                        Ok(h) => (Reply::Library(t.lib.clone()), h),
+                        Err(e) => return err(e),
+                    },
+                    Err(e) => return err(e),
+                }
+            }
             // Relace pro dite, bez odpovedi: nad mez se konec zahodi (dite
             // uvidi PEER_CLOSED a listek mu rekne, ze libd bezi dal).
             Some(Request::Connect) if handles.len() == 1 => {
@@ -179,6 +223,8 @@ impl Libd {
                     opens: self.opens,
                     hits: self.hits,
                     connections: self.conns.len() as u64,
+                    disk_templates: self.disk.len() as u64,
+                    evicted: self.evicted,
                 }),
                 Vec::new(),
             ),
@@ -202,6 +248,10 @@ impl Libd {
         }
         let hash = *blake3::hash(image).as_bytes();
         self.names.insert(String::from(name), hash);
+        // Stejny obsah uz prisel z disku: od ted ho drzi initfs, nezahazovat.
+        if let Some(u) = self.disk.remove(&hash) {
+            self.disk_bytes -= u.bytes;
+        }
         if let Some(t) = self.templates.get(&hash) {
             self.hits += 1;
             return Ok(t.clone());
@@ -209,6 +259,52 @@ impl Libd {
         let t = Arc::new(build(image, self.page).inspect_err(|e| println!("libd: {name}: {e}"))?);
         self.templates.insert(hash, t.clone());
         Ok(t)
+    }
+
+    /// Sablona knihovny z disku: obsah od klienta (prvnich `len` bajtu
+    /// `vmo`). Kopie k sobe hned - klient muze VMO dal menit, libd pracuje
+    /// jen s kopii, nad kterou spocitala hash.
+    fn open_image(&mut self, name: &str, vmo: &Vmo, len: u64) -> Result<Arc<Template>> {
+        self.opens += 1;
+        if len > MAX_FILE {
+            return Err(Error::Corrupted);
+        }
+        let mut image = Vec::new();
+        image.try_reserve_exact(len as usize).map_err(|_| Error::NoMemory)?;
+        image.resize(len as usize, 0);
+        vmo.read(0, &mut image)?;
+        let hash = *blake3::hash(&image).as_bytes();
+        self.clock += 1;
+        if let Some(t) = self.templates.get(&hash) {
+            self.hits += 1;
+            if let Some(u) = self.disk.get_mut(&hash) {
+                u.last = self.clock;
+            }
+            return Ok(t.clone());
+        }
+        let t = Arc::new(build(&image, self.page).inspect_err(|e| println!("libd: {name} (z disku): {e}"))?);
+        drop(image);
+        let bytes = t.bytes();
+        self.templates.insert(hash, t.clone());
+        self.disk.insert(hash, DiskUse { last: self.clock, bytes });
+        self.disk_bytes += bytes;
+        self.evict(&hash);
+        Ok(t)
+    }
+
+    /// Nad mezi sablon z disku zahodi nejdele nepouzite (krome `keep`,
+    /// prave vracene). Procesy, ktere je mapuji, maji vlastni handly.
+    fn evict(&mut self, keep: &[u8; 32]) {
+        while self.disk.len() > MAX_DISK_TEMPLATES || self.disk_bytes > MAX_DISK_BYTES {
+            let Some(old) = self.disk.iter().filter(|(h, _)| *h != keep).min_by_key(|(_, u)| u.last).map(|(h, _)| *h) else {
+                return;
+            };
+            if let Some(u) = self.disk.remove(&old) {
+                self.disk_bytes -= u.bytes;
+            }
+            self.templates.remove(&old);
+            self.evicted += 1;
+        }
     }
 }
 

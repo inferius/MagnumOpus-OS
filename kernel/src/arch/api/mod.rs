@@ -215,6 +215,19 @@ pub trait Threads: Cpu {
     /// Jako `switch_thread_pointer`.
     unsafe fn set_thread_pointer(value: u64);
 
+    /// Ma architektura druhy ukazatel vlakna (`thread_pointer::SECOND`)?
+    /// x86_64 ano (baze GS programu), aarch64 ne.
+    const HAS_SECOND_POINTER: bool;
+
+    /// Nahraje druhy ukazatel vlakna (x86_64: baze GS programu, ktera je
+    /// v jadre po `swapgs` v `KERNEL_GS_BASE`). Program ho sam menit nemuze
+    /// (CR4.FSGSBASE vypnute), proto se neuklada. Bez druheho ukazatele nic.
+    ///
+    /// # Safety
+    ///
+    /// Jako `switch_thread_pointer`; volat jen v jadre (GS prohozene).
+    unsafe fn set_second_pointer(value: u64);
+
     /// Prvni vstup aktualniho vlakna do userspace: `entry(arg0, arg1)` se
     /// zasobnikem `stack`, preruseni povolena.
     ///
@@ -559,7 +572,7 @@ pub trait UserState: Threads {
     ///
     /// `stack_top` je vrchol zasobniku jadra vlakna, ktere prave stoji
     /// v jadre (jeho uzivatelsky ramec je platny a nikdo ho nemeni).
-    unsafe fn read_general(stack_top: u64, tp: u64, out: &mut [u8]);
+    unsafe fn read_general(stack_top: u64, tp: u64, tp2: u64, out: &mut [u8]);
 
     /// Je zapis obecnych registru bezpecny (adresy v userspace)? Priznaky
     /// se pri zapisu orezou na uzivatelske bity, nekontroluji se.
@@ -571,7 +584,7 @@ pub trait UserState: Threads {
     ///
     /// Vola vlakno samo pred navratem do userspace (zakazana preruseni),
     /// `buf` prosel `check_general`.
-    unsafe fn write_general(stack_top: u64, buf: &[u8]) -> u64;
+    unsafe fn write_general(stack_top: u64, buf: &[u8]) -> (u64, u64);
 
     /// Precte stav FPU/SIMD ulozeny v kontextu vlakna (`fp_size()` B,
     /// s hlavickou).

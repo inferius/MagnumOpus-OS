@@ -10,6 +10,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/time.h>
+#include <sys/ucontext.h>
 #include <unistd.h>
 
 static volatile sig_atomic_t usr1, alrm, segv;
@@ -35,6 +36,31 @@ static void on_segv(int s, siginfo_t *info, void *uc) {
 #ifdef __x86_64__
 static void on_fpe(int s) { siglongjmp(fpe_jump, s); }
 #endif
+
+/* ucontext_t: obsluha opravi registr s adresou a instrukce se zopakuje
+ * (vzor Wine/JIT: zmena kontextu v obsluze). */
+static volatile uint64_t uc_target = 0x1234;
+static volatile int uc_seen, uc_fp_ok;
+static void on_segv_uc(int s, siginfo_t *info, void *ctx) {
+    ucontext_t *uc = ctx;
+    (void)s;
+    (void)info;
+#if defined(__x86_64__)
+    if (uc->uc_mcontext.gregs[REG_RBX] == 0 && uc->uc_mcontext.gregs[REG_RIP] != 0) {
+        uc->uc_mcontext.gregs[REG_RBX] = (greg_t)(uintptr_t)&uc_target;
+        uc_seen++;
+    }
+    /* MXCSR po startu 0x1f80 (vychozi maska vyjimek). */
+    uc_fp_ok = uc->uc_mcontext.fpregs && (uc->uc_mcontext.fpregs->mxcsr & 0x1f80) == 0x1f80;
+#elif defined(__aarch64__)
+    if (uc->uc_mcontext.regs[1] == 0 && uc->uc_mcontext.pc != 0) {
+        uc->uc_mcontext.regs[1] = (unsigned long long)(uintptr_t)&uc_target;
+        uc_seen++;
+    }
+    const struct fpsimd_context *fp = (const struct fpsimd_context *)uc->uc_mcontext.__reserved;
+    uc_fp_ok = fp->head.magic == FPSIMD_MAGIC && fp->head.size == sizeof(struct fpsimd_context);
+#endif
+}
 
 static jmp_buf jb;
 static void jump_deep(int n) {
@@ -82,6 +108,19 @@ int signal_test(void) {
     guard_page[100] = 42;
     if (segv != 1 || guard_page[100] != 42) return 22;
     munmap(guard_page, (size_t)page);
+
+    /* Kontext obsluhy: oprava registru v ucontext_t, opakovani instrukce. */
+    sa.sa_sigaction = on_segv_uc;
+    if (sigaction(SIGSEGV, &sa, NULL) != 0) return 23;
+    uint64_t got_uc;
+#if defined(__x86_64__)
+    __asm__ volatile("xor %%ebx, %%ebx\n\tmov (%%rbx), %0" : "=r"(got_uc) : : "rbx", "memory");
+#elif defined(__aarch64__)
+    register uint64_t base __asm__("x1") = 0;
+    __asm__ volatile("ldr %0, [%1]" : "=r"(got_uc) : "r"(base) : "memory");
+#endif
+    if (uc_seen != 1 || got_uc != 0x1234) return 24;
+    if (!uc_fp_ok) return 25;
 
 #ifdef __x86_64__
     /* SIGFPE (deleni nulou) a odchod z obsluhy pres siglongjmp. */

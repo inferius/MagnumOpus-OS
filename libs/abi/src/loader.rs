@@ -21,6 +21,18 @@ pub const AT_MO_LOADER: u64 = 0x4D4F_0001;
 /// 2 KiB, nejvys 64 KiB.
 pub const AT_MO_TLS_RESERVE: u64 = 0x4D4F_0002;
 
+/// Typ auxv s adresou tabulky rezervaci adres (Windows vrstva, T5):
+/// slova `[pocet, zacatek0, delka0, zacatek1, delka1, ...]` v bloku auxv na
+/// zasobniku hlavniho vlakna (zije do konce procesu). Rozsahy rezervoval
+/// `spawn` v potomkovi (`VM_RESERVE` s pevnou adresou) jako prvni, pred
+/// namapovanim programu, zavadece a zasobniku, takze je nezabere zadny
+/// modul ani mapovani bez pevne adresy; program je prevezme (`VM_MAP`
+/// s `MAP_IN_RESERVATION`). Nejvys [`RESERVE_MAX`] rozsahu.
+pub const AT_MO_RESERVE: u64 = 0x4D4F_0003;
+
+/// Nejvic rozsahu v [`AT_MO_RESERVE`].
+pub const RESERVE_MAX: usize = 8;
+
 /// Hodnota v tretim argumentu vstupu programu od zavadece ("MOLD").
 pub const ENTRY_MAGIC: u64 = 0x4D4F_4C44;
 
@@ -95,7 +107,8 @@ pub struct Interface {
     /// `dl_iterate_phdr` (glibc): projde nahrane moduly.
     pub dl_iterate_phdr: unsafe extern "C" fn(cb: PhdrCallback, data: *mut u8) -> i32,
     /// `dlopen(cesta, rtld::*)` -> handle, null = chyba (`dlerror`).
-    /// Cesta jen `/system/lib/<jmeno>` nebo `<jmeno>` (knihovny od libd);
+    /// Cesta `/system/lib/<jmeno>` nebo `<jmeno>` (knihovny od libd),
+    /// absolutni cesta jinam = soubor na disku (DL-4c, relaci FS procesu);
     /// null = program (globalni rozsah). `LAZY` = `NOW`.
     pub dlopen: unsafe extern "C" fn(path: *const u8, flags: i32) -> *mut u8,
     /// `dlsym(handle, jmeno)` -> adresa, null = nenalezeno.

@@ -54,6 +54,7 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -36 | `ADDRESS_NOT_AVAILABLE` | místní adresa nepatří žádnému rozhraní |
 | -37 | `FENCE_FAILED` | plot skončil chybou |
 | -38 | `FENCE_ABANDONED` | plot byl opuštěn (producent zavřel poslední handle s právem `SIGNAL`) |
+| -39 | `INTERRUPTED` | čekání přerušilo přerušení vlákna (`THREAD_INTERRUPT`) |
 | -40 | `TOO_MANY_LINKS` | příliš mnoho symbolických odkazů při hledání cesty (smyčka) |
 
 ## Podrobně
@@ -486,11 +487,22 @@ nebyla dosažena.
 **Co dělat:** zacházet jako s pádem producenta: zahodit výsledek
 a připojit se k nové instanci služby.
 
+### `INTERRUPTED` (-39)
+
+**Význam:** blokující čekání skončilo, protože vlákno dostalo přerušení
+([`THREAD_INTERRUPT`](syscally.md#thread_interrupt)); obdoba `EINTR`.
+
+**Kdy vzniká:** `OBJECT_WAIT_ONE`, `OBJECT_WAIT_MANY`, `FUTEX` WAIT a `FENCE_WAIT`, když
+přerušení přijde během čekání nebo už čeká před ním. Přerušení se doručí
+obsluze ve vlákně při návratu ze syscallu.
+
+**Co dělat:** čekání zopakovat (se stejným termínem); `cstd` vrací
+`EINTR`, `std` chybu `ErrorKind::Interrupted` (běžné smyčky čtení ji
+opakují samy).
 ### `TOO_MANY_LINKS` (-40)
 
 **Význam:** při hledání cesty bylo potřeba následovat víc než 40
-symbolických odkazů (typicky smyčka odkazů); C `ELOOP`. Číslo -39 je
-vyhrazené pro větev Windows vrstvy.
+symbolických odkazů (typicky smyčka odkazů); C `ELOOP`.
 
 **Kdy vzniká:** operace fsd s cestou ([Symbolické odkazy](souborovy-system.md#symbolické-odkazy)),
 `OPEN` s `NOFOLLOW` na odkaz.

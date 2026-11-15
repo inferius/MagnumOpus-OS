@@ -5,9 +5,11 @@
 //!
 //! - staticka (`toolchain.cmake`, bez PIC): `libc++.a`, `libc++abi.a`,
 //!   `libunwind.a` a hlavicky `include/c++/v1` v predpone portu,
-//! - dynamicka (`toolchain-dyn.cmake`, PIC nad `libc.so`): jedna sdilena
-//!   `libc++.so` (libc++ + libc++abi + libunwind uvnitr, jako Android)
-//!   v predpone `prefix-dyn`, do initfs jako `/system/lib/libc++.so`.
+//! - dynamicka (`toolchain-dyn.cmake`, PIC nad `libc.so`): sdilena
+//!   `libc++.so` (libc++ + libc++abi uvnitr) a samostatna `libunwind.so`
+//!   (jeden unwinder na proces jako `libgcc_s` na Linuxu: libc++.so na ni
+//!   zavisi, unixove knihovny Wine taky) v predpone `prefix-dyn`, do
+//!   initfs jako `/system/lib/libc++.so` a `/system/lib/libunwind.so`.
 //!
 //! Od 7a-2 s locale a sirokymi znaky (`<iostream>`, `<fstream>`,
 //! `<locale>`, `std::wstring`) nad funkcemi wchar a locale v cstd.
@@ -132,14 +134,15 @@ const STATIC: &[&str] = &[
     "-DLIBCXX_ENABLE_STATIC=ON",
 ];
 
-/// Jedna sdilena `libc++.so` s abi a unwinderem uvnitr.
+/// Sdilena `libc++.so` s abi uvnitr a samostatna `libunwind.so`: dva
+/// unwindery v jednom procesu by mely kazdy vlastni registraci FDE
+/// a mezipamet (vyjimka C++ pres ramce jineho modulu by sla spatne).
 const SHARED: &[&str] = &[
-    "-DLIBUNWIND_ENABLE_SHARED=OFF",
-    "-DLIBUNWIND_ENABLE_STATIC=ON",
+    "-DLIBUNWIND_ENABLE_SHARED=ON",
+    "-DLIBUNWIND_ENABLE_STATIC=OFF",
     "-DLIBCXXABI_ENABLE_SHARED=OFF",
     "-DLIBCXXABI_ENABLE_STATIC=ON",
-    "-DLIBCXXABI_ENABLE_STATIC_UNWINDER=ON",
-    "-DLIBCXXABI_STATICALLY_LINK_UNWINDER_IN_SHARED_LIBRARY=ON",
+    "-DLIBCXXABI_ENABLE_STATIC_UNWINDER=OFF",
     "-DLIBCXX_ENABLE_SHARED=ON",
     "-DLIBCXX_ENABLE_STATIC=OFF",
     "-DLIBCXX_STATICALLY_LINK_ABI_IN_SHARED_LIBRARY=ON",
@@ -173,7 +176,11 @@ pub fn cxx_ldflags(arch: &Arch, sysroot: &Path, dynamic: bool) -> Vec<String> {
     if dynamic {
         let mut f = csysroot::ldflags_dyn(sysroot);
         let at = f.iter().position(|x| x == "-l:libc.so").unwrap_or(f.len());
-        f.splice(at..at, [format!("-L{}", slash(&prefix_dyn(arch).join("lib"))), String::from("-l:libc++.so")]);
+        // libunwind.so: _Unwind_Resume vola i kod programu (uklid pri vyjimce).
+        f.splice(
+            at..at,
+            [format!("-L{}", slash(&prefix_dyn(arch).join("lib"))), String::from("-l:libc++.so"), String::from("-l:libunwind.so")],
+        );
         f
     } else {
         let mut f = csysroot::ldflags(sysroot);
@@ -278,6 +285,9 @@ pub fn build(arch: &Arch, sysroot: &Path) -> Result<Vec<Output>> {
     println!("xtask: port C++ {} ({})", LLVM.name, arch.name);
     build_config(arch, sysroot, &src, &work, &prefix(arch), false)?;
     build_config(arch, sysroot, &src, &work, &prefix_dyn(arch), true)?;
+    // libunwind.so i do sysrootu C: sdilene knihovny v C (unixova cast
+    // Wine, `_Unwind_Find_FDE`) ji linkuji jako libc.so (mos-cc).
+    std::fs::copy(prefix_dyn(arch).join("lib/libunwind.so"), sysroot.join("lib/libunwind.so"))?;
     write_cfg(arch, sysroot)?;
     let test_src = [workspace_root().join("user/cpptest/cpptest.cpp"), workspace_root().join("user/cpptest/cframe.c")];
     let exe = work.join("cpptest");
@@ -289,5 +299,6 @@ pub fn build(arch: &Arch, sysroot: &Path) -> Result<Vec<Output>> {
         // ET_DYN cele (zavadec cte dynamickou cast).
         Output::Data(String::from("cpptest-dyn"), exe_dyn),
         Output::Data(String::from("lib/libc++.so"), prefix_dyn(arch).join("lib/libc++.so")),
+        Output::Data(String::from("lib/libunwind.so"), prefix_dyn(arch).join("lib/libunwind.so")),
     ])
 }

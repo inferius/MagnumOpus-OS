@@ -135,6 +135,23 @@ pub fn build_tests(opts: &Options) -> Result<Vec<(String, Vec<u8>)>> {
         .file(src.join("crt.c"))
         .file(src.join("main_dl.c"))
         .link(t, &out, &prog_dl, &Link::pie().needs(&lib2))?;
+    // DL-4c: program a knihovny ze souboru (test je zkopiruje na disk do
+    // /dl4c/{bin,lib}; v initfs mimo lib/, takze je libd podle jmena nenajde).
+    let orig2 = out.join("libdlorigin2.so.1");
+    Build::new("dlorigin2").file(src.join("origin2.c")).link(t, &out, &orig2, &Link::shared("libdlorigin2.so.1").needs(&lib2))?;
+    let orig = out.join("libdlorigin.so.1");
+    Build::new("dlorigin")
+        .file(src.join("origin.c"))
+        .link(t, &out, &orig, &Link::shared("libdlorigin.so.1").needs(&orig2).needs(&lib2).runpath("$ORIGIN"))?;
+    let orig3 = out.join("libdlorigin3.so.1");
+    Build::new("dlorigin3")
+        .file(src.join("origin3.c"))
+        .link(t, &out, &orig3, &Link::shared("libdlorigin3.so.1").needs(&orig2).needs(&lib2).runpath("$ORIGIN"))?;
+    let prog_origin = out.join("dltest-origin");
+    Build::new("dltest-origin")
+        .file(src.join("crt.c"))
+        .file(src.join("main_origin.c"))
+        .link(t, &out, &prog_origin, &Link::pie().needs(&orig).needs(&lib2).runpath("$ORIGIN/../lib"))?;
     let read = |p: &PathBuf| std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()));
     let rust = build_rust_test(opts, &[lib.clone(), lib2.clone()])?;
     // libdlnone se do obrazu zamerne nedava (test chybejici knihovny).
@@ -149,6 +166,10 @@ pub fn build_tests(opts: &Options) -> Result<Vec<(String, Vec<u8>)>> {
         (String::from("lib/libdlstatic.so.1"), read(&stat)?),
         (String::from("lib/libdlbig.so.1"), read(&big)?),
         (String::from("dltest-dl"), read(&prog_dl)?),
+        (String::from("dl4c/bin/dltest-origin"), read(&prog_origin)?),
+        (String::from("dl4c/lib/libdlorigin.so.1"), read(&orig)?),
+        (String::from("dl4c/lib/libdlorigin2.so.1"), read(&orig2)?),
+        (String::from("dl4c/lib/libdlorigin3.so.1"), read(&orig3)?),
     ])
 }
 

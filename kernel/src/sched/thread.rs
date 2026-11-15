@@ -101,11 +101,16 @@ pub struct Thread {
     /// Pozadavek na ukonceni (kill procesu): vlakno skonci pri navratu do
     /// userspace nebo z cekani v jadre.
     kill: AtomicBool,
+    /// Cekajici preruseni (`THREAD_INTERRUPT`): bit = kod 0..63.
+    interrupts: AtomicU64,
     /// Vlakno uz bylo spusteno (vlakna procesu se vytvari a spousti zvlast).
     pub(super) started: AtomicBool,
     /// Registr ukazatele vlakna userspace (TLS; `THREAD_SET_POINTER`).
     /// Planovac ho nahraje pri kazdem prepnuti na vlakno.
     pub(super) user_tp: AtomicU64,
+    /// Druhy ukazatel vlakna (x86_64 baze GS; `THREAD_SET_POINTER` SECOND).
+    /// Planovac ho nahraje pri kazdem prepnuti; aarch64 ho nema (0).
+    pub(super) user_tp2: AtomicU64,
     /// Vlakno konci (`sched::exit`): planovac mu uz nenahraje adresni
     /// prostor procesu (bezi s korenem jadra), aby ho proces mohl zrusit
     /// hned po konci posledniho vlakna.
@@ -158,8 +163,10 @@ impl Thread {
             entry: SpinLock::new(entry),
             process,
             kill: AtomicBool::new(false),
+            interrupts: AtomicU64::new(0),
             started: AtomicBool::new(false),
             user_tp: AtomicU64::new(0),
+            user_tp2: AtomicU64::new(0),
             user_gone: AtomicBool::new(false),
             stop: SpinLock::new(super::suspend::Stop::default()),
             fault_reason: AtomicU32::new(0),
@@ -219,6 +226,31 @@ impl Thread {
 
     pub fn kill_requested(&self) -> bool {
         self.kill.load(Ordering::Acquire)
+    }
+
+    /// Ceka preruseni (`THREAD_INTERRUPT`)?
+    pub fn interrupt_pending(&self) -> bool {
+        self.interrupts.load(Ordering::Acquire) != 0
+    }
+
+    /// Prida cekajici preruseni (kod < 64, overi volajici).
+    pub(super) fn add_interrupt(&self, code: u32) {
+        self.interrupts.fetch_or(1 << code, Ordering::AcqRel);
+    }
+
+    /// Vezme nejnizsi cekajici kod preruseni.
+    pub(super) fn take_interrupt(&self) -> Option<u32> {
+        let mut cur = self.interrupts.load(Ordering::Acquire);
+        loop {
+            if cur == 0 {
+                return None;
+            }
+            let code = cur.trailing_zeros();
+            match self.interrupts.compare_exchange(cur, cur & !(1 << code), Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return Some(code),
+                Err(now) => cur = now,
+            }
+        }
     }
 
     pub(super) fn set_kill(&self) {

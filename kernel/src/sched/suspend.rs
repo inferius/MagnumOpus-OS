@@ -104,6 +104,10 @@ pub fn in_thread_depth(t: &Thread) -> usize {
 }
 
 /// Vlakno stoji ve vyjimce (cteni a zapis kontextu povoleny).
+pub fn in_exception(t: &Thread) -> bool {
+    t.stop.lock().in_exception
+}
+
 pub fn set_in_exception(t: &Thread, on: bool) {
     t.stop.lock().in_exception = on;
 }
@@ -288,10 +292,14 @@ fn apply(me: &Arc<Thread>, general: Option<Vec<u8>>, fp: Option<Vec<u8>>) {
         && let Some(top) = me.kernel_stack_top()
     {
         // SAFETY: vlastni ramec, zakazana preruseni, overeno pri zapisu.
-        let tp = unsafe { ustate::write_general(top, &g) };
+        let (tp, tp2) = unsafe { ustate::write_general(top, &g) };
         me.user_tp.store(tp, Ordering::Relaxed);
-        // SAFETY: vlastni CPU, zakazana preruseni, `tp` v userspace.
-        unsafe { arch::set_thread_pointer(tp) };
+        me.user_tp2.store(tp2, Ordering::Relaxed);
+        // SAFETY: vlastni CPU, zakazana preruseni, `tp` a `tp2` v userspace.
+        unsafe {
+            arch::set_thread_pointer(tp);
+            arch::set_second_pointer(tp2);
+        }
     }
     if let Some(f) = fp {
         // SAFETY: vlastni vlakno pred navratem, overeno pri zapisu.
@@ -345,7 +353,7 @@ fn copy_state(t: &Thread, kind: u32, out: &mut [u8]) -> Result<(), Error> {
         let top = t.kernel_stack_top().ok_or(Error::WrongType)?;
         // SAFETY: vlakno stoji v jadre (overeno volajicim pod `stop`), jeho
         // uzivatelsky ramec na vrcholu zasobniku se nemeni.
-        unsafe { ustate::read_general(top, t.user_tp.load(Ordering::Relaxed), out) };
+        unsafe { ustate::read_general(top, t.user_tp.load(Ordering::Relaxed), t.user_tp2.load(Ordering::Relaxed), out) };
     } else {
         // SAFETY: vlakno neni na CPU (overeno volajicim), `switch` ho
         // nemeni; FPU stav jadro mezi prepnutimi nepouziva.

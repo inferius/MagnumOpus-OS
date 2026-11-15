@@ -45,6 +45,7 @@ mod unicode;
 mod usb;
 mod vmware;
 mod venus;
+mod wine;
 
 use std::env;
 use std::ffi::OsString;
@@ -81,6 +82,9 @@ prikazy:
            zazalohuje a nahradi <slozka>/magnumopus.vmdk; --dir <slozka>
            nebo MO_VMWARE_DIR; bezici VM odmitne
   docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
+  wine [--keep-going]
+           Wine 11 pro Windows vrstvu ve WSL (LLVM 23, docs/cs/windows-vrstva.md);
+           jen x86_64, predpoklad `build`; --keep-going = prehled chyb portu
   unicode-tables
            tabulky libs/uniprop (tridy znaku, velikost pismen, sirka)
            z Unicode Character Database (HTTPS + SHA-256)
@@ -95,6 +99,8 @@ prepinace:
   --arch <arch>    architektura: x86_64 (vychozi), aarch64
   --gdb            (run) QEMU ceka na GDB na localhost:1234
   --headless       (run) bez okna, jen seriova linka v terminalu
+  --wine           (run, test; x86_64) datovy disk s Wine v /apps/org.winehq.wine
+                   (strom z `cargo xtask wine`, sablona disku se dela jednou)
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
   --res <SxV>      (run, x86_64) vychozi rozliseni, napr. 1920x1080
   --cpu <model>    (run, test) model CPU QEMU misto vychoziho (x86_64 max,
@@ -196,6 +202,9 @@ pub struct Options {
     /// Datovy disk sdileny vic behy QEMU (`boottest`); `None` = novy disk
     /// pro kazdy beh.
     data_image: Option<PathBuf>,
+    /// Datovy disk s Wine v `/apps/org.winehq.wine` (`--wine`, jen x86_64;
+    /// predpoklad `cargo xtask wine`).
+    wine: bool,
     /// Zvlastni beh testu zaznamu padu (`crashtest`): QEMU bez
     /// `-no-reboot` (jadro po panice restartuje).
     crash_test: bool,
@@ -302,14 +311,17 @@ fn run_cli() -> Result<()> {
         net_helper: std::cell::RefCell::new(None),
         power_test: None,
         data_image: None,
+        wine: false,
         crash_test: false,
     };
     let mut gpu_set = false;
     let mut vmware_dir: Option<std::path::PathBuf> = None;
     let mut no_power = false;
+    let mut keep_going = false;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--release") => opts.release = true,
+            Some("--keep-going") => keep_going = true,
             Some("--cpu") => {
                 let value = args.next().ok_or("--cpu ocekava model CPU QEMU, napr. Nehalem")?;
                 opts.cpu = Some(value.to_string_lossy().into_owned());
@@ -374,6 +386,7 @@ fn run_cli() -> Result<()> {
             }
             Some("--gdb") => opts.gdb = true,
             Some("--headless") => opts.headless = true,
+            Some("--wine") => opts.wine = true,
             Some("--accel") => {
                 let value = args.next().ok_or("--accel ocekava hodnotu")?;
                 opts.accel = Some(
@@ -407,6 +420,7 @@ fn run_cli() -> Result<()> {
             stdsys::build_libc_so_locked(opts.arch, &opts).map(|p| println!("xtask: libc.so {}", p.display()))
         }
         Some("unicode-tables") => unicode::generate(),
+        Some("wine") => wine::build(opts.arch, keep_going).map(|p| println!("xtask: Wine {}", p.display())),
         Some("image") => build(&opts).and_then(|a| image_for(&a, &opts)).map(|_| ()),
         Some("run") => {
             // Okno QEMU ukazuje prvni grafickou kartu (VGA, framebuffer

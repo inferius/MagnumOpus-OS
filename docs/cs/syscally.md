@@ -402,8 +402,8 @@ kapacitu), `BAD_STATE` (za novým koncem je připnutá stránka,
 `VMO_PHYS_ADDR`), `ACCESS_DENIED` (zapečetěný objekt, chybí právo),
 `NO_MEMORY`, `NO_RESOURCES`, `BAD_HANDLE`, `WRONG_TYPE`.
 
-Čísla 76 a 77 jsou vyhrazená pro jiné větve (`THREAD_INTERRUPT`,
-`PROCESS_MEMORY`); jádro bez nich vrací `BAD_SYSCALL`.
+Číslo 76 je [`THREAD_INTERRUPT`](#thread_interrupt), 77 je vyhrazené pro
+`PROCESS_MEMORY` (etapa W2); jádro na něj zatím vrací `BAD_SYSCALL`.
 
 ### `VMO_SIZE`
 
@@ -584,6 +584,35 @@ Kill a `JOB_KILL` vždy vyhrají: pozastavené vlákno skončí. Vyžaduje
 `MANAGE` na vlákně. Chyby: `WRONG_TYPE` (vlákno jádra), `BAD_STATE`
 (vlákno skončilo), `NO_RESOURCES`, `BAD_HANDLE`, `ACCESS_DENIED`.
 
+### `THREAD_INTERRUPT`
+
+**[ověřeno v QEMU]** `(thread, code) -> 0`. Přerušení vlákna (číslo 76):
+nastaví čekající přerušení s kódem `code` (0..63, stejný kód se sloučí)
+a vlákno probudí. Blokující čekání (`OBJECT_WAIT_ONE`, `OBJECT_WAIT_MANY`, `FUTEX` WAIT,
+`FENCE_WAIT`) vrátí [`INTERRUPTED`](chyby.md#interrupted--39) - jako
+`EINTR`; čekání jádra uvnitř doručení výjimky přerušit nejde. Běžící
+vlákno jádro přeruší (IPI). Při návratu do userspace dostane vlákno
+doručení na obsluhu ve vlákně (`EXCEPTION_HANDLER`) s druhem
+`exception::kind::INTERRUPT` (256), stupněm `IN_THREAD` a kódem
+v `Report::code`; víc čekajících kódů jde od nejnižšího, **jeden na návrat**
+(další při návratu ze syscallu obsluhy, typicky `EXCEPTION_HANDLER`
+RETURN), takže se doručení nevnořují nad sebe. NEXT z obsluhy přerušení
+jen pokračuje - kanály výjimek přerušení nedostávají. Nevejde-li se rámec
+na zásobník, přerušení se zahodí. Pozastavené vlákno přerušení dostane až
+po obnovení. Přerušení skončeného vlákna nic nedělá.
+
+Je to obecný základ asynchronních signálů: `kill`/`pthread_kill` mezi
+procesy, Ctrl+C terminálu, `SIGCHLD` a pozastavování vláken Windows vrstvy
+([windows-vrstva.md](windows-vrstva.md)). `cstd` kód bere jako číslo
+signálu (blokovaný signál čeká v masce). Vyžaduje `MANAGE` na vlákně
+(stejné právo jako `THREAD_SUSPEND`). Chyby: `INVALID_ARGS` (kód nad 63),
+`BAD_STATE` (proces vlákna nemá obsluhu ve vlákně - přerušení by viselo
+a čekání by stále vracela `INTERRUPTED`), `WRONG_TYPE` (vlákno jádra),
+`BAD_HANDLE`, `ACCESS_DENIED`.
+
+Číslo 77 je rezervované pro `PROCESS_MEMORY` (etapa W2, čtení a zápis
+paměti jiného procesu přes jádro).
+
 ### `THREAD_STATE`
 
 `(thread, op, kind, ptr, len) -> 0`. Čtení (`thread::op::READ`, pravo
@@ -688,13 +717,26 @@ s `WRITE` se nikomu jinému nedává.
 
 ### `THREAD_SET_POINTER`
 
-`(value) -> 0`, číslo 56. Nastaví registr ukazatele vlákna aktuálního vlákna pro
-TLS (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`). Jádro hodnotu ukládá ve
-vlákně a nahraje ji při každém přepnutí; nové vlákno začíná s 0, takže
-hodnota nikdy nepřeteče do jiného vlákna ani procesu (na aarch64 si
-program `TPIDR_EL0` může zapsat i sám, jádro ho proto při přepnutí
-ukládá). Chyby: `INVALID_ARGS` (`value` mimo userspace). V libos
-`sys::thread_set_pointer`; používá ho runtime `std` ([Rust std](rust-std.md)).
+`(value, which) -> 0`, číslo 56. Nastaví ukazatel vlákna aktuálního vlákna
+podle `which` (`abi::syscall::thread_pointer`):
+
+| `which` | Registr | Použití |
+|---|---|---|
+| `TLS` (0) | x86_64 `FS_BASE`, aarch64 `TPIDR_EL0` | TLS (runtime `std`, `libc.so`) |
+| `SECOND` (1) | x86_64 báze GS programu; aarch64 není | druhý ukazatel vlákna, např. TEB [Windows vrstvy](windows-vrstva.md) (`gs:[0x30]`) |
+
+Jádro hodnotu ukládá ve vlákně a nahraje ji při každém přepnutí; nové
+vlákno začíná s 0, takže hodnota nikdy nepřeteče do jiného vlákna ani
+procesu (na aarch64 si program `TPIDR_EL0` může zapsat i sám, jádro ho
+proto při přepnutí ukládá). Báze GS je v jádře po `swapgs`
+v `KERNEL_GS_BASE`, program ji sám měnit nemůže (`CR4.FSGSBASE` je
+vypnuté). Obě hodnoty jsou v kontextu `THREAD_STATE` (`fs_base`,
+`gs_base` na x86_64). Chyby: `INVALID_ARGS` (`value` mimo userspace,
+neznámé `which`), `NOT_SUPPORTED` (`SECOND` na aarch64 - Windows ARM64
+drží TEB v `x18`, ten je v kontextu jako běžný registr). V libos
+`sys::thread_set_pointer` a `sys::thread_set_second_pointer`; TLS používá
+runtime `std` ([Rust std](rust-std.md)). **[ověřeno v QEMU]** x86_64
+i aarch64 (sada `procesy`, test `druhy ukazatel vlakna`).
 
 ## Futex
 

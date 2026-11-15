@@ -172,6 +172,11 @@ pub fn stat(path: &[u8]) -> R<Stat> {
     rt::fs::stat_path(path).map(|s| stat_of(&s)).map_err(e)
 }
 
+/// Druhy ukazatel vlakna (x86_64 baze GS).
+pub fn set_second_pointer(value: u64) -> R<()> {
+    rt::thread::set_second_pointer(value).map_err(e)
+}
+
 pub fn lstat(path: &[u8]) -> R<Stat> {
     rt::fs::lstat_path(path).map(|s| stat_of(&s)).map_err(e)
 }
@@ -262,18 +267,18 @@ pub fn abi_errno(err: abi::Error) -> crate::c_int {
     errno::from_os(err as i32)
 }
 
-/// Pracovni adresar = adresar otevreny jako `fd` (cesta z doby otevreni).
-pub fn fchdir(fd: i32) -> R<()> {
-    let d = desc(fd)?;
-    let f = d.file().ok_or(errno::ENOTDIR)?;
-    rt::env::set_current_dir(f.path().as_bytes()).map_err(e)
-}
-
 /// Absolutni cesta otevreneho souboru nebo adresare (`openat`).
 pub fn fd_path(fd: i32) -> R<Vec<u8>> {
     let d = desc(fd)?;
     let f = d.file().ok_or(errno::ENOTDIR)?;
     Ok(f.path().as_bytes().to_vec())
+}
+
+/// Pracovni adresar = adresar otevreny jako `fd` (cesta z doby otevreni).
+pub fn fchdir(fd: i32) -> R<()> {
+    let d = desc(fd)?;
+    let f = d.file().ok_or(errno::ENOTDIR)?;
+    rt::env::set_current_dir(f.path().as_bytes()).map_err(e)
 }
 
 /// Absolutni normalizovana cesta (`.`, `..`, pracovni adresar).

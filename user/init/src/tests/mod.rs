@@ -23,6 +23,8 @@ mod dma;
 mod fences;
 mod firewall;
 mod dynlink;
+mod dynlink_disk;
+mod wine;
 mod fpu;
 mod fpu_avx;
 mod fs;
@@ -61,8 +63,10 @@ mod nic;
 pub mod power;
 mod process;
 mod thread_state;
+mod second_pointer;
 mod exceptions;
 mod exceptions_fast;
+mod interrupt;
 mod reboot;
 mod recovery;
 mod recovery_kit;
@@ -104,10 +108,13 @@ const SUITES: &[(&str, &[Test])] = &[
     ("dma", dma::TESTS),
     ("procesy", process::TESTS),
     ("procesy", thread_state::TESTS),
+    ("procesy", second_pointer::TESTS),
     ("procesy", exceptions::TESTS),
     ("procesy", exceptions_fast::TESTS),
+    ("procesy", interrupt::TESTS),
     ("procesy", fpu::TESTS),
     ("procesy", dynlink::TESTS),
+    ("procesy", dynlink_disk::TESTS),
     ("joby", jobs::TESTS),
     ("ovladace", drivers::TESTS),
     ("ovladace z manifestu", driverkit::TESTS),
@@ -135,6 +142,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("sit", net::TESTS),
     ("std sit", std_net::TESTS),
     ("std procesy", std_proc::TESTS),
+    ("wine", wine::TESTS),
     ("std porty", std_ports::TESTS),
     ("cstd", cstd::TESTS),
     ("cstd sit", cstd::NET_TESTS),
@@ -202,6 +210,11 @@ fn filter(startup: &Startup) -> (Vec<String>, usize) {
     (suites, repeat)
 }
 
+/// Sady jen na vyzadani (`--only`): potrebuji zvlastni beh (`wine` =
+/// datovy disk s Wine, `cargo xtask test --only wine --wine`), plny beh je
+/// preskoci.
+const ON_REQUEST: &[&str] = &["wine"];
+
 /// Spusti vsechny testy, vraci pocet selhanych.
 pub fn run_all(startup: &Startup) -> usize {
     let (only, repeat) = filter(startup);
@@ -213,6 +226,9 @@ pub fn run_all(startup: &Startup) -> usize {
         }
         for (suite, tests) in SUITES {
             if !only.is_empty() && !only.iter().any(|s| s == suite) {
+                continue;
+            }
+            if only.is_empty() && ON_REQUEST.contains(suite) {
                 continue;
             }
             for (name, test) in *tests {

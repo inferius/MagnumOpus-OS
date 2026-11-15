@@ -116,6 +116,26 @@ pub fn deliver(mut report: Report) -> Outcome {
     deliver_from(&me, &process, report, stage::DEBUGGER_FIRST)
 }
 
+/// Doruci preruseni vlakna (`THREAD_INTERRUPT`) obsluze ve vlakne; bez
+/// obsluhy nebo bez mista na zasobniku se preruseni zahodi (kanaly
+/// vyjimek ho nedostavaji - neni to chyba programu). Vola se s
+/// povolenymi prerusenimi pred navratem do userspace.
+pub fn deliver_interrupt(code: u32) {
+    let me = sched::current();
+    let Some(process) = me.process.clone() else { return };
+    let report = Report {
+        kind: abi::exception::kind::INTERRUPT,
+        stage: stage::IN_THREAD,
+        pid: process.id,
+        tid: me.id,
+        code: u64::from(code),
+        ..Default::default()
+    };
+    if !in_thread(&me, &process, &report) {
+        log::debug!("proces {} ({}): preruseni {code} bez obsluhy ve vlaknu zahozeno", process.id, process.name);
+    }
+}
+
 /// Poradi obsluh od stupne `from`: debugger (prvni sance), obsluha ve
 /// vlaknu, kanal vlakna, kanal procesu, debugger (druha sance).
 fn deliver_from(
@@ -166,11 +186,15 @@ fn offer(me: &Arc<Thread>, channel: &Arc<Channel>, report: &Report) -> Option<u3
             (token as Arc<dyn KernelObject>, Rights::BASIC),
         ],
     );
+    // Ve vyjimce uz pred odeslanim: obsluha na jinem CPU muze zpravu precist
+    // a volat THREAD_STATE driv, nez toto vlakno usne (jinak BAD_STATE;
+    // cteni pocka, az vlakno opravdu stoji mimo CPU).
+    sched::suspend::set_in_exception(me, true);
     if channel.write(msg).is_err() {
+        sched::suspend::set_in_exception(me, false);
         // Obsluha nebezi nebo nestiha (plna fronta): dalsi obsluha.
         return Some(action::NEXT);
     }
-    sched::suspend::set_in_exception(me, true);
     let r = super::wait::wait_one(&*pending, Signals::SIGNALED, None);
     sched::suspend::set_in_exception(me, false);
     match r {
@@ -203,7 +227,7 @@ fn in_thread(me: &Arc<Thread>, process: &super::process::Process, report: &Repor
     }
     let mut general = vec![0u8; ustate::GENERAL_SIZE];
     // SAFETY: vlastni ramec (vlakno je v jadre kvuli vyjimce).
-    unsafe { ustate::read_general(top, sched::user_thread_pointer(me), &mut general) };
+    unsafe { ustate::read_general(top, sched::user_thread_pointer(me), sched::user_second_pointer(me), &mut general) };
     let frame_size = ustate::frame_size();
     let mut frame = vec![0u8; frame_size];
     frame[..Report::SIZE].copy_from_slice(&report.encode());
@@ -267,15 +291,18 @@ pub fn handler_return(frame_ptr: u64, disposition: u32) -> Result<u64, Error> {
     let top = me.kernel_stack_top().ok_or(Error::WrongType)?;
     let irq = interrupts::disable();
     // SAFETY: vlastni ramec syscallu, zakazana preruseni, overeno vyse.
-    // Baze TLS se neobnovuje (behem obsluhy se nemeni a na aarch64 ji
-    // program meni sam).
+    // Baze TLS a druhy ukazatel se neobnovuji (behem obsluhy se nemeni,
+    // na aarch64 meni TLS program sam).
     unsafe {
         ustate::write_general(top, general);
         ustate::load_fp(fp);
     }
     interrupts::restore(irq);
     let (_, ret) = ustate::general_sp_ret(general);
+    // Preruseni vlakna nejde dal (kanaly vyjimek ho nedostavaji): NEXT =
+    // jen pokracovat.
     if disposition == action::NEXT
+        && report.kind != abi::exception::kind::INTERRUPT
         && deliver_from(&me, &process, report, stage::THREAD) == Outcome::Unhandled
     {
         log::error!(

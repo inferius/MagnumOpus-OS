@@ -21,6 +21,9 @@ pub fn wait_many(
         if me.kill_requested() {
             return Err(Error::Canceled);
         }
+        if sched::wait_interrupted(&me) {
+            return Err(Error::Interrupted);
+        }
         let seq = me.prepare_wait();
         let mut registered = 0;
         let mut result = None;

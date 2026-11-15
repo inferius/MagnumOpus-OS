@@ -796,6 +796,9 @@ sebou mluví jen přes úzké rozhraní: spodní část `ntdll` a službu
 4. Doručení výjimek (SEH) na kanál výjimek a pozastavení vlákna se čtením
    a zápisem kontextu.
 
+Podrobný návrh s otázkami a etapami W0-W7:
+[Windows vrstva](windows-vrstva.md) **[navrženo]**.
+
 **Postup:**
 
 1. **v1 (milník 5):** PE loader a spodní `ntdll`, konzolové .exe

@@ -26,13 +26,10 @@ fn error_codes_are_stable() {
 
 #[test]
 fn all_errors_listed() {
-    // Kody tvori souvisly rozsah -1..=-N az na vyhrazena cisla (pridelena
-    // jine vetvi, sloucenim se doplni), takze ALL nesmi nic vynechat.
-    const RESERVED: &[i32] = &[39];
-    let n = ALL.len() as i32 + RESERVED.iter().filter(|&&r| r <= ALL.len() as i32 + RESERVED.len() as i32).count() as i32;
+    // Kody tvori souvisly rozsah -1..=-N, takze ALL nesmi nic vynechat.
+    let n = ALL.len() as i32;
     for code in 1..=n {
-        let found = Error::from_code(-(code as i64)).is_some();
-        assert_eq!(found, !RESERVED.contains(&code), "kod {}", -code);
+        assert!(Error::from_code(-(code as i64)).is_some(), "kod {}", -code);
     }
     assert!(Error::from_code(-(n as i64) - 1).is_none());
 }
@@ -138,8 +135,8 @@ fn every_syscall_is_documented() {
         "DMA_MAP",
         "DMA_SEGMENTS",
         "DMA_SYNC",
-        // 76, 77 rezervovane (jine vetve)
-        "",
+        "THREAD_INTERRUPT",
+        // 77 rezervovane (PROCESS_MEMORY, W2)
         "",
         "VMO_SET_SIZE",
         "VMO_SIZE",

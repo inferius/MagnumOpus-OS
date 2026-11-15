@@ -254,7 +254,14 @@ Decision 6A - signals without kernel support:
   handler = continue (the instruction is retried - the GC and JIT pattern:
   `mprotect` in the handler), `SIG_DFL` = the next handler and the end of
   the process. Leaving with `siglongjmp` works. `ucontext_t` (the third
-  argument) is not filled in yet (zeros) **[designed]**. On aarch64
+  argument, `sys/ucontext.h`) **[verified in QEMU]** x86_64 and aarch64
+  (`ctest`, step `signal`): registers from the exception frame in the
+  Linux layout (x86_64 `uc_mcontext.gregs[REG_*]`, `fpregs` pointing to
+  the FXSAVE image, `REG_CR2` = the fault address; aarch64 `regs`, `sp`,
+  `pc`, `pstate`, `fault_address`, the `fpsimd_context` record in
+  `__reserved`). Changes of registers and FPU in the handler are applied
+  on return (fixing a register and retrying the instruction - Wine, JIT).
+  A signal without an exception (`raise`) gets an empty context. On aarch64
   division by zero gives no `SIGFPE` (the CPU does not report it).
 - **`raise`, `kill` of the own process:** the handler runs immediately in
   the calling thread; a blocked signal waits and is delivered once
@@ -302,6 +309,9 @@ tests `cxxsup_tests`, `fsat_tests`.
 | `sys/statvfs.h` | `statvfs`, `fstatvfs` | size and free blocks of the fsd session volume; inode counts 0 |
 | `sys/sendfile.h` | `sendfile` | copy through a 64 KiB buffer in the process |
 | `stdio.h` | `setbuf` | like `setvbuf` (`NULL` = unbuffered); `std::filebuf` |
+| `strings.h`, `string.h` | `ffs`, `ffsl`, `ffsll` | index of the lowest set bit from 1 |
+| `signal.h` | `si_code` values (`SEGV_*`, `BUS_*`, `FPE_*`, `ILL_*`, `TRAP_*`) | values as Linux |
+| `magnumopus/thread.h` (extension, not POSIX) | `mos_thread_set_second_pointer`, `mos_thread_get_second_pointer` | the second thread pointer (x86_64 GS base, the TEB of the [Windows layer](windows-layer.md)); aarch64 -1 and `ENOTSUP` |
 | `limits.h` | `PATH_MAX` (4096), `NAME_MAX` (255) | |
 | `link.h`, `elf.h` | `dl_iterate_phdr`, `struct dl_phdr_info`, ELF64 types | static program: one module from linker script symbols (`PT_LOAD`, `PT_GNU_EH_FRAME`) |
 | (C++ ABI) | `__cxa_atexit`, `__cxa_finalize`, `__cxa_thread_atexit_impl`, `__dso_handle` | `atexit` and `__cxa_atexit` share one list (one reverse order) |
@@ -569,6 +579,10 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
    [memory-management.md](memory-management.md)), otherwise `EACCES`.
    File `mmap`: read-only `MAP_PRIVATE` by reading into anonymous memory;
    file `MAP_SHARED` = `ENOTSUP` until fsd provides a file VMO.
+   `PROT_WRITE` or `PROT_EXEC` without `PROT_READ` (in `mmap` and
+   `mprotect`) also means reading, as on Linux x86_64 and aarch64 (the
+   kernel has no write-only page; wineserver maps `KUSER_SHARED_DATA` this
+   way).
 7. **libc.a and libc.so** (questions 1 and 2): `libc.a` (Rust
    `staticlib`) and `libc.so` (`cdylib`, `SONAME` `libc.so`),
    `crt1.o`/`crti.o`/`crtn.o`, headers. xtask assembles a **C sysroot**

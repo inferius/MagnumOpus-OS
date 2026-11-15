@@ -254,10 +254,19 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
     let drive = |id: &str, path: &Path| format!("if=none,id={id},format=raw,discard=unmap{cache},file={}", path.display());
     // Sdileny datovy disk pres vic behu (`boottest`): vytvori se jen
     // poprve a beh ho nesmaze; jinak novy disk pro kazdy beh.
+    let wine = if opts.wine {
+        let tree = crate::wine::out_dir(opts.arch).join("tree");
+        if !tree.join("bin").is_dir() {
+            return Err(format!("--wine: chybi strom Wine {} (nejdriv `cargo xtask wine`)", tree.display()).into());
+        }
+        Some(tree)
+    } else {
+        None
+    };
     let raw = match &opts.data_image {
         Some(p) if p.exists() => p.clone(),
-        Some(p) => datadisk::create(p)?,
-        None => datadisk::create(&run.data)?,
+        Some(p) => datadisk::create_with(p, wine.as_deref())?,
+        None => datadisk::create_with(&run.data, wine.as_deref())?,
     };
     // Na NVMe a AHCI jako na skutecnem pocitaci: GPT s nasim oddilem.
     let data = match opts.data_disk.as_str() {
@@ -433,7 +442,7 @@ fn gpu_device(cmd: &mut Command, opts: &Options) {
 
 /// Windows cesta `X:\a\b` -> WSL `/mnt/x/a/b` (vsechny vyskyty v argumentu,
 /// cesta konci carkou nebo koncem argumentu).
-fn to_wsl_paths(arg: &str) -> String {
+pub(crate) fn to_wsl_paths(arg: &str) -> String {
     let b = arg.as_bytes();
     let mut out = String::new();
     let mut i = 0;
@@ -520,7 +529,13 @@ fn run_test(mut cmd: Command, opts: &Options, serial_log: &Path) -> std::result:
     let timeout = match opts.power_test {
         Some(_) => Duration::from_secs(300),
         None if opts.crash_test => Duration::from_secs(400),
-        None => opts.arch.test_timeout + std::time::Duration::from_secs(60) * opts.test_repeat.saturating_sub(1),
+        // Wine (--wine) zaklada prefix (wineboot, registrace DLL z wine.inf):
+        // v QEMU TCG minuty navic.
+        None => {
+            opts.arch.test_timeout
+                + std::time::Duration::from_secs(60) * opts.test_repeat.saturating_sub(1)
+                + if opts.wine { std::time::Duration::from_secs(900) } else { std::time::Duration::ZERO }
+        }
     };
     // Chybovy vystup QEMU jde dal na terminal a zaroven do bufferu (hlaska
     // o obsazenem portu => novy pokus).

@@ -272,6 +272,40 @@ and RTTI against libc++. No source changes.
 - **Cesta / Path:** `libs/uniprop/src/tables.rs` (odvozené tabulky, ne soubory UCD / derived tables, not the UCD files)
 - **Popis / Description:** `docs/cs/cstd.md`, `docs/en/cstd.md` (kapitola Široké znaky a locale / chapter Wide characters and locale).
 
+## Wine 11.0 (Windows vrstva / Windows layer)
+
+Není v repozitáři: `cargo xtask wine` stáhne `wine-11.0.tar.xz`
+z dl.winehq.org (HTTPS; SHA-512 ověřený proti podepsanému seznamu
+`sha512sums.asc`, v xtasku připnutý SHA-256), použije naše záplaty
+z `third_party/wine/` a sestaví ho ve WSL (DLL jako PE a unixovou část nad
+`libc.so`). / Not in the repository: `cargo xtask wine` downloads
+`wine-11.0.tar.xz` from dl.winehq.org (HTTPS; SHA-512 checked against the
+signed list `sha512sums.asc`, SHA-256 pinned in xtask), applies our patches
+from `third_party/wine/` and builds it in WSL (DLLs as PE and the Unix side
+over `libc.so`).
+
+- **Licence / Licence:** LGPL-2.1-or-later (Wine), zdroj / source:
+  <https://dl.winehq.org/wine/source/11.0/>. Běží v procesech aplikací
+  Windows a ve wineserveru, ne v jádře ani ve službách systému / runs in
+  Windows application processes and in wineserver, not in the kernel or
+  system services.
+- **Naše úpravy / Our changes:** záplaty v `third_party/wine/` (LGPL jako
+  Wine): `0001-config-sub-magnumopus.patch` (systém `magnumopus`
+  v `config.sub`), `0002-ntdll-signal-x86_64-magnumopus.patch` (kontext
+  signálu jako Linux, TEB v GS přes `magnumopus/thread.h`, bez LDT),
+  `0003-server-no-fork-magnumopus.patch` (wineserver se místo `fork`
+  spustí znovu v popředí přes `posix_spawn`, synchronizace rourou jako
+  dřív / wineserver restarts itself in the foreground via `posix_spawn`
+  instead of `fork`, the same pipe handshake),
+  `0004-server-memfd-sections-magnumopus.patch` (paměť anonymních sekcí
+  jako `memfd` místo dočasného souboru / anonymous section memory as a
+  `memfd` instead of a temporary file),
+  `0005-ntdll-spawn-process-magnumopus.patch` (nový proces Windows přes
+  `posix_spawn` zavaděče místo dvojího `fork` / a new Windows process via
+  `posix_spawn` of the loader instead of a double `fork`).
+- **Popis / Description:** `docs/cs/windows-vrstva.md`,
+  `docs/en/windows-layer.md`.
+
 ## Písmo Tuffy / Tuffy font
 
 - **Název / Name:** Tuffy Regular

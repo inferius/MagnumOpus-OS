@@ -54,6 +54,7 @@ is documented in this file and in the Czech version.
 | -36 | `ADDRESS_NOT_AVAILABLE` | the local address does not belong to any interface |
 | -37 | `FENCE_FAILED` | the fence ended with an error |
 | -38 | `FENCE_ABANDONED` | the fence was abandoned (the producer closed the last handle with the `SIGNAL` right) |
+| -39 | `INTERRUPTED` | the wait was interrupted by a thread interruption (`THREAD_INTERRUPT`) |
 | -40 | `TOO_MANY_LINKS` | too many symbolic links while looking up a path (a loop) |
 
 ## Details
@@ -492,11 +493,24 @@ the fence) and the awaited value was not reached.
 **What to do:** treat it as a producer crash: discard the result and
 reconnect to the new instance of the service.
 
+### `INTERRUPTED` (-39)
+
+**Meaning:** a blocking wait ended because the thread got an interruption
+([`THREAD_INTERRUPT`](syscalls.md#thread_interrupt)); the analogue of
+`EINTR`.
+
+**When:** `OBJECT_WAIT_ONE`, `OBJECT_WAIT_MANY`, `FUTEX` WAIT and `FENCE_WAIT`, when the
+interruption arrives during the wait or is already pending before it. The
+interruption is delivered to the in-thread handler on return from the
+syscall.
+
+**What to do:** repeat the wait (with the same deadline); `cstd` returns
+`EINTR`, `std` the error `ErrorKind::Interrupted` (ordinary read loops
+retry it themselves).
 ### `TOO_MANY_LINKS` (-40)
 
 **Meaning:** looking up a path needed to follow more than 40 symbolic
-links (typically a loop of links); C `ELOOP`. The number -39 is reserved
-for the Windows layer branch.
+links (typically a loop of links); C `ELOOP`.
 
 **When it happens:** fsd operations with a path ([Symbolic links](file-system.md#symbolic-links)),
 `OPEN` with `NOFOLLOW` on a link.

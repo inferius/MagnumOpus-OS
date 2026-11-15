@@ -22,6 +22,9 @@ pub mod kind {
     pub const PAGE_FAULT: u32 = 14;
     /// Nezarovnany PC nebo SP (aarch64).
     pub const ALIGNMENT: u32 = 17;
+    /// Preruseni vlakna (`THREAD_INTERRUPT`), ne vyjimka CPU: kod
+    /// preruseni v `Report::code`, jen doruceni ve vlakne.
+    pub const INTERRUPT: u32 = 256;
 }
 
 /// Ktera obsluha zpravu dostala (`Report::stage`).

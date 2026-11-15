@@ -8,10 +8,21 @@
 //! | Zadost | Data | Handly | Odpoved |
 //! |---|---|---|---|
 //! | [`Request::Open`] | jmeno knihovny | - | [`Library`] + VMO na segment |
+//! | [`Request::OpenImage`] | jmeno (jen do logu), delka | VMO s obsahem souboru | [`Library`] + VMO na segment |
 //! | [`Request::Connect`] | - | konec noveho kanalu | **zadna** (nova relace pro dite) |
 //! | [`Request::Stats`] | - | - | [`Stats`] |
 //!
 //! Chyba = [`Reply::Error`] s kodem `abi::Error`.
+//!
+//! **Knihovny z disku** (DL-4c, `OpenImage`): libd disk nikdy necte a nema
+//! relaci FS. Soubor precte klient (zavadec) relaci FS procesu - s pravy
+//! aplikace - a posle obsah jako VMO; libd si ho zkopiruje k sobe (klient
+//! ho pak uz nezmeni), spocita BLAKE3 a sablonu sdili podle obsahu stejne
+//! jako u `/system/lib`. Jmeno z `OpenImage` se nikdy nepouzije pro hledani
+//! (`Open` podle jmena najde jen initfs), takze podvrzeny soubor se jmenem
+//! systemove knihovny jinym procesum nic nepodstrci. Sablon z disku je
+//! nejvys [`MAX_DISK_TEMPLATES`] a [`MAX_DISK_BYTES`]; nad mez libd zahodi
+//! nejdele nepouzite (procesy je mapuji dal).
 //!
 //! **Relace** tvori strom: korenove spojeni je bootstrap kanal libd (drzi ho
 //! adapter sluzby v initu, `docs/cs/obnova-sluzeb.md`), dalsi vznikaji
@@ -45,11 +56,16 @@ pub const MAX_CHILD_CONNECTIONS: u32 = 256;
 /// Nejvic spojeni celkem (nad mez libd nove spojeni zavre; klient pak
 /// dostane `PEER_CLOSED`).
 pub const MAX_CONNECTIONS: u32 = 4096;
+/// Nejvic sablon knihoven z disku (`OpenImage`) v pameti libd.
+pub const MAX_DISK_TEMPLATES: usize = 512;
+/// Nejvic bajtu sablon knihoven z disku (soucet delek VMO segmentu).
+pub const MAX_DISK_BYTES: u64 = 512 << 20;
 
 mod tag {
     pub const OPEN: u8 = 1;
     pub const CONNECT: u8 = 2;
     pub const STATS: u8 = 3;
+    pub const OPEN_IMAGE: u8 = 4;
     pub const OK: u8 = 0;
     pub const ERROR: u8 = 0xFF;
 }
@@ -68,6 +84,9 @@ pub fn valid_name(name: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     Open { name: String },
+    /// Knihovna z disku: obsah je v prilozenem VMO (prvnich `len` bajtu),
+    /// `name` je jen pro hlasky (zakladni jmeno souboru, [`valid_name`]).
+    OpenImage { name: String, len: u64 },
     Connect,
     Stats,
 }
@@ -80,6 +99,12 @@ impl Request {
                 b.push(tag::OPEN);
                 b.extend_from_slice(&(name.len() as u16).to_le_bytes());
                 b.extend_from_slice(name.as_bytes());
+            }
+            Request::OpenImage { name, len } => {
+                b.push(tag::OPEN_IMAGE);
+                b.extend_from_slice(&(name.len() as u16).to_le_bytes());
+                b.extend_from_slice(name.as_bytes());
+                b.extend_from_slice(&len.to_le_bytes());
             }
             Request::Connect => b.push(tag::CONNECT),
             Request::Stats => b.push(tag::STATS),
@@ -99,6 +124,16 @@ impl Request {
                 }
                 let name = core::str::from_utf8(raw).ok()?;
                 valid_name(name).then(|| Request::Open { name: String::from(name) })
+            }
+            tag::OPEN_IMAGE => {
+                let n = u16::from_le_bytes(b.get(1..3)?.try_into().ok()?) as usize;
+                let raw = b.get(3..3 + n)?;
+                let len = u64::from_le_bytes(b.get(3 + n..11 + n)?.try_into().ok()?);
+                if b.len() != 11 + n || len == 0 || len > MAX_FILE {
+                    return None;
+                }
+                let name = core::str::from_utf8(raw).ok()?;
+                valid_name(name).then(|| Request::OpenImage { name: String::from(name), len })
             }
             tag::CONNECT if b.len() == 1 => Some(Request::Connect),
             tag::STATS if b.len() == 1 => Some(Request::Stats),
@@ -150,6 +185,10 @@ pub struct Stats {
     pub hits: u64,
     /// Ziva spojeni.
     pub connections: u64,
+    /// Sablony knihoven z disku (`OpenImage`) a kolik jich libd zahodila
+    /// nad mezi ([`MAX_DISK_TEMPLATES`], [`MAX_DISK_BYTES`]).
+    pub disk_templates: u64,
+    pub evicted: u64,
 }
 
 /// Odpoved libd.
@@ -184,7 +223,7 @@ impl Reply {
             Reply::Stats(s) => {
                 b.push(tag::OK);
                 b.push(2);
-                for v in [s.templates, s.opens, s.hits, s.connections] {
+                for v in [s.templates, s.opens, s.hits, s.connections, s.disk_templates, s.evicted] {
                     b.extend_from_slice(&v.to_le_bytes());
                 }
             }
@@ -222,11 +261,13 @@ impl Reply {
                     }
                     Some(Reply::Library(Library { span, segments }))
                 }
-                2 if b.len() == 2 + 32 => Some(Reply::Stats(Stats {
+                2 if b.len() == 2 + 48 => Some(Reply::Stats(Stats {
                     templates: u64_at(2)?,
                     opens: u64_at(10)?,
                     hits: u64_at(18)?,
                     connections: u64_at(26)?,
+                    disk_templates: u64_at(34)?,
+                    evicted: u64_at(42)?,
                 })),
                 _ => None,
             },

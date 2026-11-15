@@ -48,6 +48,7 @@ v initfs vedle programu. Později se přesune do balíčku beze změny formátu
 id = "org.magnumopus.netprobe"   # povinné: a-z A-Z 0-9 . - _
 name = "Síťová sonda"            # pro dotazy uživateli
 static_tls_reserve = "8K"        # rezerva statického TLS pro dlopen (výchozí 2K, nejvýš 64K)
+reserve = ["0x10000-0x7fff0000"] # rozsahy adres rezervované před zavedením (nejvýš 8, Windows vrstva)
 
 [limits]                         # rozpočet jobu (bez sekce = bez limitu)
 memory = "16M"                   # uživatelská paměť
