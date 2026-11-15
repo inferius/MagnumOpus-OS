@@ -19,6 +19,7 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 - `src/wchar/` - `conv.rs` převody (`mbrtowc`, `mbsnrtowcs`, ...), `wcs.rs` řetězce, `num.rs` `wcstol`/`wcstod`/`wcsftime`, `wctype.rs` třídy nad `libs/uniprop`, `wio.rs` široké proudy (`FILE` má orientaci a stav, `stdio::Locked`), `wprintf.rs`, `wscanf.rs`; `c/math_ld.c` `wcstold`, `strtold_l`.
 - `src/spawn/` - `mod.rs` `posix_spawn(p)`, akce souborů (`plan`: jen fd 0-2, rozhodnutí 4A), atributy, hledání programu (`PATH`, jinak holý název pro launchd); `wait.rs` tabulka potomků (`pid_t` z cstd), `waitpid`/`wait4`/`waitid`, stav z kódu konce (`status_of`), `kill` na potomka (`kill_child`, jen ukončení). Systémová část `sys/os_proc.rs` nad `osrt::process`; host má náhradní potomky (`exit:<kód>`, `sleep:<ms>:<kód>`) v `sys/host.rs`.
 - `src/semaphore.rs` (nepojmenované nad futexem, `sem_open` = `ENOSYS`), `src/pthread/attr.rs` (atributy vláken, vlastní zásobník přes `sys::spawn_on`), `src/statfs.rs` (`statfs`/`fstatfs` nad `sys::volume_space`), `src/ifaddrs.rs` (`getifaddrs`, `if_nameindex`: `lo` + `eth0` z netd), `src/ifreq.rs` (`ioctl` `SIOCGIF*` na socketu).
+- `src/termios.rs` - `termios.h` nad řídicím kanálem terminálu (`libs/ttyproto`, `osrt::tty`), `ioctl` terminálu (`TCGETS` ... `TIOCSWINSZ`), vlákno `SIGWINCH`; `isatty` = stdio **a** kanál terminálu. Host: terminál v paměti v `sys/host.rs`.
 - `src/dlfcn.rs` - `dlopen` a spol. nad tabulkou zavaděče (`osrt::dl`); `crt/crt1.c` - start programu PIE nad `libc.so` (`_start` -> `__libc_start`).
 - `libs/cstd-so` - `libc.so` (cdylib nad sysrootem std jako PIC, `stdsys::build_libc_so_locked`).
 - `libs/cstd-libc` - `libc.a` (staticlib cstd + std + osrt + rozhraní SDL `libs/mosdl`) pro sysroot C (`xtask/src/csysroot.rs`), porty v C `xtask/src/cports/`. `environ` je v `osrt` (`env.rs`), ne v cstd.
@@ -52,6 +53,7 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 ## Pasti
 
 - Host testy běží souběžně nad jednou tabulkou fd (`sys/host.rs`, nové číslo = nejnižší volné): po `close` nízkého čísla ho může hned dostat jiný test. Na zavřené číslo (druhé `close`, `EBADF`) a pevná čísla (`dup2`) jen vysoko (`fd_tests::HIGH` = 4000).
+- `isatty` je pravda jen s řídicím kanálem terminálu: program spuštěný initem s kanály proudů má stdout plně bufferovaný (výstup se vyprázdní při konci; při pádu se může ztratit).
 - Host testy, které mění pracovní adresář (`chdir`, `fchdir`), by rozbily souběžné testy s relativními cestami: úspěšné `fchdir` se testuje jen v QEMU.
 - `c_long` je na hostiteli Windows 32bitový: host testy s `long` jen s hodnotami do 31 bitů.
 - Program v C je crate `#![no_main]`; `main` z C volá `osrt`. Bez `extern crate cstd;` se knihovna nepřilinkuje.

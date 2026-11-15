@@ -292,6 +292,50 @@ pub fn pipe(cloexec: bool, nonblock: bool) -> R<(i32, i32)> {
     Ok((a, b))
 }
 
+/// Hostitel: terminal v pameti (`ttyproto::Tty`, 24x80, okno smi menit
+/// velikost) pro testy `termios.rs`; udalost zmeny velikosti = pocitadlo.
+static HOST_TTY: Mutex<Option<ttyproto::Tty>> = Mutex::new(None);
+/// Pocet zmen velikosti od posledniho `tty_wait_resize`.
+static HOST_RESIZES: (Mutex<u32>, std::sync::Condvar) = (Mutex::new(0), std::sync::Condvar::new());
+
+pub fn tty_available() -> bool {
+    true
+}
+
+pub fn tty_call(req: &[u8]) -> R<(Vec<u8>, Vec<u32>)> {
+    use ttyproto::{Request, Size, Tty};
+    let r = Request::decode(req).map_err(|_| errno::EINVAL)?;
+    let mut g = HOST_TTY.lock().unwrap();
+    let t = g.get_or_insert_with(|| {
+        let mut t = Tty::new(Size { rows: 24, cols: 80, xpixel: 0, ypixel: 0 });
+        t.client_resize = true;
+        t
+    });
+    let before = t.size;
+    let out = t.handle(&r);
+    if t.size != before {
+        *HOST_RESIZES.0.lock().unwrap() += 1;
+        HOST_RESIZES.1.notify_all();
+    }
+    let handles = if matches!(r, Request::WatchSize) && out.is_ok() { vec![1] } else { vec![] };
+    Ok((ttyproto::encode_reply(out), handles))
+}
+
+pub fn tty_wait_resize(_ev: u32) -> R<()> {
+    let mut n = HOST_RESIZES.0.lock().unwrap();
+    while *n == 0 {
+        n = HOST_RESIZES.1.wait(n).unwrap();
+    }
+    *n -= 1;
+    Ok(())
+}
+
+pub fn close_handles(_h: Vec<u32>) {}
+
+pub fn abi_errno(e: abi::Error) -> crate::c_int {
+    errno::from_os(e as i32)
+}
+
 pub fn isatty(fd: i32) -> R<bool> {
     let d = get(fd)?;
     Ok(matches!(d.obj, Obj::Stdin | Obj::Stdout | Obj::Stderr))

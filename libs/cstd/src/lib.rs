@@ -49,6 +49,7 @@ pub mod stdlib;
 pub mod socket;
 pub mod spawn;
 pub mod sys;
+pub mod termios;
 pub mod time;
 pub mod unistd;
 pub mod wchar;
@@ -79,6 +80,8 @@ mod wchar_tests;
 mod posix_tests;
 #[cfg(test)]
 mod spawn_tests;
+#[cfg(test)]
+mod termios_tests;
 
 pub use cstd_core::ctypes::{c_char, c_int, c_long, c_uint, c_ulong, size_t};
 

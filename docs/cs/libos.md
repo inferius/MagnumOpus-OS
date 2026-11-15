@@ -148,7 +148,8 @@ velikost neomezuje limit zprávy kanálu. Standardní handly jdou ve stejné
 zprávě jako `kind::USER` se štítky z `abi::params::tag` (`STDIN`,
 `STDOUT`, `STDERR`, `FS`, `NET`, `LAUNCH` = kanál ke spouštěcí službě
 launchd, `AUDIO` a `AUDIO_LEASE` = relace zvukové služby s právy aplikace
-a její lístek, [Zvuk](zvuk.md#relace-aplikací-a-nahrávání)). Štítky, které
+a její lístek, [Zvuk](zvuk.md#relace-aplikací-a-nahrávání), `TTY` = řídicí
+kanál terminálu, protokol `ttyproto`, [termios](cstd.md#termios)). Štítky, které
 runtime std sám nepoužije, si nechá pro knihovny
 (`osrt::start::take_tagged`). Formát v2 má pole příznaků (`abi::params::flags`:
 `STDOUT_NULL`, `STDERR_NULL` = výstup zahodit, `Stdio::null`).

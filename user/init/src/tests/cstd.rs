@@ -30,6 +30,9 @@ fn ctest(s: &Startup) -> TestResult {
     let own = fs.connect().map_err(|e| fail("relace fsd", e))?;
     // Kanal ke launchd: posix_spawn spousti ctest sam sebe (krok posix2).
     let launch = crate::launch::client().map_err(|e| fail("kanal ke launchd", e))?;
+    // Ridici kanal terminalu: init hraje terminal (krok termios).
+    let (tty_ours, tty_theirs) = libos::Channel::create().map_err(|e| fail("kanal terminalu", e))?;
+    let server = libos::thread::spawn("test-tty", move || tty_server(tty_ours)).map_err(|e| fail("vlakno terminalu", e))?;
     let run = run_std_app(
         s,
         "ctest",
@@ -38,14 +41,48 @@ fn ctest(s: &Startup) -> TestResult {
         vec![
             StartHandle::tagged(tag::FS, own.into_channel().into_handle()),
             StartHandle::tagged(tag::LAUNCH, launch.into_handle()),
+            StartHandle::tagged(tag::TTY, tty_theirs.into_handle()),
         ],
         Duration::from_secs(120),
     )?;
-    run.expect("ctest", &["args", "getenv", "format", "memory", "files", "errno", "posix", "threads", "time", "math", "mmap", "signal", "wchar", "posix2"])?;
+    run.expect("ctest", &["args", "getenv", "format", "memory", "files", "errno", "posix", "threads", "time", "math", "mmap", "signal", "wchar", "posix2", "termios"])?;
+    // Konec ctest zavre kanal terminalu: vlakno serveru skonci.
+    server.join(None).map_err(|e| fail("konec vlakna terminalu", e))?;
     check!(run.stdout.ends_with("ctest: hotovo\n"), "atexit v obracenem poradi a vyprazdneni pri konci");
     check!(run.stderr.contains("chyba na stderr\n"), "stderr");
     check!(run.stderr.contains("ctest perror: Invalid argument\n"), "perror");
     Ok(())
+}
+
+/// Testovaci terminal pro `ctest` (protokol `ttyproto`): rezim, velikost
+/// 24x80 (klient ji smi menit), udalost zmeny velikosti pro `SIGWINCH`.
+/// Skonci, kdyz ctest zavre kanal.
+fn tty_server(ch: libos::Channel) {
+    use ttyproto::{Request, Size, Tty};
+    let mut tty = Tty::new(Size { rows: 24, cols: 80, xpixel: 0, ypixel: 0 });
+    tty.client_resize = true;
+    let mut watchers: Vec<libos::Event> = Vec::new();
+    while let Ok(msg) = ch.read(None) {
+        let mut handles = Vec::new();
+        let out = Request::decode(&msg.data).and_then(|r| {
+            let before = tty.size;
+            let out = tty.handle(&r);
+            if out.is_ok() && r == Request::WatchSize {
+                let ev = libos::Event::create()?;
+                handles.push(ev.handle().duplicate(None)?);
+                watchers.push(ev);
+            }
+            if tty.size != before {
+                for w in &watchers {
+                    let _ = w.signal();
+                }
+            }
+            out
+        });
+        if ch.write(&ttyproto::encode_reply(out), handles).is_err() {
+            return;
+        }
+    }
 }
 
 pub const NET_TESTS: &[Test] = &[("ctest net: sockety, getaddrinfo, poll, select, epoll, accept", ctest_net)];

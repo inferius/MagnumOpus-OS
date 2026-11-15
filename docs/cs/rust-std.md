@@ -317,6 +317,11 @@ i aarch64). Spouští je služba `launchd` (`user/launchd`, protokol
   nerozšíří); manifest bez `[network]` = žádná síť ani s
   `network(true)`. Program bez manifestu (pomocný) dostane relaci sítě,
   jak ji rodič předal.
+- **Rozdíl proti `posix_spawn` v C** ([cstd](cstd.md#procesy-posix_spawn-a-waitpid)):
+  `Command` předá síť jen s `network(true)`, `posix_spawn` ji předá vždy,
+  když ji rodič má (POSIX: potomek dědí prostředí rodiče). Pravidlo
+  manifestu platí pro oba stejně: o síti aplikace s manifestem rozhoduje
+  launchd podle manifestu, ne rodič.
 - **Hledání programu:** holé jméno = registr příkazů (`[[command]]`
   v manifestech), pak `/system/bin/<jméno>` v relaci FS rodiče, pak
   initfs; absolutní cesta = soubor ve FS otevřený s právem `EXECUTE`

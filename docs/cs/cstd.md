@@ -25,10 +25,10 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
 > (sada `cstd dyn`: program PIE v C, vlákna, TLS, `dlopen` pluginu).
 > Široké znaky a locale **[ověřeno v QEMU]** (krok `wchar`, kapitola
 > [Široké znaky a locale](#široké-znaky-a-locale)). Doplněk POSIX
-> (`posix_spawn`, `waitpid`, semafory, `getifaddrs`, `statfs` ...)
+> (`posix_spawn`, `waitpid`, semafory, `termios`, `getifaddrs`, `statfs` ...)
 > **[ověřeno v QEMU]** (krok `posix2`, kapitola
 > [Doplněk POSIX](#doplněk-posix-pro-porty-a-windows-vrstvu)). Další části
-> (`termios`, signály od jiných procesů, `iconv`) **[navrženo]**, viz [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
+> (signály od jiných procesů, `iconv`) **[navrženo]**, viz [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
 
 ## Vrstvy
 
@@ -742,8 +742,8 @@ licencí Unicode-3.0 (soubor `THIRD-PARTY.md` v kořeni repozitáře).
 **[ověřeno v QEMU]** x86_64 i aarch64 (krok `posix2` testu `ctest`, sada
 `cstd`; host testy `posix_tests.rs` a `spawn_tests.rs` v `cargo test -p
 cstd`). Funkce, které chtějí porty a Wine
-nad tím, co už knihovna měla (Windows vrstva = krok 8). `termios.h` **[navrženo]** (čeká na
-rozhodnutí, viz [termios](#termios)).
+nad tím, co už knihovna měla (Windows vrstva = krok 8), a `termios.h`
+(viz [termios](#termios)).
 
 ### Procesy: `posix_spawn` a `waitpid`
 
@@ -767,8 +767,7 @@ rozhodnutí, viz [termios](#termios)).
 wchar](#procesy-locale-wchar)). `posix_spawn` a `posix_spawnp` spouští
 potomka přes launchd stejně jako `std::process::Command`
 ([Rust std](rust-std.md)): podřízený job, nová relace FS se stejnou
-identitou, relace sítě (má-li ji rodič; co smí, určí manifest potomka)
-a tři standardní proudy. Ostatní fd potomek nemá (rozhodnutí 4A), proto se
+identitou, relace sítě a tři standardní proudy. Ostatní fd potomek nemá (rozhodnutí 4A), proto se
 akce souborů vyhodnotí už v rodiči:
 
 | Akce | Výsledek |
@@ -781,6 +780,12 @@ akce souborů vyhodnotí už v rodiči:
 | `addchdir(_np)`, `addfchdir(_np)` | pracovní adresář potomka (relativní vůči předchozímu); neexistující = chyba `posix_spawn` |
 | `addclosefrom_np(n)` | zavře 0-2 od `n` |
 
+- **Síť potomka:** jako POSIX se dědí, má-li ji rodič (jinak než
+  `std::process::Command`, kde jen s `network(true)`). Aplikace s vlastním
+  manifestem ale dostane síť jen podle svého manifestu: rozhoduje launchd,
+  ne rodič (průnik relace rodiče a `[network]` manifestu, manifest bez
+  `[network]` = žádná síť). Pomocný program bez manifestu dědí relaci
+  sítě rodiče beze změny.
 - **Program:** cesta s `/` (relativní vůči adresáři potomka). U
   `posix_spawn` holý název = soubor v adresáři potomka, existuje-li;
   `posix_spawnp` hledá v `PATH` (bez proměnné `/system/bin`). Nenalezený
@@ -845,6 +850,7 @@ procesy).
 - **`asctime`, `asctime_r`, `ctime`, `ctime_r`:** formát normy C
   (`"Sun Sep 16 01:03:52 1973\n"`), rok nad 9999 = `EOVERFLOW`; buffer
   `asctime`/`ctime` je per vlákno.
+- **`ffs`, `ffsl`, `ffsll`** (`strings.h`).
 - **Relace a skupiny procesů nejsou:** proces vede vlastní relaci
   i skupinu (číslo = `getpid()`); `setsid`, `getsid`, `getpgid`, `getpgrp`
   ho vrací, `setpgid` jen „zůstat ve vlastní skupině“, jinak `EPERM`.
@@ -891,11 +897,46 @@ procesy).
 
 ### termios
 
-**[navrženo]** Terminál dnes externí programy nespouští (shell je
-vestavěný interpret `shsess`) a `isatty` znamená jen „proces má kanál
-stdio“. Návrh napojení `termios.h` na terminál (řídicí kanál terminálu
-ve startovní zprávě, protokol režimu a velikosti okna) čeká na
-rozhodnutí koordinátora; do té doby `ioctl` na terminál vrací `ENOTTY`.
+**[ověřeno v QEMU]** strana programu (krok `termios` testu `ctest` proti
+testovacímu terminálu v initu, host testy `termios_tests.rs`
+a `cargo test -p ttyproto`); strana okna terminálu (`shsess` spouští
+externí programy) **[navrženo]**.
+
+Proces spuštěný v terminálu dostane ve startovní zprávě vedle proudů
+stdin/stdout/stderr i **řídicí kanál terminálu** (štítek
+`abi::params::tag::TTY`, protokol `libs/ttyproto`). Data jdou dál proudy
+bajtů; kanál nese jen řízení:
+
+| op | Požadavek | Odpověď |
+|---|---|---|
+| `GET_MODE` 1 | - | režim (pole `struct termios`) |
+| `SET_MODE` 2 | kdy (`TCSANOW`/`TCSADRAIN`/`TCSAFLUSH`), režim | režim, který terminál skutečně nastavil |
+| `GET_SIZE` 3 | - | velikost okna (`struct winsize`) |
+| `SET_SIZE` 4 | velikost | - (okno terminálu ji klientovi měnit nedovolí: `ACCESS_DENIED`) |
+| `FLUSH` 5 | fronta | - |
+| `DRAIN` 6 | - | - |
+| `WATCH_SIZE` 7 | - | handle události, kterou terminál signalizuje při změně velikosti |
+
+- **Řádková disciplína je na straně terminálu** (rozhodnutí A): editor
+  řádku, echo a Ctrl+C (`SIGINT`) zůstávají v terminálu, který zná
+  nativní protokol okna; VT sekvence jsou jen adaptér pro převzaté
+  programy. V surovém režimu (`cfmakeraw`) posílá terminál bajty kláves
+  (šipky jako VT sekvence). Nepodporované příznaky terminál v odpovědi
+  `SET_MODE` vynuluje (zjistí je následné `tcgetattr`); linka je
+  virtuální (vždy 8 bitů bez parity, rychlost se jen uchová).
+- **cstd:** `tcgetattr`, `tcsetattr`, `cfmakeraw`, `cfget/setispeed`,
+  `cfget/setospeed`, `cfsetspeed`, `tcflush`, `tcdrain`, `tcflow`
+  a `tcsendbreak` (jen ověří terminál), `tcgetpgrp`/`tcsetpgrp`/`tcgetsid`
+  (vlastní skupina procesu), `ioctl` `TCGETS`, `TCSETS(W/F)`, `TCFLSH`,
+  `TIOCGWINSZ`, `TIOCSWINSZ`, `TIOCGPGRP`. Hodnoty a `struct termios`
+  (60 B) jako glibc.
+- **`isatty`** = fd 0-2 se stdio **a** proces má řídicí kanál terminálu;
+  kanál proudu od initu nebo roura terminál není (stdout je pak plně
+  bufferovaný jako na Linuxu). Jiný fd = `ENOTTY`.
+- **`SIGWINCH`:** první `tcgetattr` nebo `TIOCGWINSZ` požádá o událost
+  (`WATCH_SIZE`) a spustí vlákno, které po její signalizaci zavolá
+  `raise(SIGWINCH)`; obsluha běží v tom vlákně jako u časovače
+  (rozhodnutí 6A).
 
 ### Vnitřní stavba (doplněk)
 
@@ -904,8 +945,11 @@ rozhodnutí koordinátora; do té doby `ioctl` na terminál vrací `ENOTTY`.
   na potomka; systémová část `sys/os_proc.rs` nad `osrt::process`
   (`wait_any`). Host testy mají náhradní potomky (`exit:<kód>`,
   `sleep:<ms>:<kód>`) v `sys/host.rs`.
+- `cstd/src/termios.rs` (klient `ttyproto`, `ioctl` terminálu, vlákno
+  `SIGWINCH`), `osrt::tty` (řídicí kanál ze startovní zprávy); host testy
+  mají terminál v paměti (`sys/host.rs`, `ttyproto::Tty`).
 - `cstd/src/semaphore.rs`, `pthread/attr.rs`, `statfs.rs`, `ifaddrs.rs`, `ifreq.rs`;
-  `time.rs` (`asctime`, `times`), `unistd.rs` (`setsid`), `socket.rs`
+  `time.rs` (`asctime`, `times`), `unistd.rs` (`setsid`), `misc.rs` (`ffs`), `socket.rs`
   (`SOCK_RAW`, řídicí zprávy).
 - `osrt`: `fs::volume_space`, `fs::File::path`, `net::interface`,
   `process::wait_any`, `thread::spawn_on`; `libos::thread::spawn_on_stack`.

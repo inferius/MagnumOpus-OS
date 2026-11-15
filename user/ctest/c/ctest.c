@@ -22,6 +22,7 @@ int signal_test(void);
 int lock_main(const char *side, const char *dir);
 int wchar_test(const char *dir);
 int posix2_test(const char *dir);
+int termios_test(const char *dir);
 int spawn_child_main(int argc, char **argv);
 
 #define CHECK(name, cond)                                              \
@@ -163,6 +164,9 @@ int main(int argc, char **argv) {
     int p2 = dir != NULL ? posix2_test(dir) : -1;
     if (p2 != 0) fprintf(stderr, "ctest posix2: krok %d errno %d\n", p2, errno);
     CHECK("posix2", p2 == 0);
+    int tt = dir != NULL ? termios_test(dir) : -1;
+    if (tt != 0) fprintf(stderr, "ctest termios: krok %d errno %d\n", tt, errno);
+    CHECK("termios", tt == 0);
     assert(failures == 0);
     fputs("chyba na stderr\n", stderr);
     fflush(stdout);

@@ -184,8 +184,34 @@ pub fn pipe(cloexec: bool, nonblock: bool) -> R<(i32, i32)> {
     }
 }
 
+/// Terminal = stdio a proces ma ridici kanal terminalu (`osrt::tty`);
+/// samotny kanal proudu (roura od initu) terminal neni.
 pub fn isatty(fd: i32) -> R<bool> {
-    fd::is_terminal(fd).map_err(e)
+    Ok(fd::is_terminal(fd).map_err(e)? && rt::tty::available())
+}
+
+pub fn tty_available() -> bool {
+    rt::tty::available()
+}
+
+/// Pozadavek na ridicim kanalu terminalu: (odpoved, syrove handly).
+pub fn tty_call(req: &[u8]) -> R<(Vec<u8>, Vec<u32>)> {
+    rt::tty::call(req).map_err(e)
+}
+
+/// Pocka na zmenu velikosti okna (handle udalosti z `WATCH_SIZE`).
+pub fn tty_wait_resize(ev: u32) -> R<()> {
+    rt::tty::wait_resize(ev).map_err(e)
+}
+
+/// Zavre syrove handly (nepotrebne handly odpovedi).
+pub fn close_handles(h: Vec<u32>) {
+    rt::tty::close_handles(h);
+}
+
+/// `errno` pro chybu protokolu (`abi::Error`).
+pub fn abi_errno(err: abi::Error) -> crate::c_int {
+    errno::from_os(err as i32)
 }
 
 /// Absolutni cesta otevreneho souboru nebo adresare (`openat`).

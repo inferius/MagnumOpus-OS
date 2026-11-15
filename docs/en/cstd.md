@@ -27,10 +27,10 @@ Compiling C (clang, flags, protections) is described in
 > threads, TLS, `dlopen` of a plugin). Wide characters and locale
 > **[verified in QEMU]** (step `wchar`, chapter
 > [Wide characters and locale](#wide-characters-and-locale)). POSIX
-> additions (`posix_spawn`, `waitpid`, semaphores, `getifaddrs`, `statfs`
+> additions (`posix_spawn`, `waitpid`, semaphores, `termios`, `getifaddrs`, `statfs`
 > ...) **[verified in QEMU]** (step `posix2`, chapter
 > [POSIX additions](#posix-additions-for-ports-and-the-windows-layer)). Further parts
-> (`termios`, signals from other processes, `iconv`) **[designed]**, see
+> (signals from other processes, `iconv`) **[designed]**, see
 > [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
 
 ## Layers
@@ -771,8 +771,8 @@ under Unicode-3.0 (file `THIRD-PARTY.md` in the repository root).
 **[verified in QEMU]** x86_64 and aarch64 (step `posix2` of the `ctest`
 test, suite `cstd`; host tests `posix_tests.rs` and `spawn_tests.rs` in
 `cargo test -p cstd`). Functions that ports and Wine need on top of what
-the library already had (Windows layer = step 8). `termios.h`
-**[designed]** (waiting for a decision, see [termios](#termios)).
+the library already had (Windows layer = step 8), and `termios.h` (see
+[termios](#termios)).
 
 ### Processes: `posix_spawn` and `waitpid`
 
@@ -796,8 +796,7 @@ There is no `fork` in the system (the user's decision, see [Processes,
 locale, wchar](#processes-locale-wchar)). `posix_spawn` and `posix_spawnp`
 start the child through launchd exactly like `std::process::Command`
 ([Rust std](rust-std.md)): a child job, a new FS session with the same
-identity, a network session (if the parent has one; the child's manifest
-decides what it may do) and three standard streams. The child has no other
+identity, a network session and three standard streams. The child has no other
 fd (decision 4A), so file actions are evaluated in the parent:
 
 | Action | Result |
@@ -810,6 +809,13 @@ fd (decision 4A), so file actions are evaluated in the parent:
 | `addchdir(_np)`, `addfchdir(_np)` | the child's working directory (relative to the previous one); a missing one makes `posix_spawn` fail |
 | `addclosefrom_np(n)` | closes 0-2 from `n` on |
 
+- **The child's network:** inherited as in POSIX when the parent has one
+  (unlike `std::process::Command`, where only with `network(true)`). An
+  application with its own manifest, however, gets the network only from
+  its manifest: launchd decides, not the parent (the intersection of the
+  parent's session and the manifest's `[network]`; a manifest without
+  `[network]` = no network). A helper program without a manifest inherits
+  the parent's network session unchanged.
 - **Program:** a path with `/` (relative to the child's directory). With
   `posix_spawn` a bare name = a file in the child's directory if it exists;
   `posix_spawnp` searches `PATH` (without the variable `/system/bin`). A
@@ -878,6 +884,7 @@ will come with shared memory between processes (a separate task:
 - **`asctime`, `asctime_r`, `ctime`, `ctime_r`:** the C standard format
   (`"Sun Sep 16 01:03:52 1973\n"`), a year above 9999 = `EOVERFLOW`; the
   `asctime`/`ctime` buffer is per thread.
+- **`ffs`, `ffsl`, `ffsll`** (`strings.h`).
 - **No sessions or process groups:** a process leads its own session and
   group (number = `getpid()`); `setsid`, `getsid`, `getpgid`, `getpgrp`
   return it, `setpgid` only "stay in the own group", otherwise `EPERM`.
@@ -927,12 +934,46 @@ will come with shared memory between processes (a separate task:
 
 ### termios
 
-**[designed]** The terminal does not start external programs today (the
-shell is the built-in `shsess` interpreter) and `isatty` only means "the
-process has a stdio channel". The design for connecting `termios.h` to the
-terminal (a terminal control channel in the start message, a protocol for
-the mode and window size) is waiting for the coordinator's decision; until
-then `ioctl` on a terminal returns `ENOTTY`.
+**[verified in QEMU]** the program side (step `termios` of the `ctest`
+test against a test terminal in init, host tests `termios_tests.rs` and
+`cargo test -p ttyproto`); the terminal window side (`shsess` starting
+external programs) **[designed]**.
+
+A process started in a terminal gets, next to the stdin/stdout/stderr
+streams, a **terminal control channel** in its start message (tag
+`abi::params::tag::TTY`, protocol `libs/ttyproto`). Data still flows over
+the byte streams; the channel only carries control:
+
+| op | Request | Reply |
+|---|---|---|
+| `GET_MODE` 1 | - | mode (the `struct termios` fields) |
+| `SET_MODE` 2 | when (`TCSANOW`/`TCSADRAIN`/`TCSAFLUSH`), mode | the mode the terminal actually set |
+| `GET_SIZE` 3 | - | window size (`struct winsize`) |
+| `SET_SIZE` 4 | size | - (a terminal window does not let the client change it: `ACCESS_DENIED`) |
+| `FLUSH` 5 | queue | - |
+| `DRAIN` 6 | - | - |
+| `WATCH_SIZE` 7 | - | handle of an event the terminal signals when the size changes |
+
+- **The line discipline lives on the terminal side** (decision A): line
+  editor, echo and Ctrl+C (`SIGINT`) stay in the terminal, which knows the
+  native window protocol; VT sequences are only an adapter for adopted
+  programs. In raw mode (`cfmakeraw`) the terminal sends key bytes (arrows
+  as VT sequences). The terminal clears unsupported flags in the `SET_MODE`
+  reply (a following `tcgetattr` shows them); the line is virtual (always 8
+  bits without parity, the speed is only stored).
+- **cstd:** `tcgetattr`, `tcsetattr`, `cfmakeraw`, `cfget/setispeed`,
+  `cfget/setospeed`, `cfsetspeed`, `tcflush`, `tcdrain`, `tcflow` and
+  `tcsendbreak` (only check the terminal), `tcgetpgrp`/`tcsetpgrp`/
+  `tcgetsid` (the process's own group), `ioctl` `TCGETS`, `TCSETS(W/F)`,
+  `TCFLSH`, `TIOCGWINSZ`, `TIOCSWINSZ`, `TIOCGPGRP`. Values and
+  `struct termios` (60 B) like glibc.
+- **`isatty`** = fd 0-2 with stdio **and** the process has a terminal
+  control channel; a stream channel from init or a pipe is not a terminal
+  (stdout is then fully buffered as on Linux). Another fd = `ENOTTY`.
+- **`SIGWINCH`:** the first `tcgetattr` or `TIOCGWINSZ` asks for the event
+  (`WATCH_SIZE`) and starts a thread that calls `raise(SIGWINCH)` when it
+  is signalled; the handler runs in that thread like the timer's
+  (decision 6A).
 
 ### Internals (additions)
 
@@ -941,8 +982,12 @@ then `ioctl` on a terminal returns `ENOTTY`.
   a child; the system part `sys/os_proc.rs` over `osrt::process`
   (`wait_any`). Host tests have stand-in children (`exit:<code>`,
   `sleep:<ms>:<code>`) in `sys/host.rs`.
+- `cstd/src/termios.rs` (the `ttyproto` client, terminal `ioctl`, the
+  `SIGWINCH` thread), `osrt::tty` (the control channel from the start
+  message); host tests have an in-memory terminal (`sys/host.rs`,
+  `ttyproto::Tty`).
 - `cstd/src/semaphore.rs`, `pthread/attr.rs`, `statfs.rs`, `ifaddrs.rs`, `ifreq.rs`;
-  `time.rs` (`asctime`, `times`), `unistd.rs` (`setsid`), `socket.rs`
+  `time.rs` (`asctime`, `times`), `unistd.rs` (`setsid`), `misc.rs` (`ffs`), `socket.rs`
   (`SOCK_RAW`, control messages).
 - `osrt`: `fs::volume_space`, `fs::File::path`, `net::interface`,
   `process::wait_any`, `thread::spawn_on`; `libos::thread::spawn_on_stack`.
