@@ -580,6 +580,12 @@ impl<D: BlockDevice> Fs<D> {
     }
 
     /// Revize objektu za handlem.
+    /// Ma handle aspon pristup `need` (`access::*`)? (fsd `OPEN_STREAM`:
+    /// proud smi jen to, co handle klienta.)
+    pub fn check_access_h(&mut self, h: Handle, need: u8) -> Result<()> {
+        self.handle_object(h, need).map(|_| ())
+    }
+
     pub fn revision_h(&mut self, h: Handle) -> Result<Revision> {
         let (o, i) = self.handle_object(h, 0)?;
         Ok(Revision { dataset: o.ds, oid: o.oid, generation: i.generation, version: i.version })

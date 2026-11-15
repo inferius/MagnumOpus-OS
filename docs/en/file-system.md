@@ -1754,6 +1754,23 @@ groups stay. A system recipe cannot be narrowed. Otherwise `ACCESS_DENIED`.
 | 31 | `CONNECT` | flags u32 (1 = control, only from a control session) | new session (handle) |
 | 118 | `REOPEN` | dataset u64, oid u64, generation u64, access u8, share u8 | handle u64, `Stat`, `Revision` (like `OPEN`) |
 | 119 | `POSIX_LOCK` | handle u64, command u8 (`TEST` 0, `SET` 1, `SET_WAIT` 2, `UNLOCK` 3), class u8 (`FCNTL` 0, `FLOCK` 1), exclusive u8, from u64, length u64 (0 = to the end) | result u8: `DONE` 0, `CONFLICT` 1 + exclusive u8, from u64, length u64; `DEADLOCK` 2 |
+| 120 | `OPEN_STREAM` | handle u64, mode u8 (`READ` 0, `WRITE` 1, `APPEND` 2), position u64 | byte-stream channel (handle in the message) |
+
+**`OPEN_STREAM`** **[verified in QEMU]** (suite `cstd`, step `posix2`: the
+output of a `posix_spawn` child into a file and 200 000 bytes of a file on
+its stdin): a file as a byte stream for a child's stdin/stdout (the process
+parameter block only carries stream channels,
+[cstd](cstd.md#processes-posix_spawn-and-waitpid)). The stream may only do
+what the client's handle may (read / write); fsd opens its own handle of
+the same object (`reopen`), so the stream survives closing the client's
+session. The fsd main loop serves it next to the sessions
+(`user/fsd/src/stream.rs`): reading sends 60 KiB chunks until the channel
+queue is full, then retries after 2 ms (a channel has no "writable"
+signal) and closes the channel at the end of the file; writing takes the
+channel's messages and writes them from the position (`APPEND` at the end).
+At most 16 streams; sessions and streams together at most 62 (the
+`OBJECT_WAIT_MANY` limit of 64 without the control and task channels). An
+fsd restart ends the streams.
 
 Sessions with a lease today: init (control), `fwd` (`/config`). The sessions
 for `dnsd`, `ntpd` (certificate store) and `revocd` have no lease yet -

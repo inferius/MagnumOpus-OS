@@ -74,6 +74,22 @@ pub mod op {
     /// konce) -> vysledek u8 (`DONE`, `CONFLICT` + druh u8, start u64,
     /// delka u64; `DEADLOCK`). Vlastnik `fcntl` = relace, `flock` = handle.
     pub const POSIX_LOCK: u32 = 119;
+    /// Soubor jako proud bajtu (stdin/stdout potomka `posix_spawn`):
+    /// handle u64, rezim u8 ([`stream_mode`]), pozice u64 -> kanal proudu
+    /// (handle ve zprave). fsd si otevre vlastni handle tehoz souboru,
+    /// takze proud prezije zavreni relace klienta; konci zavrenim kanalu
+    /// (zapis) nebo koncem souboru (cteni). Restart fsd proud ukonci.
+    pub const OPEN_STREAM: u32 = 120;
+}
+
+/// Rezimy `OPEN_STREAM`.
+pub mod stream_mode {
+    /// fsd posila obsah od pozice do konce souboru, pak kanal zavre.
+    pub const READ: u8 = 0;
+    /// Data prijata z kanalu zapisuje od pozice dal.
+    pub const WRITE: u8 = 1;
+    /// Data prijata z kanalu pripojuje na konec souboru.
+    pub const APPEND: u8 = 2;
 }
 
 /// Prikazy, tridy a vysledky `POSIX_LOCK`.
@@ -418,6 +434,16 @@ impl FsClient {
         })?;
         self.handles.lock().update(h, |r| r.locked = true);
         Ok(())
+    }
+
+    /// Soubor jako proud bajtu (viz [`op::OPEN_STREAM`]). Bez opakovani po
+    /// restartu sluzby (proud by zacal znovu).
+    pub fn open_stream(&self, h: u64, mode: u8, offset: u64) -> Result<Channel> {
+        let fsd = self.resolve(h)?;
+        let mut w = Self::req(op::OPEN_STREAM);
+        w.u64(fsd).u8(mode).u64(offset);
+        let (_, mut handles) = self.call_with_handles(w)?;
+        handles.pop().map(Channel::from_handle).ok_or(Error::Corrupted)
     }
 
     /// Zamek POSIX (viz [`op::POSIX_LOCK`]).

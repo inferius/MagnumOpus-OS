@@ -27,6 +27,7 @@ mod serve_data;
 mod serve_hist;
 mod serve_perm;
 mod serve_v2;
+mod stream;
 mod tasks;
 
 use alloc::vec::Vec;
@@ -162,6 +163,8 @@ fn main(startup: Startup) -> i64 {
         tasks: tasks::FsTasks::default(),
         orphan_cleanup: restart.map(|_| time::deadline_after(ORPHAN_GRACE)),
         posix: fs::posix_lock::PosixLocks::new(),
+        streams: Vec::new(),
+        sessions_open: 0,
     };
     if let Some(g) = restart {
         println!("fsd: nova instance po padu (generace {g}), sirotky uklidi za {} s", ORPHAN_GRACE.as_secs());
@@ -246,6 +249,11 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
                 deadline = deadline.min(w.deadline);
             }
         }
+        // Cteci proud s plnou frontou: zkusit znovu za chvili.
+        if svc.streams.iter().any(stream::Stream::blocked) {
+            deadline = deadline.min(time::now().saturating_add(stream::RETRY));
+        }
+        svc.sessions_open = sessions.len();
         let mask = Signals::READABLE | Signals::PEER_CLOSED;
         let mut items: Vec<(&libos::Handle, Signals)> =
             sessions.iter().map(|s| (s.channel.handle(), mask)).collect();
@@ -254,6 +262,10 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
         items.push((control.handle(), Signals::READABLE));
         if let Some(t) = &svc.tasks.chan {
             items.push((t.handle(), Signals::READABLE));
+        }
+        // Proudy (pocitaji se do limitu cekani; relaci + proudu <= 64).
+        for s in &svc.streams {
+            items.push((s.chan.handle(), s.signals()));
         }
         let mut quiet = false;
         match libos::wait_many(&items, Some(deadline)) {
@@ -286,6 +298,10 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
                 break;
             }
         }
+        if running && pump_streams(svc) {
+            idle = false;
+            changed = true;
+        }
         if running {
             background(svc, &mut next_commit, &mut idle, &mut changed);
             history(svc, &mut next_history);
@@ -304,6 +320,26 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
     for mut s in sessions {
         svc.close_session(&mut s);
     }
+}
+
+/// Kolo vsech proudu; skoncene zavre. `true` = neco se zapsalo do souboru.
+fn pump_streams(svc: &mut Service) -> bool {
+    let Some(fs) = svc.fs.as_mut() else { return false };
+    let mut wrote = false;
+    let mut i = 0;
+    while i < svc.streams.len() {
+        match stream::pump(fs, &mut svc.streams[i]) {
+            Ok(w) => {
+                wrote |= w;
+                i += 1;
+            }
+            Err(()) => {
+                let s = svc.streams.remove(i);
+                let _ = fs.close(s.h);
+            }
+        }
+    }
+    wrote
 }
 
 /// Zpracuje vsechny cekajici pozadavky relace `i`. `Some(true)` = neco
@@ -356,7 +392,10 @@ fn serve_session(svc: &mut Service, sessions: &mut Vec<Session>, i: usize) -> Op
         }
         let (reply, handles) = match new_session {
             // Prilis mnoho relaci: novy kanal zahodit, klientovi chyba.
-            Some(_) if sessions.len() >= MAX_SESSIONS => (fsproto::reply(Err(Error::NoResources)), Vec::new()),
+            // Relace a proudy sdili limit OBJECT_WAIT_MANY (WAIT_BUDGET).
+            Some(_) if sessions.len() >= MAX_SESSIONS || sessions.len() + svc.streams.len() >= stream::WAIT_BUDGET => {
+                (fsproto::reply(Err(Error::NoResources)), Vec::new())
+            }
             Some(s) => {
                 sessions.push(s);
                 (reply, handles)
