@@ -48,8 +48,13 @@ fi
 
 # Wine pro x86_64-unknown-magnumopus: DLL PE clangem, unixova cast mos-cc.
 B=$W/build-$WINE_KEY
-if [ ! -f "$B/Makefile" ]; then
-    rm -rf "$B" && mkdir -p "$B" && cd "$B"
+# configure zjistuje hlavicky sysrootu (HAVE_SYS_UN_H ...): zmena obsahu
+# hlavicek = znovu configure na miste (objekty zustanou, make prelozi jen
+# soubory zavisle na config.h).
+SYSKEY=$(cd "$MOS_SYSROOT" && find include -type f | LC_ALL=C sort | xargs cat | sha256sum | cut -c1-16)
+if [ ! -f "$B/Makefile" ] || [ "$(cat "$B/.sysroot-key" 2>/dev/null)" != "$SYSKEY" ]; then
+    [ -f "$B/Makefile" ] || rm -rf "$B"
+    mkdir -p "$B" && cd "$B"
     "$S/configure" --host=x86_64-unknown-magnumopus --with-wine-tools="$T" \
         --enable-archs=x86_64 --with-mingw=clang --disable-tests \
         --without-x --without-freetype --without-fontconfig --without-gstreamer --without-wayland \
@@ -60,6 +65,7 @@ if [ ! -f "$B/Makefile" ]; then
         --without-udev --without-unwind --without-xinerama --without-ffmpeg --without-opencl \
         CC=mos-cc AR=llvm-ar RANLIB=llvm-ranlib STRIP=llvm-strip x86_64_CC=clang \
         > "$W/logs/configure.log" 2>&1 || { tail -40 "$W/logs/configure.log"; exit 1; }
+    echo "$SYSKEY" > "$B/.sysroot-key"
 fi
 cd "$B"
 if [ "${WINE_KEEP_GOING:-0}" = 1 ]; then
