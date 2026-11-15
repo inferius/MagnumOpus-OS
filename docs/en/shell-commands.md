@@ -11,7 +11,7 @@
 - **Tasks:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Session and safety:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Help:** [`help`](#help), [`explain`](#explain)
-- **System:** [`audio`](#audio), [`povoleni`](#povoleni), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **System:** [`audio`](#audio), [`vzhled`](#vzhled), [`povoleni`](#povoleni), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Files
 
@@ -1808,6 +1808,49 @@ audio tone 440 -d 500ms
 **Needs:** the sound service (audiod)
 
 **Errors:** `NOT_FOUND`, `NOT_SUPPORTED`
+
+
+### `vzhled`
+
+appearance: svetly (light), tmavy (dark), auto (by the sun); kontrast ano|ne, pohyb ano|ne; status without arguments
+
+Switches the appearance of the whole environment: light, dark or automatic by sunrise and sunset in the time zone. `kontrast ano` turns on high contrast (Accessibility, overrides light and dark), `pohyb ano` reduces motion (switch without animation). The choice is stored with the account and applies at once and after the next login. With `--system` it changes the login screen choice for everyone; that is an administration action confirmed by a person with the administration role in a system dialog.
+
+```shell
+vzhled [what] [value] [-s]
+```
+
+Full name `system-appearance` · input: nothing · output: table (schema, kontrast, omezit_pohyb)
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `[what]` | text |  | svetly, tmavy, auto, kontrast or pohyb |
+| `[value]` | text |  | ano or ne (for kontrast and pohyb) |
+| `-s, --system` | switch |  | the system choice (login screen) |
+
+Dark appearance.
+
+```shell
+vzhled tmavy
+```
+
+Light by day, dark at night.
+
+```shell
+vzhled auto
+```
+
+High contrast.
+
+```shell
+vzhled kontrast ano
+```
+
+**Needs:** a user session (with `--system` an administrator's confirmation)
+
+**Errors:** `SH_ARGS`, `ACCESS_DENIED`, `CANCELED`, `NOT_SUPPORTED`
+
+**Related:** [`audio`](#audio)
 
 
 ### `povoleni`

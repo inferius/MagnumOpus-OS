@@ -368,10 +368,17 @@ window.MO_TOKENS = {
   "ease_standard": "0.2 0 0 1",
   "ease_enter": "0.05 0.7 0.1 1",
   "ease_exit": "0.3 0 1 1",
+  "ease_in_out": "0.42 0 0.58 1",
   "reduced": 90,
   "unresponsive_ms": 3000,
   "badge_flash_ms": 3000,
-  "dialog_guard_ms": 300
+  "dialog_guard_ms": 300,
+  "caret_blink": 530,
+  "caret_blink_stop": 10000,
+  "search_delay": 150,
+  "autoscroll": 50,
+  "theme": 600,
+  "theme_auto": 3000
  },
  "opacity": {
   "bar": 0.9,

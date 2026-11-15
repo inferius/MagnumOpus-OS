@@ -4,6 +4,7 @@
 mod async_tasks;
 mod bare;
 mod convert;
+mod appearance;
 mod audio;
 mod doc;
 mod draft;

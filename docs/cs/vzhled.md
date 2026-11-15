@@ -162,10 +162,101 @@ ikony a fokus alespoň 3 : 1 (1.4.11). Ve vysokém kontrastu text 7 : 1
 tokenů; generátor je ověří pro všechny tři motivy (teď 102 z 102
 dvojic v pořádku) a při nesplnění skončí chybou.
 
-**Výchozí motiv podle denní doby:** světlý od východu do západu slunce
-v nastaveném časovém pásmu (systém zná čas i pásmo, viz
-[Reálný čas](cas.md)), jinak tmavý. Přechod je prolnutí 240 ms
-a odloží se, dokud uživatel píše (nejdéle 2 minuty).
+### Světlý, tmavý a automatický vzhled
+
+**[implementováno]** **[ověřeno v QEMU]** (x86_64)
+
+Uživatel volí **Světlý**, **Tmavý** nebo **Automaticky** (výchozí);
+vysoký kontrast a Omezit pohyb jsou v Přístupnosti a mají přednost
+(kontrast přebije světlý i tmavý, s Omezit pohyb je změna okamžitá).
+
+| Kde | Jak |
+|---|---|
+| lišta | ikona Vzhled (slunce, měsíc, kontrast) otevře kartu se třemi volbami; zvolená má fajfku, pod nimi stav („Teď světlý, podle východu a západu slunce“) |
+| shell | `vzhled tmavy`, `vzhled svetly`, `vzhled auto`, `vzhled kontrast ano`, `vzhled pohyb ano`; bez argumentu stav ([Příkazy shellu](prikazy-shellu.md#vzhled)) |
+| přihlašovací obrazovka | systémová volba, výchozí Automaticky; mění ji `vzhled --system ...` jako úkon správy (`ELEVATE` `APPEARANCE_SYSTEM`, potvrdí člověk s rolí správy v systémovém dialogu, viz [Účty](ucty.md#správa-počítače)) |
+
+**Automaticky = podle slunce.** Světlý od východu do západu slunce
+v místě časového pásma (`tz::Zone::place`: souřadnice města, podle
+kterého se pásmo jmenuje; poloha počítače to není a systém ji nezjišťuje),
+výpočet NOAA s chybou do pár minut (`libs/comp/src/sun.rs`). Proč ne
+pevně 7-19 h: v Praze je v prosinci tma už v 16 h a v červnu světlo
+do 21 h, pevné hodiny by půl roku nesedly. Pevné hodiny 7-19 platí jen
+bez místa (pásmo `UTC+2`) a za polárním kruhem, kde slunce celý den
+nevyjde nebo nezapadne (polární noc by jinak znamenala tmavý motiv
+i v poledne). Automatická změna počká, dokud uživatel píše (2 s od
+poslední klávesy, nejdéle 2 minuty); ruční volba se rozběhne hned.
+
+**Plynulý přechod.** Kompozitor při dalším snímku uloží obsah displeje
+jako starý snímek, přepne režim (aplikace hned dostanou konečný `THEME`
+a překreslí se jednou, rozmazání pod lištou se spočítá jednou pro nový
+stav) a nový stav skládá normálně, jen poškozená místa, do vlastního
+bufferu. Každý snímek pak oba snímky smíchá po pixelech **v lineárním
+světle** (gamma tabulka sRGB -> 12 bitů lineárně -> sRGB, `libs/comp/src/fade.rs`):
+střed přechodu není tmavý ani „špinavý“ jako při míchání hodnot sRGB.
+Křivka `ease_in_out` (pomalý začátek i konec), ruční přepnutí za
+`motion.theme` = 600 ms, automatické při východu a západu slunce pomalu
+za `motion.theme_auto` = 3 s (nemá rušit). Během přechodu se dá normálně
+pracovat: kompozitor má vstup vždy první a okno, které se mezitím
+překreslí (klik, psaní), se do nového snímku promítne hned (QEMU test
+kliká do okna uprostřed přechodu). GPU backend zatím přepne hned;
+míchání shaderem ve `vkcomp` je ve frontě.
+
+Proč ne prolínání tokenů snímek po snímku: první verze míchala barvy
+tokenů v OKLab a skládala celou obrazovku každý snímek; v QEMU to dalo
+asi 11 snímků/s (rozmazání pod lištou a obraz plochy se počítaly pořád
+znovu). Míchání hotových snímků stojí jeden průchod obrazovkou bez
+ohledu na to, co na ní je.
+
+**Měření** (revize `cd8b6524`; QEMU 11.1 TCG na Windows 11, x86_64,
+4 CPU, release, 1280×800, test „volba vzhledu: plynulý přechod barev“
+v sadě `gui`; hostitel: `cargo test -p comp --release bench_theme_fade
+-- --ignored`):
+
+| Kde | Snímek přechodu | Z toho míchání | Snímků/s |
+|---|---|---|---|
+| QEMU TCG, 1280×800 | 15,6-21,4 ms (medián ~18,5 ms); první snímek 129 ms (složení nového stavu a rozmazání) | 15,6-21,4 ms | ~54 |
+| QEMU TCG, 1920×1080 (odhad ×2,03 pixelů) | ~38 ms | ~37 ms | ~26 |
+| hostitel nativně, 1920×1080 | 4,3 ms | 3,7 ms | ~230 |
+
+Celý přechod 600 ms v QEMU: 20 snímků za 592 ms. Cíl 30 snímků/s při
+1080p v TCG těsně nesplněn (~26); TCG je emulace, na skutečném HW je
+míchání podle měření na hostiteli asi 8× rychlejší. Zkoušená varianta se
+všemi třemi kanály v jednom `u64` (dvě násobení místo šesti) byla v TCG
+pomalejší (20-22 ms).
+
+| Kdo | Jak často | Proč |
+|---|---|---|
+| kompozitor | každý snímek smíchá starý a nový snímek; nový stav skládá jen v poškozených místech | jeden průchod obrazovkou, cena nezávisí na obsahu |
+| aplikace (`libs/ui`, terminál) | jednou: konečný `THEME` hned na začátku | překreslení okna je drahé; plynulost dělá kompozitor |
+
+Aplikace s vlastním vzhledem (přehrávač, prohlížeč obrázků) najde
+cílový režim v kontextu okna (`ui::Context::mode`) a barvy si zvolí
+sama; prvky knihovny jdou z motivu samy.
+
+**Uložení.** Init ukládá volbu do `/system/config/vzhled/<uid>.toml`
+(uživatel) a `system.toml` (přihlašovací obrazovka); adresář patří
+systému bez grantů, takže volba jde použít i před odemčením šifrovaného
+domova. Po přihlášení init pošle kompozitoru volbu uživatele dřív než
+`session open` (jeden přechod z přihlašovací obrazovky), po pádu
+kompozitoru všechny znovu. Změnu z lišty hlásí kompozitor initu na
+kanálu `launcher` a init ji uloží jen přihlášenému uživateli.
+
+```text
+schema = auto        # svetly | tmavy | auto
+kontrast = ne        # ano | ne
+omezit_pohyb = ne    # ano | ne
+```
+
+Testy: `libs/theme` (`pref_text_roundtrip_and_resolve`), `libs/comp`
+(`tests/appearance.rs`: východ a západ v Praze, polární noc, míchání
+snímků v lineárním světle, překreslení aplikace během přechodu,
+Omezit pohyb, systémová a uživatelská volba, karta v liště, odklad při
+psaní), `libs/shlang` (`tests/appearance.rs`), QEMU sada `gui`
+(„volba vzhledu: plynulý přechod barev“: odznak projde mezibarvami,
+okno aplikace se překreslí tmavě; uložení jen pro systém). Snímky
+obrazovky všech aplikací ve světlém, tmavém a kontrastním režimu dělá
+test „vzhled podle návrhu“ (`target/shots/`).
 
 ### Typografie
 
@@ -430,7 +521,7 @@ Obsah zleva doprava:
 | **Okna** | připnuté a běžící aplikace; tečka pod ikonou = běží, delší akcentová = aktivní; klik = aktivovat / minimalizovat |
 | **Agent** | když agent AI jedná, korálová pilulka „Agent ovládá Soubory“ s tlačítkem **Zastavit** |
 | **Úlohy** | počet běžících úloh a štítek agenta; klik otevře správce úloh |
-| **Stav** | síť, hlasitost, oznámení s počtem nových |
+| **Stav** | síť, hlasitost, vzhled (světlý / tmavý / automaticky, viz [Světlý, tmavý a automatický vzhled](#světlý-tmavý-a-automatický-vzhled)), oznámení s počtem nových |
 | **Hodiny** | čas a datum (tabulkové číslice) |
 
 Ve svislé poloze se popisky skryjí a zůstanou ikony s tooltipem; hodiny
@@ -1053,8 +1144,10 @@ budou jen služby mimo GUI (`taskd`, klony v `fsproto`, konfigurace).
   cestou a rozmazání se neověří. Rozmazání stojí GPU čas úměrný ploše:
   proto jen pod lištou, nabídkami a dialogem, v poloviční velikosti
   a jen když se pod ním něco změnilo.
-- **Motiv podle denní doby** potřebuje polohu (východ a západ slunce).
-  Bez polohy se použije pevný čas 7:00-20:00 podle pásma.
+- **Motiv podle denní doby** bere místo z časového pásma (město, podle
+  kterého se pásmo jmenuje), ne polohu počítače: na okraji velkého pásma
+  se východ může lišit o desítky minut. Bez místa (pevný posun) a za
+  polárním kruhem platí pevně 7-19 h.
 - **Napodobení systémového dialogu v celoobrazovkové aplikaci** nejde
   vyloučit jen vzhledem; ochrana je fráze, fyzický vstup a Ctrl+Alt+Del
   (stejné riziko jako v návrhu 6c).

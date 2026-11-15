@@ -125,6 +125,8 @@ pub struct Bar {
     pub net: Option<Rect>,
     pub volume: Option<Rect>,
     pub bell: Rect,
+    /// Vzhled (svetly, tmavy, automaticky; `appearance.rs`).
+    pub look: Rect,
     pub clock: Option<Rect>,
     /// Oddelovace (x).
     pub seps: Vec<i32>,
@@ -337,6 +339,9 @@ impl Comp {
         // Oznameni (zatim zastupna ikona), hlasitost, sit.
         right -= item as i32;
         bar.bell = Rect::new(right, y, item, item);
+        right -= gap;
+        right -= item as i32;
+        bar.look = Rect::new(right, y, item, item);
         right -= gap;
         if self.status.volume.is_some() {
             right -= item as i32;
@@ -594,6 +599,7 @@ impl Comp {
             hover: self.input.hover,
             launchable: &self.launchable,
             dnd: self.do_not_disturb(),
+            look_icon: self.look_icon(),
             pressed: self.input.sys_press.map(|(k, ..)| k).filter(|&k| self.sys_pressed(k)),
         };
         let t0 = self.prof.start();
@@ -995,6 +1001,8 @@ struct BarInfo<'a> {
     launchable: &'a [(String, String)],
     /// Nerusit (zvonek preskrtnuty).
     dnd: bool,
+    /// Ikona vzhledu (slunce, mesic, kontrast).
+    look_icon: &'static str,
     /// Drzeny prvek listy (stav "stisknuto", akce az pri pusteni).
     pressed: Option<crate::input::SysKey>,
 }
@@ -1124,6 +1132,7 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
         // Pri nahravani mikrofon v barve nebezpeci (a text v bublince).
         (bar.volume, if info.status.capturing.is_empty() { "volume" } else { "mic" }, info.status.volume.is_some_and(|(v, m)| m || v == 0) && info.status.capturing.is_empty()),
         (Some(bar.bell), if info.dnd { "bell-off" } else { "bell" }, false),
+        (Some(bar.look), info.look_icon, false),
     ];
     for (k, (r, name, off)) in icons.into_iter().enumerate() {
         let Some(r) = r else { continue };

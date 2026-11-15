@@ -127,6 +127,11 @@ pub trait Env {
     fn log_level(&mut self, _target: &str, _level: &str) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Volba vzhledu (prikaz `vzhled`, `shlang::host::Host::appearance`);
+    /// vychozi = relace ji nema.
+    fn appearance(&mut self, _system: bool, _change: &str) -> Result<String, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Povoleni aplikaci (prikaz `povoleni`); vychozi = relace je nema.
     fn permissions(&mut self, _app: &str, _perm: &str) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
@@ -562,6 +567,10 @@ impl Host for SessionHost<'_> {
 
     fn log_level(&mut self, target: &str, level: &str) -> Result<String, abi::Error> {
         self.env.log_level(target, level)
+    }
+
+    fn appearance(&mut self, system: bool, change: &str) -> Result<String, abi::Error> {
+        self.env.appearance(system, change)
     }
 
     fn permissions(&mut self, app: &str, perm: &str) -> Result<String, abi::Error> {

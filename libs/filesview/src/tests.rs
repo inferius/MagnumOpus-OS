@@ -546,3 +546,31 @@ fn denied_listing_is_not_empty_folder() {
     m.update(Msg::Go(String::from("/home/nikdo")));
     assert!(names(&ui_for(&m, 1200), Role::Label).iter().any(|l| l == "Složku nikdo nejde otevřít: neexistuje."));
 }
+
+/// Prepnuti rezimu: okno se prekresli barvami motivu (svetly, tmavy,
+/// kontrast). Snimky do `target/shots/soubory-*.png`.
+#[test]
+fn theme_modes_redraw_window() {
+    let m = fm();
+    let (w, h) = (900u32, 700u32);
+    let mut last = None;
+    for (name, th) in [
+        ("svetly", theme::Theme::builtin(theme::Mode::Light)),
+        ("tmavy", theme::Theme::builtin(theme::Mode::Dark)),
+        ("kontrast", theme::Theme::builtin(theme::Mode::Contrast)),
+    ] {
+        let mut u = ui::Ui::new(ui::Look::ui_fonts(), w, h);
+        u.look.theme = th.clone();
+        u.refresh(&m);
+        let mut px = vec![0u32; (w * h) as usize];
+        let mut c = gfx::Canvas::new(&mut px, w, h, w).unwrap();
+        u.draw(&mut c, 0);
+        let corner = px[((h - 2) * w + w - 2) as usize];
+        assert_eq!(corner, th.color.surface, "{name}: pozadi okna");
+        assert_ne!(Some(corner), last, "{name}: jiny nez predchozi rezim");
+        last = Some(corner);
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/shots");
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(dir.join(alloc::format!("soubory-{name}.png")), gfx::png::encode(&px, w, h, w));
+    }
+}

@@ -87,3 +87,28 @@ fn curves() {
     }
     let _: String = t.font.mono;
 }
+
+#[test]
+fn pref_text_roundtrip_and_resolve() {
+    let p = Pref::default();
+    assert_eq!(p.scheme, Scheme::Auto);
+    assert_eq!(p.resolve(true), Mode::Light);
+    assert_eq!(p.resolve(false), Mode::Dark);
+    let q = Pref { scheme: Scheme::Dark, contrast: true, reduce_motion: true };
+    assert_eq!(q.resolve(true), Mode::Contrast);
+    assert_eq!(Pref::parse(&q.to_text()), Ok(q));
+    assert_eq!(Pref::from_words(&q.to_words()), Some(q));
+    assert_eq!(Pref::parse("schema = svetly\r\n# x\r\n\r\n"), Ok(Pref { scheme: Scheme::Light, ..Pref::default() }));
+    assert_eq!(Pref::parse("schema = modry").unwrap_err().line, 1);
+    assert_eq!(Pref::parse("\nbarva = ne").unwrap_err().line, 2);
+    assert_eq!(Pref::from_words("auto ne"), None);
+    assert_eq!(Theme::builtin(Mode::Light).motion.theme, 600);
+    assert_eq!(Theme::builtin(Mode::Light).motion.theme_auto, 3000);
+    let mut p = Pref::default();
+    p.apply("schema tmavy").unwrap();
+    p.apply("kontrast ano").unwrap();
+    p.apply("pohyb ano").unwrap();
+    assert_eq!(p, Pref { scheme: Scheme::Dark, contrast: true, reduce_motion: true });
+    assert!(p.apply("schema").is_err());
+    assert!(p.apply("barva modra").is_err());
+}

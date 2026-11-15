@@ -69,3 +69,51 @@ fn bench_frame() {
         ms(top)
     );
 }
+
+fn host_ns() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
+}
+
+/// Prechod rezimu (`fade.rs`) pri 1920x1080: cas snimku po castech
+/// behem prechodu.
+/// `cargo test -p comp --release bench_theme_fade -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn bench_theme_fade() {
+    let (w, h) = (1920u32, 1080u32);
+    let mut t = T::new();
+    t.c.resize(w, h, t.now);
+    t.c.prof.set_clock(Some(host_ns));
+    for i in 0..3 {
+        let c = t.client(&alloc::format!("app{i}"));
+        t.window(c, Mode::Standard, RED);
+    }
+    let mut px = vec![0u32; (w * h) as usize];
+    let mut tick = |t: &mut T, px: &mut [u32]| {
+        let mut c = Canvas::new(px, w, h, w).unwrap();
+        t.now += 16_000_000;
+        let r = t.c.tick(t.now, &mut c);
+        t.c.presented(t.now);
+        r
+    };
+    tick(&mut t, &mut px);
+    t.c.session_opened(1, 1000, "a", t.now);
+    t.c.set_appearance_user(1000, theme::Pref { scheme: theme::Scheme::Dark, ..Default::default() }, t.now);
+    t.c.prof.take(1);
+    let (mut n, start) = (0u64, std::time::Instant::now());
+    let mut worst = std::time::Duration::ZERO;
+    while t.c.theme_animating() {
+        let f = std::time::Instant::now();
+        tick(&mut t, &mut px);
+        worst = worst.max(f.elapsed());
+        n += 1;
+    }
+    let all = start.elapsed();
+    std::println!(
+        "prolnuti {w}x{h}: {n} snimku, prumer {:.1} ms, nejhorsi {:.1} ms; casti: {}",
+        ms(all) / n as f64,
+        ms(worst),
+        t.c.prof.take(n)
+    );
+}

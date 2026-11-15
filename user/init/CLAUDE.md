@@ -9,6 +9,7 @@ První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`,
 - `src/launch.rs` - spouštěcí služba `launchd` (std::process): start, klientské kanály (`launch::client`, štítek `LAUNCH`).
 - `src/files.rs` - `files-copy` pro každou relaci a handly okna Soubory; `src/open.rs` - služba „otevři cestu“ (asociace `[open]`, kanál pro každou relaci, volání akce přes kompozitor, spuštění aplikace v relaci).
 - `src/supervisor/` - `mod.rs` smyčka (`Supervisor::step`), `lifecycle.rs` restart a závislosti, `leases.rs` lístky (vč. `ADOPT` s limity a `queue_lease` pro lístky vydané mimo kolo supervisoru), `service.rs` adaptér služby; `src/libd.rs` - služba knihoven (adaptér `LibdService`, poskytovatel relací pro děti initu).
+- `src/appearance.rs` - volba vzhledu: `/system/config/vzhled/{system,<uid>}.toml` (jen system, bez grantů), předání kompozitoru (`appearance ...` před `session open`, po pádu v `give_accounts`), změna z lišty (kanál `launcher`), příkaz `vzhled` (`powerproto::Request::Appearance`; systémová volba jen přes `ELEVATE` `APPEARANCE_SYSTEM` ve vlákně, grant ověří na `grants`).
 - `src/tests/mod.rs` - `SUITES` (jména sad pro `--only`), makra `check!` / `check_eq!`; jeden soubor na oblast (`gui.rs`, `net.rs`, `fs.rs`, ...).
 
 ## Invarianty

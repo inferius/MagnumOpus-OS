@@ -307,6 +307,9 @@ impl Comp {
             inputproto::event::InputClass::Synthetic => guiproto::window::input_class::SYNTHETIC,
         };
         let mods = r.mods;
+        if matches!(r.event, Event::Key { .. } | Event::Text(_)) {
+            self.appearance_key(now);
+        }
         match r.event {
             Event::Motion { dx, dy } => {
                 if self.pointer_locked_motion(dx, dy, mods, syn, r.time) {
@@ -755,8 +758,12 @@ impl Comp {
             return Some(SysKey::FsExit(g));
         }
         if self.flyout_rect().is_some_and(|r| r.contains(x, y)) {
-            let rows = matches!(self.flyout, Some(crate::flyout::Flyout::Apps | crate::flyout::Flyout::AppWindows(_)));
-            return self.flyout_row_at(y).filter(|_| rows).map(SysKey::FlyoutRow);
+            let rows = match self.flyout {
+                Some(crate::flyout::Flyout::Apps | crate::flyout::Flyout::AppWindows(_)) => usize::MAX,
+                Some(crate::flyout::Flyout::Look) => theme::Scheme::ALL.len(),
+                _ => 0,
+            };
+            return self.flyout_row_at(y).filter(|&i| i < rows).map(SysKey::FlyoutRow);
         }
         if self.panel_rect().contains(x, y) {
             let bar = self.bar_layout();
@@ -769,7 +776,7 @@ impl Comp {
             if bar.launcher.contains(x, y) {
                 return Some(SysKey::Launcher);
             }
-            for (k, r) in [bar.net, bar.volume, Some(bar.bell)].into_iter().enumerate() {
+            for (k, r) in [bar.net, bar.volume, Some(bar.bell), Some(bar.look)].into_iter().enumerate() {
                 if r.is_some_and(|r| r.contains(x, y)) {
                     return Some(SysKey::BarIcon(k as u8));
                 }
@@ -880,6 +887,15 @@ impl Comp {
         if self.flyout_rect().is_some_and(|r| r.contains(px, py)) {
             let f = self.flyout;
             self.trace(time, format_args!("{button:?} {act} na {px},{py}: panel {f:?}"));
+            // Vzhled: radek = schema (zbytek karty jsou informace).
+            if f == Some(crate::flyout::Flyout::Look)
+                && button == Button::Left
+                && pressed
+                && let Some(&s) = self.flyout_row_at(py).and_then(|i| theme::Scheme::ALL.get(i))
+            {
+                self.choose_scheme(s, now);
+                return;
+            }
             // Okna aplikace: radek = okno, posledni = nove okno.
             if let Some(crate::flyout::Flyout::AppWindows(g)) = f
                 && button == Button::Left
@@ -912,6 +928,7 @@ impl Comp {
                 (bar.net, crate::flyout::Flyout::Net),
                 (bar.volume, crate::flyout::Flyout::Volume),
                 (Some(bar.bell), crate::flyout::Flyout::Bell),
+                (Some(bar.look), crate::flyout::Flyout::Look),
             ]
             .into_iter()
             .find(|(r, _)| r.is_some_and(|r| r.contains(px, py)))

@@ -554,6 +554,7 @@ dependencies = [
  "gfx",
  "guiproto",
  "inputproto",
+ "libm",
  "theme",
  "ui",
  "vkcomp",
@@ -1110,6 +1111,7 @@ dependencies = [
  "guiproto",
  "inputproto",
  "openwith",
+ "theme",
  "tz",
  "ui",
 ]
@@ -3016,6 +3018,7 @@ dependencies = [
  "gfx",
  "guiproto",
  "taskproto",
+ "theme",
  "ui",
 ]
 

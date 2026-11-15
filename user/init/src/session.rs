@@ -161,6 +161,16 @@ pub fn take_self(session: u64) -> Option<Channel> {
     SESSIONS.lock().iter_mut().find(|u| u.id == session)?.own.take()
 }
 
+/// Vrati kanal self pujceny initem (ukon spravy za relaci, `vzhled
+/// --system`); relace mezitim skoncila = kanal se zahodi.
+pub fn put_self(session: u64, ch: Channel) {
+    if let Some(u) = SESSIONS.lock().iter_mut().find(|u| u.id == session)
+        && u.own.is_none()
+    {
+        u.own = Some(ch);
+    }
+}
+
 /// Je relace zamcena?
 pub fn locked(session: u64) -> Option<bool> {
     SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.locked)

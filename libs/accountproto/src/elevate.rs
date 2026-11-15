@@ -21,6 +21,10 @@ pub mod action {
     pub const ROLE_SET: u32 = 4;
     /// Prvni ukon jine sluzby (do [`LAST`]).
     pub const FIRST_SERVICE: u32 = 5;
+    /// Systemova volba vzhledu (prihlasovaci obrazovka): parametry = text
+    /// volby (`theme::Pref::to_words`, napr. `tmavy ne ne`). Sluzba ukonu
+    /// je init (prikaz `vzhled --system`).
+    pub const APPEARANCE_SYSTEM: u32 = 5;
     pub const LAST: u32 = 15;
 }
 

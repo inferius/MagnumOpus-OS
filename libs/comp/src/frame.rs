@@ -132,7 +132,7 @@ impl Comp {
         let mut at = |v: u64| t = Some(t.map_or(v, |x| x.min(v)));
         let animating = self.clients.values().any(|c| c.layers.values().any(|l| !l.anim.is_empty()));
         let frames = self.clients.values().any(|c| c.frame_wanted);
-        if !self.frame.in_flight && (!self.dirty.is_empty() || animating || frames) {
+        if !self.frame.in_flight && (!self.dirty.is_empty() || animating || frames || self.theme_animating()) {
             at(self.next_tick_time(now));
         }
         for g in &self.frame.groups {
@@ -142,6 +142,9 @@ impl Comp {
             at(d);
         }
         if let Some(d) = self.fs_esc_due() {
+            at(d);
+        }
+        if let Some(d) = self.appearance_wakeup(now) {
             at(d);
         }
         if let Some(d) = self.tip_due() {
@@ -199,6 +202,7 @@ impl Comp {
     pub fn timers(&mut self, now: u64) {
         self.max_menu_timer(now);
         self.fs_esc_timer(now);
+        self.appearance_timer(now);
         self.tip_timer(now);
         self.pointer_notice_timer(now);
         self.input_now = now;
@@ -274,6 +278,10 @@ impl Comp {
     /// Vraci obdelniky, ktere je treba poslat displeji (`None` = nic se
     /// neslozilo; pak sluzba nema cekat na `PRESENTED`).
     pub fn tick(&mut self, now: u64, canvas: &mut gfx::Canvas<'_>) -> Option<Vec<Rect>> {
+        // Prechod rezimu barev: michani stareho a noveho snimku (`fade.rs`).
+        if self.theme_animating() {
+            return self.tick_fading(now, canvas);
+        }
         self.tick_with(now, |c, rects| c.compose(canvas, rects, now))
     }
 
@@ -390,6 +398,7 @@ impl Comp {
 
     pub(crate) fn is_settled(&self) -> bool {
         self.dirty.is_empty()
+            && !self.theme_animating()
             && !self.frame.in_flight
             && self.frame.groups.is_empty()
             && self.windows.values().all(|w| w.configure.is_none())

@@ -482,7 +482,8 @@ nastavení se svou identitou z manifestu **[navrženo]**.
 | 2 `ACCOUNT_DELETE` | uid |
 | 3 `ACCOUNT_RESET_PASSWORD` | uid (šifrovaný domov se tím neotevře) |
 | 4 `ROLE_SET` | uid, zapnout |
-| 5-15 | ovladače, aktualizace, disky, firewall, čas - doplní jejich služby |
+| 5 `APPEARANCE_SYSTEM` | volba vzhledu přihlašovací obrazovky (text `tmavy ne ne`); služba úkonu je init (`vzhled --system`), grant ověří na kanálu `grants` |
+| 6-15 | ovladače, aktualizace, disky, firewall, čas - doplní jejich služby |
 
 Proč tak: potvrzuje se konkrétní úkon, který člověk vidí (stejný princip
 jako [API akcí](gui.md#api-akcí)); kdo dělá delší správu, si dialogy na

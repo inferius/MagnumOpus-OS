@@ -17,6 +17,7 @@ extern crate alloc;
 
 mod accounts;
 mod agent;
+mod appearance;
 mod apps;
 mod audio;
 mod certs;

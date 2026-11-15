@@ -397,6 +397,8 @@ impl Comp {
             self.greeter.busy = false;
             self.greeter.clear();
         }
+        // Jina relace na obrazovce (nebo prihlaseni) = jina volba vzhledu.
+        self.appearance_changed(now, false);
         self.damage_all();
     }
 

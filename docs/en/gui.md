@@ -475,7 +475,7 @@ gives the values for light, dark and high-contrast modes: colors
 every required contrast pair from `[contrast]` exactly like
 `design/tools/build-tokens.mjs`. The default theme is embedded at build
 time; `Tokens::parse` reads any other text (user themes later). The
-compositor switches modes with `theme light|dark|contrast`.
+compositor switches modes at once with `theme light|dark|contrast` (tests); it gets the user's choice with a smooth transition and the time-of-day mode through `appearance` (see [Appearance](appearance.md#light-dark-and-automatic-appearance)).
 
 **Windows** (`design/okna.html`): 40 px title (`size.title_h`), 18 px
 radius (`radius.window`), 1 px `border` frame, a shadow by state
@@ -1229,7 +1229,8 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 | `inspect` | - | `ok` + inspection channel |
 | `status` | - | `ok clients=1 windows=2 frames=.. presented=.. dialogs=0 secure=0` |
 | `tasks <running> <agent>` | - | `ok` (task icon in the panel) |
-| `theme light\|dark\|contrast` | - | `ok` (color mode from the tokens) |
+| `theme light\|dark\|contrast` | - | `ok` (color mode from the tokens, at once) |
+| `appearance system <choice>`, `appearance user <uid> <choice>` | - | `ok`; choice `schema kontrast omezit_pohyb`, e.g. `auto ne ne` (smooth transition, by time of day) |
 | `sources [net] [audio]` | network session (`INFO`), audio channel | `ok` (bar state) |
 | `apps` + lines `<id>\t<name>\t<single\|multi>` | - | empty (launchable apps in the bar) |
 | `dnd-fullscreen on\|off` | - | empty (Do not disturb in fullscreen) |

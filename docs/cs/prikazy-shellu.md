@@ -11,7 +11,7 @@
 - **Úlohy:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Relace a bezpečnost:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Nápověda:** [`help`](#help), [`explain`](#explain)
-- **Systém:** [`audio`](#audio), [`povoleni`](#povoleni), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **Systém:** [`audio`](#audio), [`vzhled`](#vzhled), [`povoleni`](#povoleni), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Soubory
 
@@ -1808,6 +1808,49 @@ audio tone 440 -d 500ms
 **Potřebuje:** zvuková služba (audiod)
 
 **Chyby:** `NOT_FOUND`, `NOT_SUPPORTED`
+
+
+### `vzhled`
+
+vzhled: svetly, tmavy, auto (podle slunce); kontrast ano|ne, pohyb ano|ne; bez argumentu stav
+
+Přepne vzhled celého prostředí: světlý, tmavý nebo automaticky podle východu a západu slunce v časovém pásmu. `kontrast ano` zapne vysoký kontrast (Přístupnost, přebije světlý i tmavý), `pohyb ano` omezí pohyb (přechod bez animace). Volba se uloží k účtu a platí hned i po dalším přihlášení. S `--system` mění volbu přihlašovací obrazovky pro všechny; to je úkon správy a potvrdí ho člověk s rolí správy v systémovém dialogu.
+
+```shell
+vzhled [what] [value] [-s]
+```
+
+Plné jméno `system-appearance` · vstup: nic · výstup: tabulka (schema, kontrast, omezit_pohyb)
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[what]` | text |  | svetly, tmavy, auto, kontrast nebo pohyb |
+| `[value]` | text |  | ano nebo ne (u kontrast a pohyb) |
+| `-s, --system` | přepínač |  | systémová volba (přihlašovací obrazovka) |
+
+Tmavý vzhled.
+
+```shell
+vzhled tmavy
+```
+
+Světlý přes den, tmavý v noci.
+
+```shell
+vzhled auto
+```
+
+Vysoký kontrast.
+
+```shell
+vzhled kontrast ano
+```
+
+**Potřebuje:** relace uživatele (s `--system` potvrzení správce)
+
+**Chyby:** `SH_ARGS`, `ACCESS_DENIED`, `CANCELED`, `NOT_SUPPORTED`
+
+**Souvisí:** [`audio`](#audio)
 
 
 ### `povoleni`

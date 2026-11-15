@@ -101,6 +101,10 @@ pub struct Context {
     pub min_hit: u32,
     /// Velikost textu v promile.
     pub text_scale: u32,
+    /// Rezim barev systemu (cilovy i behem prechodu). Aplikace s vlastnim
+    /// vzhledem (prehravac, obrazky) podle nej voli sve barvy; barvy prvku
+    /// knihovny jdou samy z `Look`.
+    pub mode: theme::Mode,
 }
 
 impl Context {
@@ -127,6 +131,7 @@ impl Context {
             tile: Tile::Floating,
             min_hit: 32,
             text_scale: 1000,
+            mode: theme::Mode::Light,
         }
     }
 

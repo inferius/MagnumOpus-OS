@@ -204,6 +204,26 @@ pub const DOCS: &[Doc] = &[
         needs_en: "the sound service (audiod)",
     },
     Doc {
+        name: "vzhled",
+        short_en: "appearance: svetly (light), tmavy (dark), auto (by the sun); kontrast ano|ne, pohyb ano|ne; status without arguments",
+        long_cs: "Přepne vzhled celého prostředí: světlý, tmavý nebo automaticky podle východu a západu slunce v časovém pásmu. `kontrast ano` zapne vysoký kontrast (Přístupnost, přebije světlý i tmavý), `pohyb ano` omezí pohyb (přechod bez animace). Volba se uloží k účtu a platí hned i po dalším přihlášení. S `--system` mění volbu přihlašovací obrazovky pro všechny; to je úkon správy a potvrdí ho člověk s rolí správy v systémovém dialogu.",
+        long_en: "Switches the appearance of the whole environment: light, dark or automatic by sunrise and sunset in the time zone. `kontrast ano` turns on high contrast (Accessibility, overrides light and dark), `pohyb ano` reduces motion (switch without animation). The choice is stored with the account and applies at once and after the next login. With `--system` it changes the login screen choice for everyone; that is an administration action confirmed by a person with the administration role in a system dialog.",
+        args: &[
+            Arg { name: "what", default: "", cs: "svetly, tmavy, auto, kontrast nebo pohyb", en: "svetly, tmavy, auto, kontrast or pohyb" },
+            Arg { name: "value", default: "", cs: "ano nebo ne (u kontrast a pohyb)", en: "ano or ne (for kontrast and pohyb)" },
+            Arg { name: "system", default: "", cs: "systémová volba (přihlašovací obrazovka)", en: "the system choice (login screen)" },
+        ],
+        examples: &[
+            Ex { code: "vzhled tmavy", cs: "Tmavý vzhled.", en: "Dark appearance.", check: Skip },
+            Ex { code: "vzhled auto", cs: "Světlý přes den, tmavý v noci.", en: "Light by day, dark at night.", check: Skip },
+            Ex { code: "vzhled kontrast ano", cs: "Vysoký kontrast.", en: "High contrast.", check: Skip },
+        ],
+        related: &["audio"],
+        errors: &["SH_ARGS", "ACCESS_DENIED", "CANCELED", "NOT_SUPPORTED"],
+        needs_cs: "relace uživatele (s `--system` potvrzení správce)",
+        needs_en: "a user session (with `--system` an administrator's confirmation)",
+    },
+    Doc {
         name: "povoleni",
         short_en: "app permissions: list without arguments, `povoleni odvolat <app> [mikrofon]` revokes",
         long_cs: "Bez argumentu vypíše uložená rozhodnutí uživatele o povoleních aplikací (dnes mikrofon). `povoleni odvolat <aplikace>` rozhodnutí smaže: aplikace se příště zeptá znovu.",

@@ -14,6 +14,16 @@ fn pozadavky_tam_a_zpet() {
 }
 
 #[test]
+fn vzhled_tam_a_zpet() {
+    for q in [
+        Request::Appearance { system: false, change: String::new() },
+        Request::Appearance { system: true, change: String::from("schema tmavy") },
+    ] {
+        assert_eq!(Request::decode(&q.encode()), Ok(q.clone()));
+    }
+}
+
+#[test]
 fn odpovedi_tam_a_zpet() {
     roundtrip(Reply::Ok);
     roundtrip(Reply::Failed(Error::NotSupported));

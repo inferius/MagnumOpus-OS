@@ -87,6 +87,9 @@ impl Service {
                 format!("Nastavit nové heslo účtu {}{}", self.display(uid), if enc { ". Šifrovaný domov se tím neotevře." } else { "" })
             }
             Ok(Params::RoleSet { uid, on }) => format!("{} roli správy: {}", if on { "Dát" } else { "Odebrat" }, self.display(uid)),
+            _ if act == action::APPEARANCE_SYSTEM => {
+                format!("Změnit vzhled přihlašovací obrazovky pro všechny: {}", String::from_utf8_lossy(params))
+            }
             _ => format!("Úkon {act} jiné služby (parametry {} B)", params.len()),
         }
     }

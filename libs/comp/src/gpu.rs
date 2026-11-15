@@ -88,6 +88,10 @@ impl Comp {
     /// Jako `tick`, ale snimek slozi GPU: operace jdou do `sink`, casti
     /// kreslene CPU vznikaji v `scratch` (platno velikosti snimku).
     pub fn tick_gpu(&mut self, now: u64, scratch: &mut Canvas<'_>, sink: &mut dyn GpuSink) -> Option<Vec<Rect>> {
+        // Prechod rezimu na GPU zatim hned (michani shaderem je ve fronte).
+        if let Some((mode, _)) = self.appearance.fade_pending.take() {
+            self.set_mode(mode);
+        }
         self.tick_with(now, |c, rects| c.compose_gpu(scratch, sink, rects, now))
     }
 

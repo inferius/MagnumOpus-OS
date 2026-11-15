@@ -21,9 +21,11 @@
 
 extern crate alloc;
 
+pub mod appearance;
 pub mod clipboard;
 pub mod diag;
 pub mod dialog;
+mod fade;
 pub mod flyout;
 pub mod fullscreen;
 pub mod launch;
@@ -42,6 +44,7 @@ pub mod tooltip;
 pub mod winsize;
 pub mod services;
 pub mod style;
+mod sun;
 mod sysui;
 
 #[cfg(test)]
@@ -94,6 +97,9 @@ pub enum Out {
     Dialog(PeerId, DialogReply),
     Caller(PeerId, CallerReply),
     Inspect(PeerId, InspectReply),
+    /// Uzivatel zmenil volbu vzhledu v liste: init ji ulozi
+    /// (`appearance user <uid> <slova>` na kanal `prefs`).
+    Appearance { uid: u64, pref: theme::Pref },
     /// Konec bezpecne obrazovky: poslat `release` na kanal `secure`.
     SecureRelease,
     /// Rozhodnuti o novem vstupnim zarizeni: `trust <id>` / `reject <id>`
@@ -188,6 +194,10 @@ pub struct Comp {
     pub(crate) tip_hidden_at: u64,
     /// Drzeny Ctrl pri otevrene palete (Ctrl+Enter).
     pub(crate) palette_ctrl: bool,
+    /// Volba vzhledu a prolnuti rezimu (`appearance.rs`).
+    pub(crate) appearance: appearance::Appearance,
+    /// Tabulky gamma pro prechod rezimu (spocitaji se pri prvnim prechodu).
+    pub(crate) fade_lut: Option<Box<fade::Lut>>,
 }
 
 impl Comp {
@@ -247,6 +257,8 @@ impl Comp {
             tip_hover: None,
             tip_shown: None,
             tip_hidden_at: 0,
+            appearance: appearance::Appearance::default(),
+            fade_lut: None,
         };
         c.damage_all();
         c
