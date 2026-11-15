@@ -1694,6 +1694,17 @@ fs.set_acl("/home/alice/shared/private", Some(Acl {
 `Stat` additionally has the owner u64 and the caller's effective rights u8.
 `OPEN` knows the `EXECUTE` access (8).
 
+**In the shell:** the [`acl`](shell-commands.md#acl) command works over
+`PERMISSIONS` and `SET_ACL` of the terminal user's session: a listing
+(owner, your level, inheritance, own and inherited grants), adding and
+removing a grant. The levels are `rights` masks, ascending and the same as the Permissions tab in Files:
+View = `VIEW`, Run = `RUN`, Edit = `EDIT | EXECUTE`, Manage = everything;
+any other mask shows as Custom with the list of rights. The descriptor is written whole (read, change,
+write), fsd enforces the Manage right. Init supplies user names from the
+account list (powerproto `Accounts`), the shell knows the groups
+`everyone` and `users` itself, other groups only by number so far.
+**[verified in QEMU]**
+
 ### Recovery after an fsd crash
 
 > **Change from v3 (phase 3):** a new chapter. `fsd` runs under the init

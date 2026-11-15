@@ -14,6 +14,7 @@
 
 extern crate alloc;
 
+pub mod acl;
 pub mod ast;
 pub mod complete;
 pub mod doc;

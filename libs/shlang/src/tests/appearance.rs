@@ -1,4 +1,5 @@
-//! Prikaz `vzhled` (vlastni hostitel se zaznamem pozadavku).
+//! Prikazy `theme` a `permissions` (vlastni hostitel se zaznamem
+//! pozadavku): anglicka slova prikazu se prevedou do ulozeneho tvaru.
 
 use crate::eval::Interp;
 use crate::host::{Fs, Host};
@@ -9,6 +10,7 @@ use crate::vfs::mem::MemFs;
 struct LookHost {
     fs: MemFs,
     calls: Vec<(bool, String)>,
+    perms: Vec<(String, String)>,
     emitted: Vec<Value>,
 }
 
@@ -33,15 +35,19 @@ impl Host for LookHost {
     fn appearance(&mut self, system: bool, change: &str) -> Result<String, abi::Error> {
         self.calls.push((system, change.into()));
         match change {
-            "kontrast moc" => Err(abi::Error::InvalidArgs),
             "schema tmavy" => Ok("tmavy ne ne".into()),
+            "kontrast ano" => Ok("auto ano ne".into()),
             _ => Ok("auto ne ne".into()),
         }
+    }
+    fn permissions(&mut self, app: &str, perm: &str) -> Result<String, abi::Error> {
+        self.perms.push((app.into(), perm.into()));
+        if app.is_empty() { Ok("org.example.rec\tmicrophone\tallow\norg.example.b\tmicrophone\tdeny\n".into()) } else { Ok("odvoláno".into()) }
     }
 }
 
 fn run(line: &str) -> (LookHost, Result<(), String>) {
-    let mut h = LookHost { fs: MemFs::new(), calls: Vec::new(), emitted: Vec::new() };
+    let mut h = LookHost { fs: MemFs::new(), calls: Vec::new(), perms: Vec::new(), emitted: Vec::new() };
     h.fs.mkdir("/home").unwrap();
     let mut it = Interp::new(Box::new(Builtins), "/home");
     let r = it.run_line(&mut h, line).result.map(|_| ()).map_err(|e| e.code.clone());
@@ -49,27 +55,55 @@ fn run(line: &str) -> (LookHost, Result<(), String>) {
 }
 
 #[test]
-fn vzhled_prepne_a_vypise_stav() {
-    let (h, r) = run("vzhled tmavy");
+fn theme_prepne_a_vypise_stav() {
+    let (h, r) = run("theme dark");
     assert_eq!(r, Ok(()));
     assert_eq!(h.calls, vec![(false, String::from("schema tmavy"))]);
     let v = h.emitted.last().expect("vypis stavu");
-    assert_eq!(v.field("schema"), Some(Value::str("tmavy")));
-    let (h, _) = run("vzhled");
+    assert_eq!(v.field("scheme"), Some(Value::str("dark")));
+    assert_eq!(v.field("contrast"), Some(Value::Bool(false)));
+    let (h, _) = run("theme");
     assert_eq!(h.calls, vec![(false, String::new())]);
-    let (h, _) = run("vzhled kontrast ano --system");
+    let (h, _) = run("theme contrast on --system");
     assert_eq!(h.calls, vec![(true, String::from("kontrast ano"))]);
-    let (h, _) = run("vzhled pohyb ne");
+    assert_eq!(h.emitted.last().and_then(|v| v.field("contrast")), Some(Value::Bool(true)));
+    let (h, _) = run("theme reduce-motion off");
     assert_eq!(h.calls, vec![(false, String::from("pohyb ne"))]);
+    let (h, _) = run("theme light");
+    assert_eq!(h.calls, vec![(false, String::from("schema svetly"))]);
 }
 
 #[test]
-fn vzhled_spatne_argumenty() {
-    for line in ["vzhled modry", "vzhled kontrast", "vzhled tmavy ano"] {
+fn theme_spatne_argumenty() {
+    // Ceska slova uz nejsou (bez aliasu).
+    for line in ["theme blue", "theme contrast", "theme dark on", "theme tmavy", "theme contrast ano", "theme contrast maybe"] {
         let (h, r) = run(line);
         assert_eq!(r.err().as_deref(), Some("SH_ARGS"), "{line}");
-        assert!(h.calls.is_empty());
+        assert!(h.calls.is_empty(), "{line}");
     }
-    let (_, r) = run("vzhled kontrast moc");
-    assert_eq!(r.err().as_deref(), Some("SH_ARGS"));
+    let (_, r) = run("vzhled tmavy");
+    assert_eq!(r.err().as_deref(), Some("SH_UNKNOWN"));
+}
+
+#[test]
+fn permissions_vypis_je_tabulka_a_odvolani() {
+    let (h, r) = run("permissions");
+    assert_eq!(r, Ok(()));
+    assert_eq!(h.perms, vec![(String::new(), String::new())]);
+    let Some(Value::List(rows)) = h.emitted.last() else { panic!("tabulka: {:?}", h.emitted) };
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].field("app"), Some(Value::str("org.example.rec")));
+    assert_eq!(rows[0].field("permission"), Some(Value::str("microphone")));
+    assert_eq!(rows[0].field("allowed"), Some(Value::Bool(true)));
+    assert_eq!(rows[1].field("allowed"), Some(Value::Bool(false)));
+    let (h, r) = run("permissions revoke org.example.rec");
+    assert_eq!(r, Ok(()));
+    assert_eq!(h.perms, vec![(String::from("org.example.rec"), String::from("microphone"))]);
+    for line in ["permissions revoke", "permissions odvolat x", "permissions revoke x mikrofon"] {
+        let (h, r) = run(line);
+        assert_eq!(r.err().as_deref(), Some("SH_ARGS"), "{line}");
+        assert!(h.perms.is_empty(), "{line}");
+    }
+    let (_, r) = run("povoleni");
+    assert_eq!(r.err().as_deref(), Some("SH_UNKNOWN"));
 }

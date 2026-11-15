@@ -283,7 +283,7 @@ systémová relace (lišta, shell, init) jako dosud.
   aplikace do té doby čeká;
 - rozhodnutí platí po zbytek relace; „Povolit“ a „Nepovolit“ se ukládají
   trvale po uživateli a aplikaci ([Účty](ucty.md#povolení-aplikací)),
-  odvolání příkazem shellu `povoleni odvolat <aplikace>`;
+  odvolání příkazem shellu `permissions revoke <aplikace>`;
 - bez služby účtů (nebo bez kompozitoru pro dialog) nahrávání pro
   aplikace není.
 

@@ -180,8 +180,8 @@ instant).
 | Where | How |
 |---|---|
 | bar | the Appearance icon (sun, moon, contrast) opens a card with three choices; the chosen one has a check mark, the state is below ("Now light, by sunrise and sunset") |
-| shell | `vzhled tmavy`, `vzhled svetly`, `vzhled auto`, `vzhled kontrast ano`, `vzhled pohyb ano`; without arguments the state ([Shell commands](shell-commands.md#vzhled)) |
-| login screen | the system choice, Automatic by default; `vzhled --system ...` changes it as an administration action (`ELEVATE` `APPEARANCE_SYSTEM`, confirmed by a person with the administration role in a system dialog, see [Accounts](accounts.md#administering-the-computer)) |
+| shell | `theme dark`, `theme light`, `theme auto`, `theme contrast on`, `theme reduce-motion on`; without arguments the state ([Shell commands](shell-commands.md#theme)) |
+| login screen | the system choice, Automatic by default; `theme --system ...` changes it as an administration action (`ELEVATE` `APPEARANCE_SYSTEM`, confirmed by a person with the administration role in a system dialog, see [Accounts](accounts.md#administering-the-computer)) |
 
 **Automatic = by the sun.** Light from sunrise to sunset at the place of
 the time zone (`tz::Zone::place`: the coordinates of the city the zone is

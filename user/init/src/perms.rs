@@ -1,4 +1,4 @@
-//! Povoleni aplikaci z shellu (prikaz `povoleni`, docs/cs/ucty.md, kapitola
+//! Povoleni aplikaci z shellu (prikaz `permissions`, docs/cs/ucty.md, kapitola
 //! Povoleni aplikaci): init se pta sluzby uctu jmenem uzivatele relace
 //! terminalu (kanal `permissions-admin`). Shell s `accountd` primo
 //! nemluvi a cizi rozhodnuti nevidi.
@@ -30,8 +30,10 @@ fn call(m: &ChanMsg) -> Result<Vec<u8>> {
     }
 }
 
-/// Prikaz `povoleni` relace `session`: `app` prazdne = vypis, jinak
-/// odvolani `perm` aplikace `app`. Vraci text pro terminal.
+/// Prikaz `permissions` relace `session`: `app` prazdne = vypis, jinak
+/// odvolani `perm` (slovo shellu, napr. `microphone`) aplikace `app`.
+/// Vypis: radek na rozhodnuti `aplikace\tpovoleni\tallow|deny` (shell
+/// z nej udela tabulku), prazdny text = zadne rozhodnuti.
 pub fn shell(session: Option<u64>, app: &str, perm: &str) -> Result<String> {
     let uid = session.and_then(crate::session::uid).ok_or(Error::AccessDenied)?;
     for_uid(uid, app, perm)
@@ -41,16 +43,40 @@ pub fn shell(session: Option<u64>, app: &str, perm: &str) -> Result<String> {
 pub fn for_uid(uid: u64, app: &str, perm: &str) -> Result<String> {
     if app.is_empty() {
         let list = decode_entries(&call(&ChanMsg::List { uid })?)?;
-        if list.is_empty() {
-            return Ok(String::from("Žádná uložená povolení."));
-        }
         let mut s = String::new();
         for e in list {
-            s.push_str(&format!("{}\t{}\t{}\n", e.app_id, e.perm.name(), if e.allow { "povoleno" } else { "zamítnuto" }));
+            s.push_str(&format!("{}\t{}\t{}\n", e.app_id, shell_word(e.perm), if e.allow { "allow" } else { "deny" }));
         }
         return Ok(s);
     }
-    let p = Perm::from_name(perm).ok_or(Error::InvalidArgs)?;
+    let p = from_shell_word(perm).ok_or(Error::InvalidArgs)?;
     call(&ChanMsg::Revoke { uid, app_id: String::from(app), perm: p })?;
     Ok(format!("Povolení {perm} pro {app} odvoláno (aplikace se příště zeptá znovu)."))
+}
+
+/// Ucty lidi pro jmena v prikazu `acl`: radek na ucet
+/// `uid\tjmeno\tzobrazovane jmeno`. Stejny seznam jako na prihlasovaci
+/// obrazovce (kanal `login`, `LIST`), bez tajemstvi.
+pub fn accounts() -> Result<String> {
+    let login = accountproto::client::Login(crate::accounts::channel("login")?);
+    let mut s = String::new();
+    for a in login.list()? {
+        s.push_str(&format!("{}\t{}\t{}\n", a.uid, a.name, a.display));
+    }
+    Ok(s)
+}
+
+/// Jmeno povoleni v prikazu shellu (anglicky jako vsechna jmena prikazu
+/// a voleb; ulozeny tvar `Perm::name` zustava).
+fn shell_word(p: Perm) -> &'static str {
+    match p {
+        Perm::Microphone => "microphone",
+    }
+}
+
+fn from_shell_word(s: &str) -> Option<Perm> {
+    match s {
+        "microphone" => Some(Perm::Microphone),
+        _ => None,
+    }
 }

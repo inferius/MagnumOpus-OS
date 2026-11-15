@@ -173,8 +173,8 @@ vysoký kontrast a Omezit pohyb jsou v Přístupnosti a mají přednost
 | Kde | Jak |
 |---|---|
 | lišta | ikona Vzhled (slunce, měsíc, kontrast) otevře kartu se třemi volbami; zvolená má fajfku, pod nimi stav („Teď světlý, podle východu a západu slunce“) |
-| shell | `vzhled tmavy`, `vzhled svetly`, `vzhled auto`, `vzhled kontrast ano`, `vzhled pohyb ano`; bez argumentu stav ([Příkazy shellu](prikazy-shellu.md#vzhled)) |
-| přihlašovací obrazovka | systémová volba, výchozí Automaticky; mění ji `vzhled --system ...` jako úkon správy (`ELEVATE` `APPEARANCE_SYSTEM`, potvrdí člověk s rolí správy v systémovém dialogu, viz [Účty](ucty.md#správa-počítače)) |
+| shell | `theme dark`, `theme light`, `theme auto`, `theme contrast on`, `theme reduce-motion on`; bez argumentu stav ([Příkazy shellu](prikazy-shellu.md#theme)) |
+| přihlašovací obrazovka | systémová volba, výchozí Automaticky; mění ji `theme --system ...` jako úkon správy (`ELEVATE` `APPEARANCE_SYSTEM`, potvrdí člověk s rolí správy v systémovém dialogu, viz [Účty](ucty.md#správa-počítače)) |
 
 **Automaticky = podle slunce.** Světlý od východu do západu slunce
 v místě časového pásma (`tz::Zone::place`: souřadnice města, podle

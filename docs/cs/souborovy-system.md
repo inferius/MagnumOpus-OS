@@ -1643,6 +1643,17 @@ fs.set_acl("/home/alice/sdilene/soukrome", Some(Acl {
 `Stat` má navíc vlastníka u64 a účinná práva volajícího u8. `OPEN` zná
 přístup `EXECUTE` (8).
 
+**V shellu:** příkaz [`acl`](prikazy-shellu.md#acl) je nad `PERMISSIONS`
+a `SET_ACL` relace uživatele terminálu: výpis (vlastník, vaše úroveň,
+dědění, vlastní i zděděné granty), přidání a odebrání grantu. Úrovně jsou
+masky `rights`, vzestupně a stejně jako karta Oprávnění v Souborech:
+Zobrazit = `VIEW`, Spouštět = `RUN`, Upravovat = `EDIT | EXECUTE`,
+Spravovat = vše; jiná maska se ukáže jako Vlastní s výčtem práv. Popis se
+zapisuje celý (přečíst, změnit, zapsat), právo Spravovat vynucuje fsd.
+Jména uživatelů dodá init ze seznamu účtů (powerproto `Accounts`), známé
+skupiny `everyone` a `users` zná shell sám, ostatní skupiny zatím jen
+číslem. **[ověřeno v QEMU]**
+
 ### Obnova po pádu fsd
 
 > **Změna proti v3 (fáze 3):** nová kapitola. `fsd` běží pod supervisorem
