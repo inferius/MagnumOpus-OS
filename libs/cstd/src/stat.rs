@@ -54,6 +54,10 @@ pub fn masked(mode: u32) -> u16 {
 
 /// `st_mode` z druhu a prav.
 pub fn mode_of(s: &Stat) -> u32 {
+    // Odkaz nic neprava: 0777 jen jako zobrazeni (prava jsou na cili).
+    if s.kind == Kind::Symlink {
+        return S_IFLNK | 0o777;
+    }
     if let Some(m) = s.mode {
         return type_bits(s.kind) | u32::from(m);
     }
@@ -139,11 +143,11 @@ pub unsafe extern "C" fn stat(path: *const c_char, out: *mut stat) -> c_int {
     fill(sys::stat(unsafe { c_bytes(path) }), out)
 }
 
-/// Symlinky FS zatim nevytvari, `lstat` = `stat`.
+/// `lstat`: odkaz samotny (bez nasledovani posledni slozky).
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn lstat(path: *const c_char, out: *mut stat) -> c_int {
-    // SAFETY: kontrakt C.
-    unsafe { stat(path, out) }
+    // SAFETY: retezec C.
+    fill(sys::lstat(unsafe { c_bytes(path) }), out)
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]

@@ -61,6 +61,7 @@ pub fn open(path: &[u8], o: &OpenFlags) -> R<i32> {
             create: o.create && !o.excl,
             create_new: o.create && o.excl,
             mode: o.mode,
+            nofollow: o.nofollow,
         };
         let f = File::open(path, &opts).map_err(e)?;
         // Adresar otevreny jen pro cteni je v POSIX povoleny (fdopendir).
@@ -171,6 +172,30 @@ pub fn stat(path: &[u8]) -> R<Stat> {
     rt::fs::stat_path(path).map(|s| stat_of(&s)).map_err(e)
 }
 
+pub fn lstat(path: &[u8]) -> R<Stat> {
+    rt::fs::lstat_path(path).map(|s| stat_of(&s)).map_err(e)
+}
+
+/// Cil odkazu; neni odkaz = `EINVAL` (POSIX).
+pub fn readlink(path: &[u8]) -> R<Vec<u8>> {
+    rt::fs::read_link(path).map(String::into_bytes).map_err(|err| match err {
+        rt::Error::WrongType => errno::EINVAL,
+        other => e(other),
+    })
+}
+
+pub fn symlink(target: &[u8], link: &[u8]) -> R<()> {
+    if target.is_empty() {
+        return Err(errno::ENOENT);
+    }
+    rt::fs::symlink(target, link).map_err(e)
+}
+
+/// Kanonicka cesta (odkazy vyresi fsd).
+pub fn realpath(path: &[u8]) -> R<Vec<u8>> {
+    rt::fs::realpath(path).map(String::into_bytes).map_err(e)
+}
+
 /// Velikost svazku: (velikost bloku, bloku, volnych bloku).
 pub fn volume_space() -> R<(u32, u64, u64)> {
     rt::fs::volume_space().map_err(e)
@@ -253,7 +278,7 @@ pub fn fd_path(fd: i32) -> R<Vec<u8>> {
 
 /// Absolutni normalizovana cesta (`.`, `..`, pracovni adresar).
 pub fn abs_path(path: &[u8]) -> R<Vec<u8>> {
-    rt::env::resolve(path).map(String::into_bytes).map_err(e)
+    rt::env::resolve_lexical(path).map(String::into_bytes).map_err(e)
 }
 
 pub fn list_dir(fd: i32) -> R<Vec<Entry>> {

@@ -341,7 +341,7 @@ a linkuje s `--eh-frame-hdr`; dynamická část má `lib/crtdso.o` se skrytým
   `strdup`, `strndup`, `strcasecmp`, `strerror_r`, `qsort`, `bsearch`,
   `rand`, `div`, `atol`, rodina `scanf`, `getpwuid` (uživatel z `USER`
   a `HOME`), `getuid` a spol. (identita relace FS, viz [Sockety AF_UNIX](#sockety-af_unix)), `fchown` a `utimes` bez účinku,
-  `readlink`/`symlink`/`link` (symlinky FS zatím nejsou), `ioctl`
+  `readlink`/`readlinkat`/`symlink`/`symlinkat` (odkazy následuje fsd ve jmenném prostoru relace, [Symbolické odkazy](souborovy-system.md#symbolické-odkazy); `lstat`, `fstatat(AT_SYMLINK_NOFOLLOW)`, `open(O_NOFOLLOW)` = `ELOOP` na odkaz, `realpath` přes fsd), `link` (`ENOTSUP`), `ioctl`
   (`ENOTTY`), `setlocale`/`localeconv` (viz [Široké znaky a locale](#široké-znaky-a-locale)), `uname`,
   `getrusage`/`getrlimit`, `system` (`ENOSYS`; spouštění procesů
   `posix_spawn`, viz [Doplněk POSIX](#procesy-posix_spawn-a-waitpid)).
@@ -515,7 +515,7 @@ Vlastního kódu ~11 000 řádků Rustu, převzatého ~14 000 řádků. Celá mu
    `opendir`/`readdir`, `mkdir`, `unlink`, `rmdir`, `rename`, `access`,
    `getcwd`/`chdir`, `pipe` (dvojice kanálů), `isatty`.
    `chmod` mění granty (od T1, [Mód POSIX](souborovy-system.md#mód-posix)), `link`/
-   `symlink` = `ENOTSUP` do FS v3. Zámky `fcntl`/`flock` drží fsd
+   `symlink` od fs-symlink (viz výše). Zámky `fcntl`/`flock` drží fsd
    (rozhodnutí 8).
 3. **`math.h`** (otázka 3) a plovoucí čárka v `printf`/`scanf`/`strtod`.
    Hard-float je všude (x86-64-v2, NEON). `long double`: otázka 9.

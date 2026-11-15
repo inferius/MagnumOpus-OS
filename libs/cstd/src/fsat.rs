@@ -53,7 +53,7 @@ pub fn join_at(dir_path: Option<&[u8]>, path: &[u8]) -> Result<Vec<u8>, c_int> {
 /// # Safety
 ///
 /// `path` je retezec C nebo NULL.
-unsafe fn at_path(dir: c_int, path: *const c_char) -> Result<Vec<u8>, c_int> {
+pub(crate) unsafe fn at_path(dir: c_int, path: *const c_char) -> Result<Vec<u8>, c_int> {
     if path.is_null() {
         return Err(errno::EFAULT);
     }
@@ -107,7 +107,8 @@ pub unsafe extern "C" fn fstatat(dir: c_int, path: *const c_char, out: *mut stat
         return errno::ret(Err(errno::EINVAL));
     }
     // SAFETY: kontrakt C.
-    fill(unsafe { at_path(dir, path) }.and_then(|p| sys::stat(&p)), out)
+    let p = unsafe { at_path(dir, path) };
+    fill(p.and_then(|p| if flags & AT_SYMLINK_NOFOLLOW != 0 { sys::lstat(&p) } else { sys::stat(&p) }), out)
 }
 
 /// `fchmodat`: jako `chmod` jen overi existenci (prava jsou granty FS).
@@ -120,8 +121,8 @@ pub unsafe extern "C" fn fchmodat(dir: c_int, path: *const c_char, mode: u32, fl
     errno::ret(unsafe { at_path(dir, path) }.and_then(|p| sys::chmod(&p, (mode & 0o777) as u16)))
 }
 
-/// `realpath`: absolutni cesta bez `.` a `..` k existujici polozce (FS
-/// symlinky zatim nevytvari, takze se nic dalsiho nerozbaluje).
+/// `realpath`: kanonicka absolutni cesta k existujici polozce (odkazy,
+/// `.` a `..` vyresi fsd ve jmennem prostoru relace).
 /// `resolved` NULL = alokovat (`free`), jinak buffer `PATH_MAX`.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn realpath(path: *const c_char, resolved: *mut c_char) -> *mut c_char {
@@ -130,7 +131,7 @@ pub unsafe extern "C" fn realpath(path: *const c_char, resolved: *mut c_char) ->
         return core::ptr::null_mut();
     }
     // SAFETY: retezec C.
-    let r = sys::abs_path(unsafe { c_bytes(path) }).and_then(|p| sys::stat(&p).map(|_| p));
+    let r = sys::realpath(unsafe { c_bytes(path) });
     let p = match r {
         Ok(p) if p.len() < PATH_MAX => p,
         Ok(_) => {

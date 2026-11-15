@@ -234,7 +234,8 @@ argumenty, vlakna, TLS, soubory` (x86_64 i aarch64).
 | `fs::File` open/read/write/seek/`set_len`/`sync_all`, append | fsproto v2 (handly relace; pozice v `osrt::fs::File`) | **[ověřeno v QEMU]** hello-std |
 | `fs::read_dir`, `metadata`, `create_dir`, `remove_*`, `rename`, `canonicalize` | fsproto (`STAT`, `LIST`, `CREATE`, `REMOVE`, `RENAME`); `canonicalize` = normalizace + kontrola existence | **[ověřeno v QEMU]** hello-std (bez `canonicalize`) |
 | `fs::Permissions`, ACL | `readonly` z účinných práv, nastavení Unsupported; ACL přes `std::os::magnumopus::fs` | **[ověřeno v QEMU]** hello-std |
-| symlinky, `hard_link`, zámky souborů, časy souborů | Unsupported | FS v3 rozhodne **[navrženo]** |
+| `read_link`, `symlink_metadata`, `soft_link`, `canonicalize` | odkazy fsd ([Symbolické odkazy](souborovy-system.md#symbolické-odkazy)); `canonicalize` vyřeší fsd | **[ověřeno v QEMU]** (přes cstd, krok `link`) |
+| `hard_link`, zámky souborů, časy souborů | Unsupported | FS v3 rozhodne **[navrženo]** |
 | `net::TcpStream`, `TcpListener`, `UdpSocket`, DNS | netproto (`tcp_connect`, `tcp_listen`, `udp_bind`, `resolve`), relace sítě se štítkem `NET` (viz [Síť](#síť-stdnet)) | **[ověřeno v QEMU]** std-net |
 | `process::Command`, `Child`, `io::pipe` | spouštěcí služba `launchd` s manifestem potomka, roury = dvojice kanálů (viz [Procesy](#procesy-stdprocess)) | **[ověřeno v QEMU]** std-proc |
 | `os_str`, `path` | bajty (jako unix), oddělovač `/`; `std::os::magnumopus::ffi::{OsStrExt, OsStringExt}` | **[ověřeno v QEMU]** hello-std |

@@ -389,6 +389,24 @@ pub fn mkdir(p: &[u8]) -> R<()> {
     fs::create_dir(path(p)?).map_err(io)
 }
 
+/// Na hostiteli bez odkazu: `lstat` = `stat`, odkaz neni.
+pub fn lstat(p: &[u8]) -> R<Stat> {
+    stat(p)
+}
+
+pub fn readlink(p: &[u8]) -> R<Vec<u8>> {
+    stat(p).and(Err(errno::EINVAL))
+}
+
+pub fn symlink(_target: &[u8], _link: &[u8]) -> R<()> {
+    Err(errno::ENOTSUP)
+}
+
+pub fn realpath(p: &[u8]) -> R<Vec<u8>> {
+    let a = abs_path(p)?;
+    stat(&a).map(|_| a)
+}
+
 pub fn mkdir_mode(p: &[u8], _mode: u16) -> R<()> {
     mkdir(p)
 }

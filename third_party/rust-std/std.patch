@@ -209,7 +209,7 @@ index bd63144..65a8fb8 100644
  name = "wit-bindgen"
  version = "0.62.0"
 diff --git a/std/Cargo.toml b/std/Cargo.toml
-index 2f21b78..769a071 100644
+index 2f21b78..c0d10ae 100644
 --- a/std/Cargo.toml
 +++ b/std/Cargo.toml
 @@ -70,6 +70,11 @@ fortanix-sgx-abi = { version = "0.6.1", features = [
@@ -638,7 +638,7 @@ index 1ca2bd8..8f48d36 100644
          }
 diff --git a/std/src/sys/fs/magnumopus.rs b/std/src/sys/fs/magnumopus.rs
 new file mode 100644
-index 0000000..9ad90da
+index 0000000..23c27f5
 --- /dev/null
 +++ b/std/src/sys/fs/magnumopus.rs
 @@ -0,0 +1,397 @@
@@ -1012,12 +1012,14 @@ index 0000000..9ad90da
 +
 +pub use crate::sys::fs::common::{copy, exists, remove_dir_all};
 +
-+pub fn readlink(_p: &Path) -> io::Result<PathBuf> {
-+    unsupported()
++pub fn readlink(p: &Path) -> io::Result<PathBuf> {
++    let t = osrt::fs::read_link(path_bytes(p)).map_err(map_error)?;
++    Ok(PathBuf::from(OsString::from_vec(t.into_bytes())))
 +}
 +
-+pub fn symlink(_original: &Path, _link: &Path) -> io::Result<()> {
-+    unsupported()
++/// `soft_link`/`unix::fs::symlink`: cil se uklada, jak je (i relativni).
++pub fn symlink(original: &Path, link: &Path) -> io::Result<()> {
++    osrt::fs::symlink(path_bytes(original), path_bytes(link)).map_err(map_error)
 +}
 +
 +pub fn link(_src: &Path, _dst: &Path) -> io::Result<()> {
@@ -1029,14 +1031,12 @@ index 0000000..9ad90da
 +}
 +
 +pub fn lstat(p: &Path) -> io::Result<FileAttr> {
-+    // Symbolicke odkazy sluzba FS zatim nenasleduje: stat = lstat.
-+    stat(p)
++    osrt::fs::lstat_path(path_bytes(p)).map(FileAttr).map_err(map_error)
 +}
 +
-+/// Absolutni normalizovana cesta (bez odkazu: ty FS zatim nenasleduje).
++/// Kanonicka cesta: odkazy, `.` a `..` vyresi fsd (cesta musi existovat).
 +pub fn canonicalize(p: &Path) -> io::Result<PathBuf> {
-+    let abs = osrt::env::resolve(path_bytes(p)).map_err(map_error)?;
-+    stat(Path::new(&abs))?;
++    let abs = osrt::fs::realpath(path_bytes(p)).map_err(map_error)?;
 +    Ok(PathBuf::from(OsString::from_vec(abs.into_bytes())))
 +}
 diff --git a/std/src/sys/fs/mod.rs b/std/src/sys/fs/mod.rs
@@ -1056,10 +1056,10 @@ index e15841b..91299c3 100644
          use motor as imp;
 diff --git a/std/src/sys/io/error/magnumopus.rs b/std/src/sys/io/error/magnumopus.rs
 new file mode 100644
-index 0000000..d1b2245
+index 0000000..2d00f3e
 --- /dev/null
 +++ b/std/src/sys/io/error/magnumopus.rs
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,61 @@
 +use crate::{fmt, io};
 +
 +/// MagnumOpus nema `errno`: chyby vraci kazde volani primo.
@@ -1111,6 +1111,7 @@ index 0000000..d1b2245
 +        | E::NotMounted
 +        | E::FenceFailed
 +        | E::FenceAbandoned => K::Other,
++        E::TooManyLinks => K::FilesystemLoop,
 +    }
 +}
 +

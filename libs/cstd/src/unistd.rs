@@ -57,6 +57,7 @@ pub fn open_flags(flags: c_int) -> Option<OpenFlags> {
         cloexec: flags & O_CLOEXEC != 0,
         nonblock: flags & O_NONBLOCK != 0,
         mode: None,
+        nofollow: flags & O_NOFOLLOW != 0,
     })
 }
 

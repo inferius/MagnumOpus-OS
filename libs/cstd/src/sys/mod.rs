@@ -58,6 +58,8 @@ pub struct OpenFlags {
     pub nonblock: bool,
     /// Mod noveho souboru po `umask` (`O_CREAT`); `None` = jen zdedit.
     pub mode: Option<u16>,
+    /// `O_NOFOLLOW`: odkaz na konci cesty = `ELOOP`.
+    pub nofollow: bool,
 }
 
 impl OpenFlags {

@@ -72,6 +72,8 @@ int fchown(int fd, uid_t u, gid_t g);
 int chown(const char *path, uid_t u, gid_t g);
 ssize_t readlink(const char *path, char *buf, size_t n);
 int symlink(const char *target, const char *path);
+ssize_t readlinkat(int dir, const char *path, char *buf, size_t n);
+int symlinkat(const char *target, int dir, const char *path);
 int link(const char *old, const char *path);
 pid_t getppid(void);
 /* Skupiny procesu nejsou: proces vede vlastni relaci i skupinu. */
