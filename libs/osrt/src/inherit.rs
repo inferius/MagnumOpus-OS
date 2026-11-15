@@ -13,8 +13,11 @@
 //!   na pozici rodice. Pozice se **nesdili** (POSIX ji sdili): kazdy proces
 //!   ma od spusteni vlastni.
 //!
-//! Sockety a objekty knihoven (`epoll`) zdedit nejde (`NotSupported`):
-//! spojeni s netd patri relaci rodice.
+//! - socket `AF_UNIX`: duplikat kanalu spojeni nebo posluchace (stejny
+//!   tvar jde i v `SCM_RIGHTS`, [`crate::unix`]).
+//!
+//! Sockety TCP/UDP a objekty knihoven (`epoll`) zdedit nejde
+//! (`NotSupported`): spojeni s netd patri relaci rodice.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -88,12 +91,16 @@ pub fn export(child_fd: i32, desc: &Description) -> Result<Export> {
             w.extend_from_slice(f.path().as_bytes());
             Export { entry: entry(fd_kind::FILE, w), handle: None }
         }
+        Object::Unix(u) => {
+            let (data, h) = u.export()?;
+            Export { entry: entry(fd_kind::UNIX, data), handle: Some(h) }
+        }
         Object::Socket(_) | Object::User(_) => return Err(Error::NotSupported),
     })
 }
 
 /// Popis z polozky (handle uz vybrany podle druhu).
-fn object(e: &Fd, handle: Option<Handle>) -> Result<Object> {
+pub(crate) fn object(e: &Fd, handle: Option<Handle>) -> Result<Object> {
     let mut r = Reader(&e.data);
     match e.kind {
         fd_kind::PIPE => Ok(Object::Pipe(Pipe::from_channel(Channel::from_handle(handle.ok_or(Error::Corrupted)?)))),
@@ -113,6 +120,7 @@ fn object(e: &Fd, handle: Option<Handle>) -> Result<Object> {
             let path = String::from_utf8(r.0.to_vec()).map_err(|_| Error::Corrupted)?;
             Ok(Object::File(File::from_identity(&id, pos, append, path)?))
         }
+        fd_kind::UNIX => Ok(Object::Unix(crate::unix::UnixSocket::import(&e.data, handle.ok_or(Error::Corrupted)?)?)),
         _ => Err(Error::NotSupported),
     }
 }

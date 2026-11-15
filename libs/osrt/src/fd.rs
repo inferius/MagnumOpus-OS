@@ -45,6 +45,8 @@ pub enum Object {
     Socket(crate::sock::Socket),
     /// Pametovy fd (`memfd_create`, [`crate::memfd`]).
     Memory(crate::memfd::Memory),
+    /// Socket `AF_UNIX` ([`crate::unix`]).
+    Unix(crate::unix::UnixSocket),
     /// Objekt knihovny nad std (napr. mnozina `epoll` v cstd); cteni
     /// a zapis nejdou.
     User(alloc::boxed::Box<dyn core::any::Any + Send + Sync>),
@@ -92,9 +94,12 @@ impl Description {
             Object::File(f) => f.read(buf),
             Object::Stdio(Stream::In) => stdio::read(buf),
             Object::Stdio(_) | Object::User(_) => Err(Error::BadHandle),
+            Object::Pipe(p) if self.nonblock() => p.try_read(buf),
             Object::Pipe(p) => p.read(buf),
             Object::Socket(s) => s.recv(buf, self.nonblock()),
             Object::Memory(m) => m.read(buf),
+            // Fd ze zpravy cteni pres read zahodi (jako Linux).
+            Object::Unix(u) => u.recv(buf, 0, self.nonblock()).map(|r| r.len),
         }
     }
 
@@ -109,6 +114,7 @@ impl Description {
             Object::Pipe(p) => p.write(data),
             Object::Socket(s) => s.send(data, self.nonblock()),
             Object::Memory(m) => m.write(data),
+            Object::Unix(u) => u.send(data, &[], self.nonblock()),
         }
     }
 
@@ -153,6 +159,14 @@ impl Description {
     pub fn memory(&self) -> Option<&crate::memfd::Memory> {
         match &self.object {
             Object::Memory(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// Socket `AF_UNIX` pod cislem.
+    pub fn unix(&self) -> Option<&crate::unix::UnixSocket> {
+        match &self.object {
+            Object::Unix(u) => Some(u),
             _ => None,
         }
     }

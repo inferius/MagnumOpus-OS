@@ -14,6 +14,7 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 - `src/memfd.rs` - paměťový fd (`fd::Object::Memory`): zvětšitelný objekt paměti s pozicí, pečetě, `map` (MAP_SHARED přímo na objekt), `export`/`import` handlu (jen pro čtení = bez `WRITE` a `RESIZE`). Výchozí kapacita 64 MiB.
 - `src/vm.rs` - re-export `libos::vm` a příznaků `abi::vm` pro `mmap` v cstd.
 - `src/inherit.rs` - dědění fd potomkem `posix_spawn`: `export` (popis -> položka `abi::params::Fd` + handle; socket/`epoll` = `NotSupported`), `import` při startu po relaci FS (soubor `fsproto::v2::Identity` + `REOPEN`, nepovedený se přeskočí); `process::spawn_with_fds`.
+- `src/unix.rs` - sockety `AF_UNIX` (`fd::Object::Unix`): spojení = pár kanálů, zpráva = příznaky (EOF) + fd (`SCM_RIGHTS`, stejné položky jako `inherit`) + data; `bind`/`connect` přes uzel socketu ve fsd (`fsproto` `SOCKET_BIND`/`SOCKET_CONNECT`); `fs::user_id`/`groups` z `WHOAMI`.
 - `src/stdio.rs`, `src/pipe.rs` - protokol proudu bajtů; `src/process.rs` - `LAUNCH` ke launchd, `wait_any` (C `waitpid(-1)`); `src/net.rs` - std::net (zámky do netproto v2), `interface` (C `getifaddrs`).
 - `src/fs.rs` - soubory nad fsproto v2; `File::path` (cesta z doby otevření, C `fchdir`), `volume` (C `statfs`); `src/thread.rs` - `spawn`, `spawn_on` (vlákno na zásobníku volajícího, C `pthread_attr_setstack`).
 
@@ -24,6 +25,7 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 - Nové vlákno nastaví TP jako první věc, před jakýmkoli kódem std.
 - `at_exit` volá funkce bez drženého zámku (smí registrovat další); `exit_now` je nevolá.
 - Cíl `*-unknown-magnumopus-dyn` (`cfg(target_env = "dyn")`, std jako PIC v `libc.so`): žádný `_start` ani vlastní blok TLS (TLS dělá `ld.so`), start je `__libc_start(main, bootstrap, sp, magic)` z `crt1.o` programu, `exit` volá `libos::loader::run_fini`. Symboly linker skriptu (`__tls_*`) jen ve statickém cíli.
+- `process::self_id` = C `getpid` (cstd ho bere přes `std::process::id`): jiné procesy ho vidí v `l_pid` a `SO_PEERCRED`, musí zůstat jedno číslo na proces.
 - `thread::exit_current` (C `pthread_exit`) ukončí vlákno syscallem bez destruktorů std; zásobník a TLS uvolní až `Thread::join`.
 
 ## Testy

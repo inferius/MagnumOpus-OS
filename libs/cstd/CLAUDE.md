@@ -11,7 +11,7 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 - `src/fenv.rs` - `fenv.h` (x86_64 x87 + MXCSR, aarch64 FPCR/FPSR; hodnoty a `fenv_t` jako glibc, test `fenv_header_matches`); pasti výjimek nikdy nezapínat.
 - `src/time.rs` - hodiny (`sys::monotonic_ns`, `sys::realtime`), spánek, kalendář (`split`, `civil_secs` nad `abi::time`), pásmo z `TZ` (`libs/tz`), `strftime` (`format_tm`).
 - `src/math.rs` - `math.h` nad crate `libm`, `strtod`/`strtof`/`atof`; `c/math_ld.c` - funkce `*l` a `strtold` v C (ABI `long double`), překládá `build.rs` jen pro cíl magnumopus.
-- `src/socket.rs` - sockety BSD, adresy, `getaddrinfo`; `src/poll.rs` - `poll`, `select`, `epoll` (množina = objekt `User` v tabulce fd). Logika socketů a čekání je v `osrt::sock` a `osrt::poll`.
+- `src/socket.rs` - sockety BSD, adresy, `getaddrinfo`; číslo `AF_UNIX` (`sys::is_unix`) obslouží `src/unix.rs` (`sockaddr_un`, `SCM_RIGHTS`, `SO_PEERCRED`), systémová část `sys/os_unix.rs` nad `osrt::unix` (host: náhrady `EAFNOSUPPORT`/`ENOTSOCK`); `src/poll.rs` - `poll`, `select`, `epoll` (množina = objekt `User` v tabulce fd). Logika socketů a čekání je v `osrt::sock` a `osrt::poll`.
 - `src/mman.rs` - `mmap` a spol. nad `sys::vm_*` (`osrt::vm` = obálka `libos::vm`); `check` = čistá kontrola argumentů.
 - `src/signal.rs` - signály (6A): synchronní z obsluhy výjimek (`osrt::exception`), `raise`/`kill` hned, časovač ve vlákně signálů; `src/setjmp.rs` - nahé funkce `setjmp`/`longjmp` pro obě architektury (`jmp_buf` 320 B, maska od offsetu 176).
 - `src/misc.rs` - další funkce pro porty (řetězce, `qsort`, `rand`, `pwd.h`, `ioctl`, `uname`, `getrusage`); `src/scanf.rs` - rodina `scanf` (motor `scan_units` nad znaky `u32` v bajtovém i širokém režimu, `Input`/`Sink`).
@@ -54,7 +54,7 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 ## Testy
 
 - Host: `cargo test -p cstd` (režimy `fopen`, errno, soubory, pravidla čísel fd nad `sys/host.rs`, locale a široké znaky v `locale_tests.rs` a `wchar_tests.rs` - UTF-8 jen přes `uselocale`, globální locale testy nemění).
-- QEMU: `cargo xtask test --only cstd` (program `user/ctest`, v C; krok `posix2` = `c/spawncheck.c`, `inherit` = `c/inheritcheck.c` (dědění fd), ctest spouští sám sebe v režimu `child`, proto dostává kanál ke launchd); sockety `--only "cstd sit"` (`ctest net`, pomocné servery hostitele jako `std sit`).
+- QEMU: `cargo xtask test --only cstd` (program `user/ctest`, v C; krok `posix2` = `c/spawncheck.c`, `inherit` = `c/inheritcheck.c` (dědění fd), `unix` = `c/unixcheck.c` (AF_UNIX podle wineserveru), ctest spouští sám sebe v režimu `child`, proto dostává kanál ke launchd); sockety `--only "cstd sit"` (`ctest net`, pomocné servery hostitele jako `std sit`).
 
 ## Pasti
 

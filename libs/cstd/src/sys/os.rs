@@ -16,6 +16,7 @@ fn kind_of(k: u8) -> Kind {
     match k {
         rt::fs::kind::DIR | rt::fs::kind::DATASET => Kind::Dir,
         rt::fs::kind::SYMLINK => Kind::Symlink,
+        rt::fs::kind::SOCKET => Kind::Socket,
         _ => Kind::File,
     }
 }
@@ -145,7 +146,7 @@ pub fn fstat(fd: i32) -> R<Stat> {
         Object::File(f) => f.stat().map(|s| stat_of(&s)).map_err(e),
         Object::Stdio(_) => Ok(Stat::stream(Kind::Stream)),
         Object::Pipe(_) => Ok(Stat::stream(Kind::Pipe)),
-        Object::Socket(_) => Ok(Stat::stream(Kind::Socket)),
+        Object::Socket(_) | Object::Unix(_) => Ok(Stat::stream(Kind::Socket)),
         Object::User(_) => Ok(Stat::stream(Kind::Stream)),
         // Pametovy fd: bezny soubor s velikosti objektu pameti.
         Object::Memory(m) => {
@@ -532,7 +533,7 @@ pub fn file_lock(fd: i32, cmd: u8, class: u8, write: bool, start: u64, len: u64)
     match f.posix_lock(cmd, class, write, start, len) {
         Ok(fsproto_lock) => Ok(match fsproto_lock {
             rt::fs::PosixLock::Done => LockResult::Done,
-            rt::fs::PosixLock::Conflict { write, start, len } => LockResult::Conflict { write, start, len },
+            rt::fs::PosixLock::Conflict { write, start, len, pid } => LockResult::Conflict { write, start, len, pid: pid as i32 },
             rt::fs::PosixLock::Deadlock => LockResult::Deadlock,
         }),
         Err(rt::Error::ServiceRestarted) => Err(errno::ENOLCK),

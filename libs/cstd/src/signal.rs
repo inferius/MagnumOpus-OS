@@ -318,30 +318,12 @@ pub extern "C" fn raise(sig: c_int) -> c_int {
 }
 
 /// Cislo procesu: jadro ho programum nedava, proto nahodne kladne cislo
-/// pevne po dobu behu (pro jmena docasnych souboru a `kill` na sebe).
+/// pevne po dobu behu (`osrt::process::self_id`, totez co
+/// `std::process::id`): jmena docasnych souboru, `kill` na sebe, `l_pid`
+/// zamku a `SO_PEERCRED` ho vidi jine procesy stejne.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn getpid() -> c_int {
-    static PID: AtomicU32 = AtomicU32::new(0);
-    let p = PID.load(Ordering::Relaxed);
-    if p != 0 {
-        return p as c_int;
-    }
-    let mut b = [0u8; 4];
-    let _ = getrandom_bytes(&mut b);
-    let new = (u32::from_le_bytes(b) % 0x3fff_0000) + 2;
-    match PID.compare_exchange(0, new, Ordering::AcqRel, Ordering::Acquire) {
-        Ok(_) => new as c_int,
-        Err(x) => x as c_int,
-    }
-}
-
-fn getrandom_bytes(b: &mut [u8]) -> bool {
-    use std::hash::{BuildHasher, Hasher};
-    // RandomState je nad generatorem jadra (osrt::fill_random).
-    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-    h.write_u8(0);
-    b.copy_from_slice(&h.finish().to_le_bytes()[..b.len()]);
-    true
+    std::process::id() as c_int
 }
 
 /// Rodic: neznamy, jako proces osirely (1).

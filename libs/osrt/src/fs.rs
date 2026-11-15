@@ -32,8 +32,26 @@ pub(crate) unsafe fn init(channel: Option<Channel>) {
     }
 }
 
-fn session() -> Result<&'static FsClient> {
+pub(crate) fn session() -> Result<&'static FsClient> {
     SESSION.get().ok_or(Error::NotSupported)
+}
+
+/// Cislo uzivatele relace FS (C `getuid`; 0 = system nebo bez relace).
+/// Zjisti se jednou (`WHOAMI`), pak plati po celou dobu procesu.
+pub fn user_id() -> u64 {
+    static ID: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(u64::MAX);
+    let v = ID.load(Ordering::Relaxed);
+    if v != u64::MAX {
+        return v;
+    }
+    let v = session().and_then(|s| s.whoami()).map_or(0, |w| w.0);
+    ID.store(v, Ordering::Relaxed);
+    v
+}
+
+/// Skupiny uzivatele relace (C `getgroups`; prvni = hlavni skupina).
+pub fn groups() -> Vec<u64> {
+    session().and_then(|s| s.whoami()).map(|w| w.1).unwrap_or_default()
 }
 
 /// Velikost svazku relace: (velikost bloku, bloku celkem, volnych bloku);
@@ -194,7 +212,7 @@ impl File {
 
     /// Zamek POSIX (`fcntl`/`flock`, viz `fsproto::v2::posix_lock`).
     pub fn posix_lock(&self, cmd: u8, class: u8, write: bool, start: u64, len: u64) -> Result<fsproto::v2::PosixLock> {
-        session()?.posix_lock(self.handle, cmd, class, write, start, len)
+        session()?.posix_lock(self.handle, cmd, class, write, start, len, crate::process::self_id())
     }
 
     /// Absolutni cesta pri otevreni.

@@ -87,10 +87,15 @@ pub mod fd_kind {
     /// generace u64, pristup u8, sdileni u8, pozice u64, pripojovat u8,
     /// cesta (zbytek)`.
     pub const FILE: u8 = 3;
+    /// Socket `AF_UNIX`: handle kanalu spojeni nebo posluchace `tag::FD`;
+    /// data `stav u8` (1 spojeny, 2 naslouchajici, 3 jen jmeno), u spojeneho
+    /// `uzivatel u64, skupina u64, pid u32, jmeno druhe strany`, pak vlastni
+    /// jmeno; jmeno = `delka u32 + bajty` (0 = bez jmena).
+    pub const UNIX: u8 = 4;
 
     /// Ma polozka handle ve startovni zprave?
     pub const fn has_handle(kind: u8) -> bool {
-        matches!(kind, PIPE | MEMORY)
+        matches!(kind, PIPE | MEMORY | UNIX)
     }
 }
 

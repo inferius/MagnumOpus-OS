@@ -21,6 +21,10 @@ pub use os_mem::*;
 mod os_proc;
 #[cfg(target_os = "magnumopus")]
 pub use os_proc::*;
+#[cfg(target_os = "magnumopus")]
+mod os_unix;
+#[cfg(target_os = "magnumopus")]
+pub use os_unix::*;
 
 #[cfg(not(target_os = "magnumopus"))]
 mod host;
@@ -203,6 +207,7 @@ pub struct Region {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LockResult {
     Done,
-    Conflict { write: bool, start: u64, len: u64 },
+    /// `pid` = cislo procesu drzitele (`getpid` jeho cstd; 0 = nezname).
+    Conflict { write: bool, start: u64, len: u64, pid: i32 },
     Deadlock,
 }

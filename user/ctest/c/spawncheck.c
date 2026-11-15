@@ -30,6 +30,8 @@
 
 extern char **environ;
 int inherit_child_main(void);
+int unix_child_main(const char *path);
+int unixpair_child_main(void);
 
 /* Rezim potomka: "child exit N", "child echo TEXT", "child stdin",
  * "child cwd", "child sleep", "child fds" (inheritcheck.c). */
@@ -65,6 +67,8 @@ int spawn_child_main(int argc, char **argv) {
         return 0;
     }
     if (argc == 3 && strcmp(argv[2], "fds") == 0) return inherit_child_main();
+    if (argc == 4 && strcmp(argv[2], "unix") == 0) return unix_child_main(argv[3]);
+    if (argc == 3 && strcmp(argv[2], "unixpair") == 0) return unixpair_child_main();
     if (argc == 3 && strcmp(argv[2], "sleep") == 0) {
         sleep(60);
         return 0;

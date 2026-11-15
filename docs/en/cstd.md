@@ -185,7 +185,7 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 
 | Header | Functions | Note |
 |---|---|---|
-| `sys/socket.h` | `socket` (`AF_INET`, `AF_INET6`; `SOCK_STREAM`, `SOCK_DGRAM`, `SOCK_NONBLOCK`, `SOCK_CLOEXEC`), `bind`, `listen`, `accept`, `accept4`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg` (no control messages), `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt` | `AF_UNIX` and `socketpair` = `EAFNOSUPPORT`; `MSG_PEEK` = `ENOTSUP` |
+| `sys/socket.h` | `socket` (`AF_INET`, `AF_INET6`; `SOCK_STREAM`, `SOCK_DGRAM`, `SOCK_NONBLOCK`, `SOCK_CLOEXEC`), `bind`, `listen`, `accept`, `accept4`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg` (control messages only `SCM_RIGHTS` on `AF_UNIX`), `socketpair`, `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt` | `AF_UNIX` only `SOCK_STREAM` (see [AF_UNIX sockets](#af_unix-sockets)); `MSG_PEEK` = `ENOTSUP` |
 | `netinet/in.h`, `arpa/inet.h` | `htons` ..., `inet_pton`, `inet_ntop`, `inet_addr`, `inet_ntoa`, `in6addr_any` | |
 | `netdb.h` | `getaddrinfo`, `freeaddrinfo`, `gai_strerror`, `getnameinfo` | names via the netd resolver; `getnameinfo` numeric only |
 | `poll.h`, `sys/select.h`, `sys/epoll.h` | `poll`, `select`, `epoll_create`, `epoll_create1`, `epoll_ctl`, `epoll_wait` | over `osrt::poll` |
@@ -270,7 +270,9 @@ Decision 6A - signals without kernel support:
   to a closed pipe only returns `EPIPE`).
 - **`getpid`:** the kernel does not give programs a process number;
   `getpid` returns a random positive number, stable for the run (temporary
-  file names, `kill` of itself). `getppid` = 1.
+  file names, `kill` of itself) - the same as `std::process::id`
+  (`osrt::process::self_id`), so other processes see it the same (`l_pid`,
+  `SO_PEERCRED`). `getppid` = 1.
 
 ### File locks
 
@@ -282,8 +284,9 @@ the locks (message `POSIX_LOCK`, [file-system.md](file-system.md)): the
 file. They are released by closing the process's last fd on the file
 (`flock`: closing the fd) and by the end of the process. `F_SETLKW` and
 `flock` without `LOCK_NB` wait by retrying; fsd watches for a wait cycle
-(`EDEADLK`). `l_pid` from `F_GETLK` is -1 (fsd does not know process
-numbers).
+(`EDEADLK`). `l_pid` from `F_GETLK` = the holder's `getpid` (the client
+sends it with every lock, fsd does not verify it; unknown = -1)
+**[verified in QEMU]** (test `ctest lock`).
 
 ## Functions for C++ (step 7a)
 
@@ -354,7 +357,7 @@ C frames) and links with `--eh-frame-hdr`; the dynamic part has
 - Functions added for the ports: `strspn`, `strcspn`, `strpbrk`,
   `strtok_r`, `strdup`, `strndup`, `strcasecmp`, `strerror_r`, `qsort`,
   `bsearch`, `rand`, `div`, `atol`, the `scanf` family, `getpwuid` (user
-  from `USER` and `HOME`), `getuid` and friends (0), `fchown` and `utimes`
+  from `USER` and `HOME`), `getuid` and friends (the FS session identity, see [AF_UNIX sockets](#af_unix-sockets)), `fchown` and `utimes`
   without effect, `readlink`/`symlink`/`link` (no FS symlinks yet),
   `ioctl` (`ENOTTY`), `setlocale`/`localeconv` (see [Wide characters and locale](#wide-characters-and-locale)), `uname`,
   `getrusage`/`getrlimit`, `system` (`ENOSYS`; starting processes via
@@ -557,8 +560,8 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
    `O_NONBLOCK` (deadline `TRY`). `poll` and `select` via
    `OBJECT_WAIT_MANY` (up to 64 objects), beyond that via a port
    (`libos::port`): files are always ready, channels have `READABLE`/
-   `PEER_CLOSED`, sockets readiness events (netproto v2). No `AF_UNIX`
-   (local IPC uses channels). `epoll`: question 7.
+   `PEER_CLOSED`, sockets readiness events (netproto v2). `AF_UNIX` later
+   (step T1, see [AF_UNIX sockets](#af_unix-sockets)). `epoll`: question 7.
 6. **Memory.** Anonymous `mmap` (`MAP_PRIVATE`/`MAP_SHARED` within the
    process, `MAP_FIXED`, `MAP_NORESERVE` = reservation with on-demand
    pages), `munmap` including parts, `mprotect`, `madvise(DONTNEED)` =
@@ -871,7 +874,8 @@ disappeared in the meantime (or that the child's session cannot see) is
 missing in the child (`EBADF`). There are at most `abi::params::MAX_FDS` =
 48 inherited fds above 2 (more = `EMFILE`), because the handles go in one
 start-up message together with stdio and sessions (channel message limit
-64 handles). `AF_UNIX` sockets (step T1) will be inheritable.
+64 handles). `AF_UNIX` sockets are inherited (a duplicate of the
+connection or listener channel, [AF_UNIX sockets](#af_unix-sockets)).
 
 
 - **The child's network:** inherited as in POSIX when the parent has one
@@ -909,6 +913,70 @@ start-up message together with stdio and sessions (channel message limit
   not run), signal 0 only checks it exists. Delivering other signals to the
   child's handler is not possible yet (`ENOTSUP`); the parent gets no
   `SIGCHLD`.
+
+### AF_UNIX sockets
+
+**[verified in QEMU]** x86_64 and aarch64 (step `unix` of the `ctest`
+test, suite `cstd`, modelled on wineserver: `socketpair`,
+`bind`/`listen`/`accept` on a relative path, a non-blocking listener in
+`poll`, `connect` from another process, `SCM_RIGHTS` in both directions,
+passing one end of a `socketpair` and inheriting the other through
+`posix_spawn`; host tests `unix_tests.rs`). Decision T1A
+(Windows layer, step 8): general `AF_UNIX`, so that the code of
+Wine and other ports (X11, D-Bus, Wayland) stays unchanged.
+
+<figure class="diagram">
+<svg viewBox="0 0 780 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AF_UNIX over channels and fsd">
+<defs><marker id="en11" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="10" width="220" height="80" rx="6"/><text class="t b" x="120" y="34" text-anchor="middle">server</text><text class="m" x="120" y="54" text-anchor="middle">bind("socket"), listen</text><text class="m" x="120" y="72" text-anchor="middle">listener channel</text>
+<rect class="acc" x="280" y="10" width="220" height="80" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">fsd</text><text class="m" x="390" y="54" text-anchor="middle">socket node (kind 5)</text><text class="m" x="390" y="72" text-anchor="middle">node -> listener (memory)</text>
+<rect class="box" x="550" y="10" width="220" height="80" rx="6"/><text class="t b" x="660" y="34" text-anchor="middle">client</text><text class="m" x="660" y="54" text-anchor="middle">connect("…/socket")</text><text class="m" x="660" y="72" text-anchor="middle">new channel pair</text>
+<path class="ln" d="M230 50 L278 50" marker-end="url(#en11)"/>
+<path class="ln" d="M548 50 L502 50" marker-end="url(#en11)"/>
+<rect class="ok" x="10" y="120" width="760" height="70" rx="6"/><text class="t b" x="390" y="144" text-anchor="middle">connection = a channel pair between processes (fsd is not in it)</text><text class="m" x="390" y="166" text-anchor="middle">message = flags, fds (SCM_RIGHTS: pipe, memfd, file, directory, AF_UNIX) + data</text>
+</svg>
+<figcaption>AF_UNIX: fsd only arranges the first meeting through the socket node, data go directly over the channel.</figcaption>
+</figure>
+
+- **Types:** only `SOCK_STREAM` (`SOCK_SEQPACKET`, `SOCK_DGRAM` =
+  `EPROTONOSUPPORT`); `SOCK_NONBLOCK`, `SOCK_CLOEXEC`, `O_NONBLOCK` through
+  `fcntl` (empty = `EAGAIN`, `accept` without a connection = `EAGAIN`).
+- **Name** = a path (also relative to the working directory) as a socket
+  node in fsd (`SOCKET_BIND`, [file system](file-system.md#the-fsproto-protocol));
+  `lstat` reports `S_IFSOCK` and the owner. `connect` needs the write
+  right on the node. A node without a listener (the process ended, an fsd
+  restart) = `ECONNREFUSED`, a missing one = `ENOENT`, `bind` to an
+  existing one = `EADDRINUSE` (as on Unix: `unlink` before `bind`). There
+  is no abstract name (`sun_path[0] == 0`, `ENOTSUP`). Connections that
+  arrive after `bind` and before `listen` wait in the queue (Linux would
+  refuse them).
+- **Data:** every `send`/`sendmsg` = one channel message (at most 64 KiB,
+  longer ones are split); `recv` reads at most the rest of one message (a
+  short read is allowed for `SOCK_STREAM`). `shutdown(SHUT_WR)` sends an
+  end mark: the other side reads the data and gets 0. The other side
+  closing = `POLLHUP`/`POLLIN` and `recv` 0, `send` = `EPIPE` (no
+  `SIGPIPE` is sent).
+- **`SCM_RIGHTS`:** at most 32 fds in a message. Fds are passed as with
+  inheritance ([posix_spawn](#processes-posix_spawn-and-waitpid)): a pipe
+  and `AF_UNIX` = a duplicate of the channel, a memory fd = a duplicate of
+  the memory object, a file and a directory = the durable identity +
+  `REOPEN` in the receiver's session (the receiver must see the path; the
+  position is not shared). TCP/UDP sockets and `epoll` cannot be passed
+  (`ENOTSUP`); an fd the receiver cannot open is left out. The receiver
+  gets the fds with the first `recvmsg` that starts reading the message;
+  `recv`/`read` drop them. `MSG_CMSG_CLOEXEC` sets `FD_CLOEXEC`, too little
+  room in `msg_control` = `MSG_CTRUNC` (extra fds are closed).
+- **`SO_PEERCRED`:** the side that accepted the connection gets the
+  client's user and group verified by fsd from the identity of its
+  session, and the process number (the client's `getpid`, not verified);
+  the client knows only zeros about the listener (fsd does not pass the
+  listener's credentials). `socketpair` = own values. `getuid`/`getgid` =
+  the FS session identity (`WHOAMI`; system = 0), equal to the `st_uid` of
+  objects the user created.
+- **`getsockname`** = the name from `bind` (for an accepted connection the
+  listener's name), **`getpeername`** = the path from `connect` (otherwise
+  no name); `SO_TYPE`, `SO_DOMAIN`, `SO_ACCEPTCONN`, `SO_PEERCRED`;
+  `SO_PASSCRED` and buffer sizes are accepted without effect.
 
 ### Memory fd
 
@@ -1027,7 +1095,7 @@ will come with shared memory between processes (a separate task:
   `ARPHRD_LOOPBACK`), `SIOCGIFCONF` over the same interfaces; setting
   (`SIOCSIF*`) = `ENOTTY`.
 - **Headers for building ports** (no new functionality): `sys/un.h`
-  (`struct sockaddr_un`; `AF_UNIX` sockets do not exist yet),
+  (`struct sockaddr_un`, sockets see [AF_UNIX sockets](#af_unix-sockets)),
   `struct ucred` (`SO_PEERCRED`), `struct tcp_info` and the `TCP_*` states
   (`getsockopt(TCP_INFO)` = `ENOPROTOOPT`), `net/if_arp.h` (`ARPHRD_*`,
   `struct arphdr`), `net/ethernet.h` (`ETH_ALEN`, `struct ether_header`), `netinet/if_ether.h` (`struct ether_arp`);

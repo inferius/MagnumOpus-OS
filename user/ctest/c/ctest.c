@@ -23,6 +23,7 @@ int lock_main(const char *side, const char *dir);
 int wchar_test(const char *dir);
 int posix2_test(const char *dir);
 int inherit_test(const char *dir);
+int unix_test(const char *dir);
 int termios_test(const char *dir);
 int memfd_test(void);
 int memfd_main(const char *side);
@@ -172,6 +173,9 @@ int main(int argc, char **argv) {
     int ih = dir != NULL ? inherit_test(dir) : -1;
     if (ih != 0) fprintf(stderr, "ctest inherit: krok %d errno %d\n", ih, errno);
     CHECK("inherit", ih == 0);
+    int ux = dir != NULL ? unix_test(dir) : -1;
+    if (ux != 0) fprintf(stderr, "ctest unix: krok %d errno %d\n", ux, errno);
+    CHECK("unix", ux == 0);
     int tt = dir != NULL ? termios_test(dir) : -1;
     if (tt != 0) fprintf(stderr, "ctest termios: krok %d errno %d\n", tt, errno);
     CHECK("termios", tt == 0);

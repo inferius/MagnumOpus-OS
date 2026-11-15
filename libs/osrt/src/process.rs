@@ -237,7 +237,9 @@ pub fn self_id() -> u32 {
     }
     let mut b = [0u8; 4];
     crate::fill_random(&mut b);
-    let v = (u32::from_le_bytes(b) & 0x7FFF_FFFF).max(1);
+    // Rozsah jako drive cstd `getpid`: kladne, s mistem pro cisla potomku
+    // (`pid_t` potomku cisluje cstd od `getpid() + 1`).
+    let v = (u32::from_le_bytes(b) % 0x3fff_0000) + 2;
     match ID.compare_exchange(0, v, Ordering::Relaxed, Ordering::Relaxed) {
         Ok(_) => v,
         Err(old) => old,

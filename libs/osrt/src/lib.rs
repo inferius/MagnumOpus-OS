@@ -40,6 +40,7 @@ pub mod thread;
 pub mod tty;
 pub mod time;
 pub mod tls;
+pub mod unix;
 pub mod vm;
 
 pub use abi::Error;

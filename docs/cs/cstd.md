@@ -177,7 +177,7 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 
 | Hlavička | Funkce | Poznámka |
 |---|---|---|
-| `sys/socket.h` | `socket` (`AF_INET`, `AF_INET6`; `SOCK_STREAM`, `SOCK_DGRAM`, `SOCK_NONBLOCK`, `SOCK_CLOEXEC`), `bind`, `listen`, `accept`, `accept4`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg` (bez řídicích zpráv), `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt` | `AF_UNIX` a `socketpair` = `EAFNOSUPPORT`; `MSG_PEEK` = `ENOTSUP` |
+| `sys/socket.h` | `socket` (`AF_INET`, `AF_INET6`; `SOCK_STREAM`, `SOCK_DGRAM`, `SOCK_NONBLOCK`, `SOCK_CLOEXEC`), `bind`, `listen`, `accept`, `accept4`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg` (řídicí zprávy jen `SCM_RIGHTS` na `AF_UNIX`), `socketpair`, `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt` | `AF_UNIX` jen `SOCK_STREAM` (viz [Sockety AF_UNIX](#sockety-af_unix)); `MSG_PEEK` = `ENOTSUP` |
 | `netinet/in.h`, `arpa/inet.h` | `htons` ..., `inet_pton`, `inet_ntop`, `inet_addr`, `inet_ntoa`, `in6addr_any` | |
 | `netdb.h` | `getaddrinfo`, `freeaddrinfo`, `gai_strerror`, `getnameinfo` | jména přes resolver netd; `getnameinfo` jen číselně |
 | `poll.h`, `sys/select.h`, `sys/epoll.h` | `poll`, `select`, `epoll_create`, `epoll_create1`, `epoll_ctl`, `epoll_wait` | nad `osrt::poll` |
@@ -256,7 +256,8 @@ Rozhodnutí 6A - signály bez podpory jádra:
   vrátí jen `EPIPE`).
 - **`getpid`:** jádro programům číslo procesu nedává; `getpid` vrací
   náhodné kladné číslo, stálé po dobu běhu (jména dočasných souborů,
-  `kill` na sebe). `getppid` = 1.
+  `kill` na sebe) - totéž co `std::process::id` (`osrt::process::self_id`),
+  proto ho jiné procesy vidí stejně (`l_pid`, `SO_PEERCRED`). `getppid` = 1.
 
 ### Zámky souborů
 
@@ -267,8 +268,9 @@ Zámky drží fsd (zpráva `POSIX_LOCK`, [souborovy-system.md](souborovy-system.
 vlastník `fcntl` je proces (relace FS), `flock` otevřený soubor. Uvolní je
 zavření posledního fd procesu na souboru (`flock`: zavření fd) a konec
 procesu. `F_SETLKW` a `flock` bez `LOCK_NB` čekají opakovaným zkoušením;
-fsd přitom hlídá cyklus čekání (`EDEADLK`). `l_pid` z `F_GETLK` je -1
-(čísla procesů fsd nezná).
+fsd přitom hlídá cyklus čekání (`EDEADLK`). `l_pid` z `F_GETLK` = `getpid`
+držitele (klient ho posílá s každým zámkem, fsd ho neověřuje; neznámé
+= -1) **[ověřeno v QEMU]** (test `ctest lock`).
 
 ## Funkce pro C++ (krok 7a)
 
@@ -338,7 +340,7 @@ a linkuje s `--eh-frame-hdr`; dynamická část má `lib/crtdso.o` se skrytým
 - Doplněné funkce pro porty: `strspn`, `strcspn`, `strpbrk`, `strtok_r`,
   `strdup`, `strndup`, `strcasecmp`, `strerror_r`, `qsort`, `bsearch`,
   `rand`, `div`, `atol`, rodina `scanf`, `getpwuid` (uživatel z `USER`
-  a `HOME`), `getuid` a spol. (0), `fchown` a `utimes` bez účinku,
+  a `HOME`), `getuid` a spol. (identita relace FS, viz [Sockety AF_UNIX](#sockety-af_unix)), `fchown` a `utimes` bez účinku,
   `readlink`/`symlink`/`link` (symlinky FS zatím nejsou), `ioctl`
   (`ENOTTY`), `setlocale`/`localeconv` (viz [Široké znaky a locale](#široké-znaky-a-locale)), `uname`,
   `getrusage`/`getrlimit`, `system` (`ENOSYS`; spouštění procesů
@@ -536,7 +538,7 @@ Vlastního kódu ~11 000 řádků Rustu, převzatého ~14 000 řádků. Celá mu
    `O_NONBLOCK` (termín `TRY`). `poll` a `select` přes `OBJECT_WAIT_MANY`
    (do 64 objektů), nad tím přes port (`libos::port`): soubory jsou vždy
    připravené, kanály mají `READABLE`/`PEER_CLOSED`, sockety události
-   připravenosti (netproto v2). `AF_UNIX` ne (místní IPC jsou kanály).
+   připravenosti (netproto v2). `AF_UNIX` později (krok T1, viz [Sockety AF_UNIX](#sockety-af_unix)).
    `epoll`: otázka 7.
 6. **Paměť.** `mmap` anonymní (`MAP_PRIVATE`/`MAP_SHARED` v procesu,
    `MAP_FIXED`, `MAP_NORESERVE` = rezervace se stránkami na požádání),
@@ -835,8 +837,8 @@ popis otevření mezi procesy není, platí i pro 0-2); zděděný soubor, kter�
 mezitím zmizel (nebo ho relace potomka nevidí), potomek nemá (`EBADF`).
 Zděděných fd nad 2 s handlem i bez je nejvýš `abi::params::MAX_FDS` = 48
 (víc = `EMFILE`), protože handly jdou jednou startovní zprávou spolu se
-stdio a relacemi (limit zprávy kanálu 64 handlů). Sockety `AF_UNIX`
-(krok T1) dědit půjde.
+stdio a relacemi (limit zprávy kanálu 64 handlů). Sockety `AF_UNIX` se
+dědí (duplikát kanálu spojení nebo posluchače, [Sockety AF_UNIX](#sockety-af_unix)).
 
 
 - **Síť potomka:** jako POSIX se dědí, má-li ji rodič (jinak než
@@ -871,6 +873,65 @@ stdio a relacemi (limit zprávy kanálu 64 handlů). Sockety `AF_UNIX`
   `SIGQUIT` potomka ukončí hned (`PROCESS_KILL`, jeho obsluha signálu
   neproběhne), signál 0 jen ověří existenci. Doručení ostatních signálů
   do obsluhy potomka zatím nejde (`ENOTSUP`); `SIGCHLD` rodič nedostává.
+
+### Sockety AF_UNIX
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (krok `unix` testu `ctest`, sada
+`cstd`, podle wineserveru: `socketpair`, `bind`/`listen`/`accept` na
+relativní cestu, neblokující posluchač v `poll`, `connect` z jiného
+procesu, `SCM_RIGHTS` oběma směry, předání konce `socketpair` a dědění
+druhého přes `posix_spawn`; host testy `unix_tests.rs`). Rozhodnutí T1A
+(Windows vrstva, krok 8): obecné `AF_UNIX`, aby kód Wine
+a dalších portů (X11, D-Bus, Wayland) zůstal beze změny.
+
+<figure class="diagram">
+<svg viewBox="0 0 780 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AF_UNIX nad kanaly a fsd">
+<defs><marker id="cs11" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="10" width="220" height="80" rx="6"/><text class="t b" x="120" y="34" text-anchor="middle">server</text><text class="m" x="120" y="54" text-anchor="middle">bind("socket"), listen</text><text class="m" x="120" y="72" text-anchor="middle">kanál posluchače</text>
+<rect class="acc" x="280" y="10" width="220" height="80" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">fsd</text><text class="m" x="390" y="54" text-anchor="middle">uzel socketu (druh 5)</text><text class="m" x="390" y="72" text-anchor="middle">uzel -> posluchač (paměť)</text>
+<rect class="box" x="550" y="10" width="220" height="80" rx="6"/><text class="t b" x="660" y="34" text-anchor="middle">klient</text><text class="m" x="660" y="54" text-anchor="middle">connect("…/socket")</text><text class="m" x="660" y="72" text-anchor="middle">nový pár kanálů</text>
+<path class="ln" d="M230 50 L278 50" marker-end="url(#cs11)"/>
+<path class="ln" d="M548 50 L502 50" marker-end="url(#cs11)"/>
+<rect class="ok" x="10" y="120" width="760" height="70" rx="6"/><text class="t b" x="390" y="144" text-anchor="middle">spojení = dvojice kanálů mezi procesy (fsd v ní není)</text><text class="m" x="390" y="166" text-anchor="middle">zpráva = příznaky, fd (SCM_RIGHTS: roura, memfd, soubor, adresář, AF_UNIX) + data</text>
+</svg>
+<figcaption>AF_UNIX: fsd zprostředkuje jen první setkání přes uzel socketu, data jdou přímo kanálem.</figcaption>
+</figure>
+
+- **Typy:** jen `SOCK_STREAM` (`SOCK_SEQPACKET`, `SOCK_DGRAM` =
+  `EPROTONOSUPPORT`); `SOCK_NONBLOCK`, `SOCK_CLOEXEC`, `O_NONBLOCK` přes
+  `fcntl` (prázdný = `EAGAIN`, `accept` bez spojení = `EAGAIN`).
+- **Jméno** = cesta (i relativní vůči pracovnímu adresáři) jako uzel
+  socketu ve fsd (`SOCKET_BIND`, [souborový systém](souborovy-system.md#protokol-fsproto));
+  `lstat` hlásí `S_IFSOCK` a vlastníka. `connect` potřebuje právo zápisu
+  na uzel. Uzel bez posluchače (proces skončil, restart fsd) =
+  `ECONNREFUSED`, neexistující = `ENOENT`, `bind` na existující =
+  `EADDRINUSE` (jako Unix: před `bind` `unlink`). Abstraktní jméno
+  (`sun_path[0] == 0`) není (`ENOTSUP`). Spojení přijatá po `bind` a před
+  `listen` čekají ve frontě (Linux by je odmítl).
+- **Data:** každý `send`/`sendmsg` = jedna zpráva kanálu (nejvýš 64 KiB,
+  delší se rozdělí); `recv` přečte nejvýš zbytek jedné zprávy (krátké
+  čtení je u `SOCK_STREAM` dovolené). `shutdown(SHUT_WR)` pošle značku
+  konce: druhá strana dočte data a dostane 0. Zavření druhé strany =
+  `POLLHUP`/`POLLIN` a `recv` 0, `send` = `EPIPE` (`SIGPIPE` se neposílá).
+- **`SCM_RIGHTS`:** nejvýš 32 fd ve zprávě. Fd se předají jako při dědění
+  ([posix_spawn](#procesy-posix_spawn-a-waitpid)): roura a `AF_UNIX` =
+  duplikát kanálu, paměťový fd = duplikát objektu paměti, soubor
+  a adresář = trvalá identita + `REOPEN` v relaci příjemce (příjemce musí
+  cestu vidět; pozice se nesdílí). Sockety TCP/UDP a `epoll` předat nejde
+  (`ENOTSUP`); fd, který příjemce otevřít nemůže, se vynechá. Příjemce
+  dostane fd prvním `recvmsg`, které zprávu načne; `recv`/`read` fd
+  zahodí. `MSG_CMSG_CLOEXEC` nastaví `FD_CLOEXEC`, málo místa v
+  `msg_control` = `MSG_CTRUNC` (přebytečné fd se zavřou).
+- **`SO_PEERCRED`:** strana, která přijala spojení, dostane uživatele
+  a skupinu klienta ověřené fsd z identity jeho relace a číslo procesu
+  (`getpid` klienta, neověřené); klient o posluchači ví jen nuly
+  (fsd přihlášení posluchače nepředává). `socketpair` = vlastní údaje.
+  `getuid`/`getgid` = identita relace FS (`WHOAMI`; systém = 0), shoduje
+  se se `st_uid` objektů, které uživatel vytvořil.
+- **`getsockname`** = jméno z `bind` (u přijatého spojení jméno
+  posluchače), **`getpeername`** = cesta z `connect` (jinak bez jména);
+  `SO_TYPE`, `SO_DOMAIN`, `SO_ACCEPTCONN`, `SO_PEERCRED`; `SO_PASSCRED`
+  a velikosti bufferu se přijmou bez účinku.
 
 ### Paměťový fd
 
@@ -982,7 +1043,7 @@ procesy).
   IPv4), `SIOCGIFHWADDR` (MAC, smyčka `ARPHRD_LOOPBACK`), `SIOCGIFCONF`
   nad týmiž rozhraními; nastavování (`SIOCSIF*`) = `ENOTTY`.
 - **Hlavičky pro překlad portů** (bez nové funkčnosti): `sys/un.h`
-  (`struct sockaddr_un`; sockety `AF_UNIX` zatím nejsou), `struct ucred`
+  (`struct sockaddr_un`, sockety viz [Sockety AF_UNIX](#sockety-af_unix)), `struct ucred`
   (`SO_PEERCRED`), `struct tcp_info` a stavy `TCP_*` (`getsockopt(TCP_INFO)`
   = `ENOPROTOOPT`), `net/if_arp.h` (`ARPHRD_*`, `struct arphdr`),
   `net/ethernet.h` (`ETH_ALEN`, `struct ether_header`), `netinet/if_ether.h` (`struct ether_arp`); `ioctl(SIOCATMARK)`
