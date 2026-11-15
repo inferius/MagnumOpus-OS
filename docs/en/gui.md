@@ -354,9 +354,14 @@ WINDOW_SIZE    { window, w, h, min_w, min_h, max_frac_w, max_frac_h }
   `cx.can_hover()`, `cx.focus_only()`.
 - Terminal: `win.request_size(1040, 520, 850, 0)`, i.e. 1040 px but at
   most 85 % of the work area width.
-- Protocol version 4 (`guiproto::VERSION`; 4 = gesture serial in
-  `InputRecord`): compositor and applications are built together, `HELLO`
-  requires a match.
+- `title_badge`: for a window with a custom title the compositor sends
+  the area of the trust badge (window content coordinates). The
+  application starts its own title content after it, the terminal puts
+  the session tab `s2` after it as in the design (`design/terminal.html`).
+  **[verified in QEMU]**
+- Protocol version 5 (`guiproto::VERSION`; 4 = gesture serial in
+  `InputRecord`, 5 = `title_badge` in the window context): compositor and
+  applications are built together, `HELLO` requires a match.
 
 **[implemented]** (tests `context_first_and_initial_size_without_flicker`,
 `request_size_later_and_while_maximized`, `resize_sends_new_context_generation`

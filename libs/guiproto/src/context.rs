@@ -104,6 +104,11 @@ pub struct ContextExt {
     pub min_hit: u16,
     /// Velikost textu v promile (1000 = 100 %).
     pub text_scale: u16,
+    /// Odznak duvery, ktery system kresli pres titulek okna s vlastnim
+    /// titulkem (souradnice obsahu okna; prazdny = zadny). Aplikace za nim
+    /// zacne svuj obsah titulku (napr. karty), at ho neprekryva a nenechava
+    /// zbytecnou mezeru (od verze protokolu 5).
+    pub title_badge: Rect,
 }
 
 impl Default for ContextExt {
@@ -119,6 +124,7 @@ impl Default for ContextExt {
             tile: Tile::Floating,
             min_hit: 32,
             text_scale: 1000,
+            title_badge: Rect::default(),
         }
     }
 }
@@ -165,6 +171,7 @@ impl ContextExt {
             w.u8(code(&OBSTACLES, *k)).rect(r);
         }
         w.u8(code(&TILES, self.tile)).u16(self.min_hit).u16(self.text_scale);
+        w.rect(&self.title_badge);
     }
 
     pub fn decode(r: &mut Reader<'_>) -> Result<Self> {
@@ -193,6 +200,8 @@ impl ContextExt {
             obscured.push((k, r.rect()?));
         }
         let tile = from(&TILES, r.u8()?)?;
-        Ok(Self { posture, distance, insets, safe, pointers, keyboard, obscured, tile, min_hit: r.u16()?, text_scale: r.u16()? })
+        let (min_hit, text_scale) = (r.u16()?, r.u16()?);
+        let title_badge = r.rect()?;
+        Ok(Self { posture, distance, insets, safe, pointers, keyboard, obscured, tile, min_hit, text_scale, title_badge })
     }
 }
