@@ -150,12 +150,20 @@ pub(super) fn run(cmd: &mut Command, what: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn build(arch: &Arch, sysroot: &Path, p: &CPort, src: &Path, work: &Path, options: &[&str], programs: &[(&str, &str)]) -> Result<Vec<(String, PathBuf)>> {
+/// Sestavi a nainstaluje port. `shared` = druhe sestaveni (`build-dyn`)
+/// s dynamickym souborem nastroju a sdilenymi knihovnami
+/// (`-DBUILD_SHARED_LIBS=ON`); jinak staticke (`build`, `OFF`).
+#[allow(clippy::too_many_arguments)]
+pub fn build(arch: &Arch, sysroot: &Path, p: &CPort, src: &Path, work: &Path, options: &[&str], programs: &[(&str, &str)], shared: bool) -> Result<Vec<(String, PathBuf)>> {
     let found = require(p.name, &[Tool::CMake, Tool::Ninja])?;
     let (cmake, ninja) = (&found[0], &found[1]);
-    let tc = toolchain(arch, sysroot)?;
-    let build = work.join("build");
+    let tc = if shared { toolchain_for(arch, sysroot, true)? } else { toolchain(arch, sysroot)? };
+    let build = work.join(if shared { "build-dyn" } else { "build" });
     let pfx = prefix(arch);
+    let mut options: Vec<&str> = options.to_vec();
+    if shared {
+        options.push("-DBUILD_SHARED_LIBS=ON");
+    }
     let mut h = DefaultHasher::new();
     options.hash(&mut h);
     std::fs::read(&tc)?.hash(&mut h);
@@ -171,7 +179,7 @@ pub fn build(arch: &Arch, sysroot: &Path, p: &CPort, src: &Path, work: &Path, op
         c.arg(format!("-DCMAKE_TOOLCHAIN_FILE={}", slash(&tc)));
         c.arg(format!("-DCMAKE_INSTALL_PREFIX={}", slash(&pfx)));
         c.arg("-DCMAKE_BUILD_TYPE=Release");
-        c.args(options);
+        c.args(&options);
         run(&mut c, &format!("cmake (konfigurace {})", p.name))?;
         std::fs::write(&stamp, &want)?;
     }

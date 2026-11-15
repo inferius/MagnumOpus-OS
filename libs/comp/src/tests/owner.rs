@@ -47,6 +47,7 @@ fn owned_window_centers_and_stays_above_owner() {
     t.frame();
     let g1 = t.c.clients[&a].windows[&1];
     let g2 = t.c.clients[&a].windows[&2];
+    assert_eq!(t.c.focus, Some(g2), "dialog okna s fokusem fokus prevezme");
     let (o, d) = (t.c.windows[&g1].rect, t.c.windows[&g2].rect);
     assert_eq!(d.x + d.w as i32 / 2, o.x + o.w as i32 / 2, "vystredeno vodorovne");
     assert_eq!(d.y + d.h as i32 / 2, o.y + o.h as i32 / 2, "vystredeno svisle");

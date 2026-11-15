@@ -6,13 +6,14 @@
 #   WINE_PATCHES  adresar se zaplatami *.patch (third_party/wine)
 #   WINE_KEY      otisk archivu a zaplat (zmena = novy zdroj a konfigurace)
 #   MOS_SYSROOT   sysroot C (target/c-sysroot/x86_64)
+#   MOS_CPORTS    predpona portu C (target/c-ports/x86_64/prefix): FreeType
 #   MOS_TOOLS     adresar tools/wsl (obal prekladace mos-cc)
 #   WINE_OUT      kam zkopirovat vysledek (target/wine/x86_64)
 #   WINE_KEEP_GOING=1  make -k (prehled chyb portu)
 # Pracovni adresare jsou na ext4 ve WSL (~/.cache/magnumopus-wine): pres
 # /mnt by sestaveni bylo mnohonasobne pomalejsi.
 set -e
-: "${WINE_TARBALL:?}" "${WINE_TOP:?}" "${WINE_PATCHES:?}" "${WINE_KEY:?}" "${MOS_SYSROOT:?}" "${MOS_TOOLS:?}" "${WINE_OUT:?}"
+: "${WINE_TARBALL:?}" "${WINE_TOP:?}" "${WINE_PATCHES:?}" "${WINE_KEY:?}" "${MOS_SYSROOT:?}" "${MOS_CPORTS:?}" "${MOS_TOOLS:?}" "${WINE_OUT:?}"
 W=~/.cache/magnumopus-wine
 SRC=$W/src-$WINE_KEY
 mkdir -p "$W/bin" "$W/logs"
@@ -50,11 +51,13 @@ done
 
 # Nativni nastroje Wine (winebuild, widl, wrc, winegcc) pro krizove sestaveni.
 T=$W/tools-$WINE_KEY
-if [ ! -x "$T/tools/winebuild/winebuild" ]; then
+# S FreeType hostitele: sfnt2fon prevadi pisma Wine na .fon (W3).
+if [ ! -x "$T/tools/winebuild/winebuild" ] || [ ! -f "$T/.freetype" ]; then
     rm -rf "$T" && mkdir -p "$T" && cd "$T"
-    "$S/configure" --enable-win64 --without-x --without-freetype --disable-tests CC=gcc \
+    "$S/configure" --enable-win64 --without-x --with-freetype --disable-tests CC=gcc \
         > "$W/logs/tools-configure.log" 2>&1 || { tail -30 "$W/logs/tools-configure.log"; exit 1; }
     make -j"$(nproc)" __tooldeps__ > "$W/logs/tools-make.log" 2>&1 || { tail -30 "$W/logs/tools-make.log"; exit 1; }
+    touch "$T/.freetype"
 fi
 
 # Wine pro x86_64-unknown-magnumopus: DLL PE clangem, unixova cast mos-cc.
@@ -62,19 +65,20 @@ B=$W/build-$WINE_KEY
 # configure zjistuje hlavicky sysrootu (HAVE_SYS_UN_H ...): zmena obsahu
 # hlavicek = znovu configure na miste (objekty zustanou, make prelozi jen
 # soubory zavisle na config.h).
-SYSKEY=$(cd "$MOS_SYSROOT" && find include -type f | LC_ALL=C sort | xargs cat | sha256sum | cut -c1-16)
+SYSKEY=$( (cd "$MOS_SYSROOT" && find include -type f | LC_ALL=C sort | xargs cat; cd "$MOS_CPORTS" && find include/freetype2 -type f | LC_ALL=C sort | xargs cat) | sha256sum | cut -c1-16)
 if [ ! -f "$B/Makefile" ] || [ "$(cat "$B/.sysroot-key" 2>/dev/null)" != "$SYSKEY" ]; then
     [ -f "$B/Makefile" ] || rm -rf "$B"
     mkdir -p "$B" && cd "$B"
     "$S/configure" --host=x86_64-unknown-magnumopus --with-wine-tools="$T" \
         --enable-archs=x86_64 --with-mingw=clang --disable-tests \
-        --without-x --without-freetype --without-fontconfig --without-gstreamer --without-wayland \
+        --without-x --with-freetype --without-fontconfig --without-gstreamer --without-wayland \
         --without-vulkan --without-opengl --without-pulse --without-alsa --without-oss \
         --without-coreaudio --without-cups --without-dbus --without-gnutls --without-krb5 \
         --without-gssapi --without-netapi --without-sane --without-v4l2 --without-usb \
         --without-pcap --without-sdl --without-capi --without-gphoto --without-inotify \
         --without-udev --without-unwind --without-xinerama --without-ffmpeg --without-opencl \
         CC=mos-cc AR=llvm-ar RANLIB=llvm-ranlib STRIP=llvm-strip x86_64_CC=clang \
+        FREETYPE_CFLAGS="-I$MOS_CPORTS/include/freetype2" FREETYPE_LIBS="-L$MOS_CPORTS/lib -lfreetype" \
         > "$W/logs/configure.log" 2>&1 || { tail -40 "$W/logs/configure.log"; exit 1; }
     echo "$SYSKEY" > "$B/.sysroot-key"
 fi

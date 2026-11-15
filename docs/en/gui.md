@@ -833,7 +833,7 @@ messages (`NOT_SUPPORTED`) and the compositor does not send them to it.
 - `WINDOW_OWNER { window, owner }`: the owner is another window **of the
   same connection** (a dialog). The window is centred over its owner within
   the work area when first shown and goes above it whenever the owner is
-  raised. A window of another connection (even of the same identity) cannot
+  raised; if the owner has the focus, the dialog takes it when shown. A window of another connection (even of the same identity) cannot
   be the owner (`NOT_SUPPORTED`); a cycle = `INVALID_ARGS`.
 - `POPOVER_DISMISS { window }`: a button press outside the popovers of the
   focused window. The app closes its popovers (menus, open lists) like the

@@ -28,11 +28,14 @@ pub const TOOLS: &[WslTool] = &[
     WslTool { name: "bison", version_cmd: "bison --version", min: None },
     WslTool { name: "make", version_cmd: "make --version", min: None },
     WslTool { name: "gcc", version_cmd: "gcc --version", min: None },
+    // Nastroj sfnt2fon (bitmapova pisma .fon z .ttf) potrebuje FreeType
+    // hostitele.
+    WslTool { name: "libfreetype-dev", version_cmd: "pkg-config --modversion freetype2", min: None },
 ];
 
 /// Rada k instalaci (docs/cs/sestaveni.md, Wine).
 pub const ADVICE: &str = "ve WSL Ubuntu 24.04: oficialni repozitar LLVM (apt.llvm.org, llvm-toolchain-noble-23 s jeho klicem) \
-a `sudo apt install clang-23 lld-23 llvm-23 flex bison make gcc` (docs/cs/sestaveni.md, kapitola Wine)";
+a `sudo apt install clang-23 lld-23 llvm-23 flex bison make gcc pkg-config libfreetype-dev` (docs/cs/sestaveni.md, kapitola Wine)";
 
 /// Prvni cislo verze `X.Y` v textu.
 pub fn parse_version(out: &str) -> Option<(u32, u32)> {

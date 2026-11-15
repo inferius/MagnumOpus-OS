@@ -40,7 +40,8 @@
   jeho `configure` a nástroje chtějí unixového hostitele. Ve WSL oficiální
   repozitář LLVM `apt.llvm.org` (`llvm-toolchain-noble-23` s jeho
   podpisovým klíčem) a `sudo apt install clang-23 lld-23 llvm-23 flex
-  bison make gcc`. LLVM 23 má stejné hlavní vydání jako clang hostitele
+  bison make gcc pkg-config libfreetype-dev` (FreeType hostitele pro nástroj
+  `sfnt2fon`, bitmapová písma Wine). LLVM 23 má stejné hlavní vydání jako clang hostitele
   (ABI hlaviček a sysrootu C). xtask nástroje ve WSL kontroluje
   (`clang-23 --version`, aspoň 23.1) a jinak skončí s radou. Ověřeno
   2026-11-15 s clang a LLD 23.1.6 (Ubuntu 24.04.4). Jiná distribuce:

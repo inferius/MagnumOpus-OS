@@ -790,7 +790,8 @@ a své. Zprávy verze 7 klient se starší verzí posílat nesmí
 
 - `WINDOW_OWNER { window, owner }`: vlastník je jiné okno **téhož
   spojení** (dialog). Okno se při prvním zobrazení vystředí nad vlastníkem
-  v pracovní ploše a při každém zvednutí vlastníka jde nad něj. Okno jiného
+  v pracovní ploše a při každém zvednutí vlastníka jde nad něj; má-li
+  vlastník fokus, dialog ho při zobrazení převezme. Okno jiného
   spojení (i stejné identity) vlastníkem být nemůže (`NOT_SUPPORTED`), cyklus
   = `INVALID_ARGS`.
 - `POPOVER_DISMISS { window }`: stisk tlačítka mimo popovery okna s fokusem.

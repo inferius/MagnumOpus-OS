@@ -699,12 +699,18 @@ impl Comp {
             if became_mapped {
                 touched.push(window);
                 // Vlastnene okno (dialog): vystredit nad vlastnikem.
-                if let Some(o) = self.windows.get(&gid).and_then(|w| w.owner) {
+                let owner = self.windows.get(&gid).and_then(|w| w.owner);
+                if let Some(o) = owner {
                     self.center_over_owner(gid, o);
                 }
                 // Fokus jen okno spustene uzivatelem (nebo kdyz zadne jine
                 // fokus nema); jinak zvyrazneni ikony (`launch.rs`).
-                self.new_window_focus(gid, now);
+                // Dialog okna s fokusem fokus prevezme (vstup patri jemu).
+                if owner.is_some() && owner == self.focus {
+                    self.set_focus(Some(gid));
+                } else {
+                    self.new_window_focus(gid, now);
+                }
             }
         }
         touched.sort_unstable();

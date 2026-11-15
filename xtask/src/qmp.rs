@@ -331,12 +331,13 @@ fn wine_steps(s: &mut Vec<Step>) {
     for k in ["a", "h", "o", "j"] {
         press(s, &[k]);
     }
+    // Ctrl+S az po kontrole, ze je text videt.
+    s.push(Step::WaitFor(wine::SAVE_KEYS));
     press(s, &["ctrl", "s"]);
-    // c:\t.txt a Enter v dialogu.
+    // t.txt a Enter v dialogu (bez dvojtecky a lomitka: rozlozeni
+    // klavesnice systemu nemusi byt americke).
     s.push(Step::WaitFor(wine::SAVE));
-    press(s, &["c"]);
-    press(s, &["shift", "semicolon"]);
-    for k in ["backslash", "t", "dot", "t", "x", "t", "ret"] {
+    for k in ["t", "dot", "t", "x", "t", "ret"] {
         press(s, &[k]);
     }
     s.push(Step::WaitFor(wine::CLOSE));
@@ -347,6 +348,7 @@ fn wine_steps(s: &mut Vec<Step>) {
 mod wine {
     pub const CLICK: &str = "init: test wine: klik do poznamkoveho bloku na ";
     pub const TYPE: &str = "init: test wine: pis do poznamkoveho bloku";
+    pub const SAVE_KEYS: &str = "init: test wine: Ctrl+S";
     pub const SAVE: &str = "init: test wine: dialog ulozeni";
     pub const CLOSE: &str = "init: test wine: zavri poznamkovy blok";
 }

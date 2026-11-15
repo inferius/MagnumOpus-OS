@@ -37,7 +37,7 @@ pub const LLVM: CPort = CPort {
     // clock_gettime, __cxa_thread_atexit, locale backend linux.h
     // a vychozi tabulka znaku (ctype<char>).
     patches: &["0001-magnumopus.patch"],
-    build: Build::CMake { options: &[], programs: &[] },
+    build: Build::CMake { options: &[], programs: &[], libraries: &[], tests: &[], test_flags: &[] },
     data: &[],
     dynamic: false,
 };

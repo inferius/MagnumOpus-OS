@@ -115,8 +115,9 @@ static WORD key2scan(UINT key)
     return 0x200 | (key & 0x7f);
 }
 
-/* Klavesy stisknute jako Unicode (pusteni musi poslat stejny znak). */
-static WCHAR unicode_down[KEY_MAX_TRACKED];
+/* Klavesy, jejichz stisk dal znak (MOWIN_EV_TEXT): ani pusteni se
+ * neposila jako klavesa. */
+static BOOL text_key_down[KEY_MAX_TRACKED];
 
 static void send_unicode(HWND hwnd, WCHAR ch, BOOL up)
 {
@@ -139,26 +140,31 @@ static void send_scan(HWND hwnd, UINT key, BOOL up)
     NtUserSendHardwareInput(hwnd, 0, &input, 0);
 }
 
+/* Klavesa: znak podle rozlozeni systemu prijde zvlast jako
+ * MOWIN_EV_TEXT (i po mrtve klavese), proto se klavesa, ktera dava znak
+ * bez Ctrl/Alt, neposila (jinak by se znak zdvojil: WM_CHAR z tabulek Wine
+ * a znovu z textu). Zkratky (Ctrl+S) a netisknutelne klavesy jdou jako scan
+ * kod (VK podle tabulek klavesnice Wine). Omezeni: pismena bez modifikatoru
+ * nedavaji WM_KEYDOWN s VK, jen znak (VK_PACKET); tabulky rozlozeni pro
+ * Wine (KbdLayerDescriptor) pozdeji. */
 static void handle_key(HWND hwnd, const mowin_event *ev)
 {
     UINT key = ev->a;
     BOOL up = ev->b == 0;
     WCHAR ch = ev->c > 0 && ev->c < 0x10000 ? ev->c : 0;
-    BOOL printable = ch >= 0x20 && ch != 0x7f && !(ev->mods & (MO_MOD_CTRL | MO_MOD_ALT | MO_MOD_META));
+    BOOL text = ch >= 0x20 && ch != 0x7f && !(ev->mods & (MO_MOD_CTRL | MO_MOD_ALT | MO_MOD_META));
 
-    if (key < KEY_MAX_TRACKED && up && unicode_down[key])
+    if (key < KEY_MAX_TRACKED && up && text_key_down[key])
     {
-        send_unicode(hwnd, unicode_down[key], TRUE);
-        unicode_down[key] = 0;
+        text_key_down[key] = FALSE;
         return;
     }
-    if (!up && printable)
+    if (!up && text)
     {
-        if (key < KEY_MAX_TRACKED) unicode_down[key] = ch;
-        send_unicode(hwnd, ch, FALSE);
-        if (key >= KEY_MAX_TRACKED) send_unicode(hwnd, ch, TRUE);
+        if (key < KEY_MAX_TRACKED) text_key_down[key] = TRUE;
         return;
     }
+    if (ev->b == 2 && text) return; /* opakovani da dalsi MOWIN_EV_TEXT */
     send_scan(hwnd, key, up);
 }
 

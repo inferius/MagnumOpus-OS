@@ -428,7 +428,10 @@ patch). It talks to the compositor through our `mowin` library (C API in
 | A refused clipboard in the compositor log with the app identity (without content) | **[implemented]** (test `denied_clipboard_is_logged_with_identity`) |
 | `libs/mowin`: several windows and popups on one connection, frames, events, cursor, clipboard; event module shared with `mosdl` | **[implemented]** (host tests; in QEMU with the Wine driver) |
 | `winemo.drv` (`third_party/wine/winemo.drv`, patch `0008`): windows, GDI into the window buffer, input, cursor, decorations, popups, clipboard | **[implemented]**; the GDI window and both frame branches **[verified in QEMU]** x86_64 (`wine` suite: `wintest gdi`, `wintest ramy`) |
-| Notepad (typing from QEMU, Save As, Alt+F4), winecfg | **[implemented]**, waiting for fonts: Wine is built without FreeType so far, windows have no text and dialogs have zero units (winecfg 16 x 16) |
+| Notepad (physical click and typing from QEMU, the typed text is visible, Ctrl+S, the Save As dialog as an owned window with focus, the file on disk, Alt+F4, the process ends), winecfg (dialog of a sensible size) | **[verified in QEMU]** x86_64 (`wine` suite, release) |
+| GDI fonts through FreeType 2.15.0 (`/system/lib/libfreetype.so`) | **[verified in QEMU]** x86_64 (text in Notepad, size of the winecfg dialog); the FreeType port x86_64 and aarch64 (`cstd porty` suite) |
+| Clipboard between Wine and the compositor (text both ways) | **[implemented]**, no automated test yet |
+| Recovery of Wine windows after a compositor crash | **[designed]** (`mowin` cannot do it yet, a lost connection ends the Wine process) |
 
 Decisions:
 
@@ -452,15 +455,26 @@ Decisions:
   outside closes them (`POPOVER_DISMISS` -> `WM_CANCELMODE`). Unowned popups
   (a splash screen) are their own `Frameless` windows. An owner in another
   process is not supported.
-- **Keyboard:** evdev code -> set 1 scan code and VK through a table in the
-  driver, the character by layout from the compositor. **Compose and IME
-  come later.**
+- **Keyboard:** characters by the system layout go to Wine as Unicode (the
+  compositor's text event, also after a dead key); shortcuts with Ctrl/Alt
+  and non-printable keys as set 1 scan codes (evdev code through a table in
+  the driver, VK from Wine's tables). Limitation: letters without a
+  modifier give no `WM_KEYDOWN` with a VK, only the character
+  (`VK_PACKET`); layout tables for Wine (`KbdLayerDescriptor`) later.
+  **Compose and IME come later.**
 - **Clipboard (7A):** text both ways (`CF_UNICODETEXT` <-> UTF-8), the
   number of the process's last physical press; the compositor logs a
   refusal.
 - **Window positions:** the compositor does not take window positions
   from the client (like Wayland); `SetWindowPos` changes only the size
   (`WINDOW_SIZE`).
+- **Fonts:** GDI in Wine draws text through FreeType 2.15.0 (FTL licence,
+  [C port](c-ports.md), `/system/lib/libfreetype.so`, `win32u` loads it
+  with `dlopen`). The fonts are Wine's own fonts (`share/wine/fonts`,
+  Tahoma, Courier and others; LGPL, they stay in the Wine folder); the
+  `sfnt2fon` tool turns them into `.fon` bitmap fonts at build time (host
+  FreeType in WSL). Our system font (`libs/font`) is not used by Wine yet;
+  font substitution (fontconfig and the like) comes later.
 
 ## W1: server connection and processes (questions T1-T5)
 

@@ -401,7 +401,10 @@ záplata). Mluví s kompozitorem přes naši knihovnu `mowin` (C API v
 | Odmítnutá schránka v logu kompozitoru s identitou aplikace (bez obsahu) | **[implementováno]** (test `denied_clipboard_is_logged_with_identity`) |
 | `libs/mowin`: víc oken a popupů na jednom spojení, snímky, události, kurzor, schránka; společný modul událostí s `mosdl` | **[implementováno]** (host testy; v QEMU s ovladačem Wine) |
 | `winemo.drv` (`third_party/wine/winemo.drv`, záplata `0008`): okna, GDI do bufferu okna, vstup, kurzor, dekorace, popupy, schránka | **[implementováno]**; GDI okno a obě větve rámu **[ověřeno v QEMU]** x86_64 (sada `wine`: `wintest gdi`, `wintest ramy`) |
-| Poznámkový blok (psaní z QEMU, Uložit jako, Alt+F4), winecfg | **[implementováno]**, čeká na písma: Wine je zatím bez FreeType, okna nemají text a dialogy mají nulové jednotky (winecfg 16 x 16) |
+| Poznámkový blok (fyzický klik a psaní z QEMU, napsaný text je vidět, Ctrl+S, dialog Uložit jako jako vlastněné okno s fokusem, soubor na disku, Alt+F4, konec procesu), winecfg (dialog v rozumné velikosti) | **[ověřeno v QEMU]** x86_64 (sada `wine`, release) |
+| Písma GDI přes FreeType 2.15.0 (`/system/lib/libfreetype.so`) | **[ověřeno v QEMU]** x86_64 (text v poznámkovém bloku, velikost dialogu winecfg); port FreeType x86_64 i aarch64 (sada `cstd porty`) |
+| Schránka mezi Wine a kompozitorem (text oběma směry) | **[implementováno]**, automatický test zatím není |
+| Obnova oken Wine po pádu kompozitoru | **[navrženo]** (`mowin` zatím neumí, ztráta spojení = konec procesu Wine) |
 
 Rozhodnutí:
 
@@ -425,12 +428,24 @@ Rozhodnutí:
   mimo ně je zavře (`POPOVER_DISMISS` -> `WM_CANCELMODE`). Nevlastněné
   popupy (úvodní obrazovka) jsou vlastní okna `Frameless`. Vlastník z jiného
   procesu není podporovaný.
-- **Klávesnice:** kód evdev -> scan kód sady 1 a VK tabulkou v ovladači,
-  znak podle rozložení z kompozitoru. **Compose a IME přijdou později.**
+- **Klávesnice:** znaky podle rozložení systému jdou do Wine jako Unicode
+  (událost textu z kompozitoru, i po mrtvé klávese); zkratky s Ctrl/Alt
+  a netisknutelné klávesy jako scan kód sady 1 (kód evdev tabulkou
+  v ovladači, VK podle tabulek Wine). Omezení: písmena bez modifikátoru
+  nedávají `WM_KEYDOWN` s VK, jen znak (`VK_PACKET`); tabulky rozložení
+  pro Wine (`KbdLayerDescriptor`) později. **Compose a IME přijdou
+  později.**
 - **Schránka (7A):** text oběma směry (`CF_UNICODETEXT` <-> UTF-8), číslo
   posledního fyzického stisku procesu; odmítnutí zapíše kompozitor do logu.
 - **Polohy oken:** kompozitor polohu oken neurčuje od klienta (jako
   Wayland); `SetWindowPos` mění jen velikost (`WINDOW_SIZE`).
+- **Písma:** GDI ve Wine kreslí text přes FreeType 2.15.0 (licence FTL,
+  [port C](porty-c.md), `/system/lib/libfreetype.so`, `win32u` ho načte
+  `dlopen`). Písma jsou vlastní písma Wine (`share/wine/fonts`, Tahoma,
+  Courier a další; LGPL, zůstávají ve složce Wine); nástroj `sfnt2fon`
+  z nich při sestavení dělá bitmapová písma `.fon` (FreeType hostitele ve
+  WSL). Naše systémové písmo (`libs/font`) Wine zatím nepoužívá;
+  náhrada písem (fontconfig a podobně) přijde později.
 
 ## W1: spojení se serverem a procesy (otázky T1-T5)
 

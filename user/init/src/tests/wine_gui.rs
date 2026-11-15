@@ -37,6 +37,7 @@ const LIMIT: Duration = Duration::from_secs(180);
 /// Znacky pro fyzicky vstup z QEMU (musi sedet s `xtask/src/qmp.rs`, `wine`).
 const QEMU_CLICK: &str = "init: test wine: klik do poznamkoveho bloku na ";
 const QEMU_TYPE: &str = "init: test wine: pis do poznamkoveho bloku";
+const QEMU_SAVE_KEYS: &str = "init: test wine: Ctrl+S";
 const QEMU_SAVE: &str = "init: test wine: dialog ulozeni";
 const QEMU_CLOSE: &str = "init: test wine: zavri poznamkovy blok";
 
@@ -199,6 +200,20 @@ fn wait_pixel(w: &W3, x: i32, y: i32, want: u32) -> Result<u32, String> {
     }
 }
 
+/// Pocet nebilych pixelu v oblasti `x0..x0+w`, `y0..y0+h` (krok 3 px):
+/// text v editoru proti prazdnemu stavu.
+fn ink(w: &W3, x0: i32, y0: i32, wd: i32, ht: i32) -> Result<u32, String> {
+    let mut n = 0;
+    for y in (y0..y0 + ht).step_by(3) {
+        for x in (x0..x0 + wd).step_by(3) {
+            if pixel(&w.inspect, x, y)? & 0x00FF_FFFF != 0x00FF_FFFF {
+                n += 1;
+            }
+        }
+    }
+    Ok(n)
+}
+
 /// Ukonci program a pocka, az jeho okna zmizi z kompozitoru.
 fn finish(s: &Startup, w: &mut W3, run: Run, title: &str) -> TestResult {
     let _ = run.process.kill();
@@ -259,24 +274,60 @@ pub fn frames(s: &Startup) -> TestResult {
 
 pub fn notepad(s: &Startup) -> TestResult {
     with(s, |w| {
-        let path = "/home/wine/.wine/drive_c/t.txt";
-        let _ = fs()?.remove(path);
+        // Dialog Ulozit jako zacina ve vychozim adresari (podle verze Wine
+        // dokumenty uzivatele, nebo pracovni adresar = Z:\ = koren FS).
+        let docs: Vec<String> = fs()?
+            .list("/home/wine/.wine/drive_c/users")
+            .map(|l| l.into_iter().map(|e| format!("/home/wine/.wine/drive_c/users/{}/Documents/t.txt", e.name)).collect())
+            .unwrap_or_default();
+        let candidates: Vec<String> = ["/t.txt", "/home/wine/.wine/drive_c/t.txt"].iter().map(|s| String::from(*s)).chain(docs).collect();
+        for c in &candidates {
+            let _ = fs()?.remove(c);
+        }
         let mut run = launch(s, w, &["notepad"])?;
         let win = wait_window(s, w, &mut run, "Notepad")?;
         settle(&w.inspect)?;
         let (cx, cy) = (win.rect.x + win.rect.w as i32 / 2, win.rect.y + win.rect.h as i32 / 2);
         let p = wait_pixel(w, cx, cy, 0xFFFF_FFFF)?;
         check!(p == 0xFFFF_FFFF, format!("bila plocha editoru: {p:08x} (okno {:?})", win.rect));
-        // Fyzicky vstup z QEMU: klik, text a Ctrl+S.
+        // Oblast textu: levy horni roh editoru (pod nabidkou okna).
+        let (tx, ty) = (win.rect.x + 2, win.rect.y + 20);
+        let empty = ink(w, tx, ty, 90, 30)?;
+        // Fyzicky vstup z QEMU: klik a text.
         println!("{QEMU_CLICK}{cx} {cy}");
         time::sleep(Duration::from_millis(500));
         println!("{QEMU_TYPE}");
+        // Napsany text je videt: v oblasti textu pribyl inkoust.
+        let end = time::deadline_after(Duration::from_secs(30));
+        let typed = loop {
+            run.drain();
+            w.sup.step(s, Some(time::deadline_after(Duration::from_millis(20))));
+            let n = ink(w, tx, ty, 90, 30)?;
+            if n >= empty + 8 || time::now() > end {
+                break n;
+            }
+            time::sleep(Duration::from_millis(200));
+        };
+        check!(typed >= empty + 8, format!("napsany text neni videt: inkoust {typed}, prazdny editor {empty}; {}", run.text()));
+        println!("{QEMU_SAVE_KEYS}");
         // Dialog Ulozit jako: vlastnene okno (WINDOW_OWNER) nad editorem.
         let dlg = wait_for(s, w, &mut run, "dialog Ulozit jako", |w, _| Ok(wine_windows(w, "Save")?.into_iter().next()))?;
         check!(dlg.id != win.id, "dialog je vlastni okno");
+        // Dialog prevezme fokus (vlastnene okno); chvili na jeho inicializaci.
+        let end = time::deadline_after(Duration::from_secs(10));
+        while !wine_windows(w, "Save")?.iter().any(|d| d.focused) && time::now() < end {
+            w.sup.step(s, Some(time::deadline_after(Duration::from_millis(50))));
+        }
+        check!(wine_windows(w, "Save")?.iter().any(|d| d.focused), "dialog Ulozit jako ma fokus");
+        settle(&w.inspect)?;
+        time::sleep(Duration::from_millis(500));
         println!("{QEMU_SAVE}");
         let fs = fs()?;
-        let data = wait_for(s, w, &mut run, "ulozeny soubor", |_, _| Ok(fs.read(path, 0, 4096).ok().filter(|d| !d.is_empty())))?;
+        let data = wait_for(s, w, &mut run, "ulozeny soubor", |_, _| Ok(candidates.iter().find_map(|c| fs.read(c, 0, 4096).ok().filter(|d| !d.is_empty())))).map_err(|e| {
+            let wins: Vec<String> = windows(&w.inspect).unwrap_or_default().iter().map(|x| format!("'{}' {:?} fokus {}", x.title, x.rect, x.focused)).collect();
+            let files: Vec<String> = fs.list("/home/wine/.wine/drive_c").map(|l| l.into_iter().map(|e| e.name).collect()).unwrap_or_default();
+            format!("{e}; okna: {}; drive_c: {}", wins.join(", "), files.join(" "))
+        })?;
         let text = String::from_utf8_lossy(&data);
         check!(text.contains("ahoj"), format!("obsah ulozeneho souboru: {text:?}"));
         // Alt+F4: okno se zavre a proces skonci.

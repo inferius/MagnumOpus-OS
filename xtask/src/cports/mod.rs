@@ -55,6 +55,17 @@ pub enum Build {
         options: &'static [&'static str],
         /// Programy do initfs: (jmeno v initfs, cesta v adresari sestaveni).
         programs: &'static [(&'static str, &'static str)],
+        /// Sdilene knihovny do initfs `lib/` (`/system/lib`): (soname, cesta
+        /// v adresari druheho sestaveni `build-dyn` s dynamickym souborem
+        /// nastroju a `-DBUILD_SHARED_LIBS=ON`). Neprazdne = port nad
+        /// `libc.so` ([`CPort::dynamic`]); staticka knihovna se stavi dal.
+        libraries: &'static [(&'static str, &'static str)],
+        /// Testovaci programy v C linkovane staticky proti nainstalovane
+        /// knihovne (zdroje `ws:` v repozitari) a priznaky navic
+        /// (`{prefix}` = predpona portu, napr. `-I{prefix}/include/x`,
+        /// `{prefix}/lib/libx.a`).
+        tests: &'static [Prog],
+        test_flags: &'static [&'static str],
     },
     Configure {
         /// Argumenty `configure`; zastupne hodnoty viz `configure.rs`.
@@ -237,6 +248,9 @@ const PORTS: &[CPort] = &[
                 "-DSDL_DIALOG=OFF",
                 "-DSDL_TRAY=OFF",
             ],
+            libraries: &[],
+            tests: &[],
+            test_flags: &[],
             programs: &[
                 ("testsprite", "test/testsprite"),
                 ("checkkeys", "test/checkkeys"),
@@ -247,6 +261,37 @@ const PORTS: &[CPort] = &[
                 ("snake", "examples/demo-snake"),
                 ("woodeneye", "examples/demo-woodeneye-008"),
             ],
+        },
+    },
+    // FreeType (licence FTL; dvoji licence FTL/GPLv2, GPL varianta se
+    // nepouziva): rasterizace pisem pro programy v C a Wine (win32u ji
+    // nacita dlopen z /system/lib). Staticka libfreetype.a a sdilena
+    // libfreetype.so; bez PNG, bzip2, Brotli a HarfBuzz; komprimovana pisma
+    // (gzip) pres zlib vlozeny ve FreeType (sdilena knihovna potrebuje PIC,
+    // port zlib je staticky). Archiv podepsany Wernerem Lembergem (klic
+    // E306 7470 7856 409F F194 8010 BE6C 3AAC 63AD 8E3F).
+    CPort {
+        name: "freetype",
+        url: "https://download.savannah.gnu.org/releases/freetype/freetype-2.15.0.tar.xz",
+        file: "freetype-2.15.0.tar.xz",
+        sha256: "93cd47eb719c325107f2d3cf087d06299e944c3b48a40b55537302304dea1dd5",
+        top: "freetype-2.15.0",
+        patches: &[],
+        data: &[("ft-test.ttf", "ws:libs/font/fonts/Inter-Regular.ttf")],
+        dynamic: true,
+        build: Build::CMake {
+            options: &[
+                "-DFT_DISABLE_PNG=ON",
+                "-DFT_DISABLE_BZIP2=ON",
+                "-DFT_DISABLE_BROTLI=ON",
+                "-DFT_DISABLE_HARFBUZZ=ON",
+                "-DFT_DISABLE_ZLIB=OFF",
+                "-DCMAKE_DISABLE_FIND_PACKAGE_ZLIB=TRUE",
+            ],
+            programs: &[],
+            libraries: &[("libfreetype.so", "libfreetype.so")],
+            tests: &[Prog { name: "fttest", sources: &["ws:user/ctest/c/fttest.c"] }],
+            test_flags: &["-I{prefix}/include/freetype2", "{prefix}/lib/libfreetype.a"],
         },
     },
     // AV1 (BSD-2-Clause): staticka knihovna s -fPIC, vlozi se do
@@ -463,7 +508,21 @@ pub fn build(arch: &Arch, sysroot: &Path, dynamic: bool) -> Result<Vec<Output>> 
         println!("xtask: port C {} ({})", p.name, arch.name);
         let (progs, libs) = match &p.build {
             Build::Sources { lib, defines, programs } => (sources::build(arch, sysroot, &src, &work, lib, defines, programs)?, Vec::new()),
-            Build::CMake { options, programs } => (cmake::build(arch, sysroot, p, &src, &work, options, programs)?, Vec::new()),
+            Build::CMake { options, programs, libraries, tests, test_flags } => {
+                let mut progs = cmake::build(arch, sysroot, p, &src, &work, options, programs, false)?;
+                let libs = if libraries.is_empty() {
+                    Vec::new()
+                } else {
+                    cmake::build(arch, sysroot, p, &src, &work, options, &[], true)?;
+                    libraries.iter().map(|(n, rel)| (n.to_string(), work.join("build-dyn").join(rel))).collect()
+                };
+                let pfx = prefix(arch).display().to_string().replace('\\', "/");
+                let flags: Vec<String> = test_flags.iter().map(|f| f.replace("{prefix}", &pfx)).collect();
+                for t in *tests {
+                    progs.push(sources::program(arch, sysroot, &work, t, &flags)?);
+                }
+                (progs, libs)
+            }
             Build::Configure { args, programs, libraries } => {
                 let ffmpeg = p.name == "ffmpeg";
                 let without = ffmpeg && without_patent_codecs();

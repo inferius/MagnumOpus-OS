@@ -13,6 +13,7 @@ Rozhraní C pro víc oken kompozitoru v jednom procesu (`mowin_*`, hlavička `in
 - Jedno spojení na proces: všechna okna jdou přes něj (vlastník okna musí být okno téhož spojení, `WINDOW_OWNER`).
 - Stav za zámkem, volat smí kterékoli vlákno (Wine kreslí z vláken aplikace). `mowin_next_event` čeká **mimo** zámek (duplikát kanálu, událost probuzení, událost `QUEUED`); kdo zařadí událost do fronty, signalizuje `QUEUED`.
 - Druhá kopie `libos` (vedle kopie ve std): `set_self_process` dřív, než se cokoli mapuje.
+- Zprávy, které kompozitor odkládá do `COMMIT` (`LAYER_CREATE`, titulek), jdou až s prvním snímkem okna či popupu (`first_frame`): skryté okno Wine nesmí nechat v kompozitoru rozpracovanou transakci (blokovala by ustálení). Popup okna, které ještě nemá snímek, = `BAD_STATE` (ovladač snímek zopakuje).
 - Schránka posílá číslo posledního fyzického stisku doručeného oknům procesu (pravidlo kompozitoru beze změny); text nikdy do logu.
 - Kód je náš (licence jako ostatní `libs`); žádné hlavičky ani kód z Wine. Hranice LGPL je ve složce Wine.
 
