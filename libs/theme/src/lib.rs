@@ -25,8 +25,10 @@
 
 extern crate alloc;
 
+mod blend;
 mod color;
 mod motion;
+mod pref;
 
 #[cfg(test)]
 mod tests;
@@ -38,7 +40,9 @@ use alloc::vec::Vec;
 use conf::Table;
 
 pub use color::{contrast_ratio, parse_color, to_premul, unpremul};
+pub use blend::mix;
 pub use motion::{Curve, Motion};
+pub use pref::{Pref, Scheme};
 
 /// Tokeny vlozene pri prekladu (`design/tokens.toml`).
 pub static DEFAULT: &str = include_str!("../../../design/tokens.toml");
@@ -89,6 +93,11 @@ macro_rules! colors {
             /// Barva podle jmena role (kontrola kontrastu, ladeni).
             pub fn get(&self, name: &str) -> Option<u32> {
                 match name { $(stringify!($f) => Some(self.$f),)* _ => None }
+            }
+
+            /// Projde vsechny role spolu s rolemi `other` (prolnuti motivu).
+            pub fn each_mut(&mut self, other: &Self, mut f: impl FnMut(&mut u32, u32)) {
+                $(f(&mut self.$f, other.$f);)*
             }
         }
     };

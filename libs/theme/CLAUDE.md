@@ -14,5 +14,7 @@ Motiv vzhledu: tokeny design systému jako data. **Jediný zdroj pravdy je `desi
 
 ## Pasti
 
+- Prolnutí motivů (`blend.rs`, `Theme::mix`) míchá barvy v OKLab a stíny jen barvou (geometrie je ve všech režimech stejná; jiná geometrie by při přechodu skočila v polovině). Nová role barvy se do prolnutí dostane sama přes makro `colors!` (`each_mut`).
+- Volba vzhledu `Pref` (`pref.rs`) je uložený formát (`/system/config/vzhled`): nové klíče jen s výchozí hodnotou, neznámý klíč je chyba čtení.
 - `tokens.css` a `tokens.js` jsou generované; needituj je ručně.
 - Uživatelské motivy (parse za běhu) mají stejné schéma jako vestavěný; přidání povinného tokenu je lámající změna pro ně.

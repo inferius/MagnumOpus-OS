@@ -334,6 +334,27 @@ impl Env for SysEnv {
         }
     }
 
+    /// `vzhled`: volba vzhledu pres init. Systemova zmena ceka na
+    /// potvrzeni spravce v dialogu: init odpovi kanalem, vysledek prijde
+    /// na nej (nejdele 2 minuty).
+    fn appearance(&mut self, system: bool, change: &str) -> Result<String, Error> {
+        let guard = POWER.lock();
+        let chan = guard.as_ref().ok_or(Error::NotSupported)?;
+        let req = powerproto::Request::Appearance { system, change: String::from(change) };
+        chan.write(&req.encode(), Vec::new())?;
+        let mut m = chan.read(Some(time::deadline_after(Duration::from_secs(10))))?;
+        if let Ok(powerproto::Reply::Ok) = powerproto::Reply::decode(&m.data) {
+            let h = m.handles.pop().ok_or(Error::Corrupted)?;
+            drop(guard);
+            m = Channel::from_handle(h).read(Some(time::deadline_after(Duration::from_secs(120))))?;
+        }
+        match powerproto::Reply::decode(&m.data)? {
+            powerproto::Reply::Text(t) => Ok(t),
+            powerproto::Reply::Failed(e) => Err(e),
+            _ => Err(Error::Corrupted),
+        }
+    }
+
     /// `install`: kanal k instalatoru (od initu, jednou), pozadavek,
     /// zpravy prubehu, konecna odpoved.
     fn installer_send(&mut self, req: &[u8]) -> Result<(), Error> {

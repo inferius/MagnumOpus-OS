@@ -185,6 +185,32 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
                 )),
             }
         }
+        "vzhled" => {
+            let word = |i: usize| match a.pos(i) {
+                Some(Value::Str(s)) => Ok(Some(s.clone())),
+                None => Ok(None),
+                Some(_) => Err(a.err(code::ARGS, "vzhled: čekám text (svetly, tmavy, auto, kontrast, pohyb)")),
+            };
+            let change = match (word(0)?.as_deref(), word(1)?) {
+                (None, _) => String::new(),
+                (Some(s @ ("svetly" | "tmavy" | "auto" | "světlý" | "tmavý")), None) => alloc::format!("schema {s}"),
+                (Some(k @ ("kontrast" | "pohyb")), Some(v)) => alloc::format!("{k} {v}"),
+                _ => return Err(a.err(code::ARGS, "vzhled: svetly, tmavy, auto, nebo kontrast|pohyb ano|ne")),
+            };
+            match host.appearance(a.flag("system"), &change) {
+                Ok(words) => {
+                    let mut it = words.split_whitespace().map(|w| Value::str(w));
+                    let (s, k, p) = (it.next(), it.next(), it.next());
+                    Ok(Value::record(&[
+                        ("schema", s.unwrap_or(Value::Nothing)),
+                        ("kontrast", k.unwrap_or(Value::Nothing)),
+                        ("omezit_pohyb", p.unwrap_or(Value::Nothing)),
+                    ]))
+                }
+                Err(abi::Error::InvalidArgs) => Err(a.err(code::ARGS, "vzhled: neplatná hodnota (ano, ne)")),
+                Err(e) => Err(Flow::Err(ShError::sys(e, "změna vzhledu se nepovedla").at(a.span))),
+            }
+        }
         "loglevel" => {
             let target = match a.pos(0) {
                 Some(Value::Str(s)) => s.clone(),

@@ -25,9 +25,10 @@ pub struct Style {
     pub fonts: Family,
     pub icons: Icons,
     masks: BTreeMap<(u32, u32), ShadowMask>,
-    /// Obraz plochy pro (sirka, vyska, rezim).
+    /// Obraz plochy pro (sirka, vyska, barvy bg, wall_a, wall_b): pri
+    /// prolinani motivu se meni barvy, ne rezim.
     /// Sdileny (`Arc`): prechod ze startovni obrazovky ho pouziva bez kopie.
-    backdrop: Option<(u32, u32, Mode, alloc::sync::Arc<Vec<u32>>)>,
+    backdrop: Option<(u32, u32, [u32; 3], alloc::sync::Arc<Vec<u32>>)>,
 }
 
 impl Style {
@@ -47,6 +48,16 @@ impl Style {
 
     pub fn mode(&self) -> Mode {
         self.theme.mode
+    }
+
+    /// Motiv rezimu `mode` z tokenu (cil prolnuti).
+    pub fn theme_for(&self, mode: Mode) -> Option<Theme> {
+        self.tokens.theme(mode).ok()
+    }
+
+    /// Prolnuty motiv (snimek prechodu rezimu, `appearance.rs`).
+    pub fn set_theme(&mut self, t: Theme) {
+        self.theme = t;
     }
 
     /// Rozmery oken z tokenu.
@@ -96,8 +107,8 @@ impl Style {
 
     /// Obraz plochy pro velikost `w x h` (spocita se jednou).
     pub fn backdrop(&mut self, w: u32, h: u32) -> &[u32] {
-        let mode = self.theme.mode;
-        let fresh = matches!(&self.backdrop, Some((bw, bh, m, _)) if *bw == w && *bh == h && *m == mode);
+        let key = [self.theme.color.bg, self.theme.color.wall_a, self.theme.color.wall_b];
+        let fresh = matches!(&self.backdrop, Some((bw, bh, k, _)) if *bw == w && *bh == h && *k == key);
         if !fresh {
             let c = &self.theme.color;
             // Stejne jako `.desk` v prototypu (design/assets/mo.css).
@@ -106,7 +117,7 @@ impl Style {
                 Radial { cx: 0.82, cy: 0.72, stop: 0.56, color: c.wall_b },
             ];
             let img = backdrop::render(w, h, c.bg, &layers);
-            self.backdrop = Some((w, h, mode, alloc::sync::Arc::new(img)));
+            self.backdrop = Some((w, h, key, alloc::sync::Arc::new(img)));
         }
         &self.backdrop.as_ref().unwrap().3
     }
@@ -161,9 +172,14 @@ pub fn mode_from_code(c: u8) -> Mode {
 }
 
 impl Comp {
-    /// Prepne rezim barev a prekresli vse.
+    /// Prepne rezim barev hned (bez prolnuti) a prekresli vse. Volba
+    /// uzivatele a prolnuti: [`Comp::set_appearance_user`].
     pub fn set_mode(&mut self, mode: Mode) {
+        self.appearance.anim = None;
+        self.appearance.target = mode;
         self.style.set_mode(mode);
+        // Pozadi pod listou ma nove barvy.
+        self.bar_blur_dirty = true;
         let g = self.style.geo();
         for w in self.windows.values_mut() {
             w.geo = g;
@@ -176,7 +192,8 @@ impl Comp {
         self.damage_all();
     }
 
+    /// Cilovy rezim (behem prolnuti uz ten novy).
     pub fn mode(&self) -> Mode {
-        self.style.mode()
+        self.appearance.target
     }
 }

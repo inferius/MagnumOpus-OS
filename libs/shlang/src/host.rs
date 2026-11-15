@@ -356,6 +356,14 @@ pub trait Host {
     fn report(&mut self) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Volba vzhledu (`vzhled`): `system` = systemova (prihlasovaci
+    /// obrazovka, ukon spravy), jinak uzivatele relace. `change` prazdne =
+    /// jen precist, jinak `schema svetly|tmavy|auto`, `kontrast ano|ne`,
+    /// `pohyb ano|ne`. Vraci volbu ve tvaru `schema kontrast omezit_pohyb`
+    /// (napr. `auto ne ne`); `NOT_SUPPORTED` = hostitel vzhled nema.
+    fn appearance(&mut self, _system: bool, _change: &str) -> Result<String, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Uroven logu jadra (`loglevel`): `target` prazdny = vypis.
     fn log_level(&mut self, _target: &str, _level: &str) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)

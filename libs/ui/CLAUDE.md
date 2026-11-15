@@ -20,6 +20,7 @@ Nativní knihovna UI (milník 6c): jedna pro všechny aplikace. Aplikace popíš
 - Najetí: prvek s částmi, které se zvýrazňují zvlášť (záložky, řádky a posuvník tabulky), musí část vracet z `Ui::hover_part`; jinak se pohyb uvnitř prvku nepřekreslí a zvýraznění zůstane na staré části (test `hover.rs`).
 - Rozvržení měří podle dostupné šířky (`layout::measure(n, t, avail)`): výška zalamovaného štítku závisí na šířce. `measure` a `place` musí šířky počítat stejně (řádek přes `row_sizes`), jinak se výška štítku a obdélník rozejdou.
 
+- Přechod režimu: `Event::ThemeMix` (mezikrok, `theme::Theme::builtin_mix`) a konečný `Event::Theme` nastaví `look.theme` a `Context::mode` (cílový režim pro aplikace s vlastním vzhledem). Aplikace, která události klienta vyjmenovává sama (`gui-term`), musí mít zástupnou větev.
 - Aplikace UI vykresluje do vlastního bufferu; kompozitor mu nevěří (viz `libs/comp/CLAUDE.md`), ale i klient musí ošetřit nesmyslné rozměry od kompozitoru.
 - `client/mod.rs` má ~730 řádků; při dalším růstu dělit (obnova po pádu je v `restore.rs`, schránka v `clip.rs`).
 - Seznam návrhů u pole: jádro bez stromu `complete.rs` (`Completion`, používá ho i gui-term samostatně), napojení na pole `suggest.rs`. Klávesy, které seznam nevezme, musí jít do pole (`Outcome::Ignored`); heslo seznam nikdy nemá.

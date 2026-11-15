@@ -66,9 +66,16 @@ pub struct Motion {
     pub search_delay: u32,
     /// Krok automatickeho posunu pri tahu za okraj.
     pub autoscroll: u32,
+    /// Prolnuti barev pri zmene rezimu (svetly <-> tmavy, kontrast).
+    pub theme: u32,
+    /// Prolnuti pri automaticke zmene (vychod a zapad slunce).
+    pub theme_auto: u32,
+    /// Mezikrok prolnuti pro aplikace (kompozitor prolina kazdy snimek).
+    pub theme_app_step: u32,
     pub ease_standard: Curve,
     pub ease_enter: Curve,
     pub ease_exit: Curve,
+    pub ease_in_out: Curve,
 }
 
 impl Motion {
@@ -88,9 +95,13 @@ impl Motion {
             caret_blink_stop: u(t, "motion.caret_blink_stop")?,
             search_delay: u(t, "motion.search_delay")?,
             autoscroll: u(t, "motion.autoscroll")?,
+            theme: u(t, "motion.theme")?,
+            theme_auto: u(t, "motion.theme_auto")?,
+            theme_app_step: u(t, "motion.theme_app_step")?,
             ease_standard: Curve::parse(t, "motion.ease_standard")?,
             ease_enter: Curve::parse(t, "motion.ease_enter")?,
             ease_exit: Curve::parse(t, "motion.ease_exit")?,
+            ease_in_out: Curve::parse(t, "motion.ease_in_out")?,
         })
     }
 }

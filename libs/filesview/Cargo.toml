@@ -18,3 +18,4 @@ openwith = { path = "../openwith" }
 
 [dev-dependencies]
 gfx = { path = "../gfx" }
+theme = { path = "../theme" }

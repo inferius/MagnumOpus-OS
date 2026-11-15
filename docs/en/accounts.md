@@ -514,7 +514,8 @@ its own identity from the manifest **[designed]**.
 | 2 `ACCOUNT_DELETE` | uid |
 | 3 `ACCOUNT_RESET_PASSWORD` | uid (does not open an encrypted home) |
 | 4 `ROLE_SET` | uid, on |
-| 5-15 | drivers, updates, disks, firewall, time - added by their services |
+| 5 `APPEARANCE_SYSTEM` | the login screen appearance choice (text `tmavy ne ne`); the action's service is init (`vzhled --system`), it checks the grant on the `grants` channel |
+| 6-15 | drivers, updates, disks, firewall, time - added by their services |
 
 Why: what is confirmed is a concrete action the person sees (the same
 principle as the [action API](gui.md#action-api)); whoever does longer

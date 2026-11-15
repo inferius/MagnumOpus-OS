@@ -12,3 +12,4 @@ ui = { path = "../ui" }
 
 [dev-dependencies]
 gfx = { path = "../gfx" }
+theme = { path = "../theme" }

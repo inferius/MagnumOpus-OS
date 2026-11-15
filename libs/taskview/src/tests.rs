@@ -150,3 +150,32 @@ fn checkbox_click_changes_list() {
     click_checkbox(&mut m, &mut u, "Jen úlohy agenta");
     assert_eq!(names(&u, Role::ListItem).len(), all);
 }
+
+/// Prepnuti rezimu: okno se prekresli barvami motivu (svetly, tmavy,
+/// kontrast i mezikrok prolnuti). Snimky do `target/shots/ulohy-*.png`.
+#[test]
+fn theme_modes_redraw_window() {
+    let m = TaskManager::new(TestBackend::default());
+    let (w, h) = (560u32, 620u32);
+    let mut last = None;
+    for (name, th) in [
+        ("svetly", theme::Theme::builtin(theme::Mode::Light)),
+        ("prolnuti", theme::Theme::builtin_mix(theme::Mode::Light, theme::Mode::Dark, 500)),
+        ("tmavy", theme::Theme::builtin(theme::Mode::Dark)),
+        ("kontrast", theme::Theme::builtin(theme::Mode::Contrast)),
+    ] {
+        let mut u = ui::Ui::new(gfx_text(), w, h);
+        u.look.theme = th.clone();
+        u.refresh(&m);
+        let mut px = alloc::vec![0u32; (w * h) as usize];
+        let mut c = gfx::Canvas::new(&mut px, w, h, w).unwrap();
+        u.draw(&mut c, 0);
+        let corner = px[((h - 2) * w + w - 2) as usize];
+        assert_eq!(corner, th.color.surface, "{name}: pozadi okna");
+        assert_ne!(Some(corner), last, "{name}: jiny nez predchozi rezim");
+        last = Some(corner);
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/shots");
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(dir.join(alloc::format!("ulohy-{name}.png")), gfx::png::encode(&px, w, h, w));
+    }
+}

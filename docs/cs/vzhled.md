@@ -162,10 +162,77 @@ ikony a fokus alespoň 3 : 1 (1.4.11). Ve vysokém kontrastu text 7 : 1
 tokenů; generátor je ověří pro všechny tři motivy (teď 102 z 102
 dvojic v pořádku) a při nesplnění skončí chybou.
 
-**Výchozí motiv podle denní doby:** světlý od východu do západu slunce
-v nastaveném časovém pásmu (systém zná čas i pásmo, viz
-[Reálný čas](cas.md)), jinak tmavý. Přechod je prolnutí 240 ms
-a odloží se, dokud uživatel píše (nejdéle 2 minuty).
+### Světlý, tmavý a automatický vzhled
+
+**[implementováno]** **[ověřeno v QEMU]** (x86_64)
+
+Uživatel volí **Světlý**, **Tmavý** nebo **Automaticky** (výchozí);
+vysoký kontrast a Omezit pohyb jsou v Přístupnosti a mají přednost
+(kontrast přebije světlý i tmavý, s Omezit pohyb je změna okamžitá).
+
+| Kde | Jak |
+|---|---|
+| lišta | ikona Vzhled (slunce, měsíc, kontrast) otevře kartu se třemi volbami; zvolená má fajfku, pod nimi stav („Teď světlý, podle východu a západu slunce“) |
+| shell | `vzhled tmavy`, `vzhled svetly`, `vzhled auto`, `vzhled kontrast ano`, `vzhled pohyb ano`; bez argumentu stav ([Příkazy shellu](prikazy-shellu.md#vzhled)) |
+| přihlašovací obrazovka | systémová volba, výchozí Automaticky; mění ji `vzhled --system ...` jako úkon správy (`ELEVATE` `APPEARANCE_SYSTEM`, potvrdí člověk s rolí správy v systémovém dialogu, viz [Účty](ucty.md#správa-počítače)) |
+
+**Automaticky = podle slunce.** Světlý od východu do západu slunce
+v místě časového pásma (`tz::Zone::place`: souřadnice města, podle
+kterého se pásmo jmenuje; poloha počítače to není a systém ji nezjišťuje),
+výpočet NOAA s chybou do pár minut (`libs/comp/src/sun.rs`). Proč ne
+pevně 7-19 h: v Praze je v prosinci tma už v 16 h a v červnu světlo
+do 21 h, pevné hodiny by půl roku nesedly. Pevné hodiny 7-19 platí jen
+bez místa (pásmo `UTC+2`) a za polárním kruhem, kde slunce celý den
+nevyjde nebo nezapadne (polární noc by jinak znamenala tmavý motiv
+i v poledne). Automatická změna počká, dokud uživatel píše (2 s od
+poslední klávesy, nejdéle 2 minuty); ruční volba se rozběhne hned.
+
+**Plynulý přechod.** Barvy všeho najednou (plocha, lišta s rozmazaným
+pozadím, rámy, stíny, dialogy, okna) se po křivce `ease_in_out` (pomalý
+začátek i konec) přelijí ze starého režimu do nového: ruční přepnutí
+za `motion.theme` = 600 ms, automatické při východu a západu slunce
+pomalu za `motion.theme_auto` = 3 s (nemá rušit). Během přechodu se dá
+normálně pracovat: kompozitor má vstup vždy první a prolíná snímek po
+snímku, takže okno, které se mezitím překreslí (klik, psaní), se skládá
+už v prolnutém snímku (QEMU test kliká do okna uprostřed přechodu). Prolíná
+se v **OKLab** (vnímově rovnoměrný prostor): střed bílé a tmavé má
+vnímanou polovinu světlosti a barvy cestou nešednou ani „nešpiní“ jako
+v sRGB. Stíny mají ve všech režimech stejnou geometrii, prolíná se jen
+barva; do kontrastu se stíny rozplynou.
+
+| Kdo | Jak často | Proč |
+|---|---|---|
+| kompozitor | každý snímek | svoje vrstvy skládá stejně, stojí jen složení snímku (celá obrazovka po dobu přechodu; QEMU test zapíše počet snímků a průměrný čas) |
+| aplikace (`libs/ui`, terminál) | mezikrok `THEME_MIX` každých `motion.theme_app_step` = 100 ms, na konci `THEME` | překreslení okna aplikace je dražší než složení; 3 mezikroky stačí, aby obsah nezůstal pozadu |
+| starší aplikace | jen konečný `THEME` | neznámou zprávu zahodí (test `unknown_server_op_is_not_supported_and_compose_validated`) |
+
+Aplikace s vlastním vzhledem (přehrávač, prohlížeč obrázků) najde
+cílový režim v kontextu okna (`ui::Context::mode`) a barvy si zvolí
+sama; prvky knihovny jdou z motivu samy.
+
+**Uložení.** Init ukládá volbu do `/system/config/vzhled/<uid>.toml`
+(uživatel) a `system.toml` (přihlašovací obrazovka); adresář patří
+systému bez grantů, takže volba jde použít i před odemčením šifrovaného
+domova. Po přihlášení init pošle kompozitoru volbu uživatele dřív než
+`session open` (jeden přechod z přihlašovací obrazovky), po pádu
+kompozitoru všechny znovu. Změnu z lišty hlásí kompozitor initu na
+kanálu `launcher` a init ji uloží jen přihlášenému uživateli.
+
+```text
+schema = auto        # svetly | tmavy | auto
+kontrast = ne        # ano | ne
+omezit_pohyb = ne    # ano | ne
+```
+
+Testy: `libs/theme` (`mix_ends_and_oklab_midpoint`,
+`pref_text_roundtrip_and_resolve`), `libs/comp` (`tests/appearance.rs`:
+východ a západ v Praze, polární noc, prolnutí s mezikroky pro aplikace,
+Omezit pohyb, systémová a uživatelská volba, karta v liště, odklad při
+psaní), `libs/shlang` (`tests/appearance.rs`), QEMU sada `gui`
+(„volba vzhledu: plynulý přechod barev“: odznak projde mezibarvami,
+okno aplikace se překreslí tmavě; uložení jen pro systém). Snímky
+obrazovky všech aplikací ve světlém, tmavém a kontrastním režimu dělá
+test „vzhled podle návrhu“ (`target/shots/`).
 
 ### Typografie
 
@@ -430,7 +497,7 @@ Obsah zleva doprava:
 | **Okna** | připnuté a běžící aplikace; tečka pod ikonou = běží, delší akcentová = aktivní; klik = aktivovat / minimalizovat |
 | **Agent** | když agent AI jedná, korálová pilulka „Agent ovládá Soubory“ s tlačítkem **Zastavit** |
 | **Úlohy** | počet běžících úloh a štítek agenta; klik otevře správce úloh |
-| **Stav** | síť, hlasitost, oznámení s počtem nových |
+| **Stav** | síť, hlasitost, vzhled (světlý / tmavý / automaticky, viz [Světlý, tmavý a automatický vzhled](#světlý-tmavý-a-automatický-vzhled)), oznámení s počtem nových |
 | **Hodiny** | čas a datum (tabulkové číslice) |
 
 Ve svislé poloze se popisky skryjí a zůstanou ikony s tooltipem; hodiny
@@ -1053,8 +1120,10 @@ budou jen služby mimo GUI (`taskd`, klony v `fsproto`, konfigurace).
   cestou a rozmazání se neověří. Rozmazání stojí GPU čas úměrný ploše:
   proto jen pod lištou, nabídkami a dialogem, v poloviční velikosti
   a jen když se pod ním něco změnilo.
-- **Motiv podle denní doby** potřebuje polohu (východ a západ slunce).
-  Bez polohy se použije pevný čas 7:00-20:00 podle pásma.
+- **Motiv podle denní doby** bere místo z časového pásma (město, podle
+  kterého se pásmo jmenuje), ne polohu počítače: na okraji velkého pásma
+  se východ může lišit o desítky minut. Bez místa (pevný posun) a za
+  polárním kruhem platí pevně 7-19 h.
 - **Napodobení systémového dialogu v celoobrazovkové aplikaci** nejde
   vyloučit jen vzhledem; ochrana je fráze, fyzický vstup a Ctrl+Alt+Del
   (stejné riziko jako v návrhu 6c).

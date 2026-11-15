@@ -127,6 +127,11 @@ pub trait Env {
     fn log_level(&mut self, _target: &str, _level: &str) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Volba vzhledu (prikaz `vzhled`, `shlang::host::Host::appearance`);
+    /// vychozi = relace ji nema.
+    fn appearance(&mut self, _system: bool, _change: &str) -> Result<String, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Sluzba "otevri cestu" (`start`, hola cesta k souboru): poslani
     /// zadosti; vychozi = relace sluzbu nema.
     fn open_send(&mut self, _path: &str, _app_only: bool) -> Result<(), abi::Error> {
@@ -558,6 +563,10 @@ impl Host for SessionHost<'_> {
 
     fn log_level(&mut self, target: &str, level: &str) -> Result<String, abi::Error> {
         self.env.log_level(target, level)
+    }
+
+    fn appearance(&mut self, system: bool, change: &str) -> Result<String, abi::Error> {
+        self.env.appearance(system, change)
     }
 
     fn open_path(&mut self, path: &str, app_only: bool) -> Result<Opened, abi::Error> {

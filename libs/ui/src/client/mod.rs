@@ -63,6 +63,11 @@ pub enum Event {
     Restored { generation: u64 },
     /// Rezim barev systemu (prekreslit stejnym motivem).
     Theme(theme::Mode),
+    /// Mezikrok plynuleho prechodu rezimu: motiv prolnuty z `from` do `to`
+    /// v bode `t` (0-1000, `theme::Theme::builtin_mix`). Na konci vzdy
+    /// prijde [`Event::Theme`]; aplikace, ktera mezikroky neumi, je smi
+    /// ignorovat.
+    ThemeMix { from: theme::Mode, to: theme::Mode, t: u16 },
     /// Zprava schranky; zpracuje ji [`Window::clipboard_event`].
     Clipboard(clipproto::ServerMsg),
     /// Novy kontext okna (obrazovka, pracovni plocha, skala): uz ulozeny
@@ -400,11 +405,8 @@ impl Window {
                 first
             }
             ServerMsg::Close { .. } => Some(Event::Close),
-            ServerMsg::Theme { mode } => Some(Event::Theme(match mode {
-                1 => theme::Mode::Dark,
-                2 => theme::Mode::Contrast,
-                _ => theme::Mode::Light,
-            })),
+            ServerMsg::Theme { mode } => Some(Event::Theme(mode_of(mode))),
+            ServerMsg::ThemeMix { from, to, t } => Some(Event::ThemeMix { from: mode_of(from), to: mode_of(to), t }),
             ServerMsg::A11yAction { node, action, value, .. } => Some(Event::A11yAction { node, action, value }),
             ServerMsg::Clipboard { data } => clipproto::ServerMsg::decode(&data).ok().map(Event::Clipboard),
             ServerMsg::WindowPlace { rect, .. } => Some(Event::Place(rect)),
@@ -984,6 +986,13 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
         Event::Restored { .. } => *dirty = true,
         Event::Theme(m) => {
             ui.look.set_mode(m);
+            ui.cx.mode = m;
+            ui.refresh(app);
+            *dirty = true;
+        }
+        Event::ThemeMix { from, to, t } => {
+            ui.look.theme = theme::Theme::builtin_mix(from, to, t);
+            ui.cx.mode = to;
             ui.refresh(app);
             *dirty = true;
         }
@@ -1067,4 +1076,13 @@ fn render<M: Clone>(win: &mut Window, ui: &mut Ui<M>) -> Result<()> {
         win.title = ui.title.clone();
     }
     win.commit_redrawn(true)
+}
+
+/// Kod rezimu ze zpravy `THEME` / `THEME_MIX` (neznamy = svetly).
+fn mode_of(code: u8) -> theme::Mode {
+    match code {
+        1 => theme::Mode::Dark,
+        2 => theme::Mode::Contrast,
+        _ => theme::Mode::Light,
+    }
 }

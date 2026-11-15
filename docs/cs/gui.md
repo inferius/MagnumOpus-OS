@@ -446,7 +446,7 @@ typografickou škálu, rozestupy, rozměry, zaobleni, stíny, pohyb
 všechny povinné dvojice kontrastu ze sekce `[contrast]` stejně jako
 `design/tools/build-tokens.mjs`. Výchozí motiv je vložený při překladu;
 `Tokens::parse` přečte i jiný text (uživatelské motivy později).
-Kompozitor přepíná režim příkazem `theme light|dark|contrast`.
+Kompozitor přepíná režim hned příkazem `theme light|dark|contrast` (testy); volbu uživatele s plynulým přechodem a režimem podle denní doby dostává příkazem `appearance` (viz [Vzhled](vzhled.md#světlý-tmavý-a-automatický-vzhled)).
 
 **Okna** (`design/okna.html`): titulek 40 px (`size.title_h`), zaoblení
 18 px (`radius.window`), rám 1 px `border`, stín podle stavu
@@ -1140,7 +1140,8 @@ Init mluví s `compd` po bootstrap kanálu textovými příkazy (jako s
 | `inspect` | - | `ok` + kanál inspekce |
 | `status` | - | `ok clients=1 windows=2 frames=.. presented=.. dialogs=0 secure=0` |
 | `tasks <běží> <agent>` | - | `ok` (ikona úloh v panelu) |
-| `theme light\|dark\|contrast` | - | `ok` (režim barev z tokenů) |
+| `theme light\|dark\|contrast` | - | `ok` (režim barev z tokenů, hned) |
+| `appearance system <volba>`, `appearance user <uid> <volba>` | - | `ok`; volba `schema kontrast omezit_pohyb`, např. `auto ne ne` (plynulý přechod, podle denní doby) |
 | `sources [net] [audio]` | relace sítě (`INFO`), kanál zvuku | `ok` (stav v liště) |
 | `apps` + řádky `<id>\t<jméno>\t<single\|multi>` | - | prázdná (spustitelné aplikace v liště) |
 | `dnd-fullscreen on\|off` | - | prázdná (Nerušit při celé obrazovce) |
@@ -1208,6 +1209,7 @@ Kompozitor -> aplikace:
 | 111 | `ACTION_INVOKE` | volání, akce, argumenty |
 | 112 | `ERROR` | op, kód |
 | 113 | `THEME` | režim barev u8 (0 světlý, 1 tmavý, 2 vysoký kontrast); po `WELCOME` a při změně |
+| 118 | `THEME_MIX` | od u8, do u8, bod u32 (0-1000, už po křivce): mezikrok plynulého přechodu režimu; na konci vždy `THEME` |
 
 Příklad (okno s jedním bufferem):
 

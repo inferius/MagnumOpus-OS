@@ -166,7 +166,7 @@ fn handle(r: Request, p: &ffi::Platform, power_res: &Resource) -> Reply {
         Request::Battery => Reply::Battery(sensors::batteries()),
         Request::CpuPerf => Reply::CpuPerf(sensors::cpu_perf()),
         // Balicek pro vyvojare resi init se sluzbou logu, ne acpid.
-        Request::Report | Request::LogLevel { .. } | Request::Snapshot | Request::OpenInstaller => {
+        Request::Report | Request::LogLevel { .. } | Request::Snapshot | Request::OpenInstaller | Request::Appearance { .. } => {
             Reply::Failed(libos::Error::NotSupported)
         }
     }

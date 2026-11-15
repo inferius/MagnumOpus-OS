@@ -11,6 +11,8 @@ use alloc::vec::Vec;
 use guiproto::Rect;
 use gfx::Canvas;
 
+use theme::Scheme;
+
 use crate::Comp;
 use crate::render::NetState;
 
@@ -26,6 +28,9 @@ pub enum Flyout {
     /// Okna jedne aplikace (zastupce v liste): radek = okno, posledni
     /// "Nove okno".
     AppWindows(u32),
+    /// Vzhled: radky Svetly, Tmavy, Automaticky (zvoleny s fajfkou),
+    /// pak stav (kdy se automaticky prepne, kontrast z Pristupnosti).
+    Look,
 }
 
 /// Ceske tvary "uloha".
@@ -81,6 +86,7 @@ impl Comp {
                 (String::from("Zvuk"), vec![line])
             }
             Flyout::Bell => (String::from("Oznámení"), self.dnd_lines()),
+            Flyout::Look => (String::from("Vzhled"), self.look_lines()),
             Flyout::AppWindows(g) => {
                 let id = self.app_of(g).unwrap_or_default();
                 let mut rows: Vec<String> = self.app_windows(&id).iter().filter_map(|w| self.windows.get(w)).map(|w| w.title.clone()).collect();
@@ -118,6 +124,7 @@ impl Comp {
             Flyout::Net => bar.net,
             Flyout::Volume => bar.volume,
             Flyout::Bell => Some(bar.bell),
+            Flyout::Look => Some(bar.look),
             Flyout::Apps => Some(bar.launcher),
             Flyout::AppWindows(g) => bar.apps.iter().find(|(x, _)| *x == g).map(|(_, r)| *r),
         }
@@ -132,7 +139,9 @@ impl Comp {
         let pad = t.space[4];
         let (hs, bs) = (t.text.body_strong, t.text.body);
         let tw = lines.iter().map(|l| self.style.width(l, bs)).chain([self.style.width(&title, hs)]).max().unwrap_or(0);
-        let w = (tw + 2 * pad).min(self.w);
+        // Vzhled: misto na fajfku zvoleneho radku.
+        let mark = if f == Flyout::Look { t.space[3] + t.size.icon_s } else { 0 };
+        let w = (tw + mark + 2 * pad).min(self.w);
         let h = hs.line + lines.len() as u32 * (bs.line + t.space[2]) + 2 * pad;
         let bottom = self.panel_rect().y - t.space[3] as i32;
         // Spoustec vlevo: karta zarovnana k leve strane ikony.
@@ -175,8 +184,17 @@ impl Comp {
         c.round_fill_bordered(r, t.radius.card, t.color.surface, t.color.border_strong, fw);
         let pad = t.space[4] as i32;
         let mut y = r.y + pad;
-        let rows = core::iter::once((title, t.text.body_strong, t.color.ink)).chain(lines.into_iter().map(|l| (l, t.text.body, t.color.ink_muted)));
-        for (s, style, ink) in rows {
+        // Vzhled: volby jsou plny text, zvolena s fajfkou vpravo.
+        let chosen = (f == Flyout::Look).then(|| Scheme::ALL.iter().position(|&s| s == self.appearance().1.scheme)).flatten();
+        let choices = if f == Flyout::Look { Scheme::ALL.len() } else { 0 };
+        let rows = core::iter::once((title, t.text.body_strong, t.color.ink))
+            .chain(lines.into_iter().enumerate().map(|(i, l)| (l, t.text.body, if i < choices { t.color.ink } else { t.color.ink_muted })));
+        for (k, (s, style, ink)) in rows.enumerate() {
+            if k > 0 && chosen == Some(k - 1) {
+                let is = t.size.icon_s;
+                let x = r.right() as i32 - pad - is as i32;
+                self.style.icons.draw(c, "check", x, y + (style.line as i32 - is as i32) / 2, is, t.icon_stroke, t.color.accent_ink);
+            }
             let face = self.style.face(style);
             let base = y + face.baseline_in(style.size, style.line);
             face.draw(c, r.x + pad, base, &s, style.size, ink);

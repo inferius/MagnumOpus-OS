@@ -87,3 +87,64 @@ fn curves() {
     }
     let _: String = t.font.mono;
 }
+
+#[test]
+fn mix_ends_and_oklab_midpoint() {
+    let (l, d) = (Theme::builtin(Mode::Light), Theme::builtin(Mode::Dark));
+    assert_eq!(l.mix(&d, 0.0).color, l.color);
+    assert_eq!(l.mix(&d, 1.0).color, d.color);
+    assert_eq!(l.mix(&d, 1.0).shadow, d.shadow);
+    assert_eq!(l.mix(&d, 0.4).mode, Mode::Light);
+    assert_eq!(l.mix(&d, 0.6).mode, Mode::Dark);
+    // Stred cerne a bile v OKLab: svetlost 0,5 (vnimova polovina), ne
+    // sRGB 128 ani linearni 50 % (to by bylo moc svetle).
+    let m = mix(0xFF00_0000, 0xFFFF_FFFF, 0.5);
+    assert!((crate::blend::lab_l(m) - 0.5).abs() < 0.01, "{m:08x}");
+    let g = m & 0xFF;
+    assert!((95..=105).contains(&g), "{m:08x}");
+    // Monotonni svetlost pozadi z bile do tmave.
+    let mut last = 2.0;
+    for i in 0..=10 {
+        let c = l.mix(&d, i as f32 / 10.0).color.bg;
+        let ll = crate::blend::lab_l(c);
+        assert!(ll <= last + 1e-4, "{i}");
+        last = ll;
+    }
+    // Pruhledna barva prevezme odstin druhe.
+    assert_eq!(mix(0, 0xFFFF_0000, 0.5) & 0x00FF_FFFF, to_premul(255, 0, 0, 128) & 0x00FF_FFFF);
+}
+
+#[test]
+fn mix_into_contrast_fades_shadows() {
+    let (l, c) = (Theme::builtin(Mode::Light), Theme::builtin(Mode::Contrast));
+    let h = l.mix(&c, 0.5);
+    assert_eq!(h.shadow.window.len(), l.shadow.window.len());
+    assert!(h.shadow.window[0].color >> 24 < l.shadow.window[0].color >> 24);
+    assert!(l.mix(&c, 1.0).shadow.window.is_empty());
+    assert_eq!(l.mix(&c, 1.0).opacity.bar, 255);
+}
+
+#[test]
+fn pref_text_roundtrip_and_resolve() {
+    let p = Pref::default();
+    assert_eq!(p.scheme, Scheme::Auto);
+    assert_eq!(p.resolve(true), Mode::Light);
+    assert_eq!(p.resolve(false), Mode::Dark);
+    let q = Pref { scheme: Scheme::Dark, contrast: true, reduce_motion: true };
+    assert_eq!(q.resolve(true), Mode::Contrast);
+    assert_eq!(Pref::parse(&q.to_text()), Ok(q));
+    assert_eq!(Pref::from_words(&q.to_words()), Some(q));
+    assert_eq!(Pref::parse("schema = svetly\r\n# x\r\n\r\n"), Ok(Pref { scheme: Scheme::Light, ..Pref::default() }));
+    assert_eq!(Pref::parse("schema = modry").unwrap_err().line, 1);
+    assert_eq!(Pref::parse("\nbarva = ne").unwrap_err().line, 2);
+    assert_eq!(Pref::from_words("auto ne"), None);
+    assert_eq!(Theme::builtin(Mode::Light).motion.theme, 600);
+    assert_eq!(Theme::builtin(Mode::Light).motion.theme_auto, 3000);
+    let mut p = Pref::default();
+    p.apply("schema tmavy").unwrap();
+    p.apply("kontrast ano").unwrap();
+    p.apply("pohyb ano").unwrap();
+    assert_eq!(p, Pref { scheme: Scheme::Dark, contrast: true, reduce_motion: true });
+    assert!(p.apply("schema").is_err());
+    assert!(p.apply("barva modra").is_err());
+}

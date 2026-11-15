@@ -168,10 +168,81 @@ and boundaries 4.5 : 1. The required pairs are in the `[contrast]` section
 of the tokens; the generator verifies them for all three themes (currently
 102 of 102 pairs pass) and fails with an error when one does not.
 
-**Default theme by time of day:** light from sunrise to sunset in the
-configured time zone (the system knows the time and the zone, see
-[Real time](time.md)), dark otherwise. The transition is a 240 ms
-cross-fade and is postponed while the user is typing (for at most 2 minutes).
+### Light, dark and automatic appearance
+
+**[implemented]** **[verified in QEMU]** (x86_64)
+
+The user chooses **Light**, **Dark** or **Automatic** (the default);
+high contrast and Reduce motion live in Accessibility and take precedence
+(contrast overrides light and dark, with Reduce motion the change is
+instant).
+
+| Where | How |
+|---|---|
+| bar | the Appearance icon (sun, moon, contrast) opens a card with three choices; the chosen one has a check mark, the state is below ("Now light, by sunrise and sunset") |
+| shell | `vzhled tmavy`, `vzhled svetly`, `vzhled auto`, `vzhled kontrast ano`, `vzhled pohyb ano`; without arguments the state ([Shell commands](shell-commands.md#vzhled)) |
+| login screen | the system choice, Automatic by default; `vzhled --system ...` changes it as an administration action (`ELEVATE` `APPEARANCE_SYSTEM`, confirmed by a person with the administration role in a system dialog, see [Accounts](accounts.md#administering-the-computer)) |
+
+**Automatic = by the sun.** Light from sunrise to sunset at the place of
+the time zone (`tz::Zone::place`: the coordinates of the city the zone is
+named after; it is not the computer's location and the system does not
+look it up), computed by the NOAA method within a few minutes
+(`libs/comp/src/sun.rs`). Why not a fixed 7-19 h: in Prague it is dark
+at 16 h in December and light until 21 h in June, fixed hours would be
+wrong half the year. The fixed hours 7-19 apply only without a place (a
+`UTC+2` zone) and beyond the polar circle, where the sun does not rise or
+set all day (polar night would otherwise mean a dark theme at noon too).
+An automatic change waits while the user is typing (2 s after the last
+key, at most 2 minutes); a manual choice starts at once.
+
+**Smooth transition.** The colors of everything at once (desktop, the
+bar with its blurred background, frames, shadows, dialogs, windows) flow
+from the old mode to the new one along the `ease_in_out` curve (slow
+start and end): a manual switch over `motion.theme` = 600 ms, the
+automatic one at sunrise and sunset slowly over `motion.theme_auto` = 3 s
+(it should not disturb). Work goes on normally during the transition:
+the compositor always handles input first and mixes frame by frame, so a
+window that redraws meanwhile (a click, typing) is composed into the
+mixed frame already (the QEMU test clicks into a window mid-transition). Mixing happens in **OKLab** (a perceptually
+uniform space): the midpoint of white and dark has half the perceived
+lightness and the colors do not turn gray or "muddy" on the way as in
+sRGB. Shadows have the same geometry in all modes, only their color is
+mixed; towards contrast the shadows fade out.
+
+| Who | How often | Why |
+|---|---|---|
+| compositor | every frame | it composes its layers anyway; it costs only the frame composition (the whole screen for the duration of the transition; the QEMU test logs the frame count and average time) |
+| applications (`libs/ui`, terminal) | a `THEME_MIX` step every `motion.theme_app_step` = 100 ms, `THEME` at the end | redrawing an application window costs more than composing; 3 steps are enough to keep the content in step |
+| older applications | only the final `THEME` | they drop the unknown message (test `unknown_server_op_is_not_supported_and_compose_validated`) |
+
+An application with its own look (a player, an image viewer) finds the
+target mode in the window context (`ui::Context::mode`) and picks its
+colors itself; library elements follow the theme on their own.
+
+**Storage.** Init stores the choice in `/system/config/vzhled/<uid>.toml`
+(user) and `system.toml` (login screen); the directory belongs to the
+system without grants, so the choice can be used even before an
+encrypted home is unlocked. After login init sends the compositor the
+user's choice before `session open` (one transition from the login
+screen), and all of them again after a compositor crash. The compositor
+reports a change from the bar to init on the `launcher` channel and init
+stores it only for a logged-in user.
+
+```text
+schema = auto        # svetly | tmavy | auto
+kontrast = ne        # ano | ne
+omezit_pohyb = ne    # ano | ne
+```
+
+Tests: `libs/theme` (`mix_ends_and_oklab_midpoint`,
+`pref_text_roundtrip_and_resolve`), `libs/comp` (`tests/appearance.rs`:
+sunrise and sunset in Prague, polar night, the fade with steps for
+applications, Reduce motion, the system and user choice, the bar card,
+deferral while typing), `libs/shlang` (`tests/appearance.rs`), QEMU suite
+`gui` ("appearance choice: smooth color transition": the badge passes
+through intermediate colors, the application window redraws dark; storage
+only for the system). Screenshots of all applications in light, dark and
+contrast mode come from the "look by design" test (`target/shots/`).
 
 ### Typography
 
@@ -449,7 +520,7 @@ Content from left to right:
 | **Windows** | pinned and running applications; a dot under the icon = running, a longer accent one = active; click = activate / minimize |
 | **Agent** | when an AI agent is acting, a coral pill "Agent is controlling Files" with a **Stop** button |
 | **Tasks** | number of running tasks and the agent label; a click opens the task manager |
-| **Status** | network, volume, notifications with the count of new ones |
+| **Status** | network, volume, appearance (light / dark / automatic, see [Light, dark and automatic appearance](#light-dark-and-automatic-appearance)), notifications with the count of new ones |
 | **Clock** | time and date (tabular numerals) |
 
 In the vertical position the labels are hidden and the icons with a tooltip
@@ -1105,8 +1176,10 @@ services outside the GUI (`taskd`, clones in `fsproto`, configuration).
   fallback path and blur is not verified. Blur costs GPU time proportional
   to the area: therefore only under the bar, menus and dialog, at half size,
   and only when something under it changed.
-- **Theme by time of day** needs a location (sunrise and sunset). Without a
-  location a fixed time of 7:00-20:00 per the time zone is used.
+- **Theme by time of day** takes the place from the time zone (the city
+  the zone is named after), not the computer's location: at the edge of a
+  large zone sunrise can differ by tens of minutes. Without a place (a
+  fixed offset) and beyond the polar circle a fixed 7-19 h applies.
 - **Imitating a system dialog in a full-screen application** cannot be ruled
   out by appearance alone; the protection is the phrase, physical input and
   Ctrl+Alt+Del (the same risk as in the 6c design).

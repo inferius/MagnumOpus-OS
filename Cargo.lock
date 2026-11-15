@@ -553,6 +553,7 @@ dependencies = [
  "gfx",
  "guiproto",
  "inputproto",
+ "libm",
  "theme",
  "ui",
  "vkcomp",
@@ -1106,6 +1107,7 @@ dependencies = [
  "guiproto",
  "inputproto",
  "openwith",
+ "theme",
  "tz",
  "ui",
 ]
@@ -2959,6 +2961,7 @@ dependencies = [
  "gfx",
  "guiproto",
  "taskproto",
+ "theme",
  "ui",
 ]
 
@@ -3004,6 +3007,7 @@ name = "theme"
 version = "0.1.0"
 dependencies = [
  "conf",
+ "libm",
 ]
 
 [[package]]

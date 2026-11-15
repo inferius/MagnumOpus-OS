@@ -475,6 +475,9 @@ impl Service {
             format!("{}:{:02}", civil.hour, civil.minute),
             format!("{wd} {}. {}.", civil.day, civil.month),
         )));
+        // Vzhled podle denni doby: misto pasma a den/noc (kazdou minutu).
+        c.set_sun_place(zone.place().map(|p| (p.lat, p.lon)));
+        c.sun_tick(utc.secs, l.offset.secs, now);
         let left = 60 - civil.second as u64;
         Some(now + left * 1_000_000_000)
     }
@@ -490,6 +493,12 @@ impl Service {
                         let _ = s.write(inputproto::control::RELEASE.as_bytes(), Vec::new());
                     }
                 }
+                Out::Appearance { uid, pref } => match &self.launcher {
+                    Some(l) => {
+                        let _ = l.write(format!("{} user {uid} {}", control::APPEARANCE, pref.to_words()).as_bytes(), Vec::new());
+                    }
+                    None => println!("compd: volbu vzhledu nejde ulozit: init nedal kanal launcher"),
+                },
                 Out::Device { source, trust } => {
                     if let Some(s) = &self.secure {
                         let cmd = if trust { inputproto::control::TRUST } else { inputproto::control::REJECT };
@@ -598,6 +607,28 @@ impl Service {
                     }
                     (Ok(_), None) => Err(Error::NotFound),
                     (Err(e), _) => Err(e),
+                }
+            }
+            control::APPEARANCE => {
+                let who = words.next();
+                let rest: Vec<&str> = words.by_ref().collect();
+                let (uid, w) = match (who, rest.as_slice()) {
+                    (Some("system"), w) => (None, w),
+                    (Some("user"), [uid, w @ ..]) => (uid.parse::<u64>().ok().map(Some).unwrap_or(Some(u64::MAX)), w),
+                    _ => (Some(u64::MAX), &[][..]),
+                };
+                let pref = theme::Pref::from_words(&w.join(" "));
+                match (self.comp.as_mut(), uid, pref) {
+                    (_, Some(u64::MAX), _) | (_, _, None) => Err(Error::InvalidArgs),
+                    (None, ..) => Err(Error::NotFound),
+                    (Some(c), None, Some(p)) => {
+                        c.set_appearance_system(p, now);
+                        Ok((String::new(), Vec::new()))
+                    }
+                    (Some(c), Some(uid), Some(p)) => {
+                        c.set_appearance_user(uid, p, now);
+                        Ok((String::new(), Vec::new()))
+                    }
                 }
             }
             control::INPUT => handles.into_iter().next().ok_or(Error::InvalidArgs).map(|h| {

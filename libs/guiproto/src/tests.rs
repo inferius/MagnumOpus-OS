@@ -225,6 +225,7 @@ fn server_messages_roundtrip() {
         ServerMsg::WindowPlace { window: 1, rect: Rect::new(-20, 40, 300, 200) },
         ServerMsg::Compose { window: 1, text: "\u{02C7}".into(), cursor_begin: 2, cursor_end: 2, flags: compose::UNDERLINE },
         ServerMsg::Compose { window: 1, text: String::new(), cursor_begin: 0, cursor_end: 0, flags: 0 },
+        ServerMsg::ThemeMix { from: 0, to: 1, t: 500 },
         ServerMsg::WindowContext {
             window: 1,
             generation: 3,

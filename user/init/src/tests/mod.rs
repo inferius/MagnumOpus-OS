@@ -27,6 +27,7 @@ mod fs;
 mod fs_data;
 mod fs_datasets;
 mod gui_files;
+mod gui_look;
 mod fs_hist;
 mod fs_perf;
 mod fs_recovery;

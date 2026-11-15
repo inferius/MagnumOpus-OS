@@ -230,6 +230,12 @@ fn give_accounts(s: &Compd) {
     if !ACCOUNTS_UI.load(core::sync::atomic::Ordering::Relaxed) {
         return;
     }
+    // Volba vzhledu (systemova a prihlasenych) driv nez relace.
+    for cmd in crate::appearance::commands() {
+        if let Err(e) = s.command(cmd.as_bytes(), Vec::new(), REPLY_TIMEOUT) {
+            println!("init: volba vzhledu pro kompozitor: {e}");
+        }
+    }
     let list: Vec<(u64, u64, String, bool)> = crate::session::SESSIONS.lock().iter().map(|u| (u.id, u.uid, u.name.clone(), u.locked)).collect();
     for (id, uid, name, locked) in list {
         let _ = s.command(alloc::format!("{} open {id} {uid} {name}", control::SESSION).as_bytes(), Vec::new(), REPLY_TIMEOUT);
@@ -611,6 +617,11 @@ pub fn launch_requests(startup: &Startup, sup: &mut Supervisor) {
             println!("init: paleta prikazu zada {}", if reboot { "restart" } else { "vypnuti" });
             let e = crate::power::shutdown(sup, reboot);
             println!("init: vypnuti z palety selhalo: {e}");
+            continue;
+        }
+        // Volba vzhledu z listy: ulozit uzivateli.
+        if let Some(rest) = text.strip_prefix("appearance ") {
+            crate::appearance::from_compositor(rest);
             continue;
         }
         let Some(id) = text.strip_prefix("launch ") else { continue };
