@@ -189,6 +189,18 @@ impl Revision {
     }
 }
 
+/// Trvala identita otevreneho objektu: s ni ho jina relace otevre znovu
+/// ([`FsClient::open_identity`], operace `REOPEN`). Dedeni fd pri
+/// spusteni procesu (`posix_spawn`): potomek ma vlastni relaci.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Identity {
+    pub dataset: u64,
+    pub oid: u64,
+    pub generation: u64,
+    pub access: u8,
+    pub share: u8,
+}
+
 /// Otevreny soubor u klienta.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Opened {
@@ -231,7 +243,37 @@ impl FsClient {
         // Otevreni bez vytvoreni a zkraceni jde zopakovat.
         let kind = if flags & (open_flags::CREATE | open_flags::TRUNCATE) != 0 { Kind::Effect } else { Kind::Idempotent };
         let body = self.call_as(kind, w)?;
-        let mut r = Reader::new(&body);
+        self.adopt(&body, access, share)
+    }
+
+    /// Trvala identita handlu `local` (pro predani jine relaci). Docasny
+    /// soubor podmineneho ulozeni ani mrtvy handle predat nejde.
+    pub fn identity(&self, local: u64) -> Result<Identity> {
+        let rec = self.handles.lock().get(local)?;
+        if rec.dead {
+            return Err(Error::BadHandle);
+        }
+        if rec.replace {
+            return Err(Error::BadState);
+        }
+        let v = rec.revision;
+        Ok(Identity { dataset: v.dataset, oid: v.oid, generation: v.generation, access: rec.access, share: rec.share })
+    }
+
+    /// Otevre objekt podle identity z jine relace (`REOPEN`): fsd overi
+    /// prava a pripojene cesty teto relace znovu, sirotka (smazany soubor
+    /// s otevrenym handlem) otevre jen vlastnik.
+    pub fn open_identity(&self, id: &Identity) -> Result<Opened> {
+        let mut w = Self::req(op::REOPEN);
+        w.u64(id.dataset).u64(id.oid).u64(id.generation).u8(id.access).u8(id.share);
+        let body = self.call_as(Kind::Idempotent, w)?;
+        self.adopt(&body, id.access, id.share)
+    }
+
+    /// Zapise odpoved `OPEN`/`REOPEN` (handle, Stat, Revision) mezi handly
+    /// knihovny.
+    fn adopt(&self, body: &[u8], access: u8, share: u8) -> Result<Opened> {
+        let mut r = Reader::new(body);
         let fsd = r.u64()?;
         let stat = Stat::get(&mut r)?;
         let revision = Revision::get(&mut r)?;
