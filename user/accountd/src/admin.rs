@@ -6,15 +6,17 @@
 //! ktery aplikace nepodvrhne. Ma-li roli sam prihlaseny, potvrzuje on; jinak
 //! prvni ucet s roli ("pres rameno"; vyber z vice uctu prijde s nastavenim).
 //! Zaskrtavatko v dialogu zapne rezim spravy: dalsich 5 minut se ukony z teto
-//! relace nepotvrzuji (vychozi vypnuto).
+//! relace nepotvrzuji (vychozi vypnuto). Vyvojove sestaveni ma navic
+//! rezim vyvojare (`devmode.rs`, feature `dev-mode`): jedina vyjimka
+//! z dialogu, rozhoduje se tady v [`Service::elevate`].
 
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use accountproto::elevate::{ADMIN_MODE_SECS, GRANT_TTL_SECS, Params, TOKEN_LEN, action, decode_check};
-use accountproto::{Method, Secret, ToInit, flags};
+use accountproto::elevate::{ADMIN_MODE_SECS, FileOp, GRANT_TTL_SECS, Params, SystemFile, TOKEN_LEN, action, decode_check};
+use accountproto::{Method, Secret, ToInit};
 use accounts::Outcome;
 use guiproto::control::{DialogKind, DialogReply, DialogRequest};
 use libos::{Channel, Error, Result, println};
@@ -47,6 +49,9 @@ pub struct Admin {
     grants: Vec<Grant>,
     /// Rezim spravy: (relace, do kdy).
     mode: Vec<(u64, i64)>,
+    /// Rezim vyvojare (cely pocitac, jen v pameti; `devmode.rs`).
+    #[cfg(feature = "dev-mode")]
+    pub dev: bool,
 }
 
 impl Admin {
@@ -87,6 +92,14 @@ impl Service {
                 format!("Nastavit nové heslo účtu {}{}", self.display(uid), if enc { ". Šifrovaný domov se tím neotevře." } else { "" })
             }
             Ok(Params::RoleSet { uid, on }) => format!("{} roli správy: {}", if on { "Dát" } else { "Odebrat" }, self.display(uid)),
+            _ if act == action::SYSTEM_FILE => match SystemFile::decode(params) {
+                Ok(f) => match f.op {
+                    FileOp::Write => format!("Zapsat systémový soubor {} ({} B)", f.path, f.len),
+                    FileOp::Remove => format!("Smazat systémový soubor {}", f.path),
+                    FileOp::Mkdir => format!("Vytvořit systémovou složku {}", f.path),
+                },
+                Err(_) => format!("Změnit systémový soubor (neplatné parametry, {} B)", params.len()),
+            },
             _ if act == action::APPEARANCE_SYSTEM => {
                 format!("Změnit vzhled přihlašovací obrazovky pro všechny: {}", String::from_utf8_lossy(params))
             }
@@ -96,7 +109,7 @@ impl Service {
 
     /// Kdo ukon potvrdi: prihlaseny, ma-li roli, jinak prvni ucet s roli.
     fn confirmer(&self, uid: u64) -> Option<u64> {
-        let has = |a: &accounts::Account| a.flags & flags::ADMIN != 0 && a.flags & flags::DISABLED == 0;
+        let has = |a: &accounts::Account| self.eng.is_admin(a);
         if self.eng.account(uid).is_some_and(has) {
             return Some(uid);
         }
@@ -120,6 +133,11 @@ impl Service {
         let Some(confirm_uid) = self.confirmer(uid) else {
             return Some(accountproto::reply_err(Error::AccessDenied));
         };
+        // Rezim vyvojare (jen vyvojove sestaveni): potvrdi bez dialogu.
+        #[cfg(feature = "dev-mode")]
+        if let Some(r) = self.dev_mode_confirm(session, uid, confirm_uid, act, &params) {
+            return Some(reply(r));
+        }
         if self.admin.dialog.is_none() {
             // Bez kompozitoru neni duveryhodny dialog: nic se nepovoli.
             return Some(accountproto::reply_err(Error::NotSupported));
@@ -183,6 +201,11 @@ impl Service {
             let (id, choice, text) = match r {
                 Ok(DialogReply::Answer { id, choice, text }) => (id, choice, text),
                 Ok(DialogReply::Cancelled { id }) => (id, 1, String::new()),
+                #[cfg(feature = "dev-mode")]
+                Ok(DialogReply::DevMode { on }) => {
+                    self.dev_mode_from_bar(on);
+                    continue;
+                }
                 Err(_) => continue,
             };
             let Some(k) = self.admin.pending.iter().position(|p| p.dialog_id == id) else { continue };
@@ -221,7 +244,7 @@ impl Service {
     }
 
     /// Provede potvrzeny ukon: ukony uctu hned, ostatni = grant.
-    fn perform(&mut self, session: u64, uid: u64, act: u32, params: &[u8], in_mode: bool) -> Result<Vec<u8>> {
+    pub(crate) fn perform(&mut self, session: u64, uid: u64, act: u32, params: &[u8], in_mode: bool) -> Result<Vec<u8>> {
         if in_mode {
             self.audit(uid, uid, act, true);
         }
@@ -277,7 +300,13 @@ impl Service {
 
     /// Zaznam do auditu (`/db/audit`): kdo zadal, kdo potvrdil, co.
     fn audit(&mut self, requester: u64, confirmer: u64, act: u32, mode: bool) {
-        let line = format!("{}\t{requester}\t{confirmer}\t{act}\t{}\n", now(), if mode { "rezim" } else { "dialog" });
+        self.audit_line(requester, confirmer, act, if mode { "rezim" } else { "dialog" });
+    }
+
+    /// Radek auditu: cas, zadatel, potvrzujici, ukon, jak (`dialog`,
+    /// `rezim`; ve vyvojovem sestaveni `vyvojar`, `vyvojar-zapnut|vypnut`).
+    pub(crate) fn audit_line(&mut self, requester: u64, confirmer: u64, act: u32, how: &str) {
+        let line = format!("{}\t{requester}\t{confirmer}\t{act}\t{how}\n", now());
         if let Err(e) = self.eng.store.append_audit(line.as_bytes()) {
             println!("accountd: audit: {e}");
         }

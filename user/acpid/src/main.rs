@@ -165,10 +165,8 @@ fn handle(r: Request, p: &ffi::Platform, power_res: &Resource) -> Reply {
         Request::Thermal => Reply::Thermal(sensors::thermal()),
         Request::Battery => Reply::Battery(sensors::batteries()),
         Request::CpuPerf => Reply::CpuPerf(sensors::cpu_perf()),
-        // Balicek pro vyvojare resi init se sluzbou logu, ne acpid.
-        Request::Report | Request::LogLevel { .. } | Request::Snapshot | Request::OpenInstaller | Request::Appearance { .. }
-        | Request::Permissions { .. } | Request::Accounts => {
-            Reply::Failed(libos::Error::NotSupported)
-        }
+        // Pozadavky shellu (balicek pro vyvojare, vzhled, /system, ...)
+        // resi init, ne acpid.
+        _ => Reply::Failed(libos::Error::NotSupported),
     }
 }

@@ -31,6 +31,9 @@ pub enum Flyout {
     /// Vzhled: radky Svetly, Tmavy, Automaticky (zvoleny s fajfkou),
     /// pak stav (kdy se automaticky prepne, kontrast z Pristupnosti).
     Look,
+    /// Rezim vyvojare (jen vyvojove sestaveni, `devmode.rs`).
+    #[cfg(feature = "dev-mode")]
+    Dev,
 }
 
 /// Ceske tvary "uloha".
@@ -87,6 +90,8 @@ impl Comp {
             }
             Flyout::Bell => (String::from("Oznámení"), self.dnd_lines()),
             Flyout::Look => (String::from("Vzhled"), self.look_lines()),
+            #[cfg(feature = "dev-mode")]
+            Flyout::Dev => self.dev_flyout_text(),
             Flyout::AppWindows(g) => {
                 let id = self.app_of(g).unwrap_or_default();
                 let mut rows: Vec<String> = self.app_windows(&id).iter().filter_map(|w| self.windows.get(w)).map(|w| w.title.clone()).collect();
@@ -125,6 +130,8 @@ impl Comp {
             Flyout::Volume => bar.volume,
             Flyout::Bell => Some(bar.bell),
             Flyout::Look => Some(bar.look),
+            #[cfg(feature = "dev-mode")]
+            Flyout::Dev => bar.dev,
             Flyout::Apps => Some(bar.launcher),
             Flyout::AppWindows(g) => bar.apps.iter().find(|(x, _)| *x == g).map(|(_, r)| *r),
         }

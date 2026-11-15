@@ -120,6 +120,9 @@ pub struct Bar {
     /// Spustitelne aplikace bez okna: (index v `launchable`, obdelnik).
     pub launch: Vec<(usize, Rect)>,
     pub agent: Option<Rect>,
+    /// Pilulka rezimu vyvojare (jen vyvojove sestaveni, `devmode.rs`).
+    #[cfg(feature = "dev-mode")]
+    pub dev: Option<Rect>,
     pub tasks: Option<Rect>,
     /// Stav site, hlasitost, oznameni (zleva doprava jako v prototypu).
     pub net: Option<Rect>,
@@ -359,6 +362,10 @@ impl Comp {
             right -= w as i32;
             bar.tasks = Some(Rect::new(right, y, w, item));
             right -= gap;
+        }
+        #[cfg(feature = "dev-mode")]
+        {
+            right = self.dev_chip_layout(&mut bar, right, item, gap);
         }
         if self.input.injecting > 0 {
             let h = t.size.control_h.min(item);
@@ -604,6 +611,8 @@ impl Comp {
         };
         let t0 = self.prof.start();
         draw_bar(canvas, &mut self.style, bar, &info);
+        #[cfg(feature = "dev-mode")]
+        self.draw_dev_chip(canvas, bar);
         self.prof.add(Part::Bar, t0);
         if !dialog_active {
             self.draw_flyout(canvas);

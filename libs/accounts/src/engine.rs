@@ -149,8 +149,10 @@ impl<S: Store, D: DeviceKey, R: CryptoRngCore> Engine<S, D, R> {
     }
 
     /// Kolik uctu ma roli spravy.
+    /// Ucty lidi s roli spravy (vyvojovy ucet se nepocita: posledni roli
+    /// cloveka nejde odebrat ani s nim).
     pub fn admins(&self) -> usize {
-        self.accounts.iter().filter(|a| a.flags & flags::ADMIN != 0 && a.flags & flags::DISABLED == 0).count()
+        self.accounts.iter().filter(|a| a.flags & flags::ADMIN != 0 && a.flags & (flags::DISABLED | flags::DEV) == 0).count()
     }
 
     pub(crate) fn new_verifier(&mut self, secret: &[u8]) -> Result<(Verifier, kdf::Derived)> {
@@ -204,9 +206,31 @@ impl<S: Store, D: DeviceKey, R: CryptoRngCore> Engine<S, D, R> {
         if self.by_name(DEV_NAME).is_some() {
             return Ok(None);
         }
-        let mut a = self.prepare(DEV_NAME, "Vyvojar", None, false, now)?;
+        // Role spravy (rozhodnuti 2026-11-15): ukony spravy potvrzuje
+        // rezim vyvojare v accountd; plati jen s povolenym vyvojem
+        // ([`Engine::is_admin`]).
+        let mut a = self.prepare(DEV_NAME, "Vyvojar", None, true, now)?;
         a.flags |= flags::DEV;
         Ok(Some(a))
+    }
+
+    /// Vyvojovy ucet z drivejsi verze (bez role spravy) roli dostane. Jen
+    /// s povolenym vyvojem.
+    pub fn ensure_dev_admin(&mut self) -> Result<()> {
+        if !self.cfg.dev {
+            return Err(Error::AccessDenied);
+        }
+        let Some(i) = self.accounts.iter().position(|a| a.flags & flags::DEV != 0) else { return Ok(()) };
+        if self.accounts[i].flags & flags::ADMIN != 0 {
+            return Ok(());
+        }
+        self.update(i, |a| a.flags |= flags::ADMIN)
+    }
+
+    /// Smi ucet potvrzovat ukony spravy? Vyvojovy ucet jen s povolenym
+    /// vyvojem (stejna DB bez vyvojoveho profilu ho nepouzije).
+    pub fn is_admin(&self, a: &Account) -> bool {
+        a.flags & flags::ADMIN != 0 && a.flags & flags::DISABLED == 0 && (a.flags & flags::DEV == 0 || self.cfg.dev)
     }
 
     /// Ulozi novy ucet (metadata pred zaznamem: cislo se nepouzije znovu
@@ -247,7 +271,8 @@ impl<S: Store, D: DeviceKey, R: CryptoRngCore> Engine<S, D, R> {
     /// Nastavi nebo odebere roli spravy (posledni roli odebrat nejde).
     pub fn set_admin(&mut self, uid: u64, on: bool) -> Result<()> {
         let i = self.index(uid)?;
-        if self.accounts[i].flags & flags::DEV != 0 && on {
+        // Roli vyvojoveho uctu urcuje vyvojovy profil, ne ukon spravy.
+        if self.accounts[i].flags & flags::DEV != 0 {
             return Err(Error::AccessDenied);
         }
         if !on && self.accounts[i].flags & flags::ADMIN != 0 && self.admins() <= 1 {

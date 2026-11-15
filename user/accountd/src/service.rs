@@ -234,6 +234,8 @@ impl Service {
         let r: Result<Vec<u8>> = match req {
             // Ukon pro cely pocitac: duveryhodny dialog kompozitoru.
             Request::Elevate { action, params } => return self.elevate(i, action, params),
+            #[cfg(feature = "dev-mode")]
+            Request::DevMode { set } => self.dev_mode_request(uid, set),
             Request::WhoAmI => self.whoami(session, uid),
             Request::PermList => self.perm_list(uid),
             Request::PermRevoke { app_id, perm } => self.perm_revoke(uid, &app_id, perm),

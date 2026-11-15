@@ -10,6 +10,12 @@ name = "accountd"
 test = false
 bench = false
 
+[features]
+default = []
+# Rezim vyvojare (`src/devmode.rs`): jen vyvojove sestaveni, zapina ho
+# xtask pro obrazy s vyvojovym profilem. Ve vydani kod neni.
+dev-mode = ["accountproto/dev-mode", "guiproto/dev-mode"]
+
 [dependencies]
 libos = { path = "../../libs/libos" }
 fsproto = { path = "../../libs/fsproto" }

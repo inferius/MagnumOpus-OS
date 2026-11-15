@@ -395,6 +395,16 @@ impl Host for LineHost {
         self.call(move |c| c.env.permissions(&a, &p)).unwrap_or(Err(abi::Error::Canceled))
     }
 
+    fn system_file(&mut self, op: u8, path: &str, data: &[u8]) -> Result<(), abi::Error> {
+        let (p, d) = (String::from(path), data.to_vec());
+        self.call(move |c| c.env.system_file(op, &p, &d)).unwrap_or(Err(abi::Error::Canceled))
+    }
+
+    #[cfg(feature = "dev-mode")]
+    fn dev_mode(&mut self, set: u8) -> Result<bool, abi::Error> {
+        self.call(move |c| c.env.dev_mode(set)).unwrap_or(Err(abi::Error::Canceled))
+    }
+
     fn accounts(&mut self) -> Result<Vec<shlang::acl::Account>, abi::Error> {
         self.call(|c| c.env.accounts()).unwrap_or(Err(abi::Error::Canceled))
     }

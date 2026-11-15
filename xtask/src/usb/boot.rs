@@ -5,8 +5,9 @@
 //!
 //! Testy (`cargo xtask test`, `cargo xtask usb --test`):
 //! - [`test`]: start do plochy s terminalem ([`MARKERS`], vyvojovy profil
-//!   zive USB s automatickym prihlasenim) a kopie logu na FAT
-//!   oddil MO-LOGY (overeno na hostiteli crate `fatfs`),
+//!   zive USB s automatickym prihlasenim), rezim vyvojare v terminalu
+//!   ([`DEV_STEPS`]: `devmode on`, zmena v /system bez dialogu) a kopie
+//!   logu na FAT oddil MO-LOGY (overeno na hostiteli crate `fatfs`),
 //! - [`test_rescue`]: rezim "vytahni logy" (klavesa L pres QMP), logy
 //!   "nainstalovaneho systemu" z disku NVMe na MO-LOGY, disk NVMe beze zmeny,
 //! - [`test_user_image`]: obraz bez vyvojoveho profilu (jako obraz pro
@@ -98,14 +99,114 @@ pub fn run(arch: &Arch, image: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Test: start z flash disku az do plochy s terminalem (vyvojovy profil);
-/// logd zkopiruje log na FAT oddil MO-LOGY.
+/// Rezim vyvojare na zivem USB (vyvojove sestaveni): radky psane do
+/// terminalu (QMP) a znacka v logu, po ktere se pise dalsi. Zmena v
+/// /system projde bez dialogu jen diky rezimu (zadny kompozitor ji
+/// nepotvrdi).
+pub const DEV_STEPS: &[(&str, &str)] = &[
+    ("devmode on", "accountd: rezim vyvojare zapnut"),
+    ("system mkdir /system/zkouska-dev", "init: system: vytvoreno /system/zkouska-dev"),
+    ("system rm /system/zkouska-dev", "init: system: smazano /system/zkouska-dev"),
+];
+
+/// QMP `send-key` pro jeden znak (rozlozeni US, jen co testy pisou).
+fn qcode(ch: char) -> Option<String> {
+    Some(match ch {
+        'a'..='z' | '0'..='9' => ch.to_string(),
+        ' ' => String::from("spc"),
+        '/' => String::from("slash"),
+        '-' => String::from("minus"),
+        '\n' => String::from("ret"),
+        _ => return None,
+    })
+}
+
+/// Napise radek do okna s fokusem (terminal) a Enter.
+fn type_line(port: u16, line: &str) {
+    for ch in line.chars().chain(['\n']) {
+        if let Some(q) = qcode(ch) {
+            let cmd = format!(r#"{{"execute":"send-key","arguments":{{"keys":[{{"type":"qcode","data":"{q}"}}]}}}}"#);
+            let _ = crate::qmp::command(port, &cmd);
+            std::thread::sleep(Duration::from_millis(30));
+        }
+    }
+}
+
+/// Stred ikony terminalu v liste: prvni aplikace za spoustecem (terminal
+/// otevre init jako prvni okno plochy), lista dole (tokeny `design/`).
+const TERM_ICON: (i32, i32) = (76, 34);
+
+/// Snimek obrazovky (`screendump`; bez okna QEMU prvni vynuti obnovu).
+fn screenshot(port: u16, file: &Path) {
+    let f = file.display().to_string().replace('\\', "/");
+    let cmd = format!(r#"{{"execute":"screendump","arguments":{{"filename":"{f}","format":"png"}}}}"#);
+    let _ = crate::qmp::command(port, &cmd);
+    std::thread::sleep(Duration::from_millis(700));
+    let _ = crate::qmp::command(port, &cmd);
+}
+
+/// Klik tabletem na ikonu terminalu v liste (fokus terminalu; plocha zivo
+/// USB otevira i instalator, ktery si fokus vezme). Rozmer obrazovky ze
+/// snimku `file`.
+fn focus_terminal(port: u16, file: &Path) {
+    screenshot(port, file);
+    let (w, h) = super::install_test::png_size(file).unwrap_or((1280, 800));
+    let (x, y) = (TERM_ICON.0, h - TERM_ICON.1);
+    let abs = |axis: &str, v: i32, max: i32| format!(r#"{{"type":"abs","data":{{"axis":"{axis}","value":{}}}}}"#, v * 0x7fff / max);
+    let btn = |down: bool| format!(r#"{{"type":"btn","data":{{"down":{down},"button":"left"}}}}"#);
+    for events in [vec![abs("x", x, w), abs("y", y, h)], vec![btn(true)], vec![btn(false)]] {
+        let cmd = format!(r#"{{"execute":"input-send-event","arguments":{{"events":[{}]}}}}"#, events.join(","));
+        let _ = crate::qmp::command(port, &cmd);
+        std::thread::sleep(Duration::from_millis(150));
+    }
+    std::thread::sleep(Duration::from_secs(2));
+}
+
+/// Test: start z flash disku az do plochy s terminalem (vyvojovy profil),
+/// rezim vyvojare ([`DEV_STEPS`]); logd zkopiruje log na FAT oddil MO-LOGY.
 pub fn test(arch: &Arch, image: &Path) -> Result<()> {
-    let log = boot_until(arch, image, &[], false, "start", |t| {
+    // Dalsi radek az po znacce predchoziho; plocha (vsechna okna) chvili
+    // po startu terminalu.
+    let mut step = 0usize;
+    let mut ready: Option<Instant> = None;
+    let mut sent: Option<Instant> = None;
+    let mut tries = 0u32;
+    let mut hook = |text: &str, port: u16| {
+        if !text.contains("init: termd (") || step >= DEV_STEPS.len() {
+            return;
+        }
+        let since = *ready.get_or_insert_with(Instant::now);
+        if since.elapsed() < Duration::from_secs(20) {
+            return;
+        }
+        if step > 0 && !text.contains(DEV_STEPS[step - 1].1) {
+            return;
+        }
+        if text.contains(DEV_STEPS[step].1) {
+            step += 1;
+            sent = None;
+            return;
+        }
+        // Prvni pokus, nebo po 20 s znovu (radek se mohl ztratit): fokus
+        // terminalu klikem do listy (snimek pred klikem = rozbor), radek.
+        if sent.is_none_or(|t| t.elapsed() > Duration::from_secs(20)) {
+            if sent.is_some() {
+                println!("xtask: krok '{}' bez odezvy, znovu", DEV_STEPS[step].0);
+            }
+            if step == 0 || sent.is_some() {
+                tries += 1;
+                focus_terminal(port, &crate::target_dir().join(format!("zive-usb-{}-{tries}.png", std::process::id())));
+            }
+            type_line(port, DEV_STEPS[step].0);
+            sent = Some(Instant::now());
+        }
+    };
+    let log = boot_with(arch, image, &[], Some(&mut hook), "start", |t| {
         let mut m = missing_markers(t);
         if !t.contains("logd: kopie logu na oddil MO-LOGY") {
             m.push("logd: kopie logu na oddil MO-LOGY");
         }
+        m.extend(DEV_STEPS.iter().map(|(_, k)| *k).filter(|k| !t.contains(k)));
         m
     })?;
     let fat = read_logy(image)?;
@@ -113,7 +214,7 @@ pub fn test(arch: &Arch, image: &Path) -> Result<()> {
     if !ok {
         return Err(format!("na oddilu MO-LOGY chybi MAGNUMOS/LOG01.TXT (log {})", log.display()).into());
     }
-    println!("xtask: kopie logu na FAT oddilu flashky je");
+    println!("xtask: kopie logu na FAT oddilu flashky je; rezim vyvojare zmenil /system bez dialogu");
     Ok(())
 }
 

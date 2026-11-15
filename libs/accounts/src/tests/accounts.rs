@@ -190,11 +190,19 @@ fn vyvojove_prihlaseni() {
     assert!(!e.has_users(), "vyvojovy ucet neni ucet cloveka");
     ok(e.authenticate(uid, Method::Dev, &Secret::default(), None, 0).unwrap());
     assert!(matches!(e.authenticate(uid, Method::Password, &Secret::from(""), None, 0).unwrap(), Outcome::Denied { .. }));
-    assert_eq!(e.set_admin(uid, true), Err(Error::AccessDenied));
-    // Stejna DB bez povoleni vyvoje: vyvojovy ucet se neprihlasi ani neukaze.
+    // Role spravy od zalozeni; prepinat ji ukonem nejde.
+    let a = e.account(uid).unwrap().clone();
+    assert!(a.flags & flags::ADMIN != 0 && e.is_admin(&a), "vyvojovy ucet ma roli spravy");
+    assert_eq!(e.admins(), 0, "vyvojovy ucet se do roli lidi nepocita");
+    assert_eq!(e.set_admin(uid, false), Err(Error::AccessDenied));
+    e.ensure_dev_admin().unwrap();
+    // Stejna DB bez povoleni vyvoje: vyvojovy ucet se neprihlasi, neukaze
+    // a role spravy neplati.
     let store = core::mem::take(&mut e.store);
     let mut e = engine_with(store, false);
     assert!(e.list().is_empty());
+    assert!(!e.is_admin(&a), "role vyvojoveho uctu bez vyvoje neplati");
+    assert_eq!(e.ensure_dev_admin(), Err(Error::AccessDenied));
     assert!(matches!(e.authenticate(uid, Method::Dev, &Secret::default(), None, 0).unwrap(), Outcome::Denied { .. }));
 }
 

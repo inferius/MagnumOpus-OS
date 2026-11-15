@@ -84,7 +84,24 @@ pub enum Request {
     /// `uid\tjmeno\tzobrazovane jmeno` (init ze sluzby uctu, `NAMES`),
     /// nebo [`Reply::Failed`].
     Accounts,
+    /// Jen kanal shell -> init: zmena v `/system` (prikaz `system`), ukon
+    /// spravy `SYSTEM_FILE` (`accountproto::elevate`). `op`:
+    /// `accountproto::elevate::FileOp` jako cislo, `data` = obsah zapisu
+    /// (nejvic [`SYSTEM_FILE_MAX`] B). Odpoved [`Reply::Ok`] s kanalem
+    /// (handle), na ktery po potvrzeni prijde [`Reply::Ok`] nebo
+    /// [`Reply::Failed`]; spatna cesta hned [`Reply::Failed`].
+    SystemFile { op: u8, path: String, data: Vec<u8> },
+    /// Jen kanal shell -> init: rezim vyvojare (prikaz `devmode`; jen
+    /// vyvojove sestaveni, feature `dev-mode`). `set` jako
+    /// `accountproto::DEV_QUERY|DEV_OFF|DEV_ON`; odpoved [`Reply::Text`]
+    /// `on` / `off` nebo [`Reply::Failed`].
+    #[cfg(feature = "dev-mode")]
+    DevMode { set: u8 },
 }
+
+/// Nejvetsi obsah jednoho zapisu [`Request::SystemFile`] (zprava kanalu
+/// ma 64 KiB vcetne cesty).
+pub const SYSTEM_FILE_MAX: usize = 60 * 1024;
 
 /// Udalost hlasena sluzbou bez pozadavku.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,6 +217,10 @@ mod op {
     pub const PERMISSIONS: u32 = 11;
     pub const APPEARANCE: u32 = 12;
     pub const ACCOUNTS: u32 = 13;
+    pub const SYSTEM_FILE: u32 = 14;
+    /// Rezim vyvojare; cislo rezervovane i ve vydani (tam neznama zprava).
+    #[allow(dead_code)]
+    pub const DEV_MODE: u32 = 15;
 
     pub const R_OK: u32 = 100;
     pub const R_FAILED: u32 = 101;
@@ -227,6 +248,9 @@ impl Request {
             Request::Appearance { .. } => op::APPEARANCE,
             Request::Permissions { .. } => op::PERMISSIONS,
             Request::Accounts => op::ACCOUNTS,
+            Request::SystemFile { .. } => op::SYSTEM_FILE,
+            #[cfg(feature = "dev-mode")]
+            Request::DevMode { .. } => op::DEV_MODE,
         });
         if let Request::LogLevel { target, level } = self {
             w.str(target).str(level);
@@ -236,6 +260,14 @@ impl Request {
         }
         if let Request::Permissions { app, perm } = self {
             w.str(app).str(perm);
+        }
+        if let Request::SystemFile { op, path, data } = self {
+            // Obsah az na konci (bez delky).
+            w.u8(*op).str(path).bytes(data);
+        }
+        #[cfg(feature = "dev-mode")]
+        if let Request::DevMode { set } = self {
+            w.u8(*set);
         }
         w.finish()
     }
@@ -256,6 +288,17 @@ impl Request {
             op::APPEARANCE => Request::Appearance { system: r.u8()? != 0, change: r.str()? },
             op::PERMISSIONS => Request::Permissions { app: r.str()?, perm: r.str()? },
             op::ACCOUNTS => Request::Accounts,
+            op::SYSTEM_FILE => {
+                let (op, path) = (r.u8()?, r.str()?);
+                // Obsah = zbytek zpravy.
+                let data = r.rest().to_vec();
+                if data.len() > SYSTEM_FILE_MAX {
+                    return Err(Error::InvalidArgs);
+                }
+                Request::SystemFile { op, path, data }
+            }
+            #[cfg(feature = "dev-mode")]
+            op::DEV_MODE => Request::DevMode { set: r.u8()? },
             _ => return Err(Error::InvalidArgs),
         };
         if !r.is_empty() {

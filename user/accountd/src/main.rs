@@ -18,6 +18,8 @@
 extern crate alloc;
 
 mod admin;
+#[cfg(feature = "dev-mode")]
+mod devmode;
 mod perms;
 mod os;
 mod service;
@@ -73,6 +75,10 @@ fn dev_login(svc: &mut Service) {
             return;
         }
     };
+    // Vyvojovy ucet ma roli spravy (i ucet z drivejsi verze).
+    if let Err(e) = svc.eng.ensure_dev_admin() {
+        println!("accountd: role vyvojoveho uctu: {e}");
+    }
     match svc.eng.authenticate(uid, Method::Dev, &Secret::default(), None, service::now()) {
         Ok(o) if o.is_ok() => match svc.open_session(uid, None) {
             Ok(s) => println!("accountd: vyvojove prihlaseni {} (relace {s})", accounts::DEV_NAME),
@@ -294,6 +300,9 @@ fn main(startup: Startup) -> i64 {
             match msg.handles.into_iter().next() {
                 Some(h) => {
                     svc.admin.dialog = Some(Channel::from_handle(h));
+                    // Nova instance kompozitoru dostane stav rezimu vyvojare.
+                    #[cfg(feature = "dev-mode")]
+                    svc.dev_mode_to_bar();
                     String::from("ok")
                 }
                 None => String::from("err:chybi handle"),

@@ -242,7 +242,15 @@ nahradit i samotný accountd, takže druhá pojistka bezpečnost reálně
 nezvyšovala, jen rozbila `xtask run --release` (běžný způsob spuštění).
 Se Secure Bootem bude pojistkou podpis obrazu **[navrženo]**. Test `zive-usb` ověří obojí: flashka nastartuje do
 terminálu a obraz bez souboru skončí na přihlašovací obrazovce. Vývojový
-účet nemá heslo, nemá roli správy a ve výpisu účtů je označený.
+účet nemá heslo a ve výpisu účtů je označený. **Má roli správy**
+(rozhodnutí uživatele 2026-11-15) **[implementováno]**: dostane ji při
+založení a účet z dřívější verze při vývojovém přihlášení
+(`Engine::ensure_dev_admin`). Role ale platí **jen s povoleným vývojem**
+(`Engine::is_admin`): stejná DB bez `accounts-dev` ho jako potvrzujícího
+nevybere, do počtu lidí s rolí (ochrana poslední role) se nepočítá
+a úkonem `ROLE_SET` ji nikdo nezmění. Heslo nemá, takže dialog správy
+sám potvrdit nemůže; úkony správy mu potvrzuje
+[režim vývojáře](#režim-vývojáře).
 
 ### Ochrany
 
@@ -483,11 +491,111 @@ nastavení se svou identitou z manifestu **[navrženo]**.
 | 3 `ACCOUNT_RESET_PASSWORD` | uid (šifrovaný domov se tím neotevře) |
 | 4 `ROLE_SET` | uid, zapnout |
 | 5 `APPEARANCE_SYSTEM` | volba vzhledu přihlašovací obrazovky (text `tmavy ne ne`); služba úkonu je init (`theme --system`), grant ověří na kanálu `grants` |
-| 6-15 | ovladače, aktualizace, disky, firewall, čas - doplní jejich služby |
+| 6 `SYSTEM_FILE` | změna v `/system`: operace (zápis, smazání, složka), cesta, u zápisu délka a otisk XXH3-128 obsahu (`accountproto::elevate::SystemFile`); služba úkonu je init (příkaz `system`), viz [Systémové soubory](#systémové-soubory) |
+| 7-15 | ovladače, aktualizace, disky, firewall, čas - doplní jejich služby |
 
 Proč tak: potvrzuje se konkrétní úkon, který člověk vidí (stejný princip
 jako [API akcí](gui.md#api-akcí)); kdo dělá delší správu, si dialogy na
 chvíli vypne sám a ví o tom.
+
+### Systémové soubory
+
+**[implementováno]** (`user/init/src/sysfiles.rs`, test „systemove
+soubory pres ELEVATE“ sady `ucty`). Lidé do `/system` nemají žádné
+právo (ACL), zapisuje tam jen init svou relací FS. Jediná cesta pro
+člověka je úkon správy `SYSTEM_FILE` - **stejně ve vydání i ve vývojovém
+sestavení**, žádná zadní vrátka:
+
+1. Příkaz shellu `system write <cíl> <zdroj>`, `system rm <cesta>` nebo
+   `system mkdir <cesta>` pošle initu `powerproto::Request::SystemFile`
+   (obsah nejvýš 60 KiB, jedna zpráva kanálu).
+2. Init zkontroluje cestu (`accountproto::elevate::system_path`): jen pod
+   `/system/`, bez prázdných složek, `.` a `..`; **`/system/accounts`
+   nikdy** (`ACCESS_DENIED` - hashe hesel a klíč zařízení nezmění ani
+   role správy). Špatná cesta skončí hned, bez dialogu.
+3. Init ve vlákně požádá za relaci shellu o `ELEVATE` `SYSTEM_FILE`
+   s parametry operace, cesta, délka a XXH3-128 obsahu. Dialog ukáže
+   „Zapsat systémový soubor <cesta> (<n> B)“, „Smazat systémový soubor“
+   nebo „Vytvořit systémovou složku“ a kdo potvrzuje.
+4. Po potvrzení init grant ověří a spotřebuje na kanálu `grants` (jen tato
+   operace, cesta a obsah) a teprve pak změnu provede: zápis atomicky
+   (dočasný soubor a přejmenování), smazání souboru nebo prázdné složky,
+   založení složky. Nadřazená složka musí existovat.
+
+Test v QEMU: relace uživatele sama v `/system` nic nezaloží; databáze
+účtů, cesta s `..` a cesta mimo `/system` skončí chybou bez dialogu;
+složka, zápis (špatné heslo nic nezmění, obsah sedí), smazání souboru
+i složky přes dialog.
+
+### Režim vývojáře
+
+> **Schváleno uživatelem (2026-11-15):** „režim vývojáře“ místo zadních
+> vrátek. Jen vývojové sestavení; jediné místo je politika potvrzení
+> `ELEVATE`, žádné obcházení oprávnění ve fsd, initu ani jinde.
+
+**[implementováno]** (`user/accountd/src/devmode.rs`,
+`libs/comp/src/devmode.rs`, příkaz `devmode`). Ve vývojovém profilu
+(živé USB, `xtask run`, `xtask vmware`) jde zapnout přepínač **Režim
+vývojáře**: úkony správy se potvrdí samy, bez dialogu. Všechno ostatní
+zůstává jako ve vydání: úkon jde přes `ELEVATE`, accountd vydá grant,
+služba úkonu (init, ...) ho ověří a provede. Oprávnění FS se nemění.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Rezim vyvojare jen v politice potvrzeni">
+<defs><marker id="uc6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="40" width="150" height="60" rx="6"/><text class="t b" x="85" y="65" text-anchor="middle">shell: system ...</text><text class="m" x="85" y="84" text-anchor="middle">init: ELEVATE</text>
+<rect class="acc" x="230" y="20" width="230" height="100" rx="6"/><text class="t b" x="345" y="44" text-anchor="middle">accountd: politika potvrzení</text><text class="m" x="345" y="64" text-anchor="middle">vydání: vždy dialog</text><text class="m" x="345" y="82" text-anchor="middle">vývojové sestavení + režim:</text><text class="m" x="345" y="100" text-anchor="middle">potvrdí sám, audit „vyvojar“</text>
+<rect class="ok" x="540" y="40" width="210" height="60" rx="6"/><text class="t b" x="645" y="65" text-anchor="middle">grant -> init ověří</text><text class="m" x="645" y="84" text-anchor="middle">a zapíše do /system</text>
+<path class="ln" d="M160 70 L228 70" marker-end="url(#uc6)"/>
+<path class="ln" d="M460 70 L538 70" marker-end="url(#uc6)"/>
+<rect class="warn" x="230" y="140" width="230" height="50" rx="6"/><text class="t b" x="345" y="162" text-anchor="middle">lišta: trvalý pruh</text><text class="m" x="345" y="180" text-anchor="middle">„Režim vývojáře - systém není chráněný“</text>
+<path class="ln dash" d="M345 120 L345 138" marker-end="url(#uc6)"/>
+</svg>
+<figcaption>Režim vývojáře mění jen to, kdo potvrdí úkon; cesta úkonu (grant, služba úkonu, oprávnění FS) je stejná jako ve vydání.</figcaption>
+</figure>
+
+- **Jen vývojové sestavení:** kód je za cargo feature `dev-mode`
+  (`accountd`, `compd`, `shsess`, `init` a protokoly `accountproto`,
+  `guiproto`, `powerproto`, `shlang`, `term`). Zapíná ji xtask jen pro
+  obrazy s vývojovým profilem ([Sestavení](sestaveni.md#vývojové-sestavení-a-režim-vývojáře)).
+  Obraz pro uživatele, testy i initfs pro instalaci na disk se staví
+  bez ní: příkaz, pilulka v liště ani zprávy v jejich programech nejsou.
+  Číslo operace `DEV_MODE` (23) je rezervované; accountd vydání ho nezná
+  (`NOT_SUPPORTED`).
+- **Politika potvrzení** (`Service::elevate`): zapnutý režim potvrdí
+  úkon za účet s rolí správy (stejný potvrzující jako u dialogu; bez
+  něj `ACCESS_DENIED`) a zapíše do auditu `vyvojar`. Zapnutí a vypnutí
+  se také zapíše (`vyvojar-zapnut`, `vyvojar-vypnut`; žadatel 0 =
+  lišta).
+- **Přepínač:** příkaz shellu `devmode on|off` (bez argumentu stav) jde
+  přes init na kanál self relace; přepnout smí jen účet s rolí správy.
+  V liště je pilulka „Vývojář“; klik otevře kartu s přepínačem (fyzický
+  vstup do systémové vrstvy, zpráva `DialogReply::DevMode` na kanálu
+  `dialog`). O stavu rozhoduje accountd a pošle ho liště zpět
+  (`DialogRequest::DevMode`), i nové instanci kompozitoru po pádu.
+- **Zapnuto = trvalý výrazný pruh** v liště „Režim vývojáře - systém
+  není chráněný“ (barva nebezpečí, vždy s textem; snímek
+  `target/comp-rezim-vyvojare.png`).
+- **Rozsah a trvání:** celý počítač, jen v paměti: po startu je režim
+  vypnutý, platí do vypnutí nebo restartu.
+- ⚠️ **Známé omezení:** `ELEVATE` z umělého zdroje (agent AI) má režim
+  vývojáře stejně jako režim správy **nepoužít** (vždy dialog). accountd
+  ale původ žádosti zatím nerozliší (rozlišení původu přijde s identitou
+  agenta, viz [Agent AI a identita](#agent-ai-a-identita)), takže dnes
+  režim potvrdí i žádost agenta.
+- Karta v aplikaci Nastavení **[navrženo]** (aplikace zatím není).
+
+Testy: na hostiteli `cargo test -p accountproto` (`DEV_MODE` jen
+s feature), `cargo test -p accounts` (role vývojového účtu jen
+s vývojem), `cargo test -p shlang` a `--features dev-mode` (příkaz
+`devmode` ve vydání není, s feature přepíná), `cargo test -p comp
+--features dev-mode devmode` (pilulka, karta, přepnutí jde službě účtů,
+pruh v barvě nebezpečí), `cargo test -p xtask` (kontrola vydání);
+v QEMU test „systemove soubory pres ELEVATE“ (vydání: `DEV_MODE` =
+`NOT_SUPPORTED`) a živé USB (`--only zive-usb`): `devmode on`, pak
+`system mkdir` a `system rm` v `/system` bez dialogu. Každé sestavení
+bez vývojového profilu navíc hledá v programech texty kódu režimu
+(`xtask/src/devmode.rs`); nález je chyba sestavení.
 
 **Počítač spravovaný organizací** (firma, škola): zápis počítače do správy,
 politiky a sledování koncových bodů jsou popsané v
@@ -602,6 +710,7 @@ použití vynulují. Kanály jsou různé capability:
 | 18 | self | `LOGOUT` | - | - |
 | 19 | self | `ELEVATE` | úkon u32, parametry (`accountproto::elevate::Params`) | po dialogu: výsledek úkonu účtu nebo token grantu; `CANCELED`, `ACCESS_DENIED`, bez kompozitoru `NOT_SUPPORTED` |
 | 20 | self | `SET_KEY_PIN` | PIN secret | - (klíč, který PIN ještě nemá) |
+| 23 | self | `DEV_MODE` (jen vývojové sestavení) | u8: 0 stav, 1 vypnout, 2 zapnout | u8 stav; vydání `NOT_SUPPORTED` |
 | 30 | setup | `CREATE_FIRST` | jméno, zobrazované, heslo secret | uid |
 | 40 | grants | `CHECK_GRANT` | token (blob 16 B), úkon u32, parametry (blob) | - nebo `ACCESS_DENIED`; token se spotřebuje |
 | 41 | names | `NAMES` | - | účty: uid u64, přihlašovací jméno, zobrazované jméno (prázdné -> přihlašovací) |
@@ -717,6 +826,7 @@ i aarch64):
 | zamčení a odhlášení | zamčení, odemčení špatným a správným heslem, po odhlášení relace i její FS zmizí |
 | události a job relace | události otevřena/zamčena/odemčena/skončila, jméno a aktivní relace, proces v jobu relace, job po odhlášení zmizí |
 | zvýšení práv dialogem | test hraje kompozitor: text dialogu, špatné heslo, zrušení, povolení s režimem správy (účet vznikne), další úkon v režimu bez dialogu, grant jen jednou a jen na stejné parametry |
+| systémové soubory přes ELEVATE | relace uživatele v `/system` nic nezaloží; `/system/accounts`, `..` a cesta mimo `/system` bez dialogu odmítnuty; složka, zápis (špatné heslo nic nezmění), smazání přes dialog a grant; vydání: `DEV_MODE` `NOT_SUPPORTED` |
 | špatné heslo a zpomalení | neznámý účet, 3. chyba = 30 s, v čekání neprojde ani správné heslo |
 
 ## Rizika a omezení
@@ -727,6 +837,10 @@ i aarch64):
   [PIN](#pin-vázaný-na-zařízení)).
 - ⚠️ **Režim správy** (volba, 5 minut): úkony správy z relace bez dialogu
   - i pro malware v relaci. Výchozí vypnuto.
+- ⚠️ **Režim vývojáře** (jen vývojové sestavení): dokud je zapnutý,
+  jakýkoli proces na počítači provede úkon správy bez dialogu (i agent
+  AI, dokud accountd nerozliší původ). Lišta to ukazuje trvalým pruhem;
+  vydání ho nemá.
 - ⚠️ **Šifrování domova bez obnovovacího klíče** = možná trvalá ztráta
   dat (viz [Šifrování](#šifrování-domova)). Dokud FS šifrování neumí,
   domov **šifrovaný není** a disk jde přečíst jinde (`osfs` běží jako
@@ -751,6 +865,8 @@ i aarch64):
 |---|---|
 | návrh (tato stránka) | **[implementováno]** |
 | model správy | schváleno; **[implementováno]** role, první účet s rolí, ochrana poslední role, `ELEVATE` s dialogem, úkony účtů, granty, režim správy, audit; výběr potvrzujícího z více účtů **[navrženo]** |
+| systémové soubory (`SYSTEM_FILE`, příkaz `system`) | **[implementováno]**, test v QEMU (x86_64) |
+| režim vývojáře (jen vývojové sestavení) | **[implementováno]**, testy na hostiteli, živé USB v QEMU (x86_64); karta v Nastavení **[navrženo]**; rozlišení agenta **[navrženo]** |
 | `libs/accountproto` (zprávy, klient, CTAP2, simulovaný klíč, úkony správy) | **[implementováno]**, testy na hostiteli |
 | `libs/accounts` (záznamy, Argon2id, PIN, zpomalení, klíče, obaly, obnovovací klíč, reset hesla správou) | **[implementováno]**, testy na hostiteli |
 | `user/accountd` (DB na FS, kanály login/self/setup/grants, dialog správy, vývojové přihlášení) | **[implementováno]**, testy v QEMU |

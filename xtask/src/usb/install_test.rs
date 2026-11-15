@@ -163,7 +163,7 @@ fn targets(log: &str) -> Option<((i32, i32), (i32, i32))> {
 }
 
 /// Sirka a vyska obrazku PNG (hlavicka IHDR).
-fn png_size(path: &Path) -> Option<(i32, i32)> {
+pub(super) fn png_size(path: &Path) -> Option<(i32, i32)> {
     let b = std::fs::read(path).ok()?;
     let be = |i: usize| -> Option<i32> { Some(u32::from_be_bytes(b.get(i..i + 4)?.try_into().ok()?) as i32) };
     (b.get(12..16)? == b"IHDR").then_some(())?;

@@ -87,15 +87,19 @@ fn esp_files<'a>(opts: &Options, a: &'a Artifacts, readme: &'a Path, install: &'
     ]
 }
 
-/// Initfs pro instalaci na disk (`installd` ho kopiruje): stejny jako
-/// zivy, ale bez vyvojoveho profilu (`accounts-dev`) - nainstalovany
-/// system nesmi mit ucet bez hesla s automatickym prihlasenim.
-fn install_initfs(live: &Path, out: &Path) -> Result<()> {
-    let data = std::fs::read(live)?;
-    let fs = initfs::Initfs::parse(&data).map_err(|e| format!("initfs: {e:?}"))?;
-    let files: Vec<(&str, &[u8])> =
-        fs.files().filter(|f| f.name != DEV_PROFILE.0 && f.name != INSTALL_ANSWERS).map(|f| (f.name, f.data)).collect();
-    std::fs::write(out, initfs::build(&files))?;
+/// Initfs pro instalaci na disk (`installd` ho kopiruje): samostatne
+/// sestaveni bez vyvojoveho profilu (`accounts-dev`) a bez souboru
+/// odpovedi - nainstalovany system nesmi mit ucet bez hesla
+/// s automatickym prihlasenim ani kod rezimu vyvojare (feature `dev-mode`
+/// zapina xtask jen s vyvojovym profilem, `crate::devmode`; sestaveni
+/// vydani ji samo zkontroluje). Programy se tak prekladaji dvakrat
+/// (cargo si drzi obe varianty, dalsi beh jen prekopiruje).
+fn install_initfs(opts: &mut Options, out: &Path) -> Result<()> {
+    let live = opts.extra_initfs.clone();
+    opts.extra_initfs.retain(|(n, _)| n != DEV_PROFILE.0 && n != INSTALL_ANSWERS);
+    let a = crate::build(opts);
+    opts.extra_initfs = live;
+    std::fs::copy(&a?.initfs, out)?;
     Ok(())
 }
 
@@ -110,11 +114,11 @@ MagnumOpus - live USB. Boot it from the firmware boot menu (UEFI,\r\n\
 Secure Boot off). Guide: docs/en/live-usb.md in the repository.\r\n";
 
 /// Vytvori obraz USB; vraci cestu.
-pub fn create_image(opts: &Options, artifacts: &Artifacts, path: &Path, size_mib: u64) -> Result<PathBuf> {
+pub fn create_image(opts: &mut Options, artifacts: &Artifacts, path: &Path, size_mib: u64) -> Result<PathBuf> {
     let readme = target_dir().join("usb-readme.txt");
     std::fs::write(&readme, README)?;
     let install = target_dir().join(format!("initfs-install-{}.img", std::process::id()));
-    install_initfs(&artifacts.initfs, &install)?;
+    install_initfs(opts, &install)?;
     let files = esp_files(opts, artifacts, &readme, &install);
     // ESP podle skutecne velikosti souboru; maly obraz (test) se zvetsi.
     let need = image::min_mib(image::esp_mib(&files)?);

@@ -132,6 +132,8 @@ impl Service {
         let (id, choice) = match r {
             DialogReply::Answer { id, choice, .. } => (*id, *choice),
             DialogReply::Cancelled { id } => (*id, u32::MAX),
+            #[allow(unreachable_patterns)]
+            _ => return false,
         };
         let Some(i) = self.perms.pending.iter().position(|p| p.dialog_id == id) else { return false };
         let p = self.perms.pending.remove(i);

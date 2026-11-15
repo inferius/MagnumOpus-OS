@@ -10,6 +10,7 @@ Jádro kompozitoru `compd` bez závislosti na jádru OS (`no_std` + `alloc`, tes
 - Žádná čísla vzhledu v kódu: hodnoty jsou z tokenů `design/tokens.toml` přes `libs/theme`. Vzhled a svižnost jsou stejně důležité; efekty musí vejít do rozpočtu snímku.
 - Systémové dialogy a odznak důvěry kreslí systém, aplikace je nemůže zakrýt ani zfalšovat. Oknu s vlastním titulkem kompozitor jen sdělí, kde odznak je (`ContextExt::title_badge`, `winsize.rs`), aby za něj aplikace dala svůj obsah titulku.
 - Celá obrazovka na žádost aplikace a zámek ukazatele jen po fyzickém stisku v okně s fokusem (`clip_take_gesture`, jednorázové gesto); zámek vždy zruší Super, ztráta fokusu, zavření okna, dialog a přihlášení (`pointer.rs`, testy `tests/pointer.rs`).
+- Režim vývojáře (`devmode.rs`, jen feature `dev-mode`): pilulka a pruh v liště a karta s přepínačem; stav určuje jen služba účtů (`DialogRequest::DevMode`), lišta přepnutí jen pošle (`DialogReply::DevMode`). Ve vydání modul není.
 - Po pádu kompozitoru se stav obnoví (`docs/cs/gui.md#obnova-po-pádu-kompozitoru`, `user/compd/src/snapshot.rs`).
 
 ## Testy
