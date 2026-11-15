@@ -558,20 +558,27 @@ impl FsClient {
     fn read_vmo(&self, local: u64, at: u64, n: usize, out: &mut Vec<u8>) -> Result<usize> {
         let mut guard = self.io_vmo.lock();
         if guard.is_none() {
-            *guard = Some(libos::Vmo::create(crate::VMO_IO as u64)?);
+            let vmo = libos::Vmo::create(crate::VMO_IO as u64)?;
+            // Trvale mapovani pro cteni: kopie z pameti je radove rychlejsi
+            // nez `VMO_READ` (buffer jadra); mapovani zije s relaci.
+            let me = libos::rt::self_process();
+            let addr = libos::sys::vm_map(me, vmo.handle().raw(), 0, crate::VMO_IO as u64, libos::abi::vm::MAP_READ, 0)?;
+            *guard = Some(crate::IoVmo { vmo, addr });
         }
-        let vmo = guard.as_ref().ok_or(Error::NoMemory)?;
+        let io = guard.as_ref().ok_or(Error::NoMemory)?;
+        let (vmo, addr) = (&io.vmo, io.addr);
         for _ in 0..3 {
             let fsd = self.resolve(local)?;
             let mut w = Self::req(op::READ_VMO);
             w.u64(fsd).u64(at).u32(n as u32);
-            let h = vmo.handle().duplicate(Some(libos::Rights::BASIC | libos::Rights::READ | libos::Rights::WRITE))?;
+            let h = vmo.handle().duplicate(Some(libos::Rights::BASIC | libos::Rights::READ | libos::Rights::WRITE | libos::Rights::MAP))?;
             match self.call_sending(Kind::Effect, &w.finish(), alloc::vec![h]) {
                 Ok((body, _)) => {
                     let got = (Reader::new(&body).u32()? as usize).min(n);
-                    let start = out.len();
-                    out.resize(start + got, 0);
-                    vmo.read(0, &mut out[start..])?;
+                    // SAFETY: [addr, addr + VMO_IO) je trvale namapovany
+                    // objekt pameti (pro cteni), `got <= n <= VMO_IO`; fsd
+                    // do nej uz nepise (odpoved prisla po zapisu).
+                    out.extend_from_slice(unsafe { core::slice::from_raw_parts(addr as *const u8, got) });
                     return Ok(got);
                 }
                 Err(Error::ServiceRestarted | Error::BadHandle) if self.stale(local) => {}

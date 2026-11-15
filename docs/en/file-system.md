@@ -1825,7 +1825,7 @@ groups stay. A system recipe cannot be narrowed. Otherwise `ACCESS_DENIED`.
 | 126 | `READLINK` | path | target str (`WRONG_TYPE` when not a link) |
 | 127 | `LSTAT` | path | `Stat` of the link itself |
 | 128 | `REALPATH` | path | the canonical session path (links, `.`, `..` resolved) |
-| 129 | `READ_VMO` | handle u64, offset u64, length u32 (at most `VMO_IO` = 1 MiB) + the client's VMO handle (`WRITE`) | read u32; data from the start of the VMO |
+| 129 | `READ_VMO` | handle u64, offset u64, length u32 (at most `VMO_IO` = 1 MiB) + the client's VMO handle (`WRITE`, `MAP`) | read u32; data from the start of the VMO |
 
 **`OPEN_STREAM`** **[verified in QEMU]** (suite `cstd`, step `posix2`: the
 output of a `posix_spawn` child into a file and 200 000 bytes of a file on
@@ -1842,6 +1842,23 @@ channel's messages and writes them from the position (`APPEND` at the end).
 At most 16 streams (`stream::MAX_STREAMS`); the loop waits through a port,
 the number of sessions is limited only by memory. An fsd restart ends the
 streams.
+
+**Large reads (`READ_VMO`)** **[verified in QEMU]** x86_64 (test "cteni
+velkeho souboru: po 32 KiB a pres VMO" in the suite `vykon FS`):
+`FsClient::read_h` above `MAX_IO` reads by 1 MiB into the client's memory
+object. The client keeps it mapped for reading (one per session), fsd maps
+it for writing for the duration of the copy - a copy through
+`VMO_WRITE`/`VMO_READ` (a kernel buffer) was an order of magnitude slower.
+fsd's dependencies on every request's path (`libos`, `wire`, `svcclient`,
+the allocator) are optimized even in the debug image
+(`[profile.dev.package.*]` in `Cargo.toml`; a rebuild after changing `libos`
+takes 13 s longer, `fs`/`fsd`/`fsproto` were optimized already).
+
+| Reading 8 MiB (x86_64, QEMU TCG, debug image) | Time |
+|---|---|
+| by 32 KiB, before the change (`34604355`) | 6829 ms |
+| by 32 KiB, fsd dependencies optimized (`a313581a` + profile) | 1186 ms |
+| through a VMO by 1 MiB, mapping in fsd and the client (`a313581a` + mapping) | 130 ms |
 
 **`AF_UNIX` socket nodes** **[verified in QEMU]** (suite `cstd`, step
 `unix` of the `ctest` test): `SOCKET_BIND` creates an object of kind 5

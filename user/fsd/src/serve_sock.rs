@@ -43,7 +43,7 @@ impl Service {
                 let (off, n) = (r.u64()?, (r.u32()? as usize).min(fsproto::VMO_IO));
                 let vmo = libos::Vmo::from_handle(handles.pop().ok_or(Error::InvalidArgs)?);
                 let data = self.fs.as_mut().ok_or(Error::IoError)?.read_h(h, off, n)?;
-                vmo.write(0, &data)?;
+                copy_to_vmo(&vmo, &data)?;
                 let mut w = fsproto::Writer::new();
                 w.u32(data.len() as u32);
                 Ok(Reply::body(w))
@@ -127,4 +127,24 @@ impl Service {
             Err(e) => Err(e),
         }
     }
+}
+
+/// Zapise `data` na zacatek VMO klienta: namapovat a kopirovat ve fsd
+/// (optimalizovany kod) je radove rychlejsi nez `VMO_WRITE` (kopie pres
+/// buffer jadra). Bez prava `MAP` = `VMO_WRITE`.
+fn copy_to_vmo(vmo: &libos::Vmo, data: &[u8]) -> Result<()> {
+    if data.is_empty() {
+        return Ok(());
+    }
+    let page = libos::vm::page_size();
+    let len = (data.len() as u64).div_ceil(page) * page;
+    let me = libos::rt::self_process();
+    let flags = libos::abi::vm::MAP_READ | libos::abi::vm::MAP_WRITE;
+    let Ok(addr) = libos::sys::vm_map(me, vmo.handle().raw(), 0, len, flags, 0) else {
+        return vmo.write(0, data);
+    };
+    // SAFETY: rozsah [addr, addr + len) je prave namapovany objekt pameti
+    // s pravem zapisu, nikdo jiny ve fsd na nej neukazuje.
+    unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), addr as *mut u8, data.len()) };
+    libos::sys::vm_unmap(me, addr, len)
 }

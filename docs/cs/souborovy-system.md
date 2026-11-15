@@ -1765,7 +1765,7 @@ zůstávají. Z receptu systému se nezužuje. Jinak `ACCESS_DENIED`.
 | 126 | `READLINK` | cesta | cíl str (`WRONG_TYPE`, když není odkaz) |
 | 127 | `LSTAT` | cesta | `Stat` odkazu samotného |
 | 128 | `REALPATH` | cesta | kanonická cesta relace (odkazy, `.`, `..` vyřešené) |
-| 129 | `READ_VMO` | handle u64, offset u64, délka u32 (nejvýš `VMO_IO` = 1 MiB) + handle VMO klienta (`WRITE`) | přečteno u32; data od začátku VMO |
+| 129 | `READ_VMO` | handle u64, offset u64, délka u32 (nejvýš `VMO_IO` = 1 MiB) + handle VMO klienta (`WRITE`, `MAP`) | přečteno u32; data od začátku VMO |
 
 **`OPEN_STREAM`** **[ověřeno v QEMU]** (sada `cstd`, krok `posix2`:
 výstup potomka `posix_spawn` do souboru a 200 000 bajtů souboru na jeho
@@ -1780,6 +1780,22 @@ kanálu nezaplní, pak zkouší znovu po 2 ms (kanál nemá signál
 kanálu a zapisuje je od pozice (`APPEND` na konec). Nejvýš 16 proudů
 (`stream::MAX_STREAMS`); smyčka čeká přes port, počet relací omezuje jen
 paměť. Restart fsd proudy ukončí.
+
+**Velká čtení (`READ_VMO`)** **[ověřeno v QEMU]** x86_64 (test „cteni
+velkeho souboru: po 32 KiB a pres VMO" v sadě `vykon FS`): `FsClient::read_h`
+nad `MAX_IO` čte po 1 MiB do objektu paměti klienta. Klient ho má namapovaný
+trvale pro čtení (jeden na relaci), fsd ho na dobu kopie namapuje pro
+zápis - kopie přes `VMO_WRITE`/`VMO_READ` (buffer jádra) byla řádově
+pomalejší. Závislosti fsd na cestě každého požadavku (`libos`, `wire`,
+`svcclient`, alokátor) jsou i v debug obrazu optimalizované
+(`[profile.dev.package.*]` v `Cargo.toml`; přestavba po změně `libos` delší
+o 13 s, `fs`/`fsd`/`fsproto` byly optimalizované už dřív).
+
+| Čtení 8 MiB (x86_64, QEMU TCG, debug obraz) | Čas |
+|---|---|
+| po 32 KiB, před změnou (`34604355`) | 6829 ms |
+| po 32 KiB, optimalizované závislosti fsd (`a313581a` + profil) | 1186 ms |
+| přes VMO po 1 MiB, mapování ve fsd i klientovi (`a313581a` + mapování) | 130 ms |
 
 **Uzly socketů `AF_UNIX`** **[ověřeno v QEMU]** (sada `cstd`, krok `unix`
 testu `ctest`): `SOCKET_BIND` vytvoří objekt druhu 5 (jméno, vlastník,

@@ -371,9 +371,23 @@ pub fn reply(result: Result<Writer>) -> Vec<u8> {
 pub struct FsClient {
     conn: svcclient::Conn,
     handles: libos::sync::Mutex<recover::Table>,
-    /// Objekt pameti pro velka cteni (`READ_VMO`, `VMO_IO` bajtu), zalozi
-    /// se pri prvnim; zamek = jedno cteni najednou.
-    io_vmo: libos::sync::Mutex<Option<libos::Vmo>>,
+    /// Objekt pameti pro velka cteni (`READ_VMO`, `VMO_IO` bajtu) a jeho
+    /// trvale mapovani pro cteni (adresa); zalozi se pri prvnim cteni,
+    /// zamek = jedno cteni najednou.
+    io_vmo: libos::sync::Mutex<Option<IoVmo>>,
+}
+
+/// Objekt pameti pro velka cteni a jeho mapovani pro cteni (zrusi se
+/// s relaci).
+pub(crate) struct IoVmo {
+    pub(crate) vmo: libos::Vmo,
+    pub(crate) addr: u64,
+}
+
+impl Drop for IoVmo {
+    fn drop(&mut self) {
+        let _ = libos::sys::vm_unmap(libos::rt::self_process(), self.addr, VMO_IO as u64);
+    }
 }
 
 impl FsClient {
