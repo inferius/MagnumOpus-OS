@@ -26,6 +26,7 @@ mod serve;
 mod serve_data;
 mod serve_hist;
 mod serve_perm;
+mod links;
 mod serve_sock;
 mod serve_v2;
 mod stream;

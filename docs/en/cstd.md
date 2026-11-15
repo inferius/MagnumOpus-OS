@@ -358,7 +358,7 @@ C frames) and links with `--eh-frame-hdr`; the dynamic part has
   `strtok_r`, `strdup`, `strndup`, `strcasecmp`, `strerror_r`, `qsort`,
   `bsearch`, `rand`, `div`, `atol`, the `scanf` family, `getpwuid` (user
   from `USER` and `HOME`), `getuid` and friends (the FS session identity, see [AF_UNIX sockets](#af_unix-sockets)), `fchown` and `utimes`
-  without effect, `readlink`/`symlink`/`link` (no FS symlinks yet),
+  without effect, `readlink`/`readlinkat`/`symlink`/`symlinkat` (fsd follows links in the session namespace, [Symbolic links](file-system.md#symbolic-links); `lstat`, `fstatat(AT_SYMLINK_NOFOLLOW)`, `open(O_NOFOLLOW)` = `ELOOP` on a link, `realpath` through fsd), `link` (`ENOTSUP`),
   `ioctl` (`ENOTTY`), `setlocale`/`localeconv` (see [Wide characters and locale](#wide-characters-and-locale)), `uname`,
   `getrusage`/`getrlimit`, `system` (`ENOSYS`; starting processes via
   `posix_spawn`, see [POSIX additions](#processes-posix_spawn-and-waitpid)).
@@ -535,7 +535,7 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
    (`st_mode` as a view of the grants, `st_uid` = the owner), `opendir`/`readdir`, `mkdir`, `unlink`, `rmdir`, `rename`,
    `access`, `getcwd`/`chdir`, `pipe` (a channel pair), `isatty`.
    `chmod` changes the grants (since T1, [POSIX mode](file-system.md#posix-mode)), `link`/
-   `symlink` = `ENOTSUP` until FS v3. `fcntl`/`flock` locks are held by
+   `symlink` since fs-symlink (see above). `fcntl`/`flock` locks are held by
    fsd (decision 8).
 3. **`math.h`** (question 3) and floating point in `printf`/`scanf`/
    `strtod`. Hard-float everywhere (x86-64-v2, NEON). `long double`:
@@ -839,7 +839,7 @@ evaluated in the parent over a copy of its fd table and numbers with
 |---|---|
 | `addclose(n)`, `addclosefrom_np(n)` | the child does not get the number (numbers from `n`); a closed stream 0-2 = empty input / discarded output |
 | `adddup2(x, y)` | the child's `y` = the description behind `x` (in the parent or after previous actions), without `FD_CLOEXEC`; `x == y` only clears `FD_CLOEXEC`; a closed `x` = `EBADF` |
-| `addopen(0-2, "/dev/null")` | empty input / discarded output (above 2 `ENOTSUP`) |
+| `addopen(y, "/dev/null")` | empty input / discarded output (above 2 an empty fd) |
 | `addopen(y, file)` | the parent opens the file (path relative to the child's directory at that step, `open` flags; with `O_CLOEXEC` it is not passed) |
 | `addchdir(_np)`, `addfchdir(_np)` | the child's working directory (relative to the previous one); a missing one makes `posix_spawn` fail |
 
@@ -862,6 +862,7 @@ before `main`:
 |---|---|
 | pipe, the parent's stdio under another number | a duplicate of the stream channel (both processes write/read the same channel) |
 | memory fd (`memfd_create`) | a duplicate of the memory object, seals, a copy of the position |
+| `/dev/null`, the parent's stdio without a channel | an empty fd without a handle (reading = end, writes are discarded) |
 | file, directory | the durable identity of the object (dataset, oid, generation); the child opens it in its own FS session with `REOPEN` - fsd checks the rights and the session's mounted paths again |
 | socket, `epoll` | **not inherited** (the connection to netd belongs to the parent's session); an inherited number is skipped, `adddup2` of a socket = `ENOTSUP` |
 
@@ -957,7 +958,7 @@ Wine and other ports (X11, D-Bus, Wayland) stays unchanged.
   `SIGPIPE` is sent).
 - **`SCM_RIGHTS`:** at most 32 fds in a message. Fds are passed as with
   inheritance ([posix_spawn](#processes-posix_spawn-and-waitpid)): a pipe
-  and `AF_UNIX` = a duplicate of the channel, a memory fd = a duplicate of
+  and `AF_UNIX` = a duplicate of the channel, `/dev/null` and stdio without a channel = an empty fd, a memory fd = a duplicate of
   the memory object, a file and a directory = the durable identity +
   `REOPEN` in the receiver's session (the receiver must see the path; the
   position is not shared). TCP/UDP sockets and `epoll` cannot be passed
@@ -965,6 +966,14 @@ Wine and other ports (X11, D-Bus, Wayland) stays unchanged.
   gets the fds with the first `recvmsg` that starts reading the message;
   `recv`/`read` drop them. `MSG_CMSG_CLOEXEC` sets `FD_CLOEXEC`, too little
   room in `msg_control` = `MSG_CTRUNC` (extra fds are closed).
+- **Passing a socket with messages in its queue** (inheritance and
+  `SCM_RIGHTS`; Wine: the server sends the request pipe before the child
+  starts): the kernel does not allow sending a channel end whose queue holds
+  a channel (cycle protection, `BAD_STATE`). `osrt` first reads the queue
+  into memory and the receiver gets a copy of it (handle duplicates) and the
+  partly read data and fds; a write that still hits `BAD_STATE` is retried.
+  Messages waiting at the moment of passing are thus seen by both processes
+  (the sender usually closes its end right away).
 - **`SO_PEERCRED`:** the side that accepted the connection gets the
   client's user and group verified by fsd from the identity of its
   session, and the process number (the client's `getpid`, not verified);

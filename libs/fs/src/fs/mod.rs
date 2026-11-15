@@ -718,14 +718,15 @@ impl<D: BlockDevice> Fs<D> {
         self.read_oid(&root, oid, offset, len, true)
     }
 
-    /// Cil symbolickeho odkazu (`WrongType`, kdyz `path` neni odkaz).
+    /// Cil symbolickeho odkazu (`WrongType`, kdyz `path` neni odkaz). Staci,
+    /// aby byl odkaz viditelny (POSIX `readlink` chce jen pruchod slozkou).
     pub fn readlink(&mut self, path: &str) -> Result<String> {
-        let oid = self.require(path, crate::perm::rights::READ)?;
+        let oid = self.require(path, 0)?;
         let root = self.s.root;
         self.readlink_oid(&root, oid)
     }
 
-    fn readlink_oid(&mut self, root: &Child, oid: u64) -> Result<String> {
+    pub(super) fn readlink_oid(&mut self, root: &Child, oid: u64) -> Result<String> {
         if self.inode(root, oid)?.kind != KIND_SYMLINK {
             return Err(Error::WrongType);
         }

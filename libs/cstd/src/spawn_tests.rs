@@ -41,7 +41,7 @@ fn plan_of_file_actions() {
     let p = plan(&a, b"/".to_vec(), STD, no_dir).unwrap();
     assert_eq!(p.io, [Parent(0), ChildIo::Open(0), ChildIo::Open(0)]);
     assert_eq!(p.opens, vec![(b"/data/out.txt".to_vec(), 0o1101, 0o644)]);
-    assert_eq!(plan(&[Action::Open(4, b"/dev/null".to_vec(), 0, 0)], b"/".to_vec(), STD, no_dir), Err(ENOTSUP));
+    assert_eq!(plan(&[Action::Open(4, b"/dev/null".to_vec(), 0, 0)], b"/".to_vec(), STD, no_dir).unwrap().fds, vec![(4, Null, true)]);
     assert_eq!(io(&[Action::CloseFrom(1)]), [Parent(0), Closed, Closed]);
     assert_eq!(io(&[Action::CloseFrom(3)]), [Parent(0), Parent(1), Parent(2)]);
     assert!(plan(&[Action::CloseFrom(3)], b"/".to_vec(), PARENT, no_dir).unwrap().fds.is_empty());

@@ -18,7 +18,7 @@
 extern char **environ;
 
 /* Cisla, na ktera rodic fd pripravi (potomek je zna). */
-enum { FD_PIPE = 20, FD_CLOEXEC_PIPE = 21, FD_FILE = 22, FD_MEM = 23, FD_OPENED = 24, FD_DUP = 40 };
+enum { FD_PIPE = 20, FD_CLOEXEC_PIPE = 21, FD_FILE = 22, FD_MEM = 23, FD_OPENED = 24, FD_NULL = 25, FD_DUP = 40 };
 
 /* Potomek "child fds": vraci 0, nebo cislo selhane kontroly. */
 int inherit_child_main(void) {
@@ -42,6 +42,8 @@ int inherit_child_main(void) {
     /* addopen nad 2. */
     if (read(FD_OPENED, b, sizeof b) != 6 || memcmp(b, "druhy\n", 6) != 0) return 10;
     if ((fcntl(FD_OPENED, F_GETFL) & O_ACCMODE) != O_RDONLY) return 11;
+    /* addopen(/dev/null) nad 2: cteni konec, zapis se zahodi. */
+    if (read(FD_NULL, b, sizeof b) != 0 || write(FD_NULL, "x", 1) != 1) return 13;
     /* Roura: konec rodice zapisu. */
     if (write(FD_PIPE, "ok", 2) != 2) return 12;
     return 0;
@@ -77,6 +79,7 @@ int inherit_test(const char *dir) {
     posix_spawn_file_actions_init(&fa);
     posix_spawn_file_actions_adddup2(&fa, FD_FILE, FD_DUP);
     posix_spawn_file_actions_addopen(&fa, FD_OPENED, b, O_RDONLY, 0);
+    posix_spawn_file_actions_addopen(&fa, FD_NULL, "/dev/null", O_RDWR, 0);
     char *argv[] = {"ctest", "child", "fds", NULL};
     pid_t pid = 0;
     int r = posix_spawnp(&pid, "ctest", &fa, NULL, argv, environ);

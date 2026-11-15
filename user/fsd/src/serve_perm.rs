@@ -99,13 +99,13 @@ impl Service {
         let fs = self.fs.as_mut().ok_or(Error::IoError)?;
         match opcode {
             op::PERMISSIONS => {
-                let path = sess.map(&r.str()?, false)?;
+                let path = sess.resolve(fs, &r.str()?, false, true)?;
                 let p = fs.permissions(&path)?;
                 w.u64(p.owner).u8(p.rights);
                 put_opt_acl(&mut w, p.acl.map(from_fs_acl).as_ref());
             }
             op::ACL_VIEW => {
-                let path = sess.map(&r.str()?, false)?;
+                let path = sess.resolve(fs, &r.str()?, false, true)?;
                 let v = fs.acl_view(&path)?;
                 let inherited = v
                     .inherited
@@ -116,20 +116,20 @@ impl Service {
                 AclView { perms, inherited }.put(&mut w);
             }
             op::SET_ACL => {
-                let path = sess.map(&r.str()?, true)?;
+                let path = sess.resolve(fs, &r.str()?, true, true)?;
                 let acl = get_opt_acl(r)?.map(to_fs_acl);
                 fs.set_acl(&path, acl)?;
             }
             op::SET_OWNER => {
-                let path = sess.map(&r.str()?, true)?;
+                let path = sess.resolve(fs, &r.str()?, true, true)?;
                 fs.set_owner(&path, r.u64()?)?;
             }
             op::SET_NOEXEC => {
-                let path = sess.map(&r.str()?, true)?;
+                let path = sess.resolve(fs, &r.str()?, true, true)?;
                 fs.set_noexec(&path, r.u8()? != 0)?;
             }
             op::NOEXEC => {
-                let path = sess.map(&r.str()?, false)?;
+                let path = sess.resolve(fs, &r.str()?, false, true)?;
                 w.u8(fs.noexec(&path)? as u8);
             }
             _ => return Err(Error::NotSupported),

@@ -43,6 +43,13 @@ fn desc(fd: i32) -> R<std::sync::Arc<Description>> {
 }
 
 pub fn open(path: &[u8], o: &OpenFlags) -> R<i32> {
+    // /dev/null (FS zarizeni nema): prazdny fd v tabulce.
+    if path == b"/dev/null" && !o.directory {
+        return fd::insert(Description::new(Object::Null, o.status()), 0, o.cloexec).map_err(|err| match err {
+            rt::Error::NoResources => errno::EMFILE,
+            other => e(other),
+        });
+    }
     let file = if o.directory {
         File::open_dir(path).map_err(e)?
     } else {
@@ -54,6 +61,7 @@ pub fn open(path: &[u8], o: &OpenFlags) -> R<i32> {
             create: o.create && !o.excl,
             create_new: o.create && o.excl,
             mode: o.mode,
+            nofollow: o.nofollow,
         };
         let f = File::open(path, &opts).map_err(e)?;
         // Adresar otevreny jen pro cteni je v POSIX povoleny (fdopendir).
@@ -149,7 +157,7 @@ pub fn fstat(fd: i32) -> R<Stat> {
         Object::Stdio(_) => Ok(Stat::stream(Kind::Stream)),
         Object::Pipe(_) => Ok(Stat::stream(Kind::Pipe)),
         Object::Socket(_) | Object::Unix(_) => Ok(Stat::stream(Kind::Socket)),
-        Object::User(_) => Ok(Stat::stream(Kind::Stream)),
+        Object::User(_) | Object::Null => Ok(Stat::stream(Kind::Stream)),
         // Pametovy fd: bezny soubor s velikosti objektu pameti.
         Object::Memory(m) => {
             let mut st = Stat::stream(Kind::File);
@@ -162,6 +170,30 @@ pub fn fstat(fd: i32) -> R<Stat> {
 
 pub fn stat(path: &[u8]) -> R<Stat> {
     rt::fs::stat_path(path).map(|s| stat_of(&s)).map_err(e)
+}
+
+pub fn lstat(path: &[u8]) -> R<Stat> {
+    rt::fs::lstat_path(path).map(|s| stat_of(&s)).map_err(e)
+}
+
+/// Cil odkazu; neni odkaz = `EINVAL` (POSIX).
+pub fn readlink(path: &[u8]) -> R<Vec<u8>> {
+    rt::fs::read_link(path).map(String::into_bytes).map_err(|err| match err {
+        rt::Error::WrongType => errno::EINVAL,
+        other => e(other),
+    })
+}
+
+pub fn symlink(target: &[u8], link: &[u8]) -> R<()> {
+    if target.is_empty() {
+        return Err(errno::ENOENT);
+    }
+    rt::fs::symlink(target, link).map_err(e)
+}
+
+/// Kanonicka cesta (odkazy vyresi fsd).
+pub fn realpath(path: &[u8]) -> R<Vec<u8>> {
+    rt::fs::realpath(path).map(String::into_bytes).map_err(e)
 }
 
 /// Velikost svazku: (velikost bloku, bloku, volnych bloku).
@@ -246,7 +278,7 @@ pub fn fd_path(fd: i32) -> R<Vec<u8>> {
 
 /// Absolutni normalizovana cesta (`.`, `..`, pracovni adresar).
 pub fn abs_path(path: &[u8]) -> R<Vec<u8>> {
-    rt::env::resolve(path).map(String::into_bytes).map_err(e)
+    rt::env::resolve_lexical(path).map(String::into_bytes).map_err(e)
 }
 
 pub fn list_dir(fd: i32) -> R<Vec<Entry>> {

@@ -150,6 +150,9 @@ impl Service {
         if opcode == op::COMMIT {
             self.commit_requested = true;
         }
+        if let Some(res) = self.handle_links(sess, opcode, &mut r) {
+            return res;
+        }
         let mut hs = core::mem::take(&mut self.in_handles);
         let sock = self.handle_sock(sess, opcode, &mut r, &mut hs);
         drop(hs);
@@ -216,9 +219,13 @@ impl Service {
                 }
                 .put(&mut w);
             }
-            op::STAT => stat(fs.stat(&sess.map(&r.str()?, false)?)?).put(&mut w),
+            op::STAT => {
+                let path = sess.resolve(fs, &r.str()?, false, true)?;
+                stat(fs.stat(&path)?).put(&mut w);
+            }
             op::LIST => {
-                let list = entries(fs.list(&sess.map(&r.str()?, false)?)?);
+                let path = sess.resolve(fs, &r.str()?, false, true)?;
+                let list = entries(fs.list(&path)?);
                 fsproto::encode_list(&mut w, &list);
                 if w.len() > fsproto::MAX_REPLY {
                     return Err(Error::BufferTooSmall);
@@ -237,7 +244,7 @@ impl Service {
                 };
                 let path = match snap {
                     Some(_) => r.str()?,
-                    None => sess.map(&r.str()?, false)?,
+                    None => sess.resolve(fs, &r.str()?, false, true)?,
                 };
                 let after = r.str()?;
                 let max = r.u32()? as usize;
@@ -310,18 +317,19 @@ impl Service {
                 return Ok(Reply::body(w));
             }
             op::READ => {
-                let path = sess.map(&r.str()?, false)?;
+                let path = sess.resolve(fs, &r.str()?, false, true)?;
                 let off = r.u64()?;
                 let n = io_len(&mut r)?;
                 w.bytes(&fs.read(&path, off, n)?);
             }
             op::WRITE => {
-                let path = sess.map(&r.str()?, true)?;
+                let path = sess.resolve(fs, &r.str()?, true, true)?;
                 let off = r.u64()?;
                 fs.write(&path, off, r.rest())?;
             }
             op::CREATE => {
-                let path = sess.map(&r.str()?, true)?;
+                // Posledni slozka se nenasleduje (existujici odkaz = ALREADY_EXISTS).
+                let path = sess.resolve(fs, &r.str()?, true, false)?;
                 let k = match r.u8()? {
                     kind::FILE => Kind::File,
                     kind::DIR => Kind::Dir,
@@ -335,14 +343,18 @@ impl Service {
                     fs.set_mode(&path, m, false)?;
                 }
             }
-            op::REMOVE => fs.remove(&sess.map(&r.str()?, true)?)?,
+            // Smazani a prejmenovani pusobi na odkaz, ne na cil.
+            op::REMOVE => {
+                let path = sess.resolve(fs, &r.str()?, true, false)?;
+                fs.remove(&path)?;
+            }
             op::RENAME => {
-                let from = sess.map(&r.str()?, true)?;
-                let to = sess.map(&r.str()?, true)?;
+                let from = sess.resolve(fs, &r.str()?, true, false)?;
+                let to = sess.resolve(fs, &r.str()?, true, false)?;
                 fs.rename(&from, &to)?;
             }
             op::TRUNCATE => {
-                let path = sess.map(&r.str()?, true)?;
+                let path = sess.resolve(fs, &r.str()?, true, true)?;
                 fs.truncate(&path, r.u64()?)?;
             }
             op::COMMIT => fs.commit()?,

@@ -244,7 +244,8 @@ hello-std: argumenty, vlakna, TLS, soubory` (x86_64 and aarch64).
 | `fs::File` open/read/write/seek/`set_len`/`sync_all`, append | fsproto v2 (session handles; position in `osrt::fs::File`) | **[verified in QEMU]** hello-std |
 | `fs::read_dir`, `metadata`, `create_dir`, `remove_*`, `rename`, `canonicalize` | fsproto (`STAT`, `LIST`, `CREATE`, `REMOVE`, `RENAME`); `canonicalize` = normalization + existence check | **[verified in QEMU]** hello-std (except `canonicalize`) |
 | `fs::Permissions`, ACL | `readonly` from the effective rights, setting is Unsupported; ACLs through `std::os::magnumopus::fs` | **[verified in QEMU]** hello-std |
-| symlinks, `hard_link`, file locks, file times | Unsupported | FS v3 decides **[designed]** |
+| `read_link`, `symlink_metadata`, `soft_link`, `canonicalize` | fsd links ([Symbolic links](file-system.md#symbolic-links)); `canonicalize` is resolved by fsd | **[verified in QEMU]** (through cstd, step `link`) |
+| `hard_link`, file locks, file times | Unsupported | FS v3 decides **[designed]** |
 | `net::TcpStream`, `TcpListener`, `UdpSocket`, DNS | netproto (`tcp_connect`, `tcp_listen`, `udp_bind`, `resolve`), network session with tag `NET` (see [Network](#network-stdnet)) | **[verified in QEMU]** std-net |
 | `process::Command`, `Child`, `io::pipe` | the `launchd` launcher service with the child's manifest, pipes = channel pairs (see [Processes](#processes-stdprocess)) | **[verified in QEMU]** std-proc |
 | `os_str`, `path` | bytes (like unix), separator `/`; `std::os::magnumopus::ffi::{OsStrExt, OsStringExt}` | **[verified in QEMU]** hello-std |

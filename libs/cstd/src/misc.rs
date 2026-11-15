@@ -371,14 +371,63 @@ pub unsafe extern "C" fn chown(path: *const c_char, _u: u32, _g: u32) -> c_int {
     errno::ret(crate::sys::stat(unsafe { c_bytes(path) }).map(|_| ()))
 }
 
-/// `readlink`: symlinky FS zatim nevytvari, kazda cesta = `EINVAL`.
+/// `readlink`: cil odkazu bez koncove nuly (oriznuty na `n`); neni odkaz
+/// = `EINVAL`.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn readlink(path: *const c_char, _buf: *mut c_char, _n: size_t) -> isize {
+pub unsafe extern "C" fn readlink(path: *const c_char, buf: *mut c_char, n: size_t) -> isize {
     // SAFETY: retezec C.
-    match crate::sys::stat(unsafe { c_bytes(path) }) {
-        Ok(_) => errno::ret_val::<usize>(Err(errno::EINVAL)),
+    let r = crate::sys::readlink(unsafe { c_bytes(path) });
+    // SAFETY: kontrakt C (`buf` ma `n` bajtu).
+    unsafe { put_link(r, buf, n) }
+}
+
+/// Zapise cil odkazu do bufferu C (`readlink`, `readlinkat`).
+///
+/// # Safety
+///
+/// `buf` ma `n` bajtu.
+pub unsafe fn put_link(r: crate::sys::R<Vec<u8>>, buf: *mut c_char, n: size_t) -> isize {
+    match r {
+        Ok(t) => {
+            if buf.is_null() && n > 0 {
+                return errno::ret_val::<usize>(Err(errno::EFAULT));
+            }
+            let k = t.len().min(n);
+            // SAFETY: kontrakt C.
+            unsafe { core::ptr::copy_nonoverlapping(t.as_ptr(), buf.cast::<u8>(), k) };
+            k as isize
+        }
         Err(e) => errno::ret_val::<usize>(Err(e)),
     }
+}
+
+/// `readlinkat` relativne k adresari.
+///
+/// # Safety
+///
+/// Kontrakt C.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn readlinkat(dir: c_int, path: *const c_char, buf: *mut c_char, n: size_t) -> isize {
+    // SAFETY: kontrakt C.
+    let r = unsafe { crate::fsat::at_path(dir, path) }.and_then(|p| crate::sys::readlink(&p));
+    // SAFETY: kontrakt C.
+    unsafe { put_link(r, buf, n) }
+}
+
+/// `symlinkat` relativne k adresari (cil se uklada beze zmeny).
+///
+/// # Safety
+///
+/// Kontrakt C.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn symlinkat(target: *const c_char, dir: c_int, path: *const c_char) -> c_int {
+    if target.is_null() {
+        return errno::ret(Err(errno::EFAULT));
+    }
+    // SAFETY: kontrakt C.
+    let t = unsafe { c_bytes(target) };
+    // SAFETY: kontrakt C.
+    errno::ret(unsafe { crate::fsat::at_path(dir, path) }.and_then(|p| crate::sys::symlink(t, &p)))
 }
 
 /// `ioctl`: na socketu dotazy na rozhrani `SIOCGIF*` (`ifreq.rs`);
@@ -528,10 +577,19 @@ pub unsafe extern "C" fn utime(path: *const c_char, _t: *const c_void) -> c_int 
     unsafe { utimes(path, core::ptr::null()) }
 }
 
-/// Symlinky a pevne odkazy FS zatim nevytvari (FS v3).
+/// `symlink(cil, cesta)`: cil se uklada, jak je (i relativni, nemusi
+/// existovat). Pevne odkazy (`link`) FS nema.
+///
+/// # Safety
+///
+/// Retezce C.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub extern "C" fn symlink(_t: *const c_char, _p: *const c_char) -> c_int {
-    errno::ret(Err(errno::ENOTSUP))
+pub unsafe extern "C" fn symlink(t: *const c_char, p: *const c_char) -> c_int {
+    if t.is_null() || p.is_null() {
+        return errno::ret(Err(errno::EFAULT));
+    }
+    // SAFETY: retezce C.
+    errno::ret(crate::sys::symlink(unsafe { c_bytes(t) }, unsafe { c_bytes(p) }))
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]

@@ -86,6 +86,8 @@ pub struct OpenOptions {
     /// Mod POSIX noveho souboru (9 bitu, jen zuzi zdedene granty; C
     /// `open(O_CREAT, mode)`). `None` = jen zdedit.
     pub mode: Option<u16>,
+    /// Posledni slozku nenasledovat (C `O_NOFOLLOW`; odkaz = `TooManyLinks`).
+    pub nofollow: bool,
 }
 
 /// Otevreny soubor nebo adresar (handle relace; soubor prezije
@@ -119,6 +121,9 @@ impl File {
         }
         if o.truncate {
             flags |= open_flags::TRUNCATE;
+        }
+        if o.nofollow {
+            flags |= open_flags::NOFOLLOW;
         }
         // Zapis do souboru potrebuje pravo zapisu (std: truncate/create
         // bez write = chyba InvalidInput, overuje std samo).
@@ -273,6 +278,34 @@ pub fn stat_path(path: &[u8]) -> Result<Stat> {
     stat(&crate::env::resolve(path)?)
 }
 
+/// `Stat` odkazu samotneho (C `lstat`, std `symlink_metadata`).
+pub fn lstat_path(path: &[u8]) -> Result<Stat> {
+    session()?.lstat(&crate::env::resolve(path)?)
+}
+
+/// Cil odkazu (C `readlink`, std `read_link`).
+pub fn read_link(path: &[u8]) -> Result<String> {
+    session()?.readlink(&crate::env::resolve(path)?)
+}
+
+/// Vytvori odkaz `link` s cilem `target` (cil se uklada, jak je - i
+/// relativni, nemusi existovat; C `symlink`, std `soft_link`).
+pub fn symlink(target: &[u8], link: &[u8]) -> Result<()> {
+    let t = core::str::from_utf8(target).map_err(|_| Error::InvalidArgs)?;
+    session()?.symlink(&crate::env::resolve(link)?, t)
+}
+
+/// Kanonicka cesta (odkazy, `.`, `..` vyresene ve fsd; C `realpath`, std
+/// `canonicalize`).
+pub fn realpath(path: &[u8]) -> Result<String> {
+    realpath_abs(&crate::env::resolve(path)?)
+}
+
+/// `realpath` uz absolutni cesty (`env::resolve`).
+pub(crate) fn realpath_abs(path: &str) -> Result<String> {
+    session()?.realpath(path)
+}
+
 /// Polozky adresare podle cesty.
 pub fn read_dir(path: &[u8]) -> Result<(String, Vec<DirEntry>)> {
     let abs = crate::env::resolve(path)?;
@@ -297,7 +330,8 @@ pub fn set_mode(path: &[u8], mode: u16) -> Result<()> {
 /// Smaze soubor (adresar odmitne: `IsADirectory`).
 pub fn remove_file(path: &[u8]) -> Result<()> {
     let abs = crate::env::resolve(path)?;
-    if stat(&abs)?.kind == kind::DIR {
+    // Odkaz na adresar se maze jako odkaz (lstat, ne stat).
+    if session()?.lstat(&abs)?.kind == kind::DIR {
         return Err(Error::IsADirectory);
     }
     session()?.remove(&abs)
@@ -306,7 +340,8 @@ pub fn remove_file(path: &[u8]) -> Result<()> {
 /// Smaze prazdny adresar (soubor odmitne: `NotADirectory`).
 pub fn remove_dir(path: &[u8]) -> Result<()> {
     let abs = crate::env::resolve(path)?;
-    if stat(&abs)?.kind != kind::DIR {
+    // rmdir odkazu na adresar = NOT_A_DIRECTORY (jako Linux).
+    if session()?.lstat(&abs)?.kind != kind::DIR {
         return Err(Error::NotADirectory);
     }
     session()?.remove(&abs)
