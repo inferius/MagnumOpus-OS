@@ -8,6 +8,7 @@
 
 extern crate cstd;
 extern crate mosys;
+extern crate mowin;
 
 unsafe extern "C" {
     /// Z `libs/cstd/c/math_ld.c` (funkce `long double`): odkaz vynuti

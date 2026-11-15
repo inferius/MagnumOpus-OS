@@ -232,9 +232,20 @@ mod sync {
         };
         let h = ACTIONS.lock().unwrap_or_else(|e| e.into_inner())[sig as usize].sa_handler;
         if h == SIG_DFL || h == SIG_IGN || MASK.with(Cell::get) & bit(sig) != 0 {
+            // Vypadek uvnitr vlastni obsluhy (signal blokovany): ladici
+            // hlaska na stderr, jinak by bylo videt jen PC z jadra.
+            if h > SIG_IGN {
+                std::eprintln!("cstd: signal {sig} behem jeho obsluhy (blokovany): pc {:#x}, adresa {:#x}, druh {}, kod {:#x}", r.pc, r.addr, r.kind, r.code);
+            }
             // Bez obsluhy: dalsi v poradi (nakonec konec procesu s hlaskou).
             let _ = f.next();
             crate::stdlib::_Exit(128 + sig);
+        }
+        // Ladeni: `MO_SIGDEBUG` v prostredi = kazdy synchronni signal na
+        // stderr (napr. vypadky, ktere si Wine resi sam).
+        static DEBUG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *DEBUG.get_or_init(|| std::env::var_os("MO_SIGDEBUG").is_some()) {
+            std::eprintln!("cstd: signal {sig}: pc {:#x}, adresa {:#x}, druh {}, kod {:#x}", r.pc, r.addr, r.kind, r.code);
         }
         // si_code: SEGV_MAPERR = 1 (adresa), BUS_ADRALN = 1, FPE_INTDIV = 1.
         // Kontext z ramce; zmeny obsluhy (PC, registry, FPU) zpet do ramce.

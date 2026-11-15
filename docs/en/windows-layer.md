@@ -427,8 +427,8 @@ patch). It talks to the compositor through our `mowin` library (C API in
 | Window protocol version 7: window owner (dialog above its window), `POPOVER_DISMISS`, popover within the work area, version negotiation in `HELLO` | **[implemented]** (tests in `libs/comp`) |
 | A refused clipboard in the compositor log with the app identity (without content) | **[implemented]** (test `denied_clipboard_is_logged_with_identity`) |
 | `libs/mowin`: several windows and popups on one connection, frames, events, cursor, clipboard; event module shared with `mosdl` | **[implemented]** (host tests; in QEMU with the Wine driver) |
-| `winemo.drv`: windows, GDI into the window buffer, input, cursor, decorations, popups, clipboard | **[designed]** |
-| Demos notepad, winecfg, a GDI test; a test in the `wine` suite with a screenshot | **[designed]** |
+| `winemo.drv` (`third_party/wine/winemo.drv`, patch `0008`): windows, GDI into the window buffer, input, cursor, decorations, popups, clipboard | **[implemented]**; the GDI window and both frame branches **[verified in QEMU]** x86_64 (`wine` suite: `wintest gdi`, `wintest ramy`) |
+| Notepad (typing from QEMU, Save As, Alt+F4), winecfg | **[implemented]**, waiting for fonts: Wine is built without FreeType so far, windows have no text and dialogs have zero units (winecfg 16 x 16) |
 
 Decisions:
 

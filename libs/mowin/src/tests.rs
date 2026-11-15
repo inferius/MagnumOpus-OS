@@ -36,6 +36,7 @@ fn header_constants_match() {
         ("MOWIN_EV_STATE", kind::STATE),
         ("MOWIN_EV_POPUP_DISMISS", kind::POPUP_DISMISS),
         ("MOWIN_EV_PLACE", kind::PLACE),
+        ("MOWIN_EV_CLIPBOARD", kind::CLIPBOARD),
     ] {
         assert!(h.contains(&format!("{name} = {v},")) || h.contains(&format!("{name} = {v}
 ")), "{name}");

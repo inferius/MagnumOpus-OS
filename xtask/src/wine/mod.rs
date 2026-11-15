@@ -36,6 +36,7 @@ pub const WINE: CPort = CPort {
         "0005-ntdll-spawn-process-magnumopus.patch",
         "0006-process-memory-magnumopus.patch",
         "0007-server-signals-magnumopus.patch",
+        "0008-winemo-drv-magnumopus.patch",
     ],
     build: Build::Sources { lib: &[], defines: &[], programs: &[] },
     data: &[],
@@ -61,6 +62,9 @@ pub fn source_key(sha256: &str, patches: &[(String, Vec<u8>)]) -> String {
     format!("{:016x}", h.finish())
 }
 
+/// Zaplaty Wine (obsah meni otisk zdroje). Zdrojaky ovladace
+/// `third_party/wine/winemo.drv` do otisku nepatri: `build_wine.sh` je
+/// kopiruje pri kazdem behu a make prelozi jen zmenene.
 fn read_patches() -> Result<Vec<(String, Vec<u8>)>> {
     WINE.patches
         .iter()

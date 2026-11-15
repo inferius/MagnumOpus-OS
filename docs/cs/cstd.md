@@ -252,7 +252,7 @@ Rozhodnutí 6A - signály bez podpory jádra:
   (třetí argument, `sys/ucontext.h`) **[ověřeno v QEMU]** x86_64
   i aarch64 (`ctest`, krok `signal`): registry z rámce výjimky
   v rozložení jako Linux (x86_64 `uc_mcontext.gregs[REG_*]`, `fpregs` na
-  obraz FXSAVE, `REG_CR2` = adresa výpadku; aarch64 `regs`, `sp`, `pc`,
+  obraz FXSAVE, `REG_CR2` = adresa výpadku, `REG_TRAPNO` = číslo vektoru, `REG_ERR` = chybový kód, `REG_CSGSFS` = selektory CS a SS z CPU (Wine podle nich pozná výpadek stránky a 64bitový kód); `MO_SIGDEBUG` v prostředí vypíše každý synchronní signál na stderr; aarch64 `regs`, `sp`, `pc`,
   `pstate`, `fault_address`, záznam `fpsimd_context` v `__reserved`).
   Změny registrů a FPU v obsluze se po návratu použijí (oprava registru
   a opakování instrukce - Wine, JIT). Signál bez výjimky (`raise`)

@@ -306,7 +306,19 @@ over `libc.so`).
   `0006-process-memory-magnumopus.patch` (klient svěří wineserveru paměť
   procesovým fd, `read/write_process_memory` přes `PROCESS_MEMORY` / the
   client entrusts its memory to wineserver with a process fd,
-  `read/write_process_memory` via `PROCESS_MEMORY`).
+  `read/write_process_memory` via `PROCESS_MEMORY`),
+  `0007-server-signals-magnumopus.patch` (signály serveru přes řídicí fd
+  procesu a fd vláken / server signals via the process control fd and
+  thread fds), `0008-winemo-drv-magnumopus.patch` (ovladač `winemo.drv`
+  v `configure`, výchozí ovladač grafiky v `explorer` / the `winemo.drv`
+  driver in `configure`, the default graphics driver in `explorer`).
+- **Ovladač grafiky / Graphics driver:** `third_party/wine/winemo.drv/`
+  (LGPL jako Wine, část `window.c` a tabulka kláves z `winewayland.drv` /
+  LGPL like Wine, part of `window.c` and the key table from
+  `winewayland.drv`): okna Wine nad kompozitorem přes naši knihovnu
+  `mowin` (náš kód, `libs/mowin`) / Wine windows on the compositor through
+  our `mowin` library (our code, `libs/mowin`). Sestavení ho zkopíruje do
+  `dlls/winemo.drv` / the build copies it into `dlls/winemo.drv`.
 - **Popis / Description:** `docs/cs/windows-vrstva.md`,
   `docs/en/windows-layer.md`.
 

@@ -266,7 +266,7 @@ Decision 6A - signals without kernel support:
   argument, `sys/ucontext.h`) **[verified in QEMU]** x86_64 and aarch64
   (`ctest`, step `signal`): registers from the exception frame in the
   Linux layout (x86_64 `uc_mcontext.gregs[REG_*]`, `fpregs` pointing to
-  the FXSAVE image, `REG_CR2` = the fault address; aarch64 `regs`, `sp`,
+  the FXSAVE image, `REG_CR2` = the fault address, `REG_TRAPNO` = the vector number, `REG_ERR` = the error code, `REG_CSGSFS` = the CS and SS selectors from the CPU (Wine uses them to recognise a page fault and 64-bit code); `MO_SIGDEBUG` in the environment prints every synchronous signal to stderr; aarch64 `regs`, `sp`,
   `pc`, `pstate`, `fault_address`, the `fpsimd_context` record in
   `__reserved`). Changes of registers and FPU in the handler are applied
   on return (fixing a register and retrying the instruction - Wine, JIT).

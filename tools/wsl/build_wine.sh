@@ -37,6 +37,17 @@ if [ ! -f "$SRC/.hotovo" ]; then
 fi
 S=$SRC/$WINE_TOP
 
+# Ovladac grafiky pro kompozitor (W3): zdrojaky jsou ve slozce Wine
+# repozitare (third_party/wine/winemo.drv), configure ho zna ze zaplaty
+# 0008. Kopiruji se pri kazdem behu jen zmenene soubory: zmena ovladace
+# prelozi jen jeho objekty (otisk zdroje WINE_KEY je jen ze zaplat).
+mkdir -p "$S/dlls/winemo.drv"
+for f in "$WINE_PATCHES"/winemo.drv/*; do
+    d="$S/dlls/winemo.drv/$(basename "$f")"
+    tr -d '\r' < "$f" > "$d.new"
+    if cmp -s "$d.new" "$d"; then rm "$d.new"; else mv "$d.new" "$d"; fi
+done
+
 # Nativni nastroje Wine (winebuild, widl, wrc, winegcc) pro krizove sestaveni.
 T=$W/tools-$WINE_KEY
 if [ ! -x "$T/tools/winebuild/winebuild" ]; then
@@ -84,10 +95,22 @@ fi
 # bez --wine-builtin = obycejny PE program.
 WT="$WINE_OUT/tests"
 mkdir -p "$WT"
-WSRC="$MOS_TOOLS/../../user/wintest/wintest.c"
+WSRC="$MOS_TOOLS/../../user/wintest"
 TOOLS="$W/tools-$WINE_KEY/tools"
-clang -target x86_64-windows -fuse-ld=lld --no-default-config -c -o "$WT/wintest.o" "$WSRC"     -I"$SRC/$WINE_TOP/include" -I"$SRC/$WINE_TOP/include/msvcrt" -Iinclude -D_UCRT -O2 -Wall     > "$W/logs/wintest.log" 2>&1 || { cat "$W/logs/wintest.log"; exit 1; }
-"$TOOLS/winegcc/winegcc" -o "$WT/wintest.exe" --wine-objdir . --winebuild "$TOOLS/winebuild/winebuild"     -b x86_64-windows -mconsole "$WT/wintest.o" dlls/winecrt0/x86_64-windows/libwinecrt0.a     libs/compiler-rt/x86_64-windows/libcompiler-rt.a dlls/ucrtbase/x86_64-windows/libucrtbase.a     dlls/kernel32/x86_64-windows/libkernel32.a dlls/ntdll/x86_64-windows/libntdll.a     >> "$W/logs/wintest.log" 2>&1 || { cat "$W/logs/wintest.log"; exit 1; }
+# wintest.c (konzole) a gui.c (W3: okna, GDI): user32 a gdi32 navic.
+: > "$W/logs/wintest.log"
+for c in wintest gui; do
+    clang -target x86_64-windows -fuse-ld=lld --no-default-config -c -o "$WT/$c.o" "$WSRC/$c.c" \
+        -I"$SRC/$WINE_TOP/include" -I"$SRC/$WINE_TOP/include/msvcrt" -Iinclude -D_UCRT -O2 -Wall \
+        >> "$W/logs/wintest.log" 2>&1 || { cat "$W/logs/wintest.log"; exit 1; }
+done
+"$TOOLS/winegcc/winegcc" -o "$WT/wintest.exe" --wine-objdir . --winebuild "$TOOLS/winebuild/winebuild" \
+    -b x86_64-windows -mconsole "$WT/wintest.o" "$WT/gui.o" dlls/winecrt0/x86_64-windows/libwinecrt0.a \
+    libs/compiler-rt/x86_64-windows/libcompiler-rt.a dlls/ucrtbase/x86_64-windows/libucrtbase.a \
+    dlls/user32/x86_64-windows/libuser32.a dlls/gdi32/x86_64-windows/libgdi32.a \
+    dlls/kernel32/x86_64-windows/libkernel32.a dlls/ntdll/x86_64-windows/libntdll.a \
+    >> "$W/logs/wintest.log" 2>&1 || { cat "$W/logs/wintest.log"; exit 1; }
+rm -f "$WT/gui.o"
 rm -f "$WT/wintest.o"
 
 # Vysledek do target/wine/<arch>/tree: rozlozeni adresare aplikace

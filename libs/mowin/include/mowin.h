@@ -57,7 +57,10 @@ enum {
     /* stisk mimo popupy okna: zavrit nabidky a rozbalene seznamy */
     MOWIN_EV_POPUP_DISMISS = 15,
     /* a, b, c, d = poloha a velikost obsahu okna na obrazovce */
-    MOWIN_EV_PLACE = 16
+    MOWIN_EV_PLACE = 16,
+    /* a = 1 ve schrance je text jine aplikace (mowin_clipboard_fetch),
+       0 = schranka bez textu */
+    MOWIN_EV_CLIPBOARD = 17
 };
 
 /* Rezim okna (kdo kresli ram a titulek). */

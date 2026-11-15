@@ -151,6 +151,7 @@ const STARTS: &[&str] = &[
     gui::SHOT[0],
     gui::FILES_CLICK,
     sdl::CLICK,
+    wine::CLICK,
 ];
 
 /// Konec testovaciho behu userspace (dal uz zadny usek neprijde).
@@ -284,6 +285,7 @@ fn script(ps2: bool) -> Vec<Step> {
     usb_steps(&mut s);
     gui_steps(&mut s);
     sdl_steps(&mut s);
+    wine_steps(&mut s);
     s
 }
 
@@ -310,6 +312,43 @@ fn sdl_steps(s: &mut Vec<Step>) {
         s.push(Step::Send(vec![key(k, true)]));
         s.push(Step::Send(vec![key(k, false)]));
     }
+}
+
+/// Windows vrstva W3 (`user/init/src/tests/wine_gui.rs`): poznamkovy blok
+/// pres winemo.drv dostane fyzicky klik a klavesy (text, Ctrl+S, nazev
+/// souboru v dialogu Ulozit jako, Alt+F4).
+fn wine_steps(s: &mut Vec<Step>) {
+    let press = |s: &mut Vec<Step>, keys: &[&str]| {
+        for k in keys {
+            s.push(Step::Send(vec![key(k, true)]));
+        }
+        for k in keys.iter().rev() {
+            s.push(Step::Send(vec![key(k, false)]));
+        }
+    };
+    s.push(Step::ClickAt(wine::CLICK));
+    s.push(Step::WaitFor(wine::TYPE));
+    for k in ["a", "h", "o", "j"] {
+        press(s, &[k]);
+    }
+    press(s, &["ctrl", "s"]);
+    // c:\t.txt a Enter v dialogu.
+    s.push(Step::WaitFor(wine::SAVE));
+    press(s, &["c"]);
+    press(s, &["shift", "semicolon"]);
+    for k in ["backslash", "t", "dot", "t", "x", "t", "ret"] {
+        press(s, &[k]);
+    }
+    s.push(Step::WaitFor(wine::CLOSE));
+    press(s, &["alt", "f4"]);
+}
+
+/// Znacky testu W3 (musi sedet s `user/init/src/tests/wine_gui.rs`).
+mod wine {
+    pub const CLICK: &str = "init: test wine: klik do poznamkoveho bloku na ";
+    pub const TYPE: &str = "init: test wine: pis do poznamkoveho bloku";
+    pub const SAVE: &str = "init: test wine: dialog ulozeni";
+    pub const CLOSE: &str = "init: test wine: zavri poznamkovy blok";
 }
 
 /// Znacky testu SDL (musi sedet s `user/init/src/tests/sdl.rs`).

@@ -28,6 +28,9 @@ pub mod kind {
     /// Jen `mowin`: poloha obsahu okna na obrazovce (`WINDOW_PLACE`),
     /// a, b, c, d = x, y, w, h.
     pub const PLACE: u32 = 16;
+    /// Jen `mowin`: ve schrance je novy text od jine aplikace (a = 1 text
+    /// je, 0 schranka bez textu).
+    pub const CLIPBOARD: u32 = 17;
 }
 
 /// `mowin_event` / `mosdl_event` (rozlozeni musi sedet s obema hlavickami,

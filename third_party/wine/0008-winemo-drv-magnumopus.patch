@@ -1,0 +1,43 @@
+diff --git a/configure b/configure
+--- a/configure
++++ b/configure
+@@ -1552,6 +1552,7 @@
+ enable_winepulse_drv
+ enable_wineusb_sys
+ enable_winevulkan
++enable_winemo_drv
+ enable_winewayland_drv
+ enable_winex11_drv
+ enable_winexinput_sys
+@@ -23229,6 +23230,7 @@
+ wine_fn_config_makefile dlls/winepulse.drv enable_winepulse_drv
+ wine_fn_config_makefile dlls/wineusb.sys enable_wineusb_sys
+ wine_fn_config_makefile dlls/winevulkan enable_winevulkan
++wine_fn_config_makefile dlls/winemo.drv enable_winemo_drv
+ wine_fn_config_makefile dlls/winewayland.drv enable_winewayland_drv
+ wine_fn_config_makefile dlls/winex11.drv enable_winex11_drv
+ wine_fn_config_makefile dlls/winexinput.sys enable_winexinput_sys
+diff --git a/configure.ac b/configure.ac
+--- a/configure.ac
++++ b/configure.ac
+@@ -3371,6 +3371,7 @@
+ WINE_CONFIG_MAKEFILE(dlls/winepulse.drv)
+ WINE_CONFIG_MAKEFILE(dlls/wineusb.sys)
+ WINE_CONFIG_MAKEFILE(dlls/winevulkan)
++WINE_CONFIG_MAKEFILE(dlls/winemo.drv)
+ WINE_CONFIG_MAKEFILE(dlls/winewayland.drv)
+ WINE_CONFIG_MAKEFILE(dlls/winex11.drv)
+ WINE_CONFIG_MAKEFILE(dlls/winexinput.sys)
+diff --git a/programs/explorer/desktop.c b/programs/explorer/desktop.c
+--- a/programs/explorer/desktop.c
++++ b/programs/explorer/desktop.c
+@@ -40,7 +40,8 @@
+ #define DESKTOP_CLASS_ATOM ((LPCWSTR)MAKEINTATOM(32769))
+ #define DESKTOP_ALL_ACCESS 0x01ff
+ 
+-static const WCHAR default_driver[] = L"mac,x11,wayland";
++/* MagnumOpus: ovladac grafiky pro kompozitor (dlls/winemo.drv). */
++static const WCHAR default_driver[] = L"mo,mac,x11,wayland";
+ 
+ static BOOL using_root = TRUE;
+ 

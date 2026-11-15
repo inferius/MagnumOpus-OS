@@ -400,8 +400,8 @@ záplata). Mluví s kompozitorem přes naši knihovnu `mowin` (C API v
 | Protokol okna verze 7: vlastník okna (dialog nad oknem), `POPOVER_DISMISS`, popover v mezích pracovní plochy, vyjednání verze v `HELLO` | **[implementováno]** (testy `libs/comp`) |
 | Odmítnutá schránka v logu kompozitoru s identitou aplikace (bez obsahu) | **[implementováno]** (test `denied_clipboard_is_logged_with_identity`) |
 | `libs/mowin`: víc oken a popupů na jednom spojení, snímky, události, kurzor, schránka; společný modul událostí s `mosdl` | **[implementováno]** (host testy; v QEMU s ovladačem Wine) |
-| `winemo.drv`: okna, GDI do bufferu okna, vstup, kurzor, dekorace, popupy, schránka | **[navrženo]** |
-| Ukázky notepad, winecfg, test GDI; test v sadě `wine` se snímkem obrazovky | **[navrženo]** |
+| `winemo.drv` (`third_party/wine/winemo.drv`, záplata `0008`): okna, GDI do bufferu okna, vstup, kurzor, dekorace, popupy, schránka | **[implementováno]**; GDI okno a obě větve rámu **[ověřeno v QEMU]** x86_64 (sada `wine`: `wintest gdi`, `wintest ramy`) |
+| Poznámkový blok (psaní z QEMU, Uložit jako, Alt+F4), winecfg | **[implementováno]**, čeká na písma: Wine je zatím bez FreeType, okna nemají text a dialogy mají nulové jednotky (winecfg 16 x 16) |
 
 Rozhodnutí:
 

@@ -32,6 +32,8 @@ pub(super) struct Clip {
     got: Option<core::result::Result<Vec<u8>, Error>>,
     /// Text posledniho `mowin_clipboard_fetch`.
     text: Vec<u8>,
+    /// Posledni zmena schranky je nase nabidka (udalost se neposila).
+    offered: bool,
 }
 
 impl State {
@@ -50,7 +52,15 @@ impl State {
                     self.clip.got = Some(Ok(data));
                 }
             }
-            SMsg::Changed { formats } => self.clip.formats = formats,
+            SMsg::Changed { formats } => {
+                let text = formats.iter().any(|f| f == TEXT);
+                self.clip.formats = formats;
+                // Zmena po nasi nabidce je nase vlastni (Wine ji uz ma).
+                if core::mem::take(&mut self.clip.offered) {
+                    return Ok(());
+                }
+                self.push(crate::event::kind::CLIPBOARD, 0, [text as i32, 0, 0, 0]);
+            }
             SMsg::Denied { serial, .. } => {
                 if serial == self.clip.serial {
                     self.clip.got = Some(Err(Error::AccessDenied));
@@ -75,6 +85,7 @@ pub unsafe extern "C" fn mowin_clipboard_set_text(text: *const c_char) -> i32 {
     t.truncate(n);
     with_state(|s| {
         s.clip.owned = t;
+        s.clip.offered = true;
         let gesture = s.gesture;
         s.clip_send(CMsg::Offer { gesture, formats: vec![String::from(TEXT)] }).map_or_else(code, |_| 0)
     })

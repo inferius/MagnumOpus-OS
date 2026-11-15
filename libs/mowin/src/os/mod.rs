@@ -34,6 +34,9 @@ use surface::{Buf, Surface};
 /// Jak dlouho cekat na `WELCOME` a na uvolneni bufferu kompozitorem.
 const REPLY_NS: u64 = 5_000_000_000;
 
+/// Zpravy, ktere kompozitor odklada do `COMMIT` (vrstvy, titulek), se
+/// posilaji az s prvnim snimkem: okno, ktere se nikdy neukaze (skryta okna
+/// Wine), nesmi nechat v kompozitoru rozpracovanou transakci.
 struct Win {
     w: u32,
     h: u32,
@@ -41,12 +44,16 @@ struct Win {
     ack: Option<(u32, u32, u32)>,
     content: Surface,
     shown: bool,
+    /// Titulek pred prvnim snimkem (posle se s nim).
+    title: Option<String>,
 }
 
 struct Popup {
     window: u32,
     rect: Rect,
     surface: Surface,
+    /// Vrstva uz je v kompozitoru (`LAYER_CREATE` s prvnim snimkem).
+    created: bool,
 }
 
 pub(crate) struct State {
@@ -241,7 +248,7 @@ impl State {
         Ok(())
     }
 
-    fn push(&mut self, k: u32, window: u32, v: [i32; 4]) {
+    pub(crate) fn push(&mut self, k: u32, window: u32, v: [i32; 4]) {
         let mut e = MoEvent::simple(k, v[0], v[1]);
         e.c = v[2];
         e.d = v[3];
@@ -292,6 +299,11 @@ impl State {
 
     /// Ukaze snimek ve vrstve: okno (`popup = None`) nebo popup.
     fn present(&mut self, window: u32, popup: Option<u32>, src: &[u8], pitch: u32, w: u32, h: u32) -> Result<()> {
+        // Popup okna, ktere jeste neni ukazane, by commit okna ukazal
+        // prazdne: nejdriv obsah okna (ovladac snimek zopakuje).
+        if popup.is_some() && !self.windows.get(&window).is_some_and(|w| w.shown) {
+            return Err(Error::BadState);
+        }
         // Velikost vrstvy: okno = posledni CONFIGURE, popup = jeho obdelnik.
         let (lw, lh) = match popup {
             Some(p) => {
@@ -337,9 +349,34 @@ impl State {
         let id = b.id;
         s.front = back;
         let layer = s.layer;
+        self.first_frame(window, popup, layer)?;
         self.send(ClientMsg::Damage { buffer: id, rect: Rect::new(0, 0, lw, lh) })?;
         self.send(ClientMsg::LayerSet { layer, props: Surface::props(id, rect, popup.is_some()) })?;
         self.commit(window, popup.is_none() && (w, h) == (lw, lh))
+    }
+
+    /// Pred prvnim snimkem vrstvy: `LAYER_CREATE` (a titulek okna).
+    fn first_frame(&mut self, window: u32, popup: Option<u32>, layer: u32) -> Result<()> {
+        match popup {
+            Some(p) => {
+                let pop = self.popups.get_mut(&p).ok_or(Error::NotFound)?;
+                if !pop.created {
+                    pop.created = true;
+                    self.send(ClientMsg::LayerCreate { layer, window, parent: 0, kind: LayerKind::Buffer })?;
+                }
+            }
+            None => {
+                let win = self.windows.get_mut(&window).ok_or(Error::NotFound)?;
+                if !win.shown {
+                    let title = win.title.take();
+                    self.send(ClientMsg::LayerCreate { layer, window, parent: 0, kind: LayerKind::Buffer })?;
+                    if let Some(t) = title {
+                        self.send(set_title(window, t))?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn surface(&mut self, window: u32, popup: Option<u32>) -> Result<&mut Surface> {
@@ -365,6 +402,10 @@ impl State {
         let txn = self.txn;
         self.send(ClientMsg::Commit { txn, flags, window, serial, token: 0 })
     }
+}
+
+fn set_title(window: u32, title: String) -> ClientMsg {
+    ClientMsg::WindowSet { window, title, min_w: 0, min_h: 0, side: guiproto::window::ButtonSide::Right, button_color: 0 }
 }
 
 #[unsafe(no_mangle)]
@@ -420,8 +461,7 @@ pub unsafe extern "C" fn mowin_window_create(mode: u32, w: u32, h: u32, title: *
         if owner != 0 && s.version >= 7 {
             s.send(ClientMsg::WindowOwner { window: id, owner })?;
         }
-        s.send(ClientMsg::LayerCreate { layer, window: id, parent: 0, kind: LayerKind::Buffer })?;
-        s.windows.insert(id, Win { w: w.max(1), h: h.max(1), ack: None, content: Surface::new(layer), shown: false });
+        s.windows.insert(id, Win { w: w.max(1), h: h.max(1), ack: None, content: Surface::new(layer), shown: false, title: None });
         Ok(id)
     });
     match r {
@@ -462,13 +502,13 @@ pub extern "C" fn mowin_window_destroy(win: u32) -> i32 {
 pub unsafe extern "C" fn mowin_window_set_title(win: u32, title: *const c_char) -> i32 {
     let t = c_str(title);
     with_state(|s| {
-        if !s.windows.contains_key(&win) {
-            return code(Error::NotFound);
+        let Some(w) = s.windows.get_mut(&win) else { return code(Error::NotFound) };
+        // Titulek plati s COMMIT: u neukazaneho okna az s prvnim snimkem.
+        if !w.shown {
+            w.title = Some(t);
+            return 0;
         }
-        let r = s.send(ClientMsg::WindowSet { window: win, title: t, min_w: 0, min_h: 0, side: guiproto::window::ButtonSide::Right, button_color: 0 });
-        // Titulek plati s COMMIT (jen u uz ukazaneho okna, jinak s prvnim).
-        let r = r.and_then(|_| if s.windows[&win].shown { s.commit(win, false) } else { Ok(()) });
-        r.map_or_else(code, |_| 0)
+        s.send(set_title(win, t)).and_then(|_| s.commit(win, false)).map_or_else(code, |_| 0)
     })
 }
 
@@ -542,8 +582,7 @@ pub unsafe extern "C" fn mowin_popup_create(win: u32, x: i32, y: i32, w: u32, h:
         }
         let id = s.new_id();
         let layer = s.new_layer();
-        s.send(ClientMsg::LayerCreate { layer, window: win, parent: 0, kind: LayerKind::Buffer })?;
-        s.popups.insert(id, Popup { window: win, rect: Rect::new(x, y, w.max(1), h.max(1)), surface: Surface::new(layer) });
+        s.popups.insert(id, Popup { window: win, rect: Rect::new(x, y, w.max(1), h.max(1)), surface: Surface::new(layer), created: false });
         Ok(id)
     });
     match r {
@@ -566,7 +605,7 @@ pub extern "C" fn mowin_popup_move(popup: u32, x: i32, y: i32, w: u32, h: u32) -
         p.rect = Rect::new(x, y, w.max(1), h.max(1));
         let (win, layer, rect) = (p.window, p.surface.layer, p.rect);
         // Stejna velikost: jen posun vrstvy (obsah zustane).
-        let front = p.surface.bufs[p.surface.front].as_ref().map(|b| b.id);
+        let front = p.surface.bufs[p.surface.front].as_ref().map(|b| b.id).filter(|_| p.created);
         match (same, front) {
             (true, Some(id)) => s.send(ClientMsg::LayerSet { layer, props: Surface::props(id, rect, true) }).and_then(|_| s.commit(win, false)).map_or_else(code, |_| 0),
             _ => 0,
@@ -594,8 +633,10 @@ pub unsafe extern "C" fn mowin_popup_present(popup: u32, pixels: *const u8, pitc
 pub extern "C" fn mowin_popup_destroy(popup: u32) -> i32 {
     with_state(|s| {
         let Some(p) = s.popups.remove(&popup) else { return code(Error::NotFound) };
-        let mut r = s.send(ClientMsg::LayerDestroy { layer: p.surface.layer });
-        r = r.and_then(|_| s.commit(p.window, false));
+        let mut r = Ok(());
+        if p.created {
+            r = s.send(ClientMsg::LayerDestroy { layer: p.surface.layer }).and_then(|_| s.commit(p.window, false));
+        }
         for b in p.surface.buffer_ids() {
             r = r.and(s.send(ClientMsg::BufferDestroy { buffer: b }));
         }
