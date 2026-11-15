@@ -282,6 +282,15 @@ fn main(mut startup: Startup) -> i64 {
         if t.registry.is_some() { "ano" } else { "ne" },
         t.sessions.len()
     );
+    // Relaci je promenny pocet: cekani pres port (`WaitSet`), ne pres
+    // `wait_many` (limit 64 objektu).
+    let mut waits = match libos::WaitSet::new() {
+        Ok(w) => w,
+        Err(e) => {
+            println!("termd: port nejde vytvorit: {e}");
+            return 1;
+        }
+    };
     loop {
         let mask = Signals::READABLE | Signals::PEER_CLOSED;
         let mut items: Vec<(&Handle, Signals)> = alloc::vec![(t.window.handle(), mask)];
@@ -289,7 +298,7 @@ fn main(mut startup: Startup) -> i64 {
         if let Some(r) = &t.registry {
             items.push((r.handle(), mask));
         }
-        match libos::wait_many(&items, None) {
+        match waits.wait(&items, None) {
             Ok(_) => {}
             Err(e) => {
                 println!("termd: chyba cekani: {e}");
