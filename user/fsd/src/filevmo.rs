@@ -94,6 +94,16 @@ pub struct Entry {
     /// Kolik sdilenych mapovani (relace, okno) zaznam drzi.
     pins: u32,
     used: u64,
+    /// Aspon jedno sdilene mapovani: zaznam je zdroj pravdy (jdou pres nej
+    /// `READ_H`/`WRITE_H`, zapisuje se zpet, hlida se cizi zmena). Jen
+    /// soukrome mapovani (napr. knihovny `.so`) = jen cache oken, platnost
+    /// se overi verzi pri dalsim `MAP_VMO`; zadna cena u ostatnich operaci.
+    shared: bool,
+    /// Aspon jedno okno bylo predano se zapisem (klient muze psat).
+    writable: bool,
+    /// Velikost a obsah ve FS odpovidaji zaznamu (krome klientskych zapisu
+    /// do zapisovatelnych oken); `flush` pak nesaha na FS.
+    synced: bool,
 }
 
 /// Zaznamy namapovanych souboru.
@@ -162,6 +172,10 @@ impl Entry {
     /// a srovna velikost ve FS. Stranka, kterou se zapsat nepodarilo, se
     /// znovu oznaci (zapis do ni) - zkusi se priste. Vraci pocet stranek.
     fn flush(&mut self, fs: &mut Fs<BlkDev>) -> Result<u64> {
+        // Nikdo nemohl psat (okna jen pro cteni, fsd nic nezmenil): nic.
+        if !self.writable && self.synced {
+            return Ok(0);
+        }
         let pg = page();
         let mut first_err = None;
         let mut count = 0u64;
@@ -204,10 +218,14 @@ impl Entry {
         if let Some(e) = first_err {
             return Err(e);
         }
+        if count == 0 && self.synced {
+            return Ok(0);
+        }
         if fs.stat_h(self.fh)?.size != self.size {
             fs.set_len_h(self.fh, self.size)?;
         }
         self.version = fs.revision_h(self.fh)?.version;
+        self.synced = true;
         Ok(count)
     }
 
@@ -229,6 +247,7 @@ impl Entry {
             take_dirty(&w.vmo)?;
         }
         self.version = rev.version;
+        self.synced = true;
         Ok(())
     }
 
@@ -281,6 +300,7 @@ impl Entry {
     /// stranky jdou zpet pozdeji), ostatni rovnou do FS.
     pub fn write(&mut self, fs: &mut Fs<BlkDev>, off: u64, data: &[u8], bytes: &mut u64) -> Result<()> {
         let end = off.checked_add(data.len() as u64).ok_or(Error::InvalidArgs)?;
+        self.synced = false;
         if end > self.size {
             self.size = end;
             self.fit(bytes)?;
@@ -312,6 +332,7 @@ impl Entry {
     /// Zmena velikosti (`SET_LEN`, uz provedena ve FS): okna se zmensi nebo
     /// zvetsi, zbytek posledni stranky za koncem se vynuluje.
     pub fn set_len(&mut self, fs: &mut Fs<BlkDev>, size: u64, bytes: &mut u64) -> Result<()> {
+        self.synced = false;
         self.size = size;
         self.fit(bytes)?;
         let pg = page();
@@ -336,24 +357,41 @@ impl FileVmos {
         self.map.is_empty()
     }
 
-    /// Zaznam souboru, pokud existuje (soubor je namapovany).
+    /// Zaznam sdilene namapovaneho souboru (zdroj pravdy), pokud je.
     pub fn entry(&mut self, key: Key) -> Option<(&mut Entry, &mut u64)> {
-        let e = self.map.get_mut(&key)?;
+        let e = self.map.get_mut(&key).filter(|e| e.shared)?;
         Some((e, &mut self.bytes))
     }
 
+    /// Je nejaky soubor sdilene namapovany (operace pak hlidaji zaznamy)?
+    pub fn any_shared(&self) -> bool {
+        self.map.values().any(|e| e.shared)
+    }
+
     /// Zaznam souboru za handlem klienta `h` (zalozi ho: interni handle,
-    /// velikost a verze z FS).
-    pub fn open(&mut self, fs: &mut Fs<BlkDev>, key: Key, h: fs::Handle) -> Result<&mut Entry> {
+    /// velikost a verze z FS). Zaznam jen pro soukrome mapovani se pred
+    /// pouzitim overi verzi objektu (zmeneny = nove nacist). `shared` ho
+    /// udela zdrojem pravdy, `write` = klient dostane okno se zapisem.
+    pub fn open(&mut self, fs: &mut Fs<BlkDev>, key: Key, h: fs::Handle, shared: bool, write: bool) -> Result<&mut Entry> {
         self.clock += 1;
+        let stale = match self.map.get(&key) {
+            Some(e) if !e.shared => fs.revision_h(e.fh).map_or(true, |r| r.version != e.version),
+            _ => false,
+        };
+        if stale {
+            self.drop_entry(fs, key);
+        }
         if !self.map.contains_key(&key) {
             let fh = fs.pin_h(h)?;
             let size = fs.stat_h(fh)?.size;
             let version = fs.revision_h(fh)?.version;
-            self.map.insert(key, Entry { fh, size, version, windows: BTreeMap::new(), pins: 0, used: 0 });
+            let e = Entry { fh, size, version, windows: BTreeMap::new(), pins: 0, used: 0, shared: false, writable: false, synced: true };
+            self.map.insert(key, e);
         }
         let e = self.map.get_mut(&key).ok_or(Error::NotFound)?;
         e.used = self.clock;
+        e.shared |= shared;
+        e.writable |= write;
         Ok(e)
     }
 
@@ -398,7 +436,7 @@ impl FileVmos {
     /// zapsanych stranek.
     pub fn flush_all(&mut self, fs: &mut Fs<BlkDev>) -> Result<u64> {
         let mut first = Ok(0);
-        for e in self.map.values_mut() {
+        for e in self.map.values_mut().filter(|e| e.shared) {
             match e.flush(fs) {
                 Ok(n) => {
                     if let Ok(t) = &mut first {
@@ -419,7 +457,7 @@ impl FileVmos {
     /// bez drzeni nad `CACHE_MAX` zahodit.
     pub fn refresh_all(&mut self, fs: &mut Fs<BlkDev>) {
         let mut gone = Vec::new();
-        for (&k, e) in self.map.iter_mut() {
+        for (&k, e) in self.map.iter_mut().filter(|(_, e)| e.shared) {
             if let Err(err) = e.refresh(fs, &mut self.bytes) {
                 gone.push((k, err));
             }

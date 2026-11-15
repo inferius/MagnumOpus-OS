@@ -138,15 +138,22 @@ impl Service {
         // Soubory jako pamet (`filevmo.rs`): pred operaci, ktera cte nebo
         // meni FS mimo zaznamy namapovanych souboru, zapsat zpet; po ni
         // nacist, co se zmenilo mimo ne.
+        // Jen pri sdilene namapovanem souboru; obnova jen kdyz operace FS
+        // opravdu zmenila (citac zmen knihovny).
         let opcode = msg.get(..4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
-        let foreign = !self.vmos.is_empty() && !crate::filevmo::aware(opcode);
+        let foreign = self.vmos.any_shared() && !crate::filevmo::aware(opcode);
+        let mut before = 0;
         if foreign && let Some(fs) = self.fs.as_mut() {
             if let Err(e) = self.vmos.flush_all(fs) {
                 libos::println!("fsd: zapis namapovanych souboru selhal: {e}");
             }
+            before = fs.mutation_count();
         }
         let r = self.handle_inner(sess, msg);
-        if foreign && let Some(fs) = self.fs.as_mut() {
+        if foreign
+            && let Some(fs) = self.fs.as_mut()
+            && fs.mutation_count() != before
+        {
             self.vmos.refresh_all(fs);
         }
         if let Some(fs) = self.fs.as_mut() {
