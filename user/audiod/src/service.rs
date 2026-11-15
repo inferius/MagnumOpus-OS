@@ -19,7 +19,6 @@ use crate::streams::{State, Stream};
 
 /// Za jak dlouho bez hrajiciho streamu zastavit DMA.
 pub const IDLE_STOP: Duration = Duration::from_secs(2);
-const MAX_CLIENTS: usize = 64;
 const MAX_STREAMS_PER_CLIENT: usize = 16;
 /// Nejvic zprav jednoho klienta za jedno probuzeni (ferovost).
 const BURST: usize = 16;
@@ -198,6 +197,15 @@ impl Service {
     }
 
     pub fn run(&mut self) {
+        // Klientu je promenny pocet: cekani pres port (`WaitSet`), ne pres
+        // `wait_many` (limit 64 objektu).
+        let mut waits = match libos::WaitSet::new() {
+            Ok(w) => w,
+            Err(e) => {
+                println!("audiod: port nejde vytvorit: {e}");
+                return;
+            }
+        };
         loop {
             // Nejdrive zavrene klienty (s jejich streamy) odstranit.
             self.reap();
@@ -235,7 +243,7 @@ impl Service {
             // Zaloha, kdyby udalost od ovladace neprisla: aspon jednou za
             // dve periody.
             let deadline = running_period.map(|us| time::deadline_after(Duration::from_micros(us)));
-            let woke = libos::wait_many(&items, deadline);
+            let woke = waits.wait(&items, deadline);
             drop(items);
             let observed = match woke {
                 Ok((_, o)) => o,
@@ -314,7 +322,8 @@ impl Service {
             }
             // Nova relace aplikace (recept), jen init.
             if self.clients[i].privileged && m.data.starts_with(crate::perm::APP_PREFIX) {
-                let r = if self.clients.len() >= MAX_CLIENTS { Err(Error::NoResources) } else { self.app_session(&m.data[crate::perm::APP_PREFIX.len()..]) };
+                // Pocet klientu omezuje jen pamet (cekani pres port).
+                let r = self.app_session(&m.data[crate::perm::APP_PREFIX.len()..]);
                 let (reply, hs) = match r {
                     Ok(hs) => (Ok(Vec::new()), hs),
                     Err(e) => (Err(e), Vec::new()),
@@ -420,9 +429,6 @@ impl Service {
                 ok(r)
             }
             Request::Connect => {
-                if self.clients.len() >= MAX_CLIENTS {
-                    return Some((Err(Error::NoResources), none()));
-                }
                 match Channel::create() {
                     Ok((ours, theirs)) => {
                         // Novy kanal ma stejna prava jako volajici (aplikace
