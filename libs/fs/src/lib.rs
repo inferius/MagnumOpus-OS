@@ -38,6 +38,7 @@ mod layout;
 mod merge3;
 mod names;
 mod node;
+pub mod mode;
 pub mod perm;
 pub mod posix_lock;
 pub mod records;
