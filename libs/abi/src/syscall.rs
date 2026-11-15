@@ -29,10 +29,11 @@ pub const CHANNEL_CREATE: u64 = 8;
 pub const CHANNEL_WRITE: u64 = 9;
 /// Precte zpravu. `(handle, data_ptr, data_cap, handles_ptr, handles_cap, out_actual_ptr)`
 pub const CHANNEL_READ: u64 = 10;
-/// Vytvori objekt pameti. `(size, process, flags) -> handle`; stranky se
-/// strhnou z rozpoctu jobu procesu `process` (handle s pravem `WRITE`, 0 =
-/// volajici). `flags`: `vm::VMO_PINNED` = stranky hned a pripnute (pro DMA,
-/// navic rozpocet `DMA`), jinak 0
+/// Vytvori objekt pameti. `(size, process, flags, capacity) -> handle`;
+/// stranky se strhnou z rozpoctu jobu procesu `process` (handle s pravem
+/// `WRITE`, 0 = volajici). `flags`: `vm::VMO_PINNED` = stranky hned
+/// a pripnute (pro DMA, navic rozpocet `DMA`), `vm::VMO_RESIZABLE` =
+/// zvetsitelny s kapacitou `capacity` (jinak se `capacity` ignoruje), jinak 0
 pub const VMO_CREATE: u64 = 11;
 /// Cte z objektu pameti. `(handle, offset, buf_ptr, len)`
 pub const VMO_READ: u64 = 12;
@@ -331,8 +332,22 @@ pub mod thread_pointer {
     pub const SECOND: u64 = 1;
 }
 
+// 77 je rezervovane pro PROCESS_MEMORY (etapa W2 Windows vrstvy, pamet
+// jineho procesu): jadro ho jeste nema (BAD_SYSCALL).
+
+/// Zmeni velikost zvetsitelneho objektu pameti: `(vmo, size) -> 0`
+/// (`vm::VMO_RESIZABLE`, nejvys kapacita; pravo `RESIZE`). Zvetseni slibi
+/// nove stranky hned (`NO_MEMORY`, kdyz nejsou); zmenseni je u vsech
+/// mapovani odmapuje a uvolni (dalsi pristup = vyjimka `BEYOND_END`).
+/// Pripnuta stranka za novym koncem = `BAD_STATE`, zapeceteny objekt =
+/// `ACCESS_DENIED`, objekt bez `VMO_RESIZABLE` = `NOT_SUPPORTED`.
+pub const VMO_SET_SIZE: u64 = 78;
+/// Aktualni velikost objektu pameti v bajtech: `(vmo) -> size` (jakekoli
+/// pravo; u bezneho objektu pevna).
+pub const VMO_SIZE: u64 = 79;
+
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 77;
+pub const COUNT: u64 = 80;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {

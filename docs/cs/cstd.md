@@ -863,6 +863,33 @@ skončení potomka chvíli, ne nutně hned). Restart fsd proud ukončí.
   neproběhne), signál 0 jen ověří existenci. Doručení ostatních signálů
   do obsluhy potomka zatím nejde (`ENOTSUP`); `SIGCHLD` rodič nedostává.
 
+### Paměťový fd
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (krok `memfd` testu `ctest`, test
+`ctest memfd` dvou procesů v sadě `cstd`). `memfd_create` (`sys/mman.h`,
+`MFD_CLOEXEC`, `MFD_ALLOW_SEALING`; `MFD_HUGETLB` bez účinku) vytvoří fd nad
+zvětšitelným objektem paměti jádra ([správa paměti](sprava-pameti.md#zvětšitelný-objekt-paměti))
+s kapacitou 64 MiB (`mo_memfd_create` jinou):
+
+- `read`, `write` (za koncem objekt zvětší), `pread`/`pwrite`, `lseek`,
+  `fstat` (běžný soubor, velikost z jádra - vidí ji i jiné procesy),
+  `ftruncate` (nad kapacitu `EFBIG`).
+- `mmap(MAP_SHARED)` i se zápisem mapuje přímo objekt (stejné rámce ve
+  všech procesech); mapování smí pokrýt celou kapacitu, přístup za
+  velikost = `SIGBUS`; zmenšení stránky za koncem odmapuje i u ostatních
+  procesů. `MAP_PRIVATE` = kopie obsahu (jako soubor).
+- Pečetě `fcntl(F_ADD_SEALS / F_GET_SEALS)`: `F_SEAL_SHRINK`,
+  `F_SEAL_GROW`, `F_SEAL_WRITE` (zapečetí objekt v jádře; mapování pro
+  zápis musí být pryč, jinak `EBUSY`), `F_SEAL_SEAL`. Bez
+  `MFD_ALLOW_SEALING` = `EPERM`.
+- **Předání jinému procesu** (`<magnumopus/memfd.h>`, `SCM_RIGHTS` není):
+  `mo_memfd_export(fd, readonly, &handle)` dá nový handle objektu, program
+  ho pošle vlastním kanálem, příjemce si z něj udělá fd
+  `mo_memfd_import(handle, O_RDWR | O_RDONLY)`. Jen pro čtení = handle bez
+  `WRITE` a `RESIZE` (zápis, mapování pro zápis i `ftruncate` jádro
+  odmítne). `mo_start_handle(tag)` vezme handle, který rodič předal ve
+  startovní zprávě.
+
 ### Semafory
 
 `semaphore.h`: nepojmenované semafory (`sem_init`, `sem_wait`,

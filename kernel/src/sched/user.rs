@@ -196,9 +196,12 @@ const USER_FRAMES: usize = 16;
 /// instrukce (v logu pod jmenem registru architektury, `arch::PC_NAME`).
 /// Vyjimka v userspace pro kanaly vyjimek (viz `trap::user_exception`).
 pub fn user_exception(code: u8, error_code: u64, pc: u64, addr: u64, access: u32) -> bool {
+    // Duvod nevyreseneho vypadku (napr. za koncem objektu pameti).
+    let reason = super::current().fault_reason.swap(0, core::sync::atomic::Ordering::Relaxed);
     let report = abi::exception::Report {
         kind: code as u32,
         access,
+        reason,
         pc,
         addr,
         code: error_code,
@@ -220,6 +223,13 @@ pub fn user_page_fault(addr: u64, access: crate::mm::Access) -> bool {
     interrupts::enable();
     let result = process.address_space().resolve_fault(addr, access);
     interrupts::disable();
+    // Pristup za konec zvetsitelneho objektu pameti: duvod pro zpravu
+    // o vyjimce (C `SIGBUS`, ne `SIGSEGV`).
+    let reason = match result {
+        Err(crate::error::Error::OutOfRange) => abi::exception::reason::BEYOND_END,
+        _ => abi::exception::reason::NONE,
+    };
+    super::current().fault_reason.store(reason, core::sync::atomic::Ordering::Relaxed);
     match result {
         Ok(()) => true,
         Err(_) if process.address_space().is_guard(addr) => {

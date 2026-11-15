@@ -37,6 +37,7 @@ pub mod flock;
 pub mod fsat;
 pub mod locale;
 pub mod math;
+pub mod memfd;
 pub mod misc;
 pub mod mman;
 pub mod mosthread;

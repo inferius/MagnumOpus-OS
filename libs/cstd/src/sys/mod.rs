@@ -14,6 +14,10 @@ mod os;
 #[cfg(target_os = "magnumopus")]
 pub use os::*;
 #[cfg(target_os = "magnumopus")]
+mod os_mem;
+#[cfg(target_os = "magnumopus")]
+pub use os_mem::*;
+#[cfg(target_os = "magnumopus")]
 mod os_proc;
 #[cfg(target_os = "magnumopus")]
 pub use os_proc::*;

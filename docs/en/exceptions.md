@@ -130,6 +130,7 @@ NEXT)`.
 |---|---|---|---|
 | `PAGE_FAULT`, `GENERAL` | `Segv` | `SIGSEGV` | `EXCEPTION_ACCESS_VIOLATION` (`access`: read / write / execute) |
 | `ALIGNMENT` | `Bus` | `SIGBUS` | `EXCEPTION_DATATYPE_MISALIGNMENT` |
+| `PAGE_FAULT` with `reason` = `BEYOND_END` (past the end of a resizable memory object, [memory management](memory-management.md#resizable-memory-object); `signal_class_of`) | `Bus` | `SIGBUS` | `EXCEPTION_IN_PAGE_ERROR` |
 | `DIVIDE` | `Fpe` | `SIGFPE` | `EXCEPTION_INT_DIVIDE_BY_ZERO` |
 | `INVALID_OPCODE` | `Ill` | `SIGILL` | `EXCEPTION_ILLEGAL_INSTRUCTION` |
 | `BREAKPOINT` | `Trap` | `SIGTRAP` | `EXCEPTION_BREAKPOINT` |

@@ -17,6 +17,7 @@ in [kernel.md](kernel.md#memory), syscalls in [syscalls.md](syscalls.md).
 | 3 | `VMO_CLONE` (copy-on-write) and shared code of programs from initfs | **[verified in QEMU]** x86_64 and aarch64 (self-tests `mm_cow`, suite `pamet`) |
 | 4 | `VMO_SEAL`, W^X with a "may JIT" permission (job policy, manifest), audit | **[verified in QEMU]** x86_64 and aarch64 (self-tests `mm_wx`, suite `pamet`) |
 | 5 | libos API (basis of `mmap` in `cstd`), guard regions below stacks | **[verified in QEMU]** x86_64 and aarch64 (suite `pamet`) |
+| 6 | resizable memory object (`VMO_RESIZABLE`, `VMO_SET_SIZE`, `VMO_SIZE`), exception past the end (`BEYOND_END`), memory fd in `cstd` | **[verified in QEMU]** x86_64 and aarch64 (self-tests `mm_resize`, suite `cstd`: step `memfd`, test `ctest memfd` of two processes) |
 
 ## Demand paging
 
@@ -200,6 +201,35 @@ trusted loader, or signed) is **[designed]** and belongs to the planned
 program signatures (Secure Boot, a launch gate - see
 [architecture.md](architecture.md#security)); it needs a "may create
 executable code" capability for sealing.
+
+## Resizable memory object
+
+An ordinary memory object does not change its size. A resizable one
+(`VMO_CREATE` with `vm::VMO_RESIZABLE`, `libos::Vmo::create_resizable`; C
+`memfd_create`) has a **capacity** fixed at creation and a **size** between
+0 and the capacity:
+
+- The page list is allocated for the whole capacity at once (the kernel pays
+  8 B per capacity page, the job's kernel budget), so lock-free readers never
+  see it move. The commitment (`phys::commit`) and the user memory budget
+  cover only the current size - the model "commit at creation, no OOM kill"
+  stays: growing commits the new pages at once, or fails (`NO_MEMORY`).
+- `VMO_SET_SIZE` (right `RESIZE`) changes the size. **Shrinking** goes in
+  order: publish the new size (a fault past the end then fails; a fault that
+  created the page in the meantime gives it back itself after its check),
+  unmap the range in all mappers (`drop_frame_ptes`, the mapping stays),
+  flush the TLB and only then free the frames and the commitment. A pinned
+  page past the new end = `BAD_STATE`.
+- A mapping may cover the whole capacity (like `mmap` past the end of a
+  file). A fault past the current size is not resolved: a `PAGE_FAULT`
+  exception with reason `abi::exception::reason::BEYOND_END` in the
+  `reason` field of the message (`Report`), which the C library turns into
+  `SIGBUS`. Kernel copies (`copy_to_user`) past the end = `BAD_ADDRESS`,
+  `VMO_READ`/`VMO_WRITE` `OUT_OF_RANGE`.
+- `VMO_SIZE` returns the current size (C `fstat` in another process).
+  Sharing between processes is an ordinary `VM_MAP` of the same object (the
+  same frames, not a copy); a read-only recipient gets a handle without
+  `WRITE` and `RESIZE`.
 
 ## The libos API
 

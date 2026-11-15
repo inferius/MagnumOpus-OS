@@ -26,6 +26,7 @@ pub mod fd;
 pub mod fs;
 pub mod futex;
 pub mod heap;
+pub mod memfd;
 pub mod net;
 pub mod pipe;
 pub mod poll;

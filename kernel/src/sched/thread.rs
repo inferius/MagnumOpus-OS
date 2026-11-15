@@ -4,7 +4,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::sync::Arc;
 use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use crate::arch::context::Context;
 use crate::mm::KernelStack;
@@ -118,6 +118,10 @@ pub struct Thread {
     /// Pozastaveni (`THREAD_SUSPEND`) a cekajici zapis kontextu
     /// (`suspend.rs`).
     pub(super) stop: SpinLock<super::suspend::Stop>,
+    /// Duvod posledniho nevyreseneho vypadku stranky
+    /// (`abi::exception::reason`): `user_page_fault` ho zapise, nejblizsi
+    /// `user_exception` vlakna precte do zpravy a smaze.
+    pub(super) fault_reason: AtomicU32,
 }
 
 // SAFETY: `context` cte a zapisuje jen planovac na CPU, ktere vlakno prave
@@ -165,6 +169,7 @@ impl Thread {
             user_tp2: AtomicU64::new(0),
             user_gone: AtomicBool::new(false),
             stop: SpinLock::new(super::suspend::Stop::default()),
+            fault_reason: AtomicU32::new(0),
         }
     }
 

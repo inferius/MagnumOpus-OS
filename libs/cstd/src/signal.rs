@@ -223,7 +223,7 @@ mod sync {
         if r.kind == abi::exception::kind::INTERRUPT {
             interrupt(f, r.code);
         }
-        let sig = match ex::signal_class(r.kind) {
+        let sig = match ex::signal_class_of(&r) {
             ex::SignalClass::Segv => SIGSEGV,
             ex::SignalClass::Bus => SIGBUS,
             ex::SignalClass::Fpe => SIGFPE,

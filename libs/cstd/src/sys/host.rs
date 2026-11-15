@@ -702,3 +702,45 @@ pub fn wait_children(children: &[&Child], timeout_ns: Option<u64>) -> R<Option<u
         std::thread::sleep(core::time::Duration::from_millis(1));
     }
 }
+
+// --- pametovy fd (na hostiteli neni: objekt pameti jadra) --------------------
+
+pub fn is_memfd(_fd: i32) -> bool {
+    false
+}
+
+pub fn memfd_create(_capacity: u64, _cloexec: bool, _sealing: bool) -> R<i32> {
+    Err(errno::ENOSYS)
+}
+
+pub fn memfd_size(_fd: i32) -> R<u64> {
+    Err(errno::EINVAL)
+}
+
+pub fn memfd_truncate(_fd: i32, _len: u64) -> R<()> {
+    Err(errno::EINVAL)
+}
+
+pub fn memfd_map(_fd: i32, _off: u64, _len: u64, _prot: u32, _addr: u64) -> R<u64> {
+    Err(errno::EINVAL)
+}
+
+pub fn memfd_add_seals(_fd: i32, _seals: u32) -> R<()> {
+    Err(errno::EINVAL)
+}
+
+pub fn memfd_seals(_fd: i32) -> R<u32> {
+    Err(errno::EINVAL)
+}
+
+pub fn memfd_export(_fd: i32, _readonly: bool) -> R<u32> {
+    Err(errno::EINVAL)
+}
+
+pub fn memfd_import(_handle: u32, _writable: bool, _cloexec: bool) -> R<i32> {
+    Err(errno::ENOSYS)
+}
+
+pub fn start_handle(_tag: u32) -> Option<u32> {
+    None
+}

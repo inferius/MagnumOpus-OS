@@ -104,6 +104,15 @@ pub mod frame {
     }
 }
 
+/// Duvod nevyreseneho vypadku stranky (`Report::reason`).
+pub mod reason {
+    /// Bez upresneni (adresa mimo mapovani, chybejici pravo, ...).
+    pub const NONE: u32 = 0;
+    /// Pristup za aktualni velikost zvetsitelneho objektu pameti
+    /// (`VMO_SET_SIZE`; mapovani muze sahat az do kapacity). C: `SIGBUS`.
+    pub const BEYOND_END: u32 = 1;
+}
+
 /// Zprava o vyjimce (56 B, little endian). Ke zprave patri dva handly:
 /// vlakno (READ, WRITE, MANAGE) a token vyjimky.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -114,7 +123,8 @@ pub struct Report {
     pub stage: u32,
     /// [`access`] (jen vypadek stranky).
     pub access: u32,
-    pub _reserved: u32,
+    /// [`reason`]: proc se vypadek stranky nevyresil (jinak 0).
+    pub reason: u32,
     pub pid: u64,
     /// Cislo vlakna.
     pub tid: u64,
@@ -134,6 +144,7 @@ impl Report {
         b[0..4].copy_from_slice(&self.kind.to_le_bytes());
         b[4..8].copy_from_slice(&self.stage.to_le_bytes());
         b[8..12].copy_from_slice(&self.access.to_le_bytes());
+        b[12..16].copy_from_slice(&self.reason.to_le_bytes());
         b[16..24].copy_from_slice(&self.pid.to_le_bytes());
         b[24..32].copy_from_slice(&self.tid.to_le_bytes());
         b[32..40].copy_from_slice(&self.pc.to_le_bytes());
@@ -152,7 +163,7 @@ impl Report {
             kind: u32_at(0),
             stage: u32_at(4),
             access: u32_at(8),
-            _reserved: 0,
+            reason: u32_at(12),
             pid: u64_at(16),
             tid: u64_at(24),
             pc: u64_at(32),

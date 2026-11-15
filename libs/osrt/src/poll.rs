@@ -67,7 +67,7 @@ fn source(p: &PollFd) -> Result<Source> {
     let can_read = st != fd::status::WRONLY;
     let can_write = st != fd::status::RDONLY;
     Ok(match &d.object {
-        Object::File(_) => Source::Now(want & (ev::IN | ev::OUT)),
+        Object::File(_) | Object::Memory(_) => Source::Now(want & (ev::IN | ev::OUT)),
         Object::User(_) => Source::Now(0),
         Object::Stdio(Stream::In) => {
             if stdio::stdin_buffered() || stdio::handle(Stream::In).is_none() {

@@ -266,6 +266,16 @@ pub enum SignalClass {
     Trap,
 }
 
+/// Trida signalu pro zpravu o vyjimce: jako [`signal_class`], ale pristup
+/// za konec zvetsitelneho objektu pameti (`reason::BEYOND_END`) = `Bus`
+/// (C `SIGBUS`, jako pristup za konec souboru v `mmap`).
+pub fn signal_class_of(r: &abi::exception::Report) -> SignalClass {
+    if r.kind == abi::exception::kind::PAGE_FAULT && r.reason == abi::exception::reason::BEYOND_END {
+        return SignalClass::Bus;
+    }
+    signal_class(r.kind)
+}
+
 /// Trida signalu pro druh vyjimky (`abi::exception::kind`).
 pub fn signal_class(kind: u32) -> SignalClass {
     use abi::exception::kind as k;
