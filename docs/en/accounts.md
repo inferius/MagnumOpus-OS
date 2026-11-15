@@ -620,6 +620,7 @@ them after use. The channels are different capabilities:
 | `self` | user session (settings) | own account: methods, phrase, encryption, lock, sign-out, request an administration action |
 | `setup` | installer, only while no account exists | create the first account with the role |
 | `grants` | services performing administration actions (devmgr, fwd, updates, ...) | check and consume a grant |
+| `names` | the Files window (each window its own channel from init) | only the accounts' names (`NAMES`: login and display): the login screen shows the same names, nothing else about the account |
 | `init` | init (private) | sessions, homes, home keys |
 
 | Op | Channel | Name | Fields | Reply |
@@ -642,6 +643,7 @@ them after use. The channels are different capabilities:
 | 20 | self | `SET_KEY_PIN` | PIN secret | - (a key that has no PIN yet) |
 | 30 | setup | `CREATE_FIRST` | name, display name, password secret | uid |
 | 40 | grants | `CHECK_GRANT` | token (16 B blob), action u32, parameters (blob) | - or `ACCESS_DENIED`; the token is consumed |
+| 41 | names | `NAMES` | - | accounts: uid u64, login name, display name (empty -> the login name) |
 | 50 | init | `OPEN_SESSION` (accountd -> init, + self channel handle) | uid, groups, home | session u64 |
 | 51 | init | `CLOSE_SESSION` | session | - |
 | 52, 53 | init | `LOCK_SESSION`, `UNLOCK_SESSION` | session | - |

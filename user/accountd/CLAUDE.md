@@ -1,6 +1,6 @@
 # user/accountd
 
-Služba uživatelských účtů; logika je v `libs/accounts`, protokol v `libs/accountproto`. Handly ve startovní zprávě (kind USER): relace FS (`/db` = `/system/accounts`, účet 902), její lístek, kanál k initu (`accountproto::ToInit`). První zpráva bootstrapu = konfigurace (TOML: `kdf = "qemu" | "hw"`, `dev = true` jen ve vývojovém běhu), odpověď `ok`. Pak init posílá `login` / `setup` / `key` + handle a `status`. Popis: `docs/cs/ucty.md`.
+Služba uživatelských účtů; logika je v `libs/accounts`, protokol v `libs/accountproto`. Handly ve startovní zprávě (kind USER): relace FS (`/db` = `/system/accounts`, účet 902), její lístek, kanál k initu (`accountproto::ToInit`). První zpráva bootstrapu = konfigurace (TOML: `kdf = "qemu" | "hw"`, `dev = true` jen ve vývojovém běhu), odpověď `ok`. Pak init posílá `login` / `setup` / `grants` / `names` / `key` + handle a `status`. Kanál `names` (okno Soubory) smí jen `NAMES`: uid, přihlašovací a zobrazované jméno, nic dalšího o účtu. Popis: `docs/cs/ucty.md`.
 
 ## Klíčové soubory
 

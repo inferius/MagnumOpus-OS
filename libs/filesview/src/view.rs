@@ -41,11 +41,12 @@ impl<B: Backend> FileManager<B> {
         if cx.class != SizeClass::Compact {
             main.push(self.sidebar().width(SIDEBAR_W));
         }
-        main.push(match self.mode {
-            Mode::Folder => self.folder(cx),
-            Mode::Trash => self.trash_view(),
+        main.push(match (&self.props, self.mode) {
+            (Some(p), _) => self.props_panel(p),
+            (None, Mode::Folder) => self.folder(cx),
+            (None, Mode::Trash) => self.trash_view(),
         });
-        if cx.class == SizeClass::Expanded && self.mode == Mode::Folder {
+        if cx.class == SizeClass::Expanded && self.mode == Mode::Folder && self.props.is_none() {
             // Nahled (text, obrazek, historie verzi) muze byt vyssi nez okno.
             main.push(scroll(self.preview_panel()).width(PREVIEW_W));
         }
@@ -115,6 +116,8 @@ impl<B: Backend> FileManager<B> {
             menu_item("Do koše", Msg::Trash).shortcut("Delete"),
             menu_separator(),
             menu_item("Nová složka", Msg::NewFolder).shortcut("Ctrl+Shift+N"),
+            menu_separator(),
+            menu_item("Vlastnosti", Msg::Properties).shortcut("Alt+Enter"),
         ];
         if none {
             for i in [0, 2, 3, 7] {
@@ -126,6 +129,9 @@ impl<B: Backend> FileManager<B> {
         }
         if !self.can_paste(cx) {
             v[4] = v[4].clone().disabled("Schránka je prázdná");
+        }
+        if self.sel.len() > 1 {
+            v[11] = v[11].clone().disabled("Vyberte jednu položku");
         }
         v
     }
@@ -362,7 +368,7 @@ fn job_row(j: &Status) -> Node<Msg> {
 }
 
 /// "Velikost: 1,2 MB" nebo "Velikost: - (skryto: ...)".
-fn value_line(what: &str, a: Avail, value: impl FnOnce() -> String) -> String {
+pub(crate) fn value_line(what: &str, a: Avail, value: impl FnOnce() -> String) -> String {
     match a {
         Avail::Known => format!("{what}: {}", value()),
         _ => format!("{what}: {DASH} ({})", format::reason(a)),

@@ -9,6 +9,7 @@ Služba souborového systému nad knihovnou `libs/fs`. Startovní zpráva (kind 
 
 ## Invarianty
 
+- `ACL_VIEW` (op 94, mimo rozsah 46-53, `serve_v2::handle_v2`) vrací zděděné granty s původem; původ jde přes `unmap` (mimo připojené cesty prázdný).
 - Oprávnění a identita relace jsou vynucené tady: identitu a připojené cesty relace určuje `CONNECT_AS` (`libs/fsproto/src/perm.rs`); `docs/cs/souborovy-system.md#oprávnění-a-identita-relací`.
 - Hodnoty z disku i požadavky klientů jsou nedůvěryhodný vstup.
 - Pád `fsd` nesmí poškodit data (commit je atomický, `libs/fs`); klienti se po restartu připojí přes lístky (`docs/cs/obnova-sluzeb.md`).

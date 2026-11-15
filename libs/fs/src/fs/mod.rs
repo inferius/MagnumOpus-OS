@@ -69,7 +69,7 @@ pub use history::{FileVersion, RestoreMode, Undone};
 pub use journal::{JournalPage, View};
 pub use merge::{AsideBegun, ConflictKind, MergeConflict, MergeReport};
 pub use trash::TrashEntry;
-pub use perm::{Permissions, ds_flags};
+pub use perm::{AclView, InheritedGrant, Permissions, ds_flags};
 pub use times::SetTimes;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
