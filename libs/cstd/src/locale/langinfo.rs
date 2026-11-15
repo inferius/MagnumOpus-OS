@@ -25,8 +25,15 @@ static LCONV: Lc = Lc(lconv {
     thousands_sep: b"\0".as_ptr(),
     grouping: b"\0".as_ptr(),
     _rest: [b"\0".as_ptr(); 7],
-    _chars: [127; 14],
+    _chars: [CHAR_MAX; 14],
 });
+
+/// `CHAR_MAX` (hodnota "neni k dispozici" v `lconv`): `char` je na x86_64
+/// se znamenkem, na aarch64 bez.
+#[cfg(not(target_arch = "aarch64"))]
+const CHAR_MAX: c_char = 127;
+#[cfg(target_arch = "aarch64")]
+const CHAR_MAX: c_char = 255;
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn localeconv() -> *const lconv {

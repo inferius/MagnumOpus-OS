@@ -18,7 +18,13 @@ _CSTD_BEGIN
 
 #ifndef _CSTD_WINT_T
 #define _CSTD_WINT_T
+/* Typ prekladace (kvuli kontrole formatu %lc): 32 bitu, WEOF = vsechny
+ * jednicky. */
+#ifdef __WINT_TYPE__
+typedef __WINT_TYPE__ wint_t;
+#else
 typedef unsigned int wint_t;
+#endif
 #endif
 
 /* Stav prevodu vicebajtovych znaku (UTF-8: rozpracovany znak). Nuly =

@@ -155,10 +155,8 @@ impl Enc {
     pub fn encode(self, wc: u32, buf: &mut [u8; 4]) -> Option<usize> {
         match self {
             Enc::C => {
-                if wc < 0x80 {
-                    buf[0] = wc as u8;
-                    Some(1)
-                } else if (C_HIGH | 0x80..=C_HIGH | 0xFF).contains(&wc) {
+                // ASCII nebo bajt 0x80-0xFF ulozeny jako U+DF80-U+DFFF.
+                if wc < 0x80 || (C_HIGH | 0x80..=C_HIGH | 0xFF).contains(&wc) {
                     buf[0] = wc as u8;
                     Some(1)
                 } else {

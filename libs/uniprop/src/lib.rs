@@ -14,7 +14,7 @@ mod tables;
 pub use tables::UNICODE_VERSION;
 
 fn in_ranges(t: &[(u32, u32)], c: u32) -> bool {
-    match t.binary_search_by(|&(a, b)| {
+    t.binary_search_by(|&(a, b)| {
         if b < c {
             core::cmp::Ordering::Less
         } else if a > c {
@@ -22,10 +22,8 @@ fn in_ranges(t: &[(u32, u32)], c: u32) -> bool {
         } else {
             core::cmp::Ordering::Equal
         }
-    }) {
-        Ok(_) => true,
-        Err(_) => false,
-    }
+    })
+    .is_ok()
 }
 
 fn map_case(t: &[(u32, u32, u32, i32)], c: u32) -> u32 {
@@ -34,7 +32,7 @@ fn map_case(t: &[(u32, u32, u32, i32)], c: u32) -> u32 {
         return c;
     }
     let (a, b, step, delta) = t[i - 1];
-    if c <= b && (c - a) % step == 0 { (c as i64 + delta as i64) as u32 } else { c }
+    if c <= b && (c - a).is_multiple_of(step) { (c as i64 + delta as i64) as u32 } else { c }
 }
 
 /// Pismeno (vlastnost Alphabetic).

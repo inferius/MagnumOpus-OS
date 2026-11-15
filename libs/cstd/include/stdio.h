@@ -43,6 +43,9 @@ int putc(int c, FILE *f);
 int fputs(const char *s, FILE *f);
 _CSTD_PRINTF(2, 3) int fprintf(FILE *f, const char *fmt, ...);
 int vfprintf(FILE *f, const char *fmt, va_list ap);
+/* Vystup do noveho bufferu z malloc (uvolnit free); chyba = -1. */
+_CSTD_PRINTF(2, 3) int asprintf(char **out, const char *fmt, ...);
+int vasprintf(char **out, const char *fmt, va_list ap);
 int fseek(FILE *f, long off, int whence);
 long ftell(FILE *f);
 void rewind(FILE *f);

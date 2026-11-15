@@ -204,9 +204,11 @@ pub unsafe extern "C" fn wcschr(s: *const wchar_t, c: wchar_t) -> *mut wchar_t {
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn wcschrnul(s: *const wchar_t, c: wchar_t) -> *mut wchar_t {
-    // SAFETY: kontrakt C.
-    let p = unsafe { wcschr(s, c) };
-    if p.is_null() { s.wrapping_add(unsafe { wlen(s) }) as *mut wchar_t } else { p }
+    // SAFETY: kontrakt C (retezec zakonceny nulou).
+    unsafe {
+        let p = wcschr(s, c);
+        if p.is_null() { s.add(wlen(s)) as *mut wchar_t } else { p }
+    }
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]

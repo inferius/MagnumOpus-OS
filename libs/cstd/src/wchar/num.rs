@@ -1,11 +1,9 @@
 //! Cisla a cas v sirokych retezcich: `wcstol` a spol., `wcstod`,
-//! `wcstof` (`wcstold` je v `c/wchar_ld.c`), `wcsftime`.
+//! `wcstof` (`wcstold` je v `c/math_ld.c`), `wcsftime`.
 //!
 //! Cisla jsou jen v ASCII: uvodni bile znaky se preskoci podle `iswspace`
 //! (i siroke mezery), zbytek se prevede ASCII cast retezce stejnym kodem
 //! jako `strtol`/`strtod`.
-
-use core::ptr;
 
 use super::{wchar_t, wctype};
 use crate::time::{format_tm, tm};
@@ -35,6 +33,10 @@ unsafe fn ascii_tail(s: *const wchar_t) -> (usize, Vec<u8>) {
 }
 
 /// Nastavi `*end` na `s + skip + used`, nebo na `s` (zadne cislo).
+///
+/// # Safety
+///
+/// `end` je nulovy nebo platny ukazatel.
 unsafe fn set_end(s: *const wchar_t, end: *mut *mut wchar_t, skip: usize, used: usize) {
     if !end.is_null() {
         let p = if used == 0 { s } else { s.wrapping_add(skip + used) };
@@ -69,6 +71,7 @@ pub unsafe extern "C" fn wcstoll(s: *const wchar_t, end: *mut *mut wchar_t, base
     let (skip, a) = unsafe { ascii_tail(s) };
     if base != 0 && !(2..=36).contains(&base) {
         errno::set(errno::EINVAL);
+        // SAFETY: kontrakt C.
         unsafe { set_end(s, end, 0, 0) };
         return 0;
     }
@@ -100,6 +103,7 @@ pub unsafe extern "C" fn wcstoull(s: *const wchar_t, end: *mut *mut wchar_t, bas
     let (skip, a) = unsafe { ascii_tail(s) };
     if base != 0 && !(2..=36).contains(&base) {
         errno::set(errno::EINVAL);
+        // SAFETY: kontrakt C.
         unsafe { set_end(s, end, 0, 0) };
         return 0;
     }
@@ -206,10 +210,4 @@ pub unsafe extern "C" fn wcsftime(buf: *mut wchar_t, max: size_t, fmt: *const wc
 pub unsafe extern "C" fn wcsftime_l(buf: *mut wchar_t, max: size_t, fmt: *const wchar_t, t: *const tm, _l: crate::locale::locale_t) -> size_t {
     // SAFETY: kontrakt C.
     unsafe { wcsftime(buf, max, fmt, t) }
-}
-
-/// Nevyuzite: zabrani varovani o `ptr` na hostiteli.
-#[allow(dead_code)]
-fn _unused() -> *const u8 {
-    ptr::null()
 }

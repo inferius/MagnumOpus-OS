@@ -806,6 +806,48 @@ pub unsafe extern "C" fn printf(fmt: *const c_char, args: ...) -> c_int {
     unsafe { vfprintf(stdout.0 as *mut FILE, fmt, args) }
 }
 
+/// `vasprintf` (GNU/BSD, libc++): vystup do noveho bufferu z `malloc`
+/// (uvolni volajici `free`). Chyba = -1, `*out` je pak nulovy.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn vasprintf(out: *mut *mut c_char, fmt: *const c_char, mut ap: VaList) -> c_int {
+    if out.is_null() || fmt.is_null() {
+        errno::set(errno::EINVAL);
+        return -1;
+    }
+    // SAFETY: retezec C.
+    let f = unsafe { c_bytes(fmt) };
+    let mut buf = FileOut { buf: Vec::new() };
+    let r = format::format_enc(&mut buf, f, &mut VaArgs(&mut ap), crate::locale::ctype());
+    // SAFETY: `out` je platny (kontrakt C).
+    unsafe { *out = core::ptr::null_mut() };
+    if r.is_err() {
+        errno::set(errno::EILSEQ);
+        return -1;
+    }
+    let Ok(n) = c_int::try_from(buf.buf.len()) else {
+        errno::set(errno::EOVERFLOW);
+        return -1;
+    };
+    // SAFETY: malloc z cstd-core; kopie `n` bajtu a nula do nove pameti.
+    unsafe {
+        let p = cstd_core::stdlib::malloc(buf.buf.len() + 1);
+        if p.is_null() {
+            errno::set(errno::ENOMEM);
+            return -1;
+        }
+        core::ptr::copy_nonoverlapping(buf.buf.as_ptr(), p, buf.buf.len());
+        *p.add(buf.buf.len()) = 0;
+        *out = p;
+    }
+    n
+}
+
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn asprintf(out: *mut *mut c_char, fmt: *const c_char, args: ...) -> c_int {
+    // SAFETY: kontrakt C.
+    unsafe { vasprintf(out, fmt, args) }
+}
+
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn perror(s: *const c_char) {
     let e = errno::get();
