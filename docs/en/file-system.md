@@ -626,6 +626,23 @@ over the same file, durability after `munmap` and closing the fd).
   by the client's job (the clone is on its account).
 - **Deleting** a file does not cancel mappings (the internal handle keeps
   the orphan).
+- **Deleting a dataset and unmounting a volume** **[verified in QEMU]**
+  x86_64 and aarch64 (test "smazani datasetu s namapovanym souborem: okno
+  na 0" in the suite `historie FS`; coordinator decision B): before the
+  deletion (a foreign operation) changes from mappings are written back,
+  the deletion is not blocked by anything (no `LOCKED`); fsd shrinks the
+  entries of files of the vanished dataset to 0 and closes the internal
+  handles - clients get a past-the-end exception on access (`SIGBUS`)
+  instead of stale data. When fsd ends (the volume is unmounted)
+  everything is written back and all windows are shrunk to 0.
+- **Gap (explicitly): revoking access does not apply to handles and
+  mappings that are already open.** `REVOKE` (and removing a grant) does
+  not change mappings, the same as already open handles: the session keeps
+  access to a mapped window until `munmap`/the end of the session. The
+  window is shared between processes, shrinking it would take access away
+  from sessions that still have the right. "Hard revocation" (closing the
+  handles and mappings of a revoked session) is a separate proposal in the
+  coordinator's queue.
 - **Risk (explicitly):** a writable shared mapping gives the client
   writable memory of the file - other processes with the same file see its
   writes without another FS check (rights are checked only when mapping),
@@ -673,8 +690,6 @@ other processes and `read()` do not see the changes; a read-only shared
 mapping stays on the old window (it does not see further file changes).
 
 **[designed]** (next steps):
-- **Unmounting a volume / revoking a `GRANT`:** fsd shrinks the windows to
-  0, clients get a past-the-end exception on access (`SIGBUS`).
 - **A pager in the kernel:** the window stays the unit that fsd fills
   lazily page by page on a fault instead of reading it whole when mapping;
   the client protocol (`MAP_VMO` returns a window handle) does not change.

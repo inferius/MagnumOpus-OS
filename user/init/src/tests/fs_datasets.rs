@@ -80,3 +80,29 @@ pub fn datasets(_: &Startup) -> TestResult {
     let _ = f.delete_dataset("/f2-dsl-a");
     Ok(())
 }
+
+/// Smazani datasetu se souborem namapovanym pres okno (`MAP_VMO`): fsd
+/// zaznam nezastavi (zadne `LOCKED`), zmeny z mapovani se pred smazanim
+/// zapisou a okno se zmensi na 0 (klient dostane pri pristupu `SIGBUS`).
+pub fn mapped_delete(_: &Startup) -> TestResult {
+    use fsproto::v2::{access, map_flags, open_flags, share};
+    let f = fs()?;
+    let _ = f.delete_dataset("/f2-dsm");
+    f.create_dataset("/f2-dsm").map_err(|e| fail("create_dataset", e))?;
+    let path = "/f2-dsm/m.bin";
+    let o = f.open(path, access::READ | access::WRITE, share::ALL, open_flags::CREATE).map_err(|e| fail("open", e))?;
+    f.write_h(o.handle, 0, b"obsah").map_err(|(_, e)| fail("zapis", e))?;
+    let win = f.map_vmo(o.handle, 0, map_flags::WRITE | map_flags::SHARED).map_err(|e| fail("map_vmo", e))?;
+    check!(win.vmo.size().map_err(|e| fail("velikost okna", e))? > 0, "okno ma obsah");
+    // Zapis pres okno (sdilene, jako mmap): read() ho vidi.
+    win.vmo.write(0, b"O").map_err(|e| fail("zapis do okna", e))?;
+    check_eq!(f.read_h(o.handle, 0, 5).map_err(|e| fail("cteni", e))?, b"Obsah".to_vec(), "cteni pres zaznam");
+    f.close(o.handle).map_err(|e| fail("close", e))?;
+    // Smazani datasetu s drzenym oknem projde; okno je pak prazdne.
+    f.delete_dataset("/f2-dsm").map_err(|e| fail("smazani datasetu s mapovanim", e))?;
+    check_eq!(win.vmo.size().map_err(|e| fail("velikost po smazani", e))?, 0, "okno zmensene na 0");
+    check_eq!(f.stat(path).err(), Some(Error::NotFound), "soubor zmizel");
+    // Relace drzi okno dal (do UNMAP_VMO): uvolneni projde bez chyby.
+    let _ = f.unmap_vmo(win.file, 0);
+    Ok(())
+}

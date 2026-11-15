@@ -21,6 +21,7 @@ pub const TESTS: &[Test] = &[
     ("vypis s metadaty a dataset cesty s omezenou relaci", restricted_session),
     ("dataset na existujici jmeno: svazek zustane zapisovatelny", dataset_again),
     ("seznam datasetu (DATASETS): prava a puvod klonu", super::fs_datasets::datasets),
+    ("smazani datasetu s namapovanym souborem: okno na 0", super::fs_datasets::mapped_delete),
     ("kontrola konzistence po historii", check_clean),
 ];
 

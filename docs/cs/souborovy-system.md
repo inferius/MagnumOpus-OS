@@ -609,6 +609,21 @@ procesy nad týmž souborem, trvalost po `munmap` a zavření fd).
   zpět). Stránky, do kterých klient zapíše v `MAP_PRIVATE`, platí job
   klienta (klon na jeho účet).
 - **Smazání** souboru mapování neruší (interní handle drží sirotka).
+- **Smazání datasetu a odpojení svazku** **[ověřeno v QEMU]** x86_64
+  i aarch64 (test „smazani datasetu s namapovanym souborem: okno na 0"
+  v sadě `historie FS`; rozhodnutí koordinátora B): před smazáním (cizí
+  operace) se změny z mapování zapíšou zpět, smazání nic neblokuje (žádné
+  `LOCKED`); záznamy souborů zaniklého datasetu fsd zmenší na 0 a interní
+  handly zavře - klienti dostanou při přístupu výjimku za koncem
+  (`SIGBUS`) místo starých dat. Při konci fsd (odpojení svazku) se vše
+  zapíše zpět a všechna okna se zmenší na 0.
+- **Mezera (výslovně): odvolání přístupu neplatí pro už otevřené handly
+  ani mapování.** `REVOKE` (i odebrání grantu) mapování nemění, stejně
+  jako už otevřené handly: relace má přístup k namapovanému oknu do
+  `munmap`/konce relace. Okno je sdílené mezi procesy, jeho zmenšení by
+  vzalo přístup i relacím, které právo mají dál. „Tvrdé odvolání"
+  (zavření handlů i mapování odvolané relace) je samostatný návrh ve
+  frontě koordinátora.
 - **Riziko (výslovně):** sdílené mapování pro zápis dává klientovi
   zapisovatelnou paměť souboru - ostatní procesy se stejným souborem vidí
   jeho zápisy bez další kontroly FS (práva se ověřují jen při mapování),
@@ -653,8 +668,6 @@ nevidí změny ostatní procesy ani `read()`; sdílené mapování jen pro čten
 zůstane na starém okně (další změny souboru nevidí).
 
 **[navrženo]** (další kroky):
-- **Odpojení svazku / odvolání `GRANT`:** fsd zmenší okna na 0, klienti
-  dostanou při přístupu výjimku za koncem (`SIGBUS`).
 - **Pager v jádře:** okno zůstane jednotkou, kterou fsd místo načtení
   celého při mapování plní líně po stránkách při výpadku; protokol
   klienta (`MAP_VMO` vrací handle okna) se nezmění.

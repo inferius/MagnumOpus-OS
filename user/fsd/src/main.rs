@@ -179,9 +179,9 @@ fn main(startup: Startup) -> i64 {
     // Start potvrdit (init/supervisor ceka na `ok`).
     let _ = startup.bootstrap.write(b"ok", Vec::new());
     serve(&mut svc, client, startup.bootstrap);
-    // Namapovane soubory zpet pred zaverecnym commitem.
+    // Namapovane soubory zpet pred zaverecnym commitem; okna na 0.
     if let Some(fs) = svc.fs.as_mut()
-        && let Err(e) = svc.vmos.flush_all(fs)
+        && let Err(e) = svc.vmos.close_all(fs)
     {
         println!("fsd: zapis namapovanych souboru selhal: {e}");
     }

@@ -420,16 +420,49 @@ impl FileVmos {
     pub fn refresh_all(&mut self, fs: &mut Fs<BlkDev>) {
         let mut gone = Vec::new();
         for (&k, e) in self.map.iter_mut() {
-            if e.refresh(fs, &mut self.bytes).is_err() {
-                gone.push(k);
+            if let Err(err) = e.refresh(fs, &mut self.bytes) {
+                gone.push((k, err));
             }
         }
-        // Objekt uz nejde cist (napr. zanikly dataset): zaznam pryc,
-        // klientum zustanou jejich handly oken.
-        for k in gone {
+        // Zanikl objekt, nebo cely dataset (handle do smazaneho datasetu
+        // hlasi i jine chyby)?
+        let ids = if gone.is_empty() { Vec::new() } else { fs.dataset_ids().unwrap_or_default() };
+        let gone: Vec<(Key, bool)> =
+            gone.into_iter().map(|(k, err)| (k, matches!(err, Error::NotFound | Error::BadHandle) || !ids.contains(&k.0))).collect();
+        // Objekt zanikl (smazany dataset): okna na 0 - klienti dostanou pri
+        // pristupu vyjimku za koncem (`SIGBUS`) misto starych dat. Jina
+        // chyba (I/O): zaznam pryc, mapovani klientu zustanou.
+        for (k, vanished) in gone {
+            if vanished {
+                self.shrink(k);
+            }
             self.drop_entry(fs, k);
         }
         self.evict(fs);
+    }
+
+    /// Zmensi okna zaznamu na 0 (objekt zanikl, svazek se odpojuje).
+    fn shrink(&mut self, k: Key) {
+        if let Some(e) = self.map.get_mut(&k) {
+            for w in e.windows.values_mut() {
+                if w.vmo.set_size(0).is_ok() {
+                    self.bytes -= w.len;
+                    w.len = 0;
+                }
+            }
+        }
+    }
+
+    /// Konec fsd (odpojeni svazku): vse zapsat zpet, okna zmensit na 0
+    /// a interni handly zavrit. Vraci prvni chybu zapisu.
+    pub fn close_all(&mut self, fs: &mut Fs<BlkDev>) -> Result<u64> {
+        let r = self.flush_all(fs);
+        let keys: Vec<Key> = self.map.keys().copied().collect();
+        for k in keys {
+            self.shrink(k);
+            self.drop_entry(fs, k);
+        }
+        r
     }
 
     /// Zahodi nejstarsi zaznamy bez drzeni nad `CACHE_MAX` (po zapisu zpet).
