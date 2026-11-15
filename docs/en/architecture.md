@@ -842,6 +842,9 @@ in Rust on top of our objects** (table above) and adopt the rest unchanged:
 4. Exception delivery (SEH) on the exception channel and suspending a
    thread with reading and writing its context.
 
+The detailed design with questions and stages W0-W7:
+[Windows layer](windows-layer.md) **[designed]**.
+
 **Steps:**
 
 1. **v1 (milestone 5):** PE loader and the lower `ntdll`, console .exe
