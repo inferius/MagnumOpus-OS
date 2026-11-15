@@ -66,8 +66,6 @@ pub mod op {
     pub const WINDOW_PLACE: u32 = 116;
     /// Rozpracovany text (mrtva klavesa, pozdeji IME): `Compose`.
     pub const COMPOSE: u32 = 117;
-    /// Mezikrok prechodu rezimu barev: `ThemeMix`.
-    pub const THEME_MIX: u32 = 118;
 }
 
 /// Priznaky segmentu rozpracovaneho textu (`ServerMsg::Compose::flags`).
@@ -629,12 +627,6 @@ pub enum ServerMsg {
     /// ([`compose`]). Text neni soucasti hodnoty pole; slozeny vysledek
     /// prijde jako `Text`. Jen oknu s fokusem, nelogovat (soukromi).
     Compose { window: u32, text: String, cursor_begin: u32, cursor_end: u32, flags: u32 },
-    /// Mezikrok plynuleho prechodu rezimu barev: aplikace kresli motiv
-    /// prolnuty z `from` do `to` (kody jako `Theme`) v bode `t` (0-1000,
-    /// uz po krivce). Prijde nekolikrat behem prechodu, na konci vzdy
-    /// `Theme` s cilovym rezimem; starsi klient mezikroky zahodi a prepne
-    /// se az na konci.
-    ThemeMix { from: u8, to: u8, t: u16 },
 }
 
 /// Data obalky schranky: delka a bajty (zkracena zprava = chyba).
@@ -1046,10 +1038,6 @@ impl ServerMsg {
                 w = Writer::op(op::COMPOSE);
                 w.u32(*window).str(text).u32(*cursor_begin).u32(*cursor_end).u32(*flags);
             }
-            ThemeMix { from, to, t } => {
-                w = Writer::op(op::THEME_MIX);
-                w.u8(*from).u8(*to).u32(*t as u32);
-            }
             WindowContext { window, generation, output, screen, work_area, scale, refresh_mhz, ext } => {
                 w = Writer::op(op::WINDOW_CONTEXT);
                 w.u32(*window).u32(*generation).u32(*output).rect(screen).rect(work_area).u32(*scale).u32(*refresh_mhz);
@@ -1138,13 +1126,6 @@ impl ServerMsg {
                     return Err(crate::Error::InvalidArgs);
                 }
                 Compose { window, text, cursor_begin, cursor_end, flags }
-            }
-            op::THEME_MIX => {
-                let (from, to, t) = (r.u8()?, r.u8()?, r.u32()?);
-                if t > 1000 {
-                    return Err(crate::Error::InvalidArgs);
-                }
-                ThemeMix { from, to, t: t as u16 }
             }
             op::WINDOW_CONTEXT => WindowContext {
                 window: r.u32()?,

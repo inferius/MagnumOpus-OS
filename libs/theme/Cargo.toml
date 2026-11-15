@@ -7,5 +7,3 @@ description = "Motiv vzhledu: tokeny design systemu (design/tokens.toml) jako da
 
 [dependencies]
 conf = { path = "../conf" }
-# powf a cbrtf pro prolnuti barev v OKLab (bez std).
-libm = "0.2.16"

@@ -29,20 +29,6 @@ pub struct Style {
     /// prolinani motivu se meni barvy, ne rezim.
     /// Sdileny (`Arc`): prechod ze startovni obrazovky ho pouziva bez kopie.
     backdrop: Option<(u32, u32, [u32; 3], alloc::sync::Arc<Vec<u32>>)>,
-    /// Prolnuti rezimu: obraz plochy stareho a noveho rezimu se spocita
-    /// jednou a kazdy snimek se jen smicha (`t` 0..=256). Vykresleni
-    /// prechodu barev plochy znovu by stalo vetsinu snimku.
-    fade: Option<BackdropFade>,
-}
-
-struct BackdropFade {
-    w: u32,
-    h: u32,
-    from: Vec<u32>,
-    to: Vec<u32>,
-    t: u32,
-    /// `t`, pro ktere je smichany obraz v `backdrop`.
-    done: Option<u32>,
 }
 
 /// Obraz plochy z barev motivu (stejne jako `.desk` v prototypu,
@@ -55,22 +41,12 @@ fn render_backdrop(c: &theme::Colors, w: u32, h: u32) -> Vec<u32> {
     backdrop::render(w, h, c.bg, &layers)
 }
 
-/// `out = a + (b - a) * t / 256` po kanalech (dva kanaly naraz v u32).
-fn blend_into(out: &mut [u32], a: &[u32], b: &[u32], t: u32) {
-    let t = t.min(256);
-    for ((o, &x), &y) in out.iter_mut().zip(a).zip(b) {
-        let rb = |v: u32| v & 0x00FF_00FF;
-        let ag = |v: u32| (v >> 8) & 0x00FF_00FF;
-        let mix = |p: u32, q: u32| ((p * (256 - t) + q * t) >> 8) & 0x00FF_00FF;
-        *o = mix(rb(x), rb(y)) | mix(ag(x), ag(y)) << 8;
-    }
-}
 
 impl Style {
     pub fn new(fonts: Family, mode: Mode) -> Self {
         let tokens = Tokens::builtin();
         let theme = tokens.theme(mode).expect("design/tokens.toml je uplny (test tokens_builtin)");
-        Self { tokens, theme, fonts, icons: Icons::new(), masks: BTreeMap::new(), backdrop: None, fade: None }
+        Self { tokens, theme, fonts, icons: Icons::new(), masks: BTreeMap::new(), backdrop: None }
     }
 
     /// Prepne rezim (svetly, tmavy, vysoky kontrast).
@@ -78,7 +54,6 @@ impl Style {
         if let Ok(t) = self.tokens.theme(mode) {
             self.theme = t;
             self.backdrop = None;
-            self.fade = None;
         }
     }
 
@@ -141,38 +116,8 @@ impl Style {
         self.masks.entry((radius, blur)).or_insert_with(|| ShadowMask::new(radius, blur))
     }
 
-    /// Zacatek prolnuti plochy z motivu `from` do `to` pro obrazovku `w x h`.
-    pub fn begin_backdrop_fade(&mut self, from: &Theme, to: &Theme, w: u32, h: u32) {
-        let from = render_backdrop(&from.color, w, h);
-        let to = render_backdrop(&to.color, w, h);
-        self.fade = Some(BackdropFade { w, h, from, to, t: 0, done: None });
-    }
-
-    /// Bod prolnuti plochy (0.0..=1.0).
-    pub fn set_backdrop_fade(&mut self, k: f32) {
-        if let Some(f) = self.fade.as_mut() {
-            f.t = (k.clamp(0.0, 1.0) * 256.0 + 0.5) as u32;
-        }
-    }
-
     /// Obraz plochy pro velikost `w x h` (spocita se jednou).
     pub fn backdrop(&mut self, w: u32, h: u32) -> &[u32] {
-        if let Some(f) = self.fade.as_mut()
-            && f.w == w
-            && f.h == h
-        {
-            let key = [0, 0, 0];
-            if f.done != Some(f.t) || !matches!(&self.backdrop, Some((bw, bh, k, _)) if *bw == w && *bh == h && *k == key) {
-                let mut img = match self.backdrop.take() {
-                    Some((bw, bh, _, a)) if bw == w && bh == h => alloc::sync::Arc::try_unwrap(a).unwrap_or_else(|a| (*a).clone()),
-                    _ => alloc::vec![0; (w * h) as usize],
-                };
-                blend_into(&mut img, &f.from, &f.to, f.t);
-                f.done = Some(f.t);
-                self.backdrop = Some((w, h, key, alloc::sync::Arc::new(img)));
-            }
-            return &self.backdrop.as_ref().unwrap().3;
-        }
         let key = [self.theme.color.bg, self.theme.color.wall_a, self.theme.color.wall_b];
         let fresh = matches!(&self.backdrop, Some((bw, bh, k, _)) if *bw == w && *bh == h && *k == key);
         if !fresh {
@@ -235,7 +180,8 @@ impl Comp {
     /// Prepne rezim barev hned (bez prolnuti) a prekresli vse. Volba
     /// uzivatele a prolnuti: [`Comp::set_appearance_user`].
     pub fn set_mode(&mut self, mode: Mode) {
-        self.appearance.anim = None;
+        self.appearance.fade = None;
+        self.appearance.fade_pending = None;
         self.appearance.target = mode;
         self.style.set_mode(mode);
         // Pozadi pod listou ma nove barvy.

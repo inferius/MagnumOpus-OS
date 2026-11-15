@@ -3007,7 +3007,6 @@ name = "theme"
 version = "0.1.0"
 dependencies = [
  "conf",
- "libm",
 ]
 
 [[package]]

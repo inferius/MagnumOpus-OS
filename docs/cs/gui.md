@@ -1209,7 +1209,6 @@ Kompozitor -> aplikace:
 | 111 | `ACTION_INVOKE` | volání, akce, argumenty |
 | 112 | `ERROR` | op, kód |
 | 113 | `THEME` | režim barev u8 (0 světlý, 1 tmavý, 2 vysoký kontrast); po `WELCOME` a při změně |
-| 118 | `THEME_MIX` | od u8, do u8, bod u32 (0-1000, už po křivce): mezikrok plynulého přechodu režimu; na konci vždy `THEME` |
 
 Příklad (okno s jedním bufferem):
 

@@ -378,8 +378,7 @@ window.MO_TOKENS = {
   "search_delay": 150,
   "autoscroll": 50,
   "theme": 600,
-  "theme_auto": 3000,
-  "theme_app_step": 100
+  "theme_auto": 3000
  },
  "opacity": {
   "bar": 0.9,

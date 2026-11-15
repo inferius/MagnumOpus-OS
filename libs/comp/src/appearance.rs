@@ -11,21 +11,17 @@
 //!   (`sun.rs`); dokud sluzba cas nedodala, plati den. Automaticka zmena
 //!   pocka, dokud uzivatel pise ([`TYPING_PAUSE`], nejdele
 //!   [`DEFER_MAX`]); zmena volby rucne plati hned.
-//! - Prechod: kompozitor kazdy snimek prolne vsechny barvy sveho motivu
-//!   (`theme::Theme::mix`, OKLab) po krivce `ease_in_out` za
+//! - Prechod (`fade.rs`): kompozitor jednou slozi novy stav, aplikace
+//!   dostanou hned konecny `Theme` a kazdy snimek se stary a novy snimek
+//!   smichaji po pixelech v linearnim svetle po krivce `ease_in_out` za
 //!   `motion.theme` ms (rucne) nebo `motion.theme_auto` ms (vychod a zapad
-//!   slunce) - plocha, lista, ramy, stiny, dialogy najednou. Vstup se
-//!   nezdrzuje (smycka `compd` ma vstup vzdy prvni) a okno, ktere se
-//!   behem prechodu prekresli, se sklada uz v prolnutem snimku.
-//!   Aplikace dostanou jen nekolik mezikroku `ThemeMix` (kazdych
-//!   `motion.theme_app_step` ms) a na konci `Theme`: prekresleni okna
-//!   aplikace je drazsi nez slozeni snimku, tak se nedeje kazdy snimek.
+//!   slunce). Vstup se nezdrzuje a okno, ktere se behem prechodu
+//!   prekresli, se do noveho snimku promitne hned.
 //!   Omezit pohyb = zmena okamzite.
 
 use alloc::collections::BTreeMap;
 
-use guiproto::window::ServerMsg;
-use theme::{Mode, Pref, Scheme, Theme};
+use theme::{Mode, Pref, Scheme};
 
 use crate::{Comp, Out};
 
@@ -34,19 +30,7 @@ pub const TYPING_PAUSE: u64 = 2_000_000_000;
 /// Nejdelsi odklad auto zmeny kvuli psani (ns).
 pub const DEFER_MAX: u64 = 120_000_000_000;
 
-/// Bezici prolnuti motivu.
-#[derive(Debug, Clone)]
-pub(crate) struct ThemeAnim {
-    from: Theme,
-    to: Theme,
-    start: u64,
-    ms: u32,
-    /// Kolik mezikroku uz aplikace dostaly.
-    steps_sent: u32,
-}
-
 /// Stav vzhledu.
-#[derive(Debug, Clone)]
 pub(crate) struct Appearance {
     pub system: Pref,
     /// Volba uzivatele podle uid (relace).
@@ -56,7 +40,9 @@ pub(crate) struct Appearance {
     pub day: bool,
     /// Cilovy rezim (behem prolnuti uz novy).
     pub target: Mode,
-    pub anim: Option<ThemeAnim>,
+    /// Prechod ceka na dalsi snimek CPU (rezim, delka ms) a bezici prechod.
+    pub fade_pending: Option<(Mode, u32)>,
+    pub fade: Option<crate::fade::Fade>,
     /// Posledni stisk klavesy (ns) a od kdy ceka odlozena auto zmena.
     pub last_key: u64,
     pub held_since: Option<u64>,
@@ -71,16 +57,12 @@ impl Default for Appearance {
             place: None,
             day: true,
             target: Mode::Light,
-            anim: None,
+            fade_pending: None,
+            fade: None,
             last_key: 0,
             held_since: None,
         }
     }
-}
-
-/// Kod rezimu pro `ThemeMix` (jako `THEME`).
-fn code(m: Mode) -> u8 {
-    crate::style::mode_code(m)
 }
 
 impl Comp {
@@ -165,25 +147,24 @@ impl Comp {
         self.start_theme_transition(mode, now, p.reduce_motion, auto);
     }
 
-    /// Zacne prolnuti do `mode` (z aktualniho, i rozprolinaneho motivu);
-    /// `auto` = pomale prolnuti pri vychodu a zapadu slunce.
+    /// Zacne prechod do `mode` (s dalsim snimkem CPU, `fade.rs`);
+    /// `auto` = pomaly prechod pri vychodu a zapadu slunce.
     fn start_theme_transition(&mut self, mode: Mode, now: u64, reduce: bool, auto: bool) {
         let Some(to) = self.style.theme_for(mode) else { return };
         let ms = if auto { to.motion.theme_auto } else { to.motion.theme };
         if reduce || ms == 0 || now == 0 {
+            self.appearance.fade_pending = None;
             self.set_mode(mode);
             return;
         }
         self.appearance.target = mode;
-        let from = self.style.theme.clone();
-        self.style.begin_backdrop_fade(&from, &to, self.w, self.h);
-        self.appearance.anim = Some(ThemeAnim { from, to, start: now, ms, steps_sent: 0 });
+        self.appearance.fade_pending = Some((mode, ms));
         self.damage_all();
     }
 
     /// Je prolnuti rozbehnute? (snimek kazdy takt)
     pub(crate) fn theme_animating(&self) -> bool {
-        self.appearance.anim.is_some()
+        self.appearance.fade.is_some() || self.appearance.fade_pending.is_some()
     }
 
     /// Dalsi probuzeni kvuli odlozene auto zmene.
@@ -196,53 +177,6 @@ impl Comp {
         if self.appearance.held_since.is_some() {
             self.appearance_changed(now, true);
         }
-    }
-
-    /// Krok prolnuti ve snimku `now` (`frame.rs`, `animate`).
-    pub(crate) fn animate_theme(&mut self, now: u64) {
-        let Some(a) = self.appearance.anim.as_mut() else { return };
-        let el = now.saturating_sub(a.start) as f32 / 1_000_000.0;
-        let x = (el / a.ms as f32).clamp(0.0, 1.0);
-        let k = a.to.motion.ease_in_out.at(x);
-        let step = a.to.motion.theme_app_step.max(1);
-        let steps = (a.ms / step).max(1);
-        let reached = ((x * steps as f32) as u32).min(steps);
-        let (fm, tm) = (code(a.from.mode), code(a.to.mode));
-        let mut app = None;
-        if reached > a.steps_sent && reached < steps {
-            a.steps_sent = reached;
-            // Aplikace kresli tentyz bod krivky, ktery uvidi o krok dal.
-            let ka = a.to.motion.ease_in_out.at(reached as f32 / steps as f32);
-            app = Some((ka * 1000.0 + 0.5) as u16);
-        }
-        let done = x >= 1.0;
-        let mixed = if done { a.to.clone() } else { a.from.mix(&a.to, k) };
-        self.style.set_theme(mixed);
-        self.style.set_backdrop_fade(k);
-        let g = self.style.geo();
-        for w in self.windows.values_mut() {
-            w.geo = g;
-        }
-        let ids: alloc::vec::Vec<crate::ClientId> = self.clients.iter().filter(|(_, c)| c.hello).map(|(&id, _)| id).collect();
-        if let Some(t) = app {
-            for &id in &ids {
-                self.send(id, ServerMsg::ThemeMix { from: fm, to: tm, t });
-            }
-        }
-        if done {
-            let mode = self.appearance.target;
-            self.appearance.anim = None;
-            // Konec: presne tokeny ciloveho rezimu (a stejne jako `set_mode`).
-            self.set_mode(mode);
-            return;
-        }
-        // Rozmazane pozadi listy je nejdrazsi cast snimku (v QEMU vetsina
-        // casu): prepocita se jen s mezikrokem aplikaci a na konci, mezi
-        // tim lista pouzije posledni (o nejvys jeden krok starsi barvy).
-        if app.is_some() {
-            self.bar_blur_dirty = true;
-        }
-        self.damage_all();
     }
 }
 

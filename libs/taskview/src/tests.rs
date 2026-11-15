@@ -152,7 +152,7 @@ fn checkbox_click_changes_list() {
 }
 
 /// Prepnuti rezimu: okno se prekresli barvami motivu (svetly, tmavy,
-/// kontrast i mezikrok prolnuti). Snimky do `target/shots/ulohy-*.png`.
+/// kontrast). Snimky do `target/shots/ulohy-*.png`.
 #[test]
 fn theme_modes_redraw_window() {
     let m = TaskManager::new(TestBackend::default());
@@ -160,7 +160,6 @@ fn theme_modes_redraw_window() {
     let mut last = None;
     for (name, th) in [
         ("svetly", theme::Theme::builtin(theme::Mode::Light)),
-        ("prolnuti", theme::Theme::builtin_mix(theme::Mode::Light, theme::Mode::Dark, 500)),
         ("tmavy", theme::Theme::builtin(theme::Mode::Dark)),
         ("kontrast", theme::Theme::builtin(theme::Mode::Contrast)),
     ] {

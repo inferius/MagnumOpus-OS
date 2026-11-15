@@ -75,8 +75,8 @@ fn host_ns() -> u64 {
     START.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
 }
 
-/// Prolnuti rezimu (`appearance.rs`) pri 1920x1080: cas snimku po castech
-/// behem prechodu, cena prolnuti tokenu a obrazu plochy.
+/// Prechod rezimu (`fade.rs`) pri 1920x1080: cas snimku po castech
+/// behem prechodu.
 /// `cargo test -p comp --release bench_theme_fade -- --ignored --nocapture`
 #[test]
 #[ignore]
@@ -116,10 +116,4 @@ fn bench_theme_fade() {
         ms(worst),
         t.c.prof.take(n)
     );
-    let (l, d) = (theme::Theme::builtin(theme::Mode::Light), theme::Theme::builtin(theme::Mode::Dark));
-    let s = std::time::Instant::now();
-    for k in 0..100 {
-        core::hint::black_box(l.mix(&d, k as f32 / 100.0));
-    }
-    std::println!("Theme::mix {:.3} ms", ms(s.elapsed()) / 100.0);
 }

@@ -440,15 +440,12 @@ caret_blink_stop = 10000
 search_delay = 150
 # Tah mysi s vyberem za okraj pole: krok automatickeho posunu.
 autoscroll = 50
-# Prechod rezimu (svetly <-> tmavy, kontrast): barvy vseho naraz se
-# prolnou v OKLab po krivce ease_in_out. `theme` = rucni prepnuti (lista,
+# Prechod rezimu (svetly <-> tmavy, kontrast): kompozitor smicha stary
+# a novy snimek po pixelech v linearnim svetle po krivce ease_in_out. `theme` = rucni prepnuti (lista,
 # prikaz), `theme_auto` = automaticky pri vychodu a zapadu slunce (pomalu,
 # nerusi). Omezit pohyb = okamzite.
 theme = 600
 theme_auto = 3000
-# Aplikace dostanou behem prechodu mezikrok jen po teto dobe (prekresleni
-# okna je drazsi nez slozeni snimku); kompozitor prolina kazdy snimek.
-theme_app_step = 100
 
 # Kryti (0-1). Pruhlednost jen tam, kde nesnizi kontrast textu pod limit;
 # ve vysokem kontrastu je lista vzdy plna (1).

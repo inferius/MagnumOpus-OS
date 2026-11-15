@@ -548,7 +548,7 @@ fn denied_listing_is_not_empty_folder() {
 }
 
 /// Prepnuti rezimu: okno se prekresli barvami motivu (svetly, tmavy,
-/// kontrast i mezikrok prolnuti). Snimky do `target/shots/soubory-*.png`.
+/// kontrast). Snimky do `target/shots/soubory-*.png`.
 #[test]
 fn theme_modes_redraw_window() {
     let m = fm();
@@ -556,7 +556,6 @@ fn theme_modes_redraw_window() {
     let mut last = None;
     for (name, th) in [
         ("svetly", theme::Theme::builtin(theme::Mode::Light)),
-        ("prolnuti", theme::Theme::builtin_mix(theme::Mode::Light, theme::Mode::Dark, 500)),
         ("tmavy", theme::Theme::builtin(theme::Mode::Dark)),
         ("kontrast", theme::Theme::builtin(theme::Mode::Contrast)),
     ] {

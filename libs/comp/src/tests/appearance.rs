@@ -50,7 +50,7 @@ fn sun_rise_and_set_in_prague() {
 }
 
 #[test]
-fn user_pref_fades_all_colors_and_apps_get_steps() {
+fn user_pref_fades_frames_in_linear_light() {
     let mut t = T::new();
     let a = t.client("a");
     t.window(a, Mode::Standard, RED);
@@ -60,24 +60,45 @@ fn user_pref_fades_all_colors_and_apps_get_steps() {
     t.c.session_opened(1, 1000, "alice", t.now);
     t.c.set_appearance_user(1000, dark(), t.now);
     assert_eq!(t.c.mode(), theme::Mode::Dark, "cil hned");
+    // Prvni snimek: stary snimek ulozen, aplikace hned konecny `Theme`.
+    t.frame();
+    assert_eq!(client_msgs(&t.out(), a), [ServerMsg::Theme { mode: 1 }]);
+    // Aplikace se behem prechodu prekresli: promitne se do noveho snimku.
+    t.set_color(a, BLUE);
+    t.commit(a, 2, 0, 0, 0);
     // Pulka prechodu: plocha mezi svetlou a tmavou.
     t.now += 300_000_000 - PERIOD;
     t.frame();
     let mid = t.px(5, 5);
-    assert_ne!(mid, bg0);
-    let mut out = t.out();
-    out.extend(run_transition(&mut t));
+    assert!(t.c.theme_animating());
+    let out = run_transition(&mut t);
     let dark_bg = t.px(5, 5);
-    assert_ne!(mid, dark_bg);
     let l = |c: u32| ((c >> 16 & 0xFF) + (c >> 8 & 0xFF) + (c & 0xFF)) as i32;
     assert!(l(bg0) > l(mid) && l(mid) > l(dark_bg), "{bg0:08x} {mid:08x} {dark_bg:08x}");
-    let msgs = client_msgs(&out, a);
-    let steps: Vec<u16> = msgs.iter().filter_map(|m| if let ServerMsg::ThemeMix { from: 0, to: 1, t } = m { Some(*t) } else { None }).collect();
-    assert!(steps.len() >= 3 && steps.len() <= 5, "{steps:?}");
-    assert!(steps.windows(2).all(|w| w[0] < w[1]));
-    assert_eq!(msgs.last(), Some(&ServerMsg::Theme { mode: 1 }));
-    // Na konci presne tokeny tmaveho rezimu.
+    assert!(!client_msgs(&out, a).iter().any(|m| matches!(m, ServerMsg::Theme { .. })), "Theme jen jednou");
+    // Konec: presne tokeny a stejne pixely jako bez prechodu.
     assert_eq!(t.c.style.theme, theme::Theme::builtin(theme::Mode::Dark));
+    let r = t.rect_of(a);
+    assert_eq!(t.px(r.x + 100, r.y + 50) & 0x00FF_FFFF, BLUE & 0x00FF_FFFF, "prekresleni aplikace v novem snimku");
+    let after = t.frame.clone();
+    t.c.redraw_all();
+    t.frame();
+    assert_eq!(after, t.frame, "konec prechodu = normalni snimek");
+}
+
+/// Michani v linearnim svetle: stred cerne a bile je sRGB ~188, ne 128.
+#[test]
+fn fade_mixes_in_linear_light() {
+    let m = crate::fade::lut_mix(0xFF00_0000, 0xFFFF_FFFF, 128);
+    let g = m & 0xFF;
+    assert!((185..=190).contains(&g), "{m:08x}");
+    assert_eq!(crate::fade::lut_mix(0xFF12_3456, 0xFFAB_CDEF, 0), 0xFF12_3456);
+    assert_eq!(crate::fade::lut_mix(0xFF12_3456, 0xFFAB_CDEF, 256), 0xFFAB_CDEF);
+    // Tam a zpet presne pro vsechny kody (i nejtmavsi).
+    for c in [0u32, 1, 2, 5, 10, 50, 128, 200, 254, 255] {
+        let p = 0xFF00_0000 | c << 16 | c << 8 | c;
+        assert_eq!(crate::fade::lut_mix(p, 0xFFFF_FFFF, 0), p, "{c}");
+    }
 }
 
 #[test]

@@ -274,6 +274,10 @@ impl Comp {
     /// Vraci obdelniky, ktere je treba poslat displeji (`None` = nic se
     /// neslozilo; pak sluzba nema cekat na `PRESENTED`).
     pub fn tick(&mut self, now: u64, canvas: &mut gfx::Canvas<'_>) -> Option<Vec<Rect>> {
+        // Prechod rezimu barev: michani stareho a noveho snimku (`fade.rs`).
+        if self.theme_animating() {
+            return self.tick_fading(now, canvas);
+        }
         self.tick_with(now, |c, rects| c.compose(canvas, rects, now))
     }
 
@@ -398,7 +402,6 @@ impl Comp {
     }
 
     fn animate(&mut self, now: u64) {
-        self.animate_theme(now);
         let mut done: Vec<(ClientId, u32, u32)> = Vec::new();
         for (&cid, c) in self.clients.iter_mut() {
             for (&lid, l) in c.layers.iter_mut() {

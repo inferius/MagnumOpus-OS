@@ -790,14 +790,6 @@ impl Term {
                 self.resize();
                 true
             }
-            // Mezikrok plynuleho prechodu rezimu (na konci prijde `Theme`).
-            Event::ThemeMix { from, to, t } => {
-                self.look.t = theme::Theme::builtin_mix(from, to, t);
-                self.app.theme = self.look.term_theme();
-                self.app.cwd_lead = self.look.cwd_lead();
-                self.resize();
-                true
-            }
             // Polozka seznamu navrhu (ACTIVATE doplni, FOCUS vybere).
             Event::A11yAction { node, action, .. } if node > compl::LIST_NODE && self.compl.is_some() => {
                 self.sync_compl();

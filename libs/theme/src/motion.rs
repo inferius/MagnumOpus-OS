@@ -70,8 +70,6 @@ pub struct Motion {
     pub theme: u32,
     /// Prolnuti pri automaticke zmene (vychod a zapad slunce).
     pub theme_auto: u32,
-    /// Mezikrok prolnuti pro aplikace (kompozitor prolina kazdy snimek).
-    pub theme_app_step: u32,
     pub ease_standard: Curve,
     pub ease_enter: Curve,
     pub ease_exit: Curve,
@@ -97,7 +95,6 @@ impl Motion {
             autoscroll: u(t, "motion.autoscroll")?,
             theme: u(t, "motion.theme")?,
             theme_auto: u(t, "motion.theme_auto")?,
-            theme_app_step: u(t, "motion.theme_app_step")?,
             ease_standard: Curve::parse(t, "motion.ease_standard")?,
             ease_enter: Curve::parse(t, "motion.ease_enter")?,
             ease_exit: Curve::parse(t, "motion.ease_exit")?,

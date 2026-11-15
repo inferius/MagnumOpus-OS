@@ -1263,7 +1263,6 @@ Compositor -> application:
 | 111 | `ACTION_INVOKE` | call, action, arguments |
 | 112 | `ERROR` | op, code |
 | 113 | `THEME` | color mode u8 (0 light, 1 dark, 2 high contrast); after `WELCOME` and on change |
-| 118 | `THEME_MIX` | from u8, to u8, point u32 (0-1000, already on the curve): a step of the smooth mode transition; always `THEME` at the end |
 
 Example (a window with one buffer):
 
