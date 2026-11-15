@@ -2,8 +2,8 @@
 
 Návrh kroku 8 pořadí v [architektura.md](architektura.md) (plán „Horní patro
 z Wine, spodní naše“): aplikace a hry pro Windows nad převzatým Wine.
-**Stav: [navrženo]**, čeká na odpovědi na otázky níže (vlákno 7a, 15. 11.
-2026). Kód až po rozhodnutí.
+**Stav: [navrženo]**, otázky rozhodnuté 15. 11. 2026 (kapitola
+[Rozhodnutí](#rozhodnutí)); začíná etapa W1.
 
 ## Stav
 
@@ -232,6 +232,25 @@ a VKD3D-Proton.
 - **C:** DLL PE ze sestavení WineHQ (archiv s binárkami), sami jen
   unixovou část - rychlé, ale verze PE a unixové části se musí přesně
   shodovat a bez sestavení PE neopravíme chybu v DLL.
+
+## Rozhodnutí
+
+Rozhodnutí uživatele a koordinátora (15. 11. 2026):
+
+| Otázka | Rozhodnutí |
+|---|---|
+| Q1 | A: upstream Wine 11.0.x, DXVK a VKD3D-Proton jako porty, záplaty z Protonu jednotlivě; případné druhé sestavení z Protonu později |
+| Q2 | A: `ntdll/unix` z Wine nad `libc.so`, vlastní moduly paměť, výjimky, vlákna, transport |
+| Q3 | A: wineserver z Wine jako proces na prefix, protokol přes kanály |
+| Q4 | A: napřed přes wineserver, pak obdoba ntsync ve službě vrstvy |
+| Q5 | A: GS jako obecný „druhý ukazatel vlákna“ pro každé vlákno v jádře |
+| Q6 | B: RWX jen s oprávněním `wx_compat` v manifestu (viditelné při instalaci, audit); změna invariantu W^X výslovně v [správě paměti](sprava-pameti.md) a `kernel/CLAUDE.md` |
+| Q7 | C: napřed hledání bez rozlišení velikosti písmen v `ntdll`, dataset s casefold ve fsd v W2 (obecný rys FS, samostatný návrh) |
+| Q8 | A: `win32u.so` z Wine + vlastní ovladač oken nad kompozitorem |
+| Q9 | A: vlastní ovladač zvuku nad `audioproto` |
+| Q10 | A: WoW64, 32bitový segment kódu v etapě W6 |
+| Q11 | A: jen x86_64; aarch64 = zdokumentované omezení, `NOT_SUPPORTED` v API |
+| Q12 | A: sestavení ve WSL přes `tools/wsl` |
 
 ## Co doplní systém
 

@@ -2,8 +2,8 @@
 
 Design of step 8 of the order in [architecture.md](architecture.md) (the
 plan "upper layer from Wine, lower layer ours"): Windows applications and
-games over adopted Wine. **Status: [designed]**, waiting for answers to the
-questions below (thread 7a, 15 Nov 2026). Code only after the decision.
+games over adopted Wine. **Status: [designed]**, questions decided on 15 Nov 2026
+(chapter [Decisions](#decisions)); stage W1 is starting.
 
 ## Status
 
@@ -247,6 +247,25 @@ VKD3D-Proton.
 - **C:** the PE DLLs from WineHQ builds (an archive with binaries), only
   the Unix side ourselves - fast, but the PE and Unix side versions must
   match exactly and without building PE we cannot fix a bug in a DLL.
+
+## Decisions
+
+Decisions of the user and the coordinator (15 Nov 2026):
+
+| Question | Decision |
+|---|---|
+| Q1 | A: upstream Wine 11.0.x, DXVK and VKD3D-Proton as ports, Proton patches one by one; possibly a second build from Proton later |
+| Q2 | A: `ntdll/unix` from Wine over `libc.so`, our own modules for memory, exceptions, threads, transport |
+| Q3 | A: wineserver from Wine as a process per prefix, the protocol over channels |
+| Q4 | A: first via wineserver, then an ntsync analogue in the layer service |
+| Q5 | A: GS as a generic "second thread pointer" per thread in the kernel |
+| Q6 | B: RWX only with the `wx_compat` manifest permission (visible at install time, audited); the W^X invariant change stated explicitly in [memory management](memory-management.md) and `kernel/CLAUDE.md` |
+| Q7 | C: first case-insensitive lookup in `ntdll`, a casefold dataset in fsd in W2 (a generic FS feature, a separate design) |
+| Q8 | A: `win32u.so` from Wine + our own window driver over the compositor |
+| Q9 | A: our own sound driver over `audioproto` |
+| Q10 | A: WoW64, the 32-bit code segment in stage W6 |
+| Q11 | A: x86_64 only; aarch64 = a documented limitation, `NOT_SUPPORTED` in the API |
+| Q12 | A: building in WSL via `tools/wsl` |
 
 ## What the system adds
 
