@@ -216,6 +216,30 @@ gdb target/x86_64-unknown-none/debug/kernel -ex "target remote localhost:1234" -
 Userspace programs have their own ELF files in
 `target/user/x86_64-unknown-none/<profile>/`.
 
+**Kernel optimisation in the debug image** **[implemented]**: the kernel is
+built with `opt-level = 2` even in the `dev` profile
+(`[profile.dev.package.kernel]` in the root `Cargo.toml`);
+`debug-assertions` and debug symbols stay. Without optimisation the kernel
+was the bottleneck of the whole debug image - moving data in channel
+messages (disk driver -> fsd) was an order of magnitude slower (table). Stepping through the
+kernel in gdb without optimisation (variables are not "optimized out",
+line order matches):
+
+```bash
+cargo xtask run --gdb --kernel-opt 0
+```
+
+`--kernel-opt <0-3|s|z>` applies to `build`, `image`, `run` and `test`
+(only for that run, `cargo --config profile.dev.package.kernel.opt-level`).
+The kernel's `memcpy` comes from the prebuilt optimised `compiler_builtins`
+(the kernel is not built with `-Zbuild-std`): x86_64 `rep movsb`/`rep
+movsq`, aarch64 a loop by 8 B.
+
+| Debug image, x86_64, QEMU TCG | kernel `opt-level` 0 | 2 |
+|---|---|---|
+| first mapping of a 16 MiB file window from disk (`b2f54c3a` + virtio-blk) | 1851 ms | 160 ms |
+| the `cstd` suite in total (`b2f54c3a` + virtio-blk) | 27 s | 16 s |
+
 ## Repository layout
 
 ```text

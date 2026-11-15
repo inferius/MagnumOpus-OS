@@ -252,6 +252,12 @@ pub fn vmo_set_size(vmo: u32, size: u64) -> Result<()> {
     call(nr::VMO_SET_SIZE, [vmo as u64, size, 0, 0, 0, 0]).map(|_| ())
 }
 
+/// `VMO_DIRTY`: indexy spinavych stranek do `buf` (nejvys jeho delka),
+/// oznaci je jako ciste; vraci pocet. Prvni volani zapne sledovani.
+pub fn vmo_dirty(vmo: u32, buf: &mut [u64]) -> Result<usize> {
+    call(nr::VMO_DIRTY, [vmo as u64, buf.as_mut_ptr() as u64, buf.len() as u64, 0, 0, 0]).map(|n| n as usize)
+}
+
 /// `VMO_SIZE`: aktualni velikost objektu pameti.
 pub fn vmo_size(vmo: u32) -> Result<u64> {
     call(nr::VMO_SIZE, [vmo as u64, 0, 0, 0, 0, 0])

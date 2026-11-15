@@ -196,6 +196,13 @@ panic = "abort"
 [profile.dev.package.shlang]
 opt-level = 2
 
+# Jadro i v debug obrazu optimalizovane (debug-assertions zustavaji): bez
+# optimalizace byly kopie zprav kanalu ~5 MB/s a prvni mapovani okna souboru
+# 16 MiB trvalo 2,2 s misto 0,16 s (docs/cs/sestaveni.md). Krokovani jadra
+# v gdb bez optimalizace: `cargo xtask run --gdb --kernel-opt 0`.
+[profile.dev.package.kernel]
+opt-level = 2
+
 [profile.dev.package.term]
 opt-level = 2
 

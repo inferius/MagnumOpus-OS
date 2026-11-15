@@ -88,6 +88,9 @@ pub(super) struct Open {
     rights: u8,
     /// Granty od rodice v okamziku `open` (mod POSIX v `stat_h`).
     above: crate::perm::Inherited,
+    /// Interni handle sluzby ([`Fs::pin_h`]): cte a zapisuje bez ohledu na
+    /// `access` a povinne zamky, sdilecim rezimum se nevystavuje.
+    internal: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -191,6 +194,7 @@ impl<D: BlockDevice> Fs<D> {
                 view,
                 rights,
                 above,
+                internal: false,
             },
         );
         Ok(h)
@@ -272,9 +276,25 @@ impl<D: BlockDevice> Fs<D> {
                 rights: crate::perm::rights::READ | crate::perm::rights::WRITE | crate::perm::rights::DELETE,
                 // Sirotek nema rodice: jen vlastni popis.
                 above: crate::perm::Inherited::default(),
+                internal: false,
             },
         );
         Ok((h, None))
+    }
+
+    /// Interni handle tehoz objektu jako `h` (fsd: objekty pameti souboru
+    /// pro `mmap`, zapis zpet i po zavreni fd klienta). Drzi objekt (sirotek
+    /// zustane do jeho zavreni), smi cist i zapisovat bez ohledu na pristup
+    /// handlu a povinne zamky (mapovani je obchazi jako POSIX `mmap`;
+    /// opravneni overi sluzba pri mapovani) a sdilecim rezimum ostatnich se
+    /// nevystavuje (pristup 0, sdili vse).
+    pub fn pin_h(&mut self, h: Handle) -> Result<Handle> {
+        let o = self.handles.opens.get(&h).ok_or(Error::BadHandle)?.clone();
+        self.handles.next += 1;
+        let pin = self.handles.next;
+        let open = Open { access: 0, share: share::ALL, view: None, internal: true, ..o };
+        self.handles.opens.insert(pin, open);
+        Ok(pin)
     }
 
     /// Cisla novych handlu zacnou nad `base` (nova instance sluzby po padu:
@@ -322,7 +342,7 @@ impl<D: BlockDevice> Fs<D> {
     /// Aktivuje dataset handlu a vrati jeho objekt (s kontrolou generace).
     pub(super) fn handle_object(&mut self, h: Handle, need: u8) -> Result<(Open, Inode)> {
         let o = self.handles.opens.get(&h).ok_or(Error::BadHandle)?.clone();
-        if o.access & need != need {
+        if !o.internal && o.access & need != need {
             return Err(Error::AccessDenied);
         }
         self.activate(o.ds)?;
@@ -338,7 +358,7 @@ impl<D: BlockDevice> Fs<D> {
     pub fn read_h(&mut self, h: Handle, offset: u64, len: usize) -> Result<Vec<u8>> {
         let (o, _) = self.handle_object(h, access::READ)?;
         let end = offset.saturating_add(len as u64);
-        if self.handles.mandatory_conflict(o.ds, o.oid, Some(h), offset, end, false) {
+        if !o.internal && self.handles.mandatory_conflict(o.ds, o.oid, Some(h), offset, end, false) {
             return Err(Error::Locked);
         }
         let root = self.s.root;
@@ -348,7 +368,7 @@ impl<D: BlockDevice> Fs<D> {
     pub fn write_h(&mut self, h: Handle, offset: u64, data: &[u8]) -> Result<()> {
         let (o, inode) = self.handle_object(h, access::WRITE)?;
         let end = offset.saturating_add(data.len() as u64);
-        if self.handles.mandatory_conflict(o.ds, o.oid, Some(h), offset, end, true) {
+        if !o.internal && self.handles.mandatory_conflict(o.ds, o.oid, Some(h), offset, end, true) {
             return Err(Error::Locked);
         }
         self.write_oid(o.oid, inode, offset, data)
@@ -356,7 +376,7 @@ impl<D: BlockDevice> Fs<D> {
 
     pub fn set_len_h(&mut self, h: Handle, size: u64) -> Result<()> {
         let (o, inode) = self.handle_object(h, access::WRITE)?;
-        if self.handles.mandatory_conflict(o.ds, o.oid, Some(h), size.min(inode.size), u64::MAX, true) {
+        if !o.internal && self.handles.mandatory_conflict(o.ds, o.oid, Some(h), size.min(inode.size), u64::MAX, true) {
             return Err(Error::Locked);
         }
         self.truncate_checked(o.oid, inode, size)

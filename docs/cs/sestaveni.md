@@ -205,6 +205,29 @@ gdb target/x86_64-unknown-none/debug/kernel -ex "target remote localhost:1234" -
 
 Programy userspace mají vlastní ELF v `target/user/x86_64-unknown-none/<profil>/`.
 
+**Optimalizace jádra v debug obrazu** **[implementováno]**: jádro se i v
+profilu `dev` překládá s `opt-level = 2` (`[profile.dev.package.kernel]`
+v kořenovém `Cargo.toml`); `debug-assertions` a ladicí symboly zůstávají.
+Bez optimalizace bylo jádro úzkým hrdlem celého debug obrazu - přenos dat
+zprávami kanálu (ovladač disku -> fsd) byl řádově pomalejší (tabulka). Krokování
+jádra v gdb bez optimalizace (proměnné nejsou „optimized out", pořadí
+řádků sedí):
+
+```bash
+cargo xtask run --gdb --kernel-opt 0
+```
+
+`--kernel-opt <0-3|s|z>` platí pro `build`, `image`, `run` i `test` (jen
+pro tento běh, `cargo --config profile.dev.package.kernel.opt-level`).
+`memcpy` jádra je z předpřipraveného optimalizovaného `compiler_builtins`
+(jádro se nestaví přes `-Zbuild-std`): x86_64 `rep movsb`/`rep movsq`,
+aarch64 smyčka po 8 B.
+
+| Debug obraz, x86_64, QEMU TCG | `opt-level` jádra 0 | 2 |
+|---|---|---|
+| první mapování okna souboru 16 MiB z disku (`b2f54c3a` + virtio-blk) | 1851 ms | 160 ms |
+| sada `cstd` celkem (`b2f54c3a` + virtio-blk) | 27 s | 16 s |
+
 ## Struktura repozitáře
 
 ```text

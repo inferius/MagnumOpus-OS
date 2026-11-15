@@ -421,6 +421,26 @@ current size of a memory object in bytes (fixed for an ordinary object, for
 a resizable one as set by `VMO_SET_SIZE`; C `fstat` of a memory fd in
 another process). Any right is enough. Errors: `BAD_HANDLE`, `WRONG_TYPE`.
 
+### `VMO_DIRTY`
+
+**[verified in QEMU]** x86_64 and aarch64 (kernel self-test "sledovani
+zapisu" in the suite `pamet`). `(vmo, buf_ptr, cap) -> count`. Number 80.
+Write tracking of a memory object for a shared file mapping (fsd writes the
+changes back, [Files as memory](file-system.md#files-as-memory)). It writes
+at most `cap` page indices (u64, ascending) changed since the previous call
+into `buf`, marks them clean and unmaps them in all mappings. The first call
+turns tracking on and returns all existing pages.
+
+While tracking, a clean page is mapped read-only (on `VM_MAP` and on a read
+fault); the first write causes a fault that marks the page and maps it for
+writing - **cost: one fault per page after every cleaning** (the same on
+x86_64 and aarch64, no PTE dirty bits). A write without a fault
+(`VMO_WRITE`, a kernel copy into process memory) marks the page directly.
+Order: clear the bits, unmap, flush the TLB, return the list - a write in
+between ends up in the frame before the caller reads the contents. Right
+`WRITE`. Errors: `BAD_HANDLE`, `WRONG_TYPE`, `ACCESS_DENIED`,
+`BAD_ADDRESS`, `NO_MEMORY`.
+
 ### `VMO_READ`
 
 `(handle, offset, buf_ptr, len) -> 0`. Reads object data (max 1 MiB per

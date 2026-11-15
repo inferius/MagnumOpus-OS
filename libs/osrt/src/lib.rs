@@ -24,6 +24,7 @@ pub mod dl;
 pub mod env;
 pub mod exception;
 pub mod fd;
+pub mod fmap;
 pub mod fs;
 pub mod futex;
 pub mod heap;

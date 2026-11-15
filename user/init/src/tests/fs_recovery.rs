@@ -117,6 +117,10 @@ fn kill_fsd(s: &Startup) -> TestResult {
     let o = ask(&mut sup, s, &c, "open /data/smazany.txt")?;
     let o: String = o.strip_prefix("ok ").ok_or(format!("open sirotka: {o}"))?.into();
     fs.remove(&format!("{DIR}/smazany.txt")).map_err(|e| fail("smazani otevreneho", e))?;
+    // Sdilene mapovani se zapisem (obnova oken, Q5): zapis pred padem
+    // (commit nize ho ulozi - je to cizi operace, fsd zapise okna zpet).
+    check_eq!(ask(&mut sup, s, &c, "mapw /data/m.bin")?, String::from("ok "), "mapovani");
+    check_eq!(ask(&mut sup, s, &c, "pokew 0 pred")?, String::from("ok "), "zapis do mapovani");
     // Data nepotvrzena commitem/fsync by se padem ztratila (jako vypadek).
     fs.commit().map_err(|e| fail("commit", e))?;
 
@@ -137,6 +141,11 @@ fn kill_fsd(s: &Startup) -> TestResult {
     check_eq!(ask(&mut sup, s, &c, &format!("writeh {h} novy"))?, String::from("ok 4"), "zapis po znovuotevreni");
     let r = ask(&mut sup, s, &c, "read /data/a.txt")?;
     check!(r.starts_with("ok novy"), format!("obsah po zapisu: {r}").as_str());
+    // Zapis do okna stare instance po padu (nikdo ho neulozi), pak obnova:
+    // nova instance prevezme spinave stranky, nove okno je ma.
+    check_eq!(ask(&mut sup, s, &c, "pokew 4 PO")?, String::from("ok "), "zapis po padu");
+    check_eq!(ask(&mut sup, s, &c, "recoverw")?, String::from("ok predPO.........."), "obnova okna");
+    check_eq!(ask(&mut sup, s, &c, "read /data/m.bin")?, String::from("ok predPO.........."), "obsah po obnove");
     check_eq!(ask(&mut sup, s, &c, &format!("close {o}"))?, String::from("ok "), "zavreni sirotka");
     check_eq!(ask(&mut sup, s, &c, &format!("close {h}"))?, String::from("ok "), "zavreni");
     drop(c);

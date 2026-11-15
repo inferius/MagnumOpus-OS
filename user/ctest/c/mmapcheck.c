@@ -53,7 +53,13 @@ int mmap_test(const char *dir) {
     if (m == MAP_FAILED || memcmp(m, data, sizeof data) != 0) return 22;
     char *m2 = mmap(NULL, (size_t)page, PROT_READ, MAP_PRIVATE, fd, page);
     if (m2 == MAP_FAILED || m2[0] != data[page] || m2[sizeof data - page] != 0) return 23;
-    if (mmap(NULL, 10, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0) != MAP_FAILED || errno != ENOTSUP) return 24;
+    /* Sdileny zapis jde do souboru (podrobne fmapcheck.c). */
+    char *sw = mmap(NULL, 10, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    char c = 0;
+    if (sw == MAP_FAILED) return 24;
+    sw[0] = '#';
+    if (pread(fd, &c, 1, 0) != 1 || c != '#') return 26;
+    munmap(sw, 10);
     if (mmap(NULL, 10, PROT_READ, MAP_PRIVATE, fd, 100) != MAP_FAILED || errno != EINVAL) return 25;
     munmap(m, sizeof data);
     munmap(m2, (size_t)page);

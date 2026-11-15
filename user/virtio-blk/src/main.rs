@@ -20,7 +20,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use blockproto::server::{self, Disks};
-use blockproto::{MAX_SECTORS, SECTOR};
+use blockproto::SECTOR;
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::hw::{Interrupt, Resource};
 use libos::{Channel, Error, Mapping, Result, Startup, Vmo, println};
@@ -54,7 +54,11 @@ const CFG_MAX_DISCARD_SECTORS: u64 = 36;
 const HDR_OFF: u64 = 0;
 const STATUS_OFF: u64 = 16;
 const DATA_OFF: u64 = 512;
-const DMA_SIZE: u64 = DATA_OFF + MAX_SECTORS as u64 * SECTOR as u64;
+/// Nejvic bajtu jednoho cteni: server spoji navazujici cteni klienta
+/// (po `MAX_SECTORS`) do jednoho prikazu az do teto delky: jedno preruseni
+/// a jedno cekani na 1 MiB misto na kazdych 32 KiB.
+const READ_MAX: usize = server::BATCH_MAX;
+const DMA_SIZE: u64 = DATA_OFF + READ_MAX as u64;
 
 libos::entry!(main);
 
@@ -328,6 +332,10 @@ impl Disks for Disk {
 
     fn features(&self, _: usize) -> u64 {
         Disk::features(self)
+    }
+
+    fn max_read(&self, _: usize) -> usize {
+        READ_MAX
     }
 
     fn read(&mut self, _: usize, lba: u64, out: &mut [u8]) -> Result<()> {

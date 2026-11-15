@@ -98,6 +98,8 @@ prepinace:
   --release        release profil
   --arch <arch>    architektura: x86_64 (vychozi), aarch64
   --gdb            (run) QEMU ceka na GDB na localhost:1234
+  --kernel-opt <n> uroven optimalizace jadra v debug profilu (vychozi 2);
+                   0 = krokovani jadra v gdb bez optimalizace (pomalejsi)
   --headless       (run) bez okna, jen seriova linka v terminalu
   --wine           (run, test; x86_64) datovy disk s Wine v /apps/org.winehq.wine
                    (strom z `cargo xtask wine`, sablona disku se dela jednou)
@@ -149,6 +151,8 @@ promenne prostredi:
 pub struct Options {
     release: bool,
     gdb: bool,
+    /// `--kernel-opt`: opt-level jadra v debug profilu (`None` = z Cargo.toml).
+    kernel_opt: Option<String>,
     headless: bool,
     accel: Option<String>,
     /// Emulovana IOMMU (`Arch::iommus`): x86_64 "intel", "amd", "none";
@@ -288,6 +292,7 @@ fn run_cli() -> Result<()> {
     let mut opts = Options {
         release: false,
         gdb: false,
+        kernel_opt: None,
         headless: false,
         accel: None,
         iommu: String::new(),
@@ -385,6 +390,14 @@ fn run_cli() -> Result<()> {
                 opts.test_driver = Some(value.to_string_lossy().into_owned());
             }
             Some("--gdb") => opts.gdb = true,
+            Some("--kernel-opt") => {
+                let value = args.next().ok_or("--kernel-opt ocekava uroven 0-3, s nebo z")?;
+                let value = value.to_string_lossy().into_owned();
+                if !["0", "1", "2", "3", "s", "z"].contains(&value.as_str()) {
+                    return Err("--kernel-opt ocekava uroven 0-3, s nebo z".into());
+                }
+                opts.kernel_opt = Some(value);
+            }
             Some("--headless") => opts.headless = true,
             Some("--wine") => opts.wine = true,
             Some("--accel") => {
@@ -1008,6 +1021,14 @@ fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> R
     // Rezim vyvojare jen ve vyvojovem sestaveni (`devmode.rs`).
     if user && let Some(f) = devmode::features(opts, packages) {
         cmd.args(["--features", &f]);
+    }
+    if packages.contains(&"kernel")
+        && let Some(level) = &opts.kernel_opt
+    {
+        // Ladeni jadra v gdb: uroven optimalizace jen pro tento build
+        // (vychozi 2 z Cargo.toml, docs/cs/sestaveni.md).
+        let level = if level.chars().all(|c| c.is_ascii_digit()) { level.clone() } else { format!("'{level}'") };
+        cmd.arg("--config").arg(format!("profile.dev.package.kernel.opt-level={level}"));
     }
     if packages.contains(&"kernel") {
         // Verze a commit do jadra (log pri startu, zaznam padu). Jen jadru:

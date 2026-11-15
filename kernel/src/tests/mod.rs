@@ -9,6 +9,7 @@ mod mm;
 mod mm_lazy;
 mod mm_regions;
 mod mm_cow;
+mod mm_dirty;
 mod mm_resize;
 mod mm_wx;
 mod object;
@@ -39,6 +40,7 @@ const SUITES: &[(&str, Suite)] = &[
     ("pamet", mm_cow::TESTS),
     ("pamet", mm_wx::TESTS),
     ("pamet", mm_resize::TESTS),
+    ("pamet", mm_dirty::TESTS),
     ("platforma", crate::arch::TESTS),
     ("platforma", platform::TESTS),
     ("log", log::TESTS),

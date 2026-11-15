@@ -234,3 +234,33 @@ fn reopen_checks_rights_again() {
     let r2 = fs.reopen(r.dataset, r.oid, r.generation, access::READ, share::ALL);
     assert!(matches!(r2, Err(Error::NotFound | Error::AccessDenied)), "{r2:?}");
 }
+
+#[test]
+fn pinned_handle_ignores_share_modes_and_keeps_orphan() {
+    // fsd drzi interni handle pro mmap: zapisuje i pres handle klienta jen
+    // pro cteni, nebrani otevreni se zakazem zapisu, sirotek zustane.
+    let mut fs = new_fs(4096);
+    fs.create("/m", Kind::File).unwrap();
+    fs.write("/m", 0, b"abc").unwrap();
+    let h = fs.open("/m", access::READ, share::ALL).unwrap();
+    let pin = fs.pin_h(h).unwrap();
+    fs.close(h).unwrap();
+    // Jiny klient smi otevrit se zakazem zapisu (interni handle nema pristup).
+    let deny = fs.open("/m", access::READ, share::READ).unwrap();
+    fs.write_h(pin, 1, b"XY").unwrap();
+    assert_eq!(fs.read_h(pin, 0, 3).unwrap(), b"aXY");
+    fs.close(deny).unwrap();
+    // Povinny zamek jineho handlu interni zapis nezastavi.
+    let l = fs.open("/m", RW, share::ALL).unwrap();
+    fs.lock_range(l, 0, 10, true, true).unwrap();
+    fs.write_h(pin, 0, b"Z").unwrap();
+    fs.close(l).unwrap();
+    // Smazani: objekt zije, dokud interni handle neni zavreny.
+    fs.remove("/m").unwrap();
+    assert_eq!(fs.read_h(pin, 0, 3).unwrap(), b"ZXY");
+    fs.set_len_h(pin, 1).unwrap();
+    assert_eq!(fs.stat_h(pin).unwrap().size, 1);
+    fs.close(pin).unwrap();
+    assert_eq!(fs.pin_h(pin).err(), Some(Error::BadHandle));
+    assert_clean(&mut fs);
+}

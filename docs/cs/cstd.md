@@ -215,12 +215,18 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
   nahradí, co v rozsahu bylo; `MAP_FIXED_NOREPLACE` jen volné místo.
 - **`MAP_SHARED` anonymní** je v rámci procesu totéž co soukromá (`fork`
   není).
-- **Soubor:** objekt paměti z fsd ([Soubory jako paměť](souborovy-system.md#soubory-jako-paměť)):
-  `MAP_PRIVATE` = klon s kopií při zápisu bez kopírování obsahu,
-  `MAP_SHARED` jen pro čtení = přímo objekt (pozdější změny souboru se
-  neprojeví); prázdný, velký soubor nebo rozsah za koncem = načtení do
-  anonymní paměti jako dřív. `MAP_SHARED` se zápisem = `ENOTSUP`
-  **[navrženo]**. Roura nebo socket = `ENODEV`.
+- **Soubor:** okna objektů paměti z fsd ([Soubory jako paměť](souborovy-system.md#soubory-jako-paměť)):
+  `MAP_PRIVATE` = snímek (klon s kopií při zápisu bez kopírování obsahu),
+  `MAP_SHARED` = tytéž rámce ve všech procesech, zápis jde do souboru;
+  se zápisem jen pro fd `O_RDWR` (jinak `EACCES`). `read`/`write` vidí
+  mapování hned a naopak, `ftruncate` mění velikost namapovaného souboru,
+  přístup za konec souboru = `SIGBUS`. `msync(MS_SYNC)` zapíše zpět
+  a trvale, `MS_ASYNC` je jen žádost (fsd zapíše sám nejpozději za 30 s),
+  `munmap` celého mapování zapíše zpět. `MAP_FIXED` jde i do vlastní
+  rezervace `PROT_NONE`. `mremap` není. Soubor mimo fsd = načtení do
+  anonymní paměti (sdílený zápis pak `ENOTSUP`). Roura nebo socket =
+  `ENODEV`. **[ověřeno v QEMU]** x86_64 i aarch64 (kroky `mmap` a `fmap`,
+  sada `cstd`).
 - **W^X:** `PROT_EXEC` na nezapečetěné paměti jen s oprávněním JIT
   z manifestu ([sprava-pameti.md](sprava-pameti.md)), jinak `EACCES`.
 - `madvise(MADV_DONTNEED | MADV_FREE)` vrátí paměť a další čtení vrátí
@@ -557,9 +563,9 @@ Vlastního kódu ~11 000 řádků Rustu, převzatého ~14 000 řádků. Celá mu
    `munmap` i části, `mprotect`, `madvise(DONTNEED)` = decommit,
    `mseal` = pečeť. `PROT_EXEC` na nezapečetěné paměti jen s oprávněním
    JIT z manifestu (W^X, [sprava-pameti.md](sprava-pameti.md)), jinak
-   `EACCES`. `mmap` souboru: `MAP_PRIVATE` jen pro čtení načtením do
-   anonymní paměti; `MAP_SHARED` souboru = `ENOTSUP`, dokud fsd nedá VMO
-   souboru. `PROT_WRITE` nebo `PROT_EXEC` bez `PROT_READ` (v `mmap`
+   `EACCES`. `mmap` souboru: dnes okna VMO z fsd (soukromá i sdílená se
+   zápisem, viz výše).
+   `PROT_WRITE` nebo `PROT_EXEC` bez `PROT_READ` (v `mmap`
    i `mprotect`) znamená i čtení jako na Linuxu x86_64 a aarch64 (jádro
    stránku jen pro zápis nemá; wineserver tak mapuje `KUSER_SHARED_DATA`).
 7. **libc.a a libc.so** (otázky 1 a 2): `libc.a` (Rust `staticlib`)

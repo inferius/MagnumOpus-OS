@@ -23,6 +23,7 @@ systém (doporučeno na zkoušení), `--arch aarch64` = ARM.
 | se zvukem (Windows) | `cargo xtask run --release --audio dsound` |
 | ARM (aarch64) | `cargo xtask run --release --arch aarch64` |
 | čekat na ladicí GDB | `cargo xtask run --gdb` |
+| krokovat jádro bez optimalizace (debug jádro je jinak `opt-level` 2) | `cargo xtask run --gdb --kernel-opt 0` |
 | vlastní argumenty QEMU | `cargo xtask run --release -- -smp 8 -m 2G` |
 
 Restart v okně QEMU s WHPX se zasekne (chyba QEMU/WHPX) - okno zavřít
