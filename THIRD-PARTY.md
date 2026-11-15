@@ -299,7 +299,10 @@ over `libc.so`).
   instead of `fork`, the same pipe handshake),
   `0004-server-memfd-sections-magnumopus.patch` (paměť anonymních sekcí
   jako `memfd` místo dočasného souboru / anonymous section memory as a
-  `memfd` instead of a temporary file).
+  `memfd` instead of a temporary file),
+  `0005-ntdll-spawn-process-magnumopus.patch` (nový proces Windows přes
+  `posix_spawn` zavaděče místo dvojího `fork` / a new Windows process via
+  `posix_spawn` of the loader instead of a double `fork`).
 - **Popis / Description:** `docs/cs/windows-vrstva.md`,
   `docs/en/windows-layer.md`.
 
