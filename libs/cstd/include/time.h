@@ -51,6 +51,10 @@ struct tm *gmtime(const time_t *t);
 struct tm *localtime(const time_t *t);
 time_t mktime(struct tm *t);
 time_t timegm(struct tm *t);
+char *asctime(const struct tm *t);
+char *asctime_r(const struct tm *t, char *buf);
+char *ctime(const time_t *t);
+char *ctime_r(const time_t *t, char *buf);
 size_t strftime(char *buf, size_t max, const char *fmt, const struct tm *t);
 #ifndef _CSTD_LOCALE_T
 #define _CSTD_LOCALE_T

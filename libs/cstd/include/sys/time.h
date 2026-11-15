@@ -24,4 +24,8 @@ int utimes(const char *path, const struct timeval tv[2]);
 
 _CSTD_END
 
+/* select a fd_set jako glibc (sys/select.h vklada tuto hlavicku, strazce
+ * zacykleni zabrani). */
+#include <sys/select.h>
+
 #endif

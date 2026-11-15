@@ -54,6 +54,8 @@ pub fn available() -> bool {
     SESSION.get().is_some()
 }
 
+
+
 /// Jak otevrit soubor (odpovida `std::fs::OpenOptions`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct OpenOptions {
@@ -114,6 +116,7 @@ impl File {
         Ok(File { handle: opened.handle, pos: AtomicU64::new(0), append: false, path })
     }
 
+
     pub fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
         let data = session()?.read_h(self.handle, offset, buf.len())?;
         let n = data.len().min(buf.len());
@@ -173,6 +176,20 @@ impl File {
     /// Trvale ulozeni (`sync_all`/`sync_data`): fsync relace.
     pub fn sync(&self) -> Result<()> {
         session()?.fsync()
+    }
+
+    /// Proud bajtu nad souborem od aktualni pozice (stdin/stdout potomka,
+    /// fsproto `OPEN_STREAM`): `write` = zapis (soubor v rezimu append
+    /// pripojuje), jinak cteni do konce souboru. Pozice tohoto `File` se
+    /// nemeni (potomek ma vlastni).
+    pub fn open_stream(&self, write: bool) -> Result<Channel> {
+        use fsproto::v2::stream_mode;
+        let mode = match (write, self.append) {
+            (false, _) => stream_mode::READ,
+            (true, true) => stream_mode::APPEND,
+            (true, false) => stream_mode::WRITE,
+        };
+        session()?.open_stream(self.handle, mode, self.tell())
     }
 
     /// Zamek POSIX (`fcntl`/`flock`, viz `fsproto::v2::posix_lock`).

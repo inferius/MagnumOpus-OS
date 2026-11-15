@@ -27,6 +27,7 @@ mod serve_data;
 mod serve_hist;
 mod serve_perm;
 mod serve_v2;
+mod stream;
 mod tasks;
 
 use alloc::vec::Vec;
@@ -38,7 +39,7 @@ use libos::{Channel, Error, Signals, Startup, println, time};
 
 use crate::blkdev::BlkDev;
 use crate::serve::Service;
-use crate::serve_v2::{MAX_SESSIONS, Session, SessionOp};
+use crate::serve_v2::{Session, SessionOp};
 
 /// Jak casto ukladat zmeny commitem.
 const COMMIT_INTERVAL: Duration = Duration::from_secs(5);
@@ -162,6 +163,7 @@ fn main(startup: Startup) -> i64 {
         tasks: tasks::FsTasks::default(),
         orphan_cleanup: restart.map(|_| time::deadline_after(ORPHAN_GRACE)),
         posix: fs::posix_lock::PosixLocks::new(),
+        streams: Vec::new(),
     };
     if let Some(g) = restart {
         println!("fsd: nova instance po padu (generace {g}), sirotky uklidi za {} s", ORPHAN_GRACE.as_secs());
@@ -217,6 +219,15 @@ fn report_tasks(svc: &mut Service, idle: bool) {
 }
 
 fn serve(svc: &mut Service, client: Channel, control: Channel) {
+    let waiter = match libos::Waiter::new() {
+        Ok(w) => w,
+        Err(e) => {
+            println!("fsd: port nejde vytvorit: {e}");
+            return;
+        }
+    };
+    let (mut control_key, mut control_armed) = (0u64, false);
+    let (mut tasks_key, mut tasks_armed, mut tasks_raw) = (0u64, false, u32::MAX);
     let mut sessions: Vec<Session> = alloc::vec![Session::control(client)];
     let mut next_commit = time::deadline_after(COMMIT_INTERVAL);
     let mut next_history = time::deadline_after(HISTORY_INTERVAL);
@@ -246,20 +257,55 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
                 deadline = deadline.min(w.deadline);
             }
         }
+        // Cteci proud s plnou frontou: zkusit znovu za chvili.
+        if svc.streams.iter().any(stream::Stream::blocked) {
+            deadline = deadline.min(time::now().saturating_add(stream::RETRY));
+        }
+        // Registrace na portu: kazdy objekt, ktery ji nema (novy nebo po
+        // paketu), ji dostane znovu; uz splnene signaly doruci paket hned.
         let mask = Signals::READABLE | Signals::PEER_CLOSED;
-        let mut items: Vec<(&libos::Handle, Signals)> =
-            sessions.iter().map(|s| (s.channel.handle(), mask)).collect();
-        // Ridici kanal az za relacemi (indexy relaci se nemeni); zavreny
-        // (init skoncil) se neceka.
-        items.push((control.handle(), Signals::READABLE));
+        for s in sessions.iter_mut() {
+            arm(&waiter, s.channel.handle(), &mut s.key, &mut s.armed, mask);
+        }
+        for s in svc.streams.iter_mut() {
+            let m = s.signals();
+            arm(&waiter, s.chan.handle(), &mut s.key, &mut s.armed, m);
+        }
+        // Zavreny ridici kanal (init skoncil) uz paket nedoruci znovu.
+        arm(&waiter, control.handle(), &mut control_key, &mut control_armed, Signals::READABLE);
         if let Some(t) = &svc.tasks.chan {
-            items.push((t.handle(), Signals::READABLE));
+            // Novy kanal uloh (`tasks`) = novy klic.
+            let raw = t.handle().raw();
+            if raw != tasks_raw {
+                tasks_raw = raw;
+                tasks_key = 0;
+                tasks_armed = false;
+            }
+            arm(&waiter, t.handle(), &mut tasks_key, &mut tasks_armed, Signals::READABLE);
         }
         let mut quiet = false;
-        match libos::wait_many(&items, Some(deadline)) {
-            Ok(_) => {
+        match waiter.wait(Some(deadline)) {
+            Ok(fired) if fired.is_empty() => quiet = true,
+            Ok(fired) => {
+                // Klic bez objektu (zavrena relace, skonceny proud) se ignoruje.
+                for (key, _) in fired {
+                    if key == control_key {
+                        control_armed = false;
+                    } else if key == tasks_key {
+                        tasks_armed = false;
+                    } else if let Some(s) = sessions.iter_mut().find(|s| s.key == key) {
+                        s.armed = false;
+                    } else if let Some(s) = svc.streams.iter_mut().find(|s| s.key == key) {
+                        s.armed = false;
+                    }
+                }
+                // Obslouzit relace s paketem (a nove, ty maji `armed` false).
                 let mut i = 0;
                 while i < sessions.len() {
+                    if sessions[i].armed {
+                        i += 1;
+                        continue;
+                    }
                     match serve_session(svc, &mut sessions, i) {
                         Some(true) => {
                             idle = false;
@@ -280,11 +326,14 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
                     }
                 }
             }
-            Err(Error::TimedOut) => quiet = true,
             Err(e) => {
                 println!("fsd: chyba cekani: {e}");
                 break;
             }
+        }
+        if running && pump_streams(svc) {
+            idle = false;
+            changed = true;
         }
         if running {
             background(svc, &mut next_commit, &mut idle, &mut changed);
@@ -304,6 +353,42 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
     for mut s in sessions {
         svc.close_session(&mut s);
     }
+}
+
+/// Obnovi jednorazovou registraci objektu na portu smycky (klic dostane
+/// pri prvni). Chyba (pamet, rozpocet portu) = zkusi se v pristim kole;
+/// smycka se do te doby probudi nejpozdeji v terminu.
+fn arm(w: &libos::Waiter, h: &libos::Handle, key: &mut u64, armed: &mut bool, mask: Signals) {
+    if *armed {
+        return;
+    }
+    if *key == 0 {
+        *key = w.key();
+    }
+    match w.arm(h, *key, mask) {
+        Ok(()) => *armed = true,
+        Err(e) => println!("fsd: registrace na portu: {e}"),
+    }
+}
+
+/// Kolo vsech proudu; skoncene zavre. `true` = neco se zapsalo do souboru.
+fn pump_streams(svc: &mut Service) -> bool {
+    let Some(fs) = svc.fs.as_mut() else { return false };
+    let mut wrote = false;
+    let mut i = 0;
+    while i < svc.streams.len() {
+        match stream::pump(fs, &mut svc.streams[i]) {
+            Ok(w) => {
+                wrote |= w;
+                i += 1;
+            }
+            Err(()) => {
+                let s = svc.streams.remove(i);
+                let _ = fs.close(s.h);
+            }
+        }
+    }
+    wrote
 }
 
 /// Zpracuje vsechny cekajici pozadavky relace `i`. `Some(true)` = neco
@@ -354,15 +439,11 @@ fn serve_session(svc: &mut Service, sessions: &mut Vec<Session>, i: usize) -> Op
                 SessionOp::Revoke(_, name) => s.mounts.retain(|x| x.name != name),
             }
         }
-        let (reply, handles) = match new_session {
-            // Prilis mnoho relaci: novy kanal zahodit, klientovi chyba.
-            Some(_) if sessions.len() >= MAX_SESSIONS => (fsproto::reply(Err(Error::NoResources)), Vec::new()),
-            Some(s) => {
-                sessions.push(s);
-                (reply, handles)
-            }
-            None => (reply, handles),
-        };
+        // Pocet relaci omezuje jen pamet (rozpocet jobu fsd): smycka ceka
+        // pres port, ne pres `OBJECT_WAIT_MANY` (limit 64 objektu).
+        if let Some(s) = new_session {
+            sessions.push(s);
+        }
         // Chyba odeslani odpovedi nesmi ukoncit sluzbu (a s ni svazek bez
         // zaverecneho commitu): kdyz se odpoved nevejde, posle se misto ni
         // chyba. Konci se jen pri zavrenem kanalu.

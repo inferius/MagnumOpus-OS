@@ -676,6 +676,7 @@ dependencies = [
  "cbuild",
  "cstd-core",
  "libm",
+ "ttyproto",
  "tz",
  "uniprop",
 ]
@@ -1643,6 +1644,7 @@ dependencies = [
  "taskproto",
  "term",
  "theme",
+ "ttyproto",
  "wire",
  "yuv",
  "zeroize",
@@ -3243,6 +3245,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
+]
+
+[[package]]
+name = "ttyproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "wire",
 ]
 
 [[package]]

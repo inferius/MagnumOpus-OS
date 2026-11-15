@@ -40,7 +40,8 @@ pub unsafe extern "C" fn strpbrk(s: *const c_char, accept: *const c_char) -> *mu
     if unsafe { *s.add(n) } == 0 { core::ptr::null_mut() } else { unsafe { s.add(n) as *mut c_char } }
 }
 
-/// `strtok_r` (vlaknove bezpecna varianta; `strtok` zamerne neni).
+/// `strtok_r` (vlaknove bezpecna varianta; `strtok` se stavem vlakna je
+/// ve `fortify.rs`).
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn strtok_r(s: *mut c_char, delim: *const c_char, save: *mut *mut c_char) -> *mut c_char {
     // SAFETY: kontrakt C (s nebo *save je retezec).
@@ -113,6 +114,22 @@ pub unsafe extern "C" fn strcasecmp(a: *const c_char, b: *const c_char) -> c_int
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn strncasecmp(a: *const c_char, b: *const c_char, n: size_t) -> c_int {
     casecmp(a, b, n)
+}
+
+/// `ffs`: poradi nejnizsiho nastaveneho bitu od 1, 0 pro 0.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn ffs(v: c_int) -> c_int {
+    ffsll(i64::from(v))
+}
+
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn ffsl(v: core::ffi::c_long) -> c_int {
+    ffsll(v as i64)
+}
+
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn ffsll(v: i64) -> c_int {
+    if v == 0 { 0 } else { v.trailing_zeros() as c_int + 1 }
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
@@ -362,13 +379,43 @@ pub unsafe extern "C" fn readlink(path: *const c_char, _buf: *mut c_char, _n: si
     }
 }
 
-/// `ioctl`: terminal zatim nema ovladani (`ENOTTY`).
+/// `ioctl`: na socketu dotazy na rozhrani `SIOCGIF*` (`ifreq.rs`);
+/// terminal (`termios.rs`, `TCGETS` ... `TIOCSWINSZ`); jinak `ENOTTY`.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn ioctl(fd: c_int, _req: u64, _args: ...) -> c_int {
-    match crate::sys::status(fd) {
-        Ok(_) => errno::ret(Err(errno::ENOTTY)),
-        Err(e) => errno::ret(Err(e)),
+pub unsafe extern "C" fn ioctl(fd: c_int, req: u64, mut args: ...) -> c_int {
+    if let Err(e) = crate::sys::status(fd) {
+        return errno::ret(Err(e));
     }
+    if (crate::termios::TCGETS..=crate::termios::TIOCSWINSZ).contains(&req) {
+        // SAFETY: pozadavky terminalu maji jako argument ukazatel (TCFLSH
+        // cislo fronty ve stejnem registru).
+        let p = unsafe { args.next_arg::<*mut core::ffi::c_void>() };
+        // SAFETY: kontrakt C.
+        if let Some(r) = unsafe { crate::termios::ioctl(fd, req, p) } {
+            return errno::ret(r);
+        }
+        return errno::ret(Err(errno::ENOTTY));
+    }
+    // SIOCATMARK: data mimo poradi (OOB) netd neprenasi, znacka nikdy neni.
+    if req == crate::ifreq::SIOCATMARK && crate::sys::sock_is_stream(fd).is_ok() {
+        // SAFETY: argument SIOCATMARK je ukazatel na int.
+        let p = unsafe { args.next_arg::<*mut c_int>() };
+        if p.is_null() {
+            return errno::ret(Err(errno::EFAULT));
+        }
+        // SAFETY: kontrakt C.
+        unsafe { p.write_unaligned(0) };
+        return 0;
+    }
+    if crate::ifreq::is_iface_request(req) && crate::sys::sock_is_stream(fd).is_ok() {
+        // SAFETY: pozadavky SIOCGIF* maji jako argument ukazatel.
+        let p = unsafe { args.next_arg::<*mut core::ffi::c_void>() };
+        // SAFETY: kontrakt C.
+        if let Some(r) = unsafe { crate::ifreq::ioctl(req, p) } {
+            return errno::ret(r);
+        }
+    }
+    errno::ret(Err(errno::ENOTTY))
 }
 
 // --- uname ----------------------------------------------------------------------
@@ -392,11 +439,42 @@ pub unsafe extern "C" fn uname(u: *mut utsname) -> c_int {
         dst[n] = 0;
     };
     put(&mut u.sysname, "MagnumOpus");
-    put(&mut u.nodename, "magnumopus");
+    put(&mut u.nodename, HOSTNAME);
     put(&mut u.release, env!("CARGO_PKG_VERSION"));
     put(&mut u.version, "MagnumOpus");
     put(&mut u.machine, if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" });
     0
+}
+
+/// Jmeno pocitace (`uname().nodename`, `gethostname`). Jmeno site pocitac
+/// zatim nema nastavitelne.
+pub const HOSTNAME: &str = "magnumopus";
+
+/// `gethostname`: jmeno se zakoncenim nulou; kratky buffer = `ENAMETOOLONG`.
+///
+/// # Safety
+///
+/// `buf` ma `len` bajtu.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn gethostname(buf: *mut c_char, len: size_t) -> c_int {
+    if buf.is_null() {
+        return errno::ret(Err(errno::EFAULT));
+    }
+    if len < HOSTNAME.len() + 1 {
+        return errno::ret(Err(errno::ENAMETOOLONG));
+    }
+    // SAFETY: `buf` ma `len` >= delka + 1 bajtu.
+    unsafe {
+        core::ptr::copy_nonoverlapping(HOSTNAME.as_ptr(), buf, HOSTNAME.len());
+        *buf.add(HOSTNAME.len()) = 0;
+    }
+    0
+}
+
+/// `sethostname`: jmeno pocitace aplikace nemeni (`EPERM`).
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn sethostname(_name: *const c_char, _len: size_t) -> c_int {
+    errno::ret(Err(errno::EPERM))
 }
 
 // --- casy souboru a prostredky --------------------------------------------------

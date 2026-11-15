@@ -16,8 +16,9 @@
 //! - ochrana zasobniku (`__stack_chk_guard`, `__stack_chk_fail`) pro
 //!   priznak `-fstack-protector-strong`, se kterym se vsechno C preklada.
 //!
-//! Zamerne chybi funkce bez kontroly delky (`sprintf`, `gets`, `strtok`):
-//! kod, ktery je potrebuje, se musi upravit, ne prelozit.
+//! Funkce bez parametru delky (`sprintf`, `strtok`) tady nejsou; aplikace
+//! je maji v `cstd` s pojistkou, kde ji jde dat (`fortify.rs`: preteceni
+//! bufferu znamych rozmeru = `abort`). `gets` neni nikde (pojistka nejde).
 //!
 //! Crate nezavisi na libos (testy bezi na hostiteli). Program nastavi vystup
 //! a seminko kanarku na zacatku `main`, pred prvnim volanim kodu v C:

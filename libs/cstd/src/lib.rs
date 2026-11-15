@@ -30,23 +30,31 @@ pub mod dirent;
 pub mod dlfcn;
 pub mod errno;
 pub mod fenv;
+pub mod fortify;
+pub mod ifaddrs;
+pub mod ifreq;
 pub mod flock;
 pub mod fsat;
 pub mod locale;
 pub mod math;
+pub mod memfd;
 pub mod misc;
 pub mod mman;
 pub mod poll;
 pub mod scanf;
+pub mod semaphore;
 pub mod setjmp;
 pub mod signal;
 pub mod pthread;
 pub mod stat;
+pub mod statfs;
 pub mod statvfs;
 pub mod stdio;
 pub mod stdlib;
 pub mod socket;
+pub mod spawn;
 pub mod sys;
+pub mod termios;
 pub mod time;
 pub mod unistd;
 pub mod wchar;
@@ -77,6 +85,12 @@ mod fsat_tests;
 mod locale_tests;
 #[cfg(test)]
 mod wchar_tests;
+#[cfg(test)]
+mod posix_tests;
+#[cfg(test)]
+mod spawn_tests;
+#[cfg(test)]
+mod termios_tests;
 
 pub use cstd_core::ctypes::{c_char, c_int, c_long, c_uint, c_ulong, size_t};
 

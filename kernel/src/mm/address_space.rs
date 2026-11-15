@@ -295,8 +295,10 @@ impl AddressSpace {
         if max & !PROT != 0 || flags & PROT & !max != 0 {
             return Err(Error::InvalidArgs);
         }
+        // Zvetsitelny objekt smi mapovani pokryt az do kapacity; pristup za
+        // aktualni velikost je vypadek (vyjimka), jako mmap za koncem souboru.
         match vmo_offset.checked_add(len) {
-            Some(end) if end <= vmo.size() => {}
+            Some(end) if end <= vmo.capacity() => {}
             _ => return Err(Error::OutOfRange),
         }
 
@@ -350,6 +352,9 @@ impl AddressSpace {
         for off in (0..len).step_by(PAGE_SIZE as usize) {
             // Jen existujici stranky; ostatni doplni vypadek. Sdileny ramec
             // (kopie pri zapisu) jen pro cteni.
+            if !vmo.in_size(vmo_offset + off) {
+                continue;
+            }
             let Some((phys, own)) = vmo.page_state(vmo_offset + off) else {
                 continue;
             };
@@ -473,6 +478,10 @@ impl AddressSpace {
                     return Err(Error::BadAddress);
                 }
                 let off = m.vmo_offset + (pos - start);
+                // Za koncem zvetsitelneho objektu pamet neni (jako vypadek).
+                if !vmo.in_size(off) {
+                    return Err(Error::BadAddress);
+                }
                 if !matches!(vmo.page_state(off), Some((_, true))) {
                     need.try_reserve(1).map_err(|_| Error::NoMemory)?;
                     need.push((vmo.clone(), off));
@@ -536,6 +545,9 @@ impl AddressSpace {
             let in_page = (pos % PAGE_SIZE) as usize;
             let n = (PAGE_SIZE as usize - in_page).min(len - done);
             let vmo = m.vmo.as_ref().expect("overeno vyse");
+            if !vmo.in_size(m.vmo_offset + (pos - start)) {
+                return Err(Error::BadAddress);
+            }
             let page: PhysAddr = match vmo.page(m.vmo_offset + (pos - start)) {
                 Some(page) => page,
                 // Jen pro cteni (`f` do nulove stranky nepise).

@@ -1,0 +1,10 @@
+[package]
+name = "ttyproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protokol rizeni terminalu: rezim termios a velikost okna"
+
+[dependencies]
+abi = { workspace = true }
+wire = { path = "../wire" }

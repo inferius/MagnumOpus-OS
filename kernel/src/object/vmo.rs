@@ -17,9 +17,14 @@
 //! Kopie pri zapisu (`VMO_CLONE`, `cow.rs`): klon sdili ramce zdroje,
 //! prvni zapis kterehokoli vlastnika si udela kopii.
 //!
-//! Objekt nemeni velikost. Nulova stranka: kdyz ji nektere mapovani
-//! ukazuje (`zero_mapped`) a stranka pak vznikne jinou cestou, objekt ji
-//! vsem mapperum odmapuje (`AddressSpace::drop_zero_ptes`), aby nikdo
+//! Bezny objekt nemeni velikost; zvetsitelny (`VMO_RESIZABLE`, `resize.rs`)
+//! ma pevnou kapacitu (seznam stranek je na ni alokovany hned, takze ctenari
+//! bez zamku nikdy nevidi jeho presun) a aktualni velikost `len` mezi 0
+//! a kapacitou: slib a rozpocet jen za `len`, zmena `VMO_SET_SIZE`. Za
+//! koncem (`len`) nic nevznikne a vypadek tam je vyjimka. Nulova stranka:
+//! kdyz ji nektere mapovani ukazuje (`zero_mapped`) a stranka pak vznikne
+//! jinou cestou, objekt ji vsem mapperum odmapuje
+//! (`AddressSpace::drop_frame_ptes`), aby nikdo
 //! necetl stare nuly misto zapsanych dat. Souvisla a fyzicka pamet je vzdy
 //! cela pritomna (DMA ji potrebuje hned a na stalych adresach).
 //!
@@ -60,6 +65,7 @@ const SHARED: u64 = 4;
 const ENTRY_FLAGS: u64 = PAGE - 1;
 
 mod cow;
+mod resize;
 
 fn present(phys: PhysAddr) -> AtomicU64 {
     AtomicU64::new(phys.as_u64() | PRESENT)
@@ -103,7 +109,18 @@ enum Kind {
 
 pub struct MemoryObject {
     core: ObjectCore,
+    /// Kapacita (delka seznamu stranek); u bezneho objektu = velikost.
     size: u64,
+    /// Aktualni velikost (zvetsitelny objekt ji meni `set_size`; jinak
+    /// = `size`). Za ni stranky nevznikaji a pristup je chyba.
+    len: AtomicU64,
+    /// Zvetsitelny objekt (`VMO_RESIZABLE`)?
+    resizable: bool,
+    /// Rozpocet uzivatelske pameti za `len` zvetsitelneho objektu (meni se
+    /// s velikosti; u ostatnich prazdny). Pod zamkem i zmena velikosti.
+    resize_charge: SpinLock<Charge>,
+    /// Prave bezi zmena velikosti (`resize.rs`, serializace bez zamku).
+    resizing: AtomicBool,
     pages: PageList,
     /// Slibene stranky, ktere jeste nemaji ramec (vrati se `phys` v Drop).
     unbacked: AtomicU64,
@@ -144,6 +161,10 @@ impl MemoryObject {
         Self {
             core: ObjectCore::new(Signals::NONE),
             size,
+            len: AtomicU64::new(size),
+            resizable: false,
+            resize_charge: SpinLock::new(Charge::none()),
+            resizing: AtomicBool::new(false),
             pages,
             unbacked: AtomicU64::new(unbacked),
             zero_mapped: AtomicBool::new(false),
@@ -195,6 +216,49 @@ impl MemoryObject {
             }
         }
         Ok(Arc::new(Self::with(count * PAGE, pages, Kind::Pages, count, charges)))
+    }
+
+    /// Zvetsitelny objekt (`VMO_RESIZABLE`): kapacita `capacity` bajtu
+    /// (zaokrouhleno na stranky), aktualni velikost `size` bajtu. Rozpocet
+    /// jadra plati seznam stranek cele kapacity, slib a uzivatelska pamet
+    /// jen `size` (zmena `set_size`).
+    pub fn new_resizable(size: u64, capacity: u64, job: Option<&Arc<Job>>) -> Result<Arc<Self>, Error> {
+        if capacity == 0 || capacity > abi::vm::VMO_MAX_SIZE || size > capacity {
+            return Err(Error::InvalidArgs);
+        }
+        let cap = capacity.div_ceil(PAGE);
+        let count = size.div_ceil(PAGE);
+        let list_pages = (cap * core::mem::size_of::<AtomicU64>() as u64).div_ceil(PAGE);
+        if !phys::user_room(count.saturating_add(list_pages)) {
+            return Err(Error::NoMemory);
+        }
+        let charges = charge(job, cap, 0, 0)?;
+        let user = match job {
+            Some(j) => j.charge(Pool::User, count * PAGE)?,
+            None => Charge::none(),
+        };
+        if !phys::commit(count) {
+            return Err(Error::NoMemory);
+        }
+        let mut pages = match page_list(cap) {
+            Ok(p) => p,
+            Err(e) => {
+                phys::uncommit(count);
+                return Err(e);
+            }
+        };
+        for _ in 0..cap {
+            // Misto je rezervovane (`page_list`), push nealokuje.
+            if let Err(e) = pages.push(AtomicU64::new(0)) {
+                phys::uncommit(count);
+                return Err(e);
+            }
+        }
+        let mut o = Self::with(cap * PAGE, pages, Kind::Pages, count, charges);
+        o.len = AtomicU64::new(size);
+        o.resizable = true;
+        o.resize_charge = SpinLock::new(user);
+        Ok(Arc::new(o))
     }
 
     /// Pripnuty objekt (`VMO_PINNED`): vsechny stranky hned (nesouvisle,
@@ -356,9 +420,21 @@ impl MemoryObject {
         }
     }
 
+    /// Aktualni velikost (u zvetsitelneho objektu se meni, viz `len`).
     pub fn size(&self) -> u64 {
+        self.len.load(Ordering::SeqCst)
+    }
+
+    /// Kapacita: kam az smi mapovani (u bezneho objektu = velikost).
+    pub fn capacity(&self) -> u64 {
         self.size
     }
+
+    /// Lezi offset `offset` v aktualni velikosti objektu?
+    pub fn in_size(&self, offset: u64) -> bool {
+        offset < self.len.load(Ordering::SeqCst)
+    }
+
 
     /// Fyzicky rozsah mimo RAM (neni v prime mape, jadro do nej nepristupuje)?
     pub fn is_physical(&self) -> bool {
@@ -473,6 +549,9 @@ impl MemoryObject {
     /// po vzniku stranky, uvidel ji uz pritomnou; kdo pred, toho najde
     /// `forget_zero` (bere zamek jeho adresniho prostoru).
     pub fn commit_page_fast(&self, offset: u64) -> Result<Option<(PhysAddr, bool)>, Error> {
+        if !self.in_size(offset) {
+            return Err(Error::OutOfRange);
+        }
         let slot = self.pages.get((offset / PAGE) as usize).ok_or(Error::OutOfRange)?;
         let cur = slot.load(Ordering::SeqCst);
         if cur & SHARED != 0 {
@@ -487,6 +566,19 @@ impl MemoryObject {
         match slot.compare_exchange(0, frame.as_u64() | PRESENT, Ordering::SeqCst, Ordering::SeqCst) {
             Ok(_) => {
                 self.unbacked.fetch_sub(1, Ordering::AcqRel);
+                // Soubezne zmenseni (`set_size`) mohlo posunout konec pred
+                // tuto stranku po kontrole vyse. Zmenseni zverejni `len`
+                // pred uklidem stranek (SeqCst): bud stranku uvidi s ramcem
+                // a uvolni ji samo (pak se ji vratit nepovede), nebo ji
+                // vratime do stavu "slibena, bez ramce" a zmenseni pak slib
+                // zrusi jako u kazde stranky bez ramce.
+                if !self.in_size(offset) {
+                    if slot.compare_exchange(frame.as_u64() | PRESENT, 0, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+                        phys::free_committed(frame);
+                        self.unbacked.fetch_add(1, Ordering::AcqRel);
+                    }
+                    return Err(Error::OutOfRange);
+                }
                 Ok(Some((frame, true)))
             }
             Err(_) => {
@@ -616,7 +708,7 @@ impl MemoryObject {
 
     fn check_range(&self, offset: u64, len: u64) -> Result<(), Error> {
         match offset.checked_add(len) {
-            Some(end) if end <= self.size => Ok(()),
+            Some(end) if end <= self.size() => Ok(()),
             _ => Err(Error::OutOfRange),
         }
     }
@@ -733,6 +825,7 @@ impl KernelObject for MemoryObject {
     }
 
     fn default_rights(&self) -> Rights {
-        Rights::BASIC | Rights::READ | Rights::WRITE | Rights::MAP | Rights::EXECUTE | Rights::DMA
+        let base = Rights::BASIC | Rights::READ | Rights::WRITE | Rights::MAP | Rights::EXECUTE | Rights::DMA;
+        if self.resizable { base | Rights::RESIZE } else { base }
     }
 }

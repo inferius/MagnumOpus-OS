@@ -58,6 +58,11 @@ impl AddressSpace {
         let vmo = Arc::clone(vmo);
         let flags = m.flags;
         let off = m.vmo_offset + (va.as_u64() - start);
+        // Za koncem zvetsitelneho objektu (mapovani muze sahat az do
+        // kapacity): vyjimka s duvodem `BEYOND_END` (C: `SIGBUS`).
+        if !vmo.in_size(off) {
+            return Err(Error::OutOfRange);
+        }
         let table = inner.table.as_mut().ok_or(Error::BadState)?;
         let current = table.translate(va);
 

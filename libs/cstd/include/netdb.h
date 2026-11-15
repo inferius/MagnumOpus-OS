@@ -48,6 +48,29 @@ struct addrinfo {
 #define EAI_SYSTEM (-11)
 #define EAI_OVERFLOW (-12)
 
+/* Stare rozhrani prekladu jmen: gethostbyname a gethostbyaddr vraci NULL
+ * s h_errno = NO_RECOVERY (programy maji pouzit getaddrinfo). */
+struct hostent {
+    char *h_name;
+    char **h_aliases;
+    int h_addrtype;
+    int h_length;
+    char **h_addr_list;
+};
+#define h_addr h_addr_list[0]
+
+#define HOST_NOT_FOUND 1
+#define TRY_AGAIN 2
+#define NO_RECOVERY 3
+#define NO_DATA 4
+#define NO_ADDRESS NO_DATA
+
+int *__h_errno_location(void);
+#define h_errno (*__h_errno_location())
+struct hostent *gethostbyname(const char *name);
+struct hostent *gethostbyaddr(const void *addr, socklen_t len, int type);
+const char *hstrerror(int err);
+
 int getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res);
 void freeaddrinfo(struct addrinfo *res);
 const char *gai_strerror(int code);

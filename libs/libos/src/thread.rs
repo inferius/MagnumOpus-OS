@@ -31,6 +31,10 @@ impl JoinHandle {
         if self.tp != 0 {
             crate::loader::thread_tls_free(self.tp);
         }
+        // Zasobnik od volajiciho (`spawn_on_stack`) patri volajicimu.
+        if self.stack_len == 0 {
+            return Ok(());
+        }
         let me = Process::from_handle(crate::Handle::from_raw(rt::self_process()));
         let r = me.unmap(self.stack_addr, self.stack_len);
         // Handle na vlastni proces patri behovemu prostredi: nezavirat.
@@ -72,6 +76,18 @@ pub fn spawn_sized(name: &str, stack: u64, f: impl FnOnce() + Send + 'static) ->
     r
 }
 
+/// Jako [`spawn`], ale na zasobniku volajiciho (C `pthread_attr_setstack`):
+/// `stack_top` = konec pameti zasobniku (nejvyssi adresa + 1). Pamet patri
+/// volajicimu a musi zit do konce vlakna; `join` ji neuvolni. Ochranna
+/// oblast pod zasobnikem je vec volajiciho.
+pub fn spawn_on_stack(name: &str, stack_top: u64, f: impl FnOnce() + Send + 'static) -> Result<JoinHandle> {
+    let me = Process::from_handle(crate::Handle::from_raw(rt::self_process()));
+    let r = start_on(&me, name, stack_top & !15, f);
+    core::mem::forget(me);
+    let (thread, tp) = r?;
+    Ok(JoinHandle { thread, stack_addr: 0, stack_len: 0, tp })
+}
+
 fn spawn_in(me: &Process, name: &str, f: impl FnOnce() + Send + 'static) -> Result<JoinHandle> {
     spawn_stack(me, name, STACK_SIZE, f)
 }
@@ -80,22 +96,24 @@ fn spawn_stack(me: &Process, name: &str, stack: u64, f: impl FnOnce() + Send + '
     let len = stack.max(STACK_SIZE).next_multiple_of(crate::vm::page_size());
     let stack = Vmo::create(len)?;
     let (addr, total, stack_top) = crate::vm::map_stack(me, &stack, len)?;
-    let len = total;
-    let thread = match Thread::create(me, name) {
-        Ok(t) => t,
+    match start_on(me, name, stack_top, f) {
+        Ok((thread, tp)) => Ok(JoinHandle { thread, stack_addr: addr, stack_len: total, tp }),
         Err(e) => {
-            let _ = me.unmap(addr, len);
-            return Err(e);
+            let _ = me.unmap(addr, total);
+            Err(e)
         }
-    };
+    }
+}
+
+/// Vytvori a spusti vlakno se zasobnikem do `stack_top` (zarovnany na
+/// 16 B); vraci vlakno a ukazatel bloku TLS zavadece (0 = bez zavadece).
+fn start_on(me: &Process, name: &str, stack_top: u64, f: impl FnOnce() + Send + 'static) -> Result<(Thread, u64)> {
+    let thread = Thread::create(me, name)?;
     // x86_64: rsp % 16 == 8 jako po instrukci call; aarch64: sp % 16 == 0.
     let top = if cfg!(target_arch = "x86_64") { stack_top - 8 } else { stack_top };
     // Pod zavadecem dostane vlakno blok TLS vsech modulu (abi::loader).
     let tp = match crate::loader::thread_tls_new() {
-        Some(0) => {
-            let _ = me.unmap(addr, len);
-            return Err(abi::Error::NoMemory);
-        }
+        Some(0) => return Err(abi::Error::NoMemory),
         Some(tp) => tp,
         None => 0,
     };
@@ -107,8 +125,7 @@ fn spawn_stack(me: &Process, name: &str, stack: u64, f: impl FnOnce() + Send + '
         if tp != 0 {
             crate::loader::thread_tls_free(tp);
         }
-        let _ = me.unmap(addr, len);
         return Err(e);
     }
-    Ok(JoinHandle { thread, stack_addr: addr, stack_len: len, tp })
+    Ok((thread, tp))
 }

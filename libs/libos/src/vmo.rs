@@ -23,6 +23,25 @@ impl Vmo {
         sys::vmo_create_with(size, 0, abi::vm::VMO_PINNED).map(|h| Self(Handle::from_raw(h)))
     }
 
+    /// Zvetsitelny objekt pameti (`VMO_RESIZABLE`, C `memfd`): pocatecni
+    /// velikost `size`, nejvys `capacity` bajtu. Slib a rozpocet jen za
+    /// aktualni velikost; mapovani smi pokryt celou kapacitu, pristup za
+    /// koncem = vyjimka `BEYOND_END`.
+    pub fn create_resizable(size: u64, capacity: u64) -> Result<Self> {
+        sys::vmo_create_resizable(size, capacity, 0).map(|h| Self(Handle::from_raw(h)))
+    }
+
+    /// Zmeni velikost zvetsitelneho objektu (pravo `RESIZE`). Zmenseni
+    /// stranky za koncem uvolni a odmapuje u vsech mapovani.
+    pub fn set_size(&self, size: u64) -> Result<()> {
+        sys::vmo_set_size(self.handle().raw(), size)
+    }
+
+    /// Aktualni velikost v bajtech.
+    pub fn size(&self) -> Result<u64> {
+        sys::vmo_size(self.handle().raw())
+    }
+
     /// Objekt pameti na ucet jobu procesu `process` (rodic tak vytvari
     /// pamet potomka; potrebuje pravo `WRITE` na proces).
     pub fn create_for(size: u64, process: &crate::Process) -> Result<Self> {

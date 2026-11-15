@@ -24,6 +24,8 @@ tz = { path = "../tz" }
 libm = "0.2.16"
 # Tridy znaku a velikost pismen Unicode pro wctype.h (tabulky z UCD).
 uniprop = { path = "../uniprop" }
+# termios.h: zpravy ridiciho kanalu terminalu.
+ttyproto = { path = "../ttyproto" }
 
 [build-dependencies]
 # Cast knihovny v C (long double) jen pro cil magnumopus.

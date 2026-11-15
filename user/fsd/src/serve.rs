@@ -98,6 +98,8 @@ pub struct Service {
     pub orphan_cleanup: Option<u64>,
     /// Zamky POSIX (`fcntl`, `flock`); jen v pameti, restart je zahodi.
     pub posix: fs::posix_lock::PosixLocks,
+    /// Soubory jako proudy bajtu (`OPEN_STREAM`, `stream.rs`).
+    pub streams: Vec<crate::stream::Stream>,
 }
 
 /// Klic rozpracovaneho vypisu: (dataset, snapshot) u vypisu snapshotu

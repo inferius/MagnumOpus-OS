@@ -17,9 +17,21 @@ typedef uint32_t gid_t;
 typedef int32_t pid_t;
 typedef int64_t blksize_t;
 typedef int64_t blkcnt_t;
+#ifndef _CSTD_FSBLKCNT_T
+#define _CSTD_FSBLKCNT_T
+typedef unsigned long fsblkcnt_t;
+typedef unsigned long fsfilcnt_t;
+#endif
 typedef int64_t time_t;
 typedef int64_t suseconds_t;
 typedef int clockid_t;
+/* Typy BSD (stare porty). */
+typedef char *caddr_t;
+typedef unsigned char u_char;
+typedef unsigned short u_short;
+typedef unsigned int u_int;
+typedef unsigned long u_long;
+typedef long daddr_t;
 
 #ifndef _CSTD_TIMESPEC
 #define _CSTD_TIMESPEC

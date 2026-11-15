@@ -19,9 +19,6 @@ use crate::serve::{ListCache, Service, entries, stat};
 /// Kolik cisel docasneho jmena zkusit, nez REPLACE_BEGIN to vzda.
 const TEMP_TRIES: usize = 64;
 
-/// Nejvic soucasnych relaci (ochrana sluzby pred zahlcenim).
-pub const MAX_SESSIONS: usize = 64;
-
 /// Rozpracovane podminene ulozeni (handle docasneho souboru).
 pub struct Replace {
     target: String,
@@ -45,6 +42,10 @@ pub struct Session {
     pub control: bool,
     /// Odlozene `JOURNAL_WATCH` (odpoved posle hlavni smycka).
     pub watch: Option<crate::serve_hist::Watch>,
+    /// Klic registrace na portu hlavni smycky (0 = jeste nedostala).
+    pub key: u64,
+    /// Ceka registrace na portu (po paketu `false` -> obslouzit a obnovit).
+    pub armed: bool,
 }
 
 impl Session {
@@ -59,6 +60,8 @@ impl Session {
             mounts,
             control: false,
             watch: None,
+            key: 0,
+            armed: false,
         }
     }
 
@@ -172,7 +175,7 @@ impl Service {
         if (fsproto::perm::op::CONNECT_AS..=fsproto::perm::op::NOEXEC).contains(&opcode) {
             return Some(self.perm_op(sess, opcode, r));
         }
-        if !(op::HELLO..=op::REPLACE_ABORT).contains(&opcode) && opcode != op::REOPEN && opcode != op::POSIX_LOCK {
+        if !(op::HELLO..=op::REPLACE_ABORT).contains(&opcode) && !matches!(opcode, op::REOPEN | op::POSIX_LOCK | op::OPEN_STREAM) {
             return None;
         }
         Some(self.v2(sess, opcode, r))
@@ -312,6 +315,34 @@ impl Service {
                     }
                     _ => return Err(Error::InvalidArgs),
                 }
+            }
+            op::OPEN_STREAM => {
+                let h = Self::own(sess, r.u64()?)?;
+                let (mode, offset) = (r.u8()?, r.u64()?);
+                let need = match mode {
+                    fsproto::v2::stream_mode::READ => v2access::READ,
+                    fsproto::v2::stream_mode::WRITE | fsproto::v2::stream_mode::APPEND => v2access::WRITE,
+                    _ => return Err(Error::InvalidArgs),
+                };
+                // Proud smi jen to, co handle klienta.
+                fs.check_access_h(h, need)?;
+                if self.streams.len() >= crate::stream::MAX_STREAMS {
+                    return Err(Error::NoResources);
+                }
+                // Vlastni handle tehoz objektu: proud prezije zavreni relace.
+                let v = fs.revision_h(h)?;
+                let (own, _) = fs.reopen(v.dataset, v.oid, v.generation, need, fs::share::ALL)?;
+                let (ours, theirs) = match Channel::create() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let _ = fs.close(own);
+                        return Err(e);
+                    }
+                };
+                self.streams.push(crate::stream::Stream::new(ours, own, mode, offset));
+                let mut rep = Reply::body(w);
+                rep.handles.push(theirs.into_handle());
+                return Ok(rep);
             }
             op::READ_H => {
                 let h = Self::own(sess, r.u64()?)?;

@@ -11,9 +11,11 @@
 //! (`pthread_cancel` + body zruseni `pthread_testcancel`, cekani na
 //! podminku, `pthread_join`), asynchronni ne (rozhodnuti 5).
 
+mod attr;
 mod key;
 mod sync;
 
+pub use attr::*;
 pub use key::*;
 pub use sync::*;
 
@@ -92,60 +94,6 @@ pub fn thread_id() -> u32 {
     ((p >> 4) as u32) | 1
 }
 
-/// Atributy vlakna (`pthread_attr_t`, 64 B jako Linux).
-#[repr(C)]
-pub struct pthread_attr_t {
-    stack: usize,
-    detach: c_int,
-    _rest: [u8; 52],
-}
-
-#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn pthread_attr_init(a: *mut pthread_attr_t) -> c_int {
-    // SAFETY: kontrakt C.
-    unsafe { a.write(pthread_attr_t { stack: STACK_DEFAULT, detach: PTHREAD_CREATE_JOINABLE, _rest: [0; 52] }) };
-    0
-}
-
-#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub extern "C" fn pthread_attr_destroy(_a: *mut pthread_attr_t) -> c_int {
-    0
-}
-
-#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn pthread_attr_setstacksize(a: *mut pthread_attr_t, size: usize) -> c_int {
-    if size < STACK_MIN {
-        return errno::EINVAL;
-    }
-    // SAFETY: kontrakt C.
-    unsafe { (*a).stack = size };
-    0
-}
-
-#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn pthread_attr_getstacksize(a: *const pthread_attr_t, size: *mut usize) -> c_int {
-    // SAFETY: kontrakt C.
-    unsafe { *size = (*a).stack };
-    0
-}
-
-#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn pthread_attr_setdetachstate(a: *mut pthread_attr_t, s: c_int) -> c_int {
-    if s != PTHREAD_CREATE_JOINABLE && s != PTHREAD_CREATE_DETACHED {
-        return errno::EINVAL;
-    }
-    // SAFETY: kontrakt C.
-    unsafe { (*a).detach = s };
-    0
-}
-
-#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn pthread_attr_getdetachstate(a: *const pthread_attr_t, s: *mut c_int) -> c_int {
-    // SAFETY: kontrakt C.
-    unsafe { *s = (*a).detach };
-    0
-}
-
 /// Ukazatel, ktery smi do jineho vlakna (argument a popis pro C).
 struct SendPtr(usize);
 // SAFETY: jen prenos adresy; synchronizaci zajisti volajici (pthread).
@@ -172,9 +120,9 @@ pub unsafe extern "C" fn pthread_create(
         return errno::EINVAL;
     }
     // SAFETY: atributy jsou NULL nebo inicializovane (kontrakt C).
-    let (stack, detached) = match unsafe { attr.as_ref() } {
-        Some(a) => (a.stack.max(STACK_MIN), a.detach == PTHREAD_CREATE_DETACHED),
-        None => (STACK_DEFAULT, false),
+    let (stack, own, detached) = match unsafe { attr.as_ref() } {
+        Some(a) => (a.stack.max(STACK_MIN), a.own_stack(), a.detach == PTHREAD_CREATE_DETACHED),
+        None => (STACK_DEFAULT, None, false),
     };
     let info = Box::into_raw(Box::new(Info::new()));
     // SAFETY: cerstvy popis.
@@ -184,17 +132,18 @@ pub unsafe extern "C" fn pthread_create(
     // SAFETY: popis zije do join.
     let mut slot = unsafe { &*info }.join.lock().unwrap_or_else(|e| e.into_inner());
     let (pinfo, parg) = (SendPtr(info as usize), SendPtr(arg as usize));
-    let spawned = sys::spawn(
-        stack,
-        Box::new(move || {
-            let (pinfo, parg) = (pinfo, parg);
-            SELF.with(|c| c.set(pinfo.0 as *mut Info));
-            SELF_CREATED.with(|c| c.set(true));
-            // SAFETY: funkce a argument od volajiciho pthread_create.
-            let value = unsafe { start(parg.0 as *mut c_void) } as usize;
-            finish(value);
-        }),
-    );
+    let body: sys::ThreadFn = Box::new(move || {
+        let (pinfo, parg) = (pinfo, parg);
+        SELF.with(|c| c.set(pinfo.0 as *mut Info));
+        SELF_CREATED.with(|c| c.set(true));
+        // SAFETY: funkce a argument od volajiciho pthread_create.
+        let value = unsafe { start(parg.0 as *mut c_void) } as usize;
+        finish(value);
+    });
+    let spawned = match own {
+        Some(top) => sys::spawn_on(top, body),
+        None => sys::spawn(stack, body),
+    };
     match spawned {
         Ok(t) => {
             if !detached {

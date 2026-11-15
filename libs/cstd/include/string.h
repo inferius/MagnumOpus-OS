@@ -12,6 +12,8 @@ size_t strspn(const char *s, const char *accept);
 size_t strcspn(const char *s, const char *reject);
 char *strpbrk(const char *s, const char *accept);
 char *strtok_r(char *s, const char *delim, char **save);
+/* Stav per vlakno (TLS), jinak jako strtok_r. */
+char *strtok(char *s, const char *delim);
 char *strdup(const char *s);
 char *strndup(const char *s, size_t n);
 char *stpcpy(char *dst, const char *src);

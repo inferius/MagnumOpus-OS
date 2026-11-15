@@ -15,6 +15,8 @@ int atexit(void (*f)(void));
 char *getenv(const char *name);
 int setenv(const char *name, const char *value, int overwrite);
 int unsetenv(const char *name);
+/* Kopie retezce (pozdejsi zmena se do prostredi neprojevi). */
+int putenv(char *s);
 double strtod(const char *s, char **end);
 float strtof(const char *s, char **end);
 long double strtold(const char *s, char **end);

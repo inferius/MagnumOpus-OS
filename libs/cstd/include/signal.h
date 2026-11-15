@@ -45,6 +45,14 @@ typedef struct {
 #define SIGVTALRM 26
 #define SIGPROF 27
 #define SIGWINCH 28
+/* Cisla jako Linux; cstd je samo nevytvari (vychozi akce = konec). */
+#define SIGSTKFLT 16
+#define SIGXCPU 24
+#define SIGXFSZ 25
+#define SIGIO 29
+#define SIGPOLL SIGIO
+#define SIGPWR 30
+#define SIGSYS 31
 
 #define SIG_DFL ((sighandler_t)0)
 #define SIG_IGN ((sighandler_t)1)
@@ -73,14 +81,30 @@ typedef struct {
 #define MINSIGSTKSZ 8192
 #define SIGSTKSZ 32768
 
+/* 128 B jako Linux: od offsetu 16 adresa (vyjimky) nebo potomek (waitid). */
 typedef struct {
     int si_signo;
     int si_errno;
     int si_code;
     int __pad;
-    void *si_addr;
-    unsigned long __rest[13];
+    union {
+        void *__addr;
+        struct {
+            int __pid;
+            unsigned int __uid;
+            int __status;
+        } __chld;
+    } __si;
+    unsigned long __rest[12];
 } siginfo_t;
+#define si_addr __si.__addr
+#define si_pid __si.__chld.__pid
+#define si_uid __si.__chld.__uid
+#define si_status __si.__chld.__status
+
+#define CLD_EXITED 1
+#define CLD_KILLED 2
+#define CLD_DUMPED 3
 
 struct sigaction {
     union {

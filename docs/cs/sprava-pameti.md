@@ -16,6 +16,7 @@ z fsd. Rozložení adresního prostoru a ochrany (SMAP, NX) popisuje
 | 3 | `VMO_CLONE` (copy-on-write) a sdílený kód programů z initfs | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy `mm_cow`, sada `pamet`) |
 | 4 | `VMO_SEAL`, W^X s oprávněním „smí JIT“ (politika jobu, manifest), audit | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy `mm_wx`, sada `pamet`) |
 | 5 | API v libos (podklad `mmap` v `cstd`), ochranná oblast pod zásobníky | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `pamet`) |
+| 6 | zvětšitelný objekt paměti (`VMO_RESIZABLE`, `VMO_SET_SIZE`, `VMO_SIZE`), výjimka za koncem (`BEYOND_END`), paměťový fd v `cstd` | **[ověřeno v QEMU]** x86_64 i aarch64 (self-testy `mm_resize`, sada `cstd`: krok `memfd`, test `ctest memfd` dvou procesů) |
 
 ## Stránky na požádání
 
@@ -192,6 +193,34 @@ Silnější ochrana (spouštět jen kód zapečetěný důvěryhodným zavaděč
 podepsaný) je **[navrženo]** a patří k plánovaným podpisům programů
 (Secure Boot, brána spuštění - viz [architektura.md](architektura.md#bezpečnost));
 potřebuje k pečeti capability „smí vytvářet spustitelný kód“.
+
+## Zvětšitelný objekt paměti
+
+Běžný objekt paměti velikost nemění. Zvětšitelný (`VMO_CREATE` s
+`vm::VMO_RESIZABLE`, `libos::Vmo::create_resizable`; C `memfd_create`) má
+**kapacitu** pevnou od vytvoření a **velikost** mezi 0 a kapacitou:
+
+- Seznam stránek se alokuje hned na celou kapacitu (jádro platí 8 B na
+  stránku kapacity, rozpočet jádra jobu), takže čtenáři bez zámku nikdy
+  nevidí jeho přesun. Slib (`phys::commit`) a rozpočet uživatelské paměti
+  platí jen za aktuální velikost - model „slib při vytvoření, žádný OOM
+  kill“ zůstává: zvětšení nové stránky hned slíbí, nebo selže
+  (`NO_MEMORY`).
+- `VMO_SET_SIZE` (právo `RESIZE`) mění velikost. **Zmenšení** jde
+  v pořadí: zveřejnit novou velikost (výpadek za koncem pak selže; výpadek,
+  který mezitím stránku vytvořil, ji po kontrole vrátí sám), odmapovat
+  rozsah u všech mapperů (`drop_frame_ptes`, mapování zůstane), vyprázdnit
+  TLB a teprve pak uvolnit rámce a slib. Připnutá stránka za novým koncem
+  = `BAD_STATE`.
+- Mapování smí pokrýt celou kapacitu (jako `mmap` za konec souboru).
+  Výpadek za aktuální velikostí se nevyřeší: výjimka `PAGE_FAULT`
+  s důvodem `abi::exception::reason::BEYOND_END` v poli `reason` zprávy
+  (`Report`), knihovna C z ní udělá `SIGBUS`. Kopírování jádra
+  (`copy_to_user`) za koncem = `BAD_ADDRESS`, `VMO_READ`/`VMO_WRITE`
+  `OUT_OF_RANGE`.
+- `VMO_SIZE` vrátí aktuální velikost (C `fstat` v jiném procesu).
+  Sdílení mezi procesy je obyčejné `VM_MAP` téhož objektu (stejné rámce, ne
+  kopie); příjemce jen pro čtení dostane handle bez `WRITE` a `RESIZE`.
 
 ## API v libos
 

@@ -1,6 +1,7 @@
 /*
  * stdio.h - formatovany vystup (cstd). Standardni vystup je log programu
- * (po radcich). sprintf zamerne chybi: pouzijte snprintf.
+ * (po radcich). sprintf tady neni (sluzby no_std: snprintf); aplikace ho
+ * maji v cstd s pojistkou proti preteceni (fortify.rs).
  */
 #ifndef _STDIO_H
 #define _STDIO_H

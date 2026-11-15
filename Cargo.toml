@@ -45,6 +45,7 @@ members = [
     "libs/inputproto",
     "libs/guiproto",
     "libs/clipproto",
+    "libs/ttyproto",
     "libs/svcclient",
     "libs/venus",
     "libs/spirv",

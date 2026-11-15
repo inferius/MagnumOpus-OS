@@ -35,6 +35,7 @@ _CSTD_BEGIN
 #define _CSTD_NO_FORK __attribute__((__deprecated__("MagnumOpus: no fork/exec, use posix_spawn")))
 
 int close(int fd);
+_CSTD_NORETURN void _exit(int code);
 ssize_t read(int fd, void *buf, size_t n);
 ssize_t write(int fd, const void *buf, size_t n);
 ssize_t pread(int fd, void *buf, size_t n, off_t off);
@@ -54,9 +55,14 @@ int unlink(const char *path);
 int rmdir(const char *path);
 char *getcwd(char *buf, size_t size);
 int chdir(const char *path);
+int fchdir(int fd);
 int access(const char *path, int mode);
 long sysconf(int name);
 int getpagesize(void);
+/* Jmeno pocitace = uname().nodename; zmena = EPERM. */
+int gethostname(char *buf, size_t len);
+int sethostname(const char *name, size_t len);
+#define HOST_NAME_MAX 64
 pid_t getpid(void);
 uid_t getuid(void);
 uid_t geteuid(void);
@@ -68,6 +74,13 @@ ssize_t readlink(const char *path, char *buf, size_t n);
 int symlink(const char *target, const char *path);
 int link(const char *old, const char *path);
 pid_t getppid(void);
+/* Skupiny procesu nejsou: proces vede vlastni relaci i skupinu. */
+pid_t setsid(void);
+pid_t getsid(pid_t pid);
+pid_t getpgid(pid_t pid);
+pid_t getpgrp(void);
+int setpgid(pid_t pid, pid_t pgid);
+int setpgrp(void);
 unsigned alarm(unsigned secs);
 int pause(void);
 unsigned sleep(unsigned secs);

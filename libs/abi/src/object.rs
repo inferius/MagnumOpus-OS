@@ -60,10 +60,14 @@ impl Rights {
     /// tak rozhoduje, jestli ho smi cist nebo zapisovat zarizeni; ma ho
     /// vychozi handle objektu pameti.
     pub const DMA: Self = Self(1 << 12);
+    /// Menit velikost zvetsitelneho objektu pameti (`VMO_SET_SIZE`). Ma ho
+    /// jen vychozi handle objektu s `VMO_RESIZABLE`; predat ho je volba
+    /// odesilatele (prijemce jen pro cteni ho nedostane).
+    pub const RESIZE: Self = Self(1 << 13);
 
     pub const BASIC: Self = Self(Self::DUPLICATE.0 | Self::TRANSFER.0 | Self::WAIT.0);
     /// Vsechna prava (jen jako horni mez, napr. "zachovat prava" pri duplikaci).
-    pub const ALL: Self = Self((1 << 13) - 1);
+    pub const ALL: Self = Self((1 << 14) - 1);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0

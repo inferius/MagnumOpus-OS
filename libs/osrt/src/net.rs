@@ -55,6 +55,22 @@ pub fn session_channel() -> Option<Channel> {
     Some(Channel::from_handle(h))
 }
 
+/// Sitove rozhrani relace (C `getifaddrs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Interface {
+    pub mac: [u8; 6],
+    pub mtu: u16,
+    pub link_up: bool,
+    /// Adresa a delka prefixu (bez adresy = rozhrani bez konfigurace).
+    pub addr: Option<(IpAddr, u8)>,
+}
+
+/// Rozhrani site (netd ma jedno). Relace bez prava `INFO` = `AccessDenied`.
+pub fn interface() -> Result<Interface> {
+    let i = session()?.lock().info()?;
+    Ok(Interface { mac: i.mac, mtu: i.mtu, link_up: i.link_up, addr: i.addr })
+}
+
 /// Preklad jmena na adresy (netd -> dnsd).
 pub fn resolve(host: &str) -> Result<Vec<IpAddr>> {
     session()?.lock().resolve(host)

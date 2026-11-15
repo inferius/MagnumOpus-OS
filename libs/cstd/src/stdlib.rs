@@ -31,6 +31,12 @@ pub extern "C" fn _Exit(code: c_int) -> ! {
     std::process::exit(code)
 }
 
+/// `_exit` (unistd.h) = `_Exit`.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn _exit(code: c_int) -> ! {
+    _Exit(code)
+}
+
 /// Zaregistruje funkci pro konec procesu (spolecne poradi s `__cxa_atexit`); 0 = OK.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn atexit(f: extern "C" fn()) -> c_int {
@@ -99,6 +105,38 @@ pub unsafe extern "C" fn setenv(name: *const c_char, value: *const c_char, overw
     // SAFETY: prostredi procesu meni jen tato knihovna a std (osrt drzi
     // promenne pod zamkem, cteni z jinych vlaken je bezpecne).
     unsafe { std::env::set_var(n, v) };
+    0
+}
+
+/// `putenv("JMENO=HODNOTA")`: nastavi promennou (kopii - pozdejsi zmena
+/// retezce volajicim se do prostredi neprojevi, jinak nez v glibc);
+/// retezec bez `=` promennou smaze (jako glibc).
+///
+/// # Safety
+///
+/// `s` je retezec C.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn putenv(s: *mut c_char) -> c_int {
+    if s.is_null() {
+        crate::errno::set(crate::errno::EINVAL);
+        return -1;
+    }
+    // SAFETY: retezec C.
+    let b = unsafe { c_bytes(s) };
+    let Some(eq) = b.iter().position(|&c| c == b'=') else {
+        // SAFETY: retezec C.
+        return unsafe { unsetenv(s) };
+    };
+    let (Ok(n), v) = (core::str::from_utf8(&b[..eq]), &b[eq + 1..]) else {
+        crate::errno::set(crate::errno::EINVAL);
+        return -1;
+    };
+    if n.is_empty() {
+        crate::errno::set(crate::errno::EINVAL);
+        return -1;
+    }
+    // SAFETY: viz setenv.
+    unsafe { std::env::set_var(n, os_str(v)) };
     0
 }
 

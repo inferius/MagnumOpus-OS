@@ -336,7 +336,7 @@ se zapíšou potřebné velikosti), `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`,
 
 ### `VMO_CREATE`
 
-`(size, process, flags) -> handle`. Objekt paměti o velikosti `size`
+`(size, process, flags, capacity) -> handle`. Objekt paměti o velikosti `size`
 (zaokrouhleno na 4 KiB, max. 1 TiB), vyplněný nulami. Celá velikost se hned slíbí
 (rozpočet uživatelské paměti jobu a globální strop paměti programů), rámce
 vzniknou až při prvním zápisu ([sprava-pameti.md](sprava-pameti.md)).
@@ -344,8 +344,11 @@ Strhne se z rozpočtu uživatelské paměti jobu procesu `process`
 (handle s právem `WRITE`; 0 = volající). Rodič tak vytváří paměť programu
 (segmenty, zásobník) na účet potomka. `flags`: 0, nebo `vm::VMO_PINNED`
 (1) = všechny stránky hned a připnuté pro DMA, strhne se navíc rozpočet
-`DMA` a objekt nejde zapečetit ([dma.md](dma.md#připnutá-paměť)). Práva:
-`DUPLICATE`, `TRANSFER`, `WAIT`, `READ`, `WRITE`, `MAP`, `EXECUTE`, `DMA`.
+`DMA` a objekt nejde zapečetit ([dma.md](dma.md#připnutá-paměť)), nebo
+`vm::VMO_RESIZABLE` (2) = zvětšitelný objekt s kapacitou `capacity` (viz
+[`VMO_SET_SIZE`](#vmo_set_size); s `VMO_PINNED` nejde). Práva:
+`DUPLICATE`, `TRANSFER`, `WAIT`, `READ`, `WRITE`, `MAP`, `EXECUTE`, `DMA`,
+u zvětšitelného navíc `RESIZE`.
 Chyby: `INVALID_ARGS` (0, příliš velký, neznámá volba), `NO_MEMORY`, `NO_RESOURCES` (rozpočet jobu), `BAD_HANDLE`,
 `ACCESS_DENIED`, `WRONG_TYPE` (`process`). `NO_MEMORY` znamená i to, že
 se tolik paměti nedá slíbit (strop = volná RAM bez rezervy jádra a bez
@@ -377,6 +380,37 @@ pečeť nic nedělá. Bez oprávnění JIT jde spouštět jen zapečetěná pam�
 `BAD_STATE` (objekt má mapování, které smí zapisovat - i jen jako nejvyšší
 právo), `NOT_SUPPORTED` (souvislý, DMA nebo fyzický objekt),
 `BAD_HANDLE`, `ACCESS_DENIED`, `WRONG_TYPE`.
+
+### `VMO_SET_SIZE`
+
+**[ověřeno v QEMU]** (self-testy jádra `pamet`: zvětšitelný objekt).
+`(vmo, size) -> 0`. Změní velikost zvětšitelného objektu
+(`vm::VMO_RESIZABLE`) na `size` bajtů, nejvýš kapacita. Seznam stránek
+má od vytvoření délku kapacity (jádro platí 8 B na stránku kapacity),
+slib a rozpočet uživatelské paměti jobu jen aktuální velikost:
+**zvětšení** nové stránky hned slíbí (nedostatek = `NO_MEMORY` /
+`NO_RESOURCES`, nikdy OOM při výpadku), **zmenšení** stránky za koncem
+odmapuje u všech mapování (mapování samo zůstane), vyprázdní TLB a pak
+uvolní rámce i slib. Mapování smí pokrýt celou kapacitu; přístup za
+aktuální velikost je výjimka `PAGE_FAULT` s důvodem `reason::BEYOND_END`
+(C: `SIGBUS`, jako přístup za konec souboru v `mmap`), čtení a zápis
+jádrem (`VMO_READ`/`VMO_WRITE`) za koncem `OUT_OF_RANGE`. Nová část po
+zmenšení a zvětšení je nulová. Vyžaduje `RESIZE` (má ho jen výchozí handle
+zvětšitelného objektu; příjemce jen pro čtení ho nedostane). Chyby:
+`NOT_SUPPORTED` (objekt bez `VMO_RESIZABLE`), `OUT_OF_RANGE` (nad
+kapacitu), `BAD_STATE` (za novým koncem je připnutá stránka,
+`VMO_PHYS_ADDR`), `ACCESS_DENIED` (zapečetěný objekt, chybí právo),
+`NO_MEMORY`, `NO_RESOURCES`, `BAD_HANDLE`, `WRONG_TYPE`.
+
+Čísla 76 a 77 jsou vyhrazená pro jiné větve (`THREAD_INTERRUPT`,
+`PROCESS_MEMORY`); jádro bez nich vrací `BAD_SYSCALL`.
+
+### `VMO_SIZE`
+
+**[ověřeno v QEMU]** (self-testy jádra `pamet`). `(vmo) -> size`. Aktuální
+velikost objektu paměti v bajtech (u běžného objektu pevná, u
+zvětšitelného podle `VMO_SET_SIZE`; C `fstat` paměťového fd v jiném
+procesu). Stačí jakékoli právo. Chyby: `BAD_HANDLE`, `WRONG_TYPE`.
 
 ### `VMO_READ`
 

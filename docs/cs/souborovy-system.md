@@ -1468,7 +1468,8 @@ match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
 - **Relace:** `CONNECT` vrátí nový kanál; každá relace má vlastní handly
   (handle cizí relace = `BAD_HANDLE`). Zavření kanálu zavře všechny
   handly relace: sirotci zmizí, zámky se uvolní, dočasné soubory
-  podmíněného uložení se smažou. Nejvýš 64 relací (`NO_RESOURCES`). Zavření
+  podmíněného uložení se smažou. Počet relací omezuje jen paměť: smyčka fsd
+  čeká přes port (`libos::Waiter`), ne přes `OBJECT_WAIT_MANY`. Zavření
   hlavního kanálu (ze startovní zprávy) službu ukončí.
 - **Zápis = přijato:** odpověď `WRITE_H` říká, kolik bajtů služba přijala
   (jsou v bufferu, trvalé až po `FSYNC`). Zápis rozdělený do více zpráv je
@@ -1701,6 +1702,21 @@ zůstávají. Z receptu systému se nezužuje. Jinak `ACCESS_DENIED`.
 | 31 | `CONNECT` | příznaky u32 (1 = řídicí, jen z řídicí relace) | nová relace (handle) |
 | 118 | `REOPEN` | dataset u64, oid u64, generace u64, přístup u8, sdílení u8 | handle u64, `Stat`, `Revision` (jako `OPEN`) |
 | 119 | `POSIX_LOCK` | handle u64, příkaz u8 (`TEST` 0, `SET` 1, `SET_WAIT` 2, `UNLOCK` 3), třída u8 (`FCNTL` 0, `FLOCK` 1), výhradní u8, od u64, délka u64 (0 = do konce) | výsledek u8: `DONE` 0, `CONFLICT` 1 + výhradní u8, od u64, délka u64; `DEADLOCK` 2 |
+| 120 | `OPEN_STREAM` | handle u64, režim u8 (`READ` 0, `WRITE` 1, `APPEND` 2), pozice u64 | kanál proudu bajtů (handle ve zprávě) |
+
+**`OPEN_STREAM`** **[ověřeno v QEMU]** (sada `cstd`, krok `posix2`:
+výstup potomka `posix_spawn` do souboru a 200 000 bajtů souboru na jeho
+stdin): soubor jako proud bajtů pro stdin/stdout potomka (blok parametrů
+procesu nese jen kanály proudu, [cstd](cstd.md#procesy-posix_spawn-a-waitpid)).
+Proud smí jen to, co handle klienta (čtení / zápis); fsd si otevře
+vlastní handle téhož objektu (`reopen`), takže proud přežije zavření
+relace klienta. Obsluhuje ho hlavní smyčka fsd vedle relací
+(`user/fsd/src/stream.rs`): čtení posílá kusy po 60 KiB, dokud se fronta
+kanálu nezaplní, pak zkouší znovu po 2 ms (kanál nemá signál
+„zapisovatelný“) a na konci souboru kanál zavře; zápis bere zprávy
+kanálu a zapisuje je od pozice (`APPEND` na konec). Nejvýš 16 proudů;
+relace a proudy dohromady nejvýš 62 (limit `OBJECT_WAIT_MANY` 64 bez
+řídicího kanálu a kanálu úloh). Restart fsd proudy ukončí.
 
 Relace s lístkem dnes: init (řídicí), `fwd` (`/config`). Relace pro
 `dnsd`, `ntpd` (úložiště certifikátů) a `revocd` zatím lístek nemají -
