@@ -26,6 +26,7 @@ const _: () = assert!(
         && fs::avail::OWNER == fsproto::avail::OWNER
         && fs::avail::TREE == fsproto::avail::TREE
         && fs::avail::RIGHTS == fsproto::avail::RIGHTS
+        && fs::avail::MODE == fsproto::avail::MODE
         && fs::avail::ALL == fsproto::avail::ALL
 );
 
@@ -45,6 +46,7 @@ pub(crate) fn stat(s: fs::Stat) -> Stat {
         btime: s.btime,
         owner: s.owner,
         rights: s.rights,
+        mode: s.mode,
         tree_bytes: s.tree_bytes,
         tree_files: s.tree_files,
         tree_dirs: s.tree_dirs,
@@ -325,7 +327,13 @@ impl Service {
                     kind::DIR => Kind::Dir,
                     _ => return Err(Error::InvalidArgs),
                 };
+                let mode = r.u16().ok();
                 fs.create(&path, k)?;
+                // Mod pri vytvoreni (`mkdir`) zdedene granty jen zuzi; ve
+                // stejnem pozadavku, takze nikdo jiny objekt sirsi nevidi.
+                if let Some(m) = mode {
+                    fs.set_mode(&path, m, false)?;
+                }
             }
             op::REMOVE => fs.remove(&sess.map(&r.str()?, true)?)?,
             op::RENAME => {

@@ -97,6 +97,7 @@ fn stat_md(m: &fs::Metadata) -> Stat {
         uid: 0,
         readable: true,
         writable: !m.permissions().readonly(),
+        mode: None,
     }
 }
 
@@ -386,6 +387,15 @@ pub fn list_dir(fd: i32) -> R<Vec<Entry>> {
 
 pub fn mkdir(p: &[u8]) -> R<()> {
     fs::create_dir(path(p)?).map_err(io)
+}
+
+pub fn mkdir_mode(p: &[u8], _mode: u16) -> R<()> {
+    mkdir(p)
+}
+
+/// `chmod` na hostiteli: jen existence (prava hostitele se nemeni).
+pub fn chmod(p: &[u8], _mode: u16) -> R<()> {
+    stat(p).map(|_| ())
 }
 
 pub fn unlink(p: &[u8]) -> R<()> {

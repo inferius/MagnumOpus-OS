@@ -34,6 +34,7 @@ fn stat_of(s: &rt::fs::Stat) -> Stat {
         uid: s.owner,
         readable: s.rights & r != 0,
         writable: s.rights & w != 0,
+        mode: (s.known & rt::fs::avail::MODE != 0).then_some(s.mode),
     }
 }
 
@@ -52,6 +53,7 @@ pub fn open(path: &[u8], o: &OpenFlags) -> R<i32> {
             truncate: o.trunc,
             create: o.create && !o.excl,
             create_new: o.create && o.excl,
+            mode: o.mode,
         };
         let f = File::open(path, &opts).map_err(e)?;
         // Adresar otevreny jen pro cteni je v POSIX povoleny (fdopendir).
@@ -256,6 +258,18 @@ pub fn list_dir(fd: i32) -> R<Vec<Entry>> {
 
 pub fn mkdir(path: &[u8]) -> R<()> {
     rt::fs::create_dir(path).map_err(e)
+}
+
+pub fn mkdir_mode(path: &[u8], mode: u16) -> R<()> {
+    rt::fs::create_dir_mode(path, mode).map_err(e)
+}
+
+/// `chmod`: bez prava `MANAGE` = `EPERM` (POSIX: neni vlastnik).
+pub fn chmod(path: &[u8], mode: u16) -> R<()> {
+    rt::fs::set_mode(path, mode).map_err(|err| match err {
+        rt::Error::AccessDenied => errno::EPERM,
+        other => e(other),
+    })
 }
 
 pub fn unlink(path: &[u8]) -> R<()> {

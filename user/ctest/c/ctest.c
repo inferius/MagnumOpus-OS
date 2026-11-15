@@ -24,6 +24,7 @@ int wchar_test(const char *dir);
 int posix2_test(const char *dir);
 int inherit_test(const char *dir);
 int unix_test(const char *dir);
+int mode_test(const char *dir);
 int termios_test(const char *dir);
 int memfd_test(void);
 int memfd_main(const char *side);
@@ -176,6 +177,9 @@ int main(int argc, char **argv) {
     int ux = dir != NULL ? unix_test(dir) : -1;
     if (ux != 0) fprintf(stderr, "ctest unix: krok %d errno %d\n", ux, errno);
     CHECK("unix", ux == 0);
+    int md = dir != NULL ? mode_test(dir) : -1;
+    if (md != 0) fprintf(stderr, "ctest mode: krok %d errno %d\n", md, errno);
+    CHECK("mode", md == 0);
     int tt = dir != NULL ? termios_test(dir) : -1;
     if (tt != 0) fprintf(stderr, "ctest termios: krok %d errno %d\n", tt, errno);
     CHECK("termios", tt == 0);

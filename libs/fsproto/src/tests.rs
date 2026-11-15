@@ -17,6 +17,7 @@ fn stat(known: u16, hidden: u16) -> Stat {
         btime: WallTime { secs: 1_600_000_000, nanos: 0 },
         owner: 1000,
         rights: 0x1f,
+        mode: 0o750,
         tree_bytes: 0,
         tree_files: 0,
         tree_dirs: 0,

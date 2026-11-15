@@ -219,10 +219,16 @@ impl Service {
                 let writes = access & (v2access::WRITE | v2access::DELETE) != 0
                     || flags & (open_flags::CREATE | open_flags::TRUNCATE) != 0;
                 let path = sess.map(&raw, writes)?;
+                let mode = if flags & open_flags::MODE != 0 { Some(r.u16()?) } else { None };
                 if flags & open_flags::CREATE != 0 {
                     let kind = if flags & open_flags::DIR != 0 { fs::Kind::Dir } else { fs::Kind::File };
                     match fs.create(&path, kind) {
-                        Ok(()) => {}
+                        // Mod jen pro objekt vytvoreny tady (zuzi zdedene granty).
+                        Ok(()) => {
+                            if let Some(m) = mode {
+                                fs.set_mode(&path, m, false)?;
+                            }
+                        }
                         Err(Error::AlreadyExists) if flags & open_flags::EXCL == 0 => {}
                         Err(e) => return Err(e),
                     }

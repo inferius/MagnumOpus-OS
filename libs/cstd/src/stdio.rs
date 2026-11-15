@@ -398,6 +398,8 @@ impl Mode {
             create: self.create,
             excl: self.create_new,
             trunc: self.truncate,
+            // fopen vytvari s 0666 po umask (POSIX).
+            mode: self.create.then(|| crate::stat::masked(0o666)),
             ..sys::OpenFlags::default()
         }
     }

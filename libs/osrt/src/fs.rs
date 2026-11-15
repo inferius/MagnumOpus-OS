@@ -15,7 +15,7 @@ use libos::Channel;
 
 pub use fsproto::perm::{Acl, EVERYONE, Grant, Permissions, rights};
 pub use fsproto::v2::PosixLock;
-pub use fsproto::{DirEntry, Stat, kind};
+pub use fsproto::{DirEntry, Stat, avail, kind};
 
 use crate::start::Init;
 use crate::{Error, Result};
@@ -83,6 +83,9 @@ pub struct OpenOptions {
     pub truncate: bool,
     pub create: bool,
     pub create_new: bool,
+    /// Mod POSIX noveho souboru (9 bitu, jen zuzi zdedene granty; C
+    /// `open(O_CREAT, mode)`). `None` = jen zdedit.
+    pub mode: Option<u16>,
 }
 
 /// Otevreny soubor nebo adresar (handle relace; soubor prezije
@@ -119,7 +122,10 @@ impl File {
         }
         // Zapis do souboru potrebuje pravo zapisu (std: truncate/create
         // bez write = chyba InvalidInput, overuje std samo).
-        let opened = session()?.open(&path, acc, share::ALL, flags)?;
+        let opened = match o.mode {
+            Some(m) if flags & open_flags::CREATE != 0 => session()?.open_mode(&path, acc, share::ALL, flags, m)?,
+            _ => session()?.open(&path, acc, share::ALL, flags)?,
+        };
         Ok(File { handle: opened.handle, pos: AtomicU64::new(0), append: o.append, path })
     }
 
@@ -276,6 +282,16 @@ pub fn read_dir(path: &[u8]) -> Result<(String, Vec<DirEntry>)> {
 
 pub fn create_dir(path: &[u8]) -> Result<()> {
     session()?.create(&crate::env::resolve(path)?, kind::DIR)
+}
+
+/// `mkdir(path, mode)`: mod jen zuzi zdedene granty (v jednom kroku).
+pub fn create_dir_mode(path: &[u8], mode: u16) -> Result<()> {
+    session()?.create_mode(&crate::env::resolve(path)?, kind::DIR, mode)
+}
+
+/// `chmod`: mod POSIX jako granty (pravo `MANAGE`, smi rozsirit).
+pub fn set_mode(path: &[u8], mode: u16) -> Result<()> {
+    session()?.set_mode(&crate::env::resolve(path)?, mode, true)
 }
 
 /// Smaze soubor (adresar odmitne: `IsADirectory`).

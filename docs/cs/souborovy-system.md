@@ -1328,7 +1328,7 @@ větší požadavky rozdělí.
 | op | Název | Parametry | Výsledek |
 |---|---|---|---|
 | 1 | `INFO` | - | jméno svazku, velikost bloku, bloky, volné, odložené, generace, algoritmus, návrat, přehráno |
-| 2 | `STAT` | cesta | `Stat` (oid, druh, velikost, mtime, ctime, btime, vlastník, práva, souhrny podstromu, masky `known` a `hidden` u16); čas = sekundy i64 + nanosekundy u32 |
+| 2 | `STAT` | cesta | `Stat` (oid, druh, velikost, mtime, ctime, btime, vlastník, práva, souhrny podstromu, masky `known` a `hidden` u16, mód POSIX u16); čas = sekundy i64 + nanosekundy u32 |
 | 3 | `LIST` | cesta | počet u32 + (druh u8, oid u64, jméno) - seřazené podle jména; druh 1 soubor, 2 adresář, 3 symbolický odkaz; `BUFFER_TOO_SMALL`, když se výpis do zprávy nevejde |
 | 4 | `READ` | cesta, offset u64, délka u32 | data (kratší na konci souboru) |
 | 5 | `WRITE` | cesta, offset u64, data | - |
@@ -1407,7 +1407,9 @@ i v2 (stejná obsluha).
 
 Na drátě je to +4 B na konci `Stat` (`Stat::SIZE`) i každé položky
 `LIST_STAT_PAGE` (`StatEntry::FIXED`). Protokol má kvůli tomu verzi 3
-(`HELLO`); starší tvar zprávy se nepřečte.
+(`HELLO`); starší tvar zprávy se nepřečte. Verze 4 přidala na konec `Stat`
+mód POSIX u16 (bit `MODE` masky, [Mód POSIX](#mód-posix)); `StatEntry` ho
+nemá.
 
 > **Změna proti verzi 2 protokolu:** masky `known` a `hidden`. **Proč:**
 > nula znamenala „nesmíš vidět“, „prázdné“ i „FS to nevede“ a klient
@@ -1706,6 +1708,7 @@ zůstávají. Z receptu systému se nezužuje. Jinak `ACCESS_DENIED`.
 | 121 | `SOCKET_BIND` | cesta + handle kanálu posluchače | - (existující jméno `ALREADY_EXISTS`) |
 | 122 | `SOCKET_CONNECT` | cesta, číslo procesu u32 + handle konce spojení | - (`CONNECTION_REFUSED`, plná fronta `SHOULD_WAIT`) |
 | 123 | `WHOAMI` | - | uživatel u64 (0 = systém), počet u32, skupiny u64 |
+| 124 | `SET_MODE` | cesta, mód u16 (9 bitů), rozšířit u8 | - (`MANAGE`; [Mód POSIX](#mód-posix)) |
 
 **`OPEN_STREAM`** **[ověřeno v QEMU]** (sada `cstd`, krok `posix2`:
 výstup potomka `posix_spawn` do souboru a 200 000 bajtů souboru na jeho
@@ -1739,6 +1742,35 @@ Relace s lístkem dnes: init (řídicí), `fwd` (`/config`). Relace pro
 po pádu `fsd` dostanou `SERVICE_UNAVAILABLE` (zapojení patří vláknu sítě).
 Test: sada `obnova fsd` (`user/init/src/tests/fs_recovery.rs`, klient
 `user/fsrtest`).
+
+### Mód POSIX
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (krok `mode` testu `ctest`, sada
+`cstd`; host testy `tests/mode.rs` a `perm::posix_mode_follows_grants`
+v `libs/fs`). Rozhodnutí T1A koordinátora (15. 11. 2026, varianta A):
+devět bitů `rwxrwxrwx` je jen **pohled na granty** (`libs/fs/src/mode.rs`),
+FS bity neukládá.
+
+| Třída | Odkud | Soubor | Adresář |
+|---|---|---|---|
+| user | vlastník (má vždy všechna práva) | `rw-` (spuštění určuje manifest a zákaz spouštění datasetu, ne bit) | `rwx` |
+| group | granty ostatním příjemcům kromě `EVERYONE` (skupiny i jiní uživatelé) | `r` = `READ`, `w` = `WRITE`, `x` = `EXECUTE` | `r` = `LIST`, `w` = `CREATE`, `x` = `TRAVERSE` |
+| other | grant `EVERYONE` | dtto | dtto |
+
+- **Při vytvoření** (`mkdir(path, mode)` = `CREATE` s módem,
+  `open(O_CREAT, mode)` = `OPEN` s příznakem `MODE`; mód po `umask`) mód
+  zděděné granty nového objektu **jen zúží**, nikdy nerozšíří - ve stejném
+  požadavku jako vytvoření, takže nikdo jiný objekt širší nevidí. Třída bez
+  bitů ztratí grant celý (i práva mimo mód).
+- **`chmod`** (`SET_MODE` s `rozšířit` = 1) potřebuje právo `MANAGE`
+  (vlastník ho má vždy; bez něj `EPERM`) a smí i rozšířit: přidat práva
+  existujícím grantům třídy a pro other grant `EVERYONE` jen pro objekt -
+  vědomé sdílení (změna popisu jde do žurnálu FS jako každé `SET_ACL`).
+  Bity group bez příjemce grantu zůstanou 0 (FS nemá „skupinu souboru“).
+- **Změna** = vlastní popis s `PROTECTED`: zděděné granty se zkopírují
+  zúžené (potomci adresáře je dál dědí), granty jen pro potomky
+  (`INHERIT` bez `THIS`) mód nemění. Beze změny účinku se popis nezakládá.
+- Bity setuid, setgid a sticky se ignorují; `chmod` symlinku neexistuje.
 
 ### Profily
 

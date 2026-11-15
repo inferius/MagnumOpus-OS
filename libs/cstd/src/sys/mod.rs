@@ -56,6 +56,8 @@ pub struct OpenFlags {
     pub directory: bool,
     pub cloexec: bool,
     pub nonblock: bool,
+    /// Mod noveho souboru po `umask` (`O_CREAT`); `None` = jen zdedit.
+    pub mode: Option<u16>,
 }
 
 impl OpenFlags {
@@ -148,6 +150,8 @@ pub struct Stat {
     pub uid: u64,
     pub readable: bool,
     pub writable: bool,
+    /// Mod POSIX z FS (9 bitu, pohled na opravneni); `None` = neznamy.
+    pub mode: Option<u16>,
 }
 
 impl Stat {
@@ -162,6 +166,7 @@ impl Stat {
             uid: 0,
             readable: true,
             writable: true,
+            mode: None,
         }
     }
 }

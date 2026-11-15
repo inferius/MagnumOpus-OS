@@ -121,7 +121,7 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 |---|---|---|
 | `unistd.h` | `close`, `read`, `write`, `pread`, `pwrite`, `lseek`, `dup`, `dup2`, `dup3`, `pipe`, `pipe2`, `isatty`, `fsync`, `fdatasync`, `ftruncate`, `truncate`, `unlink`, `rmdir`, `getcwd`, `chdir`, `access`, `sysconf`, `getpagesize` | `fork`, `vfork`, `exec*` return `ENOSYS` (see [No fork](#processes-locale-wchar)) |
 | `fcntl.h` | `open`, `openat` (also relative to a directory, see [Functions for C++](#functions-for-c-step-7a)), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | `O_*` values as Linux, `O_DIRECTORY` the same on both architectures; locks `F_GETLK`, `F_SETLK`, `F_SETLKW` see File locks |
-| `sys/stat.h` | `stat`, `lstat` (= `stat`), `fstat`, `mkdir`, `chmod`, `fchmod`, `umask` | `st_mode` from the kind and the session's effective rights; `chmod` has no effect (rights are FS grants) |
+| `sys/stat.h` | `stat`, `lstat` (= `stat`), `fstat`, `mkdir`, `chmod`, `fchmod`, `umask` | `st_mode` = a view of the FS grants ([POSIX mode](file-system.md#posix-mode)); `mkdir`/`open(O_CREAT)` with a mode after `umask` only narrow the grants, `chmod`/`fchmod`/`fchmodat` change them (right `MANAGE`, otherwise `EPERM`) |
 | `sys/uio.h` | `readv`, `writev` | `writev` in one write |
 | `dirent.h` | `opendir`, `fdopendir`, `readdir`, `closedir`, `rewinddir`, `dirfd` | the first two entries are `.` and `..` |
 | `stdio.h` | `fdopen`, `fileno`, `fseeko`, `ftello`, `getline`, `getdelim` | `FILE` sits on an fd number |
@@ -532,10 +532,9 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
    `open` (`O_CREAT`, `O_EXCL`, `O_TRUNC`, `O_APPEND`, `O_NONBLOCK`,
    `O_CLOEXEC`, `O_DIRECTORY`), `read`/`write`/`pread`/`pwrite`/`readv`/
    `writev`, `lseek`, `ftruncate`, `fsync`, `stat`/`fstat`/`lstat`
-   (`st_mode` from the kind and effective rights, `st_uid` from the session
-   identity), `opendir`/`readdir`, `mkdir`, `unlink`, `rmdir`, `rename`,
+   (`st_mode` as a view of the grants, `st_uid` = the owner), `opendir`/`readdir`, `mkdir`, `unlink`, `rmdir`, `rename`,
    `access`, `getcwd`/`chdir`, `pipe` (a channel pair), `isatty`.
-   `chmod` without effect (rights are FS grants, not bits), `link`/
+   `chmod` changes the grants (since T1, [POSIX mode](file-system.md#posix-mode)), `link`/
    `symlink` = `ENOTSUP` until FS v3. `fcntl`/`flock` locks are held by
    fsd (decision 8).
 3. **`math.h`** (question 3) and floating point in `printf`/`scanf`/

@@ -114,7 +114,7 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 |---|---|---|
 | `unistd.h` | `close`, `read`, `write`, `pread`, `pwrite`, `lseek`, `dup`, `dup2`, `dup3`, `pipe`, `pipe2`, `isatty`, `fsync`, `fdatasync`, `ftruncate`, `truncate`, `unlink`, `rmdir`, `getcwd`, `chdir`, `access`, `sysconf`, `getpagesize` | `fork`, `vfork`, `exec*` vrací `ENOSYS` (viz [Bez fork](#procesy-locale-wchar)) |
 | `fcntl.h` | `open`, `openat` (i relativně k adresáři, viz [Funkce pro C++](#funkce-pro-c-krok-7a)), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | hodnoty `O_*` jako Linux, `O_DIRECTORY` stejné na obou architekturách; zámky `F_GETLK`, `F_SETLK`, `F_SETLKW` viz Zámky souborů |
-| `sys/stat.h` | `stat`, `lstat` (= `stat`), `fstat`, `mkdir`, `chmod`, `fchmod`, `umask` | `st_mode` z druhu a účinných práv relace; `chmod` nemá účinek (práva jsou granty FS) |
+| `sys/stat.h` | `stat`, `lstat` (= `stat`), `fstat`, `mkdir`, `chmod`, `fchmod`, `umask` | `st_mode` = pohled na granty FS ([Mód POSIX](souborovy-system.md#mód-posix)); `mkdir`/`open(O_CREAT)` s módem po `umask` granty jen zúží, `chmod`/`fchmod`/`fchmodat` je mění (právo `MANAGE`, jinak `EPERM`) |
 | `sys/uio.h` | `readv`, `writev` | `writev` jedním zápisem |
 | `dirent.h` | `opendir`, `fdopendir`, `readdir`, `closedir`, `rewinddir`, `dirfd` | první dvě položky `.` a `..` |
 | `stdio.h` | `fdopen`, `fileno`, `fseeko`, `ftello`, `getline`, `getdelim` | `FILE` stojí nad číslem fd |
@@ -511,10 +511,10 @@ Vlastního kódu ~11 000 řádků Rustu, převzatého ~14 000 řádků. Celá mu
    `open` (`O_CREAT`, `O_EXCL`, `O_TRUNC`, `O_APPEND`, `O_NONBLOCK`,
    `O_CLOEXEC`, `O_DIRECTORY`), `read`/`write`/`pread`/`pwrite`/`readv`/
    `writev`, `lseek`, `ftruncate`, `fsync`, `stat`/`fstat`/`lstat`
-   (`st_mode` z druhu a účinných práv, `st_uid` z identity relace),
+   (`st_mode` jako pohled na granty, `st_uid` = vlastník),
    `opendir`/`readdir`, `mkdir`, `unlink`, `rmdir`, `rename`, `access`,
    `getcwd`/`chdir`, `pipe` (dvojice kanálů), `isatty`.
-   `chmod` bez účinku (práva jsou granty FS, ne bity), `link`/
+   `chmod` mění granty (od T1, [Mód POSIX](souborovy-system.md#mód-posix)), `link`/
    `symlink` = `ENOTSUP` do FS v3. Zámky `fcntl`/`flock` drží fsd
    (rozhodnutí 8).
 3. **`math.h`** (otázka 3) a plovoucí čárka v `printf`/`scanf`/`strtod`.

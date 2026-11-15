@@ -1367,7 +1367,7 @@ data = rest of the message. One read/write moves at most 32 KiB
 | op | Name | Parameters | Result |
 |---|---|---|---|
 | 1 | `INFO` | - | volume label, block size, blocks, free, delayed, generation, algorithm, fallback, replayed |
-| 2 | `STAT` | path | `Stat` (oid, kind, size, mtime, ctime, btime, owner, rights, subtree summaries, masks `known` and `hidden` u16); a time = seconds i64 + nanoseconds u32 |
+| 2 | `STAT` | path | `Stat` (oid, kind, size, mtime, ctime, btime, owner, rights, subtree summaries, masks `known` and `hidden` u16, POSIX mode u16); a time = seconds i64 + nanoseconds u32 |
 | 3 | `LIST` | path | count u32 + (kind u8, oid u64, name) - sorted by name; kind 1 file, 2 directory, 3 symbolic link; `BUFFER_TOO_SMALL` when the listing does not fit into a message |
 | 4 | `READ` | path, offset u64, length u32 | data (shorter at the end of the file) |
 | 5 | `WRITE` | path, offset u64, data | - |
@@ -1450,7 +1450,9 @@ Both `Stat` and `StatEntry` end with two u16 masks with the same bits
 
 On the wire this is +4 B at the end of `Stat` (`Stat::SIZE`) and of every
 `LIST_STAT_PAGE` entry (`StatEntry::FIXED`). Because of it the protocol has
-version 3 (`HELLO`); the older message shape is not read.
+version 3 (`HELLO`); the older message shape is not read. Version 4 added
+the POSIX mode u16 at the end of `Stat` (mask bit `MODE`,
+[POSIX mode](#posix-mode)); `StatEntry` does not have it.
 
 > **Change from protocol version 2:** the `known` and `hidden` masks.
 > **Why:** zero meant "you may not see it", "empty" and "the FS does not
@@ -1759,6 +1761,7 @@ groups stay. A system recipe cannot be narrowed. Otherwise `ACCESS_DENIED`.
 | 121 | `SOCKET_BIND` | path + handle of the listener channel | - (an existing name `ALREADY_EXISTS`) |
 | 122 | `SOCKET_CONNECT` | path, process number u32 + handle of the connection end | - (`CONNECTION_REFUSED`, full queue `SHOULD_WAIT`) |
 | 123 | `WHOAMI` | - | user u64 (0 = system), count u32, groups u64 |
+| 124 | `SET_MODE` | path, mode u16 (9 bits), widen u8 | - (`MANAGE`; [POSIX mode](#posix-mode)) |
 
 **`OPEN_STREAM`** **[verified in QEMU]** (suite `cstd`, step `posix2`: the
 output of a `posix_spawn` child into a file and 200 000 bytes of a file on
@@ -1796,6 +1799,39 @@ for `dnsd`, `ntpd` (certificate store) and `revocd` have no lease yet -
 after an `fsd` crash they get `SERVICE_UNAVAILABLE` (wiring them belongs to
 the network thread). Test: suite `obnova fsd`
 (`user/init/src/tests/fs_recovery.rs`, client `user/fsrtest`).
+
+### POSIX mode
+
+**[verified in QEMU]** x86_64 and aarch64 (step `mode` of the `ctest`
+test, suite `cstd`; host tests `tests/mode.rs` and
+`perm::posix_mode_follows_grants` in `libs/fs`). Decision T1A of the
+coordinator (15 Nov 2026, option A): the nine `rwxrwxrwx` bits are only a
+**view of the grants** (`libs/fs/src/mode.rs`), the FS does not store bits.
+
+| Class | From | File | Directory |
+|---|---|---|---|
+| user | the owner (always has all rights) | `rw-` (execution is decided by the manifest and the dataset's no-exec flag, not a bit) | `rwx` |
+| group | grants to other recipients except `EVERYONE` (groups and other users) | `r` = `READ`, `w` = `WRITE`, `x` = `EXECUTE` | `r` = `LIST`, `w` = `CREATE`, `x` = `TRAVERSE` |
+| other | the `EVERYONE` grant | same | same |
+
+- **On creation** (`mkdir(path, mode)` = `CREATE` with a mode,
+  `open(O_CREAT, mode)` = `OPEN` with the `MODE` flag; mode after `umask`)
+  the mode **only narrows** the new object's inherited grants, never widens
+  them - in the same request as the creation, so nobody else sees the
+  object wider. A class without bits loses its grant entirely (also rights
+  outside the mode).
+- **`chmod`** (`SET_MODE` with `widen` = 1) needs the `MANAGE` right (the
+  owner always has it; without it `EPERM`) and may also widen: add rights
+  to the existing grants of a class and for other an `EVERYONE` grant for
+  the object only - deliberate sharing (the description change goes to the
+  FS journal like every `SET_ACL`). Group bits without a grant recipient
+  stay 0 (the FS has no "group of a file").
+- **A change** = an own description with `PROTECTED`: inherited grants are
+  copied narrowed (a directory's children still inherit them), grants only
+  for children (`INHERIT` without `THIS`) are not changed by the mode.
+  Without a change of effect no description is created.
+- setuid, setgid and sticky bits are ignored; there is no `chmod` of a
+  symlink.
 
 ### Profiles
 

@@ -35,6 +35,12 @@ impl Service {
         match opcode {
             op::SOCKET_BIND => Some(self.sock_bind(sess, r, handles)),
             op::SOCKET_CONNECT => Some(self.sock_connect(sess, r, handles)),
+            op::SET_MODE => Some((|| {
+                let path = sess.map(&r.str()?, true)?;
+                let (mode, widen) = (r.u16()?, r.u8()? != 0);
+                self.fs.as_mut().ok_or(Error::IoError)?.set_mode(&path, mode, widen)?;
+                Ok(Reply::body(fsproto::Writer::new()))
+            })()),
             op::WHOAMI => {
                 let mut w = fsproto::Writer::new();
                 match &sess.identity {

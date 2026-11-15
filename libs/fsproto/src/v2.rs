@@ -30,7 +30,7 @@ use crate::recover::Rec;
 use crate::{DirEntry, FsClient, Reader, Stat, Writer, decode_list};
 
 /// Verze protokolu, kterou tento klient mluvi.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
 /// Kody operaci v2.
 pub mod op {
@@ -94,6 +94,9 @@ pub mod op {
     /// Identita relace: -> uzivatel u64 (0 = system), pocet u32, skupiny
     /// u64... (C `getuid`, `getgroups`).
     pub const WHOAMI: u32 = 123;
+    /// Mod POSIX (`chmod`): cesta, mod u16 (9 bitu), rozsirit u8 (1 =
+    /// `chmod`, smi pridat prava; 0 = jen zuzit). Vyzaduje `MANAGE`.
+    pub const SET_MODE: u32 = 124;
 }
 
 /// Prihlaseni klienta ve zprave posluchaci socketu (`SOCKET_CONNECT`):
@@ -182,6 +185,9 @@ pub mod open_flags {
     pub const TRUNCATE: u8 = 4;
     /// S `CREATE`: vytvorit adresar.
     pub const DIR: u8 = 8;
+    /// Za priznaky mod u16: objekt vytvoreny timto `OPEN` dostane mod
+    /// (zdedene granty jen zuzi, `open(O_CREAT, mode)`).
+    pub const MODE: u8 = 16;
 }
 
 /// Priznaky `CONNECT`.
@@ -276,6 +282,22 @@ impl FsClient {
         let kind = if flags & (open_flags::CREATE | open_flags::TRUNCATE) != 0 { Kind::Effect } else { Kind::Idempotent };
         let body = self.call_as(kind, w)?;
         self.adopt(&body, access, share)
+    }
+
+    /// Jako [`FsClient::open`] s modem pro nove vytvoreny objekt.
+    pub fn open_mode(&self, path: &str, access: u8, share: u8, flags: u8, mode: u16) -> Result<Opened> {
+        let mut w = Self::req(op::OPEN);
+        w.str(path).u8(access).u8(share).u8(flags | open_flags::MODE).u16(mode & 0o777);
+        let kind = if flags & (open_flags::CREATE | open_flags::TRUNCATE) != 0 { Kind::Effect } else { Kind::Idempotent };
+        let body = self.call_as(kind, w)?;
+        self.adopt(&body, access, share)
+    }
+
+    /// `chmod`: mod POSIX (`widen` = smi rozsirit prava).
+    pub fn set_mode(&self, path: &str, mode: u16, widen: bool) -> Result<()> {
+        let mut w = Self::req(op::SET_MODE);
+        w.str(path).u16(mode & 0o777).u8(u8::from(widen));
+        self.call_as(Kind::Idempotent, w).map(|_| ())
     }
 
     /// Identita relace: (uzivatel, skupiny); 0 = system.
