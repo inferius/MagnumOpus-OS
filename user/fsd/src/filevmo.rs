@@ -115,7 +115,7 @@ fn window_len(size: u64, start: u64) -> u64 {
 }
 
 /// Vsechny spinave stranky okna (indexy); vycisti je.
-fn take_dirty(vmo: &Vmo) -> Result<Vec<u64>> {
+pub fn take_dirty(vmo: &Vmo) -> Result<Vec<u64>> {
     let mut out = Vec::new();
     let mut buf = [0u64; DIRTY_BATCH];
     loop {
@@ -481,6 +481,7 @@ pub fn aware(opcode: u32) -> bool {
             | op::MAP_VMO
             | op::UNMAP_VMO
             | op::SYNC_VMO
+            | op::ADOPT_VMO
             | op::READ_VMO
             | op::SOCKET_BIND
             | op::SOCKET_CONNECT

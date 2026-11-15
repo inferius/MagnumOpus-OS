@@ -10,10 +10,17 @@
 //! Sdilena mapovani si proces eviduje (`SHARED`): `munmap` celeho
 //! mapovani okna uvolni (`UNMAP_VMO`, zapis zpet), `msync` je zapise zpet
 //! (`SYNC_VMO`). Castecny `munmap` okna nechava drzena do konce relace.
+//!
+//! Obnova po padu fsd (rozhodnuti Q5): zapisovatelne sdilene mapovani drzi
+//! handly svych oken a identitu souboru. Kdyz `msync` nebo `munmap` zjisti
+//! novou instanci fsd, soubor se znovu otevre se zapisem (prava overi nova
+//! instance), stara okna se predaji (`ADOPT_VMO`: fsd zapise jejich
+//! spinave stranky jako zapis klienta) a rozsah se premapuje na nova okna.
+//! Bez prava zapisu se zmeny zahodi a `msync` vrati `SERVICE_RESTARTED`.
 
 use alloc::vec::Vec;
 
-use fsproto::v2::{WINDOW, map_flags};
+use fsproto::v2::{Identity, WINDOW, map_flags};
 use libos::sync::Mutex;
 
 use crate::{Error, Result};
@@ -22,10 +29,21 @@ use crate::{Error, Result};
 struct Shared {
     addr: u64,
     len: u64,
+    /// Offset souboru na zacatku mapovani.
+    off: u64,
+    prot: u32,
     file: (u64, u64),
     /// Okna `first..first + count`.
     first: u64,
     count: u64,
+    /// Zapisovatelne: identita souboru a handly oken (obnova po padu fsd).
+    id: Option<Identity>,
+    wins: Vec<libos::Vmo>,
+    /// Generace spojeni s fsd pri namapovani (jina = fsd mezitim spadl).
+    generation: u64,
+    /// Zmeny se po padu fsd nepodarilo predat (bez prava zapisu): `msync`
+    /// vraci `SERVICE_RESTARTED`.
+    lost: bool,
 }
 
 static SHARED: Mutex<Vec<Shared>> = Mutex::new(Vec::new());
@@ -59,6 +77,9 @@ pub(crate) fn map(local: u64, off: u64, len: u64, prot: u32, addr: u64, private:
     // Soubor (dataset, oid) a pocet drzenych oken (pro uklid po chybe).
     let mut file = None;
     let mut held = 0u64;
+    let keep = !private && write;
+    let id = if keep { Some(s.identity(local)?) } else { None };
+    let mut wins = Vec::new();
     let r = (|| {
         for idx in first..=last {
             let win = s.map_vmo(local, idx, flags)?;
@@ -83,13 +104,17 @@ pub(crate) fn map(local: u64, off: u64, len: u64, prot: u32, addr: u64, private:
             } else {
                 libos::sys::vm_map(me, win.vmo.handle().raw(), lo - ws, hi - lo, fixed, at)?;
             }
+            if keep {
+                wins.push(win.vmo);
+            }
         }
         Ok(())
     })();
     match (r, file) {
         (Ok(()), Some(file)) => {
             if !private {
-                SHARED.lock().push(Shared { addr: base, len, file, first, count: last - first + 1 });
+                let generation = s.conn().generation();
+                SHARED.lock().push(Shared { addr: base, len, off, prot, file, first, count: last - first + 1, id, wins, generation, lost: false });
             }
             Ok(base)
         }
@@ -143,28 +168,86 @@ pub fn unmapped(addr: u64, len: u64) {
     };
     let Ok(s) = crate::fs::session() else { return };
     for m in gone {
+        // Zapisovatelne mapovani z doby pred padem fsd: zmeny predat nove
+        // instanci (bez premapovani - rozsah uz je pryc).
+        if let Some(id) = &m.id
+            && restarted(s, &m)
+        {
+            for (i, w) in m.wins.iter().enumerate() {
+                let _ = s.adopt_window(id, m.first + i as u64, w);
+            }
+        }
         release_windows(s, m.file, m.first, m.count);
     }
+}
+
+/// Patri mapovani stare instanci fsd? (Zjisti se dotazem: spojeni si
+/// novou instanci vsimne az pri volani.)
+fn restarted(s: &fsproto::FsClient, m: &Shared) -> bool {
+    matches!(s.sync_vmo(m.file, false), Err(Error::ServiceRestarted)) || s.conn().generation() != m.generation
+}
+
+/// Obnova po padu fsd: stara okna predat (`ADOPT_VMO`) a rozsah premapovat
+/// na nova. Bez prava zapisu = `SERVICE_RESTARTED`, zmeny se zahodi.
+fn recover(s: &fsproto::FsClient, m: &mut Shared) -> Result<()> {
+    let id = m.id.ok_or(Error::ServiceRestarted)?;
+    let me = libos::rt::self_process();
+    let fixed = m.prot | abi::vm::MAP_FIXED | abi::vm::MAP_IN_RESERVATION;
+    for i in 0..m.count as usize {
+        let idx = m.first + i as u64;
+        let win = match s.recover_window(&id, idx, &m.wins[i]) {
+            Ok(w) => w,
+            Err(e) => {
+                if e == Error::ServiceRestarted {
+                    m.id = None;
+                    m.wins.clear();
+                    m.lost = true;
+                }
+                return Err(e);
+            }
+        };
+        // Cast mapovani v okne: mapovani -> rezervace (adresy zustanou)
+        // a do ni nove okno.
+        let ws = idx * WINDOW;
+        let lo = m.off.max(ws);
+        let hi = (m.off + m.len).min(ws + WINDOW);
+        let at = m.addr + (lo - m.off);
+        libos::vm::decommit(at, hi - lo)?;
+        libos::sys::vm_map(me, win.vmo.handle().raw(), lo - ws, hi - lo, fixed, at)?;
+        m.wins[i] = win.vmo;
+        m.file = win.file;
+    }
+    m.generation = s.conn().generation();
+    Ok(())
 }
 
 /// `msync(addr, len)`: soubory sdilenych mapovani v rozsahu zapsat zpet;
 /// `durable` = i trvale (`MS_SYNC`). Rozsah bez sdileneho mapovani souboru
 /// = uspech (anonymni pamet nema kam).
 pub fn sync(addr: u64, len: u64, durable: bool) -> Result<()> {
-    let files: Vec<(u64, u64)> = {
-        let list = SHARED.lock();
-        let mut f: Vec<(u64, u64)> = list.iter().filter(|m| m.addr < addr + len && addr < m.addr + m.len).map(|m| m.file).collect();
-        f.sort_unstable();
-        f.dedup();
-        f
-    };
-    let s = match crate::fs::session() {
-        Ok(s) => s,
-        Err(_) if files.is_empty() => return Ok(()),
-        Err(e) => return Err(e),
-    };
-    for file in files {
-        s.sync_vmo(file, durable)?;
+    let mut list = SHARED.lock();
+    let overlap = |m: &Shared| m.addr < addr + len && addr < m.addr + m.len;
+    if !list.iter().any(overlap) {
+        return Ok(());
+    }
+    let s = crate::fs::session()?;
+    let mut done: Vec<(u64, u64)> = Vec::new();
+    for m in list.iter_mut().filter(|m| overlap(m)) {
+        if m.lost {
+            return Err(Error::ServiceRestarted);
+        }
+        let r = s.sync_vmo(m.file, durable);
+        let stale = matches!(r, Err(Error::ServiceRestarted)) || s.conn().generation() != m.generation;
+        if stale && m.id.is_some() {
+            // Nova instance fsd: kazde mapovani zvlast (i dalsi tehoz souboru).
+            recover(s, m)?;
+            s.sync_vmo(m.file, durable)?;
+        } else if stale {
+            // Jen pro cteni: nic k predani (okno stare instance zustane).
+        } else if !done.contains(&m.file) {
+            r?;
+        }
+        done.push(m.file);
     }
     Ok(())
 }

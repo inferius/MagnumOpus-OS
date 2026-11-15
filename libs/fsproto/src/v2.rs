@@ -129,6 +129,13 @@ pub mod op {
     /// ktera soubor nedrzi (mapovani z doby pred restartem fsd), dostane
     /// `SERVICE_RESTARTED`.
     pub const SYNC_VMO: u32 = 132;
+    /// Obnova po padu fsd: okno stare instance (VMO, pravo `WRITE`)
+    /// klienta, ktery soubor znovu otevrel se zapisem: handle u64, okno u64
+    /// + handle VMO -> zapsanych stranek u32. fsd si pres `VMO_DIRTY` vezme
+    /// stranky zmenene od posledniho zapisu zpet stare instance a zapise je
+    /// jako zapis toho klienta (do velikosti souboru); obsahu VMO neveri vic
+    /// nez zapisu klienta.
+    pub const ADOPT_VMO: u32 = 133;
 }
 
 /// Velikost okna souboru pro `MAP_VMO` (zarovnani i kapacita objektu okna).
@@ -651,6 +658,47 @@ impl FsClient {
         let mut w = Self::req(op::UNMAP_VMO);
         w.u64(file.0).u64(file.1).u64(idx);
         self.call_sending(Kind::Effect, &w.finish(), Vec::new()).map(|_| ())
+    }
+
+    /// Obnova po padu fsd (`ADOPT_VMO`): soubor `id` znovu otevre se
+    /// zapisem (prava overi nova instance) a preda stare okno `idx`; fsd
+    /// zapise jeho spinave stranky jako zapis klienta. Bez prava zapisu
+    /// (nebo objekt zanikl) = `SERVICE_RESTARTED`: zmeny se zahodi. Vraci
+    /// pocet zapsanych stranek.
+    pub fn adopt_window(&self, id: &Identity, idx: u64, old: &libos::Vmo) -> Result<u32> {
+        let o = self.reopen_write(id)?;
+        let r = self.adopt_vmo(o, idx, old);
+        let _ = self.close(o);
+        r
+    }
+
+    /// Jako [`FsClient::adopt_window`] a pak nove okno `idx` (sdilene se
+    /// zapisem) pro premapovani.
+    pub fn recover_window(&self, id: &Identity, idx: u64, old: &libos::Vmo) -> Result<MapWindow> {
+        let o = self.reopen_write(id)?;
+        let r = self.adopt_vmo(o, idx, old).and_then(|_| self.map_vmo(o, idx, map_flags::WRITE | map_flags::SHARED));
+        let _ = self.close(o);
+        r
+    }
+
+    /// `REOPEN` objektu `id` pro cteni a zapis; bez prava nebo zanikly
+    /// objekt = `SERVICE_RESTARTED` (rozhodnuti Q5).
+    fn reopen_write(&self, id: &Identity) -> Result<u64> {
+        let rw = Identity { access: access::READ | access::WRITE, share: share::ALL, ..*id };
+        match self.open_identity(&rw) {
+            Ok(o) => Ok(o.handle),
+            Err(Error::AccessDenied | Error::NotFound | Error::Locked) => Err(Error::ServiceRestarted),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn adopt_vmo(&self, local: u64, idx: u64, old: &libos::Vmo) -> Result<u32> {
+        let fsd = self.resolve(local)?;
+        let mut w = Self::req(op::ADOPT_VMO);
+        w.u64(fsd).u64(idx);
+        let dup = old.handle().duplicate(None)?;
+        let (body, _) = self.call_sending(Kind::Effect, &w.finish(), alloc::vec![dup])?;
+        Reader::new(&body).u32()
     }
 
     /// Zapis zmen namapovaneho souboru zpet (`SYNC_VMO`); `durable` = i

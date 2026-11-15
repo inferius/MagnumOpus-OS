@@ -547,10 +547,11 @@ over the same file, durability after `munmap` and closing the fd).
   (`MAP_IN_RESERVATION`), so it is contiguous. A file can have any size;
   the limit applies to the **mapped range** (session quota), not to the
   file. The window is also the unit for the future pager (see below).
-- **Handles:** the client holds a window handle only during `mmap` (one
-  `MAP_VMO` message per window, the mapping then holds the object by
-  itself) - a big mapping does not use up the process's handles. Mapping
-  1 GiB = 64 `MAP_VMO` messages.
+- **Handles:** one `MAP_VMO` message per window (mapping 1 GiB = 64
+  messages). Private and read-only shared mappings hold a window handle
+  only during `mmap` (the mapping then holds the object by itself); a
+  **writable shared** one keeps the handle of every window until `munmap`
+  for recovery after an fsd crash (1 GiB = 64 handles).
 - **`MAP_PRIVATE`** = a copy-on-write clone of the window (`VMO_CLONE`): a
   snapshot at the time of `mmap`, the source and the clone do not affect
   each other, nothing is copied up front. Pages past the end of the file
@@ -599,10 +600,14 @@ over the same file, durability after `munmap` and closing the fd).
   reads the whole window from the FS; another mapping of the same window
   only hands over a handle. Numbers in the table below the list: almost
   all the time goes to the FS read (`fs.read_h`), the copy into the
-  window and enabling tracking are small next to it. The FS read here is
-  much slower than in the test "cteni velkeho souboru" - the cause has not
-  been looked for yet. That is why the pager (filling page by page on a
-  fault) matters for big files.
+  window and enabling tracking are small next to it. **Cause** (measured in
+  the driver and fsd): the device reads 16 MiB in tens of ms, the time
+  goes to moving the data in channel messages driver -> fsd (32 KiB per
+  message, copies in the kernel) - the kernel in the debug image was not
+  optimised (now `opt-level = 2`). The test "cteni velkeho souboru" read the data still from
+  the fsd cache, which is why it was faster. The virtio-blk driver also
+  merges consecutive reads into 1 MiB commands (`Disks::max_read`). The
+  pager (filling page by page on a fault) still matters for big files.
 - **Cost of writing:** the first write to a page after every cleaning costs
   one fault (tracking without PTE dirty bits, the same on x86_64 and
   aarch64). Every foreign operation costs one `VMO_DIRTY` per loaded
@@ -639,14 +644,35 @@ over the same file, durability after `munmap` and closing the fd).
 | another mapping of the same window, x86_64 (`3a65dd78` + windows) | 4 ms |
 | first / another mapping, aarch64 (`3a65dd78` + windows) | 2616 ms / 1 ms |
 | for comparison: FS read in the test "cteni velkeho souboru" (`a313581a` + mapping) | 16 ms/MiB |
+| breakdown, x86_64: device (virtio-blk waiting) 16 MiB (`b2f54c3a` + measurement) | 34 ms |
+| breakdown, x86_64: replies over the channel driver -> fsd 16 MiB (`b2f54c3a` + measurement) | 1.7-3 s |
+| first mapping, the driver merges reads by 1 MiB (`b2f54c3a` + virtio-blk) | 1851 ms |
+| first mapping, kernel at `opt-level = 2` (the default, [building](building.md#debugging-with-gdb)), x86_64 (`b2f54c3a` + virtio-blk + profile) | 122 ms |
+| first mapping, kernel at `opt-level = 2`, aarch64 (`b2f54c3a` + virtio-blk + profile) | 181 ms |
+
+**fsd crash (Q5)** **[verified in QEMU]** x86_64 and aarch64 (test "zabij fsd
+uprostred prace" in the suite `obnova fsd`: a write to an old instance's
+window after the crash carries over to the new one): the new instance's
+windows are empty, but the old window lives on in the client's mapping
+together with its write tracking. A writable shared mapping keeps its
+window handles and the file identity (`libs/osrt/src/fmap.rs`). When
+`msync` or `munmap` notices a new instance (`SYNC_VMO` returns
+`SERVICE_RESTARTED` or a different connection generation), the client
+**opens the file again with the write right** (`REOPEN`, the new instance
+checks the rights) and hands over the old window with the `ADOPT_VMO`
+operation: fsd takes the pages changed since the old instance's last
+write-back through `VMO_DIRTY` and writes them as that client's write
+(nothing past the file size, it trusts the contents no more than a write
+of the client). Then the range is remapped to the new windows (mapping ->
+reservation -> new window; the addresses stay). Without the write right or
+when the object is gone (the file was not saved before the crash) the
+changes are dropped and `msync` returns `SERVICE_RESTARTED` (C `EIO`).
+**Limitations:** writes of other threads of the process between the
+handover and the remap are lost; until `msync`/`munmap` after the crash
+other processes and `read()` do not see the changes; a read-only shared
+mapping stays on the old window (it does not see further file changes).
 
 **[designed]** (next steps):
-
-- **fsd crash (Q5):** the new fsd's windows are empty; `msync` of an old
-  mapping returns `SERVICE_RESTARTED` (C `EIO`), unsaved changes are lost.
-  Designed recovery: after the session recovers, the client opens the file
-  again with the write right (rights are checked again) and hands over its
-  window; fsd takes its contents as that client's write.
 - **Unmounting a volume / revoking a `GRANT`:** fsd shrinks the windows to
   0, clients get a past-the-end exception on access (`SIGBUS`).
 - **A pager in the kernel:** the window stays the unit that fsd fills
@@ -1957,6 +1983,7 @@ groups stay. A system recipe cannot be narrowed. Otherwise `ACCESS_DENIED`.
 | 130 | `MAP_VMO` | handle u64, window u64, flags u8 (`map_flags`: `WRITE` 1, `SHARED` 2) | file size u64, dataset u64, oid u64 + a window handle (`READ`, `MAP`, with writing also `WRITE`; capacity `WINDOW` = 16 MiB); session quota `NO_MEMORY` ([Files as memory](#files-as-memory)) |
 | 131 | `UNMAP_VMO` | dataset u64, oid u64, window u64 | - (the session releases the window, the file is written back) |
 | 132 | `SYNC_VMO` | dataset u64, oid u64, durable u8 | - (write-back, `durable` = also `FSYNC`); a session without a window of the file `SERVICE_RESTARTED` |
+| 133 | `ADOPT_VMO` | handle u64 (with writing), window u64 + an old instance's VMO handle (`WRITE`) | pages written u32 (recovery after an fsd crash, [Files as memory](#files-as-memory)) |
 
 **`OPEN_STREAM`** **[verified in QEMU]** (suite `cstd`, step `posix2`: the
 output of a `posix_spawn` child into a file and 200 000 bytes of a file on

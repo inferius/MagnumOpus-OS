@@ -39,6 +39,18 @@ impl Service {
                 }
                 Ok(Reply::body(fsproto::Writer::new()))
             })(),
+            op::ADOPT_VMO => (|| {
+                let h = r.u64()?;
+                let idx = r.u64()?;
+                if !sess.handles.contains(&h) {
+                    return Err(Error::BadHandle);
+                }
+                let vmo = libos::Vmo::from_handle(handles.pop().ok_or(Error::InvalidArgs)?);
+                let n = self.adopt_window(h, idx, &vmo)?;
+                let mut w = fsproto::Writer::new();
+                w.u32(n);
+                Ok(Reply::body(w))
+            })(),
             op::READ_VMO => (|| {
                 let h = r.u64()?;
                 if !sess.handles.contains(&h) {
@@ -183,6 +195,55 @@ impl Service {
         let mut w = fsproto::Writer::new();
         w.u64(size).u64(key.0).u64(key.1);
         Ok(Reply { body: w, handles: alloc::vec![handle], new_session: None, session_ops: Vec::new(), watch: None })
+    }
+
+    /// `ADOPT_VMO` (obnova po padu fsd, Q5): spinave stranky okna stare
+    /// instance zapise jako zapis klienta s handlem `h` (pravo zapisu
+    /// overi FS); nic za velikosti souboru. Vraci pocet stranek.
+    fn adopt_window(&mut self, h: u64, idx: u64, old: &libos::Vmo) -> Result<u32> {
+        use crate::filevmo::{MAX_WINDOWS, WINDOW, take_dirty};
+        if idx >= MAX_WINDOWS {
+            return Err(Error::OutOfRange);
+        }
+        let fs = self.fs.as_mut().ok_or(Error::IoError)?;
+        if fs.stat_h(h)?.kind != fs::Kind::File {
+            return Err(Error::WrongType);
+        }
+        fs.check_access_h(h, fs::access::WRITE)?;
+        let rev = fs.revision_h(h)?;
+        let key = (rev.dataset, rev.oid);
+        self.vmos.open(fs, key, h)?;
+        let pages = take_dirty(old)?;
+        let size = old.size()?.min(WINDOW);
+        if pages.is_empty() || size == 0 {
+            return Ok(0);
+        }
+        let page = libos::vm::page_size();
+        let me = libos::rt::self_process();
+        let addr = libos::sys::vm_map(me, old.handle().raw(), 0, size, libos::abi::vm::MAP_READ, 0)?;
+        // SAFETY: [addr, addr + size) je prave namapovany objekt (jen pro
+        // cteni); po zapisu se odmapuje. Obsah muze klient soubezne menit -
+        // fsd ho bere jen jako bajty.
+        let buf = unsafe { core::slice::from_raw_parts(addr as *const u8, size as usize) };
+        let mut written = 0u32;
+        let mut r = Ok(());
+        if let Some((e, bytes)) = self.vmos.entry(key) {
+            for p in pages {
+                let at = p * page;
+                let file_off = idx * WINDOW + at;
+                if at >= size || file_off >= e.size() {
+                    continue;
+                }
+                let n = page.min(size - at).min(e.size() - file_off) as usize;
+                if let Err(err) = e.write(fs, file_off, &buf[at as usize..at as usize + n], bytes) {
+                    r = Err(err);
+                    break;
+                }
+                written += 1;
+            }
+        }
+        let _ = libos::sys::vm_unmap(me, addr, size);
+        r.map(|()| written)
     }
 
     /// `UNMAP_VMO`: relace uvolni drzeni okna; soubor se zapise zpet.
