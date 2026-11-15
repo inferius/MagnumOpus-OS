@@ -19,7 +19,7 @@ use abi::{Error, Result};
 use super::{DirEntry, Fs, Kind, split_parent, zil};
 use crate::btree;
 use crate::device::BlockDevice;
-use crate::layout::{KIND_DATASET, KIND_DIR, Key, META_OID, ROOT_DATASET, ROOT_OID, feature, item};
+use crate::layout::{KIND_DATASET, KIND_DIR, KIND_SYMLINK, Key, META_OID, ROOT_DATASET, ROOT_OID, feature, item};
 use crate::node::Child;
 use crate::perm::{Acl, Inherited, Principal, SYSTEM, acl_hash, decode_acl, encode_acl, grant, rights};
 
@@ -155,6 +155,54 @@ impl<D: BlockDevice> Fs<D> {
         }
         let below = inherited.child(acl.as_ref());
         Ok(Walked { oid, rights: r, below, above: inherited })
+    }
+
+    /// Prvni symbolicky odkaz na ceste (pro nasledovani odkazu ve fsd):
+    /// `Some((index slozky v ceste, cil))`. Posledni slozka se pocita jen
+    /// s `last`. Cesta, ktera dal nevede (chybi, neni adresar, bez prava
+    /// `TRAVERSE`, neviditelny odkaz), = `None`: operaci pak vrati chybu
+    /// sama. Prava jako `walk` (odkaz v adresari bez `TRAVERSE` se nenajde).
+    pub fn find_link(&mut self, path: &str, last: bool) -> Result<Option<(usize, alloc::string::String)>> {
+        if !path.starts_with('/') {
+            return Err(Error::InvalidArgs);
+        }
+        self.activate(ROOT_DATASET)?;
+        let p = self.principal.clone().unwrap_or_default();
+        let mut root = self.s.root;
+        let mut oid = ROOT_OID;
+        let mut inherited = Inherited::default();
+        let mut inode = self.inode(&root, oid)?;
+        let mut acl = self.load_acl(&root, inode.acl)?;
+        let names: Vec<&str> = super::split_path(path).collect();
+        for (i, name) in names.iter().enumerate() {
+            if inode.kind != KIND_DIR {
+                return Ok(None);
+            }
+            if inherited.rights_of(&p, inode.owner, acl.as_ref()) & rights::TRAVERSE == 0 {
+                return Ok(None);
+            }
+            inherited = inherited.child(acl.as_ref());
+            let Some(d) = self.lookup_child(&root, oid, name)? else { return Ok(None) };
+            if d.kind == KIND_DATASET {
+                if self.is_boundary(oid, &d)? {
+                    return Ok(None);
+                }
+                self.activate(d.oid)?;
+                root = self.s.root;
+                oid = ROOT_OID;
+            } else {
+                oid = d.oid;
+            }
+            inode = self.inode(&root, oid)?;
+            acl = self.load_acl(&root, inode.acl)?;
+            if inode.kind == KIND_SYMLINK && (i + 1 < names.len() || last) {
+                if inherited.rights_of(&p, inode.owner, acl.as_ref()) == 0 {
+                    return Ok(None);
+                }
+                return Ok(Some((i, self.readlink_oid(&root, oid)?)));
+            }
+        }
+        Ok(None)
     }
 
     /// Projde cestu a overi prava `need` (bez kontrol jen `enter`).

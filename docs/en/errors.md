@@ -54,6 +54,7 @@ is documented in this file and in the Czech version.
 | -36 | `ADDRESS_NOT_AVAILABLE` | the local address does not belong to any interface |
 | -37 | `FENCE_FAILED` | the fence ended with an error |
 | -38 | `FENCE_ABANDONED` | the fence was abandoned (the producer closed the last handle with the `SIGNAL` right) |
+| -40 | `TOO_MANY_LINKS` | too many symbolic links while looking up a path (a loop) |
 
 ## Details
 
@@ -490,6 +491,18 @@ the fence) and the awaited value was not reached.
 
 **What to do:** treat it as a producer crash: discard the result and
 reconnect to the new instance of the service.
+
+### `TOO_MANY_LINKS` (-40)
+
+**Meaning:** looking up a path needed to follow more than 40 symbolic
+links (typically a loop of links); C `ELOOP`. The number -39 is reserved
+for the Windows layer branch.
+
+**When it happens:** fsd operations with a path ([Symbolic links](file-system.md#symbolic-links)),
+`OPEN` with `NOFOLLOW` on a link.
+
+**What to do:** fix the links (the loop); `lstat`/`readlink` on the link
+itself works.
 
 ## Process exit codes
 

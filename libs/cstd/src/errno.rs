@@ -224,6 +224,7 @@ pub fn from_os(code: i32) -> c_int {
         -31 => EHOSTUNREACH,
         -32 => EADDRINUSE,
         -36 => EADDRNOTAVAIL,
+        -40 => ELOOP,
         _ => EIO,
     }
 }

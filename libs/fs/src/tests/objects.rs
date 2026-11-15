@@ -214,3 +214,25 @@ fn fragmented_free_space_does_not_hang() {
     let r = fs.commit();
     assert!(matches!(r, Ok(()) | Err(Error::NoSpace)), "{r:?}");
 }
+
+#[test]
+fn find_link_on_path() {
+    // Prvni odkaz na ceste (fsd podle nej nasleduje); posledni slozka jen s `last`.
+    let mut fs = new_fs(2048);
+    fs.create("/a", Kind::Dir).unwrap();
+    fs.create("/a/b", Kind::Dir).unwrap();
+    fs.symlink("/a/l", "b").unwrap();
+    fs.symlink("/a/b/abs", "/a").unwrap();
+    assert_eq!(fs.find_link("/a/l/x/y", false).unwrap(), Some((1, String::from("b"))));
+    assert_eq!(fs.find_link("/a/l", false).unwrap(), None);
+    assert_eq!(fs.find_link("/a/l", true).unwrap(), Some((1, String::from("b"))));
+    assert_eq!(fs.find_link("/a/b/abs/b", false).unwrap(), Some((2, String::from("/a"))));
+    // Bez odkazu, chybejici slozka i soubor uprostred = None (chybu vrati operace).
+    assert_eq!(fs.find_link("/a/b", true).unwrap(), None);
+    assert_eq!(fs.find_link("/a/neni/x", true).unwrap(), None);
+    fs.create("/a/f", Kind::File).unwrap();
+    assert_eq!(fs.find_link("/a/f/x", true).unwrap(), None);
+    // readlink staci viditelnost.
+    assert_eq!(fs.readlink("/a/l").unwrap(), "b");
+    assert_clean(&mut fs);
+}

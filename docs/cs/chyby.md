@@ -54,6 +54,7 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -36 | `ADDRESS_NOT_AVAILABLE` | místní adresa nepatří žádnému rozhraní |
 | -37 | `FENCE_FAILED` | plot skončil chybou |
 | -38 | `FENCE_ABANDONED` | plot byl opuštěn (producent zavřel poslední handle s právem `SIGNAL`) |
+| -40 | `TOO_MANY_LINKS` | příliš mnoho symbolických odkazů při hledání cesty (smyčka) |
 
 ## Podrobně
 
@@ -484,6 +485,18 @@ nebyla dosažena.
 
 **Co dělat:** zacházet jako s pádem producenta: zahodit výsledek
 a připojit se k nové instanci služby.
+
+### `TOO_MANY_LINKS` (-40)
+
+**Význam:** při hledání cesty bylo potřeba následovat víc než 40
+symbolických odkazů (typicky smyčka odkazů); C `ELOOP`. Číslo -39 je
+vyhrazené pro větev Windows vrstvy.
+
+**Kdy vzniká:** operace fsd s cestou ([Symbolické odkazy](souborovy-system.md#symbolické-odkazy)),
+`OPEN` s `NOFOLLOW` na odkaz.
+
+**Co dělat:** opravit odkazy (smyčku); `lstat`/`readlink` na odkaz
+samotný funguje.
 
 ## Návratové kódy procesů
 
