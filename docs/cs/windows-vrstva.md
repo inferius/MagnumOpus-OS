@@ -2,15 +2,16 @@
 
 Návrh kroku 8 pořadí v [architektura.md](architektura.md) (plán „Horní patro
 z Wine, spodní naše“): aplikace a hry pro Windows nad převzatým Wine.
-**Stav: [navrženo]**, otázky rozhodnuté 15. 11. 2026 (kapitola
-[Rozhodnutí](#rozhodnutí)); začíná etapa W1.
+**Stav:** otázky rozhodnuté 15. 11. 2026 (kapitola
+[Rozhodnutí](#rozhodnutí)); etapa W1 (konzolové programy) **[ověřeno
+v QEMU]** x86_64, další etapy **[navrženo]** (tabulka níže).
 
 ## Stav
 
 | Část | Co | Stav |
 |---|---|---|
 | W0 | sestavení Wine 11 (DLL PE, nástroje), port unixové části nad `libc.so` | celé Wine přes `cargo xtask wine` ve WSL **[implementováno]**: 602 DLL jako PE, 25 unixových `.so` nad `libc.so` (`ntdll.so` s `libunwind.so`), zavaděč `wine` a `wineserver`; `wine --version` v systému **[ověřeno v QEMU]** ([Wine na disku](#wine-na-disku-w1)) |
-| W1 | konzolové `.exe` (`cmd`, `hostname`, vlastní test): spodní `ntdll`, TEB přes GS, SEH, paměť, soubory, `wineserver` jako proces | rozpracováno: GS v jádře a `ucontext_t` v `cstd` **[ověřeno v QEMU]**; záplata výjimek `signal_x86_64.c` se přeloží **[implementováno]**; Wine na datovém disku jako aplikace (`/apps/org.winehq.wine`), zavaděč `wine` z disku nahraje `ntdll.so` ([DL-4c](dynamicke-linkovani.md#knihovny-z-disku-a-origin-dl-4c)) **[ověřeno v QEMU]**; první konzolový program: nový prefix (`wineboot`) a `cmd /c echo` **[ověřeno v QEMU]** x86_64, release ([Wine na disku](#wine-na-disku-w1)); vlastní konzolový test, `hostname` **[navrženo]** |
+| W1 | konzolové `.exe` (`cmd`, `hostname`, vlastní test): spodní `ntdll`, TEB přes GS, SEH, paměť, soubory, `wineserver` jako proces | **[ověřeno v QEMU]** x86_64, release (sada `wine`): GS v jádře a `ucontext_t` v `cstd` **[ověřeno v QEMU]**; záplata výjimek `signal_x86_64.c` se přeloží **[implementováno]**; Wine na datovém disku jako aplikace (`/apps/org.winehq.wine`), zavaděč `wine` z disku nahraje `ntdll.so` ([DL-4c](dynamicke-linkovani.md#knihovny-z-disku-a-origin-dl-4c)) **[ověřeno v QEMU]**; nový prefix (`wineboot`), `cmd /c echo`, vlastní konzolový program `user/wintest` a `hostname` ([Wine na disku](#wine-na-disku-w1)); oprávnění `wx_compat` (RWX, Q6) zatím není potřeba **[navrženo]** |
 | W2 | víc procesů jedné aplikace, registry, pojmenované objekty, `winecfg` v režimu bez oken | **[navrženo]** |
 | W3 | okna: ovladač Wine nad kompozitorem (`guiproto`), GDI, `notepad`, `winecfg`, schránka, vstup | **[navrženo]** |
 | W4 | zvuk nad `audiod`, jednoduchá hra (GDI: `winemine`, pak hra přes SDL nebo Direct3D 9) | **[navrženo]** |
@@ -291,6 +292,12 @@ Rozhodnutí uživatele a koordinátora (15. 11. 2026):
     spojeného `AF_UNIX` se zprávami ve frontě, symbolické odkazy,
     `mmap(PROT_WRITE)` = i čtení (wineserver tak mapuje `KUSER_SHARED_DATA`;
     bez toho klientům stál čas).
+- **Vlastní konzolový program** (`user/wintest`, PE přeložený nástroji
+  Wine, na disku `/apps/org.magnumopus.wintest`): `printf`, argumenty
+  (i s mezerou), prostředí (`getenv`, `GetEnvironmentVariableA`), soubor
+  v textovém režimu (zápis, čtení, atributy, smazání v `%TEMP%`), vlákno
+  (`CreateThread`, kód vlákna) a kód konce 42; s hotovým prefixem asi
+  0,7 s. `wine hostname` vypíše jméno počítače.
 - ⚠️ **Omezení:** Wine čeká na `wineboot` napevno 5 minut. V sestavení
   debug (QEMU TCG) se založení prefixu nestihne (čtení z fsd asi
   1,7 MB/s proti 36 MB/s v release, `wine --version` 609 ms proti 31 ms)

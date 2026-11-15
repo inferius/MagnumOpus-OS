@@ -2,15 +2,16 @@
 
 Design of step 8 of the order in [architecture.md](architecture.md) (the
 plan "upper layer from Wine, lower layer ours"): Windows applications and
-games over adopted Wine. **Status: [designed]**, questions decided on 15 Nov 2026
-(chapter [Decisions](#decisions)); stage W1 is starting.
+games over adopted Wine. **Status:** questions decided on 15 Nov 2026
+(chapter [Decisions](#decisions)); stage W1 (console programs) **[verified
+in QEMU]** x86_64, later stages **[designed]** (table below).
 
 ## Status
 
 | Part | What | Status |
 |---|---|---|
 | W0 | building Wine 11 (PE DLLs, tools), port of the Unix side over `libc.so` | all of Wine via `cargo xtask wine` in WSL **[implemented]**: 602 DLLs as PE, 25 Unix `.so` over `libc.so` (`ntdll.so` with `libunwind.so`), the `wine` loader and `wineserver`; `wine --version` in the system **[verified in QEMU]** ([Wine on disk](#wine-on-disk-w1)) |
-| W1 | console `.exe` (`cmd`, `hostname`, our own test): lower `ntdll`, TEB via GS, SEH, memory, files, `wineserver` as a process | in progress: GS in the kernel and `ucontext_t` in `cstd` **[verified in QEMU]**; the exception patch `signal_x86_64.c` compiles **[implemented]**; Wine on the data disk as an application (`/apps/org.winehq.wine`), the `wine` loader from disk loads `ntdll.so` ([DL-4c](dynamic-linking.md#libraries-from-disk-and-origin-dl-4c)) **[verified in QEMU]**; the first console program: a new prefix (`wineboot`) and `cmd /c echo` **[verified in QEMU]** x86_64, release ([Wine on disk](#wine-on-disk-w1)); our own console test, `hostname` **[designed]** |
+| W1 | console `.exe` (`cmd`, `hostname`, our own test): lower `ntdll`, TEB via GS, SEH, memory, files, `wineserver` as a process | **[verified in QEMU]** x86_64, release (`wine` suite): GS in the kernel and `ucontext_t` in `cstd` **[verified in QEMU]**; the exception patch `signal_x86_64.c` compiles **[implemented]**; Wine on the data disk as an application (`/apps/org.winehq.wine`), the `wine` loader from disk loads `ntdll.so` ([DL-4c](dynamic-linking.md#libraries-from-disk-and-origin-dl-4c)) **[verified in QEMU]**; a new prefix (`wineboot`), `cmd /c echo`, our own console program `user/wintest` and `hostname` ([Wine on disk](#wine-on-disk-w1)); the `wx_compat` permission (RWX, Q6) is not needed yet **[designed]** |
 | W2 | several processes of one application, registry, named objects, `winecfg` without windows | **[designed]** |
 | W3 | windows: a Wine driver over the compositor (`guiproto`), GDI, `notepad`, `winecfg`, clipboard, input | **[designed]** |
 | W4 | sound over `audiod`, a simple game (GDI: `winemine`, then a game via SDL or Direct3D 9) | **[designed]** |
@@ -309,6 +310,12 @@ Decisions of the user and the coordinator (15 Nov 2026):
     passing a connected `AF_UNIX` with messages in its queue, symbolic
     links, `mmap(PROT_WRITE)` = also read (wineserver maps
     `KUSER_SHARED_DATA` this way; without it time stood still for clients).
+- **Our own console program** (`user/wintest`, a PE built with the Wine
+  tools, on disk at `/apps/org.magnumopus.wintest`): `printf`, arguments
+  (also with a space), environment (`getenv`, `GetEnvironmentVariableA`),
+  a file in text mode (write, read, attributes, delete in `%TEMP%`), a
+  thread (`CreateThread`, the thread's exit code) and exit code 42; about
+  0.7 s with an existing prefix. `wine hostname` prints the computer name.
 - ⚠️ **Limitation:** Wine waits for `wineboot` for a fixed 5 minutes. In a
   debug build (QEMU TCG) creating the prefix does not make it (reading from
   fsd about 1.7 MB/s versus 36 MB/s in release, `wine --version` 609 ms

@@ -78,6 +78,18 @@ else
     make -j"$(nproc)" > "$W/logs/make.log" 2>&1 || { grep -m 20 "error" "$W/logs/make.log"; echo "xtask-wine: log $W/logs/make.log"; exit 1; }
 fi
 
+# Testovaci program Windows (user/wintest, sada `wine`): preklad jako
+# programy Wine (clang -target x86_64-windows, hlavicky msvcrt z Wine),
+# link pres winegcc z build stromu (winecrt0, ucrtbase, kernel32), ale
+# bez --wine-builtin = obycejny PE program.
+WT="$WINE_OUT/tests"
+mkdir -p "$WT"
+WSRC="$MOS_TOOLS/../../user/wintest/wintest.c"
+TOOLS="$W/tools-$WINE_KEY/tools"
+clang -target x86_64-windows -fuse-ld=lld --no-default-config -c -o "$WT/wintest.o" "$WSRC"     -I"$SRC/$WINE_TOP/include" -I"$SRC/$WINE_TOP/include/msvcrt" -Iinclude -D_UCRT -O2 -Wall     > "$W/logs/wintest.log" 2>&1 || { cat "$W/logs/wintest.log"; exit 1; }
+"$TOOLS/winegcc/winegcc" -o "$WT/wintest.exe" --wine-objdir . --winebuild "$TOOLS/winebuild/winebuild"     -b x86_64-windows -mconsole "$WT/wintest.o" dlls/winecrt0/x86_64-windows/libwinecrt0.a     libs/compiler-rt/x86_64-windows/libcompiler-rt.a dlls/ucrtbase/x86_64-windows/libucrtbase.a     dlls/kernel32/x86_64-windows/libkernel32.a dlls/ntdll/x86_64-windows/libntdll.a     >> "$W/logs/wintest.log" 2>&1 || { cat "$W/logs/wintest.log"; exit 1; }
+rm -f "$WT/wintest.o"
+
 # Vysledek do target/wine/<arch>/tree: rozlozeni adresare aplikace
 # (/apps/org.winehq.wine): bin/wineserver, lib/wine/x86_64-unix (i zavadec
 # `wine`; bin/wine je v instalaci Wine jen odkaz na nej),

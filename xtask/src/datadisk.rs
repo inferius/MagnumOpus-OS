@@ -19,6 +19,31 @@ const SIZE: u64 = 64 * 1024 * 1024;
 const SIZE_WINE: u64 = 512 * 1024 * 1024;
 /// Adresar aplikace Wine na disku.
 pub const WINE_APP: &str = "/apps/org.winehq.wine";
+/// Testovaci programy Windows (`target/wine/<arch>/tests`, `user/wintest`).
+pub const WINE_TESTS_APP: &str = "/apps/org.magnumopus.wintest";
+
+/// Adresare na disk s Wine: (zdroj na hostiteli, cil na disku). Testy jen
+/// kdyz je sestaveni Wine vyrobilo.
+fn wine_sources(tree: &Path) -> Vec<(PathBuf, &'static str)> {
+    let mut v = vec![(tree.to_path_buf(), WINE_APP)];
+    let tests = tree.parent().unwrap_or(tree).join("tests");
+    if tests.is_dir() {
+        v.push((tests, WINE_TESTS_APP));
+    }
+    v
+}
+
+/// Vsechny soubory zdroju: (cesta na disku, plna cesta na hostiteli).
+fn wine_files(tree: &Path) -> Result<Vec<(String, PathBuf)>> {
+    let mut out = Vec::new();
+    for (src, target) in wine_sources(tree) {
+        let mut list = Vec::new();
+        walk(&src, &src, &mut list)?;
+        out.extend(list.into_iter().map(|(rel, full)| (format!("{target}/{rel}"), full)));
+    }
+    out.sort();
+    Ok(out)
+}
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -46,9 +71,7 @@ pub fn create_with(path: &Path, wine: Option<&Path>) -> Result<PathBuf> {
 /// Klic stromu: relativni cesty, velikosti a casy zmeny vsech souboru.
 fn tree_key(tree: &Path) -> Result<u64> {
     use std::hash::{Hash, Hasher};
-    let mut files = Vec::new();
-    walk(tree, tree, &mut files)?;
-    files.sort();
+    let files = wine_files(tree)?;
     let mut h = std::collections::hash_map::DefaultHasher::new();
     SIZE_WINE.hash(&mut h);
     for (rel, full) in &files {
@@ -109,12 +132,9 @@ fn build(path: &Path, size: u64, wine: Option<&Path>) -> Result<PathBuf> {
         fs.write(p, 0, data).map_err(|e| fs_err(p, e))?;
     }
     if let Some(tree) = wine {
-        let mut list = Vec::new();
-        walk(tree, tree, &mut list)?;
-        list.sort();
+        let list = wine_files(tree)?;
         let mut dirs = std::collections::BTreeSet::new();
-        for (rel, full) in &list {
-            let target = format!("{WINE_APP}/{rel}");
+        for (target, full) in &list {
             // Adresare cesty (od korene) jednou.
             let mut at = 0;
             while let Some(i) = target[at + 1..].find('/') {
@@ -128,10 +148,10 @@ fn build(path: &Path, size: u64, wine: Option<&Path>) -> Result<PathBuf> {
                 at += 1 + i;
             }
             let data = std::fs::read(full)?;
-            fs.create(&target, Kind::File).map_err(|e| fs_err(&target, e))?;
-            fs.write(&target, 0, &data).map_err(|e| fs_err(&target, e))?;
+            fs.create(target, Kind::File).map_err(|e| fs_err(target, e))?;
+            fs.write(target, 0, &data).map_err(|e| fs_err(target, e))?;
         }
-        println!("xtask: Wine na datovem disku: {} souboru v {WINE_APP}", list.len());
+        println!("xtask: Wine na datovem disku: {} souboru ({WINE_APP}, testy {WINE_TESTS_APP})", list.len());
     }
     fs.commit().map_err(|e| fs_err("commit", e))?;
     let report = fs.check(true).map_err(|e| fs_err("kontrola", e))?;

@@ -19,7 +19,15 @@ use crate::check;
 pub const TESTS: &[Test] = &[
     ("wine: zavadec z disku nahraje ntdll.so (wine --version)", wine_version),
     ("wine: novy prefix a konzolovy cmd /c echo (pomaly, --release)", wine_cmd),
+    ("wine: vlastni konzolovy program (printf, argv, prostredi, soubory, vlakno, kod konce)", wine_program),
+    ("wine: hostname", wine_hostname),
 ];
+
+/// Testovaci programy Windows na disku (`xtask/src/datadisk.rs`).
+const TESTS_APP: &str = "/apps/org.magnumopus.wintest";
+/// Prostredi pro programy Windows v testech (prefix z `wine_cmd`, jinak se
+/// zalozi novy - pomale).
+const WINE_ENV: &[&str] = &["HOME=/home/wine", "WINEPREFIX=/home/wine/.wine"];
 
 /// Adresar aplikace Wine (`xtask/src/datadisk.rs`, `WINE_APP`).
 const APP: &str = "/apps/org.winehq.wine";
@@ -145,7 +153,7 @@ fn wine_cmd(s: &Startup) -> TestResult {
         }
     }
     let t0 = time::now();
-    let run = launch_path(s, &loader, &["cmd", "/c", "echo", "ahoj"], &["HOME=/home/wine", "WINEPREFIX=/home/wine/.wine"], Duration::from_secs(600))?;
+    let run = launch_path(s, &loader, &["cmd", "/c", "echo", "ahoj"], WINE_ENV, Duration::from_secs(600))?;
     libos::println!("init: wine: novy prefix a cmd /c echo za {} ms", (time::now() - t0) / 1_000_000);
     check!(
         run.code == 0 && run.stdout.lines().any(|l| l.trim() == "ahoj"),
@@ -155,5 +163,30 @@ fn wine_cmd(s: &Startup) -> TestResult {
     for p in ["/home/wine/.wine/system.reg", "/home/wine/.wine/dosdevices/c:/windows/system32/kernel32.dll"] {
         fs.stat(p).map_err(|e| fail(p, e))?;
     }
+    Ok(())
+}
+
+fn wine_program(s: &Startup) -> TestResult {
+    let loader = format!("{APP}/lib/wine/x86_64-unix/wine");
+    let exe = format!("{TESTS_APP}/wintest.exe");
+    fs()?.stat(&exe).map_err(|e| fail(&exe, e))?;
+    let mut env = WINE_ENV.to_vec();
+    env.push("WINTEST_VAR=hodnota");
+    let run = launch_path(s, &loader, &[&exe, "alfa", "beta gama"], &env, Duration::from_secs(600))?;
+    check!(
+        run.code == 42 && run.stdout.contains("wintest: start") && run.stdout.contains("wintest: chyby 0"),
+        format!("kod {} (42 = ok, 100 + bity chyb viz user/wintest); stdout: {}; stderr: {}", run.code, run.stdout.trim(), run.stderr.trim())
+    );
+    Ok(())
+}
+
+fn wine_hostname(s: &Startup) -> TestResult {
+    let loader = format!("{APP}/lib/wine/x86_64-unix/wine");
+    let run = launch_path(s, &loader, &["hostname"], WINE_ENV, Duration::from_secs(600))?;
+    let name = run.stdout.trim();
+    check!(
+        run.code == 0 && !name.is_empty() && !name.contains(' '),
+        format!("kod {}; stdout: {}; stderr: {}", run.code, name, run.stderr.trim())
+    );
     Ok(())
 }
