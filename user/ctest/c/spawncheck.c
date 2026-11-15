@@ -10,6 +10,7 @@
 #include <net/ethernet.h>
 #include <net/if.h>
 #include <net/if_arp.h>
+#include <netinet/if_ether.h>
 #include <netinet/tcp.h>
 #include <sys/un.h>
 #include <netinet/in.h>
@@ -281,6 +282,7 @@ static int misc(void) {
     _Static_assert(sizeof(struct tcp_info) == 232, "tcp_info");
     _Static_assert(sizeof(struct ether_header) == ETH_HLEN, "ether_header");
     _Static_assert(sizeof(struct arphdr) == 8, "arphdr");
+    _Static_assert(sizeof(struct ether_arp) == 28, "ether_arp");
     caddr_t cp = host;
     (void)cp;
     return 0;

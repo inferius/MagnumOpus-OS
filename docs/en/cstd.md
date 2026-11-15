@@ -980,7 +980,7 @@ will come with shared memory between processes (a separate task:
   (`struct sockaddr_un`; `AF_UNIX` sockets do not exist yet),
   `struct ucred` (`SO_PEERCRED`), `struct tcp_info` and the `TCP_*` states
   (`getsockopt(TCP_INFO)` = `ENOPROTOOPT`), `net/if_arp.h` (`ARPHRD_*`,
-  `struct arphdr`), `net/ethernet.h` (`ETH_ALEN`, `struct ether_header`);
+  `struct arphdr`), `net/ethernet.h` (`ETH_ALEN`, `struct ether_header`), `netinet/if_ether.h` (`struct ether_arp`);
   `ioctl(SIOCATMARK)` on a socket returns 0 (netd does not carry
   out-of-band data).
 - **`gethostbyname`, `gethostbyaddr`** (`struct hostent`, `h_errno`,

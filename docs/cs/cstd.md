@@ -939,7 +939,7 @@ procesy).
   (`struct sockaddr_un`; sockety `AF_UNIX` zatím nejsou), `struct ucred`
   (`SO_PEERCRED`), `struct tcp_info` a stavy `TCP_*` (`getsockopt(TCP_INFO)`
   = `ENOPROTOOPT`), `net/if_arp.h` (`ARPHRD_*`, `struct arphdr`),
-  `net/ethernet.h` (`ETH_ALEN`, `struct ether_header`); `ioctl(SIOCATMARK)`
+  `net/ethernet.h` (`ETH_ALEN`, `struct ether_header`), `netinet/if_ether.h` (`struct ether_arp`); `ioctl(SIOCATMARK)`
   na socketu vrací 0 (data mimo pořadí netd nepřenáší).
 - **`gethostbyname`, `gethostbyaddr`** (`struct hostent`, `h_errno`,
   `hstrerror`): staré rozhraní vrací NULL s `h_errno` = `NO_RECOVERY`;
