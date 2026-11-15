@@ -61,6 +61,18 @@ struct Lun {
 struct Storage {
     bot: Bot,
     luns: Vec<Lun>,
+    /// Nejvic bajtu jednoho prikazu READ (spojena cteni, `max_read`).
+    max_read: usize,
+}
+
+/// Nejvic bajtu jednoho cteni podle rychlosti: USB 3 1 MiB, starsi 120 KiB
+/// (240 sektoru; nektere flash disky USB 2 vetsi prikaz nezvladnou, stejny
+/// limit pouziva Linux).
+fn max_read_for(speed: usbproto::Speed) -> usize {
+    match speed {
+        usbproto::Speed::Super => server::BATCH_MAX,
+        _ => 240 * 512,
+    }
 }
 
 fn main(startup: Startup) -> i64 {
@@ -104,6 +116,7 @@ fn main(startup: Startup) -> i64 {
     let mut dev = Storage {
         bot: Bot::new(usb, info.interface, ep_in, ep_out),
         luns: Vec::new(),
+        max_read: max_read_for(info.speed),
     };
     dev.probe();
     let clients = match server::report_disks("usb-storage", &mut dev, &startup.bootstrap) {
@@ -317,6 +330,13 @@ impl Disks for Storage {
 
     fn read(&mut self, d: usize, lba: u64, out: &mut [u8]) -> Result<()> {
         self.rw(d, lba, Some(out), &[])
+    }
+
+    /// Prikaz BOT stoji tri prenosy (CBW, data, CSW): navazujici cteni
+    /// klienta server spoji do jednoho prikazu (`max_read_for`).
+    fn max_read(&self, d: usize) -> usize {
+        let ss = self.luns[d].sector_size;
+        (self.max_read / ss * ss).max(server::IO_MAX)
     }
 
     fn write(&mut self, d: usize, lba: u64, data: &[u8]) -> Result<()> {

@@ -57,8 +57,9 @@ pub mod completion {
 }
 
 pub const HEADER: usize = 16;
-/// Nejvic dat v jednom prenosu (pozadavek i odpoved se vejdou do zpravy).
-pub const MAX_DATA: usize = 16 * 1024;
+/// Nejvic dat v jednom prenosu (pozadavek i odpoved se vejdou do zpravy;
+/// bulk 32 KiB = cteni bloku 32 KiB jednim prenosem dat).
+pub const MAX_DATA: usize = 32 * 1024;
 
 /// Pozadavek.
 #[derive(Debug, Clone, PartialEq, Eq)]

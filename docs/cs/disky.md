@@ -17,6 +17,15 @@ pro všechny tři ovladače. Ovladač dodá jen čtení, zápis, flush a TRIM
 v sektorech zařízení (trait `Disks`). Disky s logickým sektorem 512 B
 i 4 KiB fungují stejně (viz [Velikost sektoru](#velikost-sektoru)).
 
+**Čtení bez čekání a spojování** **[ověřeno v QEMU]**: `BlockClient::read`
+pošle u delšího čtení až 32 požadavků po 32 KiB bez čekání (odpovědi chodí
+v pořadí, po chybě klient vybere i zbylé odpovědi); `write_queued` totéž
+pro zápisy. Ovladač s drahým příkazem vrátí větší `Disks::max_read` (dnes
+`usb-storage`) a server navazující čtení jednoho klienta, která už čekají
+ve frontě, přečte jedním voláním a odpoví na každé zvlášť. Když spojené
+čtení selže, každé se zopakuje samo, takže chybu dostane to, kterého se
+týká. Ostatní ovladače zůstávají po 32 KiB.
+
 <figure class="diagram">
 <svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Spuštění ovladačů disků a ochrana cizích disků">
 <defs><marker id="dk1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>

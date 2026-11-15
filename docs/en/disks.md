@@ -17,6 +17,16 @@ one place for all three drivers. A driver only provides read, write, flush
 and TRIM in device sectors (the `Disks` trait). Disks with 512 B and
 4 KiB logical sectors work the same (see [Sector size](#sector-size)).
 
+**Reads without waiting and merging** **[verified in QEMU]**: for a longer
+read `BlockClient::read` sends up to 32 requests of 32 KiB without waiting
+(replies arrive in order; after an error the client still collects the
+remaining replies); `write_queued` does the same for writes. A driver with an
+expensive command reports a larger `Disks::max_read` (today `usb-storage`)
+and the server reads one client's consecutive reads that are already queued
+with one call and replies to each separately. If the merged read fails, each
+read is retried on its own, so the error goes to the read it concerns. Other
+drivers stay at 32 KiB.
+
 <figure class="diagram">
 <svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Disk driver start-up and foreign disk protection">
 <defs><marker id="dk1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>

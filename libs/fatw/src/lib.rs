@@ -92,8 +92,9 @@ pub struct Volume<D: Device> {
     fat_cache: Option<(u64, [u8; SECTOR])>,
 }
 
-/// Nejvic bajtu v jednom cteni nebo zapisu souvisleho behu clusteru.
-const RUN_BYTES: usize = 256 * 1024;
+/// Nejvic bajtu v jednom cteni nebo zapisu souvisleho behu clusteru (1 MiB:
+/// blokovy klient posle cteni najednou a ovladac USB je spoji).
+const RUN_BYTES: usize = 1024 * 1024;
 
 /// Jmeno 8.3 do 11 bajtu adresare (`LOG.TXT` -> `LOG     TXT`).
 pub fn short_name(name: &str) -> Result<[u8; 11]> {

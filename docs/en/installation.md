@@ -47,8 +47,8 @@ the user through the steps of the design **[verified in QEMU]** (x86_64 and aarc
 8. **Installation progress** - eight steps (reading the system from the
    live USB, partition table, EFI partition, loader and system, file
    system, settings, account, verification). Reading from the stick comes
-   first and takes longest: a debug build under TCG needs ~50 s before
-   anything is written.
+   first and takes longest, before anything is written (numbers in
+   [Installation speed](#installation-speed)).
 
 <figure class="diagram">
 <svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Path from the install command to the disk">
@@ -213,7 +213,41 @@ Steps of the `installd` service **[verified in QEMU]** (x86_64 and aarch64,
    (Argon2id, file `/system/accounts/users/<uid>`), home folder as a
    dataset; init re-applies file permissions at boot,
 7. verification: the table again through diskguard, ESP files read back
-   and compared, our FS mounted read-only.
+   from the target disk and compared with the source fingerprint (length
+   and XXH3-128 computed right after reading from the stick; the source is
+   freed from memory after writing), our FS mounted read-only.
+
+### Installation speed
+
+The system is read from the stick once (loader, kernel, `os/instfs.img`)
+and the same data go to the target ESP; verification reads back only what
+was written. **[verified in QEMU]** (x86_64 and aarch64, `--only instalace-gui`):
+
+- reading from the stick in 1 MiB pieces: `BlockClient::read` sends 32
+  requests without waiting and `usb-storage` merges them into one READ
+  command ([Disks](disks.md), [USB](usb.md)); USB data transfers of 32 KiB,
+- writing to the target without waiting for each reply (`write_queued`; an
+  error is reported at `flush`, which FAT and FS call after writing),
+- verification by fingerprint instead of a second copy in memory (peak
+  memory lower by the size of the system).
+
+Measured on 15 Nov 2026 under TCG, debug build, the same image (source
+108-114 MiB), revision `ccfdb23` (before) and `ccfdb23` + this change (after),
+step times from the installd log:
+
+| step | x86_64 before | x86_64 after | aarch64 before | aarch64 after |
+|---|---|---|---|---|
+| reading from the stick | 104 s | 61 s | 154 s | 92 s |
+| copy to the ESP | 43 s | 23 s | 57 s | 30 s |
+| verification | 51 s | 24 s | 63 s | 34 s |
+| installation total | 201 s | 110 s | 277 s | 157 s |
+
+Conditions: QEMU TCG on a Windows host, 4 vCPUs, a `usb-storage` stick
+(super speed) on xHCI, NVMe target. Under TCG each USB transfer currently
+costs about 13 ms and each NVMe command (32 KiB) about 7 ms (debug, `ccfdb23*`)
+regardless of the data size, so the number of requests matters, not the volume. Further
+speed-up would come from several transfers per endpoint at once in `xhci`
+and larger NVMe commands.
 
 ## Firmware menu (NVRAM)
 
