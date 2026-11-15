@@ -177,7 +177,9 @@ static int refused(void) {
     s = socket(AF_INET, SOCK_STREAM, 0);
     if (connect(s, (struct sockaddr *)&a, sizeof a) != -1 || errno != EACCES) return 5;
     close(s);
-    if (socket(AF_UNIX, SOCK_STREAM, 0) != -1 || errno != EAFNOSUPPORT) return 3;
+    /* AF_UNIX je jen SOCK_STREAM (unixcheck.c); jina rodina neni. */
+    if (socket(AF_UNIX, SOCK_DGRAM, 0) != -1 || errno != EPROTONOSUPPORT) return 3;
+    if (socket(5, SOCK_STREAM, 0) != -1 || errno != EAFNOSUPPORT) return 6; /* AF_APPLETALK */
     char b[4];
     if (recv(0, b, 1, 0) != -1 || errno != ENOTSOCK) return 4;
     return 0;
