@@ -252,6 +252,87 @@ Rozhodnutí uživatele a koordinátora (15. 11. 2026):
 | Q11 | A: jen x86_64; aarch64 = zdokumentované omezení, `NOT_SUPPORTED` v API |
 | Q12 | A: sestavení ve WSL přes `tools/wsl` |
 
+## W1: spojení se serverem a procesy (otázky T1-T5)
+
+**Stav: [navrženo]**, čeká na rozhodnutí (vlákno Wine, 15. 11. 2026). Rozbor
+Wine 11 (`dlls/ntdll/unix/server.c`, `server/request.c`, `server/ptrace.c`):
+
+- **Spojení:** klient se připojí k serveru přes socket `AF_UNIX` v adresáři
+  prefixu (nebo zdědí socket v proměnné `WINESERVERSOCKET`, když proces
+  spouští jiný proces Wine). Každé vlákno pošle serveru své roury pro
+  požadavky a odpovědi; soubory, roury a mapování putují oběma směry jako
+  fd přes `SCM_RIGHTS`. Server čeká na všechny fd v jedné smyčce `poll`.
+- **Signály vláknům jiného procesu:** server pozastavuje vlákno signálem
+  `SIGUSR1` (vlákno v obsluze pošle serveru kontext a čeká), ukončuje
+  `SIGQUIT` (`tkill` na pid a tid).
+- **Paměť jiného procesu:** `ReadProcessMemory` a `WriteProcessMemory`
+  přes `ptrace` a `/proc/<pid>/mem` (ladění, některé dotazy serveru).
+- **Start procesu:** zavaděč `wine` a `wine-preloader` rezervují rozsahy
+  adres pro Windows (obrazy PE od 0x10000, `KUSER_SHARED_DATA` na
+  0x7ffe0000) dřív, než dynamický zavaděč nahraje knihovny.
+
+### T1 - předávání fd mezi procesy
+
+- **A (doporučuji):** obecné **`AF_UNIX` v `cstd`/`osrt`**: `socketpair`,
+  `bind`/`connect` na cestu (uzel socketu ve fsd nebo jmenná služba),
+  `sendmsg`/`recvmsg` s `SCM_RIGHTS`, kde se fd předá jako duplikát handlu
+  v kanálu (soubor = relace fsd, roura = konec kanálu, paměť = VMO). Kód
+  Wine zůstane beze změn a stejný mechanismus potřebují další porty
+  (X11, D-Bus, Wayland).
+- **B:** záplata Wine: spojení a předávání přes vlastní funkce nad kanály
+  v `server.c`, `request.c`, `fd.c`. Předávání otevřených souborů mezi
+  procesy je ale potřeba i tak - jen ne ve tvaru POSIX.
+- **C:** jen `socketpair` a zděděný socket (bez `bind`/`connect` na cestu):
+  stačí, pokud každý proces aplikace spouští spouštěč nebo server.
+
+### T2 - signál vláknu jiného procesu
+
+- **A (doporučuji):** obecné **přerušení vlákna v jádře**:
+  `THREAD_INTERRUPT(thread, code)` s právem handlu vlákna; cílové vlákno
+  dostane při návratu do userspace synchronní doručení na obsluhu ve
+  vlákně (druh `INTERRUPT` s kódem), i když je v blokujícím syscallu (ten
+  vrátí `INTERRUPTED` jako `EINTR`). `cstd` na tom postaví `kill`,
+  `pthread_kill` a `tgkill` mezi procesy (chybí i pro Ctrl+C terminálu
+  a `SIGCHLD`). Server dostane handly vláken klientů při `init_thread`.
+- **B:** bez jádra: server vlákno pozastaví (`THREAD_SUSPEND`) a přepíše
+  jeho kontext tak, aby skočilo do obsluhy (jako vkládání přes `ptrace`).
+  Křehké uprostřed syscallu a bez `EINTR`.
+- **C:** pozastavení jen přes `THREAD_SUSPEND` a čtení kontextu serverem
+  (`THREAD_STATE`) - Wine ale chce, aby kontext poslalo vlákno samo
+  (záplata synchronizace pozastavení v serveru i v `ntdll`).
+
+### T3 - paměť jiného procesu
+
+- **A (doporučuji):** syscall `PROCESS_MEMORY(process, addr, buf, len,
+  flags)` s právy handlu procesu `READ_MEMORY` / `WRITE_MEMORY` (debuggery,
+  `ReadProcessMemory`), kopie přes jádro bez mapování; etapa W2.
+- **B:** jen pro procesy téže aplikace přes sdílené VMO - nepokryje
+  libovolné adresy.
+
+### T4 - spuštění procesu a dědění fd
+
+`posix_spawn` v `cstd` (vlákno plánovače) zatím plánuje jen fd 0-2. Wine
+dává dítěti socket serveru dalším fd a proměnnou `WINESERVERSOCKET`.
+
+- **A (doporučuji):** `posix_spawn` s akcemi `dup2`/`close` pro libovolná
+  fd (fd bez `FD_CLOEXEC` se dědí jako duplikát handlu ve startovní
+  zprávě), jako POSIX.
+- **B:** jen zděděný socket serveru zvláštním štítkem startovní zprávy
+  (záplata Wine v `loader.c`).
+
+### T5 - rezervace adres pro Windows
+
+Rozsahy pro obrazy PE (dolní 2 GiB, obvyklé báze 0x140000000), sdílená
+data systému 0x7ffe0000 a zásobníky musí být volné dřív, než `ld.so`
+nahraje knihovny na náhodné báze.
+
+- **A (doporučuji):** `ld.so` dostane seznam rozsahů k rezervaci před
+  nahráním knihoven (auxv `AT_MO_RESERVE` z manifestu nebo od spouštěče
+  vrstvy) a předá je programu jako rezervace (`VM_RESERVE`), které Wine
+  převezme (místo `wine-preloader`).
+- **B:** báze knihoven a zásobníků vždy nad 4 GiB pro programy s příznakem
+  v manifestu (jednodušší, ale pevné pravidlo v zavaděči).
+
 ## Co doplní systém
 
 | Kde | Co | Etapa |

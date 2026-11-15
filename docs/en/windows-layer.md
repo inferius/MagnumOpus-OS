@@ -267,6 +267,95 @@ Decisions of the user and the coordinator (15 Nov 2026):
 | Q11 | A: x86_64 only; aarch64 = a documented limitation, `NOT_SUPPORTED` in the API |
 | Q12 | A: building in WSL via `tools/wsl` |
 
+## W1: server connection and processes (questions T1-T5)
+
+**Status: [designed]**, waiting for a decision (Wine thread, 15 Nov 2026).
+Analysis of Wine 11 (`dlls/ntdll/unix/server.c`, `server/request.c`,
+`server/ptrace.c`):
+
+- **Connection:** the client connects to the server over an `AF_UNIX`
+  socket in the prefix directory (or inherits a socket in the
+  `WINESERVERSOCKET` variable when another Wine process starts it). Every
+  thread sends the server its request and reply pipes; files, pipes and
+  mappings travel both ways as fds over `SCM_RIGHTS`. The server waits on
+  all fds in one `poll` loop.
+- **Signals to threads of another process:** the server suspends a thread
+  with `SIGUSR1` (the thread sends the server its context in the handler
+  and waits) and terminates it with `SIGQUIT` (`tkill` on pid and tid).
+- **Memory of another process:** `ReadProcessMemory` and
+  `WriteProcessMemory` via `ptrace` and `/proc/<pid>/mem` (debugging, some
+  server queries).
+- **Process start:** the `wine` loader and `wine-preloader` reserve address
+  ranges for Windows (PE images from 0x10000, `KUSER_SHARED_DATA` at
+  0x7ffe0000) before the dynamic loader loads libraries.
+
+### T1 - passing fds between processes
+
+- **A (recommended):** generic **`AF_UNIX` in `cstd`/`osrt`**:
+  `socketpair`, `bind`/`connect` to a path (a socket node in fsd or a name
+  service), `sendmsg`/`recvmsg` with `SCM_RIGHTS`, where an fd is passed as
+  a handle duplicate in a channel (file = fsd session, pipe = channel end,
+  memory = VMO). Wine code stays unchanged and other ports need the same
+  mechanism (X11, D-Bus, Wayland).
+- **B:** a Wine patch: connection and passing via our own functions over
+  channels in `server.c`, `request.c`, `fd.c`. Passing open files between
+  processes is still needed - just not in the POSIX form.
+- **C:** only `socketpair` and an inherited socket (no `bind`/`connect` to
+  a path): enough if every process of the application is started by the
+  launcher or the server.
+
+### T2 - a signal to a thread of another process
+
+- **A (recommended):** a generic **thread interruption in the kernel**:
+  `THREAD_INTERRUPT(thread, code)` with a thread handle right; the target
+  thread gets a synchronous delivery on its in-thread handler (kind
+  `INTERRUPT` with the code) on return to user space, even from a blocking
+  syscall (which returns `INTERRUPTED`, like `EINTR`). `cstd` builds `kill`,
+  `pthread_kill` and `tgkill` between processes on it (also missing for
+  terminal Ctrl+C and `SIGCHLD`). The server gets the client thread
+  handles at `init_thread`.
+- **B:** without the kernel: the server suspends the thread
+  (`THREAD_SUSPEND`) and rewrites its context to jump into the handler
+  (like injection via `ptrace`). Fragile in the middle of a syscall and
+  without `EINTR`.
+- **C:** suspension only via `THREAD_SUSPEND` and the server reading the
+  context (`THREAD_STATE`) - but Wine wants the thread to send the context
+  itself (a patch of the suspension handshake in the server and `ntdll`).
+
+### T3 - memory of another process
+
+- **A (recommended):** a syscall `PROCESS_MEMORY(process, addr, buf, len,
+  flags)` with process handle rights `READ_MEMORY` / `WRITE_MEMORY`
+  (debuggers, `ReadProcessMemory`), a copy through the kernel without
+  mapping; stage W2.
+- **B:** only for processes of the same application via shared VMOs -
+  does not cover arbitrary addresses.
+
+### T4 - process start and fd inheritance
+
+`posix_spawn` in `cstd` (the scheduler thread) plans only fds 0-2 so far.
+Wine gives the child the server socket as another fd and the
+`WINESERVERSOCKET` variable.
+
+- **A (recommended):** `posix_spawn` with `dup2`/`close` actions for any fd
+  (fds without `FD_CLOEXEC` are inherited as handle duplicates in the
+  start message), as in POSIX.
+- **B:** only the inherited server socket under a special start message
+  tag (a Wine patch in `loader.c`).
+
+### T5 - address reservations for Windows
+
+The ranges for PE images (the lower 2 GiB, the usual base 0x140000000),
+the system shared data at 0x7ffe0000 and stacks must be free before
+`ld.so` loads libraries at random bases.
+
+- **A (recommended):** `ld.so` gets a list of ranges to reserve before
+  loading libraries (auxv `AT_MO_RESERVE` from the manifest or from the
+  layer launcher) and hands them to the program as reservations
+  (`VM_RESERVE`) that Wine takes over (instead of `wine-preloader`).
+- **B:** library and stack bases always above 4 GiB for programs with a
+  manifest flag (simpler, but a fixed rule in the loader).
+
 ## What the system adds
 
 | Where | What | Stage |
