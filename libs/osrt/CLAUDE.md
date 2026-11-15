@@ -23,7 +23,7 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 ## Invarianty
 
 - Crate se překládá jako závislost std (`rustc-dep-of-std`): závislosti jen naše crates s toutéž feature a vendorované crates z rust-src; libos vždy s `default-features = false` (bez `rt`).
-- `env::resolve` nechává `..` (řeší ho fsd po následování odkazů), `.` maže; `env::resolve_lexical` jen pro cesty mimo fsd (program pro launchd). `set_current_dir` ukládá kanonickou cestu (`REALPATH`). `remove_file`/`remove_dir` kontrolují druh přes `lstat` (odkaz se maže jako odkaz).
+- `env::resolve` nechává `..` (řeší ho fsd po následování odkazů), `.` maže; `env::resolve_lexical` jen pro cesty mimo fsd (program pro launchd). `set_current_dir` ukládá kanonickou cestu (`REALPATH`). `remove_file`/`remove_dir` kontrolují druh přes `lstat` (odkaz se maže jako odkaz). `rename` nahradí existující cíl (`RENAME_REPLACE`, POSIX), na tom stojí ukládání přes dočasný soubor (registr Wine).
 - Handle vlastního procesu se nesmí zavřít (`start::init` ho zapomene).
 - Nové vlákno nastaví TP jako první věc, před jakýmkoli kódem std.
 - `at_exit` volá funkce bez drženého zámku (smí registrovat další); `exit_now` je nevolá.

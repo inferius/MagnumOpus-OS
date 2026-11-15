@@ -357,8 +357,11 @@ pub fn remove_dir(path: &[u8]) -> Result<()> {
     session()?.remove(&abs)
 }
 
+/// Prejmenuje `from` na `to`; existujici cil atomicky nahradi (POSIX
+/// `rename`, std): soubor souborem, adresar prazdnym adresarem, jinak
+/// `IsADirectory` / `NotADirectory` / `NotEmpty`.
 pub fn rename(from: &[u8], to: &[u8]) -> Result<()> {
-    session()?.rename(&crate::env::resolve(from)?, &crate::env::resolve(to)?)
+    session()?.rename_replace(&crate::env::resolve(from)?, &crate::env::resolve(to)?)
 }
 
 /// Opravneni objektu: vlastnik, ucinna prava volajiciho a popis

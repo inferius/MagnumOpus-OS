@@ -1,0 +1,213 @@
+diff --git a/server/process.h b/server/process.h
+--- a/server/process.h
++++ b/server/process.h
+@@ -53,6 +53,7 @@
+     int                  unix_pid;        /* Unix pid for final SIGKILL */
+ #ifdef __magnumopus__
+     int                  mem_fd;          /* MagnumOpus: procesovy fd klienta (PROCESS_MEMORY) */
++    int                  ctl_fd;          /* MagnumOpus: ridici fd klienta (jen ukonceni) */
+ #endif
+     int                  exit_code;       /* process exit code */
+     int                  running_threads; /* number of threads running in this process */
+diff --git a/server/process.c b/server/process.c
+--- a/server/process.c
++++ b/server/process.c
+@@ -60,6 +60,9 @@
+ #include "file.h"
+ #include "handle.h"
+ #include "process.h"
++#ifdef __magnumopus__
++#include <magnumopus/process.h>
++#endif
+ #include "thread.h"
+ #include "request.h"
+ #include "user.h"
+@@ -625,6 +628,16 @@
+     struct process *process = private;
+     int signal = 0;
+ 
++#ifdef __magnumopus__
++    /* MagnumOpus: kill(pid, 0) ani SIGKILL podle pid neni. Spojeni se
++     * serverem uz je zavrene: proces ukoncit pres ridici fd (jen pravo
++     * ukonceni, klient ho sveril pri pripojeni) a povazovat ho za mrtvy. */
++    if (process->ctl_fd != -1) mo_process_kill( process->ctl_fd );
++    process->sigkill_delay = TICKS_PER_SEC / 64;
++    process->sigkill_timeout = NULL;
++    process_died( process );
++    return;
++#endif
+     process->sigkill_delay *= 2;
+     if (process->sigkill_delay >= TICKS_PER_SEC / 2)
+         signal = SIGKILL;
+@@ -675,6 +688,7 @@
+     process->unix_pid        = -1;
+ #ifdef __magnumopus__
+     process->mem_fd          = -1;
++    process->ctl_fd          = -1;
+ #endif
+     process->exit_code       = STILL_ACTIVE;
+     process->running_threads = 0;
+@@ -791,6 +805,7 @@
+     set_process_startup_state( process, STARTUP_ABORTED );
+ #ifdef __magnumopus__
+     if (process->mem_fd != -1) close( process->mem_fd );
++    if (process->ctl_fd != -1) close( process->ctl_fd );
+ #endif
+ 
+     if (process->job)
+diff --git a/server/thread.h b/server/thread.h
+--- a/server/thread.h
++++ b/server/thread.h
+@@ -79,6 +79,9 @@
+     int                    exit_code;     /* thread exit code */
+     int                    unix_pid;      /* Unix pid of client */
+     int                    unix_tid;      /* Unix tid of client */
++#ifdef __magnumopus__
++    int                    mo_thread_fd;  /* MagnumOpus: fd vlakna klienta (jen preruseni, signaly) */
++#endif
+     struct context        *context;       /* current context */
+     client_ptr_t           suspend_cookie;/* wait cookie of suspending select */
+     client_ptr_t           teb;           /* TEB address (in client address space) */
+diff --git a/server/thread.c b/server/thread.c
+--- a/server/thread.c
++++ b/server/thread.c
+@@ -402,6 +402,9 @@
+     thread->alert_sync      = NULL;
+     thread->unix_pid        = -1;  /* not known yet */
+     thread->unix_tid        = -1;  /* not known yet */
++#ifdef __magnumopus__
++    thread->mo_thread_fd    = -1;
++#endif
+     thread->context         = NULL;
+     thread->teb             = 0;
+     thread->entry_point     = 0;
+@@ -656,6 +659,9 @@
+ 
+     list_remove( &thread->entry );
+     cleanup_thread( thread );
++#ifdef __magnumopus__
++    if (thread->mo_thread_fd != -1) close( thread->mo_thread_fd );
++#endif
+     release_object( thread->process );
+     if (thread->id) free_ptid( thread->id );
+     if (thread->token) release_object( thread->token );
+@@ -1760,6 +1766,9 @@
+     /* Procesovy fd, ktery klient poslal pred pozadavkem (ntdll server.c):
+      * pamet klienta pro read/write_process_memory (ptrace.c). */
+     if (process->mem_fd == -1) process->mem_fd = thread_get_inflight_fd( current, 1021 );
++    /* Ridici fd procesu (ukonceni) a fd prvniho vlakna (signaly). */
++    if (process->ctl_fd == -1) process->ctl_fd = thread_get_inflight_fd( current, 1022 );
++    if (current->mo_thread_fd == -1) current->mo_thread_fd = thread_get_inflight_fd( current, 1023 );
+ #endif
+ 
+     if (!process->parent_id)
+@@ -1799,6 +1808,10 @@
+ 
+     current->unix_pid = current->process->unix_pid;
+     current->unix_tid = req->unix_tid;
++#ifdef __magnumopus__
++    /* Fd dalsiho vlakna (jen preruseni), klient ho poslal pred pozadavkem. */
++    if (current->mo_thread_fd == -1) current->mo_thread_fd = thread_get_inflight_fd( current, 1023 );
++#endif
+     current->teb      = req->teb;
+     current->entry_point = req->entry;
+ 
+diff --git a/server/ptrace.c b/server/ptrace.c
+--- a/server/ptrace.c
++++ b/server/ptrace.c
+@@ -55,6 +55,9 @@
+ #include "file.h"
+ #include "process.h"
+ #include "thread.h"
++#ifdef __magnumopus__
++#include <magnumopus/process.h>
++#endif
+ 
+ #ifdef USE_PTRACE
+ 
+@@ -255,11 +258,18 @@
+ {
+     int ret = -1;
+ 
++#ifdef __magnumopus__
++    /* MagnumOpus: signal = preruseni vlakna pres jeho fd (jen pravo
++     * INTERRUPT, klient ho sveril v init_thread); tkill ani kill neni. */
++    if (thread->mo_thread_fd != -1) ret = mo_thread_signal( thread->mo_thread_fd, sig );
++    else errno = ESRCH;
++#else
+     if (thread->unix_tid != -1)
+     {
+         ret = tkill( thread->unix_pid, thread->unix_tid, sig );
+         if (ret == -1 && errno == ENOSYS) ret = kill( thread->unix_pid, sig );
+     }
++#endif
+     if (ret == -1 && errno == ESRCH) /* thread got killed */
+     {
+         thread->unix_pid = -1;
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -81,6 +81,25 @@
+ #include "unix_private.h"
+ #ifdef __magnumopus__
+ #include <magnumopus/process.h>
++
++/* Posle fd serveru pod pevnym cislem `num` (server ho vyzvedne jako
++ * inflight fd s timto cislem) a zavre ho. */
++static void mo_send_fd( int fd, int num )
++{
++    if (fd == -1) return;
++    if (fd != num)
++    {
++        if (dup2( fd, num ) != -1)
++        {
++            wine_server_send_fd( num );
++            close( num );
++        }
++        close( fd );
++        return;
++    }
++    wine_server_send_fd( fd );
++    close( fd );
++}
+ #endif
+ #include "ddk/wdm.h"
+ 
+@@ -1669,18 +1688,13 @@
+ 
+ #ifdef __magnumopus__
+     /* MagnumOpus: serveru sve aplikace sverit vlastni pamet (procesovy fd jen
+-     * s pravy pameti, PROCESS_MEMORY; jako ptrace stejneho uzivatele). Server
+-     * ho vyzvedne pod pevnym cislem v init_first_thread (thread.c). */
+-    {
+-        int pfd = mo_self_process_fd();
+-        if (pfd != -1 && pfd != 1021)
+-        {
+-            if (dup2( pfd, 1021 ) != -1) wine_server_send_fd( 1021 );
+-            close( 1021 );
+-        }
+-        else if (pfd == 1021) wine_server_send_fd( pfd );
+-        if (pfd != -1) close( pfd );
+-    }
++     * s pravy pameti, PROCESS_MEMORY; jako ptrace stejneho uzivatele),
++     * ukonceni (ridici fd, jako kill) a signaly prvnimu vlaknu (fd vlakna,
++     * jako tgkill). Server je vyzvedne pod pevnymi cisly v init_first_thread
++     * (thread.c). */
++    mo_send_fd( mo_self_process_fd(), 1021 );
++    mo_send_fd( mo_self_control_fd(), 1022 );
++    mo_send_fd( mo_self_thread_fd(), 1023 );
+ #endif
+ 
+     SERVER_START_REQ( init_first_thread )
+@@ -1798,6 +1812,11 @@
+     void *teb;
+     int reply_pipe = init_thread_pipe();
+ 
++#ifdef __magnumopus__
++    /* Fd vlakna (jen preruseni) pro signaly serveru (init_thread v thread.c). */
++    mo_send_fd( mo_self_thread_fd(), 1023 );
++#endif
++
+     /* always send the native TEB */
+     if (!(teb = NtCurrentTeb64())) teb = NtCurrentTeb();
+ 

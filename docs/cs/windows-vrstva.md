@@ -344,20 +344,21 @@ Rozhodnutí uživatele a koordinátora (15. 11. 2026):
   (záplata `0004`).
 - **Registr**: `wine reg add` a v dalším procesu `wine reg query` vidí
   hodnotu (registr drží wineserver). Server ho ukládá do `user.reg`
-  a `system.reg` periodicky (30 s).
-- ⚠️ **Otevřené:** při ukončení serveru assert v `free_async_queue`
-  (ve frontě naslouchání pojmenované roury zůstala uvolněná asynchronní
-  operace), takže změny od posledního periodického uložení se při konci
-  serveru ztratí. Pravděpodobně souvisí se signály serveru klientům
-  (`SIGUSR1`/`SIGQUIT`/`SIGKILL`), které zatím nedoručíme; ověří se po
-  jejich zavedení (řídicí fd, rozhodnutí A).
+  a `system.reg` periodicky (30 s) a při svém konci; test po
+  `wineboot -k` a `wineserver -w` najde klíč v `user.reg`.
+- Ukládá se přes dočasný soubor a `rename` na existující `user.reg`:
+  `rename` v `osrt` (tedy i `cstd` a `std`) cíl atomicky nahradí jako
+  POSIX (požadavek fsd `RENAME_REPLACE`); dřív vracel `EEXIST`.
+- Dřívější pád serveru při konci (assert v `free_async_queue`) se se
+  signály serveru (záplata `0007`) už neobjevuje: server končí s kódem 0.
 - Záplata `0003` předává při opětovném spuštění serveru všechny jeho volby
   (`-d`, `-p`), nejen `-f`.
 
 ## Signály serveru (W2)
 
-**[implementováno]** (jádro a `cstd` **[ověřeno v QEMU]** x86_64 i aarch64,
-napojení Wine se ověřuje).
+**[ověřeno v QEMU]** jádro a `cstd` x86_64 i aarch64, napojení Wine
+(záplata `0007`) x86_64 (sada `wine`, release: konec procesů prefixu
+přes `wineboot -k` a čistý konec serveru).
 
 Wineserver na Linuxu posílá klientům signály: `SIGUSR1` přes `tgkill`
 (přerušení vlákna kvůli pozastavení, kontextu a APC jiného procesu),

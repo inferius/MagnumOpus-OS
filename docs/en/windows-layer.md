@@ -365,20 +365,23 @@ Decisions of the user and the coordinator (15 Nov 2026):
   (patch `0004`).
 - **The registry**: `wine reg add` and `wine reg query` in another process
   see the value (wineserver holds the registry). The server saves it to
-  `user.reg` and `system.reg` periodically (30 s).
-- ⚠️ **Open:** when the server ends, an assert in `free_async_queue` (a
-  freed asynchronous operation left in the listen queue of a named pipe),
-  so changes since the last periodic save are lost when the server ends.
-  Probably related to the server's signals to clients
-  (`SIGUSR1`/`SIGQUIT`/`SIGKILL`), which we do not deliver yet; to be
-  checked once they exist (control fd, decision A).
+  `user.reg` and `system.reg` periodically (30 s) and when it ends; after
+  `wineboot -k` and `wineserver -w` the test finds the key in `user.reg`.
+- Saving goes through a temporary file and `rename` onto the existing
+  `user.reg`: `rename` in `osrt` (and so in `cstd` and `std`) atomically
+  replaces the target as in POSIX (fsd request `RENAME_REPLACE`); it used
+  to return `EEXIST`.
+- The former server crash at exit (assert in `free_async_queue`) no longer
+  appears with the server signals (patch `0007`): the server exits with
+  code 0.
 - Patch `0003` passes all of the server's options (`-d`, `-p`) when it
   restarts itself, not only `-f`.
 
 ## Server signals (W2)
 
-**[implemented]** (kernel and `cstd` **[verified in QEMU]** x86_64 and
-aarch64, the Wine wiring is being verified).
+**[verified in QEMU]** kernel and `cstd` x86_64 and aarch64, the Wine
+wiring (patch `0007`) x86_64 (`wine` suite, release: ending the prefix's
+processes via `wineboot -k` and a clean server exit).
 
 On Linux wineserver sends signals to clients: `SIGUSR1` via `tgkill`
 (interrupting a thread to suspend it, read its context or run an APC of

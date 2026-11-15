@@ -23,7 +23,7 @@ pub const TESTS: &[Test] = &[
     ("wine: hostname", wine_hostname),
     ("wine: dalsi proces, pojmenovane udalosti, Read/WriteProcessMemory (W2)", wine_processes),
     ("wine: sdilena sekce nad souborem mezi procesy, koherence s ReadFile/WriteFile (W2)", wine_sections),
-    ("wine: registr - reg add a reg query v dalsim procesu (W2)", wine_registry),
+    ("wine: registr - reg add, reg query v dalsim procesu, user.reg po konci serveru (W2)", wine_registry),
 ];
 
 /// Testovaci programy Windows na disku (`xtask/src/datadisk.rs`).
@@ -219,9 +219,24 @@ fn wine_sections(s: &Startup) -> TestResult {
     Ok(())
 }
 
+/// Ukonci server prefixu: `wineboot -k` ukonci procesy prefixu (server je
+/// konci pres ridici fd, zaplata 0007), `wineserver -w` pocka na konec
+/// serveru (pri konci ulozi registr). Vrati popis pro hlaseni chyb.
+fn end_server(s: &Startup) -> Result<String, String> {
+    let loader = format!("{APP}/lib/wine/x86_64-unix/wine");
+    let boot = launch_path(s, &loader, &["wineboot", "-k"], WINE_ENV, Duration::from_secs(120))?;
+    let wait = launch_path(s, &format!("{APP}/bin/wineserver"), &["-w"], WINE_ENV, Duration::from_secs(120))?;
+    Ok(format!("wineboot -k: kod {} {}; wineserver -w: kod {} {}", boot.code, boot.stderr.trim(), wait.code, wait.stderr.trim()))
+}
+
+/// Registr: zapis a cteni v dalsim procesu, pak ulozeni do user.reg pri
+/// konci serveru. Server prefixu z predchozich testu se nejdriv ukonci, aby
+/// novy server (spusti ho `reg add`) psal na stderr `reg add` - chybova
+/// hlaseni ukladani registru jsou pak videt.
 fn wine_registry(s: &Startup) -> TestResult {
     let loader = format!("{APP}/lib/wine/x86_64-unix/wine");
     let key = "HKCU\\Software\\MagnumOpus";
+    let before = end_server(s)?;
     let add = launch_path(s, &loader, &["reg", "add", key, "/v", "Zkouska", "/d", "hodnota-42", "/f"], WINE_ENV, Duration::from_secs(600))?;
     check!(add.code == 0, format!("reg add: kod {}; stdout: {}; stderr: {}", add.code, add.stdout.trim(), add.stderr.trim()));
     let query = launch_path(s, &loader, &["reg", "query", key, "/v", "Zkouska"], WINE_ENV, Duration::from_secs(600))?;
@@ -229,9 +244,24 @@ fn wine_registry(s: &Startup) -> TestResult {
         query.code == 0 && query.stdout.contains("hodnota-42"),
         format!("reg query: kod {}; stdout: {}; stderr: {}", query.code, query.stdout.trim(), query.stderr.trim())
     );
-    // Ulozeni do user.reg pri konci serveru zatim neoverujeme: wineserver pri
-    // ukonceni pada (uvolnena operace ve fronte pojmenovane roury, souvisi
-    // se signaly serveru klientum, ktere zatim nejdou) - otevreny bod W2.
-    let _ = add.err;
+    let after = end_server(s)?;
+    // Stderr serveru (drzi ho kanal `reg add`).
+    let mut server_err = Vec::new();
+    while let Ok(m) = add.err.read(Some(time::deadline_after(Duration::from_millis(200)))) {
+        server_err.extend_from_slice(&m.data);
+    }
+    let reg = fs()?.read("/home/wine/.wine/user.reg", 0, 1 << 20).map_err(|e| fail("user.reg", e))?;
+    let reg = String::from_utf8_lossy(&reg);
+    for line in String::from_utf8_lossy(&server_err).lines().filter(|l| !l.contains("fixme")) {
+        libos::println!("init: wineserver: {line}");
+    }
+    check!(
+        reg.contains("[Software\\\\MagnumOpus]") && reg.contains("hodnota-42"),
+        format!(
+            "klic v user.reg po konci serveru ({} B); pred: {before}; po: {after}; stderr serveru: {}",
+            reg.len(),
+            String::from_utf8_lossy(&server_err).trim()
+        )
+    );
     Ok(())
 }
