@@ -514,7 +514,7 @@ its own identity from the manifest **[designed]**.
 | 2 `ACCOUNT_DELETE` | uid |
 | 3 `ACCOUNT_RESET_PASSWORD` | uid (does not open an encrypted home) |
 | 4 `ROLE_SET` | uid, on |
-| 5 `APPEARANCE_SYSTEM` | the login screen appearance choice (text `tmavy ne ne`); the action's service is init (`vzhled --system`), it checks the grant on the `grants` channel |
+| 5 `APPEARANCE_SYSTEM` | the login screen appearance choice (text `tmavy ne ne`); the action's service is init (`theme --system`), it checks the grant on the `grants` channel |
 | 6-15 | drivers, updates, disks, firewall, time - added by their services |
 
 Why: what is confirmed is a concrete action the person sees (the same
@@ -699,8 +699,9 @@ manifest), so that nobody asks again.
   this time** / **Do not allow** (Esc = Do not allow). Allow and Do not
   allow are stored, Only this time holds until the application ends.
   Without the compositor or for an unknown user = Do not allow.
-- **Listing and revoking:** the shell command `povoleni` (list) and
-  `povoleni odvolat <app> [mikrofon]`. The shell does not talk to the
+- **Listing and revoking:** the shell command `permissions` (a table)
+  and `permissions revoke <app> [microphone]`. The permission name in the
+  shell is English (`microphone`), the stored form stays. The shell does not talk to the
   account service: the request goes to init (the power channel of the
   shell session) and init asks the account service on behalf of the user
   of the terminal session (the `permissions-admin` channel). The shell thus

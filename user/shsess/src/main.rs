@@ -320,7 +320,8 @@ impl Env for SysEnv {
         }
     }
 
-    /// `loglevel`: uroven logu jadra (pres init, ten ma pravo DIAG).
+    /// `permissions`: povoleni aplikaci uzivatele relace (pres init, ten
+    /// mluvi se sluzbou uctu).
     fn permissions(&mut self, app: &str, perm: &str) -> Result<String, Error> {
         let guard = POWER.lock();
         let chan = guard.as_ref().ok_or(Error::NotSupported)?;
@@ -334,6 +335,28 @@ impl Env for SysEnv {
         }
     }
 
+    /// `acl`: jmena uctu (pres init). Radek `uid\tjmeno\tzobrazovane`.
+    fn accounts(&mut self) -> Result<Vec<shlang::acl::Account>, Error> {
+        let guard = POWER.lock();
+        let chan = guard.as_ref().ok_or(Error::NotSupported)?;
+        chan.write(&powerproto::Request::Accounts.encode(), Vec::new())?;
+        let m = chan.read(Some(time::deadline_after(Duration::from_secs(10))))?;
+        let text = match powerproto::Reply::decode(&m.data)? {
+            powerproto::Reply::Text(t) => t,
+            powerproto::Reply::Failed(e) => return Err(e),
+            _ => return Err(Error::Corrupted),
+        };
+        Ok(text
+            .lines()
+            .filter_map(|l| {
+                let mut f = l.splitn(3, '\t');
+                let uid = f.next()?.parse().ok()?;
+                Some(shlang::acl::Account { uid, name: f.next()?.into(), display: f.next().unwrap_or("").into() })
+            })
+            .collect())
+    }
+
+    /// `loglevel`: uroven logu jadra (pres init, ten ma pravo DIAG).
     fn log_level(&mut self, target: &str, level: &str) -> Result<String, Error> {
         let guard = POWER.lock();
         let chan = guard.as_ref().ok_or(Error::NotSupported)?;
@@ -347,7 +370,7 @@ impl Env for SysEnv {
         }
     }
 
-    /// `vzhled`: volba vzhledu pres init. Systemova zmena ceka na
+    /// `theme`: volba vzhledu pres init. Systemova zmena ceka na
     /// potvrzeni spravce v dialogu: init odpovi kanalem, vysledek prijde
     /// na nej (nejdele 2 minuty).
     fn appearance(&mut self, system: bool, change: &str) -> Result<String, Error> {

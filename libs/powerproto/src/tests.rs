@@ -14,10 +14,12 @@ fn pozadavky_tam_a_zpet() {
 }
 
 #[test]
-fn vzhled_tam_a_zpet() {
+fn shell_pozadavky_tam_a_zpet() {
     for q in [
         Request::Appearance { system: false, change: String::new() },
         Request::Appearance { system: true, change: String::from("schema tmavy") },
+        Request::Permissions { app: String::from("org.example.rec"), perm: String::from("microphone") },
+        Request::Accounts,
     ] {
         assert_eq!(Request::decode(&q.encode()), Ok(q.clone()));
     }

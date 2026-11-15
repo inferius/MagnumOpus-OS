@@ -482,7 +482,7 @@ nastavení se svou identitou z manifestu **[navrženo]**.
 | 2 `ACCOUNT_DELETE` | uid |
 | 3 `ACCOUNT_RESET_PASSWORD` | uid (šifrovaný domov se tím neotevře) |
 | 4 `ROLE_SET` | uid, zapnout |
-| 5 `APPEARANCE_SYSTEM` | volba vzhledu přihlašovací obrazovky (text `tmavy ne ne`); služba úkonu je init (`vzhled --system`), grant ověří na kanálu `grants` |
+| 5 `APPEARANCE_SYSTEM` | volba vzhledu přihlašovací obrazovky (text `tmavy ne ne`); služba úkonu je init (`theme --system`), grant ověří na kanálu `grants` |
 | 6-15 | ovladače, aktualizace, disky, firewall, čas - doplní jejich služby |
 
 Proč tak: potvrzuje se konkrétní úkon, který člověk vidí (stejný princip
@@ -658,8 +658,9 @@ uživateli a aplikaci (identita z manifestu), aby se nikdo neptal znovu.
   **Nepovolit** (Esc = Nepovolit). Povolit a Nepovolit se uloží, Jen
   tentokrát platí do konce běhu aplikace. Bez kompozitoru nebo pro
   neznámého uživatele = Nepovolit.
-- **Výpis a odvolání:** příkaz shellu `povoleni` (výpis) a
-  `povoleni odvolat <aplikace> [mikrofon]`. Shell se službou účtů
+- **Výpis a odvolání:** příkaz shellu `permissions` (výpis jako tabulka)
+  a `permissions revoke <aplikace> [microphone]`. Jméno povolení v shellu
+  je anglicky (`microphone`), uložený tvar zůstává. Shell se službou účtů
   nemluví: požadavek jde initu (kanál napájení relace shellu) a ten se ptá
   služby účtů jménem uživatele relace terminálu (kanál
   `permissions-admin`). Cizí rozhodnutí tak shell nevidí. Odvolání

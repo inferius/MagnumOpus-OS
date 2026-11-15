@@ -253,6 +253,28 @@ fn session(s: &Startup) -> TestResult {
     crate::check_eq!(w.value(id, "open /shell-test/a.txt | from text")?, Value::str("ahoj"), "undo prepsani");
     crate::check_eq!(w.value(id, "open /shell-test/a.txt.~termd | from text")?, Value::str("cizi"), "cizi soubor po undo");
 
+    // Opravneni souboru (`acl`) pres fsd: grant s dedenim, vypis
+    // zdedeneho na souboru ve slozce, odebrani.
+    w.ok(id, "acl add users edit /shell-test --inherit")?;
+    let own = acl_json(&w, id, "/shell-test")?;
+    crate::check!(
+        own.contains("\"who\":\"users\"") && own.contains("\"label\":\"Upravovat\"") && own.contains("\"scope\":\"this+children\""),
+        alloc::format!("acl slozky: {own}")
+    );
+    let file = acl_json(&w, id, "/shell-test/a.txt")?;
+    crate::check!(
+        file.contains("\"scope\":\"inherited\"") && file.contains("\"from\":\"/shell-test\""),
+        alloc::format!("acl souboru (zdedene): {file}")
+    );
+    w.ok(id, "acl remove users /shell-test")?;
+    let gone = acl_json(&w, id, "/shell-test")?;
+    crate::check!(gone.contains("\"grants\":[]"), alloc::format!("acl po odebrani: {gone}"));
+    crate::check_eq!(
+        w.value(id, "try { acl add nikdo view /shell-test } else e => e.code")?,
+        Value::str("SH_ARGS"),
+        "acl neznamy prijemce"
+    );
+
     // async: ulohy ve vlaknech shsess bezi soubezne, vysledky v poradi.
     let t0 = time::now();
     crate::check_eq!(
@@ -389,4 +411,12 @@ v.error.code")?,
     drop(w);
     let _ = proc2.wait_exit(Some(time::deadline_after(Duration::from_secs(5))));
     Ok(())
+}
+
+/// Vypis `acl` cesty jako JSON (text pro kontrolu poli).
+fn acl_json(w: &Window, id: u64, path: &str) -> Result<String, String> {
+    match w.value(id, &alloc::format!("acl {path} | to json"))? {
+        Value::Str(s) => Ok(s.chars().filter(|c| !c.is_whitespace()).collect()),
+        other => Err(alloc::format!("acl {path} | to json: {other:?}")),
+    }
 }
