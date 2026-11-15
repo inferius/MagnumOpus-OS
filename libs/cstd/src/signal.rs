@@ -151,6 +151,14 @@ fn default_action(sig: c_int) {
 
 /// Doruci signal v aktualnim vlakne (obsluha, ignorovani, vychozi akce).
 pub fn deliver(sig: c_int, code: c_int, addr: *mut c_void) {
+    let mut uc = crate::ucontext::empty();
+    uc.uc_sigmask = [MASK.with(Cell::get), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    deliver_ctx(sig, code, addr, &mut uc);
+}
+
+/// Jako [`deliver`] s kontextem pro obsluhu `SA_SIGINFO` (z ramce vyjimky;
+/// volajici zmeny po navratu pouzije).
+pub fn deliver_ctx(sig: c_int, code: c_int, addr: *mut c_void, uc: &mut crate::ucontext::ucontext_t) {
     let act = {
         let mut a = ACTIONS.lock().unwrap_or_else(|e| e.into_inner());
         let act = a[sig as usize];
@@ -174,11 +182,10 @@ pub fn deliver(sig: c_int, code: c_int, addr: *mut c_void) {
             MASK.with(|m| m.set(old | block));
             if act.sa_flags & SA_SIGINFO != 0 {
                 let mut info = siginfo_t { si_signo: sig, si_errno: 0, si_code: code, _pad: 0, si_addr: addr, _rest: [0; 13] };
-                // Kontext (ucontext_t) zatim nevyplneny: nulovy buffer.
-                let mut uc = [0u64; 128];
-                // SAFETY: obsluha registrovana pres sigaction s SA_SIGINFO.
+                // SAFETY: obsluha registrovana pres sigaction s SA_SIGINFO;
+                // kontext `ucontext_t` (sys/ucontext.h) zije po dobu volani.
                 let f: extern "C" fn(c_int, *mut siginfo_t, *mut c_void) = unsafe { core::mem::transmute(h) };
-                f(sig, &mut info, uc.as_mut_ptr().cast());
+                f(sig, &mut info, crate::ucontext::as_arg(uc));
             } else {
                 // SAFETY: obsluha registrovana pres sigaction/signal.
                 let f: extern "C" fn(c_int) = unsafe { core::mem::transmute(h) };
@@ -227,7 +234,12 @@ mod sync {
             crate::stdlib::_Exit(128 + sig);
         }
         // si_code: SEGV_MAPERR = 1 (adresa), BUS_ADRALN = 1, FPE_INTDIV = 1.
-        deliver(sig, 1, r.addr as *mut c_void);
+        // Kontext z ramce; zmeny obsluhy (PC, registry, FPU) zpet do ramce.
+        let mut f = f;
+        let mask = [MASK.with(Cell::get), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut uc = crate::ucontext::from_frame(&f, &mask);
+        deliver_ctx(sig, 1, r.addr as *mut c_void, &mut uc);
+        crate::ucontext::to_frame(&uc, &mut f);
         let _ = f.resume();
         crate::stdlib::_Exit(128 + sig)
     }

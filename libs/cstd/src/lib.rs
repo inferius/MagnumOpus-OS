@@ -48,6 +48,7 @@ pub mod stdlib;
 pub mod socket;
 pub mod sys;
 pub mod time;
+pub mod ucontext;
 pub mod unistd;
 pub mod wchar;
 
@@ -73,6 +74,8 @@ mod fenv_tests;
 mod cxxsup_tests;
 #[cfg(test)]
 mod fsat_tests;
+#[cfg(test)]
+mod ucontext_tests;
 #[cfg(test)]
 mod locale_tests;
 #[cfg(test)]

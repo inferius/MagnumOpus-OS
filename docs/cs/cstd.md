@@ -231,7 +231,14 @@ Rozhodnutí 6A - signály bez podpory jádra:
   `si_addr` z výjimky. Návrat z obsluhy = pokračovat (instrukce se
   zopakuje - vzor GC a JIT: `mprotect` v obsluze), `SIG_DFL` = další
   obsluha a konec procesu. Odchod `siglongjmp` funguje. `ucontext_t`
-  (třetí argument) zatím vyplněný není (nuly) **[navrženo]**. Na aarch64
+  (třetí argument, `sys/ucontext.h`) **[ověřeno v QEMU]** x86_64
+  i aarch64 (`ctest`, krok `signal`): registry z rámce výjimky
+  v rozložení jako Linux (x86_64 `uc_mcontext.gregs[REG_*]`, `fpregs` na
+  obraz FXSAVE, `REG_CR2` = adresa výpadku; aarch64 `regs`, `sp`, `pc`,
+  `pstate`, `fault_address`, záznam `fpsimd_context` v `__reserved`).
+  Změny registrů a FPU v obsluze se po návratu použijí (oprava registru
+  a opakování instrukce - Wine, JIT). Signál bez výjimky (`raise`)
+  dostane prázdný kontext. Na aarch64
   dělení nulou `SIGFPE` nedá (CPU ho nehlásí).
 - **`raise`, `kill` na vlastní proces:** obsluha běží hned ve volajícím
   vlákně; blokovaný signál čeká a doručí se po odblokování.

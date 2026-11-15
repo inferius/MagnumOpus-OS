@@ -45,7 +45,8 @@ pub struct X64General {
     pub rip: u64,
     pub rflags: u64,
     pub fs_base: u64,
-    /// Rezerva (GS baze pro TEB Windows vrstvy - zatim 0, zapis ignorovan).
+    /// Baze GS programu (druhy ukazatel vlakna, `THREAD_SET_POINTER`
+    /// `SECOND`; TEB Windows vrstvy). Zapis kontroluje adresu userspace.
     pub gs_base: u64,
 }
 

@@ -242,7 +242,14 @@ Decision 6A - signals without kernel support:
   handler = continue (the instruction is retried - the GC and JIT pattern:
   `mprotect` in the handler), `SIG_DFL` = the next handler and the end of
   the process. Leaving with `siglongjmp` works. `ucontext_t` (the third
-  argument) is not filled in yet (zeros) **[designed]**. On aarch64
+  argument, `sys/ucontext.h`) **[verified in QEMU]** x86_64 and aarch64
+  (`ctest`, step `signal`): registers from the exception frame in the
+  Linux layout (x86_64 `uc_mcontext.gregs[REG_*]`, `fpregs` pointing to
+  the FXSAVE image, `REG_CR2` = the fault address; aarch64 `regs`, `sp`,
+  `pc`, `pstate`, `fault_address`, the `fpsimd_context` record in
+  `__reserved`). Changes of registers and FPU in the handler are applied
+  on return (fixing a register and retrying the instruction - Wine, JIT).
+  A signal without an exception (`raise`) gets an empty context. On aarch64
   division by zero gives no `SIGFPE` (the CPU does not report it).
 - **`raise`, `kill` of the own process:** the handler runs immediately in
   the calling thread; a blocked signal waits and is delivered once
