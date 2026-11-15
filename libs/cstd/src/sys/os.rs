@@ -149,6 +149,11 @@ pub fn stat(path: &[u8]) -> R<Stat> {
     rt::fs::stat_path(path).map(|s| stat_of(&s)).map_err(e)
 }
 
+/// Velikost svazku: (velikost bloku, bloku, volnych bloku).
+pub fn volume_space() -> R<(u32, u64, u64)> {
+    rt::fs::volume_space().map_err(e)
+}
+
 pub fn ftruncate(fd: i32, len: u64) -> R<()> {
     let d = desc(fd)?;
     match d.file() {
@@ -181,6 +186,18 @@ pub fn pipe(cloexec: bool, nonblock: bool) -> R<(i32, i32)> {
 
 pub fn isatty(fd: i32) -> R<bool> {
     fd::is_terminal(fd).map_err(e)
+}
+
+/// Absolutni cesta otevreneho souboru nebo adresare (`openat`).
+pub fn fd_path(fd: i32) -> R<Vec<u8>> {
+    let d = desc(fd)?;
+    let f = d.file().ok_or(errno::ENOTDIR)?;
+    Ok(f.path().as_bytes().to_vec())
+}
+
+/// Absolutni normalizovana cesta (`.`, `..`, pracovni adresar).
+pub fn abs_path(path: &[u8]) -> R<Vec<u8>> {
+    rt::env::resolve(path).map(String::into_bytes).map_err(e)
 }
 
 pub fn list_dir(fd: i32) -> R<Vec<Entry>> {
@@ -259,6 +276,12 @@ pub fn monotonic_ns() -> u64 {
 /// Realny cas (sekundy, ns od 1970 UTC); `None` = jadro ho nezna.
 pub fn realtime() -> Option<(i64, u32)> {
     rt::time::realtime()
+}
+
+/// Nahodne bajty z nasazeneho generatoru jadra; `false` = jeste neni
+/// nasazeny (volajici ceka a zkusi znovu).
+pub fn entropy(buf: &mut [u8]) -> bool {
+    rt::fill_random_seeded(buf).is_ok()
 }
 
 // --- sockety a cekani ------------------------------------------------------

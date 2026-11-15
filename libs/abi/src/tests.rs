@@ -298,3 +298,15 @@ fn debug_log_chunks_split_long_text() {
     assert!(ps.len() >= 3 && ps.iter().all(|p| p.len() <= crate::syscall::DEBUG_LOG_MAX));
     assert_eq!(ps.concat(), long);
 }
+
+#[test]
+fn loader_table_offsets() {
+    // Posuny pouziva i crt v C (user/dltest/crt.c): nova pole jen na konec.
+    use crate::loader::Interface;
+    use core::mem::offset_of;
+    assert_eq!(offset_of!(Interface, run_fini), 24);
+    assert_eq!(offset_of!(Interface, libd_session), 80);
+    assert_eq!(offset_of!(Interface, run_init), 88);
+    assert_eq!(core::mem::size_of::<Interface>(), 96);
+    assert!(crate::loader::has_field(96, 96) && !crate::loader::has_field(88, 96));
+}

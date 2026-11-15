@@ -25,11 +25,13 @@
 // Symboly cstd-core (strlen, malloc, snprintf, ...) se musi prilinkovat.
 extern crate cstd_core;
 
+pub mod cxxsup;
 pub mod dirent;
 pub mod dlfcn;
 pub mod errno;
 pub mod fenv;
 pub mod flock;
+pub mod fsat;
 pub mod locale;
 pub mod math;
 pub mod misc;
@@ -40,6 +42,7 @@ pub mod setjmp;
 pub mod signal;
 pub mod pthread;
 pub mod stat;
+pub mod statvfs;
 pub mod stdio;
 pub mod stdlib;
 pub mod socket;
@@ -66,6 +69,10 @@ mod signal_tests;
 mod scanf_tests;
 #[cfg(test)]
 mod fenv_tests;
+#[cfg(test)]
+mod cxxsup_tests;
+#[cfg(test)]
+mod fsat_tests;
 #[cfg(test)]
 mod locale_tests;
 #[cfg(test)]

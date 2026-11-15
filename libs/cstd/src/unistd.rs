@@ -88,19 +88,7 @@ pub unsafe extern "C" fn open(path: *const c_char, flags: c_int, _mode: ...) -> 
     ret_fd(sys::open(p, &o))
 }
 
-/// `openat` jen s `AT_FDCWD` nebo absolutni cestou.
-#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn openat(dir: c_int, path: *const c_char, flags: c_int, _mode: ...) -> c_int {
-    if dir != AT_FDCWD && !path.is_null() {
-        // SAFETY: ukazatel neni NULL.
-        if unsafe { *path } != b'/' {
-            errno::set(errno::ENOTSUP);
-            return -1;
-        }
-    }
-    // SAFETY: kontrakt C.
-    unsafe { open(path, flags, 0) }
-}
+// `openat` a ostatni funkce `*at` jsou v `fsat.rs`.
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn creat(path: *const c_char, mode: u32) -> c_int {

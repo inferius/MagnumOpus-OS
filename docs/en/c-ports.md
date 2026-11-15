@@ -43,26 +43,41 @@ A port is an entry in the `PORTS` table (`xtask/src/cports/mod.rs`):
 | `url`, `file`, `sha256` | the pinned archive; HTTPS only, the hash is checked on every use |
 | `top` | the directory inside the archive |
 | `patches` | patches in `third_party/c-ports/<port>/` (order of application, `-p1`) |
+| `data` | more files for the initfs; a `port:` path = in the port folder, `ws:` = in the repository, otherwise in the port source |
 | `build` | the build method (below) |
 
 Own files of a port (for example the SDL driver for our compositor) are in
 `third_party/c-ports/<port>/overlay/` and are copied over the source after
 the patches. The prepared source (`target/c-ports/src/<port>-<hash>`) is
-made again only when the archive, a patch or an overlay file changes.
+made again only when the archive, a patch or an overlay file changes. Only
+a part of a large archive can be extracted (`fetch::prepare_subset`:
+selected subtrees and `--exclude` patterns); the [C++ runtime](cpp.md)
+does that with `llvm-project`.
 
 ## Build methods
 
 | Method | When | Needs |
 |---|---|---|
-| `Sources` | small libraries with a simple source list (zlib, sqlite) | clang only |
+| `Sources` | small libraries with a simple source list (zlib, sqlite, HarfBuzz) | clang only (C++ via clang++ and libc++) |
 | `CMake` | projects with CMake (SDL) | CMake, Ninja |
 | `Configure` | projects with a `configure` script (autotools, FFmpeg) | `sh`, `make`, pkgconf (nasm for FFmpeg on x86_64) |
 | `Meson` | Meson projects (dav1d) | `sh`, Meson, Ninja, pkgconf (nasm on x86_64) |
 
+- **`Sources`:** `.cc`, `.cpp` and `.cxx` sources are compiled by clang++
+  against the libc++ headers ([C++ runtime](cpp.md)); a program with such
+  an object is linked with `libc++.a`, `libc++abi.a` and `libunwind.a`.
 - **`CMake`:** xtask generates `target/c-ports/<arch>/cmake/toolchain.cmake`
   and the platform module `Platform/MagnumOpus.cmake` (`UNIX`, `MAGNUMOPUS`,
   static libraries only). The flags are the same as in the sysroot
-  `clang.cfg`; `-lc` is in `CMAKE_C_STANDARD_LIBRARIES` (after the objects).
+  `clang.cfg` (C, C++ and `.S` assembler); `-lc` is in
+  `CMAKE_C_STANDARD_LIBRARIES` (after the objects). A second file
+  `toolchain-dyn.cmake` (`MAGNUMOPUS_DYNAMIC`) builds PIC over `libc.so`
+  including shared libraries without a version in the SONAME (the loader
+  looks for them in `/system/lib` as `libfoo.so`); every `.so` gets
+  `crtdso.o` with its own `__dso_handle`. CMake try-compiles only into a
+  static library, so library existence checks (`check_library_exists`)
+  always succeed: a port must switch off the libraries that do not exist
+  explicitly.
   Libraries and headers are searched only in the sysroot and the port
   prefix; the host `pkg-config` is switched off (it must not find Windows
   or Linux libraries). Configuration is repeated only when the options, the
@@ -125,9 +140,11 @@ installer may not have refreshed `PATH` in an open terminal).
 |---|---|---|---|---|
 | zlib | 1.3.1 | zlib | `Sources` | `zlib-example`, `minigzip` |
 | sqlite | 3.46.1 | public domain | `Sources` | `sqlite3`, `sqltest` |
+| HarfBuzz | 14.2.0 | Old MIT | `Sources` (C++) | `hbtest` ([C++ runtime](cpp.md)) |
 | SDL | 3.4.20 | zlib | `CMake` | `snake`, `woodeneye`, `testsprite`, `testaudio`, `testkeys`, `checkkeys`, `testmagnumopus` ([SDL](sdl.md)) |
 | dav1d | 1.5.4 | BSD-2-Clause | `Meson` | - (inside `libavcodec.so`) |
 | FFmpeg | 9.0.2 | LGPL-2.1-or-later | `Configure` (shared libraries) | `lib/libav*.so`, `libsw*.so`; the `ffdec` process ([Multimedia](multimedia.md)) |
+| LLVM runtimes | 23.1.5 | Apache-2.0 WITH LLVM-exception | `CMake` (own, `cxx.rs`) | `cpptest`, `cpptest-dyn`, `/system/lib/libc++.so` ([C++ runtime](cpp.md)) |
 
 Port tests and limitations (sqlite without WAL and mmap I/O) are described
 in [cstd](cstd.md#c-sysroot-and-ports-part-2i).

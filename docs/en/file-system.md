@@ -1131,6 +1131,14 @@ service, a driver) and are gone after a restart; there are no durable
 handles yet. Range locks (`LOCK`) do not wait - a conflict returns
 `LOCKED` at once; POSIX locks (above) do wait.
 
+⚠️ **Limitation:** the protocol has no open relative to a directory
+handle; operations go by path. The `openat`, `unlinkat`, `mkdirat`,
+`fstatat` functions in [cstd](cstd.md#functions-for-c-step-7a) therefore
+join the directory path remembered when it was opened with the name: they
+do not protect against the directory being renamed between the open and
+the call (Linux binds them to the directory inode). Fixed only with an
+open relative to a directory handle in fsd **[designed]**.
+
 ## Snapshots
 
 > **Change from v3 (phase 1):** a snapshot has metadata (the `SNAPMETA`

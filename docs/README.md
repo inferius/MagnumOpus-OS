@@ -35,6 +35,7 @@ site menu.
 | [Knihovna C (cstd)](cs/cstd.md) | [The C library (cstd)](en/cstd.md) | vrstva POSIX nad std pro programy v C: stdio, errno, atexit; požadavek AVX/XSAVE; FFmpeg a LGPL / POSIX layer over std for C programs: stdio, errno, atexit; AVX/XSAVE requirement; FFmpeg and the LGPL |
 | [SDL](cs/sdl.md) | [SDL](en/sdl.md) | port SDL 3: ovladač videa magnumopus nad libs/mosdl, okno kompozitoru, vstup, omezení a testy / SDL 3 port: magnumopus video driver over libs/mosdl, compositor window, input, limitations and tests |
 | [Porty v C](cs/porty-c.md) | [C ports](en/c-ports.md) | obecný mechanismus portů v xtasku: připnutý archiv, záplaty, Sources / CMake / Configure, rada k instalaci nástrojů / generic port mechanism in xtask: pinned archive, patches, Sources / CMake / Configure, tool install advice |
+| [Běh C++](cs/cpp.md) | [C++ runtime](en/cpp.md) | libc++, libc++abi, libunwind z LLVM nad cstd: výjimky, RTTI, vlákna, `std::filesystem`, `libc++.so`, HarfBuzz / libc++, libc++abi, libunwind from LLVM over cstd: exceptions, RTTI, threads, `std::filesystem`, `libc++.so`, HarfBuzz |
 | [Překlad C](cs/preklad-c.md) | [Building C code](en/c-build.md) | clang z build.rs (cbuild), knihovna C cstd, příznaky a ochrany, převzatý kód / clang from build.rs (cbuild), the cstd C library, flags and protections, vendored code |
 
 ### Spolehlivost / Reliability

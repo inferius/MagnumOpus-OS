@@ -30,6 +30,10 @@ typedef struct {
     long quot;
     long rem;
 } ldiv_t;
+typedef struct {
+    long long quot;
+    long long rem;
+} lldiv_t;
 
 void qsort(void *base, size_t n, size_t size, int (*cmp)(const void *, const void *));
 void *bsearch(const void *key, const void *base, size_t n, size_t size, int (*cmp)(const void *, const void *));
@@ -37,6 +41,7 @@ long labs(long v);
 long long llabs(long long v);
 div_t div(int a, int b);
 ldiv_t ldiv(long a, long b);
+lldiv_t lldiv(long long a, long long b);
 long atol(const char *s);
 long long atoll(const char *s);
 int rand(void);
@@ -45,6 +50,8 @@ long random(void);
 void srandom(unsigned seed);
 int system(const char *cmd);
 
+/* Absolutni cesta bez . a .. (resolved NULL = malloc). */
+char *realpath(const char *path, char *resolved);
 /* Vicebajtove znaky podle LC_CTYPE (wchar.h ma stavove varianty). */
 size_t __ctype_get_mb_cur_max(void);
 #define MB_CUR_MAX (__ctype_get_mb_cur_max())

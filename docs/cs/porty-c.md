@@ -43,26 +43,38 @@ Port je záznam v tabulce `PORTS` (`xtask/src/cports/mod.rs`):
 | `url`, `file`, `sha256` | připnutý archiv; jen HTTPS, otisk se kontroluje při každém použití |
 | `top` | adresář v archivu |
 | `patches` | záplaty v `third_party/c-ports/<port>/` (pořadí použití, `-p1`) |
+| `data` | další soubory do initfs; cesta `port:` = ve složce portu, `ws:` = v repozitáři, jinak ve zdroji portu |
 | `build` | způsob sestavení (níže) |
 
 Vlastní soubory portu (např. ovladač SDL pro náš kompozitor) jsou
 v `third_party/c-ports/<port>/overlay/` a kopírují se přes zdroj po
 záplatách. Připravený zdroj (`target/c-ports/src/<port>-<otisk>`) se dělá
-znovu jen při změně archivu, záplaty nebo souboru overlay.
+znovu jen při změně archivu, záplaty nebo souboru overlay. Z velkého
+archivu jde rozbalit jen část (`fetch::prepare_subset`: vybrané podstromy
+a vzory `--exclude`), tak to dělá [běh C++](cpp.md) s `llvm-project`.
 
 ## Způsoby sestavení
 
 | Způsob | Kdy | Potřebuje |
 |---|---|---|
-| `Sources` | malé knihovny, kde je seznam zdrojů jednoduchý (zlib, sqlite) | jen clang |
+| `Sources` | malé knihovny, kde je seznam zdrojů jednoduchý (zlib, sqlite, HarfBuzz) | jen clang (C++ přes clang++ a libc++) |
 | `CMake` | projekty s CMake (SDL) | CMake, Ninja |
 | `Configure` | projekty se skriptem `configure` (autotools, FFmpeg) | `sh`, `make`, pkgconf (nasm pro FFmpeg na x86_64) |
 | `Meson` | projekty s Mesonem (dav1d) | `sh`, Meson, Ninja, pkgconf (nasm na x86_64) |
 
+- **`Sources`:** zdroje `.cc`, `.cpp` a `.cxx` překládá clang++ proti
+  hlavičkám libc++ ([běh C++](cpp.md)); program s takovým objektem se
+  linkuje s `libc++.a`, `libc++abi.a` a `libunwind.a`.
 - **`CMake`:** xtask vygeneruje `target/c-ports/<arch>/cmake/toolchain.cmake`
   a modul platformy `Platform/MagnumOpus.cmake` (`UNIX`, `MAGNUMOPUS`, jen
-  statické knihovny). Příznaky jsou stejné jako v `clang.cfg` sysrootu;
-  `-lc` je v `CMAKE_C_STANDARD_LIBRARIES` (za objekty). Hledání knihoven
+  statické knihovny). Příznaky jsou stejné jako v `clang.cfg` sysrootu
+  (C, C++ i assembler `.S`); `-lc` je v `CMAKE_C_STANDARD_LIBRARIES` (za
+  objekty). Druhý soubor `toolchain-dyn.cmake` (`MAGNUMOPUS_DYNAMIC`) staví
+  PIC nad `libc.so` včetně sdílených knihoven bez verze v SONAME (zavaděč
+  je hledá v `/system/lib` jménem `libfoo.so`); každá `.so` dostane
+  `crtdso.o` s vlastním `__dso_handle`. Zkušební překlady CMake jdou jen
+  do statické knihovny, takže testy existence knihoven (`check_library_exists`)
+  vždy uspějí: port musí knihovny, které neexistují, vypnout výslovně. Hledání knihoven
   a hlaviček jen v sysrootu a předponě portů, `pkg-config` hostitele je
   vypnutý (nesmí najít knihovny Windows ani Linuxu). Konfigurace se
   opakuje jen při změně voleb, souboru nástrojů nebo zdroje.
@@ -123,9 +135,11 @@ v otevřeném terminálu obnovit).
 |---|---|---|---|---|
 | zlib | 1.3.1 | zlib | `Sources` | `zlib-example`, `minigzip` |
 | sqlite | 3.46.1 | public domain | `Sources` | `sqlite3`, `sqltest` |
+| HarfBuzz | 14.2.0 | Old MIT | `Sources` (C++) | `hbtest` ([běh C++](cpp.md)) |
 | SDL | 3.4.20 | zlib | `CMake` | `snake`, `woodeneye`, `testsprite`, `testaudio`, `testkeys`, `checkkeys`, `testmagnumopus` ([SDL](sdl.md)) |
 | dav1d | 1.5.4 | BSD-2-Clause | `Meson` | - (v `libavcodec.so`) |
 | FFmpeg | 9.0.2 | LGPL-2.1-or-later | `Configure` (sdílené knihovny) | `lib/libav*.so`, `libsw*.so`; proces `ffdec` ([Multimédia](multimedia.md)) |
+| LLVM runtimes | 23.1.5 | Apache-2.0 WITH LLVM-exception | `CMake` (vlastní, `cxx.rs`) | `cpptest`, `cpptest-dyn`, `/system/lib/libc++.so` ([běh C++](cpp.md)) |
 
 Testy portů a omezení (sqlite bez WAL a mmap I/O) popisuje
 [cstd](cstd.md#sysroot-c-a-porty-část-2i).

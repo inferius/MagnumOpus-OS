@@ -1097,6 +1097,13 @@ ovladač) a po restartu neplatí; trvalé handly zatím nejsou. Zámky rozsahu
 (`LOCK`) nečekají - konflikt hned vrátí `LOCKED`; čekání mají zámky POSIX
 (výše).
 
+⚠️ **Omezení:** otevření relativně k handlu adresáře protokol nemá, operace
+jsou podle cesty. Funkce `openat`, `unlinkat`, `mkdirat`, `fstatat`
+v [cstd](cstd.md#funkce-pro-c-krok-7a) proto skládají cestu adresáře
+zapamatovanou při jeho otevření se jménem: nechrání před přejmenováním
+adresáře mezi otevřením a voláním (Linux je váže na inode adresáře).
+Oprava až s otevřením relativně k handlu adresáře ve fsd **[navrženo]**.
+
 ## Snapshoty
 
 > **Změna proti v3 (fáze 1):** snapshot má metadata (položka `SNAPMETA`):

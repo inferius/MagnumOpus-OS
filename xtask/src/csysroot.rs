@@ -46,6 +46,9 @@ pub fn cflags(arch: &Arch, sysroot: &Path) -> Result<Vec<String>> {
             "-ftls-model=local-exec",
             "-ffunction-sections",
             "-fdata-sections",
+            // Tabulky rozbalovani i v C: vyjimka C++ smi projit ramcem C
+            // (zpetna volani, docs/cs/cpp.md). Cil *-none-elf je sam nedela.
+            "-funwind-tables",
             "-fstack-protector-strong",
             "-mstack-protector-guard=global",
             "-ftrivial-auto-var-init=zero",
@@ -71,6 +74,9 @@ pub fn ldflags(sysroot: &Path) -> Vec<String> {
         String::from("-fuse-ld=lld"),
         format!("-Wl,-T,{}", slash(&sysroot.join("lib/magnumopus.ld"))),
         String::from("-Wl,--gc-sections"),
+        // Tabulka .eh_frame_hdr pro libunwind (C++); ovladac clangu pro
+        // cil *-none-elf ji sam nepozada.
+        String::from("-Wl,--eh-frame-hdr"),
         format!("-L{}", slash(&sysroot.join("lib"))),
         String::from("-lc"),
     ]
@@ -149,6 +155,7 @@ pub fn ldflags_dyn(sysroot: &Path) -> Vec<String> {
         String::from("-Wl,-z,text"),
         String::from("-Wl,-z,max-page-size=65536"),
         String::from("-Wl,--hash-style=both"),
+        String::from("-Wl,--eh-frame-hdr"),
         String::from("-Wl,--allow-shlib-undefined"),
         slash(&sysroot.join("lib/crt1.o")),
         format!("-L{}", slash(&sysroot.join("lib"))),
@@ -160,6 +167,18 @@ pub fn ldflags_dyn(sysroot: &Path) -> Vec<String> {
         // 128bitove deleni) staticky do programu, jako libgcc.a.
         String::from("-l:libbuiltins.a"),
     ]
+}
+
+/// Priznaky linkovani sdilene knihovny nad `libc.so` (`libc++.so`): jako
+/// [`ldflags_dyn`], ale `-shared` bez `crt1.o` a bez PIE.
+pub fn ldflags_so(sysroot: &Path) -> Vec<String> {
+    ldflags_dyn(sysroot)
+        .into_iter()
+        .map(|f| if f.ends_with("crt1.o") { slash(&sysroot.join("lib/crtdso.o")) } else { f })
+        .filter(|f| f != "-Wl,-pie" && !f.starts_with("-Wl,--dynamic-linker"))
+        // Ovladac clangu pro cil *-none-elf `-shared` linkeru nepreda.
+        .chain([String::from("-shared"), String::from("-Wl,-shared")])
+        .collect()
 }
 
 /// Priznaky pro porty se sdilenymi knihovnami (configure FFmpeg, Meson):
@@ -202,7 +221,8 @@ pub fn dyn_parts(arch: &Arch, sysroot: &Path) -> Result<DynParts> {
         String::from("-Wl,--allow-shlib-undefined"),
         slash(&sysroot.join("lib/crt1.o")),
     ];
-    let ld_shared = vec![String::from("-Wl,-shared")];
+    // crtdso.o: vlastni skryty __dso_handle knihovny (__cxa_atexit, C++).
+    let ld_shared = vec![String::from("-Wl,-shared"), slash(&sysroot.join("lib/crtdso.o"))];
     let libs = vec![String::from("-Wl,-Bdynamic"), String::from("-l:libc.so"), String::from("-l:libbuiltins.a")];
     Ok(DynParts { cflags, ld, ld_exe, ld_shared, libs })
 }
@@ -213,17 +233,20 @@ pub fn add_dynamic(arch: &Arch, root: &Path, libc_so: &Path) -> Result<()> {
     write_if_changed(&root.join("lib/libc.so"), &std::fs::read(libc_so)?)?;
     let clang = cbuild::find_clang()?;
     builtins(arch, root, &clang)?;
-    let crt = root.join("lib/crt1.o");
-    let src = workspace_root().join("libs/cstd/crt/crt1.c");
-    let out = std::process::Command::new(&clang)
-        .args(cflags_dyn(arch, root)?)
-        .args(["-c", "-O2"])
-        .arg(&src)
-        .arg("-o")
-        .arg(&crt)
-        .output()?;
-    if !out.status.success() {
-        return Err(format!("crt1.o: {}", String::from_utf8_lossy(&out.stderr)).into());
+    // crt1.o (start programu PIE) a crtdso.o (__dso_handle knihovny).
+    for name in ["crt1", "crtdso"] {
+        let obj = root.join(format!("lib/{name}.o"));
+        let src = workspace_root().join(format!("libs/cstd/crt/{name}.c"));
+        let out = std::process::Command::new(&clang)
+            .args(cflags_dyn(arch, root)?)
+            .args(["-c", "-O2"])
+            .arg(&src)
+            .arg("-o")
+            .arg(&obj)
+            .output()?;
+        if !out.status.success() {
+            return Err(format!("{name}.o: {}", String::from_utf8_lossy(&out.stderr)).into());
+        }
     }
     let mut cfg = String::from("# Sysroot C MagnumOpus, programy PIE nad libc.so: clang --config=<tento soubor>.\n");
     for f in cflags_dyn(arch, root)?.into_iter().chain(ldflags_dyn(root)) {

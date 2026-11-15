@@ -72,6 +72,18 @@ unsigned alarm(unsigned secs);
 int pause(void);
 unsigned sleep(unsigned secs);
 int usleep(unsigned us);
+/* Nahodne bajty z generatoru jadra (nejvic GETENTROPY_MAX). */
+#define GETENTROPY_MAX 256
+int getentropy(void *buf, size_t len);
+/* Relativne k otevrenemu adresari (AT_* ve fcntl.h). */
+int unlinkat(int dirfd, const char *path, int flags);
+/* pathconf: stejne hodnoty pro cely FS. */
+#define _PC_LINK_MAX 0
+#define _PC_NAME_MAX 3
+#define _PC_PATH_MAX 4
+#define _PC_PIPE_BUF 5
+long pathconf(const char *path, int name);
+long fpathconf(int fd, int name);
 
 _CSTD_NO_FORK pid_t fork(void);
 _CSTD_NO_FORK pid_t vfork(void);

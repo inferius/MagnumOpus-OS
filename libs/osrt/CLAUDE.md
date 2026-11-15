@@ -5,11 +5,12 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 ## Klíčové soubory
 
 - `src/start.rs` - `_start`, startovní zpráva, rozdělení handlů podle štítků `abi::params::tag`; volá `main(argc, argv)` (z rustc nebo z programu v C, `c_argv`). Netagované handly (okno aplikace) drží pro `take_handles` (jednou; bere je `libs/mosdl`), `self_process` pro další kopii libos.
-- `src/lib.rs` - `exit` (nejdřív funkce `at_exit` v obráceném pořadí), `exit_now` (bez nich, C `_Exit`), `at_exit` (max 1024; C `atexit` a vyprázdnění stdio knihovny `cstd`, v std `os::magnumopus::rt`).
+- `src/lib.rs` - `exit` (nejdřív funkce `at_exit` v obráceném pořadí), `exit_now` (bez nich, C `_Exit`), `at_exit` (max 1024; cstd sem dává vyprázdnění stdio a jednu funkci pro svůj seznam `atexit`/`__cxa_atexit`, v std `os::magnumopus::rt`); `fill_random_seeded` (C `getentropy`).
 - `src/env.rs` - argumenty, proměnné, pracovní adresář; C `environ` (`#[no_mangle]`) se přestaví při startu a každé změně proměnných pod zámkem `VARS`, stará pole se neuvolňují.
 - `src/tls.rs` - bloky TLS (local-exec, varianta II x86_64 / I aarch64; posuny musí sedět s lld).
 - `src/fd.rs` - tabulka čísel fd pro cstd (popis otevření: soubor, stdio, roura; `dup` sdílí popis); std ji vystavuje jako `std::os::magnumopus::runtime` (re-export celého crate, nestabilní).
 - `src/sock.rs` - sockety pro tabulku fd (stav nový/TCP/naslouchání/UDP nad netproto, neblokující = `Deadline::TRY`); `src/poll.rs` - čekání na více fd (signály kanálů, připravenost socketů, do 64 `OBJECT_WAIT_MANY`, víc port).
+- `src/fs.rs` - soubory nad fsproto; `File::path` (absolutní cesta při otevření, `openat` v cstd), `volume_space` (C `statvfs`).
 - `src/vm.rs` - re-export `libos::vm` a příznaků `abi::vm` pro `mmap` v cstd.
 - `src/stdio.rs`, `src/pipe.rs` - protokol proudu bajtů; `src/process.rs` - `LAUNCH` ke launchd; `src/net.rs` - std::net (zámky do netproto v2).
 
