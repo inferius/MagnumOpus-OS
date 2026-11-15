@@ -260,10 +260,19 @@ fn main(startup: Startup) -> i64 {
         Ok(None) => {}
         Err(e) => println!("devmgr: ovladac ps2 nelze spustit: {e}"),
     }
+    // Radicu a ovladacu je promenny pocet: cekani pres port (`WaitSet`),
+    // ne pres `wait_many` (limit 64 objektu).
+    let mut waits = match libos::WaitSet::new() {
+        Ok(w) => w,
+        Err(e) => {
+            println!("devmgr: port nejde vytvorit: {e}");
+            return 1;
+        }
+    };
     // Zarizeni USB pri startu: pockat, az radice projdou porty.
     let deadline = libos::time::deadline_after(USB_READY_TIMEOUT);
     while controllers.iter().any(|c| !c.ready) {
-        if !serve_usb(&fs, &mut controllers, &startup, &mut drivers, &mut from_manifest, Some(deadline)) {
+        if !serve_usb(&mut waits, &fs, &mut controllers, &startup, &mut drivers, &mut from_manifest, Some(deadline)) {
             println!("devmgr: radic USB nedokoncil pruchod porty");
             break;
         }
@@ -287,7 +296,7 @@ fn main(startup: Startup) -> i64 {
     }
     // Zustat bezet, dokud init drzi spojeni: hotplug USB (pozdeji restart
     // spadlych ovladacu).
-    while serve_usb(&fs, &mut controllers, &startup, &mut drivers, &mut from_manifest, None) {}
+    while serve_usb(&mut waits, &fs, &mut controllers, &startup, &mut drivers, &mut from_manifest, None) {}
     drop(drivers);
     0
 }
@@ -305,6 +314,7 @@ fn builtin(f: &Function) -> bool {
 /// Jedno kolo cekani na radice USB, konec ovladacu z manifestu (a zavreni
 /// initu). `false` = konec (init skoncil nebo vyprsel termin).
 fn serve_usb(
+    waits: &mut libos::WaitSet,
     fs: &Initfs,
     controllers: &mut [usb::Controller],
     startup: &Startup,
@@ -322,7 +332,7 @@ fn serve_usb(
     }
     let first_driver = items.len();
     items.extend(from_manifest.wait_items());
-    let observed = match libos::wait_many(&items, deadline) {
+    let observed = match waits.wait(&items, deadline) {
         Ok((_, o)) => o,
         Err(_) => return false,
     };
