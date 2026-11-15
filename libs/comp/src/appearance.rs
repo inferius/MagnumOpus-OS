@@ -176,6 +176,7 @@ impl Comp {
         }
         self.appearance.target = mode;
         let from = self.style.theme.clone();
+        self.style.begin_backdrop_fade(&from, &to, self.w, self.h);
         self.appearance.anim = Some(ThemeAnim { from, to, start: now, ms, steps_sent: 0 });
         self.damage_all();
     }
@@ -217,6 +218,7 @@ impl Comp {
         let done = x >= 1.0;
         let mixed = if done { a.to.clone() } else { a.from.mix(&a.to, k) };
         self.style.set_theme(mixed);
+        self.style.set_backdrop_fade(k);
         let g = self.style.geo();
         for w in self.windows.values_mut() {
             w.geo = g;
