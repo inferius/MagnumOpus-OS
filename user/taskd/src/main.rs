@@ -180,13 +180,22 @@ fn main(startup: Startup) -> i64 {
     let mut d = Taskd { core: Core::new(), conns: Vec::new(), watched: Vec::new(), dead: Vec::new() };
     println!("taskd: bezim");
     let mut next_poll = time::deadline_after(POLL);
+    // Klientu je promenny pocet: cekani pres port (`WaitSet`), ne pres
+    // `wait_many` (limit 64 objektu).
+    let mut waits = match libos::WaitSet::new() {
+        Ok(w) => w,
+        Err(e) => {
+            println!("taskd: port nejde vytvorit: {e}");
+            return 1;
+        }
+    };
     loop {
         let rd = Signals::READABLE | Signals::PEER_CLOSED;
         let mut items: Vec<(&Handle, Signals)> = alloc::vec![(control.handle(), rd)];
         for (_, ch) in &d.conns {
             items.push((ch.handle(), rd));
         }
-        let observed = match libos::wait_many(&items, Some(next_poll)) {
+        let observed = match waits.wait(&items, Some(next_poll)) {
             Ok((_, o)) => o,
             Err(_) => Vec::new(),
         };

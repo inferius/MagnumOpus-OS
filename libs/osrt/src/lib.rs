@@ -11,7 +11,8 @@
 //! - [`heap`] - alokator (dlmalloc nad objekty pameti),
 //! - [`tls`] - bloky TLS vlaken (nativni ELF TLS, local-exec),
 //! - [`thread`] - vlakna, [`futex`] - cekani pro `std::sync`,
-//! - [`stdio`], [`env`], [`time`], [`fs`], [`fd`] (cisla fd pro cstd).
+//! - [`stdio`], [`env`], [`time`], [`fs`], [`fd`] (cisla fd pro cstd),
+//!   [`inherit`] (dedeni fd potomkem `posix_spawn`).
 //!
 //! Navrh: `docs/cs/rust-std.md`.
 
@@ -26,6 +27,7 @@ pub mod fd;
 pub mod fs;
 pub mod futex;
 pub mod heap;
+pub mod inherit;
 pub mod memfd;
 pub mod net;
 pub mod pipe;
@@ -38,6 +40,7 @@ pub mod thread;
 pub mod tty;
 pub mod time;
 pub mod tls;
+pub mod unix;
 pub mod vm;
 
 pub use abi::Error;

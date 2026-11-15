@@ -107,7 +107,9 @@ map.write::<u32>(0x14, status | 1);
 ### Waiting for many clients: `Waiter`
 
 **[verified in QEMU]** x86_64 and aarch64 (fsd, test "v2: 200 soucasnych
-relaci a proud" in the suite `souborovy system`).
+relaci a proud" in the suite `souborovy system`; `WaitSet`: compd 100
+clients in the suite `gui`, termd 70 sessions in the suite `shell`, taskd
+100 producers in the suite `ulohy`).
 
 `wait_many` (`OBJECT_WAIT_MANY`) takes at most 64 objects
 (`WAIT_MANY_MAX`, an array on the kernel stack). **Rule: a service with a
@@ -133,6 +135,21 @@ The loop: register every object without a registration -> `wait` -> for
 the keys of the packets clear the registration flag and serve only those
 objects (read everything until `SHOULD_WAIT`) -> again. Closing an object
 cleans its registration up in the kernel (returns the port reservation).
+
+**`libos::WaitSet`** - a replacement of `wait_many` with the same interface
+for loops that already build an array of `(handle, mask)` (compd, termd,
+accountd, taskd, inputd, audiod, devmgr, revocd, timed, the init
+supervisor): `wait(&items, deadline)` returns the index of the first ready
+item and the signals per item, a deadline = `TIMED_OUT`. It keeps
+registrations between calls (an object without an event is not registered
+again), recognizes an object by the handle value (it contains the slot
+generation, so it differs after closing and opening again) and forgets an
+object missing from the array. The port can be shared (`port()`) for own
+registrations with keys below `FOREIGN_KEYS` (fences in compd, leases of
+the supervisor): such a packet wakes the loop, with `keep_foreign` the
+caller picks it up with `take_foreign`. A port itself cannot be in the
+array (`NOT_SUPPORTED` from the kernel) - share the port of the set
+instead.
 
 Functions: `wait_one`, `wait_many` (waiting for signals), `time::now`,
 `time::deadline_after`, `time::sleep`, `time::wall`, `time::local` (local
@@ -187,7 +204,11 @@ session of the sound service with application rights and its lease,
 control channel, protocol `ttyproto`, [termios](cstd.md#termios)). Tags the std runtime
 does not use itself are kept for libraries (`osrt::start::take_tagged`). Format v2 has a flags field
 (`abi::params::flags`: `STDOUT_NULL`, `STDERR_NULL` = discard the output,
-`Stdio::null`).
+`Stdio::null`). Format v3 added inherited fds (`Params::fds`,
+`abi::params::Fd`: number, kind `fd_kind`, status, data; at most `MAX_FDS`
+= 48) - the entries' handles go with the tag `FD` in the order of the
+entries ([posix_spawn](cstd.md#processes-posix_spawn-and-waitpid)).
+**[verified in QEMU]** (step `inherit` of the `ctest` test, suite `cstd`).
 
 ```rust
 use libos::params::Params;
@@ -196,6 +217,7 @@ let params = Params {
     cwd: b"/".to_vec(),
     args: vec![b"hello-std".to_vec(), b"alfa".to_vec()],
     env: vec![b"HELLO=svet".to_vec()],
+    ..Default::default()
 };
 let (out, out_child) = Channel::create()?;
 let handles = vec![

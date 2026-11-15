@@ -28,6 +28,7 @@ mod objects;
 mod ondisk;
 mod perf;
 mod perf_shell;
+mod mode;
 mod perm;
 mod posix_lock;
 mod scrub;

@@ -149,6 +149,7 @@ pub(super) fn start_std_app(
         args: core::iter::once(name).chain(args.iter().copied()).map(|a| a.as_bytes().to_vec()).collect(),
         env: env.iter().map(|e| e.as_bytes().to_vec()).collect(),
         flags: 0,
+        fds: vec![],
     };
     let (out, out_child) = Channel::create().map_err(|e| fail("kanal stdout", e))?;
     let (err, err_child) = Channel::create().map_err(|e| fail("kanal stderr", e))?;

@@ -15,7 +15,7 @@ use libos::Channel;
 
 pub use fsproto::perm::{Acl, EVERYONE, Grant, Permissions, rights};
 pub use fsproto::v2::PosixLock;
-pub use fsproto::{DirEntry, Stat, kind};
+pub use fsproto::{DirEntry, Stat, avail, kind};
 
 use crate::start::Init;
 use crate::{Error, Result};
@@ -32,8 +32,26 @@ pub(crate) unsafe fn init(channel: Option<Channel>) {
     }
 }
 
-fn session() -> Result<&'static FsClient> {
+pub(crate) fn session() -> Result<&'static FsClient> {
     SESSION.get().ok_or(Error::NotSupported)
+}
+
+/// Cislo uzivatele relace FS (C `getuid`; 0 = system nebo bez relace).
+/// Zjisti se jednou (`WHOAMI`), pak plati po celou dobu procesu.
+pub fn user_id() -> u64 {
+    static ID: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(u64::MAX);
+    let v = ID.load(Ordering::Relaxed);
+    if v != u64::MAX {
+        return v;
+    }
+    let v = session().and_then(|s| s.whoami()).map_or(0, |w| w.0);
+    ID.store(v, Ordering::Relaxed);
+    v
+}
+
+/// Skupiny uzivatele relace (C `getgroups`; prvni = hlavni skupina).
+pub fn groups() -> Vec<u64> {
+    session().and_then(|s| s.whoami()).map(|w| w.1).unwrap_or_default()
 }
 
 /// Velikost svazku relace: (velikost bloku, bloku celkem, volnych bloku);
@@ -65,6 +83,9 @@ pub struct OpenOptions {
     pub truncate: bool,
     pub create: bool,
     pub create_new: bool,
+    /// Mod POSIX noveho souboru (9 bitu, jen zuzi zdedene granty; C
+    /// `open(O_CREAT, mode)`). `None` = jen zdedit.
+    pub mode: Option<u16>,
 }
 
 /// Otevreny soubor nebo adresar (handle relace; soubor prezije
@@ -101,7 +122,10 @@ impl File {
         }
         // Zapis do souboru potrebuje pravo zapisu (std: truncate/create
         // bez write = chyba InvalidInput, overuje std samo).
-        let opened = session()?.open(&path, acc, share::ALL, flags)?;
+        let opened = match o.mode {
+            Some(m) if flags & open_flags::CREATE != 0 => session()?.open_mode(&path, acc, share::ALL, flags, m)?,
+            _ => session()?.open(&path, acc, share::ALL, flags)?,
+        };
         Ok(File { handle: opened.handle, pos: AtomicU64::new(0), append: o.append, path })
     }
 
@@ -194,12 +218,28 @@ impl File {
 
     /// Zamek POSIX (`fcntl`/`flock`, viz `fsproto::v2::posix_lock`).
     pub fn posix_lock(&self, cmd: u8, class: u8, write: bool, start: u64, len: u64) -> Result<fsproto::v2::PosixLock> {
-        session()?.posix_lock(self.handle, cmd, class, write, start, len)
+        session()?.posix_lock(self.handle, cmd, class, write, start, len, crate::process::self_id())
     }
 
     /// Absolutni cesta pri otevreni.
     pub fn path(&self) -> &str {
         &self.path
+    }
+
+    /// Rezim pripojovani (`O_APPEND`).
+    pub fn is_append(&self) -> bool {
+        self.append
+    }
+
+    /// Trvala identita pro jinou relaci (dedeni fd, [`crate::inherit`]).
+    pub fn identity(&self) -> Result<fsproto::v2::Identity> {
+        session()?.identity(self.handle)
+    }
+
+    /// Otevre objekt z identity jine relace (`REOPEN`) na pozici `pos`.
+    pub fn from_identity(id: &fsproto::v2::Identity, pos: u64, append: bool, path: String) -> Result<File> {
+        let opened = session()?.open_identity(id)?;
+        Ok(File { handle: opened.handle, pos: AtomicU64::new(pos), append, path })
     }
 
     /// Polozky otevreneho adresare.
@@ -242,6 +282,16 @@ pub fn read_dir(path: &[u8]) -> Result<(String, Vec<DirEntry>)> {
 
 pub fn create_dir(path: &[u8]) -> Result<()> {
     session()?.create(&crate::env::resolve(path)?, kind::DIR)
+}
+
+/// `mkdir(path, mode)`: mod jen zuzi zdedene granty (v jednom kroku).
+pub fn create_dir_mode(path: &[u8], mode: u16) -> Result<()> {
+    session()?.create_mode(&crate::env::resolve(path)?, kind::DIR, mode)
+}
+
+/// `chmod`: mod POSIX jako granty (pravo `MANAGE`, smi rozsirit).
+pub fn set_mode(path: &[u8], mode: u16) -> Result<()> {
+    session()?.set_mode(&crate::env::resolve(path)?, mode, true)
 }
 
 /// Smaze soubor (adresar odmitne: `IsADirectory`).

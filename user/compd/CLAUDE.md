@@ -8,13 +8,15 @@ Kompozitor (milník 6c) jako služba. Logika je v knihovně `libs/comp` (host te
 
 ## Invarianty
 
+- Smyčka čeká přes `libos::WaitSet` (počet klientů bez limitu `wait_many`); plot získání se registruje na port množiny (`Peers::set_port`, duplikát) s klíčem klienta pod `libos::FOREIGN_KEYS` - paket jen budí smyčku, port se z `Peers` nečte.
+
 - Priorita vstupu před skládáním; na displeji je vždy nejvýš jeden snímek.
 - Obsahu bufferů aplikací se nevěří (kontroly rozměrů, čtení omezené na VMO).
 - Pád `compd` nesmí ztratit okna: stav se obnoví ze snímku (`docs/cs/gui.md#obnova-po-pádu-kompozitoru`); init spustí záložní konzoli.
 - Aplikace ani kompozitor nesahají na HW displeje; jde to přes ovladač displeje (protokol `guiproto::display`).
 - Render uzel (3D) kompozitor sám neotevírá: dostane ho s příkazem `backend gpu` (init přes `gpud`). Při změně velikosti obrazovky znovu použije stejné spojení Venus (`GpuBackend::with`).
 - Vzhled jen z tokenů (`libs/theme`).
-- Plot získání (`SYNC_POINTS`): commit s nesplněným plotem se podrží i se všemi dalšími zprávami klienta (kanál se nečte, ve `wait_many` jen `PEER_CLOSED`), nejdéle `video::ACQUIRE_TIMEOUT`; chyba nebo termín = commit se použije a klient dostane `ERROR`. Plot uvolnění: YUV hned po převodu, BGRA až po `RELEASED`. Popis `bufdesc` se vždy ověří a VMO se mapuje přesně v potřebné velikosti.
+- Plot získání (`SYNC_POINTS`): commit s nesplněným plotem se podrží i se všemi dalšími zprávami klienta (kanál se nečte, v čekání smyčky jen `PEER_CLOSED`), nejdéle `video::ACQUIRE_TIMEOUT`; chyba nebo termín = commit se použije a klient dostane `ERROR`. Plot uvolnění: YUV hned po převodu, BGRA až po `RELEASED`. Popis `bufdesc` se vždy ověří a VMO se mapuje přesně v potřebné velikosti.
 
 ## Testy
 

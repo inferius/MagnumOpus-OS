@@ -59,6 +59,7 @@ pub mod vm;
 mod vmo;
 mod wait;
 mod waiter;
+mod waitset;
 
 /// Rozhrani jadra (kody chyb, konstanty mapovani, kody procesu, ...).
 pub use abi;
@@ -71,6 +72,7 @@ pub use handle::Handle;
 pub use mapping::{Mapping, Pod};
 pub use port::{Port, PortPacket};
 pub use waiter::Waiter;
+pub use waitset::{FOREIGN_KEYS, WaitSet};
 pub use process::{Process, SuspendToken, Thread};
 pub use rt::Startup;
 pub use job::Job;

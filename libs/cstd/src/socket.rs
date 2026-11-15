@@ -1,9 +1,10 @@
 //! Sockety BSD (`sys/socket.h`, `netinet/in.h`, `arpa/inet.h`,
 //! `netdb.h`) nad relaci site (osrt::sock, netproto v2).
 //!
-//! `AF_INET` a `AF_INET6`, `SOCK_STREAM` (TCP) a `SOCK_DGRAM` (UDP).
-//! `AF_UNIX` neni (mistni IPC jsou kanaly). Co program smi (cile, porty,
-//! naslouchani), urcuje relace site z manifestu, ne `setsockopt`.
+//! `AF_INET` a `AF_INET6`, `SOCK_STREAM` (TCP) a `SOCK_DGRAM` (UDP);
+//! `AF_UNIX` (`SOCK_STREAM`) obsluhuje [`crate::unix`] (cislo fd pozna
+//! `sys::is_unix`). Co program smi (cile, porty, naslouchani), urcuje
+//! relace site z manifestu, ne `setsockopt`.
 
 use core::ffi::c_void;
 use core::time::Duration;
@@ -159,6 +160,13 @@ pub unsafe fn write_addr(a: SocketAddr, p: *mut c_void, len: *mut u32) {
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn socket(domain: c_int, ty: c_int, proto: c_int) -> c_int {
+    if domain == AF_UNIX {
+        return match (ty & 0xf, proto) {
+            (SOCK_STREAM, 0) => errno::ret_val(sys::unix_socket(ty & SOCK_CLOEXEC != 0, ty & SOCK_NONBLOCK != 0)) as c_int,
+            (SOCK_STREAM | SOCK_DGRAM | SOCK_SEQPACKET, _) => errno::ret(Err(errno::EPROTONOSUPPORT)),
+            _ => errno::ret(Err(errno::EPROTOTYPE)),
+        };
+    }
     let v6 = match domain {
         AF_INET => false,
         AF_INET6 => true,
@@ -178,26 +186,77 @@ pub extern "C" fn socket(domain: c_int, ty: c_int, proto: c_int) -> c_int {
     errno::ret_val(sys::socket(kind, v6, ty & SOCK_CLOEXEC != 0, ty & SOCK_NONBLOCK != 0)) as c_int
 }
 
-/// `socketpair`: `AF_UNIX` neni.
+/// `socketpair`: jen `AF_UNIX` + `SOCK_STREAM`.
+///
+/// # Safety
+///
+/// `fds` ukazuje na dve cisla.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub extern "C" fn socketpair(_d: c_int, _t: c_int, _p: c_int, _fds: *mut c_int) -> c_int {
-    errno::ret(Err(errno::EAFNOSUPPORT))
+pub unsafe extern "C" fn socketpair(d: c_int, t: c_int, p: c_int, fds: *mut c_int) -> c_int {
+    if d != AF_UNIX {
+        return errno::ret(Err(errno::EAFNOSUPPORT));
+    }
+    if t & 0xf != SOCK_STREAM || p != 0 {
+        return errno::ret(Err(errno::EPROTONOSUPPORT));
+    }
+    if fds.is_null() {
+        return errno::ret(Err(errno::EFAULT));
+    }
+    match sys::unix_pair(t & SOCK_CLOEXEC != 0, t & SOCK_NONBLOCK != 0) {
+        Ok((a, b)) => {
+            // SAFETY: kontrakt C.
+            unsafe {
+                *fds = a;
+                *fds.add(1) = b;
+            }
+            0
+        }
+        Err(e) => errno::ret(Err(e)),
+    }
+}
+
+/// Adresa `AF_UNIX` z `struct sockaddr *` (cesta).
+///
+/// # Safety
+///
+/// `a` ma `len` bajtu.
+unsafe fn unix_path(a: *const c_void, len: u32) -> Result<Vec<u8>, c_int> {
+    if a.is_null() || len < 2 {
+        return Err(errno::EINVAL);
+    }
+    // SAFETY: kontrakt C.
+    let b = unsafe { core::slice::from_raw_parts(a.cast::<u8>(), len as usize) };
+    if c_int::from(u16::from_ne_bytes([b[0], b[1]])) != AF_UNIX {
+        return Err(errno::EINVAL);
+    }
+    crate::unix::path_of(b)
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn bind(fd: c_int, a: *const c_void, len: u32) -> c_int {
+    if sys::is_unix(fd) {
+        // SAFETY: kontrakt C.
+        return errno::ret(unsafe { unix_path(a, len) }.and_then(|p| sys::unix_bind(fd, &p)));
+    }
     // SAFETY: kontrakt C.
     errno::ret(unsafe { read_addr(a, len) }.and_then(|a| sys::sock_bind(fd, a)))
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn listen(fd: c_int, backlog: c_int) -> c_int {
+    if sys::is_unix(fd) {
+        return errno::ret(sys::unix_listen(fd));
+    }
     errno::ret(sys::sock_listen(fd, backlog.clamp(1, 4096) as u16))
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn connect(fd: c_int, a: *const c_void, len: u32) -> c_int {
     crate::pthread::testcancel();
+    if sys::is_unix(fd) {
+        // SAFETY: kontrakt C.
+        return errno::ret(unsafe { unix_path(a, len) }.and_then(|p| sys::unix_connect(fd, &p)));
+    }
     // SAFETY: kontrakt C.
     errno::ret(unsafe { read_addr(a, len) }.and_then(|a| sys::sock_connect(fd, a)))
 }
@@ -205,6 +264,17 @@ pub unsafe extern "C" fn connect(fd: c_int, a: *const c_void, len: u32) -> c_int
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn accept4(fd: c_int, a: *mut c_void, len: *mut u32, flags: c_int) -> c_int {
     crate::pthread::testcancel();
+    if sys::is_unix(fd) {
+        return match sys::unix_accept(fd, flags & SOCK_CLOEXEC != 0, flags & SOCK_NONBLOCK != 0) {
+            Ok(n) => {
+                // Klient bez jmena: jen rodina (jako Linux).
+                // SAFETY: kontrakt C.
+                unsafe { crate::unix::write_addr(None, a, len) };
+                n
+            }
+            Err(e) => errno::ret(Err(e)),
+        };
+    }
     match sys::sock_accept(fd, flags & SOCK_CLOEXEC != 0, flags & SOCK_NONBLOCK != 0) {
         Ok((n, from)) => {
             // SAFETY: kontrakt C.
@@ -260,6 +330,14 @@ unsafe fn buf_ref<'a>(buf: *const c_void, n: size_t) -> Result<&'a [u8], c_int> 
 pub unsafe extern "C" fn recv(fd: c_int, buf: *mut c_void, n: size_t, flags: c_int) -> isize {
     crate::pthread::testcancel();
     // SAFETY: kontrakt C.
+    if sys::is_unix(fd) {
+        // Fd zpravy recv zahodi (jako Linux bez msg_control).
+        // SAFETY: kontrakt C.
+        let r = flags_ok(flags)
+            .and_then(|dw| unsafe { buf_mut(buf, n) }.and_then(|b| sys::unix_recv(fd, b, 0, dw, false)))
+            .map(|(n, _, _)| n);
+        return errno::ret_val(r);
+    }
     let r = flags_ok(flags).and_then(|dw| unsafe { buf_mut(buf, n) }.and_then(|b| sys::sock_recv(fd, b, dw)));
     errno::ret_val(r)
 }
@@ -268,6 +346,11 @@ pub unsafe extern "C" fn recv(fd: c_int, buf: *mut c_void, n: size_t, flags: c_i
 pub unsafe extern "C" fn send(fd: c_int, buf: *const c_void, n: size_t, flags: c_int) -> isize {
     crate::pthread::testcancel();
     // SAFETY: kontrakt C.
+    if sys::is_unix(fd) {
+        // SAFETY: kontrakt C.
+        let r = flags_ok(flags).and_then(|dw| unsafe { buf_ref(buf, n) }.and_then(|b| sys::unix_send(fd, b, &[], dw)));
+        return errno::ret_val(r);
+    }
     let r = flags_ok(flags).and_then(|dw| unsafe { buf_ref(buf, n) }.and_then(|b| sys::sock_send(fd, b, dw)));
     errno::ret_val(r)
 }
@@ -281,6 +364,14 @@ pub unsafe extern "C" fn recvfrom(
     from: *mut c_void,
     len: *mut u32,
 ) -> isize {
+    if sys::is_unix(fd) {
+        if !len.is_null() {
+            // SAFETY: kontrakt C (spojeny socket: odesilatel bez jmena).
+            unsafe { *len = 0 };
+        }
+        // SAFETY: kontrakt C.
+        return unsafe { recv(fd, buf, n, flags) };
+    }
     crate::pthread::testcancel();
     // SAFETY: kontrakt C.
     let r = flags_ok(flags).and_then(|dw| unsafe { buf_mut(buf, n) }.and_then(|b| sys::sock_recv_from(fd, b, dw)));
@@ -303,6 +394,12 @@ pub unsafe extern "C" fn sendto(
     to: *const c_void,
     len: u32,
 ) -> isize {
+    if sys::is_unix(fd) {
+        // Spojeny socket: cil se ignoruje (Linux EISCONN by byl jen pri
+        // jinem cili; Wine sendto na AF_UNIX nepouziva).
+        // SAFETY: kontrakt C.
+        return unsafe { send(fd, buf, n, flags) };
+    }
     crate::pthread::testcancel();
     if to.is_null() {
         // SAFETY: kontrakt C.
@@ -363,8 +460,9 @@ pub unsafe fn control_supported(m: &msghdr) -> Result<(), c_int> {
 pub unsafe extern "C" fn sendmsg(fd: c_int, m: *const msghdr, flags: c_int) -> isize {
     // SAFETY: kontrakt C.
     let Some(m) = (unsafe { m.as_ref() }) else { return errno::ret_val::<usize>(Err(errno::EFAULT)) };
+    let unix = sys::is_unix(fd);
     // SAFETY: kontrakt C.
-    if let Err(e) = unsafe { control_supported(m) } {
+    if !unix && let Err(e) = unsafe { control_supported(m) } {
         return errno::ret_val::<usize>(Err(e));
     }
     let mut all = Vec::new();
@@ -376,6 +474,11 @@ pub unsafe extern "C" fn sendmsg(fd: c_int, m: *const msghdr, flags: c_int) -> i
             Ok(b) => all.extend_from_slice(b),
             Err(e) => return errno::ret_val::<usize>(Err(e)),
         }
+    }
+    if unix {
+        crate::pthread::testcancel();
+        // SAFETY: kontrakt C.
+        return errno::ret_val(unsafe { crate::unix::sendmsg(fd, m, &all, flags) });
     }
     // SAFETY: kontrakt C.
     unsafe { sendto(fd, all.as_ptr().cast(), all.len(), flags, m.msg_name, m.msg_namelen) }
@@ -393,15 +496,25 @@ pub unsafe extern "C" fn recvmsg(fd: c_int, m: *mut msghdr, flags: c_int) -> isi
         total += unsafe { (*m.msg_iov.add(i)).iov_len };
     }
     let mut tmp = vec![0u8; total];
-    let mut namelen = m.msg_namelen;
-    // SAFETY: kontrakt C.
-    let n = unsafe { recvfrom(fd, tmp.as_mut_ptr().cast(), total, flags, m.msg_name, &mut namelen) };
-    if n < 0 {
-        return n;
-    }
-    m.msg_namelen = namelen;
-    m.msg_controllen = 0;
-    m.msg_flags = 0;
+    let n = if sys::is_unix(fd) {
+        crate::pthread::testcancel();
+        // SAFETY: kontrakt C.
+        match unsafe { crate::unix::recvmsg(fd, m, &mut tmp, flags) } {
+            Ok(n) => n as isize,
+            Err(e) => return errno::ret_val::<usize>(Err(e)),
+        }
+    } else {
+        let mut namelen = m.msg_namelen;
+        // SAFETY: kontrakt C.
+        let n = unsafe { recvfrom(fd, tmp.as_mut_ptr().cast(), total, flags, m.msg_name, &mut namelen) };
+        if n < 0 {
+            return n;
+        }
+        m.msg_namelen = namelen;
+        m.msg_controllen = 0;
+        m.msg_flags = 0;
+        n
+    };
     let mut rest = &tmp[..n as usize];
     for i in 0..m.msg_iovlen {
         // SAFETY: msg_iov ma msg_iovlen polozek.
@@ -416,6 +529,13 @@ pub unsafe extern "C" fn recvmsg(fd: c_int, m: *mut msghdr, flags: c_int) -> isi
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn shutdown(fd: c_int, how: c_int) -> c_int {
+    if sys::is_unix(fd) {
+        return match how {
+            SHUT_RD => 0,
+            SHUT_WR | SHUT_RDWR => errno::ret(sys::unix_shutdown_write(fd)),
+            _ => errno::ret(Err(errno::EINVAL)),
+        };
+    }
     match how {
         // Uzavreni cteni netd nezna: data se dal prijimaji, program je necte.
         SHUT_RD => errno::ret(sys::sock_is_stream(fd).map(|_| ())),
@@ -426,6 +546,13 @@ pub extern "C" fn shutdown(fd: c_int, how: c_int) -> c_int {
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn getsockname(fd: c_int, a: *mut c_void, len: *mut u32) -> c_int {
+    if sys::is_unix(fd) {
+        return match sys::unix_name(fd, false) {
+            // SAFETY: kontrakt C.
+            Ok(p) => unsafe { crate::unix::write_addr(p.as_deref(), a, len); 0 },
+            Err(e) => errno::ret(Err(e)),
+        };
+    }
     match sys::sock_name(fd, false) {
         Ok(x) => {
             // SAFETY: kontrakt C.
@@ -438,6 +565,13 @@ pub unsafe extern "C" fn getsockname(fd: c_int, a: *mut c_void, len: *mut u32) -
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn getpeername(fd: c_int, a: *mut c_void, len: *mut u32) -> c_int {
+    if sys::is_unix(fd) {
+        return match sys::unix_name(fd, true) {
+            // SAFETY: kontrakt C.
+            Ok(p) => unsafe { crate::unix::write_addr(p.as_deref(), a, len); 0 },
+            Err(e) => errno::ret(Err(e)),
+        };
+    }
     match sys::sock_name(fd, true) {
         Ok(x) => {
             // SAFETY: kontrakt C.
@@ -466,6 +600,9 @@ fn tv_to(t: Tv) -> Option<Duration> {
 /// nastavuje sam).
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn setsockopt(fd: c_int, level: c_int, name: c_int, v: *const c_void, len: u32) -> c_int {
+    if sys::is_unix(fd) {
+        return errno::ret(crate::unix::setsockopt(fd, level, name));
+    }
     if let Err(e) = sys::sock_is_stream(fd) {
         return errno::ret(Err(e));
     }
@@ -491,6 +628,10 @@ pub unsafe extern "C" fn setsockopt(fd: c_int, level: c_int, name: c_int, v: *co
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn getsockopt(fd: c_int, level: c_int, name: c_int, v: *mut c_void, len: *mut u32) -> c_int {
+    if sys::is_unix(fd) {
+        // SAFETY: kontrakt C.
+        return errno::ret(unsafe { crate::unix::getsockopt(fd, level, name, v, len) });
+    }
     let (stream, v6) = match sys::sock_is_stream(fd) {
         Ok(x) => x,
         Err(e) => return errno::ret(Err(e)),

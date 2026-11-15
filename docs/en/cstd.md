@@ -121,7 +121,7 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 |---|---|---|
 | `unistd.h` | `close`, `read`, `write`, `pread`, `pwrite`, `lseek`, `dup`, `dup2`, `dup3`, `pipe`, `pipe2`, `isatty`, `fsync`, `fdatasync`, `ftruncate`, `truncate`, `unlink`, `rmdir`, `getcwd`, `chdir`, `access`, `sysconf`, `getpagesize` | `fork`, `vfork`, `exec*` return `ENOSYS` (see [No fork](#processes-locale-wchar)) |
 | `fcntl.h` | `open`, `openat` (also relative to a directory, see [Functions for C++](#functions-for-c-step-7a)), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | `O_*` values as Linux, `O_DIRECTORY` the same on both architectures; locks `F_GETLK`, `F_SETLK`, `F_SETLKW` see File locks |
-| `sys/stat.h` | `stat`, `lstat` (= `stat`), `fstat`, `mkdir`, `chmod`, `fchmod`, `umask` | `st_mode` from the kind and the session's effective rights; `chmod` has no effect (rights are FS grants) |
+| `sys/stat.h` | `stat`, `lstat` (= `stat`), `fstat`, `mkdir`, `chmod`, `fchmod`, `umask` | `st_mode` = a view of the FS grants ([POSIX mode](file-system.md#posix-mode)); `mkdir`/`open(O_CREAT)` with a mode after `umask` only narrow the grants, `chmod`/`fchmod`/`fchmodat` change them (right `MANAGE`, otherwise `EPERM`) |
 | `sys/uio.h` | `readv`, `writev` | `writev` in one write |
 | `dirent.h` | `opendir`, `fdopendir`, `readdir`, `closedir`, `rewinddir`, `dirfd` | the first two entries are `.` and `..` |
 | `stdio.h` | `fdopen`, `fileno`, `fseeko`, `ftello`, `getline`, `getdelim` | `FILE` sits on an fd number |
@@ -185,7 +185,7 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 
 | Header | Functions | Note |
 |---|---|---|
-| `sys/socket.h` | `socket` (`AF_INET`, `AF_INET6`; `SOCK_STREAM`, `SOCK_DGRAM`, `SOCK_NONBLOCK`, `SOCK_CLOEXEC`), `bind`, `listen`, `accept`, `accept4`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg` (no control messages), `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt` | `AF_UNIX` and `socketpair` = `EAFNOSUPPORT`; `MSG_PEEK` = `ENOTSUP` |
+| `sys/socket.h` | `socket` (`AF_INET`, `AF_INET6`; `SOCK_STREAM`, `SOCK_DGRAM`, `SOCK_NONBLOCK`, `SOCK_CLOEXEC`), `bind`, `listen`, `accept`, `accept4`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg` (control messages only `SCM_RIGHTS` on `AF_UNIX`), `socketpair`, `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt` | `AF_UNIX` only `SOCK_STREAM` (see [AF_UNIX sockets](#af_unix-sockets)); `MSG_PEEK` = `ENOTSUP` |
 | `netinet/in.h`, `arpa/inet.h` | `htons` ..., `inet_pton`, `inet_ntop`, `inet_addr`, `inet_ntoa`, `in6addr_any` | |
 | `netdb.h` | `getaddrinfo`, `freeaddrinfo`, `gai_strerror`, `getnameinfo` | names via the netd resolver; `getnameinfo` numeric only |
 | `poll.h`, `sys/select.h`, `sys/epoll.h` | `poll`, `select`, `epoll_create`, `epoll_create1`, `epoll_ctl`, `epoll_wait` | over `osrt::poll` |
@@ -270,7 +270,9 @@ Decision 6A - signals without kernel support:
   to a closed pipe only returns `EPIPE`).
 - **`getpid`:** the kernel does not give programs a process number;
   `getpid` returns a random positive number, stable for the run (temporary
-  file names, `kill` of itself). `getppid` = 1.
+  file names, `kill` of itself) - the same as `std::process::id`
+  (`osrt::process::self_id`), so other processes see it the same (`l_pid`,
+  `SO_PEERCRED`). `getppid` = 1.
 
 ### File locks
 
@@ -282,8 +284,9 @@ the locks (message `POSIX_LOCK`, [file-system.md](file-system.md)): the
 file. They are released by closing the process's last fd on the file
 (`flock`: closing the fd) and by the end of the process. `F_SETLKW` and
 `flock` without `LOCK_NB` wait by retrying; fsd watches for a wait cycle
-(`EDEADLK`). `l_pid` from `F_GETLK` is -1 (fsd does not know process
-numbers).
+(`EDEADLK`). `l_pid` from `F_GETLK` = the holder's `getpid` (the client
+sends it with every lock, fsd does not verify it; unknown = -1)
+**[verified in QEMU]** (test `ctest lock`).
 
 ## Functions for C++ (step 7a)
 
@@ -354,7 +357,7 @@ C frames) and links with `--eh-frame-hdr`; the dynamic part has
 - Functions added for the ports: `strspn`, `strcspn`, `strpbrk`,
   `strtok_r`, `strdup`, `strndup`, `strcasecmp`, `strerror_r`, `qsort`,
   `bsearch`, `rand`, `div`, `atol`, the `scanf` family, `getpwuid` (user
-  from `USER` and `HOME`), `getuid` and friends (0), `fchown` and `utimes`
+  from `USER` and `HOME`), `getuid` and friends (the FS session identity, see [AF_UNIX sockets](#af_unix-sockets)), `fchown` and `utimes`
   without effect, `readlink`/`symlink`/`link` (no FS symlinks yet),
   `ioctl` (`ENOTTY`), `setlocale`/`localeconv` (see [Wide characters and locale](#wide-characters-and-locale)), `uname`,
   `getrusage`/`getrlimit`, `system` (`ENOSYS`; starting processes via
@@ -412,7 +415,7 @@ sysroot is built only when std or osrt changes):
   position, the process stdio (0, 1, 2 from start-up) or a pipe end. `dup`
   shares the description and the position.
 - At most 4096 numbers (`EMFILE`). `FD_CLOEXEC` is stored (for
-  `posix_spawn`, the child gets only 0-2).
+  `posix_spawn`: the child inherits numbers without it).
 - A pipe is a channel pair; the read end cannot be written (`EBADF`), a
   pipe has no position (`ESPIPE`).
 - On the host (`cargo test -p cstd`) the same rules over `std::fs`
@@ -529,10 +532,9 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
    `open` (`O_CREAT`, `O_EXCL`, `O_TRUNC`, `O_APPEND`, `O_NONBLOCK`,
    `O_CLOEXEC`, `O_DIRECTORY`), `read`/`write`/`pread`/`pwrite`/`readv`/
    `writev`, `lseek`, `ftruncate`, `fsync`, `stat`/`fstat`/`lstat`
-   (`st_mode` from the kind and effective rights, `st_uid` from the session
-   identity), `opendir`/`readdir`, `mkdir`, `unlink`, `rmdir`, `rename`,
+   (`st_mode` as a view of the grants, `st_uid` = the owner), `opendir`/`readdir`, `mkdir`, `unlink`, `rmdir`, `rename`,
    `access`, `getcwd`/`chdir`, `pipe` (a channel pair), `isatty`.
-   `chmod` without effect (rights are FS grants, not bits), `link`/
+   `chmod` changes the grants (since T1, [POSIX mode](file-system.md#posix-mode)), `link`/
    `symlink` = `ENOTSUP` until FS v3. `fcntl`/`flock` locks are held by
    fsd (decision 8).
 3. **`math.h`** (question 3) and floating point in `printf`/`scanf`/
@@ -557,8 +559,8 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
    `O_NONBLOCK` (deadline `TRY`). `poll` and `select` via
    `OBJECT_WAIT_MANY` (up to 64 objects), beyond that via a port
    (`libos::port`): files are always ready, channels have `READABLE`/
-   `PEER_CLOSED`, sockets readiness events (netproto v2). No `AF_UNIX`
-   (local IPC uses channels). `epoll`: question 7.
+   `PEER_CLOSED`, sockets readiness events (netproto v2). `AF_UNIX` later
+   (step T1, see [AF_UNIX sockets](#af_unix-sockets)). `epoll`: question 7.
 6. **Memory.** Anonymous `mmap` (`MAP_PRIVATE`/`MAP_SHARED` within the
    process, `MAP_FIXED`, `MAP_NORESERVE` = reservation with on-demand
    pages), `munmap` including parts, `mprotect`, `madvise(DONTNEED)` =
@@ -584,7 +586,7 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
   returns -1 with `errno` = `ENOSYS`. `posix_spawn` and `posix_spawnp`
   with `posix_spawn_file_actions_*` and `posix_spawnattr_*`: applications
   with a manifest via `launchd`, helper programs via `spawn` (like
-  `std::process`), file actions for fd 0-2 (question 4), `waitpid` over the
+  `std::process`), file actions for fd 0-2 (question 4; since T4 all fds without `FD_CLOEXEC`), `waitpid` over the
   process handle (done, see [POSIX additions](#processes-posix_spawn-and-waitpid)),
   `system`/`popen` via the system shell **[designed]**. Starting a PIE
   program (dynamic process) needs a libd session in the spawner
@@ -799,7 +801,7 @@ under Unicode-3.0 (file `THIRD-PARTY.md` in the repository root).
 
 ## POSIX additions for ports and the Windows layer
 
-**[verified in QEMU]** x86_64 and aarch64 (step `posix2` of the `ctest`
+**[verified in QEMU]** x86_64 and aarch64 (steps `posix2` and `inherit` (fd inheritance) of the `ctest`
 test, suite `cstd`; host tests `posix_tests.rs` and `spawn_tests.rs` in
 `cargo test -p cstd`). Functions that ports and Wine need on top of what
 the library already had (Windows layer = step 8), and `termios.h` (see
@@ -812,11 +814,11 @@ the library already had (Windows layer = step 8), and `termios.h` (see
 <defs><marker id="ce9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
 <rect class="box" x="10" y="10" width="230" height="90" rx="6"/><text class="t b" x="125" y="34" text-anchor="middle">parent: fd table</text><text class="m" x="125" y="54" text-anchor="middle">0 stdin, 1 stdout, 2 stderr</text><text class="m" x="125" y="72" text-anchor="middle">5, 6 pipe, 7 file ...</text><text class="m" x="125" y="90" text-anchor="middle">file actions (adddup2 ...)</text>
 <path class="ln" d="M240 55 L288 55" marker-end="url(#ce9)"/>
-<rect class="acc" x="290" y="10" width="200" height="90" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">plan (cstd)</text><text class="m" x="390" y="54" text-anchor="middle">only fd 0-2: stream channel,</text><text class="m" x="390" y="72" text-anchor="middle">/dev/null or nothing;</text><text class="m" x="390" y="90" text-anchor="middle">otherwise ENOTSUP</text>
+<rect class="acc" x="290" y="10" width="200" height="90" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">plan (cstd)</text><text class="m" x="390" y="54" text-anchor="middle">fds without FD_CLOEXEC:</text><text class="m" x="390" y="72" text-anchor="middle">0-2 streams, above 2</text><text class="m" x="390" y="90" text-anchor="middle">inherited fds (handles)</text>
 <path class="ln" d="M490 55 L538 55" marker-end="url(#ce9)"/>
 <rect class="box" x="540" y="10" width="230" height="90" rx="6"/><text class="t b" x="655" y="34" text-anchor="middle">launchd</text><text class="m" x="655" y="54" text-anchor="middle">program, manifest, job,</text><text class="m" x="655" y="72" text-anchor="middle">FS and network sessions</text><text class="m" x="655" y="90" text-anchor="middle">(like std::process)</text>
 <path class="ln" d="M655 100 L655 148" marker-end="url(#ce9)"/>
-<rect class="ok" x="540" y="150" width="230" height="90" rx="6"/><text class="t b" x="655" y="174" text-anchor="middle">child</text><text class="m" x="655" y="194" text-anchor="middle">new process in a child job,</text><text class="m" x="655" y="212" text-anchor="middle">fd 0-2 from the parameter block,</text><text class="m" x="655" y="230" text-anchor="middle">default signals</text>
+<rect class="ok" x="540" y="150" width="230" height="90" rx="6"/><text class="t b" x="655" y="174" text-anchor="middle">child</text><text class="m" x="655" y="194" text-anchor="middle">new process in a child job,</text><text class="m" x="655" y="212" text-anchor="middle">fds from the parameter block,</text><text class="m" x="655" y="230" text-anchor="middle">default signals</text>
 <path class="ln" d="M538 195 L242 195" marker-end="url(#ce9)"/>
 <rect class="box" x="10" y="150" width="230" height="90" rx="6"/><text class="t b" x="125" y="174" text-anchor="middle">parent: child table</text><text class="m" x="125" y="194" text-anchor="middle">pid_t from cstd -> process handle</text><text class="m" x="125" y="212" text-anchor="middle">waitpid, wait4, waitid,</text><text class="m" x="125" y="230" text-anchor="middle">kill (termination)</text>
 </svg>
@@ -827,31 +829,53 @@ There is no `fork` in the system (the user's decision, see [Processes,
 locale, wchar](#processes-locale-wchar)). `posix_spawn` and `posix_spawnp`
 start the child through launchd exactly like `std::process::Command`
 ([Rust std](rust-std.md)): a child job, a new FS session with the same
-identity, a network session and three standard streams. The child has no other
-fd (decision 4A), so file actions are evaluated in the parent:
+identity, a network session and three standard streams. The child also
+**inherits the parent's fds without `FD_CLOEXEC`** at the same numbers
+(decision T4A, as in POSIX; formerly 4A only 0-2). File actions are
+evaluated in the parent over a copy of its fd table and numbers with
+`FD_CLOEXEC` are dropped at the end:
 
 | Action | Result |
 |---|---|
-| `addclose(0-2)` | the stream is not passed (empty input, discarded output) |
-| `addclose(> 2)` | nothing (the child has no higher numbers) |
-| `adddup2(x, 0-2)` | the child's stream = the description behind `x` in the parent (stdio, also another stream after `dup2`, a pipe or a file) or 0-2 after the previous actions; a socket is `ENOTSUP` |
-| `addopen(0-2, "/dev/null")` | empty input / discarded output |
-| `addopen(0-2, file)` | the parent opens the file (path relative to the child's directory at that step, `open` flags) and passes it as a stream |
-| anything with a target > 2 | `ENOTSUP` (the parameter block only carries three streams) |
-
-**A file as a stream** (fsd message `OPEN_STREAM`, [file system](file-system.md#the-fsproto-protocol)):
-the parameter block only carries byte-stream channels, so fsd "plays" the
-file into the channel (stdin: from the current position to the end, then
-end of stream) or writes from the channel (stdout/stderr: from the current
-position, with `O_APPEND` at the end). fsd opens its own handle of the
-same file, so the stream survives closing the fd and the end of the
-parent. Difference from POSIX: the child has **its own position** in the
-file (a shared position of an open file description between processes does
-not exist); the child's writes are in the file once fsd has processed them
-(shortly after the child ends, not necessarily at once). An fsd restart ends
-the stream.
+| `addclose(n)`, `addclosefrom_np(n)` | the child does not get the number (numbers from `n`); a closed stream 0-2 = empty input / discarded output |
+| `adddup2(x, y)` | the child's `y` = the description behind `x` (in the parent or after previous actions), without `FD_CLOEXEC`; `x == y` only clears `FD_CLOEXEC`; a closed `x` = `EBADF` |
+| `addopen(0-2, "/dev/null")` | empty input / discarded output (above 2 `ENOTSUP`) |
+| `addopen(y, file)` | the parent opens the file (path relative to the child's directory at that step, `open` flags; with `O_CLOEXEC` it is not passed) |
 | `addchdir(_np)`, `addfchdir(_np)` | the child's working directory (relative to the previous one); a missing one makes `posix_spawn` fail |
-| `addclosefrom_np(n)` | closes 0-2 from `n` on |
+
+**Fds 0-2 as streams** (fsd message `OPEN_STREAM`, [file system](file-system.md#the-fsproto-protocol)):
+the child's standard streams are byte-stream channels, so fsd "plays" a
+file on 0-2 into the channel (stdin: from the current position to the
+end, then end of stream) or writes from the channel (stdout/stderr: from
+the current position, with `O_APPEND` at the end). fsd opens its own handle
+of the same file, so the stream survives closing the fd and the end of the
+parent. The child's writes are in the file once fsd has processed them
+(shortly after the child ends, not necessarily at once). An fsd restart
+ends the stream.
+
+**Fds above 2** go in the parameter block (`abi::params`, version 3: `Fd`
+entries + handles with the tag `tag::FD`, launchd passes them unchanged)
+and the child's runtime (`osrt::inherit`) puts them into the fd table
+before `main`:
+
+| Kind | How it is passed |
+|---|---|
+| pipe, the parent's stdio under another number | a duplicate of the stream channel (both processes write/read the same channel) |
+| memory fd (`memfd_create`) | a duplicate of the memory object, seals, a copy of the position |
+| file, directory | the durable identity of the object (dataset, oid, generation); the child opens it in its own FS session with `REOPEN` - fsd checks the rights and the session's mounted paths again |
+| socket, `epoll` | **not inherited** (the connection to netd belongs to the parent's session); an inherited number is skipped, `adddup2` of a socket = `ENOTSUP` |
+
+Differences from POSIX (explicitly): the file position is **not shared**
+between the parent and the child - the child starts at the parent's
+position and then has its own (a shared open file description between
+processes does not exist, also for 0-2); an inherited file that has
+disappeared in the meantime (or that the child's session cannot see) is
+missing in the child (`EBADF`). There are at most `abi::params::MAX_FDS` =
+48 inherited fds above 2 (more = `EMFILE`), because the handles go in one
+start-up message together with stdio and sessions (channel message limit
+64 handles). `AF_UNIX` sockets are inherited (a duplicate of the
+connection or listener channel, [AF_UNIX sockets](#af_unix-sockets)).
+
 
 - **The child's network:** inherited as in POSIX when the parent has one
   (unlike `std::process::Command`, where only with `network(true)`). An
@@ -888,6 +912,70 @@ the stream.
   not run), signal 0 only checks it exists. Delivering other signals to the
   child's handler is not possible yet (`ENOTSUP`); the parent gets no
   `SIGCHLD`.
+
+### AF_UNIX sockets
+
+**[verified in QEMU]** x86_64 and aarch64 (step `unix` of the `ctest`
+test, suite `cstd`, modelled on wineserver: `socketpair`,
+`bind`/`listen`/`accept` on a relative path, a non-blocking listener in
+`poll`, `connect` from another process, `SCM_RIGHTS` in both directions,
+passing one end of a `socketpair` and inheriting the other through
+`posix_spawn`; host tests `unix_tests.rs`). Decision T1A
+(Windows layer, step 8): general `AF_UNIX`, so that the code of
+Wine and other ports (X11, D-Bus, Wayland) stays unchanged.
+
+<figure class="diagram">
+<svg viewBox="0 0 780 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AF_UNIX over channels and fsd">
+<defs><marker id="en11" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="10" width="220" height="80" rx="6"/><text class="t b" x="120" y="34" text-anchor="middle">server</text><text class="m" x="120" y="54" text-anchor="middle">bind("socket"), listen</text><text class="m" x="120" y="72" text-anchor="middle">listener channel</text>
+<rect class="acc" x="280" y="10" width="220" height="80" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">fsd</text><text class="m" x="390" y="54" text-anchor="middle">socket node (kind 5)</text><text class="m" x="390" y="72" text-anchor="middle">node -> listener (memory)</text>
+<rect class="box" x="550" y="10" width="220" height="80" rx="6"/><text class="t b" x="660" y="34" text-anchor="middle">client</text><text class="m" x="660" y="54" text-anchor="middle">connect("…/socket")</text><text class="m" x="660" y="72" text-anchor="middle">new channel pair</text>
+<path class="ln" d="M230 50 L278 50" marker-end="url(#en11)"/>
+<path class="ln" d="M548 50 L502 50" marker-end="url(#en11)"/>
+<rect class="ok" x="10" y="120" width="760" height="70" rx="6"/><text class="t b" x="390" y="144" text-anchor="middle">connection = a channel pair between processes (fsd is not in it)</text><text class="m" x="390" y="166" text-anchor="middle">message = flags, fds (SCM_RIGHTS: pipe, memfd, file, directory, AF_UNIX) + data</text>
+</svg>
+<figcaption>AF_UNIX: fsd only arranges the first meeting through the socket node, data go directly over the channel.</figcaption>
+</figure>
+
+- **Types:** only `SOCK_STREAM` (`SOCK_SEQPACKET`, `SOCK_DGRAM` =
+  `EPROTONOSUPPORT`); `SOCK_NONBLOCK`, `SOCK_CLOEXEC`, `O_NONBLOCK` through
+  `fcntl` (empty = `EAGAIN`, `accept` without a connection = `EAGAIN`).
+- **Name** = a path (also relative to the working directory) as a socket
+  node in fsd (`SOCKET_BIND`, [file system](file-system.md#the-fsproto-protocol));
+  `lstat` reports `S_IFSOCK` and the owner. `connect` needs the write
+  right on the node. A node without a listener (the process ended, an fsd
+  restart) = `ECONNREFUSED`, a missing one = `ENOENT`, `bind` to an
+  existing one = `EADDRINUSE` (as on Unix: `unlink` before `bind`). There
+  is no abstract name (`sun_path[0] == 0`, `ENOTSUP`). Connections that
+  arrive after `bind` and before `listen` wait in the queue (Linux would
+  refuse them).
+- **Data:** every `send`/`sendmsg` = one channel message (at most 64 KiB,
+  longer ones are split); `recv` reads at most the rest of one message (a
+  short read is allowed for `SOCK_STREAM`). `shutdown(SHUT_WR)` sends an
+  end mark: the other side reads the data and gets 0. The other side
+  closing = `POLLHUP`/`POLLIN` and `recv` 0, `send` = `EPIPE` (no
+  `SIGPIPE` is sent).
+- **`SCM_RIGHTS`:** at most 32 fds in a message. Fds are passed as with
+  inheritance ([posix_spawn](#processes-posix_spawn-and-waitpid)): a pipe
+  and `AF_UNIX` = a duplicate of the channel, a memory fd = a duplicate of
+  the memory object, a file and a directory = the durable identity +
+  `REOPEN` in the receiver's session (the receiver must see the path; the
+  position is not shared). TCP/UDP sockets and `epoll` cannot be passed
+  (`ENOTSUP`); an fd the receiver cannot open is left out. The receiver
+  gets the fds with the first `recvmsg` that starts reading the message;
+  `recv`/`read` drop them. `MSG_CMSG_CLOEXEC` sets `FD_CLOEXEC`, too little
+  room in `msg_control` = `MSG_CTRUNC` (extra fds are closed).
+- **`SO_PEERCRED`:** the side that accepted the connection gets the
+  client's user and group verified by fsd from the identity of its
+  session, and the process number (the client's `getpid`, not verified);
+  the client knows only zeros about the listener (fsd does not pass the
+  listener's credentials). `socketpair` = own values. `getuid`/`getgid` =
+  the FS session identity (`WHOAMI`; system = 0), equal to the `st_uid` of
+  objects the user created.
+- **`getsockname`** = the name from `bind` (for an accepted connection the
+  listener's name), **`getpeername`** = the path from `connect` (otherwise
+  no name); `SO_TYPE`, `SO_DOMAIN`, `SO_ACCEPTCONN`, `SO_PEERCRED`;
+  `SO_PASSCRED` and buffer sizes are accepted without effect.
 
 ### Memory fd
 
@@ -1006,7 +1094,7 @@ will come with shared memory between processes (a separate task:
   `ARPHRD_LOOPBACK`), `SIOCGIFCONF` over the same interfaces; setting
   (`SIOCSIF*`) = `ENOTTY`.
 - **Headers for building ports** (no new functionality): `sys/un.h`
-  (`struct sockaddr_un`; `AF_UNIX` sockets do not exist yet),
+  (`struct sockaddr_un`, sockets see [AF_UNIX sockets](#af_unix-sockets)),
   `struct ucred` (`SO_PEERCRED`), `struct tcp_info` and the `TCP_*` states
   (`getsockopt(TCP_INFO)` = `ENOPROTOOPT`), `net/if_arp.h` (`ARPHRD_*`,
   `struct arphdr`), `net/ethernet.h` (`ETH_ALEN`, `struct ether_header`), `netinet/if_ether.h` (`struct ether_arp`);

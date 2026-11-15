@@ -174,6 +174,11 @@ impl<D: BlockDevice> Fs<D> {
                 self.symlink(dst, &target)?;
                 Ok(0)
             }
+            // Kopie uzlu socketu = novy uzel (bez posluchace, jako cp -a).
+            Kind::Socket => {
+                self.create(dst, Kind::Socket)?;
+                Ok(0)
+            }
             Kind::Dir => {
                 let entries = self.list(src)?;
                 self.create(dst, Kind::Dir)?;

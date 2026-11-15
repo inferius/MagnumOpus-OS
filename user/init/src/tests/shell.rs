@@ -25,6 +25,7 @@ use super::{Test, TestResult, devices, fail};
 
 pub const TESTS: &[Test] = &[
     ("termd: relace, soubory, undo, odpojeni", session),
+    ("termd: 70 soucasnych relaci (smycka pres port)", many_sessions),
     ("console: displej, fokus, psani a vystup", super::console::console),
 ];
 
@@ -142,6 +143,37 @@ impl Reg {
             }
         }
     }
+}
+
+/// Vic relaci nez limit `OBJECT_WAIT_MANY` (64): termd ceka pres port.
+/// Kazda relace je proces `shsess` s vlastni relaci fsd (fsd tak ma taky
+/// pres 64 relaci).
+fn many_sessions(s: &Startup) -> TestResult {
+    const N: usize = 70;
+    let mut reg = Reg { store: Registry::default(), chan: None };
+    let (proc, w) = start_termd(s, &mut reg)?;
+    let mut ids = Vec::new();
+    for i in 0..N {
+        w.send(ClientMsg::Attach { session: 0 })?;
+        let id = w.reply(|m| match m {
+            ServerMsg::Attached { session, .. } => Some(*session),
+            _ => None,
+        });
+        ids.push(id.map_err(|e| alloc::format!("relace {i}: {e}"))?);
+        // Registr (uschova nahradnich koncu) obsluhovat prubezne.
+        reg.pump(false)?;
+    }
+    // Odpovidaji vsechny, posledni (nad starym limitem) prvni.
+    for (i, id) in ids.iter().enumerate().rev() {
+        let v = w.value(*id, "1 + 1").map_err(|e| alloc::format!("relace {i}: {e}"))?;
+        crate::check_eq!(v, Value::Int(2), "vysledek v relaci");
+        reg.pump(false)?;
+    }
+    drop(w);
+    let _ = proc.wait_exit(Some(time::deadline_after(Duration::from_secs(10))));
+    // Konec registru = konec nahradnich koncu: relace skonci.
+    drop(reg);
+    Ok(())
 }
 
 /// Spusti termd s FS, initfs a novym kanalem registru; vrati okno.

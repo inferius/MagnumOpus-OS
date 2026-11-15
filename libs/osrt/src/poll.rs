@@ -45,6 +45,8 @@ enum Source {
     Channel(Held, u16),
     /// Event socketu.
     Socket(Arc<Readiness>),
+    /// Kanal socketu `AF_UNIX` (duplikat handlu na dobu cekani).
+    Unix(Handle, u16),
 }
 
 /// Popis drzeny po dobu cekani (handle kanalu zije s nim).
@@ -86,6 +88,12 @@ fn source(p: &PollFd) -> Result<Source> {
                 Source::Channel(Held(d.clone()), out)
             }
         }
+        Object::Unix(u) => match u.wait_handle() {
+            Some((_, true)) => Source::Now(want & (ev::IN | ev::OUT)),
+            Some((h, false)) => Source::Unix(h, if u.is_listening() { 0 } else { want & ev::OUT }),
+            // Bez spojeni (po socket/bind): zapis by selhal.
+            None => Source::Now(want & ev::OUT),
+        },
         Object::Socket(s) => match s.readiness()? {
             Some(r) => Source::Socket(r),
             // Socket bez spojeni: jako Linux (zapis by selhal, konec).
@@ -97,7 +105,7 @@ fn source(p: &PollFd) -> Result<Source> {
 /// Maska signalu objektu pro pozadovane udalosti.
 fn mask(src: &Source, events: u16) -> Signals {
     match src {
-        Source::Channel(..) => Signals(Signals::READABLE.0 | Signals::PEER_CLOSED.0),
+        Source::Channel(..) | Source::Unix(..) => Signals(Signals::READABLE.0 | Signals::PEER_CLOSED.0),
         Source::Socket(_) => {
             let mut m = ready::HUP.0 | ready::ERROR.0;
             if events & ev::IN != 0 {
@@ -117,7 +125,7 @@ fn revents(src: &Source, events: u16, s: Signals) -> u16 {
     let want = events | ev::ERR | ev::HUP;
     match src {
         Source::Now(r) => *r,
-        Source::Channel(_, extra) => {
+        Source::Channel(_, extra) | Source::Unix(_, extra) => {
             let mut r = *extra;
             if s.0 & Signals::READABLE.0 != 0 {
                 r |= ev::IN;
@@ -151,6 +159,7 @@ fn handle_of(src: &Source) -> Option<&Handle> {
     match src {
         Source::Channel(d, _) => d.handle(),
         Source::Socket(r) => Some(r.handle()),
+        Source::Unix(h, _) => Some(h),
         Source::Now(_) => None,
     }
 }

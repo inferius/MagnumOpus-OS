@@ -36,6 +36,8 @@ pub(super) struct Walked {
     pub rights: u8,
     /// Granty pro potomky objektu.
     pub below: Inherited,
+    /// Granty, ktere k objektu prisly od rodice (mod POSIX, `crate::mode`).
+    pub above: Inherited,
 }
 
 /// Opravneni objektu, jak je vraci `Fs::permissions`.
@@ -131,7 +133,7 @@ impl<D: BlockDevice> Fs<D> {
             return Err(Error::NotFound);
         }
         let below = inherited.child(acl.as_ref());
-        Ok(Walked { oid, rights: r, below })
+        Ok(Walked { oid, rights: r, below, above: inherited })
     }
 
     /// Projde cestu a overi prava `need` (bez kontrol jen `enter`).
@@ -177,6 +179,45 @@ impl<D: BlockDevice> Fs<D> {
         let inode = self.inode(&root, oid)?;
         let acl = self.load_acl(&root, inode.acl)?;
         Ok(Permissions { owner: inode.owner, acl, rights })
+    }
+
+    /// Mod POSIX objektu (9 bitu, `crate::mode`) z vlastnika, druhu,
+    /// zdedenych grantu `above` a vlastniho popisu.
+    pub(super) fn mode_at(&mut self, root: &Child, oid: u64, above: &Inherited) -> Result<u16> {
+        let inode = self.inode(root, oid)?;
+        let acl = self.load_acl(root, inode.acl)?;
+        let grants = crate::mode::effective(above, acl.as_ref());
+        Ok(crate::mode::mode_of(inode.owner, inode.kind == KIND_DIR, &grants))
+    }
+
+    /// Mod POSIX objektu `path` (pro system i bez kontrol).
+    pub fn mode(&mut self, path: &str) -> Result<u16> {
+        let w = self.walk(path)?;
+        let root = self.s.root;
+        self.mode_at(&root, w.oid, &w.above)
+    }
+
+    /// Zmeni opravneni podle modu POSIX (9 bitu; setuid/setgid/sticky se
+    /// ignoruji). `widen` = `chmod` (smi rozsirit), jinak jen zuzi (mod
+    /// pri vytvoreni). Vyzaduje `MANAGE` (vlastnik ho ma vzdy).
+    pub fn set_mode(&mut self, path: &str, mode: u16, widen: bool) -> Result<()> {
+        let w = self.walk(path)?;
+        if self.checking() && w.rights & rights::MANAGE == 0 {
+            return Err(Error::AccessDenied);
+        }
+        let root = self.s.root;
+        let inode = self.inode(&root, w.oid)?;
+        let acl = self.load_acl(&root, inode.acl)?;
+        let dir = inode.kind == KIND_DIR;
+        let Some(new) = crate::mode::apply(inode.owner, dir, &w.above, acl.as_ref(), mode & 0o777, widen) else {
+            return Ok(());
+        };
+        let oid = w.oid;
+        self.guarded(|fs| {
+            fs.s.check_writable()?;
+            fs.ensure_room(4)?;
+            fs.set_acl_oid(oid, Some(&new))
+        })
     }
 
     /// Nastavi vlastni popis opravneni objektu (`None` = jen dedit).

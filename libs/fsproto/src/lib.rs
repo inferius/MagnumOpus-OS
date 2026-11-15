@@ -108,8 +108,10 @@ pub mod avail {
     /// Pocty v podstromu (`tree_files`, `tree_dirs`).
     pub const TREE: u16 = 1 << 5;
     pub const RIGHTS: u16 = 1 << 6;
+    /// Mod POSIX (`Stat::mode`, pohled na opravneni; jen `Stat`).
+    pub const MODE: u16 = 1 << 7;
     /// Vsechny zname bity.
-    pub const ALL: u16 = SIZE | MTIME | CTIME | BTIME | OWNER | TREE | RIGHTS;
+    pub const ALL: u16 = SIZE | MTIME | CTIME | BTIME | OWNER | TREE | RIGHTS | MODE;
 }
 
 /// Precte masky `known` a `hidden`; prekryv nebo neznamy bit =
@@ -132,6 +134,8 @@ pub mod kind {
     pub const SYMLINK: u8 = 3;
     /// Vstup do jineho datasetu (slozka s vlastni historii).
     pub const DATASET: u8 = 4;
+    /// Uzel socketu `AF_UNIX` (`v2::op::SOCKET_BIND`).
+    pub const SOCKET: u8 = 5;
 }
 
 /// Metadata objektu.
@@ -153,6 +157,8 @@ pub struct Stat {
     pub tree_bytes: u64,
     pub tree_files: u64,
     pub tree_dirs: u64,
+    /// Mod POSIX (9 bitu `rwxrwxrwx`, `fs::mode`); plati s `avail::MODE`.
+    pub mode: u16,
     /// Platne hodnoty (`avail::*`).
     pub known: u16,
     /// Hodnoty skryte pro nedostatek prav (`avail::*`, pole jsou 0).
@@ -268,11 +274,11 @@ impl Stat {
         w.u64(self.tree_bytes)
             .u64(self.tree_files)
             .u64(self.tree_dirs);
-        w.u16(self.known).u16(self.hidden);
+        w.u16(self.known).u16(self.hidden).u16(self.mode);
     }
 
-    /// Velikost na drate.
-    pub const SIZE: usize = 8 + 1 + 8 + 3 * 12 + 8 + 1 + 3 * 8 + 4;
+    /// Velikost na drate (od verze 4 s modem).
+    pub const SIZE: usize = 8 + 1 + 8 + 3 * 12 + 8 + 1 + 3 * 8 + 4 + 2;
 
     pub fn get(r: &mut Reader) -> Result<Self> {
         let mut st = Self {
@@ -287,10 +293,15 @@ impl Stat {
             tree_bytes: r.u64()?,
             tree_files: r.u64()?,
             tree_dirs: r.u64()?,
+            mode: 0,
             known: 0,
             hidden: 0,
         };
         (st.known, st.hidden) = get_avail(r)?;
+        st.mode = r.u16()?;
+        if st.mode & !0o777 != 0 {
+            return Err(Error::InvalidArgs);
+        }
         Ok(st)
     }
 }
@@ -412,7 +423,12 @@ impl FsClient {
     }
 
     fn call_raw(&self, kind: svcclient::Kind, data: &[u8]) -> Result<(Vec<u8>, Vec<libos::Handle>)> {
-        let msg = self.conn.call(kind, data, Vec::new())?;
+        self.call_sending(kind, data, Vec::new())
+    }
+
+    /// Pozadavek s handly (napr. konec kanalu socketu).
+    pub(crate) fn call_sending(&self, kind: svcclient::Kind, data: &[u8], handles: Vec<libos::Handle>) -> Result<(Vec<u8>, Vec<libos::Handle>)> {
+        let msg = self.conn.call(kind, data, handles)?;
         let mut r = Reader::new(&msg.data);
         let status = r.i32()?;
         r.u32()?;
@@ -535,6 +551,14 @@ impl FsClient {
     pub fn create(&self, path: &str, kind: u8) -> Result<()> {
         let mut w = Self::req(op::CREATE);
         w.str(path).u8(kind);
+        self.call(w).map(|_| ())
+    }
+
+    /// Jako [`FsClient::create`] s modem POSIX (`mkdir`): mod zdedene
+    /// granty jen zuzi, v jednom kroku s vytvorenim.
+    pub fn create_mode(&self, path: &str, kind: u8, mode: u16) -> Result<()> {
+        let mut w = Self::req(op::CREATE);
+        w.str(path).u8(kind).u16(mode & 0o777);
         self.call(w).map(|_| ())
     }
 

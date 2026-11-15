@@ -234,14 +234,23 @@ unsafe fn init(mut startup: Startup) {
     let fs = take(&mut startup, abi::params::tag::FS);
     let net = take(&mut startup, abi::params::tag::NET);
     let launch = take(&mut startup, abi::params::tag::LAUNCH);
+    let fd_handles: alloc::vec::Vec<libos::Handle> =
+        core::iter::from_fn(|| startup.take_tagged(abi::params::tag::FD)).collect();
+    let mut params = params.unwrap_or_default();
+    let fds = core::mem::take(&mut params.fds);
     // SAFETY: predano volajicim.
     unsafe {
-        crate::env::init(params.unwrap_or_default());
+        crate::env::init(params);
         crate::stdio::init(stdin, stdout, stderr, flags);
         crate::fs::init(fs);
         crate::net::init(net);
         crate::process::init(launch);
         BOOTSTRAP.set(startup.bootstrap);
+    }
+    // Zdedene fd az nad pripravenou relaci FS (soubory = `REOPEN`).
+    crate::inherit::import(&fds, fd_handles);
+    // SAFETY: predano volajicim.
+    unsafe {
         HANDLES.set(core::mem::take(&mut startup.handles).into_iter().map(|h| h.into_raw()).collect());
     }
     *TAGGED.lock() = core::mem::take(&mut startup.tagged).into_iter().map(|(t, h)| (t, h.into_raw())).collect();

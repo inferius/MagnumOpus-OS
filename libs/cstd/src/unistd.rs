@@ -56,6 +56,7 @@ pub fn open_flags(flags: c_int) -> Option<OpenFlags> {
         directory: flags & O_DIRECTORY != 0,
         cloexec: flags & O_CLOEXEC != 0,
         nonblock: flags & O_NONBLOCK != 0,
+        mode: None,
     })
 }
 
@@ -67,18 +68,35 @@ fn ret_fd(r: sys::R<i32>) -> c_int {
     errno::ret_val(r) as c_int
 }
 
-/// `open(path, flags, mode)`; `mode` (prava) se nepouzije - prava jsou
-/// granty FS, novy soubor dedi popis opravneni od adresare.
+/// `open(path, flags, mode)`: s `O_CREAT` mod po `umask` zdedene granty
+/// noveho souboru jen zuzi (prava jsou granty FS, `stat.rs`).
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn open(path: *const c_char, flags: c_int, _mode: ...) -> c_int {
+pub unsafe extern "C" fn open(path: *const c_char, flags: c_int, mut mode: ...) -> c_int {
+    let m = if flags & O_CREAT != 0 {
+        // SAFETY: s O_CREAT predava volajici treti argument (mode_t).
+        Some(unsafe { mode.next_arg::<u32>() })
+    } else {
+        None
+    };
+    // SAFETY: kontrakt C.
+    unsafe { open_mode(path, flags, m) }
+}
+
+/// `open` s modem uz prectenym (`openat`, `creat`).
+///
+/// # Safety
+///
+/// `path` je retezec C.
+pub unsafe fn open_mode(path: *const c_char, flags: c_int, mode: Option<u32>) -> c_int {
     if path.is_null() {
         errno::set(errno::EFAULT);
         return -1;
     }
-    let Some(o) = open_flags(flags) else {
+    let Some(mut o) = open_flags(flags) else {
         errno::set(errno::EINVAL);
         return -1;
     };
+    o.mode = mode.map(crate::stat::masked);
     // SAFETY: retezec C.
     let p = unsafe { c_bytes(path) };
     if p.is_empty() {

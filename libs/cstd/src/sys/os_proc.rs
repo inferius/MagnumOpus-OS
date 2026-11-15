@@ -46,9 +46,29 @@ fn spec(io: ChildIo, target: Stream) -> R<StdioSpec> {
     }
 }
 
+/// Zdedene fd nad 2 (`osrt::inherit`). Druh, ktery zdedit nejde, se
+/// u zdedeneho fd preskoci; u fd z akce souboru je to `ENOTSUP`.
+fn inherited(fds: &[(crate::c_int, ChildIo, bool)]) -> R<Vec<rt::inherit::Export>> {
+    let mut out = Vec::new();
+    for &(child, io, explicit) in fds {
+        let ChildIo::Parent(fd) = io else { return Err(errno::ENOTSUP) };
+        let d = rt::fd::get(fd).map_err(|_| errno::EBADF)?;
+        match rt::inherit::export(child, &d) {
+            Ok(x) => out.push(x),
+            Err(rt::Error::NotSupported) if !explicit => {}
+            Err(err) => return Err(e(err)),
+        }
+    }
+    if out.len() > abi::params::MAX_FDS {
+        return Err(errno::EMFILE);
+    }
+    Ok(out)
+}
+
 /// Spusti potomka. Relaci site dostane, ma-li ji rodic (POSIX: potomek
 /// dedi prostredi rodice); co smi, urci manifest potomka v launchd.
 pub fn spawn_child(r: SpawnReq) -> R<Child> {
+    let fds = inherited(&r.fds)?;
     let s = Spawn {
         program: r.program,
         args: r.args,
@@ -59,7 +79,7 @@ pub fn spawn_child(r: SpawnReq) -> R<Child> {
         stderr: spec(r.io[2], Stream::Err)?,
         network: rt::net::available(),
     };
-    match rt::process::spawn(s) {
+    match rt::process::spawn_with_fds(s, fds) {
         Ok((c, _)) => Ok(Child(c)),
         Err((err, _)) => Err(match err {
             // Proces bez kanalu ke launchd potomky spoustet nemuze.

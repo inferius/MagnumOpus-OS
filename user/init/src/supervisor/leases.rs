@@ -119,7 +119,10 @@ impl Supervisor {
     /// Zaregistruje listek s koncem supervisoru `server`.
     fn insert_lease(&mut self, service: usize, recipe: Vec<u8>, issued: u64, server: Channel, parent: Option<u64>) -> Result<()> {
         if self.port.is_none() {
-            self.port = Some(Port::create()?);
+            // Listky na portu kola supervisoru (pakety vybere `lease_packets`).
+            self.ensure_waits();
+            let w = self.waits.as_ref().ok_or(Error::NoMemory)?;
+            self.port = Some(Port::from_handle(w.port().handle().duplicate(None)?));
         }
         let key = self.next_lease;
         self.next_lease += 1;
@@ -173,9 +176,8 @@ impl Supervisor {
 
     /// Pakety portu: listky s novou zpravou nebo zavrene klientem.
     pub(super) fn lease_packets(&mut self) {
-        loop {
-            let Some(port) = &self.port else { return };
-            let Ok(p) = port.wait(Some(0)) else { return };
+        let packets = self.waits.as_mut().map(|w| w.take_foreign()).unwrap_or_default();
+        for p in packets {
             let key = p.key;
             let sig = Signals(p.signals);
             if !self.leases.contains_key(&key) {

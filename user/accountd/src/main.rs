@@ -150,6 +150,15 @@ fn main(startup: Startup) -> i64 {
     }
 
     let mut clients: Vec<(Channel, Kind)> = Vec::new();
+    // Klientu je promenny pocet: cekani pres port (`WaitSet`), ne pres
+    // `wait_many` (limit 64 objektu).
+    let mut waits = match libos::WaitSet::new() {
+        Ok(w) => w,
+        Err(e) => {
+            println!("accountd: port nejde vytvorit: {e}");
+            return 5;
+        }
+    };
     loop {
         for e in core::mem::take(&mut svc.events) {
             svc.init_event(&e);
@@ -176,7 +185,7 @@ fn main(startup: Startup) -> i64 {
             items.push((p.handle(), rd));
             items.len() - 1
         });
-        let observed = match libos::wait_many(&items, None) {
+        let observed = match waits.wait(&items, None) {
             Ok((_, o)) => o,
             Err(e) => {
                 println!("accountd: cekani: {e}");

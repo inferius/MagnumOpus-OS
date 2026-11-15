@@ -278,6 +278,15 @@ fn main(startup: Startup) -> i64 {
     );
 
     let mut clients: Vec<Channel> = Vec::new();
+    // Klientu je promenny pocet: cekani pres port (`WaitSet`), ne pres
+    // `wait_many` (limit 64 objektu).
+    let mut waits = match libos::WaitSet::new() {
+        Ok(w) => w,
+        Err(e) => {
+            println!("revocd: port nejde vytvorit: {e}");
+            return 5;
+        }
+    };
     loop {
         let mut items: Vec<(&libos::Handle, Signals)> = Vec::with_capacity(1 + clients.len());
         items.push((bootstrap.handle(), Signals::READABLE | Signals::PEER_CLOSED));
@@ -289,7 +298,7 @@ fn main(startup: Startup) -> i64 {
             let wait = Duration::from_secs((svc.onecrl_next - wall()).max(0) as u64).max(IDLE);
             time::deadline_after(wait)
         });
-        let observed = match libos::wait_many(&items, deadline) {
+        let observed = match waits.wait(&items, deadline) {
             Ok((_, o)) => o,
             Err(Error::TimedOut) => {
                 drop(items);
