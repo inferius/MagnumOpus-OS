@@ -15,9 +15,14 @@ CFLAGS=(--target=x86_64-unknown-none-elf -march=x86-64-v2 -mcmodel=small -nostdl
     -fstack-protector-strong -mstack-protector-guard=global -ftrivial-auto-var-init=zero
     -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -D__magnumopus__=1
     -isystem "$S/include" -isystem "$S/include-core")
-LD=(-nostdlib -fuse-ld=lld -Wl,-z,now -Wl,-z,relro -Wl,-z,text -Wl,-z,max-page-size=65536
+# Ovladac clangu pro baremetal linkuje od zacatku -Bstatic: sdilene
+# knihovny na prikazove radce (ntdll.so pro dalsi unixove knihovny Wine)
+# by bral jako staticke.
+LD=(-nostdlib -fuse-ld=lld -Wl,-Bdynamic -Wl,-z,now -Wl,-z,relro -Wl,-z,text -Wl,-z,max-page-size=65536
     -Wl,--hash-style=both -Wl,--eh-frame-hdr -L"$S/lib")
-LIBS=(-Wl,-Bdynamic -l:libc.so -l:libbuiltins.a)
+# libunwind.so (jeden unwinder na proces, jako libgcc_s): DT_NEEDED jen
+# kdyz modul pouziva _Unwind_* (--as-needed).
+LIBS=(-Wl,-Bdynamic -l:libc.so -Wl,--as-needed -l:libunwind.so -Wl,--no-as-needed -l:libbuiltins.a)
 mode=exe
 for a in "$@"; do
     case "$a" in

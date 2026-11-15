@@ -11,7 +11,7 @@ in xtask ([C ports](c-ports.md), `xtask/src/cports/cxx.rs`).
 | Part | What | Status |
 |---|---|---|
 | static runtime | `libc++.a`, `libc++abi.a`, `libunwind.a` in the port prefix, `clang++.cfg` | **[verified in QEMU]** x86_64 and aarch64 (suite `cpp`, test `cpptest`) |
-| shared runtime | one `/system/lib/libc++.so` (libc++ + abi + unwind), a PIE program via the loader | **[verified in QEMU]** x86_64 and aarch64 (test `cpptest-dyn`) |
+| shared runtime | `/system/lib/libc++.so` (libc++ + abi) and a separate `/system/lib/libunwind.so`, a PIE program via the loader | **[verified in QEMU]** x86_64 and aarch64 (test `cpptest-dyn`) |
 | exceptions | Itanium ABI, DWARF `.eh_frame` tables, also through C frames (`-funwind-tables`) | **[verified in QEMU]** x86_64 and aarch64 (`cpptest`: through a C frame, `exception_ptr`, in threads) |
 | RTTI | `dynamic_cast`, `typeid`, `bad_cast` | **[verified in QEMU]** x86_64 and aarch64 |
 | threads | `std::thread`, `mutex`, `condition_variable` over pthread from cstd; `thread_local` with destructors (`__cxa_thread_atexit_impl`) | **[verified in QEMU]** x86_64 and aarch64 |
@@ -57,9 +57,18 @@ other ports, because C++ ports (HarfBuzz) link libc++:
   - static (`toolchain.cmake`, no PIC) installs `libc++.a`,
     `libc++abi.a`, `libunwind.a` and the `include/c++/v1` headers into
     `target/c-ports/<arch>/prefix`,
-  - dynamic (`toolchain-dyn.cmake`, PIC over `libc.so`) builds one
-    `libc++.so` with libc++abi and libunwind inside (like Android) into
-    `prefix-dyn`; in the initfs it is `/system/lib/libc++.so`.
+  - dynamic (`toolchain-dyn.cmake`, PIC over `libc.so`) builds
+    `libc++.so` with libc++abi inside and a separate `libunwind.so` into
+    `prefix-dyn`; in the initfs they are `/system/lib/libc++.so` and
+    `/system/lib/libunwind.so` (`libc++.so` depends on it, `DT_NEEDED`).
+    **One unwinder per process** like `libgcc_s` on Linux: two unwinders
+    would each have their own FDE registration and cache, and a C++
+    exception through frames of another module (a callback from the
+    Windows layer) would go wrong. Shared libraries in C get it via
+    `-lunwind` (the C sysroot has it in `lib/`; the `mos-cc` wrapper for
+    Wine links it with `--as-needed`, so `DT_NEEDED` appears only in a
+    module that calls `_Unwind_*`, e.g. `ntdll.so` for
+    `_Unwind_Find_FDE`). Static programs are unchanged (`libunwind.a`).
 - **Locale and wide characters** (since 7a-2,
   `LIBCXX_ENABLE_LOCALIZATION`, `LIBCXX_ENABLE_WIDE_CHARACTERS`): the
   libc++ locale backend is `support/linux.h` (generic POSIX 2008:

@@ -85,7 +85,10 @@ pub fn toolchain_for(arch: &Arch, sysroot: &Path, dynamic: bool) -> Result<PathB
         // Knihovna C (libc.so) a pomocne funkce prekladace az za objekty.
         let tail = |f: &String| f == "-l:libc.so" || f == "-l:libbuiltins.a" || f == "-Wl,-Bdynamic";
         let exe: Vec<String> = csysroot::ldflags_dyn(sysroot).into_iter().filter(|f| !tail(f)).collect();
-        let so: Vec<String> = csysroot::ldflags_so(sysroot).into_iter().filter(|f| !tail(f)).collect();
+        // Sdilena knihovna: -Bdynamic zustava na zacatku (zavislosti .so
+        // pred libc.so, napr. libunwind.so v libc++.so).
+        let so: Vec<String> =
+            csysroot::ldflags_so(sysroot).into_iter().filter(|f| f == "-Wl,-Bdynamic" || !tail(f)).collect();
         (csysroot::cflags_dyn(arch, sysroot)?, exe, so)
     } else {
         // Knihovna C az za objekty (staticke archivy se ctou v poradi).

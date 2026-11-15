@@ -11,7 +11,7 @@ v xtasku ([Porty v C](porty-c.md), `xtask/src/cports/cxx.rs`).
 | Část | Co | Stav |
 |---|---|---|
 | statický běh | `libc++.a`, `libc++abi.a`, `libunwind.a` v předponě portů, `clang++.cfg` | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `cpp`, test `cpptest`) |
-| sdílený běh | jedna `/system/lib/libc++.so` (libc++ + abi + unwind), program PIE přes zavaděč | **[ověřeno v QEMU]** x86_64 i aarch64 (test `cpptest-dyn`) |
+| sdílený běh | `/system/lib/libc++.so` (libc++ + abi) a samostatná `/system/lib/libunwind.so`, program PIE přes zavaděč | **[ověřeno v QEMU]** x86_64 i aarch64 (test `cpptest-dyn`) |
 | výjimky | Itanium ABI, tabulky DWARF `.eh_frame`, i přes rámce C (`-funwind-tables`) | **[ověřeno v QEMU]** x86_64 i aarch64 (`cpptest`: přes ramec C, `exception_ptr`, ve vláknech) |
 | RTTI | `dynamic_cast`, `typeid`, `bad_cast` | **[ověřeno v QEMU]** x86_64 i aarch64 |
 | vlákna | `std::thread`, `mutex`, `condition_variable` nad pthread z cstd; `thread_local` s destruktory (`__cxa_thread_atexit_impl`) | **[ověřeno v QEMU]** x86_64 i aarch64 |
@@ -57,9 +57,18 @@ porty, protože C++ porty (HarfBuzz) linkují libc++:
   - statická (`toolchain.cmake`, bez PIC) instaluje `libc++.a`,
     `libc++abi.a`, `libunwind.a` a hlavičky `include/c++/v1` do
     `target/c-ports/<arch>/prefix`,
-  - dynamická (`toolchain-dyn.cmake`, PIC nad `libc.so`) staví jednu
-    `libc++.so` s libc++abi a libunwind uvnitř (jako Android) do
-    `prefix-dyn`; v initfs je jako `/system/lib/libc++.so`.
+  - dynamická (`toolchain-dyn.cmake`, PIC nad `libc.so`) staví
+    `libc++.so` s libc++abi uvnitř a samostatnou `libunwind.so` do
+    `prefix-dyn`; v initfs jsou jako `/system/lib/libc++.so`
+    a `/system/lib/libunwind.so` (`libc++.so` na ni závisí, `DT_NEEDED`).
+    **Jeden unwinder na proces** jako `libgcc_s` na Linuxu: dva unwindery
+    by měly každý vlastní registraci FDE a mezipaměť a výjimka C++ přes
+    rámce jiného modulu (zpětné volání z Windows vrstvy) by šla špatně.
+    Sdílené knihovny v C ji dostanou přes `-lunwind` (sysroot C ji má
+    v `lib/`; obal `mos-cc` pro Wine ji linkuje s `--as-needed`, takže
+    `DT_NEEDED` vznikne jen u modulu, který volá `_Unwind_*`, např.
+    `ntdll.so` kvůli `_Unwind_Find_FDE`). Statické programy beze změny
+    (`libunwind.a`).
 - **Locale a široké znaky** (od 7a-2, `LIBCXX_ENABLE_LOCALIZATION`,
   `LIBCXX_ENABLE_WIDE_CHARACTERS`): backend locale libc++ je
   `support/linux.h` (obecné POSIX 2008: `newlocale`, `uselocale`,

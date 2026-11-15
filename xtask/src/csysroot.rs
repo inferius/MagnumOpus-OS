@@ -176,8 +176,10 @@ pub fn ldflags_so(sysroot: &Path) -> Vec<String> {
         .into_iter()
         .map(|f| if f.ends_with("crt1.o") { slash(&sysroot.join("lib/crtdso.o")) } else { f })
         .filter(|f| f != "-Wl,-pie" && !f.starts_with("-Wl,--dynamic-linker"))
-        // Ovladac clangu pro cil *-none-elf `-shared` linkeru nepreda.
-        .chain([String::from("-shared"), String::from("-Wl,-shared")])
+        // Ovladac clangu pro cil *-none-elf `-shared` linkeru nepreda a
+        // linkuje od zacatku -Bstatic: sdilene zavislosti pred libc.so
+        // (libunwind.so v libc++.so) by bral jako staticke.
+        .chain([String::from("-shared"), String::from("-Wl,-shared"), String::from("-Wl,-Bdynamic")])
         .collect()
 }
 
