@@ -124,6 +124,7 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::VMO_SEAL => vm::seal(a),
         nr::VMO_SET_SIZE => vm::vmo_set_size(a),
         nr::VMO_SIZE => vm::vmo_size(a),
+        nr::VMO_DIRTY => vm::vmo_dirty(a),
         nr::THREAD_SUSPEND => process::thread_suspend(a),
         nr::THREAD_STATE => process::thread_state(a),
         nr::EXCEPTION_CHANNEL => process::exception_channel(a),
@@ -229,6 +230,7 @@ pub fn name(number: u64) -> &'static str {
         "",
         "VMO_SET_SIZE",
         "VMO_SIZE",
+        "VMO_DIRTY",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

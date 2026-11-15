@@ -65,6 +65,7 @@ const SHARED: u64 = 4;
 const ENTRY_FLAGS: u64 = PAGE - 1;
 
 mod cow;
+mod dirty;
 mod resize;
 
 fn present(phys: PhysAddr) -> AtomicU64 {
@@ -152,6 +153,8 @@ pub struct MemoryObject {
     /// Vsechny stranky vznikly hned a jsou pripnute po celou dobu zivota
     /// (`VMO_PINNED`): zarizeni k nim smi pres `DMA_MAP`.
     pinned: bool,
+    /// Bity spinavych stranek (`dirty.rs`); prazdne = zapis se nesleduje.
+    dirty: spin::Once<alloc::boxed::Box<[core::sync::atomic::AtomicU64]>>,
     /// Strzeni z rozpoctu jadra, uzivatelske pameti a pripnute pameti jobu.
     _charges: [Charge; 3],
 }
@@ -178,6 +181,7 @@ impl MemoryObject {
             pinned: false,
             revocable: false,
             revoked: AtomicBool::new(false),
+            dirty: spin::Once::new(),
             _charges: charges,
         }
     }
@@ -763,6 +767,8 @@ impl MemoryObject {
             // nezaniknou (zije s objektem).
             unsafe { core::ptr::copy_nonoverlapping(data.as_ptr().add(at), ptr, n) }
         });
+        // Zapis bez vypadku: sledovani zapisu (`dirty.rs`) ho oznaci primo.
+        self.mark_dirty(offset, data.len() as u64);
         // Zarizeni a mapovani bez cache musi zapsana data videt.
         self.dma_sync(offset, data.len(), arch::dma_sync_for_device);
         Ok(())

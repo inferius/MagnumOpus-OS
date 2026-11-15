@@ -320,9 +320,16 @@ pub const VMO_SET_SIZE: u64 = 78;
 /// Aktualni velikost objektu pameti v bajtech: `(vmo) -> size` (jakekoli
 /// pravo; u bezneho objektu pevna).
 pub const VMO_SIZE: u64 = 79;
+/// Spinave stranky objektu pameti (sdilene mapovani souboru, fsd):
+/// `(vmo, buf_ptr, cap) -> pocet`. Do `buf` zapise nejvys `cap` indexu
+/// stranek (u64, vzestupne), ktere se od minuleho volani zmenily, oznaci je
+/// jako ciste a odmapuje je u vsech mapovani (dalsi zapis = vypadek, ktery
+/// stranku oznaci znovu). Prvni volani sledovani zapne a vrati vsechny
+/// existujici stranky. Pravo `WRITE`.
+pub const VMO_DIRTY: u64 = 80;
 
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 80;
+pub const COUNT: u64 = 81;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {

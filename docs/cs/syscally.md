@@ -412,6 +412,26 @@ velikost objektu paměti v bajtech (u běžného objektu pevná, u
 zvětšitelného podle `VMO_SET_SIZE`; C `fstat` paměťového fd v jiném
 procesu). Stačí jakékoli právo. Chyby: `BAD_HANDLE`, `WRONG_TYPE`.
 
+### `VMO_DIRTY`
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (self-test jádra „sledovani zapisu"
+v sadě `pamet`). `(vmo, buf_ptr, cap) -> počet`. Číslo 80. Sledování
+zápisu do objektu paměti pro sdílené mapování souboru (fsd zapisuje změny
+zpět, [Soubory jako paměť](souborovy-system.md#soubory-jako-paměť)). Do
+`buf` zapíše nejvýš `cap` indexů stránek (u64, vzestupně), které se od
+minulého volání změnily, označí je jako čisté a odmapuje je u všech
+mapování. První volání sledování zapne a vrátí všechny existující stránky.
+
+Při sledování se čistá stránka mapuje jen pro čtení (při `VM_MAP`
+i výpadku pro čtení); první zápis vyvolá výpadek, který stránku označí
+a namapuje pro zápis - **cena: jeden výpadek na stránku po každém
+vyčištění** (stejně na x86_64 i aarch64, bez dirty bitů PTE). Zápis bez
+výpadku (`VMO_WRITE`, kopie jádra do paměti procesu) stránku označí
+přímo. Pořadí: vynulovat bity, odmapovat, vyprázdnit TLB, vrátit seznam -
+zápis mezi tím skončí v rámci dřív, než volající obsah přečte. Právo
+`WRITE`. Chyby: `BAD_HANDLE`, `WRONG_TYPE`, `ACCESS_DENIED`,
+`BAD_ADDRESS`, `NO_MEMORY`.
+
 ### `VMO_READ`
 
 `(handle, offset, buf_ptr, len) -> 0`. Přečte data objektu (max. 1 MiB na

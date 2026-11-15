@@ -49,6 +49,18 @@ pub fn vmo_size(a: Args) -> Result<u64> {
     Ok(vmo.size())
 }
 
+/// `VMO_DIRTY(vmo, buf_ptr, cap) -> pocet`: indexy spinavych stranek
+/// (u64) do `buf`, oznaci je jako ciste (`object/vmo/dirty.rs`).
+pub fn vmo_dirty(a: Args) -> Result<u64> {
+    let p = current_process();
+    let vmo = p.handles().get_as::<MemoryObject>(arg_handle(a[0])?, Rights::WRITE)?;
+    let cap = user::check_len(a[2], RW_MAX / 8)?;
+    let pages = vmo.take_dirty(cap)?;
+    let bytes: alloc::vec::Vec<u8> = pages.iter().flat_map(|i| i.to_le_bytes()).collect();
+    user::write_bytes(&p, a[1], &bytes)?;
+    Ok(pages.len() as u64)
+}
+
 /// Job, na jehoz ucet jde nova pamet: procesu `handle` (pravo `WRITE`),
 /// 0 = volajiciho.
 fn job_of(p: &Process, handle: u64) -> Result<alloc::sync::Arc<crate::object::job::Job>> {

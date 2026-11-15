@@ -13,6 +13,10 @@
 //!   vypadek uz namapuje vlastni ramec. Sdileny ramec se mapuje jen pro
 //!   cteni.
 //!
+//! - sleduje-li objekt zapis (`VMO_DIRTY`, `object/vmo/dirty.rs`), cista
+//!   stranka se mapuje jen pro cteni a zapis do ni ji oznaci a namapuje
+//!   pro zapis (i kdyz uz byla namapovana pro cteni),
+//!
 //! Vse se overuje znovu pod zamkem prostoru, takze soubeh dvou vlaken na
 //! stejne strance, s `VM_UNMAP` nebo s koncem procesu je bezpecny: kdo
 //! prijde druhy, najde stranku uz namapovanou (planny vypadek) nebo
@@ -80,6 +84,9 @@ impl AddressSpace {
                     vmo.page_state(off).unwrap_or((zero_frame(), false))
                 }
             };
+            // Sledovany zapis: cista stranka jen pro cteni (prvni zapis =
+            // vypadek, ktery ji oznaci).
+            let writable = writable && !vmo.tracked_clean(off);
             return map_one(table, va, frame, page_flags(&vmo, flags, writable));
         }
 
@@ -89,8 +96,18 @@ impl AddressSpace {
             vmo.writable_page(off)?;
             return Ok(());
         };
+        // Sledovany zapis: oznacit pred namapovanim pro zapis (`dirty.rs`).
+        let tracked = vmo.tracking();
+        vmo.mark_dirty(off, PAGE_SIZE);
         let mut flush = false;
         match current {
+            // Cista sledovana stranka je namapovana jen pro cteni: znovu
+            // pro zapis (break-before-make).
+            Some(p) if p == frame && tracked => {
+                table.unmap_4k(va);
+                flush = true;
+                map_one(table, va, frame, page_flags(&vmo, flags, true))?;
+            }
             Some(p) if p == frame => {} // planny vypadek, uz je namapovana
             Some(_) => {
                 // Nulova stranka -> vlastni ramec: break-before-make.
