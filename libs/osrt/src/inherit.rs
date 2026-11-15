@@ -13,6 +13,8 @@
 //!   na pozici rodice. Pozice se **nesdili** (POSIX ji sdili): kazdy proces
 //!   ma od spusteni vlastni.
 //!
+//! - prazdny fd (`/dev/null`, stdio rodice bez kanalu): bez handlu,
+//!   potomek ma zase `/dev/null`,
 //! - socket `AF_UNIX`: duplikat kanalu spojeni nebo posluchace (stejny
 //!   tvar jde i v `SCM_RIGHTS`, [`crate::unix`]).
 //!
@@ -56,8 +58,9 @@ impl<'a> Reader<'a> {
 /// Zdedeny fd pripraveny pro [`crate::process::spawn_with_fds`].
 pub struct Export {
     pub entry: Fd,
-    /// Handle polozky (`abi::params::fd_kind::has_handle`).
-    pub handle: Option<Handle>,
+    /// Handly polozky v poradi (`abi::params::fd_kind::has_handle`: jeden;
+    /// socket `AF_UNIX` navic handly zprav z fronty, pocet je v datech).
+    pub handles: Vec<Handle>,
 }
 
 /// Prevede popis rodice na fd `child_fd` potomka. `NotSupported` = druh
@@ -67,17 +70,19 @@ pub fn export(child_fd: i32, desc: &Description) -> Result<Export> {
     let status = desc.status();
     let entry = |kind, data| Fd { fd, kind, status, data };
     Ok(match &desc.object {
-        Object::Pipe(p) => Export { entry: entry(fd_kind::PIPE, Vec::new()), handle: Some(p.try_clone()?.into_channel().into_handle()) },
+        Object::Pipe(p) => Export { entry: entry(fd_kind::PIPE, Vec::new()), handles: alloc::vec![p.try_clone()?.into_channel().into_handle()] },
         Object::Stdio(s) => match crate::stdio::inherit(*s)? {
-            Inherit::Channel(c) => Export { entry: entry(fd_kind::PIPE, Vec::new()), handle: Some(c.into_handle()) },
-            Inherit::Null | Inherit::None => return Err(Error::NotSupported),
+            Inherit::Channel(c) => Export { entry: entry(fd_kind::PIPE, Vec::new()), handles: alloc::vec![c.into_handle()] },
+            // Proud bez kanalu (zahozeny nebo zadny): jako /dev/null.
+            Inherit::Null | Inherit::None => Export { entry: entry(fd_kind::NULL, Vec::new()), handles: Vec::new() },
         },
+        Object::Null => Export { entry: entry(fd_kind::NULL, Vec::new()), handles: Vec::new() },
         Object::Memory(m) => {
             let mut w = Vec::with_capacity(13);
             w.push(u8::from(m.writable()));
             w.extend_from_slice(&m.seals().to_le_bytes());
             w.extend_from_slice(&m.tell().to_le_bytes());
-            Export { entry: entry(fd_kind::MEMORY, w), handle: Some(m.export(false)?) }
+            Export { entry: entry(fd_kind::MEMORY, w), handles: alloc::vec![m.export(false)?] }
         }
         Object::File(f) => {
             let id = f.identity()?;
@@ -89,19 +94,20 @@ pub fn export(child_fd: i32, desc: &Description) -> Result<Export> {
             w.extend_from_slice(&f.tell().to_le_bytes());
             w.push(u8::from(f.is_append()));
             w.extend_from_slice(f.path().as_bytes());
-            Export { entry: entry(fd_kind::FILE, w), handle: None }
+            Export { entry: entry(fd_kind::FILE, w), handles: Vec::new() }
         }
         Object::Unix(u) => {
-            let (data, h) = u.export()?;
-            Export { entry: entry(fd_kind::UNIX, data), handle: Some(h) }
+            let (data, handles) = u.export()?;
+            Export { entry: entry(fd_kind::UNIX, data), handles }
         }
         Object::Socket(_) | Object::User(_) => return Err(Error::NotSupported),
     })
 }
 
-/// Popis z polozky (handle uz vybrany podle druhu).
-pub(crate) fn object(e: &Fd, handle: Option<Handle>) -> Result<Object> {
+/// Popis z polozky; handly bere z `handles` v poradi (kolik druh potrebuje).
+pub(crate) fn object(e: &Fd, handles: &mut dyn Iterator<Item = Handle>) -> Result<Object> {
     let mut r = Reader(&e.data);
+    let handle = if fd_kind::has_handle(e.kind) && e.kind != fd_kind::UNIX { handles.next() } else { None };
     match e.kind {
         fd_kind::PIPE => Ok(Object::Pipe(Pipe::from_channel(Channel::from_handle(handle.ok_or(Error::Corrupted)?)))),
         fd_kind::MEMORY => {
@@ -120,7 +126,8 @@ pub(crate) fn object(e: &Fd, handle: Option<Handle>) -> Result<Object> {
             let path = String::from_utf8(r.0.to_vec()).map_err(|_| Error::Corrupted)?;
             Ok(Object::File(File::from_identity(&id, pos, append, path)?))
         }
-        fd_kind::UNIX => Ok(Object::Unix(crate::unix::UnixSocket::import(&e.data, handle.ok_or(Error::Corrupted)?)?)),
+        fd_kind::NULL => Ok(Object::Null),
+        fd_kind::UNIX => Ok(Object::Unix(crate::unix::UnixSocket::import(&e.data, handles)?)),
         _ => Err(Error::NotSupported),
     }
 }
@@ -131,12 +138,14 @@ pub(crate) fn object(e: &Fd, handle: Option<Handle>) -> Result<Object> {
 pub(crate) fn import(fds: &[Fd], handles: Vec<Handle>) {
     let mut handles = handles.into_iter();
     for e in fds {
-        let h = if fd_kind::has_handle(e.kind) { handles.next() } else { None };
+        // Handly polozky se vezmou vzdy (i kdyz ji nejde obnovit), at dalsi
+        // polozky dostanou sve.
+        let obj = object(e, &mut handles);
         // Stdio potomka (0-2) preda launchd jako proudy, ne polozky.
         if e.fd <= 2 {
             continue;
         }
-        if let Ok(obj) = object(e, h) {
+        if let Ok(obj) = obj {
             let _ = crate::fd::install(e.fd as i32, Description::new(obj, e.status));
         }
     }

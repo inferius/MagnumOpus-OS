@@ -87,11 +87,18 @@ pub mod fd_kind {
     /// generace u64, pristup u8, sdileni u8, pozice u64, pripojovat u8,
     /// cesta (zbytek)`.
     pub const FILE: u8 = 3;
-    /// Socket `AF_UNIX`: handle kanalu spojeni nebo posluchace `tag::FD`;
+    /// Socket `AF_UNIX`: handle kanalu spojeni nebo posluchace `tag::FD`
+    /// a za nim handly zprav, ktere uz byly vyctene z fronty (pocet v datech);
     /// data `stav u8` (1 spojeny, 2 naslouchajici, 3 jen jmeno), u spojeneho
-    /// `uzivatel u64, skupina u64, pid u32, jmeno druhe strany`, pak vlastni
-    /// jmeno; jmeno = `delka u32 + bajty` (0 = bez jmena).
+    /// `uzivatel u64, skupina u64, pid u32, jmeno druhe strany, EOF u8,
+    /// rozectena data (delka u32 + bajty), rozectene fd (pocet u8 + polozky
+    /// jako `SCM_RIGHTS`)`, pak vlastni jmeno a fronta (pocet u32 + zprava:
+    /// delka u32 + bajty + pocet handlu u8); jmeno = `delka u32 + bajty`
+    /// (0 = bez jmena). Handly rozectenych fd jdou pred handly fronty.
     pub const UNIX: u8 = 4;
+    /// Prazdny fd jako `/dev/null` (cteni = konec, zapis se zahodi), bez
+    /// handlu a dat: stdio rodice bez kanalu (`Stdio::null`) a `/dev/null`.
+    pub const NULL: u8 = 5;
 
     /// Ma polozka handle ve startovni zprave?
     pub const fn has_handle(kind: u8) -> bool {

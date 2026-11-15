@@ -9,7 +9,7 @@
 //! - `adddup2(x, y)` = `y` ukazuje na totez co `x` (bez `FD_CLOEXEC`;
 //!   `x == y` jen priznak zrusi);
 //! - `addopen(y, ...)` otevre soubor rodic pred spustenim; `/dev/null`
-//!   na 0-2 = prazdny vstup / zahozeny vystup (nad 2 `ENOTSUP`);
+//!   = prazdny vstup / zahozeny vystup (nad 2 prazdny fd);
 //! - `addchdir`, `addfchdir` = pracovni adresar potomka.
 //!
 //! Na konci se zahodi cisla s `FD_CLOEXEC`. Fd 0-2 dostane potomek jako
@@ -130,10 +130,8 @@ pub fn plan(
                 t.insert(*to, Entry { src: e.src, cloexec: false, explicit: true });
             }
             Action::Open(fd, path, flags, mode) => {
-                let src = if path.as_slice() == b"/dev/null" && *fd <= 2 {
+                let src = if path.as_slice() == b"/dev/null" {
                     ChildIo::Null
-                } else if path.as_slice() == b"/dev/null" {
-                    return Err(errno::ENOTSUP);
                 } else {
                     // Relativni cesta plati vuci adresari potomka v tomto kroku.
                     opens.push((join(&cwd, path), *flags, *mode));

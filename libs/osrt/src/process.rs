@@ -153,7 +153,7 @@ pub fn spawn_with_fds(s: Spawn, fds: Vec<crate::inherit::Export>) -> Result<(Chi
     let mut fd_handles = Vec::new();
     for e in fds {
         fd_entries.push(e.entry);
-        fd_handles.extend(e.handle);
+        fd_handles.extend(e.handles);
     }
     let params = libos::params::Params { cwd: s.cwd, args: s.args, env: s.env, flags, fds: fd_entries }.encode().map_err(fail)?;
 

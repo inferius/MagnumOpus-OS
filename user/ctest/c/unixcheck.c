@@ -98,6 +98,13 @@ int unix_child_main(const char *path) {
 
 /* Potomek "child unixpair": zdedeny konec socketpair na FD_PAIR. */
 int unixpair_child_main(void) {
+    /* Zprava s rourou, ktera ve fronte lezela uz pri predani (Wine:
+     * server posle rouru pozadavku driv, nez se potomek spusti). */
+    char q[4];
+    int pfd = -1;
+    if (recv_fd(FD_PAIR, q, sizeof q, &pfd) != 1 || q[0] != 'q' || pfd < 0) return 3;
+    if (write(pfd, "fronta", 6) != 6) return 4;
+    close(pfd);
     if (write(FD_PAIR, "pair", 4) != 4) return 1;
     char b[8];
     if (read(FD_PAIR, b, sizeof b) != 2 || memcmp(b, "ok", 2) != 0) return 2;
@@ -132,6 +139,33 @@ static int pairs(void) {
     close(got);
     if (read(p[0], b, sizeof b) != 5 || memcmp(b, "roura", 5) != 0) return 6;
     close(p[0]);
+    /* /dev/null a stdin (i bez kanalu, jako Wine posila 0-2) jdou predat. */
+    int nul = open("/dev/null", O_RDWR);
+    if (nul < 0 || read(nul, b, 1) != 0 || write(nul, "abc", 3) != 3) return 16;
+    if (send_fd(sv[0], "n", 1, nul) != 1 || recv_fd(sv[1], b, sizeof b, &got) != 1 || got < 0) return 17;
+    if (read(got, b, 1) != 0) return 18;
+    close(got);
+    close(nul);
+    if (send_fd(sv[0], "0", 1, 0) != 1 || recv_fd(sv[1], b, sizeof b, &got) != 1 || got < 0) return 19;
+    close(got);
+    /* Predani socketu s rourou ve fronte pres SCM_RIGHTS (jadro takovy
+     * konec poslat nedovoli: osrt frontu nejdriv vycte a preda s nim). */
+    int x[2], c[2], w[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, x) != 0 || socketpair(AF_UNIX, SOCK_STREAM, 0, c) != 0 || pipe(w) != 0) return 60;
+    if (send_fd(x[0], "w", 1, w[1]) != 1) return 61;
+    close(w[1]);
+    if (send_fd(c[0], "y", 1, x[1]) != 1) return 62;
+    close(x[1]);
+    int y = -1, wp = -1;
+    if (recv_fd(c[1], b, sizeof b, &y) != 1 || y < 0) return 63;
+    if (recv_fd(y, b, sizeof b, &wp) != 1 || b[0] != 'w' || wp < 0) return 64;
+    if (write(wp, "ok", 2) != 2 || read(w[0], b, sizeof b) != 2) return 65;
+    close(wp);
+    close(y);
+    close(w[0]);
+    close(x[0]);
+    close(c[0]);
+    close(c[1]);
     /* Hranice zprav s fd a data bez fd. */
     if (send(sv[0], "abc", 3, 0) != 3 || send(sv[0], "de", 2, 0) != 2) return 7;
     int n = 0, k;
@@ -162,6 +196,10 @@ static int pairs(void) {
 static int handoff(void) {
     int sv[2], ctl[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0 || socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, ctl) != 0) return 20;
+    /* Do fronty konce, ktery zdedi potomek, nejdriv zpravu s rourou. */
+    int q[2];
+    if (pipe2(q, O_CLOEXEC) != 0 || send_fd(sv[0], "q", 1, q[1]) != 1) return 27;
+    close(q[1]);
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
     posix_spawn_file_actions_adddup2(&fa, sv[1], FD_PAIR);
@@ -177,6 +215,9 @@ static int handoff(void) {
     if (read(s, b, sizeof b) != 4 || memcmp(b, "pair", 4) != 0) return 24;
     if (write(s, "ok", 2) != 2) return 25;
     if (!child_ok(pid)) return 26;
+    char fr[8];
+    if (read(q[0], fr, sizeof fr) != 6 || memcmp(fr, "fronta", 6) != 0) return 28;
+    close(q[0]);
     close(s);
     close(ctl[0]);
     close(ctl[1]);
