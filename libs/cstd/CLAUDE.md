@@ -46,6 +46,7 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 
 ## Pasti
 
+- Host testy běží souběžně nad jednou tabulkou fd (`sys/host.rs`, nové číslo = nejnižší volné): po `close` nízkého čísla ho může hned dostat jiný test. Na zavřené číslo (druhé `close`, `EBADF`) a pevná čísla (`dup2`) jen vysoko (`fd_tests::HIGH` = 4000).
 - Program v C je crate `#![no_main]`; `main` z C volá `osrt`. Bez `extern crate cstd;` se knihovna nepřilinkuje.
 - Deklarace v hlavičkách jen s implementací: CMake/configure portů by funkci našly a link by selhal.
 - `locale_t` se v hlavičkách definuje pod strážcem `_CSTD_LOCALE_T` (je v `locale.h`, `wchar.h`, `wctype.h`, `ctype.h`, `string.h`, `stdlib.h`, `time.h`, `langinfo.h`).

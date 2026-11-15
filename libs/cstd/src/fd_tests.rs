@@ -44,6 +44,9 @@ fn temp(name: &str) -> Vec<u8> {
     p.to_str().unwrap().as_bytes().to_vec()
 }
 
+/// Cislo fd jen pro tento test (zadny jiny test tak vysoko nepristane).
+const HIGH: core::ffi::c_int = 4000;
+
 #[test]
 fn fd_numbers_dup_and_shared_offset() {
     let path = temp("dup");
@@ -57,10 +60,14 @@ fn fd_numbers_dup_and_shared_offset() {
     let mut b = [0u8; 2];
     assert_eq!(sys::read(fd, &mut b).unwrap(), 2);
     assert_eq!(&b, b"cd");
-    // dup2 na konkretni cislo, F_DUPFD od minima.
-    assert_eq!(sys::dup2(fd, 100, true).unwrap(), 100);
-    assert!(sys::cloexec(100).unwrap());
-    assert!(sys::dup(fd, 100, false).unwrap() > 100);
+    // dup2 na konkretni cislo, F_DUPFD od minima. Vysoka cisla: testy bezi
+    // soubezne nad jednou tabulkou fd a nova cisla se berou od nejnizsiho
+    // volneho, takze sem jiny test nesahne.
+    assert_eq!(sys::dup2(fd, HIGH, true).unwrap(), HIGH);
+    assert!(sys::cloexec(HIGH).unwrap());
+    let above = sys::dup(fd, HIGH, false).unwrap();
+    assert!(above > HIGH);
+    sys::close(above).unwrap();
     // pread nemeni pozici.
     let mut c = [0u8; 3];
     assert_eq!(sys::pread(fd, &mut c, 0).unwrap(), 3);
@@ -69,10 +76,13 @@ fn fd_numbers_dup_and_shared_offset() {
     sys::close(fd).unwrap();
     // Duplikat zustava platny i po zavreni puvodniho cisla.
     assert_eq!(sys::seek(d, Seek::End(0)).unwrap(), 6);
-    assert_eq!(sys::close(fd), Err(EBADF));
+    // Zavrene cislo uz neplati. Ne na `fd`: uvolnene nizke cislo muze hned
+    // dostat soubezny test (druhe `close` by zavrelo jeho soubor).
+    sys::close(HIGH).unwrap();
+    assert_eq!(sys::close(HIGH), Err(EBADF));
+    assert_eq!(sys::read(HIGH, &mut b), Err(EBADF));
     assert_eq!(sys::read(-1, &mut b), Err(EBADF));
     sys::close(d).unwrap();
-    sys::close(100).unwrap();
     std::fs::remove_file(core::str::from_utf8(&path).unwrap()).unwrap();
 }
 
