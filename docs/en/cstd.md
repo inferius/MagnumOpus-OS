@@ -889,6 +889,35 @@ the stream.
   child's handler is not possible yet (`ENOTSUP`); the parent gets no
   `SIGCHLD`.
 
+### Memory fd
+
+**[verified in QEMU]** x86_64 and aarch64 (step `memfd` of the `ctest`
+test, test `ctest memfd` of two processes in the suite `cstd`).
+`memfd_create` (`sys/mman.h`, `MFD_CLOEXEC`, `MFD_ALLOW_SEALING`;
+`MFD_HUGETLB` without effect) creates an fd over a resizable kernel memory
+object ([memory management](memory-management.md#resizable-memory-object))
+with a capacity of 64 MiB (`mo_memfd_create` for another one):
+
+- `read`, `write` (past the end grows the object), `pread`/`pwrite`,
+  `lseek`, `fstat` (a regular file, size from the kernel - other processes
+  see it too), `ftruncate` (above the capacity `EFBIG`).
+- `mmap(MAP_SHARED)`, also with writing, maps the object itself (the same
+  frames in all processes); a mapping may cover the whole capacity, an
+  access past the size = `SIGBUS`; shrinking unmaps the pages past the end
+  in other processes too. `MAP_PRIVATE` = a copy of the content (like a
+  file).
+- Seals `fcntl(F_ADD_SEALS / F_GET_SEALS)`: `F_SEAL_SHRINK`,
+  `F_SEAL_GROW`, `F_SEAL_WRITE` (seals the object in the kernel; writable
+  mappings must be gone, otherwise `EBUSY`), `F_SEAL_SEAL`. Without
+  `MFD_ALLOW_SEALING` = `EPERM`.
+- **Passing to another process** (`<magnumopus/memfd.h>`, there is no
+  `SCM_RIGHTS`): `mo_memfd_export(fd, readonly, &handle)` gives a new
+  handle of the object, the program sends it over its own channel, the
+  recipient makes an fd of it with `mo_memfd_import(handle, O_RDWR |
+  O_RDONLY)`. Read-only = a handle without `WRITE` and `RESIZE` (the kernel
+  refuses writing, writable mappings and `ftruncate`). `mo_start_handle(tag)`
+  takes a handle the parent passed in the start message.
+
 ### Semaphores
 
 `semaphore.h`: unnamed semaphores (`sem_init`, `sem_wait`, `sem_trywait`,

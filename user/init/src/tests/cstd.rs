@@ -19,7 +19,33 @@ use libos::Error;
 pub const TESTS: &[Test] = &[
     ("ctest: stdio, soubory, errno, getenv, atexit", ctest),
     ("ctest lock: zamky fcntl a flock mezi dvema procesy, EDEADLK", ctest_lock),
+    ("ctest memfd: pametovy fd mezi dvema procesy, zvetseni, jen pro cteni", ctest_memfd),
 ];
+
+/// Stitek handlu objektu pameti pro `ctest memfd` (`c/memcheck.c`).
+const MEMFD_TAG: u32 = 0x4D46_0001;
+
+/// Dva procesy nad jednim zvetsitelnym objektem pameti: `a` dostane handle
+/// pro zapis (zvetsi objekt a zapise pres `mmap`), `b` handle jen pro cteni
+/// (vidi novou velikost a data, zapis neprojde). Nakonec init precte
+/// objekt sam: stejne ramce, ne kopie.
+fn ctest_memfd(s: &Startup) -> TestResult {
+    use libos::abi::object::Rights;
+    use super::std_app::start_std_app;
+
+    let vmo = libos::Vmo::create_resizable(4096, 1 << 20).map_err(|e| fail("zvetsitelny objekt", e))?;
+    let rw = vmo.handle().duplicate(None).map_err(|e| fail("handle a", e))?;
+    let a = start_std_app(s, "ctest", &["memfd", "a"], &[], vec![StartHandle::tagged(MEMFD_TAG, rw)])?;
+    a.finish(Duration::from_secs(60))?.expect("ctest", &["memfd-a"])?;
+    check!(vmo.size() == Ok(8192), "proces a zvetsil objekt na 2 stranky");
+    let ro = vmo.handle().duplicate(Some(Rights::BASIC | Rights::READ | Rights::MAP)).map_err(|e| fail("handle b", e))?;
+    let b = start_std_app(s, "ctest", &["memfd", "b"], &[], vec![StartHandle::tagged(MEMFD_TAG, ro)])?;
+    b.finish(Duration::from_secs(60))?.expect("ctest", &["memfd-b"])?;
+    let mut buf = [0u8; 6];
+    vmo.read(4096, &mut buf).map_err(|e| fail("cteni objektu", e))?;
+    check!(&buf == b"svete\0", "zapis procesu a je v objektu (sdilene ramce)");
+    Ok(())
+}
 
 fn ctest(s: &Startup) -> TestResult {
     let fs = devices().and_then(|d| d.fs.as_ref()).ok_or("sluzba fsd nebezi")?;
@@ -45,7 +71,7 @@ fn ctest(s: &Startup) -> TestResult {
         ],
         Duration::from_secs(120),
     )?;
-    run.expect("ctest", &["args", "getenv", "format", "memory", "files", "errno", "posix", "threads", "time", "math", "mmap", "signal", "wchar", "posix2", "termios"])?;
+    run.expect("ctest", &["args", "getenv", "format", "memory", "files", "errno", "posix", "threads", "time", "math", "mmap", "signal", "wchar", "posix2", "termios", "memfd"])?;
     // Konec ctest zavre kanal terminalu: vlakno serveru skonci.
     server.join(None).map_err(|e| fail("konec vlakna terminalu", e))?;
     check!(run.stdout.ends_with("ctest: hotovo\n"), "atexit v obracenem poradi a vyprazdneni pri konci");

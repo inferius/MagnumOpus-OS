@@ -43,6 +43,8 @@ pub enum Object {
     Pipe(Pipe),
     /// Socket ([`crate::sock`]).
     Socket(crate::sock::Socket),
+    /// Pametovy fd (`memfd_create`, [`crate::memfd`]).
+    Memory(crate::memfd::Memory),
     /// Objekt knihovny nad std (napr. mnozina `epoll` v cstd); cteni
     /// a zapis nejdou.
     User(alloc::boxed::Box<dyn core::any::Any + Send + Sync>),
@@ -92,6 +94,7 @@ impl Description {
             Object::Stdio(_) | Object::User(_) => Err(Error::BadHandle),
             Object::Pipe(p) => p.read(buf),
             Object::Socket(s) => s.recv(buf, self.nonblock()),
+            Object::Memory(m) => m.read(buf),
         }
     }
 
@@ -105,6 +108,7 @@ impl Description {
             Object::Stdio(s) => stdio::write(*s, data),
             Object::Pipe(p) => p.write(data),
             Object::Socket(s) => s.send(data, self.nonblock()),
+            Object::Memory(m) => m.write(data),
         }
     }
 
@@ -112,7 +116,8 @@ impl Description {
     pub fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
         match &self.object {
             Object::File(f) if self.can_read() => f.read_at(offset, buf),
-            Object::File(_) => Err(Error::BadHandle),
+            Object::Memory(m) if self.can_read() => m.read_at(offset, buf),
+            Object::File(_) | Object::Memory(_) => Err(Error::BadHandle),
             _ => Err(Error::NotSupported),
         }
     }
@@ -121,7 +126,8 @@ impl Description {
     pub fn write_at(&self, offset: u64, data: &[u8]) -> Result<usize> {
         match &self.object {
             Object::File(f) if self.can_write() => f.write_at(offset, data),
-            Object::File(_) => Err(Error::BadHandle),
+            Object::Memory(m) if self.can_write() => m.write_at(offset, data),
+            Object::File(_) | Object::Memory(_) => Err(Error::BadHandle),
             _ => Err(Error::NotSupported),
         }
     }
@@ -130,6 +136,7 @@ impl Description {
     pub fn seek(&self, pos: SeekFrom) -> Result<u64> {
         match &self.object {
             Object::File(f) => f.seek(pos),
+            Object::Memory(m) => m.seek(pos),
             _ => Err(Error::NotSupported),
         }
     }
@@ -138,6 +145,14 @@ impl Description {
     pub fn file(&self) -> Option<&File> {
         match &self.object {
             Object::File(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    /// Pametovy fd pod cislem.
+    pub fn memory(&self) -> Option<&crate::memfd::Memory> {
+        match &self.object {
+            Object::Memory(m) => Some(m),
             _ => None,
         }
     }

@@ -305,6 +305,11 @@ pub unsafe extern "C" fn fcntl(fd: c_int, cmd: c_int, mut args: ...) -> c_int {
             // SAFETY: kontrakt C.
             unsafe { crate::flock::fcntl_lock(fd, cmd, p) }
         }
+        crate::memfd::F_ADD_SEALS | crate::memfd::F_GET_SEALS => {
+            // SAFETY: argument int (u F_GET_SEALS nepouzity).
+            let v = if cmd == crate::memfd::F_ADD_SEALS { unsafe { args.next_arg::<c_int>() } } else { 0 };
+            crate::memfd::fcntl(fd, cmd, v).unwrap_or(-1)
+        }
         _ => errno::ret(Err(errno::EINVAL)),
     }
 }

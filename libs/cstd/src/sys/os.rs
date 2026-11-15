@@ -142,6 +142,13 @@ pub fn fstat(fd: i32) -> R<Stat> {
         Object::Pipe(_) => Ok(Stat::stream(Kind::Pipe)),
         Object::Socket(_) => Ok(Stat::stream(Kind::Socket)),
         Object::User(_) => Ok(Stat::stream(Kind::Stream)),
+        // Pametovy fd: bezny soubor s velikosti objektu pameti.
+        Object::Memory(m) => {
+            let mut st = Stat::stream(Kind::File);
+            st.size = m.size().map_err(e)?;
+            st.writable = m.writable();
+            Ok(st)
+        }
     }
 }
 
@@ -158,6 +165,7 @@ pub fn ftruncate(fd: i32, len: u64) -> R<()> {
     let d = desc(fd)?;
     match d.file() {
         Some(f) => f.set_len(len).map_err(e),
+        None if d.memory().is_some() => super::memfd_truncate(fd, len),
         None => Err(errno::EINVAL),
     }
 }

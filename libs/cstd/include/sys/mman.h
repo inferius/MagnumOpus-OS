@@ -45,6 +45,14 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off);
 int munmap(void *addr, size_t len);
 int mprotect(void *addr, size_t len, int prot);
 int madvise(void *addr, size_t len, int advice);
+
+/* Pametovy fd: zvetsitelny objekt pameti jadra (kapacita 64 MiB,
+ * mo_memfd_create v <magnumopus/memfd.h> jinou). mmap(MAP_SHARED) sdili
+ * ramce mezi procesy, pristup za velikost = SIGBUS. */
+#define MFD_CLOEXEC 0x0001U
+#define MFD_ALLOW_SEALING 0x0002U
+#define MFD_HUGETLB 0x0004U
+int memfd_create(const char *name, unsigned int flags);
 int posix_madvise(void *addr, size_t len, int advice);
 int mseal(void *addr, size_t len, unsigned long flags);
 int msync(void *addr, size_t len, int flags);

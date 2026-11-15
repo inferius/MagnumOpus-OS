@@ -1,6 +1,6 @@
 //! Testy mmap na hostiteli: kontrola argumentu a mapovani souboru.
 
-use crate::errno::{EBADF, EINVAL, ENOTSUP};
+use crate::errno::{EBADF, EINVAL};
 use crate::mman::*;
 
 const PAGE: u64 = 4096;
@@ -17,7 +17,8 @@ fn argument_checks() {
     assert_eq!((f.addr, f.replace), (Some(0x10000), true));
     assert_eq!(check(0, 10, PROT_READ, MAP_PRIVATE, -1, 0, PAGE), Err(EBADF), "soubor bez fd");
     assert_eq!(check(0, 10, PROT_READ, MAP_PRIVATE, 3, 100, PAGE), Err(EINVAL), "offset mimo stranku");
-    assert_eq!(check(0, 10, PROT_READ | PROT_WRITE, MAP_SHARED, 3, 0, PAGE), Err(ENOTSUP), "sdileny zapis do souboru");
+    // Sdileny zapis: rozhodne `map` podle druhu fd (pametovy fd ano, soubor ENOTSUP).
+    assert!(check(0, 10, PROT_READ | PROT_WRITE, MAP_SHARED, 3, 0, PAGE).unwrap().shared);
     assert!(check(0, 10, PROT_READ, MAP_SHARED, 3, 0, PAGE).unwrap().shared);
 }
 

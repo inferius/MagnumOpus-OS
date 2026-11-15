@@ -9,6 +9,9 @@
 //!   `MAP_SHARED` jen pro cteni - zmeny souboru se pak neprojevi);
 //!   `MAP_SHARED` se zapisem = `ENOTSUP`, dokud fsd neda objekt pameti
 //!   souboru.
+//! - Pametovy fd (`memfd.rs`): `MAP_SHARED` (i se zapisem) mapuje primo
+//!   objekt pameti - stejne ramce ve vsech procesech; mapovani smi pokryt
+//!   celou kapacitu, pristup za velikost = `SIGBUS`.
 //! - `PROT_EXEC` na nezapecetene pameti jen s opravnenim JIT (W^X), jinak
 //!   `EACCES`.
 
@@ -70,9 +73,6 @@ pub fn check(addr: u64, len: size_t, prot: c_int, flags: c_int, fd: c_int, off: 
         if fd < 0 {
             return Err(errno::EBADF);
         }
-        if kind == MAP_SHARED && prot & PROT_WRITE != 0 {
-            return Err(errno::ENOTSUP);
-        }
         Some((fd, off as u64))
     };
     Ok(Request {
@@ -109,6 +109,20 @@ fn anon(r: &Request, prot: u32) -> Result<u64, c_int> {
 
 fn map(r: Request) -> Result<u64, c_int> {
     let Some((fd, off)) = r.file else { return anon(&r, r.prot) };
+    // Pametovy fd: MAP_SHARED primo na objekt pameti (sdilene mezi
+    // procesy); MAP_PRIVATE jako soubor (kopie obsahu).
+    if r.shared && sys::is_memfd(fd) {
+        if let Some(a) = r.addr {
+            if r.replace {
+                let _ = sys::vm_release(a, r.len);
+            }
+        }
+        return sys::memfd_map(fd, off, r.len, r.prot, r.addr.unwrap_or(0));
+    }
+    // Soubor ve fsd zatim objekt pameti nedava: sdileny zapis nejde.
+    if r.shared && r.prot & PROT_WRITE as u32 != 0 {
+        return Err(errno::ENOTSUP);
+    }
     // Soubor: nacist do pameti s pravem zapisu, pak nastavit prava.
     let st = sys::status(fd)?;
     if st & sys::status::ACCMODE == sys::status::WRONLY {
