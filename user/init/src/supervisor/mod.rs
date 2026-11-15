@@ -146,8 +146,13 @@ pub struct Supervisor {
     entries: Vec<Entry>,
     devmgr_open: bool,
     start_timeout: Duration,
-    /// Port listku (vytvori se s prvnim listkem).
+    /// Port listku: duplikat portu `waits` (vytvori se s prvnim listkem),
+    /// klice listku jsou pod `libos::FOREIGN_KEYS`.
     port: Option<Port>,
+    /// Cekani kola pres port (vytvori se v prvnim kole; `new` je `const`).
+    /// Sluzeb, terminalu a kanalu "otevri cestu" je promenny pocet, `wait_many`
+    /// ma limit 64 objektu.
+    waits: Option<libos::WaitSet>,
     leases: BTreeMap<u64, leases::Lease>,
     next_lease: u64,
 }
@@ -160,7 +165,6 @@ enum Item {
     Service(usize),
     /// Kanal sluzby, ktera ceka na potvrzeni startu.
     Starting(usize),
-    Leases,
     Terminal(crate::terminal::Wait),
     /// Kanal sluzby napajeni (udalosti tlacitek, `crate::power`).
     Power,
@@ -185,8 +189,19 @@ impl Supervisor {
             devmgr_open: true,
             start_timeout: START_TIMEOUT,
             port: None,
+            waits: None,
             leases: BTreeMap::new(),
             next_lease: 1,
+        }
+    }
+
+    /// Port kola (s cizimi pakety pro listky); bez nej se ceka postaru.
+    fn ensure_waits(&mut self) {
+        if self.waits.is_none() {
+            self.waits = libos::WaitSet::new().ok().map(|mut w| {
+                w.keep_foreign();
+                w
+            });
         }
     }
 
@@ -268,6 +283,7 @@ impl Supervisor {
     /// co prislo.
     pub fn step(&mut self, startup: &Startup, deadline: Option<u64>) -> Vec<Happened> {
         let mut out = Vec::new();
+        self.ensure_waits();
         self.adopt_pending();
         // Sluzby, ktere uz mohou startovat (zavislosti bezi), nebo nove
         // registrovane bez procesu.
@@ -296,10 +312,6 @@ impl Supervisor {
                 what.push(Item::Starting(i));
             }
         }
-        if let Some(p) = &self.port {
-            items.push((p.handle(), Signals::READABLE));
-            what.push(Item::Leases);
-        }
         let terminals = crate::terminal::TERMINALS.lock();
         let mut term_what = Vec::new();
         terminals.wait_items(&mut items, &mut term_what);
@@ -326,9 +338,14 @@ impl Supervisor {
             .into_iter()
             .flatten()
             .min();
-        let observed = match libos::wait_many(&items, wake) {
-            Ok((_, o)) => o,
-            Err(_) => Vec::new(),
+        let observed = match self.waits.as_mut().map(|w| w.wait(&items, wake)) {
+            Some(Ok((_, o))) => o,
+            Some(Err(e)) => {
+                println!("init: cekani supervisoru: {e}");
+                Vec::new()
+            }
+            // Bez portu (nedostatek pameti pri prvnim kole): stare cekani.
+            None => libos::wait_many(&items, wake).map(|(_, o)| o).unwrap_or_default(),
         };
         drop(items);
         drop(power);
@@ -354,15 +371,16 @@ impl Supervisor {
                 Item::Starting(i) if sig.intersects(Signals::READABLE | Signals::PEER_CLOSED) => {
                     self.started(i, &mut out)
                 }
-                Item::Leases if sig.intersects(Signals::READABLE) => self.lease_packets(),
                 Item::Terminal(w) => terminals.on_signal(startup, w, sig, &mut || self.session("audiod", Vec::new()).ok()),
                 Item::Power => power_ready = true,
                 Item::Launcher => launch_ready = sig.intersects(Signals::READABLE | Signals::PEER_CLOSED),
                 Item::Sessions => sessions_ready = sig.intersects(Signals::READABLE),
                 Item::Open => open_ready |= sig.intersects(Signals::READABLE | Signals::PEER_CLOSED),
-                Item::Service(_) | Item::Starting(_) | Item::Leases => {}
+                Item::Service(_) | Item::Starting(_) => {}
             }
         }
+        // Pakety listku (cizi klice na portu kola).
+        self.lease_packets();
         terminals.cleanup();
         // Kompozitor se nepodarilo obnovit: terminal v zalozni konzoli.
         if out.iter().any(|h| matches!(h, Happened::GaveUp("compd")))

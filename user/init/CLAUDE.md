@@ -21,6 +21,7 @@ První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`,
 - Render uzly (`src/render.rs`): poskytovatele si init vyžádá od displeje jednou (`OPEN_PROVIDER`) dřív, než displej dostane kompozitor, drží ho (`Kept`) a dává duplikát službě `gpud` (restart supervisorem). Render uzel pro kompozitor (`backend gpu`) a testy otevírá `render::open_render` přes gpud, nikdy přes displej.
 - Kanál služby „otevři cestu“ dostane jen okno terminálu přihlášeného uživatele (`terminal.rs`, štítek `term::ctl::tag::OPEN`, relace = `Client.open_session`); záložní konzole ne.
 - `open::poll` nesmí spouštět aplikaci se zámkem služby (spuštění Souborů si bere `open::endpoint`): spouštění až po `drop` zámku.
+- Supervisor čeká přes `libos::WaitSet` (`Supervisor::waits`, vznikne v prvním `step`, protože `new` je `const`); port lístků je duplikát portu množiny, klíče lístků `< libos::FOREIGN_KEYS`, pakety vybírá `lease_packets` z `take_foreign` (port se nečte přímo, jinak by kradl pakety množiny).
 - Pořadí startu je závislostní: `fsd` čeká na disk od `devmgr`, `netd` na síťovou kartu atd. Nové pořadí = upravit `docs/cs/init.md`.
 
 ## Testy
