@@ -19,6 +19,7 @@ mod audio;
 mod boottest;
 mod crashtest;
 mod datadisk;
+mod devmode;
 mod dynlink;
 mod drivers;
 mod docs;
@@ -990,6 +991,10 @@ fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> R
     if opts.test && packages.contains(&"kernel") {
         cmd.args(["--features", "qemu-test"]);
     }
+    // Rezim vyvojare jen ve vyvojovem sestaveni (`devmode.rs`).
+    if user && let Some(f) = devmode::features(opts, packages) {
+        cmd.args(["--features", &f]);
+    }
     if packages.contains(&"kernel") {
         // Verze a commit do jadra (log pri startu, zaznam padu). Jen jadru:
         // zmena commitu tak neprekladá znovu cely userspace.
@@ -1164,13 +1169,24 @@ fn build(opts: &Options) -> Result<Artifacts> {
         files.push((Manifest::file_name(&f.manifest.name), data));
     }
     files.push((String::from("certs.pem"), webhelper::bundle_pem()));
+    // Vydani (bez vyvojoveho profilu) nesmi mit kod rezimu vyvojare.
+    let dev = devmode::dev_profile(opts);
+    if !dev {
+        let rust: Vec<(&str, &[u8])> = files
+            .iter()
+            .filter(|(n, _)| programs.contains(&n.as_str()) || stdsys::STD_PROGRAMS.contains(&n.as_str()))
+            .map(|(n, d)| (n.as_str(), d.as_slice()))
+            .collect();
+        devmode::check_release("initfs bez vyvojoveho profilu", rust)?;
+    }
     files.extend(opts.extra_initfs.iter().cloned());
     let refs: Vec<(&str, &[u8])> = files
         .iter()
         .map(|(n, d)| (n.as_str(), d.as_slice()))
         .collect();
     // Vlastni soubor behu: jiny soubezny beh z nej muze prave skladat obraz.
-    let initfs = run_file(&format!("initfs-{}-{profile}", a.name), "img");
+    // Vyvojovy a vydani zvlast: obraz USB potrebuje oba (instfs).
+    let initfs = run_file(&format!("initfs-{}-{profile}{}", a.name, if dev { "-dev" } else { "" }), "img");
     std::fs::write(&initfs, initfs::build(&refs))?;
 
     Ok(Artifacts {

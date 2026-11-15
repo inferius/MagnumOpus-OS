@@ -10,6 +10,12 @@ name = "shsess"
 test = false
 bench = false
 
+[features]
+default = []
+# Prikaz `devmode` (rezim vyvojare): jen vyvojove sestaveni, zapina ho
+# xtask pro obrazy s vyvojovym profilem.
+dev-mode = ["term/dev-mode", "shlang/dev-mode", "powerproto/dev-mode"]
+
 [dependencies]
 installplan = { workspace = true }
 libos = { path = "../../libs/libos" }

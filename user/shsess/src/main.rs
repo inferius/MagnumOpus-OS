@@ -368,6 +368,41 @@ impl Env for SysEnv {
         }
     }
 
+    /// `system`: zmena v /system pres init (ukon spravy). Init odpovi
+    /// kanalem, vysledek prijde na nej po potvrzeni (nejdele 2 minuty);
+    /// spatna cesta = chyba hned.
+    fn system_file(&mut self, op: u8, path: &str, data: &[u8]) -> Result<(), Error> {
+        let guard = POWER.lock();
+        let chan = guard.as_ref().ok_or(Error::NotSupported)?;
+        let req = powerproto::Request::SystemFile { op, path: String::from(path), data: data.to_vec() };
+        chan.write(&req.encode(), Vec::new())?;
+        let mut m = chan.read(Some(time::deadline_after(Duration::from_secs(10))))?;
+        if let Ok(powerproto::Reply::Ok) = powerproto::Reply::decode(&m.data) {
+            let h = m.handles.pop().ok_or(Error::Corrupted)?;
+            drop(guard);
+            m = Channel::from_handle(h).read(Some(time::deadline_after(Duration::from_secs(120))))?;
+        }
+        match powerproto::Reply::decode(&m.data)? {
+            powerproto::Reply::Ok => Ok(()),
+            powerproto::Reply::Failed(e) => Err(e),
+            _ => Err(Error::Corrupted),
+        }
+    }
+
+    /// `devmode` (jen vyvojove sestaveni): init preda zadost sluzbe uctu.
+    #[cfg(feature = "dev-mode")]
+    fn dev_mode(&mut self, set: u8) -> Result<bool, Error> {
+        let guard = POWER.lock();
+        let chan = guard.as_ref().ok_or(Error::NotSupported)?;
+        chan.write(&powerproto::Request::DevMode { set }.encode(), Vec::new())?;
+        let m = chan.read(Some(time::deadline_after(Duration::from_secs(10))))?;
+        match powerproto::Reply::decode(&m.data)? {
+            powerproto::Reply::Text(t) => Ok(t == "on"),
+            powerproto::Reply::Failed(e) => Err(e),
+            _ => Err(Error::Corrupted),
+        }
+    }
+
     /// `install`: kanal k instalatoru (od initu, jednou), pozadavek,
     /// zpravy prubehu, konecna odpoved.
     fn installer_send(&mut self, req: &[u8]) -> Result<(), Error> {

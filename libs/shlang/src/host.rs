@@ -370,6 +370,19 @@ pub trait Host {
     fn permissions(&mut self, _app: &str, _perm: &str) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Zmena v `/system` (`system`): ukon spravy `SYSTEM_FILE`, `op` =
+    /// 1 zapis, 2 smazani, 3 slozka (`accountproto::elevate::FileOp`).
+    /// Ceka na potvrzeni v systemovem dialogu. `NOT_SUPPORTED` = hostitel
+    /// sluzbu nema (testy, konzole).
+    fn system_file(&mut self, _op: u8, _path: &str, _data: &[u8]) -> Result<(), abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
+    /// Rezim vyvojare (`devmode`, jen vyvojove sestaveni): `set` 0 = stav,
+    /// 1 = vypnout, 2 = zapnout; vraci stav.
+    #[cfg(feature = "dev-mode")]
+    fn dev_mode(&mut self, _set: u8) -> Result<bool, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Uroven logu jadra (`loglevel`): `target` prazdny = vypis.
     fn log_level(&mut self, _target: &str, _level: &str) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)

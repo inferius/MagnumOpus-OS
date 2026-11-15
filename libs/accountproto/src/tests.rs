@@ -156,6 +156,44 @@ fn ukony_spravy() {
     assert!(decode_check(&encode_check(&[7; 3], 6, b"")).is_err());
 }
 
+#[test]
+fn systemovy_soubor_parametry_a_cesty() {
+    use crate::elevate::{FileOp, SystemFile, system_path};
+    let f = SystemFile { op: FileOp::Write, path: "/system/config/x.toml".into(), len: 5, hash: u128::MAX - 3 };
+    assert_eq!(SystemFile::decode(&f.encode()).unwrap(), f);
+    for ok in ["/system/config", "/system/config/vzhled/system.toml", "/system/a.b"] {
+        assert_eq!(system_path(ok), Ok(()), "{ok}");
+    }
+    for bad in ["/system", "/system/", "/home/x", "system/x", "/system//x", "/system/x/", "/system/./x", "/system/x/../accounts"] {
+        assert_eq!(system_path(bad), Err(Error::InvalidArgs), "{bad}");
+    }
+    // Databaze uctu nikdy, ani s roli spravy.
+    for bad in ["/system/accounts", "/system/accounts/users/1000"] {
+        assert_eq!(system_path(bad), Err(Error::AccessDenied), "{bad}");
+    }
+    let bad = SystemFile { path: "/system/accounts/key".into(), ..f.clone() };
+    assert_eq!(SystemFile::decode(&bad.encode()), Err(Error::AccessDenied));
+    let mut b = f.encode();
+    b[0] = 9;
+    assert_eq!(SystemFile::decode(&b), Err(Error::InvalidArgs));
+}
+
+#[test]
+fn rezim_vyvojare_jen_s_feature() {
+    let mut w = wire::Writer::op(crate::op::DEV_MODE);
+    w.u8(crate::DEV_ON);
+    let raw = w.finish();
+    #[cfg(not(feature = "dev-mode"))]
+    assert_eq!(crate::Request::decode(&raw), Err(Error::NotSupported));
+    #[cfg(feature = "dev-mode")]
+    {
+        let r = crate::Request::decode(&raw).unwrap();
+        assert_eq!(r, crate::Request::DevMode { set: crate::DEV_ON });
+        assert!(r.is_self());
+        assert_eq!(r.encode(), raw);
+    }
+}
+
 // --- CBOR ---
 
 #[test]

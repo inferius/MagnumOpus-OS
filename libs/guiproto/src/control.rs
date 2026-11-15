@@ -248,6 +248,10 @@ pub enum DialogRequest {
     Cancel { id: u32 },
     /// Nastavit bezpecnostni frazi uzivatele (zobrazi se v kazdem dialogu).
     Phrase { text: String },
+    /// Stav rezimu vyvojare (sluzba uctu -> kompozitor): lista ukaze
+    /// trvaly pruh. Jen vyvojove sestaveni (feature `dev-mode`).
+    #[cfg(feature = "dev-mode")]
+    DevMode { on: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -256,6 +260,10 @@ pub enum DialogReply {
     Answer { id: u32, choice: u32, text: String },
     /// Dialog zrusen (Cancel, zavreni kanalu).
     Cancelled { id: u32 },
+    /// Clovek prepnul rezim vyvojare v liste (fyzicky vstup do systemoveho
+    /// UI). Jen vyvojove sestaveni (feature `dev-mode`).
+    #[cfg(feature = "dev-mode")]
+    DevMode { on: bool },
 }
 
 impl DialogRequest {
@@ -273,6 +281,10 @@ impl DialogRequest {
             }
             DialogRequest::Phrase { text } => {
                 w.u8(3).str(text);
+            }
+            #[cfg(feature = "dev-mode")]
+            DialogRequest::DevMode { on } => {
+                w.u8(4).u8(*on as u8);
             }
         }
         w.finish()
@@ -301,6 +313,8 @@ impl DialogRequest {
             }
             2 => DialogRequest::Cancel { id: r.u32()? },
             3 => DialogRequest::Phrase { text: r.str()? },
+            #[cfg(feature = "dev-mode")]
+            4 => DialogRequest::DevMode { on: r.u8()? != 0 },
             _ => return Err(Error::NotSupported),
         };
         if !r.is_empty() {
@@ -320,6 +334,10 @@ impl DialogReply {
             DialogReply::Cancelled { id } => {
                 w.u8(2).u32(*id);
             }
+            #[cfg(feature = "dev-mode")]
+            DialogReply::DevMode { on } => {
+                w.u8(3).u8(*on as u8);
+            }
         }
         w.finish()
     }
@@ -333,6 +351,8 @@ impl DialogReply {
                 text: r.str()?,
             },
             2 => DialogReply::Cancelled { id: r.u32()? },
+            #[cfg(feature = "dev-mode")]
+            3 => DialogReply::DevMode { on: r.u8()? != 0 },
             _ => return Err(Error::NotSupported),
         };
         if !r.is_empty() {

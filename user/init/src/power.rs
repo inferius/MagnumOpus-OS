@@ -155,6 +155,22 @@ pub fn request_from_shell(data: &[u8], chan: Channel, session: Option<u64>) -> O
             Ok(None) => Reply::Ok,
             Err(r) => r,
         },
+        // Zmena v /system (`system`): ukon spravy, vysledek po potvrzeni
+        // prijde na kanal z odpovedi.
+        Ok(Request::SystemFile { op, path, data }) => match crate::sysfiles::from_shell(session, op, &path, data) {
+            Ok(ch) => {
+                let _ = chan.write(&Reply::Ok.encode(), alloc::vec![ch.into_handle()]);
+                return Some(chan);
+            }
+            Err(r) => r,
+        },
+        // Rezim vyvojare (`devmode`, jen vyvojove sestaveni): preda se
+        // sluzbe uctu na kanalu self relace, rozhoduje accountd.
+        #[cfg(feature = "dev-mode")]
+        Ok(Request::DevMode { set }) => match crate::accounts::dev_mode(session, set) {
+            Ok(on) => Reply::Text(alloc::string::String::from(if on { "on" } else { "off" })),
+            Err(e) => Reply::Failed(e),
+        },
         Ok(Request::Report) => match crate::logd::report() {
             Ok((path, preview)) => Reply::Text(alloc::format!("{path}
 {preview}")),

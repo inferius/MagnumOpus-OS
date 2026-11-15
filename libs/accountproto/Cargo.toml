@@ -12,6 +12,9 @@ default = []
 client = ["dep:libos"]
 # Simulovany bezpecnostni klic (testy na hostiteli a v accountd).
 soft = []
+# Rezim vyvojare (`Request::DevMode`): jen vyvojove sestaveni, zapina ho
+# xtask pro obrazy s vyvojovym profilem. Ve vydani kod neni.
+dev-mode = []
 
 [dependencies]
 abi = { workspace = true }

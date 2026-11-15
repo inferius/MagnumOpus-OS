@@ -5,6 +5,12 @@ edition.workspace = true
 license.workspace = true
 description = "Protokol GUI: okna, vrstvy, pristupnost, snimky, displej, akce, dialogy"
 
+[features]
+default = []
+# Rezim vyvojare (zpravy kanalu `dialog`): jen vyvojove sestaveni, zapina
+# ho xtask pro obrazy s vyvojovym profilem.
+dev-mode = []
+
 [dependencies]
 abi = { workspace = true }
 wire = { path = "../wire" }

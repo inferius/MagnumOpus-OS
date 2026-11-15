@@ -27,6 +27,8 @@ mod cull;
 mod gpu;
 mod greeter;
 mod launcher;
+#[cfg(feature = "dev-mode")]
+mod devmode;
 mod popover;
 mod secure;
 mod shots;

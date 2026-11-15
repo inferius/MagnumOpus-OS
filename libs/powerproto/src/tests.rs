@@ -24,6 +24,18 @@ fn vzhled_tam_a_zpet() {
 }
 
 #[test]
+fn systemovy_soubor_tam_a_zpet() {
+    for q in [
+        Request::SystemFile { op: 1, path: String::from("/system/config/x.toml"), data: alloc::vec![1, 2, 3] },
+        Request::SystemFile { op: 2, path: String::from("/system/x"), data: alloc::vec![] },
+    ] {
+        assert_eq!(Request::decode(&q.encode()), Ok(q.clone()));
+    }
+    let big = Request::SystemFile { op: 1, path: String::from("/system/x"), data: alloc::vec![0; SYSTEM_FILE_MAX + 1] };
+    assert_eq!(Request::decode(&big.encode()), Err(Error::InvalidArgs));
+}
+
+#[test]
 fn odpovedi_tam_a_zpet() {
     roundtrip(Reply::Ok);
     roundtrip(Reply::Failed(Error::NotSupported));

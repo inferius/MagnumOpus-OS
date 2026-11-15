@@ -165,7 +165,22 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("Úlohy", &["tasks", "jobs", "fg", "wait", "kill", "cancel"]),
     ("Relace a bezpečnost", &["undo", "preview", "history", "run", "error", "exit"]),
     ("Nápověda", &["help", "explain"]),
-    ("Systém", &["audio", "vzhled", "povoleni", "loglevel", "report", "install", "shutdown", "reboot"]),
+    (
+        "Systém",
+        &[
+            "audio",
+            "vzhled",
+            "povoleni",
+            "system",
+            #[cfg(feature = "dev-mode")]
+            "devmode",
+            "loglevel",
+            "report",
+            "install",
+            "shutdown",
+            "reboot",
+        ],
+    ),
 ];
 
 pub const BUILTINS: &[Sig] = &[
@@ -281,6 +296,11 @@ pub const BUILTINS: &[Sig] = &[
         "vzhled: svetly, tmavy, auto (podle slunce); kontrast ano|ne, pohyb ano|ne; bez argumentu stav"),
     sig!("povoleni", "system-permissions", NONE, None, NOFLAGS, IN, IN,
         "povolení aplikací: bez argumentu výpis, `povoleni odvolat <aplikace> [mikrofon]`"),
+    sig!("system", "system-file", &[opt("op", Kind::Str), opt("path", Kind::Path), opt("source", Kind::Path)], None, NOFLAGS, IN, IN,
+        "změna v /system (úkon správy, potvrdí člověk s rolí): `system write <cíl> <zdroj>`, `system rm <cesta>`, `system mkdir <cesta>`"),
+    #[cfg(feature = "dev-mode")]
+    sig!("devmode", "system-dev-mode", &[opt("state", Kind::Str)], None, NOFLAGS, IN, Io::Records(&["devmode"]),
+        "režim vývojáře (jen vývojové sestavení): `devmode on|off`, bez argumentu stav"),
     sig!("loglevel", "system-log-level", NONE, None, NOFLAGS, IN, IN,
         "úroveň logu: bez argumentu výpis, `loglevel <modul|proces> <error|warn|info|debug|trace|vychozi>`"),
     sig!("report", "system-report", NONE, None, NOFLAGS, IN, IN,

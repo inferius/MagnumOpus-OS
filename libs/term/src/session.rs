@@ -136,6 +136,16 @@ pub trait Env {
     fn permissions(&mut self, _app: &str, _perm: &str) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Zmena v `/system` (prikaz `system`, `shlang::host::Host::system_file`);
+    /// vychozi = relace ji nema.
+    fn system_file(&mut self, _op: u8, _path: &str, _data: &[u8]) -> Result<(), abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
+    /// Rezim vyvojare (prikaz `devmode`, jen vyvojove sestaveni).
+    #[cfg(feature = "dev-mode")]
+    fn dev_mode(&mut self, _set: u8) -> Result<bool, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Sluzba "otevri cestu" (`start`, hola cesta k souboru): poslani
     /// zadosti; vychozi = relace sluzbu nema.
     fn open_send(&mut self, _path: &str, _app_only: bool) -> Result<(), abi::Error> {
@@ -575,6 +585,15 @@ impl Host for SessionHost<'_> {
 
     fn permissions(&mut self, app: &str, perm: &str) -> Result<String, abi::Error> {
         self.env.permissions(app, perm)
+    }
+
+    fn system_file(&mut self, op: u8, path: &str, data: &[u8]) -> Result<(), abi::Error> {
+        self.env.system_file(op, path, data)
+    }
+
+    #[cfg(feature = "dev-mode")]
+    fn dev_mode(&mut self, set: u8) -> Result<bool, abi::Error> {
+        self.env.dev_mode(set)
     }
 
     fn open_path(&mut self, path: &str, app_only: bool) -> Result<Opened, abi::Error> {

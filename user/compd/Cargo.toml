@@ -10,6 +10,12 @@ name = "compd"
 test = false
 bench = false
 
+[features]
+default = []
+# Rezim vyvojare v liste: jen vyvojove sestaveni, zapina ho xtask pro
+# obrazy s vyvojovym profilem.
+dev-mode = ["comp/dev-mode"]
+
 [dependencies]
 libos = { path = "../../libs/libos" }
 guiproto = { path = "../../libs/guiproto" }

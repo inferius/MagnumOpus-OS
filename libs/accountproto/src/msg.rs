@@ -36,7 +36,19 @@ pub enum Request {
     PermList,
     /// Odvolat vlastni rozhodnuti (aplikace se priste zepta znovu).
     PermRevoke { app_id: String, perm: crate::perm::Perm },
+    /// Rezim vyvojare (jen vyvojove sestaveni, feature `dev-mode`): `set`
+    /// [`DEV_QUERY`] = jen stav, [`DEV_OFF`] / [`DEV_ON`] = prepnout.
+    /// Odpoved: 1 B, 1 = zapnuto. Sestaveni bez feature operaci nezna
+    /// (`NOT_SUPPORTED`).
+    #[cfg(feature = "dev-mode")]
+    DevMode { set: u8 },
 }
+
+/// Hodnoty `Request::DevMode::set` (cislo operace [`op::DEV_MODE`] je
+/// rezervovane i ve vydani).
+pub const DEV_QUERY: u8 = 0;
+pub const DEV_OFF: u8 = 1;
+pub const DEV_ON: u8 = 2;
 
 impl Request {
     pub fn op(&self) -> u32 {
@@ -60,6 +72,8 @@ impl Request {
             Request::CreateFirst { .. } => op::CREATE_FIRST,
             Request::PermList => op::PERM_LIST,
             Request::PermRevoke { .. } => op::PERM_REVOKE,
+            #[cfg(feature = "dev-mode")]
+            Request::DevMode { .. } => op::DEV_MODE,
         }
     }
 
@@ -110,6 +124,10 @@ impl Request {
                 put_blob(&mut w, params);
             }
             Request::SetKeyPin { pin } => put_secret(&mut w, pin),
+            #[cfg(feature = "dev-mode")]
+            Request::DevMode { set } => {
+                w.u8(*set);
+            }
             Request::CreateFirst { name, display, password } => {
                 w.str(name).str(display);
                 put_secret(&mut w, password);
@@ -151,6 +169,11 @@ impl Request {
             op::PERM_REVOKE => Request::PermRevoke { app_id: r.str()?, perm: crate::perm::Perm::from_u8(r.u8()?)? },
             op::ELEVATE => Request::Elevate { action: r.u32()?, params: get_blob(&mut r)? },
             op::SET_KEY_PIN => Request::SetKeyPin { pin: get_secret(&mut r)? },
+            #[cfg(feature = "dev-mode")]
+            op::DEV_MODE => match r.u8()? {
+                set @ (DEV_QUERY | DEV_OFF | DEV_ON) => Request::DevMode { set },
+                _ => return Err(Error::InvalidArgs),
+            },
             op::CREATE_FIRST => Request::CreateFirst {
                 name: r.str()?,
                 display: r.str()?,
@@ -174,7 +197,7 @@ impl Request {
 
     /// Patri operace na kanal self?
     pub fn is_self(&self) -> bool {
-        (op::WHOAMI..=op::PERM_REVOKE).contains(&self.op())
+        (op::WHOAMI..=op::DEV_MODE).contains(&self.op())
     }
 }
 

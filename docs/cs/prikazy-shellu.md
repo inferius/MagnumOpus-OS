@@ -11,7 +11,7 @@
 - **Úlohy:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Relace a bezpečnost:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Nápověda:** [`help`](#help), [`explain`](#explain)
-- **Systém:** [`audio`](#audio), [`vzhled`](#vzhled), [`povoleni`](#povoleni), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **Systém:** [`audio`](#audio), [`vzhled`](#vzhled), [`povoleni`](#povoleni), [`system`](#system), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Soubory
 
@@ -1876,6 +1876,37 @@ povoleni odvolat org.libsdl.testaudio
 **Chyby:** `SH_ARGS`, `NOT_FOUND`, `ACCESS_DENIED`, `NOT_SUPPORTED`
 
 **Souvisí:** [`audio`](#audio)
+
+
+### `system`
+
+změna v /system (úkon správy, potvrdí člověk s rolí): `system write <cíl> <zdroj>`, `system rm <cesta>`, `system mkdir <cesta>`
+
+Změní systémový soubor nebo složku v `/system`: `write` zapíše obsah souboru `zdroj` (nejvýš 60 KiB) do `cíl`, `rm` smaže soubor nebo prázdnou složku, `mkdir` založí složku. Lidé do `/system` jinak nesmí; tohle je úkon správy a potvrdí ho člověk s rolí správy v systémovém dialogu (stejně ve vydání i ve vývoji). `/system/accounts` (databáze účtů) nejde změnit nikdy.
+
+```shell
+system [op] [path] [source]
+```
+
+Plné jméno `system-file` · vstup: nic · výstup: nic
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[op]` | text |  | write, rm nebo mkdir |
+| `[path]` | cesta |  | cesta pod /system/ |
+| `[source]` | cesta |  | soubor s obsahem (jen u write) |
+
+Nové nastavení času z domova.
+
+```shell
+system write /system/config/ntpd.toml ntpd.toml
+```
+
+**Potřebuje:** relace uživatele a potvrzení člověka s rolí správy
+
+**Chyby:** `SH_ARGS`, `ACCESS_DENIED`, `CANCELED`, `NOT_SUPPORTED`
+
+**Souvisí:** [`vzhled`](#vzhled)
 
 
 ### `loglevel`

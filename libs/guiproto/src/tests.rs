@@ -724,3 +724,22 @@ fn sync_points_reject_inconsistent_encoding() {
     b[8] = 2;
     assert!(ClientMsg::decode(&b).is_err());
 }
+
+/// Zpravy rezimu vyvojare zna jen vyvojove sestaveni (feature `dev-mode`);
+/// vydani je odmitne jako neznamou zpravu.
+#[test]
+fn rezim_vyvojare_jen_s_feature() {
+    let (req, rep) = ([4u8, 1], [3u8, 1]);
+    #[cfg(not(feature = "dev-mode"))]
+    {
+        assert_eq!(DialogRequest::decode(&req), Err(Error::NotSupported));
+        assert_eq!(DialogReply::decode(&rep), Err(Error::NotSupported));
+    }
+    #[cfg(feature = "dev-mode")]
+    {
+        assert_eq!(DialogRequest::decode(&req), Ok(DialogRequest::DevMode { on: true }));
+        assert_eq!(DialogReply::decode(&rep), Ok(DialogReply::DevMode { on: true }));
+        assert_eq!(DialogRequest::DevMode { on: false }.encode(), [4, 0]);
+        assert_eq!(DialogReply::DevMode { on: true }.encode(), rep);
+    }
+}

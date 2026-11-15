@@ -5,6 +5,12 @@ edition.workspace = true
 license.workspace = true
 description = "Jadro kompozitoru: okna, strom vrstev, transakce, takt snimku, skladani, vstup, systemove dialogy, akce"
 
+[features]
+default = []
+# Rezim vyvojare v liste (`src/devmode.rs`): jen vyvojove sestaveni,
+# zapina ho xtask pro obrazy s vyvojovym profilem.
+dev-mode = ["guiproto/dev-mode"]
+
 [dependencies]
 guiproto = { path = "../guiproto" }
 clipproto = { path = "../clipproto" }

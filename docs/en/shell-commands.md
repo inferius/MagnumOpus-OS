@@ -11,7 +11,7 @@
 - **Tasks:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Session and safety:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Help:** [`help`](#help), [`explain`](#explain)
-- **System:** [`audio`](#audio), [`vzhled`](#vzhled), [`povoleni`](#povoleni), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **System:** [`audio`](#audio), [`vzhled`](#vzhled), [`povoleni`](#povoleni), [`system`](#system), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Files
 
@@ -1876,6 +1876,37 @@ povoleni odvolat org.libsdl.testaudio
 **Errors:** `SH_ARGS`, `NOT_FOUND`, `ACCESS_DENIED`, `NOT_SUPPORTED`
 
 **Related:** [`audio`](#audio)
+
+
+### `system`
+
+change in /system (an administration action): `system write <target> <source>`, `system rm <path>`, `system mkdir <path>`
+
+Changes a system file or directory in `/system`: `write` writes the content of the file `source` (at most 60 KiB) to `target`, `rm` deletes a file or an empty directory, `mkdir` creates a directory. People may not write to `/system` otherwise; this is an administration action confirmed by a person with the administration role in a system dialog (the same in a release and in development). `/system/accounts` (the account database) can never be changed.
+
+```shell
+system [op] [path] [source]
+```
+
+Full name `system-file` · input: nothing · output: nothing
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `[op]` | text |  | write, rm or mkdir |
+| `[path]` | path |  | a path under /system/ |
+| `[source]` | path |  | the file with the content (write only) |
+
+New time settings from home.
+
+```shell
+system write /system/config/ntpd.toml ntpd.toml
+```
+
+**Needs:** a user session and confirmation by a person with the administration role
+
+**Errors:** `SH_ARGS`, `ACCESS_DENIED`, `CANCELED`, `NOT_SUPPORTED`
+
+**Related:** [`vzhled`](#vzhled)
 
 
 ### `loglevel`

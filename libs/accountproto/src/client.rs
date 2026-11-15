@@ -90,6 +90,13 @@ impl SelfService {
     pub fn elevate(&self, action: u32, params: Vec<u8>) -> Result<Vec<u8>> {
         call(&self.0, Request::Elevate { action, params })
     }
+
+    /// Rezim vyvojare (jen vyvojove sestaveni): `set` = `DEV_QUERY` |
+    /// `DEV_OFF` | `DEV_ON`; vraci stav.
+    #[cfg(feature = "dev-mode")]
+    pub fn dev_mode(&self, set: u8) -> Result<bool> {
+        call(&self.0, Request::DevMode { set }).map(|b| b.first() == Some(&1))
+    }
 }
 
 /// Odpoved overeni jako vysledek: `Ok(relace)`, jinak `ACCESS_DENIED`
