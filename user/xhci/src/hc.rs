@@ -234,7 +234,12 @@ impl Hc {
         self.regs.set_ir32(ERSTSZ, 1);
         self.regs.set_ir64(ERDP, self.events.erdp());
         self.regs.set_ir64(ERSTBA, self.events.erst.phys);
-        self.regs.set_ir32(IMOD, 4000); // 1 ms (jednotky 250 ns)
+        // Moderace preruseni 40 us (jednotky 250 ns, stejne jako Linux).
+        // Pri 1 ms by na skutecnem radici kazdy prenos dokonceny do 1 ms od
+        // minuleho preruseni cekal na casovac moderace: disk USB 3 by mel
+        // strop kolem 32 KiB/ms (prenosy jdou po jednom). V QEMU TCG je
+        // vysledek stejny (latenci tam urcuje emulace).
+        self.regs.set_ir32(IMOD, 160);
         self.regs.set_ir32(IMAN, IMAN_IE | IMAN_IP);
         self.regs.set_op32(USBCMD, CMD_RUN | CMD_INTE);
         self.wait_status(STS_HALTED, false, "start")

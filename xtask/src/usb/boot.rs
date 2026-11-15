@@ -202,7 +202,12 @@ pub(super) fn boot_with(
 ) -> Result<PathBuf> {
     let pid = std::process::id();
     let vars = target_dir().join(format!("fw-{}-vars-usb-{pid}.fd", arch.name));
-    let log = target_dir().join(format!("serial-usb-{}-{pid}.log", arch.name));
+    // Dalsi start v tomtez behu (start nainstalovaneho systemu) dostane
+    // vlastni log, at log instalace zustane (casy kroku installd).
+    static BOOTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = BOOTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let suffix = if n == 0 { String::new() } else { format!("-{}", n + 1) };
+    let log = target_dir().join(format!("serial-usb-{}-{pid}{suffix}.log", arch.name));
     let _ = std::fs::remove_file(&log);
     let mut extra = extra.to_vec();
     let port = crate::qmp::free_port()?;

@@ -43,8 +43,8 @@ bez dotazů; interaktivní dotazy jen ručně):
    Je-li na disku jiný systém, otázka, který systém startuje jako výchozí.
 8. **Průběh instalace** - osm kroků (čtení systému ze živého USB, tabulka
    oddílů, oddíl EFI, zavaděč a systém, souborový systém, nastavení, účet,
-   ověření). Čtení ze flashky je první a nejdelší: debug build pod TCG
-   ~50 s, než se cokoli zapíše.
+   ověření). Čtení ze flashky je první a nejdelší, než se cokoli zapíše
+   (čísla v [Rychlost instalace](#rychlost-instalace)).
 
 <figure class="diagram">
 <svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cesta od příkazu install k disku">
@@ -193,7 +193,39 @@ Postup služby `installd` **[ověřeno v QEMU]** (x86_64 i aarch64, `--only inst
    soubor `/system/accounts/users/<uid>`), domovská složka jako
    dataset; práva souborů znovu nastaví init při startu,
 7. ověření: tabulka znovu přes diskguard, soubory na ESP přečtené zpět
-   a porovnané, náš FS připojený jen pro čtení.
+   z cílového disku a porovnané s otiskem zdroje (délka a XXH3-128
+   spočtené hned po přečtení z flashky; zdroj se z paměti uvolní po
+   zápisu), náš FS připojený jen pro čtení.
+
+### Rychlost instalace
+
+Systém se z flashky čte jednou (zavaděč, jádro, `os/instfs.img`) a stejná
+data jdou na cílovou ESP; ověření čte zpět jen to, co se zapsalo.
+**[ověřeno v QEMU]** (x86_64 i aarch64, `--only instalace-gui`):
+
+- čtení z flashky po 1 MiB: `BlockClient::read` pošle 32 požadavků bez
+  čekání a `usb-storage` je spojí do jednoho příkazu READ ([Disky](disky.md),
+  [USB](usb.md)); přenos dat USB po 32 KiB,
+- zápis na cíl bez čekání na každou odpověď (`write_queued`, chyba se
+  ohlásí u `flush`, který FAT i FS po zápisu volají),
+- ověření otiskem místo druhé kopie v paměti (špička paměti o velikost
+  systému nižší).
+
+Změřeno 15. 11. 2026 pod TCG, debug build, stejný obraz (zdroj 108-114 MiB),
+revize `ccfdb23` (před) a `ccfdb23` + tato změna (po), čas kroků z logu installd:
+
+| krok | x86_64 před | x86_64 po | aarch64 před | aarch64 po |
+|---|---|---|---|---|
+| čtení z flashky | 104 s | 61 s | 154 s | 92 s |
+| kopie na ESP | 43 s | 23 s | 57 s | 30 s |
+| ověření | 51 s | 24 s | 63 s | 34 s |
+| instalace celkem | 201 s | 110 s | 277 s | 157 s |
+
+Podmínky: QEMU TCG na hostiteli Windows, 4 vCPU, flashka `usb-storage`
+(super speed) na xHCI, cíl NVMe. Pod TCG stojí každý přenos USB
+kolem 13 ms a každý příkaz NVMe (32 KiB) kolem 7 ms (debug, `ccfdb23*`)
+bez ohledu na velikost dat, proto rozhoduje počet požadavků, ne objem. Další zrychlení
+by daly víc přenosů na endpoint najednou v `xhci` a větší příkazy NVMe.
 
 ## Nabídka firmwaru (NVRAM)
 

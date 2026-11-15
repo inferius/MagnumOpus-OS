@@ -1674,6 +1674,7 @@ dependencies = [
  "libos",
  "rand_core 0.6.4",
  "taskproto",
+ "xxhash-rust",
 ]
 
 [[package]]

@@ -58,7 +58,17 @@ pub trait Disks {
     fn model(&self, _d: usize) -> alloc::string::String {
         alloc::string::String::new()
     }
+    /// Nejvic bajtu v jednom volani `read` (nasobek sektoru, aspon
+    /// [`IO_MAX`]). Ovladac s pomalym prikazem (USB: CBW, data, CSW) vrati
+    /// vic: server pak spoji po sobe jdouci cteni klienta do jednoho
+    /// prikazu ([`serve`]). `write` dostane vzdy nejvys [`IO_MAX`].
+    fn max_read(&self, _d: usize) -> usize {
+        IO_MAX
+    }
 }
+
+/// Nejvic bajtu, ktere server spoji z po sobe jdoucich cteni klienta.
+pub const BATCH_MAX: usize = 1024 * 1024;
 
 /// Stranka pro test ochrany DMA (`op::TEST_DMA_PROTECTION`): bezna pamet
 /// ovladace (ne DMA pamet, s IOMMU neni v domene zarizeni) naplnena vzorem.
@@ -103,11 +113,13 @@ impl DmaProbe {
     }
 }
 
-/// Precte souvisly usek sektoru zarizeni po kusech nejvys [`IO_MAX`].
+/// Precte souvisly usek sektoru zarizeni po kusech nejvys
+/// [`Disks::max_read`].
 fn read_dev(disks: &mut impl Disks, d: usize, lba: u64, buf: &mut [u8]) -> Result<()> {
     let ss = disks.sector_size(d);
-    for (i, chunk) in buf.chunks_mut(IO_MAX).enumerate() {
-        disks.read(d, lba + (i * IO_MAX / ss) as u64, chunk)?;
+    let max = (disks.max_read(d).clamp(IO_MAX, BATCH_MAX) / ss * ss).max(ss);
+    for (i, chunk) in buf.chunks_mut(max).enumerate() {
+        disks.read(d, lba + (i * max / ss) as u64, chunk)?;
     }
     Ok(())
 }
@@ -233,7 +245,10 @@ pub fn report_disks(name: &str, disks: &mut impl Disks, bootstrap: &Channel) -> 
 }
 
 /// Obsluhuje klienty, dokud vsichni nezavrou kanal. Pozadavky se
-/// zpracovavaji po jednom (protokol verze 1 je synchronni).
+/// zpracovavaji v poradi prichodu a odpovedi jdou ve stejnem poradi.
+/// Cteni, ktera klient poslal bez cekani (`BlockClient::read`) a ktera na
+/// sebe navazuji, server u ovladace s vetsim [`Disks::max_read`] precte
+/// jednim volanim (`read_batch`).
 pub fn serve(name: &str, disks: &mut impl Disks, mut clients: Vec<Client>) {
     while !clients.is_empty() {
         let items: Vec<_> = clients
@@ -254,17 +269,20 @@ pub fn serve(name: &str, disks: &mut impl Disks, mut clients: Vec<Client>) {
             if s.intersects(Signals::READABLE) {
                 match c.channel.try_read() {
                     Ok(msg) => {
-                        let (result, data) = match Request::decode(&msg.data) {
-                            Some((req, payload)) => match raw_check(disks, c, &req) {
-                                Ok(()) => handle(disks, c.disk, &c.view, req, payload),
-                                Err(e) => {
-                                    println!("{name}: disk {}: raw zapis LBA {} ({} s.) odmitnut", c.disk, req.lba, req.count);
-                                    (Err(e), Vec::new())
+                        let mut msg = Some(msg);
+                        // Navazujici cteni ve fronte: jednim volanim ovladace.
+                        if disks.max_read(c.disk) > IO_MAX {
+                            match read_batch(disks, c, msg.take().unwrap()) {
+                                Ok(rest) => msg = rest,
+                                Err(()) => {
+                                    closed.push(i);
+                                    continue;
                                 }
-                            },
-                            None => (Err(Error::InvalidArgs), Vec::new()),
-                        };
-                        if c.channel.write(&encode_reply(result, &data), Vec::new()).is_err() {
+                            }
+                        }
+                        if let Some(msg) = msg
+                            && !reply_one(name, disks, c, &msg.data)
+                        {
                             closed.push(i);
                         }
                     }
@@ -279,6 +297,84 @@ pub fn serve(name: &str, disks: &mut impl Disks, mut clients: Vec<Client>) {
             clients.remove(i);
         }
     }
+}
+
+/// Jeden pozadavek klienta a odpoved; `false` = kanal je zavreny.
+fn reply_one(name: &str, disks: &mut impl Disks, c: &mut Client, raw: &[u8]) -> bool {
+    let (result, data) = match Request::decode(raw) {
+        Some((req, payload)) => match raw_check(disks, c, &req) {
+            Ok(()) => handle(disks, c.disk, &c.view, req, payload),
+            Err(e) => {
+                println!("{name}: disk {}: raw zapis LBA {} ({} s.) odmitnut", c.disk, req.lba, req.count);
+                (Err(e), Vec::new())
+            }
+        },
+        None => (Err(Error::InvalidArgs), Vec::new()),
+    };
+    c.channel.write(&encode_reply(result, &data), Vec::new()).is_ok()
+}
+
+/// Platne cteni pro spojeni: (lba, pocet sektoru po 512 B).
+fn batch_read(view: &Decision, raw: &[u8]) -> Option<(u64, u32)> {
+    let (req, _) = Request::decode(raw)?;
+    (req.op == op::READ && req.count > 0 && req.count <= MAX_SECTORS && span(view, req.lba, req.count as u64).is_ok())
+        .then_some((req.lba, req.count))
+}
+
+/// Spoji cteni `first` s navazujicimi ctenimi ve fronte klienta (celkem
+/// nejvys [`Disks::max_read`]), precte je jednim volanim a odpovi na kazde
+/// zvlast. Vraci prvni zpravu, ktera nenavazuje (zpracuje ji volajici),
+/// `Err` = kanal je zavreny. Chyba spojeneho cteni: kazde cteni znovu samo,
+/// at chybu dostane to, ktereho se tyka.
+fn read_batch(disks: &mut impl Disks, c: &mut Client, first: libos::Message) -> core::result::Result<Option<libos::Message>, ()> {
+    let Some((lba, count)) = batch_read(&c.view, &first.data) else { return Ok(Some(first)) };
+    // Nezarovnany usek (sektor zarizeni > 512 B) cte o sektor navic.
+    let extra = if c.view.sector_size > SECTOR { c.view.sector_size } else { 0 };
+    let limit = disks.max_read(c.disk).min(BATCH_MAX).saturating_sub(extra);
+    let mut parts: Vec<u32> = alloc::vec![count];
+    let mut total = count as u64;
+    let mut rest = None;
+    while (total as usize + MAX_SECTORS as usize) * SECTOR <= limit {
+        let m = match c.channel.try_read() {
+            Ok(m) => m,
+            Err(_) => break,
+        };
+        match batch_read(&c.view, &m.data) {
+            Some((l, n)) if l == lba + total && span(&c.view, lba, total + n as u64).is_ok() => {
+                parts.push(n);
+                total += n as u64;
+            }
+            _ => {
+                rest = Some(m);
+                break;
+            }
+        }
+    }
+    let send = |c: &Client, r: Result<u64>, data: &[u8]| c.channel.write(&encode_reply(r, data), Vec::new()).map_err(|_| ());
+    if parts.len() == 1 {
+        let (r, data) = handle(disks, c.disk, &c.view, Request { op: op::READ, count, lba }, &[]);
+        send(c, r, &data)?;
+        return Ok(rest);
+    }
+    match read_client(disks, c.disk, &c.view, lba, total as u32) {
+        Ok(buf) => {
+            let mut at = 0;
+            for n in parts {
+                let len = n as usize * SECTOR;
+                send(c, Ok(0), &buf[at..at + len])?;
+                at += len;
+            }
+        }
+        Err(_) => {
+            let mut l = lba;
+            for n in parts {
+                let (r, data) = handle(disks, c.disk, &c.view, Request { op: op::READ, count: n, lba: l }, &[]);
+                send(c, r, &data)?;
+                l += n as u64;
+            }
+        }
+    }
+    Ok(rest)
 }
 
 /// Raw kanal instalatoru: zapis a TRIM jen do struktur GPT a nasich
@@ -349,7 +445,8 @@ fn span(view: &Decision, lba: u64, count: u64) -> Result<Span> {
     })
 }
 
-/// Cteni useku klienta (`count` sektoru po 512 B, nejvys `MAX_SECTORS`).
+/// Cteni useku klienta (`count` sektoru po 512 B; z `handle` nejvys
+/// `MAX_SECTORS`, ze spojeneho cteni nejvys [`Disks::max_read`]).
 fn read_client(disks: &mut impl Disks, d: usize, view: &Decision, lba: u64, count: u32) -> Result<Vec<u8>> {
     let s = span(view, lba, count as u64)?;
     let len = count as usize * SECTOR;

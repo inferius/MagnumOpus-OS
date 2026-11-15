@@ -21,4 +21,5 @@ keymap = { path = "../../libs/keymap" }
 taskproto = { path = "../../libs/taskproto" }
 accounts = { path = "../../libs/accounts" }
 accountproto = { path = "../../libs/accountproto" }
+xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"] }
 rand_core = { version = "0.6", default-features = false }

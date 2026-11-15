@@ -15,6 +15,9 @@
 //! vic zapisu bez cekani (`BlockClient::write_queued`): odpovedi vybere
 //! pred dalsim pozadavkem jineho druhu (cteni, flush, ...). Cteni po zapisu
 //! tak vidi zapsana data a chyba zapisu se ohlasi nejpozdeji u `flush`.
+//! Stejne tak dlouhe cteni (`BlockClient::read`) posle vic pozadavku
+//! najednou; ovladac s pomalym prikazem (USB) navazujici cteni spoji
+//! (`server::Disks::max_read`).
 //! TODO: sdilena pamet a fronty pozadavku (asynchronni I/O podle navrhu).
 
 #![no_std]
@@ -35,6 +38,9 @@ pub const MAX_SECTORS: u32 = 64;
 /// Nejvic zapisu na ceste bez odpovedi (32 x 32 KiB = 1 MiB, hluboko pod
 /// limitem fronty kanalu).
 pub const MAX_QUEUED_WRITES: u32 = 32;
+/// Nejvic cteni na ceste bez odpovedi v jednom `BlockClient::read`
+/// (32 x 32 KiB = 1 MiB odpovedi ve fronte kanalu).
+pub const READ_AHEAD: usize = 32;
 pub const HEADER: usize = 16;
 
 /// Kody operaci.
@@ -232,28 +238,48 @@ impl BlockClient {
         Ok((value, payload.to_vec()))
     }
 
-    /// Precte sektory od `lba` do `buf` (delka = nasobek 512).
+    /// Precte sektory od `lba` do `buf` (delka = nasobek 512). Delsi cteni
+    /// posle az [`READ_AHEAD`] pozadavku bez cekani (odpovedi chodi
+    /// v poradi): klient neceka na kazdou zpravu zvlast a ovladac muze
+    /// navazujici cteni spojit (`server::Disks::max_read`).
     pub fn read(&self, lba: u64, buf: &mut [u8]) -> Result<()> {
+        use core::sync::atomic::Ordering;
         if !buf.len().is_multiple_of(SECTOR) {
             return Err(Error::InvalidArgs);
         }
-        for (i, chunk) in buf.chunks_mut(MAX_SECTORS as usize * SECTOR).enumerate() {
-            let count = (chunk.len() / SECTOR) as u32;
-            let lba = lba + (i * MAX_SECTORS as usize) as u64;
-            let (_, data) = self.call(
-                Request {
-                    op: op::READ,
-                    count,
-                    lba,
-                },
-                &[],
-            )?;
-            if data.len() != chunk.len() {
-                return Err(Error::Corrupted);
-            }
-            chunk.copy_from_slice(&data);
+        if self.failed.load(Ordering::Acquire) {
+            return Err(Error::IoError);
         }
-        Ok(())
+        self.drain()?;
+        const CHUNK: usize = MAX_SECTORS as usize * SECTOR;
+        let n = buf.len().div_ceil(CHUNK);
+        let (mut sent, mut got) = (0usize, 0usize);
+        let mut first_err = None;
+        while got < n {
+            while sent < n && sent - got < READ_AHEAD && first_err.is_none() {
+                let count = ((buf.len() - sent * CHUNK).min(CHUNK) / SECTOR) as u32;
+                let req = Request { op: op::READ, count, lba: lba + (sent * MAX_SECTORS as usize) as u64 };
+                match self.channel.write(&req.encode(&[]), Vec::new()) {
+                    Ok(()) => sent += 1,
+                    Err(e) => first_err = Some(e),
+                }
+            }
+            if got == sent {
+                break;
+            }
+            // Odpovedi na vsechna odeslana cteni vybrat i po chybe (jinak
+            // by je dostal dalsi pozadavek).
+            let m = self.reply()?;
+            let end = ((got + 1) * CHUNK).min(buf.len());
+            let chunk = &mut buf[got * CHUNK..end];
+            got += 1;
+            match decode_reply(&m.data) {
+                Ok((_, data)) if data.len() == chunk.len() => chunk.copy_from_slice(data),
+                Ok(_) => _ = first_err.get_or_insert(Error::Corrupted),
+                Err(e) => _ = first_err.get_or_insert(e),
+            }
+        }
+        first_err.map_or(Ok(()), Err)
     }
 
     /// Zapise sektory od `lba` (delka = nasobek 512).

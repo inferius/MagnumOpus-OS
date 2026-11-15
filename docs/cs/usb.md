@@ -111,8 +111,8 @@ jeden požadavek, jinak `ALREADY_EXISTS`.
 | 2 `CONTROL` | všichni | kontrolní přenos na EP0: data = setup 8 B + data OUT; odpověď = data IN. `SET_ADDRESS` a `SET_CONFIGURATION` = `ACCESS_DENIED` (řídí je řadič) |
 | 3 `INTERRUPT_IN` | všichni | `a` = endpoint (např. 0x81), `b` = nejvýš bajtů; odpověď až přijdou data. Jen endpointy vlastního rozhraní, jinak `ACCESS_DENIED` |
 | 4 `INTERRUPT_OUT` | všichni | `a` = endpoint, data = obsah |
-| 5 `BULK_IN` | všichni | `a` = bulk endpoint, `b` = nejvýš bajtů (16 KiB); odpověď = přečtená data (kratší při krátkém paketu) |
-| 6 `BULK_OUT` | všichni | `a` = bulk endpoint, data = obsah (nejvýš 16 KiB) |
+| 5 `BULK_IN` | všichni | `a` = bulk endpoint, `b` = nejvýš bajtů (32 KiB); odpověď = přečtená data (kratší při krátkém paketu) |
+| 6 `BULK_OUT` | všichni | `a` = bulk endpoint, data = obsah (nejvýš 32 KiB) |
 | 16 `ATTACH` | hub | na port `a` se připojilo zařízení (port je po resetu povolený); odpověď `actual` = slot |
 | 17 `DETACH` | hub | zařízení z portu `a` zmizelo: řadič zavře kanály jeho rozhraní a zruší slot |
 | 18 `SCAN_DONE` | hub | první průchod porty dokončen |
@@ -138,21 +138,28 @@ nahlásí disky stejně jako ovladač řadiče disků (`block` + kanál, nakonec
 v seznamu disků dřív, než init hledá souborový systém (živé USB,
 [Živé USB](zive-usb.md)).
 
-**Bulk přenosy v `xhci`.** Bulk endpoint má buffer 32 KiB a jeden přenos
-používá okno 16 KiB, které neleží přes hranici 64 KiB (jeden TRB ji
+**Bulk přenosy v `xhci`.** Bulk endpoint má buffer 64 KiB a jeden přenos
+používá okno 32 KiB, které neleží přes hranici 64 KiB (jeden TRB ji
 nesmí překročit, xHCI 4.11.7.1). Typ endpointu 2 (OUT) a 6 (IN),
 interval 0, průměrná délka TRB 3 KiB.
 
 **Jeden příkaz BOT** (`libs/usbproto/src/storage.rs`, `user/usb-storage/src/bot.rs`):
 
 1. CBW (31 B, podpis `USBC`, tag, délka dat, směr, LUN, příkaz SCSI) na bulk OUT,
-2. data po kusech nejvýš 16 KiB na bulk IN nebo OUT; krátký paket nebo
+2. data po kusech nejvýš 32 KiB na bulk IN nebo OUT; krátký paket nebo
    STALL fázi ukončí (STALL: `CLEAR_FEATURE(ENDPOINT_HALT)`),
 3. CSW (13 B, `USBS`, stejný tag, residue, stav) na bulk IN; po STALL
    ještě jeden pokus.
 
 Neplatné CSW, chyba fáze nebo chyba přenosu = **Reset Recovery** (reset
 rozhraní, uvolnění obou endpointů) a příkaz se zopakuje (nejvýš 3x).
+
+**Spojená čtení** **[ověřeno v QEMU]**: příkaz BOT stojí tři přenosy
+(CBW, data, CSW), proto `usb-storage` hlásí větší `Disks::max_read` a server
+spojí navazující čtení klienta do jednoho příkazu READ (viz
+[Disky](disky.md)): USB 3 nejvýš 1 MiB, starší rychlosti 240 sektorů
+(120 KiB; některé flashky USB 2 větší příkaz nezvládnou, stejný limit má
+Linux). Zápis zůstává po 32 KiB.
 
 **Start:** Get Max LUN (STALL = jeden LUN), pro každý LUN INQUIRY (jen
 disky s přímým přístupem, typ 0), TEST UNIT READY s opakováním až 15 s
@@ -336,7 +343,7 @@ Další omezení první verze:
 - dotyk více prsty (Multi-touch, kolekce Finger) a gesta zatím ne, jen
   jedno pero nebo jeden bod,
 - izochronní endpointy zatím ne (zvuk, kamery), jeden interrupter,
-- bulk: jeden přenos nejvýš 16 KiB, u USB 3 bez burstu (MaxBurst 0) - disk
+- bulk: jeden přenos nejvýš 32 KiB, u USB 3 bez burstu (MaxBurst 0) - disk
   USB 3 je proto pomalejší, než by mohl,
 - zrušení visícího přenosu (příkaz Stop Endpoint) zatím není: disk USB,
   který na přenos neodpoví do 20 s, zůstane nepoužitelný až do odpojení,
