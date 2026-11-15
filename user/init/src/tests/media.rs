@@ -281,7 +281,9 @@ fn decoder_crash(_: &Startup) -> TestResult {
     Ok(())
 }
 
-fn bad_requests(_: &Startup) -> TestResult {
+fn bad_requests(s: &Startup) -> TestResult {
+    // Poskozena magie jde do ffdec (spousti se pres libd).
+    super::media_ffmpeg::libd_ready(s)?;
     let m = session()?;
     check_eq!(m.play().err(), Some(Error::BadState), "PLAY bez zdroje");
     // Poskozeny soubor: OPEN selze, relace zustane pouzitelna.

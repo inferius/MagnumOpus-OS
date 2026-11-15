@@ -16,3 +16,4 @@ Služba médií (`docs/cs/multimedia.md`). Řídicí kanál od initu (`media.rs`
 ## Pasti
 
 - Obsluha zdroje kanálem aplikace blokuje vlákno relace (čeká až 5 s na aplikaci); ostatní relace běží dál.
+- Po pádu libd obnoví `mediad` svou relaci až při dalším spuštění `ffdec` (`RECONNECT` na lístku u supervisoru initu). Během testů supervisor neřídí hlavní smyčka initu, ale test: testy, které spouštějí `ffdec`, proto volají `media_ffmpeg::libd_ready` (jednou za generaci libd spustí `ffdec` ve vedlejším vlákně a mezitím řídí supervisor). Bez toho po sadě `procesy` (test obnovy libd) visí každé `OPEN` do `ffdec`.

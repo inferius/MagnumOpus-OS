@@ -9,7 +9,9 @@
 
 use alloc::format;
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicU64, Ordering};
 use core::time::Duration;
 
 use audioproto::conn::AudioClient;
@@ -17,7 +19,7 @@ use audioproto::{Direction, Format, Sample};
 use bufdesc::{BufDesc, format as fourcc};
 use libos::abi::vm::MAP_READ;
 use libos::initfs::Initfs;
-use libos::{Channel, Fence, Mapping, Startup, Vmo, time};
+use libos::{Channel, Error, Fence, Mapping, Startup, Vmo, time};
 use mediaproto::conn::MediaClient;
 use mediaproto::source::{SourceRequest, clamp};
 use mediaproto::{AudioRing, Event, Kind};
@@ -40,8 +42,52 @@ fn media(s: &Startup, name: &str) -> Result<&'static [u8], String> {
     fs.find(&format!("media/{name}")).ok_or_else(|| format!("media/{name} neni v initfs"))
 }
 
-fn session() -> Result<MediaClient, String> {
+fn session(s: &Startup) -> Result<MediaClient, String> {
+    libd_ready(s)?;
     crate::media::connect().map(MediaClient::new).map_err(|e| fail("pripojeni k mediad", e))
+}
+
+/// Generace libd, se kterou uz mediad spustil ffdec (0 = zatim nikdy).
+static LIBD_READY: AtomicU64 = AtomicU64::new(0);
+
+/// mediad spousti `ffdec` (PIE) pres svou relaci s libd. Po padu libd (sada
+/// `procesy`, test obnovy libd) ji obnovi az pri dalsim spusteni pres listek
+/// (`RECONNECT` u supervisoru initu) - jenze supervisor behem testu ridi jen
+/// test, hlavni smycka initu nebezi. Jednou za generaci libd proto test
+/// spusti ffdec (nesmyslny vstup) ve vedlejsim vlakne a mezitim ridi
+/// supervisor. V bezicim systemu supervisor ridi hlavni smycka sama.
+pub(super) fn libd_ready(s: &Startup) -> TestResult {
+    let generation = crate::supervisor::SUPERVISOR.lock().generation("libd").unwrap_or(0);
+    if LIBD_READY.load(Ordering::Relaxed) == generation {
+        return Ok(());
+    }
+    let result: Arc<spin::Mutex<Option<Result<(), Error>>>> = Arc::new(spin::Mutex::new(None));
+    let r = result.clone();
+    let t = libos::thread::spawn("media-libd", move || {
+        let probe = || -> Result<(), Error> {
+            let m = MediaClient::new(crate::media::connect()?);
+            let vmo = Vmo::create(64)?;
+            vmo.write(0, &[0u8; 64])?;
+            // Nuly FFmpeg nepozna: chyba je spravne, jde jen o start ffdec.
+            match m.open_vmo(&vmo, 64) {
+                Err(Error::TimedOut) => Err(Error::TimedOut),
+                _ => Ok(()),
+            }
+        };
+        *r.lock() = Some(probe());
+    })
+    .map_err(|e| fail("vlakno", e))?;
+    let end = time::deadline_after(Duration::from_secs(30));
+    while result.lock().is_none() {
+        if time::now() > end {
+            return Err(String::from("mediad po restartu libd nespustil ffdec do 30 s"));
+        }
+        crate::supervisor::SUPERVISOR.lock().step(s, Some(time::deadline_after(Duration::from_millis(20))));
+    }
+    let _ = t.join(None);
+    result.lock().take().unwrap_or(Err(Error::IoError)).map_err(|e| fail("spusteni ffdec (obnova libd)", e))?;
+    LIBD_READY.store(generation, Ordering::Relaxed);
+    Ok(())
 }
 
 fn open_bytes(m: &MediaClient, data: &[u8]) -> Result<mediaproto::Info, String> {
@@ -121,7 +167,7 @@ fn i420_md5(d: &BufDesc, vmo: &Vmo) -> Result<String, String> {
 
 fn describe(s: &Startup) -> TestResult {
     for (name, codec) in [("av1-64x64.ivf", "av1"), ("vp9-64x64.webm", "vp9")] {
-        let m = session()?;
+        let m = session(s)?;
         let info = open_bytes(&m, media(s, name)?)?;
         let v = info.first(Kind::Video).ok_or(format!("{name}: chybi video"))?;
         let st = &info.streams[v];
@@ -136,7 +182,7 @@ fn describe(s: &Startup) -> TestResult {
 fn frames(s: &Startup, file: &str, md5: &str) -> Result<(MediaClient, Pool, Vec<String>, Vec<String>), String> {
     let want = md5_list(media(s, md5)?);
     check!(!want.is_empty(), "prazdny seznam MD5");
-    let m = session()?;
+    let m = session(s)?;
     let info = open_bytes(&m, media(s, file)?)?;
     let v = info.first(Kind::Video).ok_or("chybi video")? as i32;
     m.select(v, -1, -1).map_err(|e| fail("SELECT", e))?;
@@ -203,8 +249,8 @@ fn serve(ch: Channel, data: Vec<u8>) {
     }
 }
 
-fn wav_audio(_: &Startup) -> TestResult {
-    let m = session()?;
+fn wav_audio(s: &Startup) -> TestResult {
+    let m = session(s)?;
     let (ours, theirs) = Channel::create().map_err(|e| fail("kanal zdroje", e))?;
     let data = wav(500);
     libos::thread::spawn("zdroj-wav", move || serve(ours, data)).map_err(|e| fail("vlakno zdroje", e))?;
@@ -235,20 +281,20 @@ fn wav_audio(_: &Startup) -> TestResult {
     Ok(())
 }
 
-fn bad_input(_: &Startup) -> TestResult {
+fn bad_input(s: &Startup) -> TestResult {
     // Nahodne bajty: FFmpeg format nepozna (NOT_SUPPORTED), relace zije.
     let junk: Vec<u8> = (0..4096u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8).collect();
-    let m = session()?;
+    let m = session(s)?;
     let r = open_bytes(&m, &junk);
     check!(r.is_err(), "nahodne bajty se otevrely");
     // Useknuty WebM: otevreni muze projit, dekodovani pak skonci chybou
     // nebo koncem, nikdy padem sluzby.
-    let m2 = session()?;
+    let m2 = session(s)?;
     let cut = &wav(100)[..30];
     match open_bytes(&m2, cut) {
         Ok(_) | Err(_) => {}
     }
-    check!(session().is_ok(), "mediad zije");
+    check!(session(s).is_ok(), "mediad zije");
     Ok(())
 }
 
