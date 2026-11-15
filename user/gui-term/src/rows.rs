@@ -12,25 +12,159 @@ use term::ui::draw::{Line, Mark, PromptRow, Role};
 
 use crate::Look;
 
-/// Mrizka v okne: pocatek a velikost bunky.
+/// Mrizka v okne: radky maji vlastni vysku podle role (okraje nad a pod
+/// textem jako v navrhu: hlavicka bloku 28 px, ramecek nahledu, paticka),
+/// text radku je vzdy pasmo vysky `ch`. Radky se skladaji od spodniho
+/// okraje nahoru (radek vstupu sedi dole); stavovy radek nahore je
+/// pripnuty a co se nevejde, schova se pod nim (`clip_top`).
+#[derive(Default)]
 pub struct Grid {
     pub x: i32,
-    pub y: i32,
     pub cw: u32,
     pub ch: u32,
     pub cols: usize,
+    /// Horni hrana textu radku.
+    tops: Vec<i32>,
+    /// Okraj nad a pod textem radku (px).
+    pads: Vec<(u32, u32)>,
+    /// Odsazeni textu radku vpravo (px; text v ramecku nahledu, chyby).
+    indents: Vec<u32>,
+    /// Nad touto hranou se radky obsahu nekresli (pod stavovym radkem).
+    pub clip_top: i32,
+    /// Spodni hrana posledniho radku.
+    pub bottom: i32,
+}
+
+/// Rozestupy navrhu pro role radku (tokeny `space`).
+pub struct Spacing {
+    pub sp: [u32; 12],
+    /// Vyska tlacitek vyzvy a pilulky slozky (`control_h_compact`).
+    pub control: u32,
+    /// Vyska radku vstupu (`#line`: `control_h`).
+    pub line: u32,
+}
+
+fn is_err(l: Option<&Line>) -> bool {
+    matches!(l.map(|l| &l.role), Some(Role::Body { error: true, .. }))
+}
+
+fn is_preview(l: Option<&Line>) -> bool {
+    l.is_some_and(|l| preview_row(&l.role))
+}
+
+/// Okraj nad a pod textem radku `k` a odsazeni textu (px).
+fn pads(lines: &[Line], k: usize, (cw, ch): (u32, u32), s: &Spacing) -> (u32, u32, u32) {
+    let sp = &s.sp;
+    let prev = k.checked_sub(1).and_then(|p| lines.get(p));
+    let next = lines.get(k + 1);
+    // Ramecek: odsazeni od pruhu bloku (3 px + s4) a vnitrni okraj s4.
+    let boxed = 3 + sp[4] + sp[4];
+    let around = |center: u32| center.saturating_sub(ch) / 2;
+    match lines.get(k).map(|l| &l.role) {
+        // `.blk-head`: min-height 28 px.
+        Some(Role::Head { .. }) => (around(s.control), around(s.control), 0),
+        // `.errbox`: okraj s3 nad prvnim a pod poslednim radkem.
+        Some(Role::Body { error: true, .. }) => {
+            let pre = if is_err(prev) { 0 } else { sp[3] };
+            let post = if is_err(next) { 0 } else { sp[3] };
+            (pre, post, sp[4])
+        }
+        Some(Role::Prompt(PromptRow::Question { preview: true })) => (sp[3], sp[3], boxed),
+        Some(Role::Prompt(PromptRow::Change)) => {
+            let pre = if matches!(prev.map(|l| &l.role), Some(Role::Prompt(PromptRow::Change))) { 0 } else { sp[2] };
+            let post = if matches!(next.map(|l| &l.role), Some(Role::Prompt(PromptRow::Change))) { 0 } else { sp[2] };
+            // Radek zmeny zacina dvema mezerami (konzole): text zarovnat
+            // se zahlavim ramecku.
+            (pre, post, boxed.saturating_sub(2 * cw))
+        }
+        // `.diffbox footer`: okraj s3, tlacitka `.btn.small`.
+        Some(Role::Prompt(PromptRow::Buttons { preview: true, .. })) => {
+            let m = sp[3] + around(s.control);
+            (m, m, boxed)
+        }
+        Some(Role::Prompt(PromptRow::Buttons { .. })) => (sp[2] + around(s.control), sp[2] + around(s.control), 0),
+        Some(Role::Prompt(PromptRow::Question { .. })) if !is_preview(prev) => (sp[2], 0, 0),
+        // `.input-wrap`: linka, okraj s3, radek vstupu vysky `control_h`.
+        Some(Role::Input { .. }) => (sp[3] + around(s.line), around(s.line), 0),
+        // `.hintbar`: margin-top s2.
+        Some(Role::Hints(_)) => (sp[2], 0, 0),
+        _ => (0, 0, 0),
+    }
 }
 
 impl Grid {
-    fn row_y(&self, row: usize) -> i32 {
-        self.y + (row as u32 * self.ch) as i32
+    /// Rozlozeni `rows` radku mrizky mezi `top` a `bottom` (od spodu).
+    pub fn layout(x: i32, (cw, ch): (u32, u32), cols: usize, rows: usize, (top, bottom): (i32, i32), lines: &[Line], s: &Spacing) -> Self {
+        let mut g = Grid { x, cw, ch, cols, tops: alloc::vec![0; rows], pads: alloc::vec![(0, 0); rows], indents: alloc::vec![0; rows], clip_top: top, bottom };
+        for k in 0..rows {
+            let (pre, post, ind) = pads(lines, k, (cw, ch), s);
+            g.pads[k] = (pre, post);
+            g.indents[k] = ind;
+        }
+        let pinned = matches!(lines.first().map(|l| &l.role), Some(Role::Status));
+        let mut y = bottom;
+        let first = if pinned { 1 } else { 0 };
+        for k in (first..rows).rev() {
+            let (pre, post) = g.pads[k];
+            y -= (post + ch) as i32;
+            g.tops[k] = y;
+            y -= pre as i32;
+        }
+        if pinned && rows > 0 {
+            let (pre, post) = g.pads[0];
+            g.tops[0] = top + pre as i32;
+            g.clip_top = g.tops[0] + (ch + post) as i32;
+        }
+        // Radek, ktery se nevejde cely, se schova cely (ne pulka textu).
+        if let Some(k) = (first..rows).find(|&k| g.span(k).0 >= g.clip_top) {
+            g.clip_top = g.span(k).0;
+        }
+        g
+    }
+
+    /// Horni hrana textu radku (za poslednim radkem dalsi pod nim).
+    pub fn row_y(&self, row: usize) -> i32 {
+        match self.tops.get(row) {
+            Some(&y) => y,
+            None => self.bottom + (row.saturating_sub(self.tops.len()) as u32 * self.ch) as i32,
+        }
+    }
+
+    /// Cely radek i s okraji: horni a spodni hrana.
+    pub fn span(&self, row: usize) -> (i32, i32) {
+        let (pre, post) = self.pads.get(row).copied().unwrap_or((0, 0));
+        let y = self.row_y(row);
+        (y - pre as i32, y + (self.ch + post) as i32)
+    }
+
+    /// Je radek videt (neni schovany pod stavovym radkem)?
+    pub fn visible(&self, row: usize) -> bool {
+        row == 0 && self.clip_top > self.row_y(0) || self.row_y(row) >= self.clip_top
+    }
+
+    /// Radek pod bodem `y` (i v okrajich radku).
+    pub fn row_at(&self, y: i32) -> Option<usize> {
+        (0..self.tops.len()).find(|&k| {
+            let (a, b) = self.span(k);
+            self.visible(k) && y >= a && y < b
+        })
+    }
+
+    /// Levy okraj textu radku.
+    pub fn text_x(&self, row: usize) -> i32 {
+        self.x + self.indents.get(row).copied().unwrap_or(0) as i32
+    }
+
+    /// Bunka `col` radku `row`.
+    pub fn cell_x(&self, row: usize, col: usize) -> i32 {
+        self.text_x(row) + (col as u32 * self.cw) as i32
     }
 
     fn col_x(&self, col: usize) -> i32 {
         self.x + (col as u32 * self.cw) as i32
     }
 
-    fn right(&self) -> i32 {
+    pub fn right(&self) -> i32 {
         self.col_x(self.cols)
     }
 }
@@ -86,69 +220,88 @@ pub struct Button {
     pub index: usize,
 }
 
-/// Rozlozeni tlacitek vyzvy (stejne pro kresleni i klik): popisky pismem
-/// UI, vyska radku mrizky bez okraje.
+/// Rozlozeni tlacitek vyzvy (stejne pro kresleni i klik): `.btn.small`
+/// z navrhu (vyska `control_h_compact`, okraj s4, pismo `small`), hlavni
+/// tlacitko nahledu s ikonou potvrzeni.
 pub fn buttons(look: &mut Look, lines: &[Line], g: &Grid) -> Vec<(Button, String, bool, bool)> {
     let t = look.t.clone();
     let mut out = Vec::new();
+    let h = t.size.control_h_compact;
     for (row, l) in lines.iter().enumerate() {
         let Role::Prompt(PromptRow::Buttons { labels, sel, preview }) = &l.role else { continue };
+        if !g.visible(row) {
+            continue;
+        }
         let s = t.text.small;
         let f = look.ui.face(t.text.body_strong.weight);
-        let mut x = g.x + if *preview { t.space[3] as i32 } else { 0 };
-        let y = g.row_y(row) + 1;
+        let mut x = g.text_x(row);
+        let y = g.row_y(row) + (g.ch as i32 - h as i32) / 2;
         for (i, label) in labels.iter().enumerate() {
-            let w = f.width(label, s.size) + 2 * t.space[4];
+            let primary = *preview && i == 0;
+            let icon = if primary { t.size.icon_s + t.space[2] } else { 0 };
+            let w = f.width(label, s.size) + 2 * t.space[4] + icon;
             if x + w as i32 > g.right() {
                 break;
             }
-            let primary = *preview && i == 0;
-            out.push((Button { rect: Rect::new(x, y, w, g.ch.saturating_sub(2)), index: i }, label.clone(), primary, i == *sel));
+            out.push((Button { rect: Rect::new(x, y, w, h), index: i }, label.clone(), primary, i == *sel));
             x += (w + t.space[3]) as i32;
         }
     }
     out
 }
 
-/// Pod textem: ramecky chyb, pilulka slozky, linka nad radkem vstupu.
+/// Pod textem: ramecky chyb a nahledu, pilulka slozky, linka paticky.
 pub fn under(c: &mut Canvas<'_>, look: &mut Look, lines: &[Line], g: &Grid) {
     let t = look.t.clone();
     let col = &t.color;
+    let sp = &t.space;
+    // Obsah bloku zacina za pruhem (3 px) a okrajem s4 (`.blk`).
+    let content = g.x + 3 + sp[4] as i32;
     let mut row = 0;
     while row < lines.len() {
         match &lines[row].role {
             Role::Body { error: true, .. } => {
-                // Souvisle radky hlaseni chyby = jeden ramecek.
+                // Souvisle radky hlaseni chyby = jeden ramecek (`.errbox`:
+                // okraj s3 s4, text od sloupce 2 radku).
                 let first = row;
                 let mut width = 0;
                 while row < lines.len() && matches!(lines[row].role, Role::Body { error: true, .. }) {
                     width = width.max(lines[row].width());
                     row += 1;
                 }
-                let x = g.col_x(2) - 6;
-                let w = ((width.saturating_sub(2)) as u32 * g.cw + 20).min((g.right() - x).max(0) as u32);
-                let r = Rect::new(x, g.row_y(first) + 1, w, (row - first) as u32 * g.ch - 2);
-                c.round_fill_bordered(r, t.radius.control, col.danger_soft, col.danger, 1);
+                let x = content.max(g.cell_x(first, 2) - sp[4] as i32);
+                let text = g.cell_x(first, width.max(2)) - x + sp[4] as i32;
+                let w = (text.max(0) as u32).min(PREVIEW_W).min((g.right() + sp[4] as i32 - x).max(0) as u32);
+                let (top, bot) = (g.span(first).0, g.span(row - 1).1);
+                let r = Rect::new(x, top, w, (bot - top).max(0) as u32);
+                c.round_fill_bordered(r, t.radius.control, col.danger_soft, crate::alpha(col.danger, 115), 1);
                 continue;
             }
             r if preview_row(r) => {
-                // Nahled zmen: ramecek se zlutym okrajem, zahlavi (otazka)
-                // `warn_soft`, pod tlacitky linka jako v navrhu.
+                // Nahled zmen (`.blk.preview` + `.diffbox`): pruh `warn`
+                // vlevo, ramecek se zlutym okrajem, zahlavi (otazka)
+                // `warn_soft`, nad tlacitky linka.
                 let first = row;
                 while row < lines.len() && preview_row(&lines[row].role) {
                     row += 1;
                 }
-                let x = g.x - t.space[3] as i32;
-                let w = PREVIEW_W.min((g.right() + t.space[3] as i32 - x).max(0) as u32);
-                let r = Rect::new(x, g.row_y(first), w, (row - first) as u32 * g.ch);
+                let last = row - 1;
+                let (top, bot) = (g.span(first).0, g.span(last).1);
+                c.fill(Rect::new(g.x, top, 3, (bot - top).max(0) as u32), col.warn);
+                let x = content;
+                let w = PREVIEW_W.min((g.right() + sp[4] as i32 - x).max(0) as u32);
+                let r = Rect::new(x, top, w, (bot - top).max(0) as u32);
                 let rad = t.radius.control;
                 c.round_fill_bordered(r, rad, col.term_bg, crate::alpha(col.warn, 128), 1);
-                let old = c.clip();
-                c.set_clip(old.intersect(&Rect::new(r.x, r.y, r.w, g.ch)));
-                c.round_fill(Rect::new(r.x + 1, r.y + 1, r.w.saturating_sub(2), g.ch + rad), rad, col.warn_soft);
-                c.set_clip(old);
-                if row - first > 1 {
-                    c.fill(Rect::new(r.x + 1, g.row_y(row - 1) - 1, r.w.saturating_sub(2), 1), col.border);
+                if matches!(lines[first].role, Role::Prompt(PromptRow::Question { .. })) {
+                    let hb = g.span(first).1;
+                    let old = c.clip();
+                    c.set_clip(old.intersect(&Rect::new(r.x, r.y, r.w, (hb - r.y).max(0) as u32)));
+                    c.round_fill(Rect::new(r.x + 1, r.y + 1, r.w.saturating_sub(2), (hb - r.y) as u32 + rad), rad, col.warn_soft);
+                    c.set_clip(old);
+                }
+                if last > first && matches!(lines[last].role, Role::Prompt(PromptRow::Buttons { .. })) {
+                    c.fill(Rect::new(r.x + 1, g.span(last).0, r.w.saturating_sub(2), 1), col.border);
                 }
                 continue;
             }
@@ -156,21 +309,22 @@ pub fn under(c: &mut Canvas<'_>, look: &mut Look, lines: &[Line], g: &Grid) {
                 let y = g.row_y(row);
                 // Paticka (`.input-wrap`): linka pres celou sirku mrizky
                 // i s okraji.
-                c.fill(Rect::new(0, y - 3, (g.right() + g.x).max(0) as u32, 1), col.border);
+                c.fill(Rect::new(0, g.span(row).0, (g.right() + g.x).max(0) as u32, 1), col.border);
                 if let Some(&(_, end)) = lines[row].part_cols().get(prefix.saturating_sub(1)) {
-                    // Pilulka `.cwd`: okraj s3, ikona, mezera s1, jmeno,
-                    // okraj s3; sirka podle textu, nejvys k mezere s3 pred
-                    // textem radku (bunka `end`).
-                    let pad = t.space[3];
+                    // Pilulka `.cwd`: vyska `control_h_compact`, okraj s3,
+                    // ikona, mezera s1, jmeno, okraj s3; sirka podle textu,
+                    // nejvys k mezere s3 pred textem radku (bunka `end`).
+                    let pad = sp[3];
                     let s = t.text.small;
                     let f = look.ui.face(t.text.body_strong.weight);
-                    let is = t.size.icon_s.min(g.ch.saturating_sub(6));
-                    let max = (end as u32 * g.cw).saturating_sub(t.space[3]);
-                    let w = (2 * pad + is + t.space[1] + f.width(cwd, s.size)).min(max);
-                    let r = Rect::new(g.x, y + 1, w, g.ch - 2);
-                    c.round_fill(r, (g.ch - 2) / 2, col.accent_soft);
+                    let h = t.size.control_h_compact;
+                    let is = t.size.icon_s;
+                    let max = (end as u32 * g.cw).saturating_sub(sp[3]);
+                    let w = (2 * pad + is + sp[1] + f.width(cwd, s.size)).min(max);
+                    let r = Rect::new(g.x, y + (g.ch as i32 - h as i32) / 2, w, h);
+                    c.round_fill(r, h / 2, col.accent_soft);
                     look.icons.draw(c, "folder", r.x + pad as i32, r.y + (r.h - is) as i32 / 2, is, t.icon_stroke, col.accent_ink);
-                    let tx = r.x + (pad + is + t.space[1]) as i32;
+                    let tx = r.x + (pad + is + sp[1]) as i32;
                     let base = r.y + f.baseline_in(s.size, r.h);
                     let room = (r.x + r.w as i32 - pad as i32 - tx).max(0) as u32;
                     f.draw_ellipsized(c, tx, base, cwd, s.size, col.accent_ink, room);
@@ -266,15 +420,22 @@ pub fn over(c: &mut Canvas<'_>, look: &mut Look, lines: &[Line], g: &Grid, hover
             c.round_stroke(Rect::new(r.x - o, r.y - o, r.w + 2 * o as u32, r.h + 2 * o as u32), rad + o as u32, fr, col.focus);
         }
         let s = t.text.small;
+        let mut x = r.x + t.space[4] as i32;
+        if primary {
+            let is = t.size.icon_s;
+            look.icons.draw(c, "check", x, r.y + (r.h - is) as i32 / 2, is, t.icon_stroke, ink);
+            x += (is + t.space[2]) as i32;
+        }
         let f = look.ui.face(t.text.body_strong.weight);
         let base = r.y + f.baseline_in(s.size, r.h);
-        f.draw(c, r.x + t.space[4] as i32, base, &label, s.size, ink);
+        f.draw(c, x, base, &label, s.size, ink);
     }
     for (row, l) in lines.iter().enumerate() {
         let y = g.row_y(row);
         match &l.role {
             Role::Head { mark, meta, block } => {
-                c.fill(Rect::new(g.x, y, 3, g.ch), mark_color(look, *mark));
+                let (a, b) = g.span(row);
+                c.fill(Rect::new(g.x, a, 3, (b - a) as u32), mark_color(look, *mark));
                 // Blok pod ukazatelem ma vpravo akce: cas se posune vlevo.
                 let right = g.right() - if hover == Some(*block) { (crate::blockact::width(look, g) + t.space[2]) as i32 } else { 0 };
                 // Cas a vysledek vpravo pismem UI (neuspech barvou chyby).
@@ -296,7 +457,8 @@ pub fn over(c: &mut Canvas<'_>, look: &mut Look, lines: &[Line], g: &Grid, hover
                 }
             }
             Role::Body { mark, table_head, .. } => {
-                c.fill(Rect::new(g.x, y, 3, g.ch), mark_color(look, *mark));
+                let (a, b) = g.span(row);
+                c.fill(Rect::new(g.x, a, 3, (b - a) as u32), mark_color(look, *mark));
                 if *table_head {
                     let w = (l.width().saturating_sub(2) as u32 * g.cw).min((g.right() - g.col_x(2)).max(0) as u32);
                     c.fill(Rect::new(g.col_x(2), y + g.ch as i32 - 2, w, 1), col.border);

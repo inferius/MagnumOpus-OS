@@ -418,3 +418,68 @@ fn legacy_netdb_and_headers() {
     assert_eq!(getsid(me + 1), -1);
     assert_eq!(errno::get(), crate::errno::ESRCH);
 }
+
+#[test]
+fn putenv_gethostname_and_wine_headers() {
+    let mut set = *b"CSTD_PUTENV_TEST=ano\0";
+    // SAFETY: retezce C.
+    unsafe {
+        assert_eq!(crate::stdlib::putenv(set.as_mut_ptr().cast()), 0);
+        assert_eq!(std::env::var("CSTD_PUTENV_TEST").as_deref(), Ok("ano"));
+        let mut del = *b"CSTD_PUTENV_TEST\0";
+        assert_eq!(crate::stdlib::putenv(del.as_mut_ptr().cast()), 0);
+        assert!(std::env::var("CSTD_PUTENV_TEST").is_err());
+        let mut bad = *b"=x\0";
+        assert_eq!(crate::stdlib::putenv(bad.as_mut_ptr().cast()), -1);
+        assert_eq!(errno::get(), EINVAL);
+        let mut buf = [0 as crate::c_char; 64];
+        assert_eq!(crate::misc::gethostname(buf.as_mut_ptr(), buf.len()), 0);
+        assert_eq!(crate::c_bytes(buf.as_ptr()), crate::misc::HOSTNAME.as_bytes());
+        assert_eq!(crate::misc::gethostname(buf.as_mut_ptr(), 3), -1);
+        assert_eq!(errno::get(), crate::errno::ENAMETOOLONG);
+    }
+    assert_eq!(crate::misc::sethostname(core::ptr::null(), 0), -1);
+    for (h, d) in [
+        (include_str!("../include/sys/un.h"), "char sun_path[108];"),
+        (include_str!("../include/net/if_arp.h"), "#define ARPHRD_LOOPBACK 772"),
+        (include_str!("../include/net/ethernet.h"), "#define ETH_ALEN 6"),
+        (include_str!("../include/netinet/tcp.h"), "uint32_t tcpi_snd_wnd;"),
+        (include_str!("../include/sys/types.h"), "typedef char *caddr_t;"),
+        (include_str!("../include/sys/socket.h"), "struct ucred {"),
+        (include_str!("../include/sys/ioctl.h"), "#define SIOCATMARK 0x8905"),
+    ] {
+        assert!(h.contains(d), "{d}");
+    }
+    assert_eq!(crate::ifreq::SIOCATMARK, 0x8905);
+    assert_eq!(crate::ifreq::ARPHRD_LOOPBACK, 772);
+}
+
+#[test]
+fn sprintf_and_strtok() {
+    use crate::fortify::{__sprintf_chk, UNKNOWN, sprintf, strtok};
+    let mut buf = [0 as crate::c_char; 32];
+    // SAFETY: buffer staci, format odpovida argumentum.
+    unsafe {
+        assert_eq!(sprintf(buf.as_mut_ptr(), c"%d-%s".as_ptr().cast(), 42 as crate::c_int, c"x".as_ptr()), 4);
+        assert_eq!(crate::c_bytes(buf.as_ptr()), b"42-x");
+        assert_eq!(__sprintf_chk(buf.as_mut_ptr(), 0, 5, c"%s".as_ptr().cast(), c"abcd".as_ptr()), 4);
+        assert_eq!(__sprintf_chk(buf.as_mut_ptr(), 0, UNKNOWN, c"%05d".as_ptr().cast(), 7 as crate::c_int), 5);
+        assert_eq!(crate::c_bytes(buf.as_ptr()), b"00007");
+    }
+    // strtok: stav per vlakno.
+    let mut a = *b"a,b,,c\0";
+    // SAFETY: retezce C zijou po celou dobu.
+    unsafe {
+        let d = c",".as_ptr().cast();
+        assert_eq!(crate::c_bytes(strtok(a.as_mut_ptr().cast(), d)), b"a");
+        let other = std::thread::spawn(|| {
+            let mut b = *b"x y\0";
+            let t = strtok(b.as_mut_ptr().cast(), c" ".as_ptr().cast());
+            crate::c_bytes(t).to_vec()
+        });
+        assert_eq!(other.join().unwrap(), b"x");
+        assert_eq!(crate::c_bytes(strtok(core::ptr::null_mut(), d)), b"b");
+        assert_eq!(crate::c_bytes(strtok(core::ptr::null_mut(), d)), b"c");
+        assert!(strtok(core::ptr::null_mut(), d).is_null());
+    }
+}

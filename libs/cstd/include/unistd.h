@@ -59,6 +59,10 @@ int fchdir(int fd);
 int access(const char *path, int mode);
 long sysconf(int name);
 int getpagesize(void);
+/* Jmeno pocitace = uname().nodename; zmena = EPERM. */
+int gethostname(char *buf, size_t len);
+int sethostname(const char *name, size_t len);
+#define HOST_NAME_MAX 64
 pid_t getpid(void);
 uid_t getuid(void);
 uid_t geteuid(void);

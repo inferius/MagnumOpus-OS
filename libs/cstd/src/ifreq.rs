@@ -10,6 +10,8 @@ use crate::ifaddrs::{ETH_INDEX, IF_NAMESIZE, IFF_BROADCAST, IFF_LOOPBACK, IFF_RU
 use crate::sys::{self, Iface};
 use crate::{c_int, errno};
 
+/// `ioctl` socketu: je cteni u znacky dat mimo poradi (`sys/ioctl.h`)?
+pub const SIOCATMARK: u64 = 0x8905;
 pub const SIOCGIFNAME: u64 = 0x8910;
 pub const SIOCGIFCONF: u64 = 0x8912;
 pub const SIOCGIFFLAGS: u64 = 0x8913;

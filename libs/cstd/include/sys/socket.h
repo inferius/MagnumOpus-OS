@@ -115,6 +115,13 @@ struct cmsghdr {
     int cmsg_type;
 };
 
+/* Prihlasovaci udaje druhe strany (SO_PEERCRED; az s AF_UNIX). */
+struct ucred {
+    pid_t pid;
+    uid_t uid;
+    gid_t gid;
+};
+
 struct linger {
     int l_onoff;
     int l_linger;

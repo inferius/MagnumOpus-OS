@@ -7,7 +7,11 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <ifaddrs.h>
+#include <net/ethernet.h>
 #include <net/if.h>
+#include <net/if_arp.h>
+#include <netinet/tcp.h>
+#include <sys/un.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -41,6 +45,13 @@ int spawn_child_main(int argc, char **argv) {
         char b[256];
         if (getcwd(b, sizeof b) == NULL) return 1;
         printf("%s\n", b);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[2], "overflow") == 0) {
+        /* Pojistka sprintf: buffer znamych 4 bajtu, text delsi = abort. */
+        char small[4];
+        volatile int n = 123456;
+        sprintf(small, "%d", n);
         return 0;
     }
     if (argc == 3 && strcmp(argv[2], "sleep") == 0) {
@@ -125,6 +136,16 @@ static int spawning(const char *dir) {
     if (kill(p, 0) != 0 || kill(p, SIGTERM) != 0) return 12;
     if (waitpid(-1, &st, 0) != p || !WIFSIGNALED(st) || WTERMSIG(st) != SIGTERM) return 13;
     if (wait(&st) != -1 || errno != ECHILD) return 14;
+
+    /* sprintf s pojistkou: v mezich funguje, preteceni ukonci potomka. */
+    char ok[16];
+    if (sprintf(ok, "%d-%s", 42, "x") != 4 || strcmp(ok, "42-x") != 0) return 15;
+    p = child(NULL, "overflow", NULL);
+    if (p <= 0 || waitpid(p, &st, 0) != p || (WIFEXITED(st) && WEXITSTATUS(st) == 0)) return 16;
+    char words[] = "a,b,,c";
+    if (strcmp(strtok(words, ","), "a") != 0 || strcmp(strtok(NULL, ","), "b") != 0 ||
+        strcmp(strtok(NULL, ","), "c") != 0 || strtok(NULL, ",") != NULL)
+        return 17;
     return 0;
 }
 
@@ -215,6 +236,15 @@ static int misc(void) {
     if (gmtime_r(&fixed, &tm) == NULL || strcmp(asctime(&tm), "Sun Sep 16 01:03:52 1973\n") != 0) return 52;
     if (setsid() != getpid() || getpgrp() != getpid() || setpgid(0, 0) != 0) return 53;
     if (strcmp(strerror(EOWNERDEAD), "Owner died") != 0) return 54;
+    char host[HOST_NAME_MAX + 1];
+    if (gethostname(host, sizeof host) != 0 || strlen(host) == 0) return 55;
+    if (putenv("CTEST_PUTENV=1") != 0 || getenv("CTEST_PUTENV") == NULL) return 56;
+    _Static_assert(sizeof(struct sockaddr_un) == 110, "sockaddr_un");
+    _Static_assert(sizeof(struct tcp_info) == 232, "tcp_info");
+    _Static_assert(sizeof(struct ether_header) == ETH_HLEN, "ether_header");
+    _Static_assert(sizeof(struct arphdr) == 8, "arphdr");
+    caddr_t cp = host;
+    (void)cp;
     return 0;
 }
 

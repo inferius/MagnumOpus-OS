@@ -42,6 +42,12 @@ fn term(t: &[Node]) -> Option<&Node> {
     t.iter().find(|n| n.role == Role::Terminal)
 }
 
+/// Plocha radku `k` mrizky terminalu `id` (potomek `Row` c. `k`; schovany
+/// radek nema plochu).
+fn row_rect(t: &[Node], id: u32, k: usize) -> Option<guiproto::Rect> {
+    t.iter().filter(|n| n.parent == id && n.role == Role::Row).nth(k).map(|n| n.bounds).filter(|b| b.h > 0)
+}
+
 pub fn select_copy_paste(startup: &Startup) -> TestResult {
     with(|s| {
         let conn = crate::terminal::TERMINALS.lock().client(NAME).map_err(|e| fail("kanal terminalu", e))?;
@@ -59,13 +65,13 @@ pub fn select_copy_paste(startup: &Startup) -> TestResult {
                 pump();
                 term(t).is_some_and(|n| n.value.lines().any(|l| l.trim() == WORD))
             })?;
-            // Radek hodnoty = radek mrizky, plocha uzlu = mrizka (meze
-            // z inspekce jsou v souradnicich obrazovky).
+            // Radek hodnoty = radek mrizky, jeho plocha = potomek `Row`
+            // (radky maji ruznou vysku; meze z inspekce jsou v souradnicich
+            // obrazovky).
             let n = term(&t).ok_or("terminal chybi")?;
-            let rows = n.value.lines().count().max(1);
             let row = n.value.lines().position(|l| l.trim() == WORD).ok_or("radek vystupu")?;
-            let ch = n.bounds.h as i32 / rows as i32;
-            let y = n.bounds.y + row as i32 * ch + ch / 2;
+            let r = row_rect(&t, n.id, row).ok_or("plocha radku vystupu")?;
+            let y = r.y + r.h as i32 / 2;
             let (x0, x1) = (n.bounds.x + 1, n.bounds.x + n.bounds.w as i32 - 2);
             settle(&s.inspect)?;
             println!("{QEMU_TERM_DRAG}{x0} {y} {x1} {y}");
@@ -115,10 +121,8 @@ fn completion<R>(inspect: &libos::Channel, w: u32, pump: &dyn Fn() -> R) -> Test
     let list = t.iter().find(|n| n.role == Role::ListBox).ok_or("ListBox chybi")?;
     check!(list.name == "Příkazy", alloc::format!("zahlavi seznamu: {}", list.name));
     // Seznam lezi nad radkem vstupu (radek s vyzvou).
-    let rows = n.value.lines().count().max(1);
-    let ch = n.bounds.h as i32 / rows as i32;
     let row = n.value.lines().position(|l| l.contains('\u{276F}')).ok_or("radek vstupu")?;
-    let input_y = n.bounds.y + row as i32 * ch;
+    let input_y = row_rect(&t, n.id, row).ok_or("plocha radku vstupu")?.y;
     check!(list.bounds.h > 0 && list.bounds.y + list.bounds.h as i32 <= input_y, alloc::format!("seznam {:?} neni nad radkem vstupu y={input_y}", list.bounds));
     let opt = t.iter().find(|n| n.role == Role::ListOption && n.name == "explain").ok_or("polozka explain chybi")?;
     ask(inspect, InspectRequest::Act { window: w, node: opt.id, action: actions::ACTIVATE, value: alloc::string::String::new() })?;
@@ -165,8 +169,9 @@ fn title_drag<R>(inspect: &libos::Channel, w: u32, pump: &dyn Fn() -> R) -> Test
     })
     .map_err(short)?;
     let bar2 = title(&moved).ok_or("titulek chybi")?;
-    // Mezi odznakem (system, vlevo) a kartou: kousek pred kartou.
-    let x = bar2.x + (tab_x - bar.x) - 6;
+    // Mezera mezi odznakem (system, vlevo) a kartou (`s2` = 4 px): jeji
+    // stred, 2 px pred kartou.
+    let x = bar2.x + (tab_x - bar.x) - 2;
     let y = bar2.y + bar2.h as i32 / 2;
     settle(inspect)?;
     println!("{QEMU_TERM_TITLE_LEFT}{x} {y} {} {}", x - 40, y - 30);

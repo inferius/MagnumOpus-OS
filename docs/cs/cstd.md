@@ -58,6 +58,13 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
   Symboly C exportuje jen na cíli `*-unknown-magnumopus`; na hostiteli se
   testuje logika (`cargo test -p cstd`), symboly by se tloukly se
   systémovou libc.
+- **Funkce bez parametru délky** (`sprintf`, `vsprintf`, `strtok`) jsou
+  pro porty k dispozici **s pojistkou, kde ji jde dat**: `sprintf`
+  a `vsprintf` hlavička v C mapuje na `__sprintf_chk` /
+  `__vsprintf_chk` s `__builtin_object_size` (jako `_FORTIFY_SOURCE`), takže
+  přetečení bufferu známé velikosti = `abort` se zprávou místo přepsání
+  paměti; `strtok` má stav per vlákno. `gets` není (pojistka nejde). Služby
+  `no_std` (`cstd-core`) je nemají; nový kód má `snprintf` a `strtok_r`.
 
 ## Program v C
 
@@ -886,6 +893,10 @@ procesy).
 - **Relace a skupiny procesů nejsou:** proces vede vlastní relaci
   i skupinu (číslo = `getpid()`); `setsid`, `getsid`, `getpgid`, `getpgrp`
   ho vrací, `setpgid` jen „zůstat ve vlastní skupině“, jinak `EPERM`.
+- **`putenv`** (kopie řetězce: pozdější změna se do prostředí
+  neprojeví, jinak než glibc; bez `=` proměnnou smaže), **`gethostname`**
+  (= `uname().nodename`, `sethostname` = `EPERM`), typy BSD `caddr_t`,
+  `u_char` ... (`sys/types.h`).
 - **`_exit`** (`unistd.h`, = `_Exit`), `select` i přes `sys/time.h` (jako glibc), čísla signálů
   `SIGIO`, `SIGXCPU`, `SIGXFSZ`, `SIGPWR`, `SIGSYS`, `SIGSTKFLT` (cstd je
   samo nevytváří) a bity `S_ISUID`, `S_ISGID`, `S_ISVTX`.
@@ -923,6 +934,12 @@ procesy).
   `SIOCGIFNAME`, `SIOCGIFADDR`, `SIOCGIFNETMASK`, `SIOCGIFBRDADDR` (jen
   IPv4), `SIOCGIFHWADDR` (MAC, smyčka `ARPHRD_LOOPBACK`), `SIOCGIFCONF`
   nad týmiž rozhraními; nastavování (`SIOCSIF*`) = `ENOTTY`.
+- **Hlavičky pro překlad portů** (bez nové funkčnosti): `sys/un.h`
+  (`struct sockaddr_un`; sockety `AF_UNIX` zatím nejsou), `struct ucred`
+  (`SO_PEERCRED`), `struct tcp_info` a stavy `TCP_*` (`getsockopt(TCP_INFO)`
+  = `ENOPROTOOPT`), `net/if_arp.h` (`ARPHRD_*`, `struct arphdr`),
+  `net/ethernet.h` (`ETH_ALEN`, `struct ether_header`); `ioctl(SIOCATMARK)`
+  na socketu vrací 0 (data mimo pořadí netd nepřenáší).
 - **`gethostbyname`, `gethostbyaddr`** (`struct hostent`, `h_errno`,
   `hstrerror`): staré rozhraní vrací NULL s `h_errno` = `NO_RECOVERY`;
   programy mají `getaddrinfo`.

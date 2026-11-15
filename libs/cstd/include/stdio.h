@@ -46,6 +46,19 @@ int vfprintf(FILE *f, const char *fmt, va_list ap);
 /* Vystup do noveho bufferu z malloc (uvolnit free); chyba = -1. */
 _CSTD_PRINTF(2, 3) int asprintf(char **out, const char *fmt, ...);
 int vasprintf(char **out, const char *fmt, va_list ap);
+
+/* sprintf a vsprintf s pojistkou jako _FORTIFY_SOURCE (src/fortify.rs):
+ * zna-li prekladac velikost bufferu, preteceni = abort se zpravou misto
+ * prepsani pameti; jinak bezny sprintf. Zaroven tvar __sprintf_chk z glibc.
+ * Pro novy kod je lepsi snprintf. */
+int sprintf(char *s, const char *fmt, ...);
+int vsprintf(char *s, const char *fmt, va_list ap);
+int __sprintf_chk(char *s, int flag, size_t slen, const char *fmt, ...);
+int __vsprintf_chk(char *s, int flag, size_t slen, const char *fmt, va_list ap);
+#if !defined(__cplusplus) && !defined(_CSTD_NO_FORTIFY)
+#define sprintf(s, ...) __sprintf_chk((s), 0, __builtin_object_size((s), 1), __VA_ARGS__)
+#define vsprintf(s, fmt, ap) __vsprintf_chk((s), 0, __builtin_object_size((s), 1), (fmt), (ap))
+#endif
 int fseek(FILE *f, long off, int whence);
 long ftell(FILE *f);
 void rewind(FILE *f);

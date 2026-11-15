@@ -18,6 +18,8 @@ _CSTD_BEGIN
 #define TIOCSWINSZ 0x5414
 #define FIONREAD 0x541B
 #define FIONBIO 0x5421
+/* Socket: cteni u znacky dat mimo poradi (vzdy 0, OOB data nejsou). */
+#define SIOCATMARK 0x8905
 
 struct winsize {
     unsigned short ws_row;
