@@ -27,6 +27,7 @@ mod fpu;
 mod fpu_avx;
 mod fs;
 mod fs_data;
+mod fs_links;
 mod fs_datasets;
 mod gui_files;
 mod gui_look;
@@ -115,6 +116,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("acpi", power::TESTS),
     ("diagnostika", diag::TESTS),
     ("souborovy system", fs::TESTS),
+    ("souborovy system", fs_links::TESTS),
     ("std", std_app::TESTS),
     ("ucty", accounts::TESTS),
     ("vstup", input::TESTS),

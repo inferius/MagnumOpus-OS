@@ -36,9 +36,10 @@ impl Service {
             op::SOCKET_BIND => Some(self.sock_bind(sess, r, handles)),
             op::SOCKET_CONNECT => Some(self.sock_connect(sess, r, handles)),
             op::SET_MODE => Some((|| {
-                let path = sess.map(&r.str()?, true)?;
+                let fs = self.fs.as_mut().ok_or(Error::IoError)?;
+                let path = sess.resolve(fs, &r.str()?, true, true)?;
                 let (mode, widen) = (r.u16()?, r.u8()? != 0);
-                self.fs.as_mut().ok_or(Error::IoError)?.set_mode(&path, mode, widen)?;
+                fs.set_mode(&path, mode, widen)?;
                 Ok(Reply::body(fsproto::Writer::new()))
             })()),
             op::WHOAMI => {
@@ -79,8 +80,9 @@ impl Service {
     fn sock_bind(&mut self, sess: &mut Session, r: &mut Reader, handles: &mut alloc::vec::Vec<Handle>) -> Result<Reply> {
         let raw = r.str()?;
         let listener = Channel::from_handle(handles.pop().ok_or(Error::InvalidArgs)?);
-        let path = sess.map(&raw, true)?;
-        self.fs.as_mut().ok_or(Error::IoError)?.create(&path, fs::Kind::Socket)?;
+        let fsys = self.fs.as_mut().ok_or(Error::IoError)?;
+        let path = sess.resolve(fsys, &raw, true, false)?;
+        fsys.create(&path, fs::Kind::Socket)?;
         let key = self.socket_node(&path, v2access::READ)?;
         self.listeners.prune();
         self.listeners.map.insert(key, listener);
@@ -94,7 +96,7 @@ impl Service {
         let raw = r.str()?;
         let pid = r.u32()?;
         let end = handles.pop().ok_or(Error::InvalidArgs)?;
-        let path = sess.map(&raw, false)?;
+        let path = sess.resolve(self.fs.as_mut().ok_or(Error::IoError)?, &raw, false, true)?;
         let key = self.socket_node(&path, v2access::WRITE)?;
         let Some(listener) = self.listeners.map.get(&key) else { return Err(Error::ConnectionRefused) };
         let (user, group) = match &sess.identity {

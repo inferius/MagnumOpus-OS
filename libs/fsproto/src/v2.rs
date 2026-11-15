@@ -97,6 +97,17 @@ pub mod op {
     /// Mod POSIX (`chmod`): cesta, mod u16 (9 bitu), rozsirit u8 (1 =
     /// `chmod`, smi pridat prava; 0 = jen zuzit). Vyzaduje `MANAGE`.
     pub const SET_MODE: u32 = 124;
+    /// Symbolicky odkaz: cesta str (posledni slozka se nenasleduje), cil str
+    /// (neprazdny, do `fsproto::SYMLINK_MAX` bajtu, bez NUL; nemusi existovat).
+    /// Chce pravo vytvareni ve slozce; existujici jmeno = `ALREADY_EXISTS`.
+    pub const SYMLINK: u32 = 125;
+    /// Cil odkazu: cesta str -> cil str (`WRONG_TYPE`, kdyz neni odkaz).
+    pub const READLINK: u32 = 126;
+    /// `Stat` bez nasledovani posledni slozky (C `lstat`): cesta -> `Stat`.
+    pub const LSTAT: u32 = 127;
+    /// Kanonicka cesta relace po vyreseni odkazu, `.` a `..` (C `realpath`):
+    /// cesta str -> cesta str. Objekt musi existovat.
+    pub const REALPATH: u32 = 128;
 }
 
 /// Prihlaseni klienta ve zprave posluchaci socketu (`SOCKET_CONNECT`):
@@ -188,6 +199,9 @@ pub mod open_flags {
     /// Za priznaky mod u16: objekt vytvoreny timto `OPEN` dostane mod
     /// (zdedene granty jen zuzi, `open(O_CREAT, mode)`).
     pub const MODE: u8 = 16;
+    /// Posledni slozku nenasledovat; je-li to odkaz, `TOO_MANY_LINKS`
+    /// (C `O_NOFOLLOW` = `ELOOP`).
+    pub const NOFOLLOW: u8 = 32;
 }
 
 /// Priznaky `CONNECT`.
@@ -291,6 +305,37 @@ impl FsClient {
         let kind = if flags & (open_flags::CREATE | open_flags::TRUNCATE) != 0 { Kind::Effect } else { Kind::Idempotent };
         let body = self.call_as(kind, w)?;
         self.adopt(&body, access, share)
+    }
+
+    /// Vytvori symbolicky odkaz `path` s cilem `target`.
+    pub fn symlink(&self, path: &str, target: &str) -> Result<()> {
+        let mut w = Self::req(op::SYMLINK);
+        w.str(path).str(target);
+        self.call_as(Kind::Effect, w).map(|_| ())
+    }
+
+    /// Cil odkazu `path`.
+    pub fn readlink(&self, path: &str) -> Result<String> {
+        let mut w = Self::req(op::READLINK);
+        w.str(path);
+        let body = self.call_as(Kind::Idempotent, w)?;
+        Reader::new(&body).str()
+    }
+
+    /// Kanonicka cesta relace (odkazy, `.`, `..` vyresene; objekt existuje).
+    pub fn realpath(&self, path: &str) -> Result<String> {
+        let mut w = Self::req(op::REALPATH);
+        w.str(path);
+        let body = self.call_as(Kind::Idempotent, w)?;
+        Reader::new(&body).str()
+    }
+
+    /// `Stat` odkazu samotneho (bez nasledovani posledni slozky).
+    pub fn lstat(&self, path: &str) -> Result<Stat> {
+        let mut w = Self::req(op::LSTAT);
+        w.str(path);
+        let body = self.call_as(Kind::Idempotent, w)?;
+        Stat::get(&mut Reader::new(&body))
     }
 
     /// `chmod`: mod POSIX (`widen` = smi rozsirit prava).

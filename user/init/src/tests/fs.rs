@@ -194,10 +194,11 @@ fn errors(_: &Startup) -> TestResult {
         "relativni cesta"
     );
     check_eq!(
-        f.create("/a/../b", kind::FILE).err(),
-        // `..` a `.` sluzba odmita (z pripojene cesty relace nejde utect).
-        Some(Error::InvalidArgs),
-        "cesta s .."
+        f.create("/neni-slozka/../b", kind::FILE).err(),
+        // `..` resi fsd po nasledovani odkazu (POSIX): slozka pred `..` musi
+        // existovat; nad korenem relace zustane koren.
+        Some(Error::NotFound),
+        "cesta s .. pres neexistujici slozku"
     );
     Ok(())
 }
@@ -526,7 +527,9 @@ fn perm_sessions(_: &Startup) -> TestResult {
     check_eq!(app.read("/vybrane/foto.jpg", 0, 4).map_err(|e| fail("vybrany soubor", e))?, b"JPEG".to_vec(), "vybrany soubor");
     check_eq!(app.write("/vybrane/foto.jpg", 0, b"x").err(), Some(Error::AccessDenied), "vyber jen pro cteni");
     check_eq!(app.stat("/perm/alice").err(), Some(Error::NotFound), "mimo pripojene cesty");
-    check_eq!(app.stat("/app/../foto.jpg").err(), Some(Error::InvalidArgs), "cesta s ..");
+    // `..` se resi ve jmennem prostoru relace: nad /app je koren relace, kde
+    // nic pripojeneho neni.
+    check_eq!(app.stat("/app/../foto.jpg").err(), Some(Error::NotFound), "cesta s .. nad pripojenou cestou");
     // Powerbox: uzivatel vybere slozku pozdeji.
     f.grant(id, &Mount::new("/dokumenty", "/perm/alice", 0)).map_err(|e| fail("grant", e))?;
     app.stat("/dokumenty/foto.jpg").map_err(|e| fail("po grant", e))?;
