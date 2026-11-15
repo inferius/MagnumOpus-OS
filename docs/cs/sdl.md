@@ -13,8 +13,10 @@ krok 6 pořadí převzetí software; staví na [knihovně C](cstd.md) a na
 | sestavení | SDL 3.4.20 (připnutá verze), CMake + Ninja, statická `libSDL3.a` v předponě portů | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `sdl`) |
 | `libs/mosdl` | rozhraní C `mosdl_*` nad oknem z `libs/ui`, součást `libc.a` | **[ověřeno v QEMU]** x86_64 i aarch64; překlad událostí host testy |
 | ovladač videa `magnumopus` | jedno okno, softwarový framebuffer, klávesnice (kódy evdev), text, myš, kolečko, fokus, změna velikosti, čekání na události s probuzením | **[ověřeno v QEMU]** `testsprite` (pixely), `checkkeys` (umělý vstup) |
-| zvuk, schránka, kurzor, relativní myš, HiDPI, celá obrazovka, YUV bez kopie | etapa 6-2 | **[navrženo]** |
-| ukázkové hry SDL (`snake`, `woodeneye-008`), test se snímkem obrazovky | etapa 6-3 | **[navrženo]** |
+| schránka, kurzor, relativní myš, celá obrazovka, škála displeje | etapa 6-2: text ve schránce, systémové tvary i vlastní kurzor 64 × 64, zámek ukazatele kompozitoru, celá obrazovka na žádost, škála jako `SDL_GetDisplayContentScale` ([Kurzor a zámek ukazatele](gui.md#kurzor-a-zámek-ukazatele)) | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `sdl`, fyzický vstup přes QMP) |
+| zvuk | ovladač zvuku SDL `magnumopus` nad relací aplikace u `audiod` (štítek `AUDIO`): přehrávání; nahrávání jen s `[audio] capture = true` a po povolení uživatelem, rozhodnutí uložené po uživateli a aplikaci, odvolání příkazem `povoleni` ([Zvuk](zvuk.md#relace-aplikací-a-nahrávání)) | **[ověřeno v QEMU]** x86_64 i aarch64 (fyzický Enter v dialogu přes QMP) |
+| YUV bez kopie (`BUFFER_CREATE_DESC`) | odloženo do kroku FFmpeg (záplata vnitřků SDL, odhad ~300 řádků) | **[navrženo]** |
+| ukázkové hry SDL a testy v obrazu | etapa 6-3: `snake` a `woodeneye` (examples/demo), `testsprite`, `testaudio`, `testkeys`, `checkkeys` v initfs s manifesty | **[ověřeno v QEMU]** x86_64 i aarch64 (test `sdl: ukazkove hry snake a woodeneye-008`) |
 | gamepady | samostatný krok s vlastním návrhem (rozhodnutí Q6 B) | **[navrženo]** |
 
 ## Jak to funguje
@@ -37,7 +39,7 @@ krok 6 pořadí převzetí software; staví na [knihovně C](cstd.md) a na
 
 - **Ovladač videa** (`third_party/c-ports/sdl3/overlay/src/video/magnumopus/`)
   je náš kód v C uvnitř SDL. Volá jen funkce `mosdl_*` z hlavičky `mosdl.h`
-  v sysrootu C. Záplata `0001-video-magnumopus.patch` ho v SDL zaregistruje
+  v sysrootu C. Záplata `0001-magnumopus.patch` ho v SDL zaregistruje
   a přidá makro `SDL_PLATFORM_MAGNUMOPUS`.
 - **`libs/mosdl`** je v Rustu a je součástí `libc.a`. Dvě statické knihovny
   v Rustu v jednom programu by měly každá vlastní kopii std (alokátor, TLS,
@@ -89,9 +91,15 @@ Funkce vracejí 0 nebo záporný kód chyby jádra ([chyby](chyby.md)). Rozlože
   je etapa 6-2.
 - **Softwarový renderer.** Vulkan pro SDL (render i GPU API) až s ovladači
   GPU pro aplikace ([render](render.md)).
-- **Bez zvuku a schránky** (ovladač zvuku SDL `dummy`), kurzoru, relativní
-  myši, HiDPI a celé obrazovky: etapa 6-2.
-- **Bez gamepadů** (rozhodnutí Q6 B), dialogů souborů (Q7 A: SDL vrátí
+- **Zvuk**: jedno výchozí zařízení pro přehrávání a jedno pro nahrávání (výběr karty je věc systému); latence bufferu je konstanta ovladače `MOS_LATENCY_US`. Nahrávání jen po povolení (systémový dialog při prvním použití).
+- **HiDPI jen jako škála**: buffery okna jsou 1:1, kompozitor zatím
+  škálu 100 % a škálování bufferů nemá; SDL dostane škálu jako
+  `SDL_GetDisplayContentScale` (hustota pixelů 1).
+- **Schránka jen text** (`text/plain;charset=utf-8`); kopie, vložení,
+  zámek ukazatele a vstup do celé obrazovky jen v reakci na fyzický
+  stisk (pravidlo kompozitoru). `SDL_WarpMouse` není (v relativním
+  režimu ho zámek nepotřebuje).
+- **Bez gamepadů** (rozhodnutí Q6 B): subsystém joysticků a haptiky je zapnutý jen s ovladačem `dummy`, takže `SDL_Init(SDL_INIT_JOYSTICK)` projde (hry ho volají) a žádné zařízení není. Bez dialogů souborů (Q7 A: SDL vrátí
   nepodporováno), lišty (`SDL_TRAY`) a `SDL_OpenURL` (bude přes službu
   „otevři cestu“).
 - **Priorita vláken** jen `SCHED_OTHER` (plánovač zatím aplikacím reálný čas
@@ -104,10 +112,14 @@ Funkce vracejí 0 nebo záporný kód chyby jádra ([chyby](chyby.md)). Rozlože
 Port `sdl3` v `xtask/src/cports/mod.rs` (způsob `CMake`, [Porty v C](porty-c.md)).
 Hlavní volby: `SDL_STATIC=ON`, `SDL_SHARED=OFF`, `SDL_UNIX_CONSOLE_BUILD=ON`
 (okna dává náš ovladač, ne X11 ani Wayland), vypnuté X11, Wayland, KMSDRM,
-OpenGL, Vulkan, GPU, ALSA, PulseAudio, PipeWire, D-Bus, HIDAPI, joysticky,
-kamera, dialogy, lišta. Knihovna a hlavičky jdou do
-`target/c-ports/<arch>/prefix`, testy SDL `testsprite` a `checkkeys` do
-initfs i s manifesty a ikonou.
+OpenGL, Vulkan, GPU, ALSA, PulseAudio, PipeWire, D-Bus, HIDAPI, virtuální
+joystick, kamera, dialogy, lišta (joysticky a haptika jen `dummy`).
+Knihovna a hlavičky jdou do `target/c-ports/<arch>/prefix`; do initfs
+s manifesty jdou ukázkové hry `snake` a `woodeneye`, testy SDL
+`testsprite`, `testaudio`, `testkeys`, `checkkeys` a náš
+`testmagnumopus` (s ikonou a `sdl-sample.wav`). Programy potřebují kanál
+okna od kompozitoru (dnes je spouští testy initu; ze spouštěče plochy až
+s aplikacemi třetích stran **[navrženo]**).
 
 Co SDL potřebovalo v knihovně C a doplnilo se v tomto kroku
 ([cstd](cstd.md#sdl-krok-6)): `environ`, `fenv.h`, `nl_langinfo`, `sched_param`
@@ -121,11 +133,43 @@ jen typy) a `inttypes.h`, prázdné `libm.a`, `libpthread.a`, `librt.a`.
 | `cargo test -p mosdl` | hostitel | překlad událostí, kopie snímku (oříznutí, doplnění, nepřátelské rozměry), shoda s `mosdl.h` |
 | `sdl: testsprite ...` | QEMU, sada `sdl` | okno programu SDL v kompozitoru; deterministický snímek (`--iterations 0`): červený bod v rohu, zelená horní, modrá levá a červená dolní čára na obrazovce |
 | `sdl: checkkeys ...` | QEMU, sada `sdl` | umělý vstup přes inputd a kompozitor: klávesa A = scancode 4, text „a“, pravé tlačítko myši, dvakrát Esc ukončí program kódem 0 |
+| `sdl: kurzor, zámek ukazatele, schránka a celá obrazovka (QMP)` | QEMU, sada `sdl` | program `testmagnumopus` (náš test v SDL): displej a škála jako kompozitor, kurzor kříž na obrazovce; fyzický klik = zámek ukazatele, posun = relativní pohyb, Super = zrušení zámku, druhý klik = kopie, Ctrl+V = vložení, F = celá obrazovka |
+| `sdl: zvuk - přehrávání, nahrávání s povolením, odvolání (QMP)` | QEMU, sada `sdl` | `testmagnumopus audio`: tón dohraje přes ovladač `magnumopus`; bez klíče v manifestu nahrávání zamítnuto bez dotazu; s ním dialog Povolení (fyzický Enter = Povolit), nahraná data z kodeku HDA; další běh bez dialogu (uložené rozhodnutí); výpis a odvolání jako příkaz `povoleni` |
+| `sdl: ukázkové hry snake a woodeneye-008` | QEMU, sada `sdl` | had: okno 576 × 432, řádek mřížky s hlavou se za 1 s změní (had se pohybuje); woodeneye: okno s vykreslenou scénou (aspoň 3 barvy ve vzorku) |
+| `sdl: měření cesty videa 1080p` | QEMU, sada `sdl` | `testmagnumopus bench`: I420 1920 × 1080 -> převod v SDL -> okno ([Výkon](#výkon)) |
 
 ```text
 cargo xtask test --only sdl
 cargo xtask test --arch aarch64 --only sdl
 ```
+
+## Výkon
+
+Dnešní cesta videa přes SDL (podklad pro rozhodnutí o YUV bez kopie):
+textura I420 1920 × 1080 -> `SDL_UpdateYUVTexture` (převod na RGB v SDL)
+-> `SDL_RenderTexture` do okna 960 × 540 -> `SDL_RenderPresent` (kopie
+do bufferu okna přes `mosdl`). Průměr 60 snímků po 10 zahřívacích
+(`testmagnumopus bench`, test `sdl: měření cesty videa 1080p`).
+
+| Architektura | Sestavení systému | ms na snímek |
+|---|---|---|
+| x86_64 | ladicí (`cargo xtask test`) | 139,6 |
+| x86_64 | release (`--release`) | 102,0 |
+| aarch64 | ladicí | 150,4 |
+
+Podmínky: revize `5ab30f2`, QEMU 11.1.0 bez akcelerace (TCG), `-cpu max`
+(aarch64 `cortex-a76`), `-smp 4`, `-m 1G`, hostitel AMD Ryzen 9 9950X3D,
+Windows 11. SDL přeložené jako Release (CMake), na 1 vlákně. Čísla
+z emulace TCG jsou pro srovnání cest, ne pro skutečný stroj; na hardwaru
+**[navrženo]** změřit s KVM/WHPX.
+
+**YUV bez kopie** (snímek jako NV12/I420 přes `BUFFER_CREATE_DESC`,
+převod SIMD v kompozitoru, později GPU) je navazující krok spolu
+s FFmpegem: záplata `SDL_render.c` (nepřevedená YUV textura u okna
+magnumopus, v `RenderPresent` poznat jedinou YUV texturu přes celé okno),
+`ui::Window::present_yuv` a test; odhad ~300 řádků záplaty SDL
+**[navrženo]**. Přehrávač systému jde přes `mediad` a okna s `bufdesc`
+přímo, SDL a `ffplay` jsou vedlejší cesta.
 
 ## Rozhodnutí (2026-11-14)
 

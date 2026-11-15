@@ -12,6 +12,7 @@
 #ifndef MOSDL_H
 #define MOSDL_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -41,7 +42,38 @@ enum {
     /* uzivatel zavira okno */
     MOSDL_EV_CLOSE = 9,
     /* kompozitor spadl, okno je zpet: prekreslit */
-    MOSDL_EV_EXPOSE = 10
+    MOSDL_EV_EXPOSE = 10,
+    /* a, b = relativni pohyb pri zamku ukazatele */
+    MOSDL_EV_RELMOTION = 11,
+    /* a = 1 zamek ukazatele zapnut, 0 zrusen (i systemem) */
+    MOSDL_EV_POINTER_LOCK = 12,
+    /* zmenil se vystup okna (obrazovka, skala): mosdl_display_info */
+    MOSDL_EV_DISPLAY = 13,
+    /* a = stav okna (MOSDL_STATE_*) */
+    MOSDL_EV_STATE = 14
+};
+
+/* Bity stavu okna (MOSDL_EV_STATE, guiproto::window::wstate). */
+enum {
+    MOSDL_STATE_MAXIMIZED = 1 << 1,
+    MOSDL_STATE_FULLSCREEN = 1 << 2
+};
+
+/* Systemove tvary kurzoru (mosdl_set_cursor_shape, guiproto::cursor::Shape). */
+enum {
+    MOSDL_CURSOR_DEFAULT = 0,
+    MOSDL_CURSOR_TEXT = 1,
+    MOSDL_CURSOR_WAIT = 2,
+    MOSDL_CURSOR_CROSSHAIR = 3,
+    MOSDL_CURSOR_PROGRESS = 4,
+    MOSDL_CURSOR_RESIZE_NWSE = 5,
+    MOSDL_CURSOR_RESIZE_NESW = 6,
+    MOSDL_CURSOR_RESIZE_EW = 7,
+    MOSDL_CURSOR_RESIZE_NS = 8,
+    MOSDL_CURSOR_MOVE = 9,
+    MOSDL_CURSOR_NOT_ALLOWED = 10,
+    MOSDL_CURSOR_POINTER = 11,
+    MOSDL_CURSOR_HIDDEN = 12
 };
 
 /* Bity mosdl_event.mods (stejne jako inputproto::mods). */
@@ -101,6 +133,53 @@ int mosdl_next_event(mosdl_event *ev, int64_t timeout_ns);
 
 /* Probudi cekajici mosdl_next_event (z libovolneho vlakna). */
 int mosdl_wake(void);
+
+/* Cela obrazovka (1) / navrat (0). Vstup jen v reakci na fyzicky stisk
+   (pravidlo kompozitoru); vysledek prijde jako MOSDL_EV_RESIZE. */
+int mosdl_window_set_fullscreen(int on);
+
+/* Kurzor nad obsahem okna: systemovy tvar, nebo vlastni obrazek
+   w x h pixelu B G R A (0xAARRGGBB) nejvys 64 x 64 s aktivnim bodem. */
+int mosdl_set_cursor_shape(uint32_t shape);
+int mosdl_set_cursor_image(const uint32_t *pixels, uint32_t w, uint32_t h, uint32_t hot_x, uint32_t hot_y);
+
+/* Zamek ukazatele (relativni pohyb, skryty kurzor). Jen okno s fokusem
+   po fyzickem stisku; vysledek a zruseni systemem = MOSDL_EV_POINTER_LOCK. */
+int mosdl_pointer_lock(int on);
+
+/* Schranka (text UTF-8). Kopirovani jen v reakci na fyzicky stisk.
+   mosdl_clipboard_fetch pozada o text a pocka na nej (nejdel 1 s):
+   vrati delku v bajtech (0 = prazdna), zaporne = chyba; text pak
+   zkopiruje mosdl_clipboard_copy (nejvys cap - 1 bajtu a nula). */
+int mosdl_clipboard_set_text(const char *text);
+int mosdl_clipboard_has_text(void);
+int64_t mosdl_clipboard_fetch(void);
+int64_t mosdl_clipboard_copy(char *buf, size_t cap);
+
+/* Zvuk: relace aplikace u audiod (stitek AUDIO ze startovni zpravy).
+   Vzorky (MOSDL_SAMPLE_*) prokladane po kanalech, little endian. */
+enum {
+    MOSDL_SAMPLE_U8 = 0,
+    MOSDL_SAMPLE_S16 = 1,
+    MOSDL_SAMPLE_S32 = 2,
+    MOSDL_SAMPLE_F32 = 3
+};
+
+/* Ma proces relaci zvuku? 1 ano, 0 ne (pak SDL zvoli ovladac dummy). */
+int mosdl_audio_available(void);
+/* Otevre stream (dir 0 vystup, 1 vstup); vrati id > 0, nebo zaporny kod
+   (ACCESS_DENIED = nahravani nepovoleno; OPEN vstupu muze cekat na
+   rozhodnuti uzivatele v systemovem dialogu). *period_frames = takt sluzby. */
+int mosdl_audio_open(int dir, uint32_t rate, uint32_t channels, uint32_t sample, uint32_t latency_us, uint32_t *period_frames);
+/* Zapise cele snimky; pri plnem bufferu ceka (nejdel timeout_ns, < 0 bez
+   limitu). Stream se spusti, jakmile se buffer poprve naplni. */
+int mosdl_audio_write(int id, const void *data, uint32_t bytes, int64_t timeout_ns);
+/* Precte dostupna nahrana data; vrati pocet bajtu. */
+int mosdl_audio_read(int id, void *data, uint32_t bytes);
+/* Ceka na udalost streamu (misto / nova data). */
+int mosdl_audio_wait(int id, int64_t timeout_ns);
+int mosdl_audio_start(int id);
+void mosdl_audio_close(int id);
 
 #ifdef __cplusplus
 }

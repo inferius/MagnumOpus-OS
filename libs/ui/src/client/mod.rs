@@ -18,8 +18,13 @@
 //! vrati `SERVICE_RESTARTED` ([`run`] pak okno nakresli znovu).
 
 mod clip;
+pub use clip::Pasted;
+mod pointer;
 mod size;
 mod restore;
+mod video;
+
+pub use video::VideoSurface;
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -72,6 +77,12 @@ pub enum Event {
     Place(Rect),
     /// Rozpracovany text u kurzoru (mrtva klavesa; `ServerMsg::Compose`).
     Compose { text: String, cursor_begin: u32, cursor_end: u32, flags: u32 },
+    /// Zamek ukazatele zapnut / zrusen (`Window::pointer_lock`, zruseni
+    /// systemem pri ztrate fokusu nebo systemove zkratce).
+    PointerLock(bool),
+    /// Zmenil se stav okna (`guiproto::window::wstate`: maximalizace, cela
+    /// obrazovka); fokus jde zvlast jako vstup `Focus`.
+    State(u32),
 }
 
 /// Kontext okna od kompozitoru (`WINDOW_CONTEXT`).
@@ -175,6 +186,8 @@ pub struct Window {
     txn: u32,
     /// Commit s FRAME odeslan, FRAME jeste neprisel.
     pub frame_pending: bool,
+    /// Cas pristi vymeny z posledniho FRAME (ns, 0 = nezname).
+    pub frame_deadline: u64,
     /// Titulek, ktery kompozitor zna (zmenu posle `render` s commitem).
     title: String,
     /// Posledni poslane menu okna (`MENU_UPDATE` jen pri zmene).
@@ -200,6 +213,8 @@ pub struct Window {
     popover_shown: bool,
     /// Vrstva kurzoru: nakresleny obdelnik a barva, viditelnost.
     caret: Option<(Rect, u32)>,
+    /// Stav okna z posledniho `CONFIGURE` bez fokusu (`wstate`).
+    pub state: u32,
     caret_shown: bool,
 }
 
@@ -279,6 +294,7 @@ impl Window {
             ack: Some(serial),
             txn: 0,
             frame_pending: false,
+            frame_deadline: 0,
             title: title.into(),
             menu: Vec::new(),
             a11y_ids: Default::default(),
@@ -294,6 +310,7 @@ impl Window {
             popover_shown: false,
             caret: None,
             caret_shown: false,
+            state: 0,
         };
         win.send(ClientMsg::LayerCreate { layer: ROOT_LAYER, window: 1, parent: 0, kind: LayerKind::Buffer })?;
         win.pairs.insert(ROOT_LAYER, Pair { bufs: [None, None], front: 1 });
@@ -377,8 +394,14 @@ impl Window {
                 self.send(ClientMsg::Pong { serial })?;
                 None
             }
-            ServerMsg::Configure { w, h, serial, .. } => {
+            ServerMsg::Configure { w, h, serial, state, .. } => {
                 self.ack = Some(serial);
+                // Stav bez fokusu (ten chodi jako vstup).
+                let st = state & !window::wstate::FOCUSED;
+                if st != self.state {
+                    self.state = st;
+                    self.queue.push(Event::State(st));
+                }
                 if (w, h) != (self.w, self.h) {
                     self.w = w;
                     self.h = h;
@@ -388,8 +411,9 @@ impl Window {
                     None
                 }
             }
-            ServerMsg::Frame { .. } => {
+            ServerMsg::Frame { deadline, .. } => {
                 self.frame_pending = false;
+                self.frame_deadline = deadline;
                 Some(Event::Frame)
             }
             ServerMsg::Input { records, .. } => {
@@ -410,6 +434,7 @@ impl Window {
                 Some(Event::Context)
             }
             ServerMsg::ActionInvoke { call, action, args, caller, synthetic } => Some(Event::Action { call, id: action, args, caller, synthetic }),
+            ServerMsg::PointerLockState { locked, .. } => Some(Event::PointerLock(locked)),
             _ => None,
         })
     }
@@ -738,7 +763,15 @@ pub fn run_with<A: App>(link: impl Into<Link>, app: A, mode: Mode, w: u32, h: u3
 
 /// Jako [`run`] s vic dalsimi kanaly (sluzba, pomocny proces kopirovani):
 /// zpravy z kanalu `extras[i]` dostane [`App::external_from`] s indexem `i`.
-pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h: u32, extras: Vec<Channel>) -> Result<()> {
+pub fn run_channels<A: App>(link: impl Into<Link>, app: A, mode: Mode, w: u32, h: u32, extras: Vec<Channel>) -> Result<()> {
+    run_video(link, app, mode, w, h, extras, Vec::new())
+}
+
+/// Jako [`run_channels`] s povrchy videa pro plochy `node::video`:
+/// klient tika se snimky kompozitoru, dokud [`App::wants_frames`], a ukazuje
+/// snimky z [`App::video_frame`] bez prekresleni okna.
+pub fn run_video<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, h: u32, extras: Vec<Channel>, surfaces: Vec<VideoSurface>) -> Result<()> {
+    let mut videos = surfaces.into_iter().map(video::Video::new).collect::<Result<Vec<_>>>()?;
     let mut win = Window::open(link, mode, w, h, &app.title())?;
     // Velikost podle aplikace pred prvnim zobrazenim (bez probliknuti).
     if let Some((sw, sh, fw, fh)) = app.size_hint() {
@@ -759,9 +792,18 @@ pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u3
             Err(Error::PeerClosed) => return Ok(()),
             Err(e) => return Err(e),
         }
+        // Prehravani: udrzet tok snimku kompozitoru (prazdny commit s FRAME).
+        if !dirty && !win.frame_pending && app.wants_frames() {
+            match win.commit(true) {
+                Ok(()) => {}
+                Err(Error::ServiceRestarted) => dirty = true,
+                Err(Error::PeerClosed) => return Ok(()),
+                Err(e) => return Err(e),
+            }
+        }
         if dirty && !win.frame_pending {
             ui.refresh(&app);
-            match render(&mut win, &mut ui) {
+            match render(&mut win, &mut ui).and_then(|_| place_videos(&mut win, &ui, &mut videos)) {
                 Ok(()) => {
                     dirty = false;
                     // Menu aplikace (paleta prikazu): jen pri zmene.
@@ -849,7 +891,16 @@ pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u3
         {
             libos::println!("vstup: id={id} ui kompozitor slozil snimek se zmenou (FRAME) +{} ms", since_ms(id));
         }
+        let frame = matches!(ev, Event::Frame);
         let r = handle_event(&mut win, &mut ui, &mut app, ev, &mut dirty);
+        if frame && r.is_ok() && app.wants_frames() {
+            match video_tick(&mut win, &ui, &mut app, &mut videos, &mut dirty) {
+                Ok(()) => {}
+                Err(Error::ServiceRestarted) => dirty = true,
+                Err(Error::PeerClosed) => return Ok(()),
+                Err(e) => return Err(e),
+            }
+        }
         match r {
             Ok(true) => {}
             Ok(false) => return Ok(()),
@@ -858,6 +909,42 @@ pub fn run_channels<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u3
             Err(e) => return Err(e),
         }
     }
+}
+
+/// Snimek kompozitoru pri prehravani: snimky videa od aplikace do vrstev.
+/// Bez prekresleni okna je commit tady (s FRAME = dalsi tik); jinak ho
+/// udela `render` v teze transakci.
+fn video_tick<A: App>(win: &mut Window, ui: &Ui<A::Msg>, app: &mut A, videos: &mut [video::Video], dirty: &mut bool) -> Result<()> {
+    let tick = app.video_frame(libos::time::now(), win.frame_deadline);
+    *dirty |= tick.redraw;
+    let rects = ui.video_rects();
+    for s in tick.shows {
+        let Some(v) = videos.iter_mut().find(|v| v.id() == s.id) else { continue };
+        let Some(&(_, r)) = rects.iter().find(|(id, _)| *id == s.id) else { continue };
+        let release = win.video_show(v, s.slot, s.acquire, r)?;
+        app.video_shown(s.id, s.slot, release);
+    }
+    if !*dirty {
+        win.commit(true)?;
+    }
+    Ok(())
+}
+
+/// Po prekresleni: vrstvy videa na obdelniky z rozvrzeni.
+fn place_videos<M: Clone>(win: &mut Window, ui: &Ui<M>, videos: &mut [video::Video]) -> Result<()> {
+    if videos.is_empty() {
+        return Ok(());
+    }
+    let rects = ui.video_rects();
+    let mut sent = false;
+    for v in videos.iter_mut() {
+        let r = rects.iter().find(|(id, _)| *id == v.id()).map(|&(_, r)| r);
+        sent |= win.video_place(v, r)?;
+    }
+    if sent {
+        win.commit(false)?;
+    }
+    Ok(())
 }
 
 /// Blikani kurzoru bez prekresleni: jen viditelnost vrstvy kurzoru
@@ -957,6 +1044,8 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
             }
         }
         Event::Close => return Ok(false),
+        // Aplikace s rozhranim knihovny zamek ukazatele nezada.
+        Event::PointerLock(_) | Event::State(_) => {}
         Event::A11yAction { node, action, value } => {
             let resp = ui.a11y_action(node, action, &value);
             for m in resp.msgs {

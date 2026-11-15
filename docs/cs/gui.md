@@ -660,6 +660,37 @@ s velikostí obrazovky a příznakem `FULLSCREEN`, nic nemusí umět.
   výjimky (hovory, baterie, bezpečnost) a konfigurační klíč v Nastavení
   **[navrženo]**.
 
+### Kurzor a zámek ukazatele
+
+Okna, která kreslí sama (SDL přes [`libs/mosdl`](sdl.md)), si řídí kurzor,
+zámek ukazatele a celou obrazovku zprávami protokolu verze 5
+(`libs/guiproto/src/cursor.rs`, kompozitor `libs/comp/src/pointer.rs`).
+**[ověřeno v QEMU]** (testy `libs/comp` `app_cursor_over_content_only`,
+`fullscreen_request_needs_gesture`, `pointer_lock_rules_and_release`,
+`pointer_lock_ends_with_focus_and_window`, `synthetic_input_cannot_lock`;
+v QEMU sada `sdl` s fyzickým vstupem přes QMP)
+
+- **Kurzor (`SET_CURSOR`):** systémový tvar (šipka, text, čekání, kříž,
+  práce na pozadí, čtyři dvojité šipky, přesun, zákaz, ruka, skrytý) nebo
+  vlastní obrázek B G R A nejvýš 64 × 64 s aktivním bodem. Platí jen nad
+  obsahem okna; nad rámem, lištou a pod systémovým dialogem je vždy
+  systémový kurzor. Systémové tvary kreslí kompozitor stejně jako šipku
+  (černá s bílým obrysem). Po obnově kompozitoru ho `mosdl` pošle znovu.
+- **Celá obrazovka (`WINDOW_STATE`):** stejná cesta jako zkratka systému
+  (odznak, tlačítko návratu, držený Esc fungují). Vstup jen **v reakci na
+  fyzický stisk v okně s fokusem** (číslo gesta jako u schránky, jedno
+  gesto = jedna akce), jinak `ACCESS_DENIED`; návrat kdykoli. Aplikace
+  dostane `CONFIGURE` se stavem `FULLSCREEN`.
+- **Zámek ukazatele (`POINTER_LOCK`):** jen okno s fokusem po fyzickém
+  stisku a bez systémového dialogu. Kurzor se skryje a stojí, okno dostává
+  `PointerRelative { dx, dy }` (i z absolutního zařízení: posun od
+  poslední polohy). Nahoře se na 3 s ukáže upozornění systému „Aplikace
+  převzala myš. Uvolnění: klávesa Super“. Zámek **vždy zruší** klávesa
+  Super (aplikaci nejde), ztráta fokusu, zavření okna, systémový dialog
+  a přihlašovací obrazovka; aplikace dostane `POINTER_LOCK_STATE` 0.
+- **Umělý a vzdálený vstup** číslo gesta nedostává: ani zámek, ani celou
+  obrazovku nezapne (test `synthetic_input_cannot_lock`).
+
 ### Ovládací prvky: akce až při puštění, bubliny, dvojklik
 
 - **Akce až při puštění** nad stejným prvkem pro všechny systémové prvky
@@ -1190,6 +1221,9 @@ Aplikace -> kompozitor:
 | 18 | `ACTION_RESULT` | volání, výsledek |
 | 22 | `BUFFER_CREATE_DESC` | buffer, popis `bufdesc` (72 B) + handle VMO |
 | 23 | `SYNC_POINTS` | okno, plot získání (příznak, hodnota), plot uvolnění (příznak, hodnota) + handly plotů |
+| 24 | `WINDOW_STATE` | okno, celá obrazovka (0/1), číslo gesta ([Kurzor a zámek ukazatele](#kurzor-a-zámek-ukazatele)) |
+| 25 | `SET_CURSOR` | okno, tvar (0-12) nebo 0xFF + w, h, aktivní bod, pixely B G R A |
+| 26 | `POINTER_LOCK` | okno, zamknout (0/1), číslo gesta |
 
 Kompozitor -> aplikace:
 
@@ -1209,6 +1243,11 @@ Kompozitor -> aplikace:
 | 111 | `ACTION_INVOKE` | volání, akce, argumenty |
 | 112 | `ERROR` | op, kód |
 | 113 | `THEME` | režim barev u8 (0 světlý, 1 tmavý, 2 vysoký kontrast); po `WELCOME` a při změně |
+| 118 | `POINTER_LOCK_STATE` | okno, zamčeno (0/1): odpověď na `POINTER_LOCK` i zrušení systémem |
+
+Verze protokolu 5 (`guiproto::VERSION`): `WINDOW_STATE`, `SET_CURSOR`,
+`POINTER_LOCK`, `POINTER_LOCK_STATE` a záznam vstupu `PointerRelative`
+(druh 8: `dx`, `dy`).
 
 Příklad (okno s jedním bufferem):
 
@@ -1367,6 +1406,8 @@ z framebufferu nikdy nečte.
   (jen při panice), takže v praxi nevadí.
 
 ## Nativní knihovna UI (`libs/ui`)
+
+Plocha videa (`node::video`) ukazuje snímky z cizích bufferů (NV12 od dekodéru) ve vlastní vrstvě bez překreslení okna; popis a stav v [multimedia.md](multimedia.md#přehrávač-aplikace).
 
 Jedna knihovna pro všechny aplikace, deklarativní v Rustu:
 

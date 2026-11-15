@@ -1,0 +1,7 @@
+# Port SDL (docs/cs/sdl.md): ukazkova hra SDL (examples/demo/02-woodeneye-008), mys pres zamek ukazatele.
+[app]
+id = "org.libsdl.woodeneye"
+name = "SDL Woodeneye 008"
+
+[limits]
+memory = "128M"

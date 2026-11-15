@@ -216,6 +216,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 name = "audiod"
 version = "0.1.0"
 dependencies = [
+ "accountproto",
  "audiomix",
  "audioproto",
  "libos",
@@ -676,6 +677,7 @@ dependencies = [
  "cstd-core",
  "libm",
  "tz",
+ "uniprop",
 ]
 
 [[package]]
@@ -688,6 +690,7 @@ version = "0.1.0"
 dependencies = [
  "cstd",
  "mosdl",
+ "mosys",
 ]
 
 [[package]]
@@ -695,6 +698,7 @@ name = "cstd-so"
 version = "0.1.0"
 dependencies = [
  "cstd",
+ "mosys",
 ]
 
 [[package]]
@@ -1338,6 +1342,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gui-player"
+version = "0.1.0"
+dependencies = [
+ "audioproto",
+ "bufdesc",
+ "guiproto",
+ "libos",
+ "mediaproto",
+ "ui",
+]
+
+[[package]]
 name = "gui-tasks"
 version = "0.1.0"
 dependencies = [
@@ -1616,6 +1632,7 @@ dependencies = [
  "installplan",
  "libos",
  "manifest",
+ "mediaproto",
  "netproto",
  "openwith",
  "powerproto",
@@ -1948,6 +1965,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "mediad"
+version = "0.1.0"
+dependencies = [
+ "bufdesc",
+ "libos",
+ "mediaproto",
+]
+
+[[package]]
+name = "mediaproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "bufdesc",
+ "libos",
+ "wire",
+]
+
+[[package]]
+name = "mediatest"
+version = "0.1.0"
+dependencies = [
+ "audiomix",
+ "audioproto",
+ "bufdesc",
+ "libos",
+ "mediaproto",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1968,11 +2015,21 @@ dependencies = [
 name = "mosdl"
 version = "0.1.0"
 dependencies = [
+ "audioproto",
+ "clipproto",
  "gfx",
  "guiproto",
  "inputproto",
  "libos",
  "ui",
+]
+
+[[package]]
+name = "mosys"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "libos",
 ]
 
 [[package]]
@@ -3257,6 +3314,7 @@ checksum = "0c8352f8c05e47892e7eaf13b34abd76a7f4aeaf817b716e88789381927f199c"
 name = "ui"
 version = "0.1.0"
 dependencies = [
+ "bufdesc",
  "clipproto",
  "font",
  "gfx",
@@ -3293,6 +3351,10 @@ checksum = "75cd3fb03d5288b3ba9a1ee103ac7e9cbb59f0b03d64f8ddfcc04dd42758a85d"
 dependencies = [
  "tinyvec",
 ]
+
+[[package]]
+name = "uniprop"
+version = "0.1.0"
 
 [[package]]
 name = "universal-hash"

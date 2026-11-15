@@ -321,6 +321,19 @@ impl Env for SysEnv {
     }
 
     /// `loglevel`: uroven logu jadra (pres init, ten ma pravo DIAG).
+    fn permissions(&mut self, app: &str, perm: &str) -> Result<String, Error> {
+        let guard = POWER.lock();
+        let chan = guard.as_ref().ok_or(Error::NotSupported)?;
+        let req = powerproto::Request::Permissions { app: String::from(app), perm: String::from(perm) };
+        chan.write(&req.encode(), Vec::new())?;
+        let m = chan.read(Some(time::deadline_after(Duration::from_secs(10))))?;
+        match powerproto::Reply::decode(&m.data)? {
+            powerproto::Reply::Text(t) => Ok(t),
+            powerproto::Reply::Failed(e) => Err(e),
+            _ => Err(Error::Corrupted),
+        }
+    }
+
     fn log_level(&mut self, target: &str, level: &str) -> Result<String, Error> {
         let guard = POWER.lock();
         let chan = guard.as_ref().ok_or(Error::NotSupported)?;

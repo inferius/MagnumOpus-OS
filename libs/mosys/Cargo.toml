@@ -1,0 +1,21 @@
+[package]
+name = "mosys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Objekty jadra pro programy v C (kanaly, VMO, ploty, cekani; magnumopus/sys.h); soucast libc.a a libc.so"
+
+[lib]
+test = true
+
+[dev-dependencies]
+# Host test hlavicky (kody chyb a signaly jadra).
+abi = { workspace = true }
+
+[target.'cfg(target_os = "magnumopus")'.dependencies]
+# Bez `rt`: vstupni bod, heap a vlakna dava std (osrt).
+libos = { path = "../libos", default-features = false }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("magnumopus"))'] }

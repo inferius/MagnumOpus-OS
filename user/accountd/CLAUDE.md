@@ -4,7 +4,7 @@ Služba uživatelských účtů; logika je v `libs/accounts`, protokol v `libs/a
 
 ## Klíčové soubory
 
-- `src/main.rs` (smyčka, konfigurace), `service.rs` (obsluha požadavků), `admin.rs` (správa), `store.rs` (ukládání na FS), `os.rs` (vazba na OS).
+- `src/main.rs` (smyčka, konfigurace), `service.rs` (obsluha požadavků), `admin.rs` (správa), `store.rs` (ukládání na FS), `os.rs` (vazba na OS), `perms.rs` (povolení aplikací: kanál `permissions` pro dotazy služby zařízení, `permissions-admin` pro init, dialog Povolit / Jen tentokrát / Nepovolit, uložení `/db/permissions/<uid>`).
 
 ## Invarianty
 
@@ -12,6 +12,7 @@ Služba uživatelských účtů; logika je v `libs/accounts`, protokol v `libs/a
 - Žádný root: správa počítače podle schválených rozhodnutí v `docs/cs/ucty.md`.
 - Data účtů jsou v `/system/accounts` přes vlastní relaci FS (účet 902), ne pod identitou volajícího.
 - `dev = true` a `kdf = "qemu"` nesmějí do produkčního běhu.
+- Povolení aplikací: bez kompozitoru (dialogu) nebo pro neznámého uživatele vždy Nepovolit; dialogy správy a povolení sdílejí čísla (`Admin::next_dialog_id`), odpověď povolení se pozná v `dialog_answers` dřív než správa.
 
 ## Testy
 

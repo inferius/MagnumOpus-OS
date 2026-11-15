@@ -11,7 +11,7 @@
 - **Úlohy:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Relace a bezpečnost:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Nápověda:** [`help`](#help), [`explain`](#explain)
-- **Systém:** [`audio`](#audio), [`vzhled`](#vzhled), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **Systém:** [`audio`](#audio), [`vzhled`](#vzhled), [`povoleni`](#povoleni), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Soubory
 
@@ -1849,6 +1849,31 @@ vzhled kontrast ano
 **Potřebuje:** relace uživatele (s `--system` potvrzení správce)
 
 **Chyby:** `SH_ARGS`, `ACCESS_DENIED`, `CANCELED`, `NOT_SUPPORTED`
+
+**Souvisí:** [`audio`](#audio)
+
+
+### `povoleni`
+
+povolení aplikací: bez argumentu výpis, `povoleni odvolat <aplikace> [mikrofon]`
+
+Bez argumentu vypíše uložená rozhodnutí uživatele o povoleních aplikací (dnes mikrofon). `povoleni odvolat <aplikace>` rozhodnutí smaže: aplikace se příště zeptá znovu.
+
+```shell
+povoleni
+```
+
+Plné jméno `system-permissions` · vstup: nic · výstup: nic
+
+Aplikace se znovu zeptá na mikrofon.
+
+```shell
+povoleni odvolat org.libsdl.testaudio
+```
+
+**Potřebuje:** přihlášená relace (rozhodnutí patří uživateli relace)
+
+**Chyby:** `SH_ARGS`, `NOT_FOUND`, `ACCESS_DENIED`, `NOT_SUPPORTED`
 
 **Souvisí:** [`audio`](#audio)
 

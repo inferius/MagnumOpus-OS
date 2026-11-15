@@ -31,6 +31,7 @@ pub mod fullscreen;
 pub mod launch;
 pub mod menu;
 pub mod palette;
+pub mod pointer;
 pub mod prof;
 pub mod frame;
 pub mod gpu;
@@ -185,6 +186,8 @@ pub struct Comp {
     pub(crate) multi: Vec<alloc::string::String>,
     /// Od kdy je drzeny Esc pri cele obrazovce (`fullscreen.rs`).
     pub(crate) esc_since: Option<u64>,
+    /// Zamek ukazatele: okno a do kdy ukazovat upozorneni (`pointer.rs`).
+    pub(crate) plock: Option<(u32, u64)>,
     /// Bublina listy: prvek pod ukazatelem (od kdy), zobrazena, kdy zmizela.
     pub(crate) tip_hover: Option<(tooltip::Tip, u64)>,
     pub(crate) tip_shown: Option<tooltip::Tip>,
@@ -250,6 +253,7 @@ impl Comp {
             multi: Vec::new(),
             palette_ctrl: false,
             esc_since: None,
+            plock: None,
             tip_hover: None,
             tip_shown: None,
             tip_hidden_at: 0,

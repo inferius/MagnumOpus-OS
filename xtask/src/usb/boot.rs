@@ -34,8 +34,10 @@ pub const MARKERS: &[&str] = &[
 /// vyvojoveho prihlaseni a prihlasovaci obrazovka.
 pub const USER_MARKERS: &[&str] = &["fsd: pripojeno 'MagnumOpus'", "accountd: bezim", "init: kompozitor bezi", "compd: prihlasovaci obrazovka:"];
 
-/// Jak dlouho smi start trvat (aarch64 v emulaci TCG).
-const TIMEOUT: Duration = Duration::from_secs(420);
+/// Jak dlouho smi start trvat (aarch64 v emulaci TCG). Instalace z obrazu
+/// s FFmpeg, SDL a C++ (initfs pres 300 MiB) cte zive USB pres usb-storage
+/// v TCG kolem 3 minut; zrychleni cteni resi installd, do te doby 720 s.
+const TIMEOUT: Duration = Duration::from_secs(720);
 
 /// Argumenty QEMU pro stroj s flash diskem `image` (`extra` = dalsi
 /// argumenty, napr. interni disk).

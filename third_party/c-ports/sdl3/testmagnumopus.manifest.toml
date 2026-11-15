@@ -1,0 +1,12 @@
+# Test portu SDL (docs/cs/sdl.md): kurzor, zamek ukazatele, schranka a cela
+# obrazovka v okne kompozitoru. Sada testu `sdl`.
+[app]
+id = "org.magnumopus.sdltest"
+name = "SDL test MagnumOpus"
+
+[limits]
+memory = "128M"
+
+[audio]
+# Test nahravani: dotaz uzivateli pri prvnim pouziti.
+capture = true

@@ -9,6 +9,7 @@
 //! je mimo zamek, aby `mosdl_wake` nemusel cekat na vlakno, ktere prave
 //! ceka na udalosti.
 
+use std::collections::VecDeque;
 use std::ffi::{CStr, c_char};
 use std::os::magnumopus::runtime as rt;
 use std::sync::{Mutex, OnceLock};
@@ -19,10 +20,20 @@ use ui::client::{Event as WinEvent, Link, Window};
 
 use crate::event::{MosdlEvent, copy_frame, from_input, kind};
 
-struct State {
+mod audio;
+mod clip;
+mod pointer;
+
+pub(crate) struct State {
     /// Kanal okna a listek, dokud okno neni otevrene.
     link: Option<Link>,
     win: Option<Window>,
+    /// Udalosti prijate behem cekani na schranku (`clip.rs`).
+    pending: VecDeque<MosdlEvent>,
+    /// Text posledniho `mosdl_clipboard_fetch`.
+    clip_text: Vec<u8>,
+    /// Posledni kurzor (po obnove kompozitoru se posle znovu).
+    cursor: Option<guiproto::cursor::Cursor>,
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -39,7 +50,7 @@ pub struct MosdlDisplay {
     pub refresh_mhz: u32,
 }
 
-fn code(e: Error) -> i32 {
+pub(crate) fn code(e: Error) -> i32 {
     e.code()
 }
 
@@ -48,7 +59,7 @@ fn wake_event() -> Option<&'static Event> {
 }
 
 /// Stav procesu (handly ze startovni zpravy vezme jednou).
-fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
+pub(crate) fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
     let mut g = STATE.lock().unwrap_or_else(|e| e.into_inner());
     let st = g.get_or_insert_with(|| {
         libos::rt::set_self_process(rt::start::self_process());
@@ -56,12 +67,12 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
         let link = it.next().map(|w| Link { window: Channel::from_handle(w), lease: it.next().map(Channel::from_handle) });
         // Dalsi handly SDL nepouziva: zavrou se.
         drop(it);
-        State { link, win: None }
+        State { link, win: None, pending: VecDeque::new(), clip_text: Vec::new(), cursor: None }
     });
     f(st)
 }
 
-fn c_str(p: *const c_char) -> String {
+pub(crate) fn c_str(p: *const c_char) -> String {
     if p.is_null() {
         return String::new();
     }
@@ -195,22 +206,41 @@ pub unsafe extern "C" fn mosdl_window_present(pixels: *const u8, pitch: u32, w: 
     })
 }
 
-/// Udalost okna -> udalost pro C (`None` = SDL ji nepotrebuje).
-fn translate(e: WinEvent) -> Option<MosdlEvent> {
-    match e {
-        WinEvent::Input(r) => Some(from_input(&r)),
-        WinEvent::Resized { w, h } => Some(MosdlEvent::simple(kind::RESIZE, w as i32, h as i32)),
-        WinEvent::Close => Some(MosdlEvent::simple(kind::CLOSE, 0, 0)),
-        WinEvent::Restored { .. } => Some(MosdlEvent::simple(kind::EXPOSE, 0, 0)),
-        _ => None,
-    }
+/// Udalost okna -> udalost pro C (`None` = SDL ji nepotrebuje). Schranku
+/// obslouzi okno samo (zadost o nase data); dorucena data vrati `Pasted`.
+enum Item {
+    Ev(MosdlEvent),
+    Pasted(ui::client::Pasted),
 }
 
-fn next_event(win: &mut Window, deadline: u64) -> Result<Option<MosdlEvent>> {
+fn translate(st: &mut State, e: WinEvent) -> Result<Option<Item>> {
+    let win = st.win.as_mut().ok_or(Error::BadState)?;
+    Ok(match e {
+        WinEvent::Input(r) => Some(Item::Ev(from_input(&r))),
+        WinEvent::Resized { w, h } => Some(Item::Ev(MosdlEvent::simple(kind::RESIZE, w as i32, h as i32))),
+        WinEvent::Close => Some(Item::Ev(MosdlEvent::simple(kind::CLOSE, 0, 0))),
+        WinEvent::Restored { .. } => {
+            // Novy kompozitor kurzor nezna: poslat znovu.
+            pointer::restore(st);
+            Some(Item::Ev(MosdlEvent::simple(kind::EXPOSE, 0, 0)))
+        }
+        WinEvent::Context => Some(Item::Ev(MosdlEvent::simple(kind::DISPLAY, 0, 0))),
+        WinEvent::PointerLock(on) => Some(Item::Ev(MosdlEvent::simple(kind::POINTER_LOCK, on as i32, 0))),
+        WinEvent::State(s) => Some(Item::Ev(MosdlEvent::simple(kind::STATE, s as i32, 0))),
+        WinEvent::Clipboard(m) => win.clipboard_event_any(m)?.map(Item::Pasted),
+        _ => None,
+    })
+}
+
+/// Dalsi polozka do `deadline` (`None` = vyprsel cas nebo probuzeni).
+fn next_item(st: &mut State, deadline: u64) -> Result<Option<Item>> {
     loop {
+        let win = st.win.as_mut().ok_or(Error::BadState)?;
         if win.has_queued() {
-            if let Some(e) = win.next_one(Some(0))?.and_then(translate) {
-                return Ok(Some(e));
+            if let Some(e) = win.next_one(Some(0))?
+                && let Some(i) = translate(st, e)?
+            {
+                return Ok(Some(i));
             }
             continue;
         }
@@ -230,8 +260,8 @@ fn next_event(win: &mut Window, deadline: u64) -> Result<Option<MosdlEvent>> {
         }
         match win.next_one(Some(0)) {
             Ok(Some(e)) => {
-                if let Some(e) = translate(e) {
-                    return Ok(Some(e));
+                if let Some(i) = translate(st, e)? {
+                    return Ok(Some(i));
                 }
             }
             Ok(None) | Err(Error::TimedOut | Error::ShouldWait) => {}
@@ -239,6 +269,20 @@ fn next_event(win: &mut Window, deadline: u64) -> Result<Option<MosdlEvent>> {
         }
         if libos::time::now() >= deadline {
             return Ok(None);
+        }
+    }
+}
+
+fn next_event(st: &mut State, deadline: u64) -> Result<Option<MosdlEvent>> {
+    if let Some(e) = st.pending.pop_front() {
+        return Ok(Some(e));
+    }
+    loop {
+        match next_item(st, deadline)? {
+            Some(Item::Ev(e)) => return Ok(Some(e)),
+            // Data schranky mimo `mosdl_clipboard_fetch` (opozdena): zahodit.
+            Some(Item::Pasted(_)) => {}
+            None => return Ok(None),
         }
     }
 }
@@ -255,10 +299,7 @@ pub unsafe extern "C" fn mosdl_next_event(ev: *mut MosdlEvent, timeout_ns: i64) 
         t if t < 0 => u64::MAX,
         t => libos::time::now().saturating_add(t as u64),
     };
-    let r = with_state(|s| match s.win.as_mut() {
-        Some(win) => next_event(win, deadline),
-        None => Ok(None),
-    });
+    let r = with_state(|s| if s.win.is_some() { next_event(s, deadline) } else { Ok(None) });
     match r {
         // SAFETY: `ev` overen vyse.
         Ok(Some(e)) => unsafe {

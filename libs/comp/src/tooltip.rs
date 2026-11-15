@@ -68,6 +68,7 @@ impl Comp {
             Tip::Bar(SysKey::BarLaunch(i)) => self.launchable.get(i).map_or(String::new(), |(_, n)| format!("{n} - spustit")),
             Tip::Bar(SysKey::Launcher) => String::from("Aplikace"),
             Tip::Bar(SysKey::BarIcon(0)) => self.net_line(),
+            Tip::Bar(SysKey::BarIcon(1)) if !self.status.capturing.is_empty() => format!("Nahrává zvuk: {}", self.status.capturing.join(", ")),
             Tip::Bar(SysKey::BarIcon(1)) => match self.status.volume {
                 Some((_, true)) => String::from("Zvuk: ztlumeno"),
                 Some((v, false)) => format!("Zvuk: hlasitost {v} %"),

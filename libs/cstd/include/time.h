@@ -52,6 +52,11 @@ struct tm *localtime(const time_t *t);
 time_t mktime(struct tm *t);
 time_t timegm(struct tm *t);
 size_t strftime(char *buf, size_t max, const char *fmt, const struct tm *t);
+#ifndef _CSTD_LOCALE_T
+#define _CSTD_LOCALE_T
+typedef struct __locale_struct *locale_t;
+#endif
+size_t strftime_l(char *buf, size_t max, const char *fmt, const struct tm *t, locale_t l);
 void tzset(void);
 
 _CSTD_END

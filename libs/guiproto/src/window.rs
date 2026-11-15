@@ -42,6 +42,12 @@ pub mod op {
     pub const BUFFER_CREATE_DESC: u32 = 22;
     /// Ploty pristiho `COMMIT` okna (`SyncPoints`).
     pub const SYNC_POINTS: u32 = 23;
+    /// Cela obrazovka na zadost aplikace (`WindowState`).
+    pub const WINDOW_STATE: u32 = 24;
+    /// Kurzor nad obsahem okna (`SetCursor`).
+    pub const SET_CURSOR: u32 = 25;
+    /// Zamek ukazatele, relativni pohyb (`PointerLock`).
+    pub const POINTER_LOCK: u32 = 26;
     // Kompozitor -> aplikace.
     pub const WELCOME: u32 = 100;
     pub const CONFIGURE: u32 = 101;
@@ -66,6 +72,8 @@ pub mod op {
     pub const WINDOW_PLACE: u32 = 116;
     /// Rozpracovany text (mrtva klavesa, pozdeji IME): `Compose`.
     pub const COMPOSE: u32 = 117;
+    /// Zamek ukazatele zapnut / zrusen (`PointerLockState`).
+    pub const POINTER_LOCK_STATE: u32 = 118;
 }
 
 /// Priznaky segmentu rozpracovaneho textu (`ServerMsg::Compose::flags`).
@@ -444,6 +452,9 @@ pub enum InputEvent {
     Scroll { dx: i32, dy: i32 },
     /// Okno ziskalo / ztratilo fokus klavesnice.
     Focus(bool),
+    /// Relativni pohyb ukazatele pri zamku ukazatele (`POINTER_LOCK`):
+    /// kurzor stoji a je skryty, okno dostava jen posuny.
+    PointerRelative { dx: i32, dy: i32 },
 }
 
 /// Zaznam vstupu: udalost, modifikatory (`inputproto::mods`), priznak
@@ -484,6 +495,7 @@ impl InputRecord {
             InputEvent::Button { code, pressed, x, y } => (5, code as u32 | (pressed as u32) << 16, x as u32, y as u32),
             InputEvent::Scroll { dx, dy } => (6, dx as u32, dy as u32, 0),
             InputEvent::Focus(f) => (7, f as u32, 0, 0),
+            InputEvent::PointerRelative { dx, dy } => (8, dx as u32, dy as u32, 0),
         };
         // Trida ve stejnem bajtu jako driv priznak umeleho vstupu.
         let class = if self.class != input_class::LOCAL { self.class } else { self.synthetic as u8 };
@@ -519,6 +531,7 @@ impl InputRecord {
             },
             6 => InputEvent::Scroll { dx: a as i32, dy: b as i32 },
             7 => InputEvent::Focus(a != 0),
+            8 => InputEvent::PointerRelative { dx: a as i32, dy: b as i32 },
             _ => return Err(Error::InvalidArgs),
         };
         Ok(Self {
@@ -587,6 +600,19 @@ pub enum ClientMsg {
     /// - uvolneni: kompozitor plot posune, az buffery pripojene timto
     ///   commitem prestane cist (YUV hned po prevodu, BGRA po `RELEASED`).
     SyncPoints { window: u32, acquire: Option<u64>, release: Option<u64> },
+    /// Zadost o celou obrazovku (`fullscreen`) nebo navrat. Vstup do cele
+    /// obrazovky jen v reakci na fyzicky stisk v okne s fokusem (`gesture`
+    /// = `InputRecord::serial`), jako v prohlizecich; navrat kdykoli.
+    /// Kompozitor odpovi `CONFIGURE` se stavem `FULLSCREEN`.
+    WindowState { window: u32, fullscreen: bool, gesture: u32 },
+    /// Kurzor nad obsahem okna ([`crate::cursor`]).
+    SetCursor { window: u32, cursor: crate::cursor::Cursor },
+    /// Zamek ukazatele: kurzor se skryje a stoji, okno dostava
+    /// `InputEvent::PointerRelative`. Zapnout jen okno s fokusem
+    /// a v reakci na fyzicky stisk (`gesture`); kompozitor ukaze upozorneni
+    /// a zamek zrusi pri ztrate fokusu nebo systemove zkratce. Vysledek
+    /// a kazde zruseni prijde jako `PointerLockState`.
+    PointerLock { window: u32, lock: bool, gesture: u32 },
 }
 
 /// Zprava kompozitor -> aplikace.
@@ -627,6 +653,18 @@ pub enum ServerMsg {
     /// ([`compose`]). Text neni soucasti hodnoty pole; slozeny vysledek
     /// prijde jako `Text`. Jen oknu s fokusem, nelogovat (soukromi).
     Compose { window: u32, text: String, cursor_begin: u32, cursor_end: u32, flags: u32 },
+    /// Zamek ukazatele okna je (`locked`) / neni zapnuty (odpoved na
+    /// `PointerLock` i zruseni systemem).
+    PointerLockState { window: u32, locked: bool },
+}
+
+/// Pravdivostni hodnota: jen 0 nebo 1 (jediny tvar kodovani).
+fn bool_r(r: &mut Reader<'_>) -> Result<bool> {
+    match r.u8()? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(Error::InvalidArgs),
+    }
 }
 
 /// Data obalky schranky: delka a bajty (zkracena zprava = chyba).
@@ -784,6 +822,19 @@ impl ClientMsg {
                     };
                 }
             }
+            WindowState { window, fullscreen, gesture } => {
+                w = Writer::op(op::WINDOW_STATE);
+                w.u32(*window).u8(*fullscreen as u8).u32(*gesture);
+            }
+            SetCursor { window, cursor } => {
+                w = Writer::op(op::SET_CURSOR);
+                w.u32(*window);
+                cursor.write(&mut w);
+            }
+            PointerLock { window, lock, gesture } => {
+                w = Writer::op(op::POINTER_LOCK);
+                w.u32(*window).u8(*lock as u8).u32(*gesture);
+            }
         }
         w.finish()
     }
@@ -913,6 +964,9 @@ impl ClientMsg {
                 let release = point()?;
                 SyncPoints { window, acquire, release }
             }
+            op::WINDOW_STATE => WindowState { window: r.u32()?, fullscreen: bool_r(&mut r)?, gesture: r.u32()? },
+            op::SET_CURSOR => SetCursor { window: r.u32()?, cursor: crate::cursor::Cursor::read(&mut r)? },
+            op::POINTER_LOCK => PointerLock { window: r.u32()?, lock: bool_r(&mut r)?, gesture: r.u32()? },
             _ => return Err(Error::NotSupported),
         };
         if !r.is_empty() {
@@ -1038,6 +1092,10 @@ impl ServerMsg {
                 w = Writer::op(op::COMPOSE);
                 w.u32(*window).str(text).u32(*cursor_begin).u32(*cursor_end).u32(*flags);
             }
+            PointerLockState { window, locked } => {
+                w = Writer::op(op::POINTER_LOCK_STATE);
+                w.u32(*window).u8(*locked as u8);
+            }
             WindowContext { window, generation, output, screen, work_area, scale, refresh_mhz, ext } => {
                 w = Writer::op(op::WINDOW_CONTEXT);
                 w.u32(*window).u32(*generation).u32(*output).rect(screen).rect(work_area).u32(*scale).u32(*refresh_mhz);
@@ -1137,6 +1195,7 @@ impl ServerMsg {
                 refresh_mhz: r.u32()?,
                 ext: crate::context::ContextExt::decode(&mut r)?,
             },
+            op::POINTER_LOCK_STATE => PointerLockState { window: r.u32()?, locked: bool_r(&mut r)? },
             _ => return Err(crate::Error::NotSupported),
         };
         if !r.is_empty() {

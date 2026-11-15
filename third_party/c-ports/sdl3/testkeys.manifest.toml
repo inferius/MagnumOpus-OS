@@ -1,0 +1,7 @@
+# Port SDL (docs/cs/sdl.md): test klaves SDL (vypis klaves a textu).
+[app]
+id = "org.libsdl.testkeys"
+name = "SDL testkeys"
+
+[limits]
+memory = "128M"

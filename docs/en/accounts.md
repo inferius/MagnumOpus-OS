@@ -674,6 +674,38 @@ match login.auth(1000, Method::Password, Secret::from("password"))? {
 }
 ```
 
+## Application permissions
+
+**[verified in QEMU]** x86_64 and aarch64 (test `sdl: zvuk - prehravani,
+nahravani s povolenim, odvolani (QMP)`; host tests `cargo test -p
+accountproto perm`).
+
+The user's decisions "may application X use Y" (the microphone today,
+[Sound](audio.md#application-sessions-and-capture)) are kept by the account
+service permanently per user and application (identity from the
+manifest), so that nobody asks again.
+
+- **Where:** `/system/accounts/permissions/<uid>` (`/db/permissions/<uid>`
+  in the account service FS session, account 902): lines
+  `identity<TAB>permission<TAB>allow|deny`. Neither applications nor the
+  user FS session can access the file; it changes only through the
+  account service. Why here: account data are managed by the system, the
+  account service already has a trusted channel for system dialogs and
+  the decision belongs to the user like the rest of their account
+  settings.
+- **Question** (the `permissions` channel, given by init to a device
+  service, `audiod` today): a stored decision replies at once; otherwise
+  the system Permission dialog at the compositor with **Allow** / **Only
+  this time** / **Do not allow** (Esc = Do not allow). Allow and Do not
+  allow are stored, Only this time holds until the application ends.
+  Without the compositor or for an unknown user = Do not allow.
+- **Listing and revoking:** the shell command `povoleni` (list) and
+  `povoleni odvolat <app> [mikrofon]`. The shell does not talk to the
+  account service: the request goes to init (the power channel of the
+  shell session) and init asks the account service on behalf of the user
+  of the terminal session (the `permissions-admin` channel). The shell thus
+  never sees other users' decisions. Revoking in Settings **[designed]**.
+
 ## AI agent and identity
 
 The agent workspace (the agents thread, `user/agentd`) runs as user 1000

@@ -164,6 +164,11 @@ pub fn request_from_shell(data: &[u8], chan: Channel, session: Option<u64>) -> O
             Ok(text) => Reply::Text(text),
             Err(e) => Reply::Failed(e),
         },
+        // Povoleni aplikaci uzivatele relace (prikaz `povoleni`).
+        Ok(Request::Permissions { app, perm }) => match crate::perms::shell(session, &app, &perm) {
+            Ok(text) => Reply::Text(text),
+            Err(e) => Reply::Failed(e),
+        },
         // Diagnosticky snimek: kompozitor (blok v logu, obrazek pres logd).
         Ok(Request::Snapshot) => match crate::gui::snapshot() {
             Ok(()) => Reply::Text(alloc::string::String::from("snimek: blok stavu v logu, obrazek v /system/log/snimek-*.bmp")),

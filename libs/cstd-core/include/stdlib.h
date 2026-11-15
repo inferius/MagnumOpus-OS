@@ -11,6 +11,10 @@ void *malloc(size_t size);
 void *calloc(size_t count, size_t size);
 void *realloc(void *p, size_t size);
 void free(void *p);
+/* Zarovnane bloky (align mocnina 2; posix_memalign navic nasobek sizeof(void *)). */
+int posix_memalign(void **out, size_t align, size_t size);
+void *aligned_alloc(size_t align, size_t size);
+void *memalign(size_t align, size_t size);
 
 unsigned long strtoul(const char *s, char **end, int base);
 unsigned long long strtoull(const char *s, char **end, int base);

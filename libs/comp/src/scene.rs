@@ -160,6 +160,8 @@ pub struct Window {
     /// Do kdy ukazovat odznak u bezramoveho okna.
     pub badge_until: u64,
     pub geo: Geo,
+    /// Kurzor aplikace nad obsahem okna (`SET_CURSOR`, `pointer.rs`).
+    pub app_cursor: Option<guiproto::cursor::Cursor>,
 }
 
 impl Window {
@@ -363,6 +365,7 @@ impl Comp {
     }
 
     pub(crate) fn drop_window(&mut self, gid: u32) {
+        self.pointer_unlock_window(gid);
         if let Some(w) = self.windows.remove(&gid) {
             // Cele misto okna vcetne stinu (aktivni okno ma vetsi stin).
             let r = w.visual();
@@ -489,6 +492,9 @@ impl Comp {
             ClientMsg::MenuUpdate { window, items } => self.menu_update(c, window, &items),
             ClientMsg::Clipboard { data } => self.clipboard_msg(c, &data, now),
             ClientMsg::WindowSize { window, w, h, min_w, min_h, max_frac_w, max_frac_h } => self.window_size(c, window, w, h, (min_w, min_h), (max_frac_w, max_frac_h), now),
+            ClientMsg::SetCursor { window, cursor } => self.set_app_cursor(c, window, cursor),
+            ClientMsg::WindowState { window, fullscreen, gesture } => self.window_state(c, window, fullscreen, gesture, now),
+            ClientMsg::PointerLock { window, lock, gesture } => self.pointer_lock(c, window, lock, gesture, now),
             _ => {}
         }
     }
@@ -544,6 +550,7 @@ impl Comp {
             serial: 1,
             badge_until: 0,
             geo: self.style.geo(),
+            app_cursor: None,
         };
         self.windows.insert(gid, win);
         self.z.push(gid);
@@ -849,6 +856,10 @@ impl Comp {
         if self.focus == gid {
             return;
         }
+        // Zamek ukazatele plati jen pro okno s fokusem.
+        if let Some(old) = self.focus {
+            self.pointer_unlock_window(old);
+        }
         if let Some(old) = self.focus.take()
             && let Some(w) = self.windows.get(&old)
         {
@@ -913,5 +924,8 @@ pub(crate) fn op_of(m: &ClientMsg) -> u32 {
         // Prevadi a zpracovava sluzba compd (YUV, ploty); sem nechodi.
         ClientMsg::BufferCreateDesc { .. } => op::BUFFER_CREATE_DESC,
         ClientMsg::SyncPoints { .. } => op::SYNC_POINTS,
+        ClientMsg::WindowState { .. } => op::WINDOW_STATE,
+        ClientMsg::SetCursor { .. } => op::SET_CURSOR,
+        ClientMsg::PointerLock { .. } => op::POINTER_LOCK,
     }
 }

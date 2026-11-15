@@ -1,0 +1,9 @@
+[package]
+name = "uniprop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Vlastnosti znaku Unicode (tridy wctype, jednoduche prevody velikosti, sirka v terminalu) z tabulek UCD"
+
+[dependencies]

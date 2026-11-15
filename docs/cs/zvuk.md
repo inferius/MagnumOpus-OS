@@ -132,6 +132,11 @@ vstupu vrací `NOT_SUPPORTED`.
 Klient `audioproto::conn::AudioClient` stojí na `svcclient::Conn`:
 s lístkem přežije restart služby, bez něj vrátí `SERVICE_UNAVAILABLE`.
 
+Data do kruhu smí psát i jiný proces než vlastník streamu:
+`Stream::producer_handles` vrátí kopie VMO kruhu a události periody
+(dekodér médií, [multimedia.md](multimedia.md)). Řízení (start, stop,
+zavření) zůstává vlastníkovi; na událost pak čeká jen producent.
+
 ### Protokol ovladače
 
 `audiod` pošle ovladači `OPEN_OUTPUT` (formát, perioda, počet period)
@@ -247,6 +252,44 @@ vzniká přes Resource ovladače, takže s IOMMU (VT-d, AMD-Vi, SMMUv3) do
 ní zařízení smí a jinam ne. Pozice (`LPIB`) se převádí na monotónní
 počet snímků ve stránce stavu. Chyba FIFO nebo deskriptoru stream
 zastaví a nahlásí.
+
+## Relace aplikací a nahrávání
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (test `sdl: zvuk - prehravani,
+nahravani s povolenim, odvolani (QMP)`, host testy `cargo test -p
+audioproto session`, `-p accountproto perm`).
+
+Každá aplikace s oknem dostane při spuštění **relaci zvukové služby
+s právy aplikace**: init ji vytvoří přes supervisor
+(`Supervisor::session("audiod", recept)`) a předá jako handle se štítkem
+`abi::params::tag::AUDIO`, lístek k obnově jako `AUDIO_LEASE`. Recept
+(`audioproto::session::Recipe`) nese identitu a jméno z manifestu,
+uživatele relace a nahrávání podle manifestu; po restartu `audiod` ho
+supervisor pošle znovu, takže práva obnovu přežijí. Prázdný recept je
+systémová relace (lišta, shell, init) jako dosud.
+
+| Smí relace aplikace | Ne |
+|---|---|
+| `OPEN`, `START`, `STOP`, `CLOSE`, `DRAIN` vlastních streamů, `STREAM_VOLUME`, `STREAM_INFO`, `STATUS`, `DEVICES` | `MASTER_VOLUME`, `MUTE`, `SELECT`, `CONNECT` (`ACCESS_DENIED`; mění zvuk celého systému, patří liště a nastavení) |
+
+**Nahrávání** (`OPEN` vstupu):
+
+- bez `[audio] capture = true` v manifestu `ACCESS_DENIED` hned, bez
+  dotazu;
+- s ním se `audiod` při prvním `OPEN` vstupu v relaci zeptá služby účtů
+  (kanál `permissions`, zprávy `accountproto::perm`) a odpoví aplikaci,
+  až přijde rozhodnutí: uložené hned, jinak po systémovém dialogu
+  Povolení (Povolit / Jen tentokrát / Nepovolit, Esc = Nepovolit). Volání
+  aplikace do té doby čeká;
+- rozhodnutí platí po zbytek relace; „Povolit“ a „Nepovolit“ se ukládají
+  trvale po uživateli a aplikaci ([Účty](ucty.md#povolení-aplikací)),
+  odvolání příkazem shellu `povoleni odvolat <aplikace>`;
+- bez služby účtů (nebo bez kompozitoru pro dialog) nahrávání pro
+  aplikace není.
+
+Po dobu nahrávání ukazuje lišta místo ikony hlasitosti **mikrofon
+v barvě nebezpečí**; bublina vypíše, které aplikace nahrávají (`STATUS`
+pole `capturing`). Uživatel tak vždy vidí, že se nahrává.
 
 ## Služba `audiod`
 
