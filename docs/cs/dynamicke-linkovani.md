@@ -342,8 +342,12 @@ sysrootu C a start `__libc_start` v `osrt`, viz [cstd.md](cstd.md#libcso).
 - **init** **[ověřeno v QEMU]** x86_64 i aarch64 (sady `procesy`, `cstd dyn`, `cpp`):
   inicializátory modulů ze startu (`DT_INIT`, `DT_INIT_ARRAY`, závislosti
   napřed, program poslední) zavaděč před skokem do programu nespouští.
-  Volá je běhové prostředí programu funkcí tabulky `run_init` hned po své
-  inicializaci a před `main` (`rt_own` po `startup`, `__libc_start` v osrt
+  Pořadí: zavaděč nahraje a relokuje moduly, skočí do programu, runtime
+  programu připraví heap, stdio a soubory a pak zavolá funkci tabulky
+  `run_init`: inicializátory všech závislostí před programem, nakonec
+  program, to vše před `main`. **Vlastní crt (start programu bez osrt
+  a libos) musí `run_init` zavolat sám** (vzor `user/dltest/crt.c`), jinak
+  konstruktory nepoběží. Volají ho (`rt_own` po `startup`, `__libc_start` v osrt
   po `init`, crt testu před `program_main`): konstruktory statických
   objektů C++ alokují, registrují `__cxa_atexit` a sahají na soubory, což
   před přípravou heapu a stdio nejde ([běh C++](cpp.md)). Podruhé nic

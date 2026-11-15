@@ -363,8 +363,13 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
 - **init** **[verified in QEMU]** x86_64 and aarch64 (suites `procesy`, `cstd dyn`,
   `cpp`): the loader does not run the initializers of the start-up modules
   (`DT_INIT`, `DT_INIT_ARRAY`, dependencies first, the program last) before
-  jumping to the program. The program runtime calls them through the table
-  function `run_init` right after its own initialization and before `main`
+  jumping to the program. Order: the loader loads and relocates the
+  modules, jumps to the program, the program runtime prepares the heap,
+  stdio and files and then calls the table function `run_init`: the
+  initializers of all dependencies before the program, the program last,
+  all before `main`. **An own crt (a program start without osrt and
+  libos) must call `run_init` itself** (example `user/dltest/crt.c`),
+  otherwise constructors do not run. It is called by
   (`rt_own` after `startup`, `__libc_start` in osrt after `init`, the test
   crt before `program_main`): constructors of C++ static objects allocate,
   register `__cxa_atexit` and touch files, which is not possible before the
