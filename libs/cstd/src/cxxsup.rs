@@ -201,8 +201,9 @@ std::thread_local! {
 }
 
 /// `__cxa_thread_atexit_impl` (glibc ABI, libc++abi ji vola pro
-/// `thread_local` s destruktorem). Modul `dso` se nesleduje: knihovna
-/// s `thread_local` se nesmi odebrat (`dlclose`), dokud vlakno bezi.
+/// `thread_local` s destruktorem). Modul `dso` se nesleduje: zavadec
+/// moduly neodstranuje (`dlclose` jen snizi pocitadlo), kod destruktoru
+/// tedy zustava namapovany.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn __cxa_thread_atexit_impl(
     f: unsafe extern "C" fn(*mut c_void),

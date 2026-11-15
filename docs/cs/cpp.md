@@ -119,11 +119,12 @@ Seznam `atexit`/`__cxa_atexit` se spustí z jedné funkce v `osrt::at_exit`
 zaregistrované po vyprázdnění proudů stdio, takže proudy se vyprázdní až po
 všech destruktorech.
 
-⚠️ **Omezení:** zavaděč zatím při `dlclose` nevolá `__cxa_finalize`.
-Knihovna v C++ se statickými objekty, kterou program uvolní `dlclose`,
-nechá v seznamu funkce s neplatnou adresou. Dokud to zavaděč neumí,
-knihovny v C++ se nesmí uvolňovat (`RTLD_NODELETE`). Stejně tak knihovna
-s `thread_local`, dokud běží vlákna, která je použila.
+**`dlclose`:** zavaděč moduly neodstraňuje (`dlclose` jen sníží počítadlo,
+[dynamické linkování](dynamicke-linkovani.md), jako musl). Kód knihovny tedy
+zůstává namapovaný a její destruktory statických objektů a `thread_local`
+proběhnou bezpečně při konci procesu, ne při `dlclose`. `__cxa_finalize`
+zavaděč nevolá: zničit objekty knihovny, která zůstává nahraná a při dalším
+`dlopen` se znovu neinicializuje, by bylo horší než počkat do konce.
 
 ## Co doplnil cstd
 

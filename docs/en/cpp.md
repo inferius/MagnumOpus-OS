@@ -122,12 +122,13 @@ The `atexit`/`__cxa_atexit` list runs from one function in
 `osrt::at_exit`, registered after the stdio flush, so the streams are
 flushed only after all destructors.
 
-⚠️ **Limitation:** the loader does not call `__cxa_finalize` on `dlclose`
-yet. A C++ library with static objects that a program unloads with
-`dlclose` leaves functions with invalid addresses in the list. Until the
-loader can do it, C++ libraries must not be unloaded (`RTLD_NODELETE`).
-The same holds for a library with `thread_local` while the threads that
-used it are running.
+**`dlclose`:** the loader does not remove modules (`dlclose` only
+decrements the counter, [dynamic linking](dynamic-linking.md), like musl).
+The library code therefore stays mapped and its destructors of static
+objects and `thread_local` run safely at process exit, not at `dlclose`.
+The loader does not call `__cxa_finalize`: destroying the objects of a
+library that stays loaded and is not initialized again on the next
+`dlopen` would be worse than waiting until exit.
 
 ## What cstd added
 
