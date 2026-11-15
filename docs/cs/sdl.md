@@ -91,7 +91,7 @@ Funkce vracejí 0 nebo záporný kód chyby jádra ([chyby](chyby.md)). Rozlože
   je etapa 6-2.
 - **Softwarový renderer.** Vulkan pro SDL (render i GPU API) až s ovladači
   GPU pro aplikace ([render](render.md)).
-- **Zvuk**: jedno výchozí zařízení pro přehrávání a jedno pro nahrávání (výběr karty je věc systému); latence bufferu je konstanta ovladače `MOS_LATENCY_US`. Nahrávání jen po povolení (systémový dialog při prvním použití).
+- **Zvuk**: jedno výchozí zařízení pro přehrávání a jedno pro nahrávání (výběr karty je věc systému); latence bufferu je konstanta ovladače `MOS_LATENCY_US`. Nahrávání jen po povolení (systémový dialog při prvním použití). Na místo v kruhovém bufferu `audiod` čeká `WaitDevice` (`mosdl_audio_wait_space`, mimo zámek zařízení), `PlayDevice` jen zapíše - SDL ho volá pod zámkem zařízení, takže blokování v něm drželo `SDL_ResumeAudioDevice` i zavření streamu sekundy.
 - **HiDPI jen jako škála**: buffery okna jsou 1:1, kompozitor zatím
   škálu 100 % a škálování bufferů nemá; SDL dostane škálu jako
   `SDL_GetDisplayContentScale` (hustota pixelů 1).

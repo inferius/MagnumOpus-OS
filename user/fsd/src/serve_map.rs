@@ -70,7 +70,7 @@ impl Service {
 
     /// Zaznam namapovaneho souboru za handlem `h` (jen kdyz nejaky je).
     pub fn mapped_key(&mut self, h: u64) -> Option<Key> {
-        if self.vmos.is_empty() {
+        if !self.vmos.any_shared() {
             return None;
         }
         let rev = self.fs.as_mut()?.revision_h(h).ok()?;
@@ -173,7 +173,7 @@ impl Service {
         }
         let rev = fs.revision_h(h)?;
         let key = (rev.dataset, rev.oid);
-        self.vmos.open(fs, key, h)?;
+        self.vmos.open(fs, key, h, shared, write)?;
         let (vmo, size) = self.vmos.window(fs, key, idx)?;
         let mut rights = Rights::BASIC | Rights::READ | Rights::MAP;
         if write {
@@ -212,7 +212,7 @@ impl Service {
         fs.check_access_h(h, fs::access::WRITE)?;
         let rev = fs.revision_h(h)?;
         let key = (rev.dataset, rev.oid);
-        self.vmos.open(fs, key, h)?;
+        self.vmos.open(fs, key, h, true, true)?;
         let pages = take_dirty(old)?;
         let size = old.size()?.min(WINDOW);
         if pages.is_empty() || size == 0 {

@@ -95,7 +95,7 @@ The event time (ns since system start) is converted to SDL time.
   (`BUFFER_CREATE_DESC`) is stage 6-2.
 - **Software renderer.** Vulkan for SDL (render and the GPU API) comes with
   GPU drivers for applications ([render](render.md)).
-- **Audio**: one default device for playback and one for capture (choosing the card is up to the system); the buffer latency is the driver constant `MOS_LATENCY_US`. Capture only after permission (a system dialog on first use).
+- **Audio**: one default device for playback and one for capture (choosing the card is up to the system); the buffer latency is the driver constant `MOS_LATENCY_US`. Capture only after permission (a system dialog on first use). `WaitDevice` waits for room in the `audiod` ring buffer (`mosdl_audio_wait_space`, outside the device lock), `PlayDevice` only writes - SDL calls it under the device lock, so blocking there held `SDL_ResumeAudioDevice` and closing a stream for seconds.
 - **HiDPI only as a scale**: window buffers are 1:1, the compositor has no
   scale other than 100 % and no buffer scaling yet; SDL gets the scale as
   `SDL_GetDisplayContentScale` (pixel density 1).

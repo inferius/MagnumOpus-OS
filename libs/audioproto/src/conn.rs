@@ -175,6 +175,31 @@ impl Stream {
         self.client.call(&Request::Drain { stream: self.info.stream }).map(|_| ())
     }
 
+    /// Pocka, az se do bufferu vejde `bytes` bajtu (nejvys cely buffer),
+    /// nejdele do `deadline` (`TIMED_OUT`). Plny buffer nespusteneho streamu
+    /// stream spusti (jinak by sluzba nic nespotrebovala). Pro klienty,
+    /// kteri cekaji mimo svuj zamek a zapis pak neblokuje (SDL:
+    /// `WaitDevice` blokuje, `PlayDevice` ne).
+    pub fn wait_space(&self, bytes: usize, deadline: Option<u64>) -> Result<()> {
+        let fb = self.ring.frame_bytes() as usize;
+        let need = ((bytes / fb.max(1)) as u32).min(self.ring.capacity());
+        loop {
+            // Nejdriv nulovat, pak zjistit misto: spotreba po kontrole
+            // udalost nastavi a cekani hned skonci.
+            let _ = self.event.reset();
+            if self.ring.writable() >= need {
+                return Ok(());
+            }
+            if !self.started.load(Ordering::Relaxed) {
+                self.start()?;
+            }
+            match libos::wait_one(self.event.handle(), Signals::SIGNALED, deadline) {
+                Ok(_) | Err(Error::ShouldWait) => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
     /// Pocka na udalost sluzby (perioda dohrala / nova data), nejdele do
     /// `deadline`.
     pub fn wait(&self, deadline: Option<u64>) -> Result<()> {

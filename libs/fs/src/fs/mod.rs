@@ -442,6 +442,13 @@ impl<D: BlockDevice> Fs<D> {
         self.s.discard = on;
     }
 
+    /// Citac zmen stavu v pameti (strom, buffer dat): beze zmeny = operace
+    /// nic nezmenila (fsd podle nej hlida soubory namapovane do pameti).
+    /// Commit ho nemeni.
+    pub fn mutation_count(&self) -> u64 {
+        self.mutations
+    }
+
     /// Ulozi vsechny zmeny atomicky.
     pub fn commit(&mut self) -> Result<()> {
         self.s.check_writable()?;

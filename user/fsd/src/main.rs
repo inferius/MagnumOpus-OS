@@ -268,7 +268,7 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
         if let Some(t) = svc.orphan_cleanup {
             deadline = deadline.min(t);
         }
-        if !svc.vmos.is_empty() {
+        if svc.vmos.any_shared() {
             deadline = deadline.min(next_writeback);
         }
         for s in &sessions {
