@@ -113,6 +113,7 @@ pub fn assemble(arch: &Arch, std_bin: &Path) -> Result<PathBuf> {
     copy_tree(&workspace_root().join("libs/cstd-core/include"), &root.join("include-core"))?;
     // Rozhrani pro port SDL (symboly v libc.a).
     copy_tree(&workspace_root().join("libs/mosdl/include"), &root.join("include"))?;
+    copy_tree(&workspace_root().join("libs/mowin/include"), &root.join("include"))?;
     // Objekty jadra pro programy v C (magnumopus/sys.h, symboly v libc).
     copy_tree(&workspace_root().join("libs/mosys/include"), &root.join("include"))?;
     let libc = std::fs::read(std_bin.join("libc.a")).map_err(|e| format!("libc.a: {e}"))?;

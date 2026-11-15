@@ -182,6 +182,13 @@ pub fn launch(d: &mut Launchd, r: &mut Reader, handles: Vec<Handle>) -> Result<V
         .collect();
     // Handly zdedenych fd v poradi zpravy (polozky jsou v bloku parametru).
     let fds: Vec<Handle> = core::iter::from_fn(|| take(Role::Fd)).collect();
+    // Relace okna od rodice (role Gui): jen relace i listek spolu; launchd
+    // je jen preda (identitu a zuzeni udelal supervisor pri NARROW).
+    let gui = match (take(Role::Gui), take(Role::GuiLease)) {
+        (Some(s), Some(l)) => Some((s, l)),
+        (None, None) => None,
+        _ => return Err(fail(Error::InvalidArgs, "role Gui jen s listkem GuiLease")),
+    };
 
     let source = find(d, &req.program, fs.as_ref())?;
     let (name, image, manifest): (String, Vec<u8>, Option<Manifest>) = match &source {
@@ -218,6 +225,10 @@ pub fn launch(d: &mut Launchd, r: &mut Reader, handles: Vec<Handle>) -> Result<V
     }
     for h in fds {
         start.push(StartHandle::tagged(tag::FD, h));
+    }
+    if let Some((s, l)) = gui {
+        start.push(StartHandle::tagged(tag::GUI, s));
+        start.push(StartHandle::tagged(tag::GUI_LEASE, l));
     }
     if let Some(fs) = fs {
         start.push(StartHandle::tagged(tag::FS, fs.into_channel().into_handle()));

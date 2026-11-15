@@ -45,8 +45,15 @@ pub use wire::{Reader, Writer};
 /// 3: rozsireni kontextu pro tablet a TV, `context::ContextExt`;
 /// 4: seriove cislo gesta v `InputRecord`; 5: kurzor, zamek ukazatele
 /// a cela obrazovka na zadost aplikace, `InputEvent::PointerRelative`;
-/// 6: plocha odznaku duvery v kontextu okna, `ContextExt::title_badge`).
-pub const VERSION: u32 = 6;
+/// 6: plocha odznaku duvery v kontextu okna, `ContextExt::title_badge`;
+/// 7: vlastnik okna `WINDOW_OWNER`, zavreni popoveru `POPOVER_DISMISS`).
+pub const VERSION: u32 = 7;
+
+/// Nejstarsi verze, kterou kompozitor jeste prijme v `HELLO`. Verzi
+/// spojeni (mensi z verze klienta a [`VERSION`]) vrati `WELCOME`; zpravy
+/// novejsi verze klient se starsi verzi posilat nesmi (`NOT_SUPPORTED`)
+/// a kompozitor mu je neposle.
+pub const MIN_VERSION: u32 = 6;
 
 /// Nejvetsi sirka nebo vyska bufferu, okna a vystupu v pixelech.
 pub const MAX_DIM: u32 = 16384;

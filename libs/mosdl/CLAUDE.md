@@ -4,7 +4,7 @@ Rozhraní C pro port SDL (`mosdl_*`, hlavička `include/mosdl.h`, v sysrootu C `
 
 ## Klíčové soubory
 
-- `src/event.rs` - překlad `InputRecord` na `mosdl_event`, kopie snímku do bufferu okna (čisté, host testy).
+- `src/event.rs` - jen re-export společného modulu `libs/mowin/src/event.rs` (překlad `InputRecord`, kopie snímku; testy tam). `mosdl_event` má stejné rozložení jako `mowin_event` (`reserved` = `window`, vždy 0).
 - `src/os/` - symboly C nad `ui::client::Window` (jen `target_os = "magnumopus"`): `mod.rs` okno, snímek, události (fronta `pending` pro události přijaté při čekání na schránku), `clip.rs` schránka (líné vložení s čekáním 1 s), `pointer.rs` kurzor, zámek ukazatele, celá obrazovka, `audio.rs` zvuk (relace ze štítku `AUDIO`, streamy `audioproto`; `Shared` = jeden producent a konzument na stream).
 - `include/mosdl.h` - hlavička; konstanty a rozložení musí sedět s `event.rs` (test `header_constants_match`, `layout_matches_header`).
 

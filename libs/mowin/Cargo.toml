@@ -1,0 +1,24 @@
+[package]
+name = "mowin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Rozhrani C pro vic oken kompozitoru v jednom procesu (ovladac grafiky Wine); soucast libc.a"
+
+[lib]
+# Preklad udalosti a kopie snimku se testuji na hostiteli; symboly C a
+# spojeni s kompozitorem jen na cili magnumopus.
+test = true
+
+[dependencies]
+guiproto = { path = "../guiproto" }
+inputproto = { path = "../inputproto" }
+
+[target.'cfg(target_os = "magnumopus")'.dependencies]
+# Bez `rt`: vstupni bod, heap a vlakna dava std (osrt).
+libos = { path = "../libos", default-features = false }
+clipproto = { path = "../clipproto" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("magnumopus"))'] }

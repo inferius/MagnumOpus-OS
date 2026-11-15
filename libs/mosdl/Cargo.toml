@@ -13,6 +13,8 @@ test = true
 
 [dependencies]
 guiproto = { path = "../guiproto" }
+# Spolecne udalosti a kopie snimku (libs/mowin/src/event.rs).
+mowin = { path = "../mowin" }
 inputproto = { path = "../inputproto" }
 
 [target.'cfg(target_os = "magnumopus")'.dependencies]

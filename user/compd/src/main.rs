@@ -527,6 +527,9 @@ impl Service {
                 other => self.peers.send(other),
             }
         }
+        for l in c.take_logs() {
+            println!("{l}");
+        }
         self.peers.reap(c);
     }
 
@@ -538,6 +541,11 @@ impl Service {
         if data.starts_with(b"connect\n") {
             let r = ConnectInfo::decode(&data).and_then(|info| {
                 let c = self.comp.as_mut().ok_or(Error::NotFound)?;
+                // Limit spojeni na identitu (procesy s dedenou roli Gui).
+                if !c.can_add_client(&info) {
+                    println!("compd: {} ma prilis mnoho spojeni, dalsi odmitnuto", info.id);
+                    return Err(Error::NoResources);
+                }
                 let (mine, theirs) = Channel::create()?;
                 let name = info.name.clone();
                 let id = c.add_client(info, now);
@@ -730,6 +738,19 @@ impl Service {
             }
             control::OUTPUTS => self.outputs_text().map(|t| (t, Vec::new())),
             control::BACKEND => self.set_backend(words.next().unwrap_or(""), handles.into_iter().next()),
+            control::REVOKE => {
+                let app = words.next().unwrap_or("");
+                match self.comp.as_mut() {
+                    Some(c) if !app.is_empty() => {
+                        let ids = c.clients_of(app);
+                        self.peers.close_clients(&ids, c);
+                        println!("compd: GUI pravo {app} odvolano ({} spojeni zavreno)", ids.len());
+                        Ok((format!("{}", ids.len()), Vec::new()))
+                    }
+                    Some(_) => Err(Error::InvalidArgs),
+                    None => Err(Error::NotFound),
+                }
+            }
             control::STATUS => match &self.comp {
                 Some(c) => {
                     let mut s = String::new();

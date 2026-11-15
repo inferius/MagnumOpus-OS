@@ -27,6 +27,7 @@ pub mod fd;
 pub mod fmap;
 pub mod fs;
 pub mod futex;
+pub mod gui;
 pub mod heap;
 pub mod inherit;
 pub mod memfd;

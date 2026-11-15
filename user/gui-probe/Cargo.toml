@@ -1,0 +1,16 @@
+[package]
+name = "gui-probe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Test role Gui: relace okna zdedena od rodice, opt-out, odvolani"
+
+[[bin]]
+name = "gui-probe"
+test = false
+bench = false
+
+# Program se std. Sestavuje `cargo xtask build` (stdsys::STD_PROGRAMS).
+[dependencies]
+guiproto = { path = "../../libs/guiproto" }

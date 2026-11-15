@@ -7,7 +7,7 @@ description = "Behove prostredi std pro MagnumOpus (cil magnumopus): start, heap
 
 [features]
 # Preklad jako zavislost std (third_party/rust-std, docs/cs/rust-std.md).
-rustc-dep-of-std = ["dep:core", "dep:alloc", "abi/rustc-dep-of-std", "libos/rustc-dep-of-std", "fsproto/rustc-dep-of-std", "netproto/rustc-dep-of-std", "launchproto/rustc-dep-of-std", "dlmalloc/rustc-dep-of-std"]
+rustc-dep-of-std = ["dep:core", "dep:alloc", "abi/rustc-dep-of-std", "libos/rustc-dep-of-std", "fsproto/rustc-dep-of-std", "netproto/rustc-dep-of-std", "launchproto/rustc-dep-of-std", "leaseproto/rustc-dep-of-std", "dlmalloc/rustc-dep-of-std"]
 
 [dependencies]
 core = { version = "1.0.0", optional = true, package = "rustc-std-workspace-core" }
@@ -17,6 +17,7 @@ libos = { path = "../libos", default-features = false }
 fsproto = { path = "../fsproto" }
 netproto = { path = "../netproto", features = ["client"] }
 launchproto = { path = "../launchproto" }
+leaseproto = { path = "../leaseproto" }
 dlmalloc = { version = "0.2.10", default-features = false }
 
 [lints.rust]

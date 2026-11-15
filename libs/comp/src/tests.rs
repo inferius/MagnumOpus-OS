@@ -26,6 +26,8 @@ mod pointer;
 mod cull;
 mod gpu;
 mod greeter;
+mod identity;
+mod owner;
 mod launcher;
 #[cfg(feature = "dev-mode")]
 mod devmode;

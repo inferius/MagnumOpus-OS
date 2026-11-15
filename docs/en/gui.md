@@ -785,6 +785,63 @@ in QEMU the `sdl` suite with physical input through QMP)
 **[implemented]** (tests `multiple_windows_per_app_and_user_launch_focus`,
 `pointer_keyboard_routing_and_focus` in `libs/comp`)
 
+### Window session for child processes (the `Gui` role)
+
+**[verified in QEMU]** x86_64 (`gui` suite, tests `role Gui: ...`, program
+`user/gui-probe`). An app that starts further processes with windows (Wine:
+`explorer`, `notepad` from `cmd`, `winecfg`) hands them a window session with
+the **same identity**, the way the file session is inherited:
+
+- launchd knows the roles `Gui` and `GuiLease` (`launchproto`); the child
+  gets the session and the lease tagged `abi::params::tag::GUI` and
+  `GUI_LEASE`. The runtime (`osrt::gui`) hands the session to the window
+  library (`take_session`) and keeps the lease: recovery after a compositor
+  crash (`reconnect`) and sessions for further children (`child`).
+- The child's session comes from `NARROW` with an empty narrowing on the
+  parent's lease (the `compd` adapter in init refuses any other narrowing):
+  the supervisor issues a new session with the same recipe (identity from
+  the manifest) and a new lease **bound to the parent's**. The limit on live
+  leases and rate is the same as for `ADOPT` (256 live, 128 per second).
+- **Opt-out:** the runtime sets `MO_GUI=1` at start. A child gets a session
+  only when its environment has a non-empty `MO_GUI` (like
+  `WAYLAND_DISPLAY`). `env_remove("MO_GUI")` or an environment without it in
+  `posix_spawn` = a child without GUI.
+- **Revocation:** `gui::revoke(id)` in init cancels all leases of the
+  identity at the compositor and the leases derived from them (to any
+  depth), and the compositor closes all connections of the identity with
+  the command `revoke <id>`. Recovery through the lease then fails (test: the
+  child loses its window after revocation and `reconnect` fails). The end of
+  an account session kills the session job with all children.
+- **Limits per identity, not per connection** (`libs/comp`, `scene.rs`):
+  windows (`MAX_WINDOWS` 32), buffers (`MAX_BUFFERS` 256, 256 MiB in total)
+  and connections (`MAX_IDENTITY_CLIENTS` 64) are summed over all
+  connections of the same identity, so many processes cannot get around
+  them (tests `window_limit_counts_all_connections_of_identity`,
+  `identity_client_limit_and_revoke_list`).
+- ⚠️ Risk: every child with the role may open windows under the parent's
+  identity (like a process with `DISPLAY` or `WAYLAND_DISPLAY`). Analysis in
+  [Device interface](device-interfaces.md#window-session-for-children-risk).
+
+### Window owner and popover dismissal (version 7)
+
+**[implemented]** (tests in `libs/comp/src/tests/owner.rs`). The protocol
+version is negotiated in `HELLO`: the compositor accepts versions from
+`guiproto::MIN_VERSION` (6) and `WELCOME` returns the lower of the client's
+and its own. A client with an older version must not send version 7
+messages (`NOT_SUPPORTED`) and the compositor does not send them to it.
+
+- `WINDOW_OWNER { window, owner }`: the owner is another window **of the
+  same connection** (a dialog). The window is centred over its owner within
+  the work area when first shown and goes above it whenever the owner is
+  raised. A window of another connection (even of the same identity) cannot
+  be the owner (`NOT_SUPPORTED`); a cycle = `INVALID_ARGS`.
+- `POPOVER_DISMISS { window }`: a button press outside the popovers of the
+  focused window. The app closes its popovers (menus, open lists) like the
+  system menus; the press itself goes where it belongs.
+- A popover is clipped to the work area (it does not slide under the bar)
+  and is drawn below the system layers (bar, permission dialogs, screen
+  lock).
+
 ### Command palette (v2)
 
 **The look is provisional**; the target is `design/prostredi-menu.html`
@@ -1285,6 +1342,7 @@ Application -> compositor:
 | 24 | `WINDOW_STATE` | window, fullscreen (0/1), gesture number ([Cursor and pointer lock](#cursor-and-pointer-lock)) |
 | 25 | `SET_CURSOR` | window, shape (0-12) or 0xFF + w, h, hot spot, B G R A pixels |
 | 26 | `POINTER_LOCK` | window, lock (0/1), gesture number |
+| 27 | `WINDOW_OWNER` | window, owner (0 = none); version 7 |
 
 Compositor -> application:
 
@@ -1305,6 +1363,7 @@ Compositor -> application:
 | 112 | `ERROR` | op, code |
 | 113 | `THEME` | color mode u8 (0 light, 1 dark, 2 high contrast); after `WELCOME` and on change |
 | 118 | `POINTER_LOCK_STATE` | window, locked (0/1): reply to `POINTER_LOCK` and cancellation by the system |
+| 119 | `POPOVER_DISMISS` | window: a press outside its popovers; version 7 |
 
 Protocol version 5 (`guiproto::VERSION`): `WINDOW_STATE`, `SET_CURSOR`,
 `POINTER_LOCK`, `POINTER_LOCK_STATE` and the input record `PointerRelative`

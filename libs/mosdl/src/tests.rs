@@ -1,6 +1,6 @@
 use guiproto::window::{InputEvent, InputRecord};
 
-use crate::event::{MosdlEvent, copy_frame, from_input, kind};
+use crate::event::{MosdlEvent, kind};
 
 fn rec(event: InputEvent) -> InputRecord {
     InputRecord { event, mods: inputproto::mods::SHIFT, synthetic: false, time: 77, class: 0, serial: 5 }
@@ -59,50 +59,4 @@ fn header_constants_match() {
     }
 }
 
-#[test]
-fn input_translation() {
-    let e = from_input(&rec(InputEvent::Key { code: 30, action: 1, ch: Some('a') }));
-    assert_eq!((e.kind, e.a, e.b, e.c, e.mods, e.time_ns), (kind::KEY, 30, 1, 'a' as i32, 1, 77));
-    let e = from_input(&rec(InputEvent::Button { code: 0x110, pressed: true, x: 3, y: -4 }));
-    assert_eq!((e.kind, e.a, e.b, e.c, e.d), (kind::BUTTON, 0x110, 1, 3, -4));
-    let e = from_input(&rec(InputEvent::Scroll { dx: 0, dy: -2 }));
-    assert_eq!((e.kind, e.a, e.b), (kind::WHEEL, 0, -2));
-    let e = from_input(&rec(InputEvent::PointerRelative { dx: -3, dy: 7 }));
-    assert_eq!((e.kind, e.a, e.b), (kind::RELMOTION, -3, 7));
-    let e = from_input(&rec(InputEvent::Text('č')));
-    assert_eq!((e.kind, e.a), (kind::TEXT, 'č' as i32));
-    let mut r = rec(InputEvent::Focus(false));
-    r.synthetic = true;
-    let e = from_input(&r);
-    assert_eq!((e.kind, e.a, e.synthetic), (kind::FOCUS, 0, 1));
-}
-
-#[test]
-fn frame_copy_crops_and_pads() {
-    // Snimek 3x2 s krokem 16 B do okna 2x3.
-    let mut src = vec![0u8; 16 * 2];
-    for y in 0..2 {
-        for x in 0..3 {
-            let o = y * 16 + x * 4;
-            src[o..o + 4].copy_from_slice(&[x as u8, y as u8, 9, 0]);
-        }
-    }
-    let mut dst = vec![0u32; 6];
-    assert!(copy_frame(&mut dst, 2, 3, &src, 16, 3, 2));
-    assert_eq!(dst[0], 0xFF09_0000);
-    assert_eq!(dst[1], 0xFF09_0001);
-    assert_eq!(dst[3], 0xFF09_0101);
-    assert_eq!(&dst[4..], &[0xFF00_0000, 0xFF00_0000]);
-}
-
-#[test]
-fn frame_copy_rejects_short_source() {
-    let mut dst = vec![0u32; 4];
-    // krok mensi nez radek
-    assert!(!copy_frame(&mut dst, 2, 2, &[0; 64], 4, 2, 2));
-    // malo dat: posledni radek by presahl
-    assert!(!copy_frame(&mut dst, 2, 2, &[0; 15], 8, 2, 2));
-    assert!(copy_frame(&mut dst, 2, 2, &[0; 16], 8, 2, 2));
-    // nepratelske rozmery bez preteceni
-    assert!(!copy_frame(&mut dst, 2, 2, &[0; 16], u32::MAX, 2, u32::MAX));
-}
+// Preklad udalosti a kopie snimku testuje spolecny modul (`libs/mowin`).

@@ -24,9 +24,10 @@ pub(super) struct Lease {
     /// Generace, na ktere byla vydana posledni relace listku.
     issued: u64,
     pending: Option<Pending>,
-    /// Listek, ktery tento prevzal pres `ADOPT` (pocitadlo zijicich).
+    /// Listek, ze ktereho tento vznikl pres `ADOPT` nebo `NARROW`
+    /// (pocitadlo zijicich; odvolani rodice odvola i jeho).
     parent: Option<u64>,
-    /// Limit `ADOPT` z tohoto listku.
+    /// Limit `ADOPT` a `NARROW` z tohoto listku.
     adopts: svcclient::policy::AdoptLimit,
 }
 
@@ -269,8 +270,11 @@ impl Supervisor {
         r
     }
 
-    /// Zuzeny recept listku `key`: nova relace a novy listek.
+    /// Zuzeny recept listku `key`: nova relace a novy listek, svazany
+    /// s rodicem (limit zijicich a rychlosti jako `ADOPT`; odvolani rodice
+    /// ho odvola taky, [`Supervisor::revoke_leases`]).
     fn narrow(&mut self, key: u64, narrowing: &[u8]) -> Result<(Channel, Channel)> {
+        let now = time::now();
         let l = self.leases.get(&key).ok_or(Error::NotFound)?;
         let i = l.service;
         let e = &self.entries[i];
@@ -282,10 +286,47 @@ impl Supervisor {
             .as_ref()
             .ok_or(Error::NotSupported)?
             .narrow(&l.recipe, narrowing)?;
-        let ch = self.connect(i, &recipe)?;
-        let issued = self.entries[i].generation;
-        let lease = self.add_lease(i, recipe, issued)?;
-        Ok((ch, lease))
+        if !self.leases.get_mut(&key).is_some_and(|l| l.adopts.take(now)) {
+            return Err(Error::NoResources);
+        }
+        let r = self.connect(i, &recipe).and_then(|ch| {
+            let issued = self.entries[i].generation;
+            let (client, server) = Channel::create()?;
+            self.insert_lease(i, recipe, issued, server, Some(key))?;
+            Ok((ch, client))
+        });
+        if r.is_err()
+            && let Some(l) = self.leases.get_mut(&key)
+        {
+            l.adopts.release();
+        }
+        r
+    }
+
+    /// Odvola listky sluzby `service`, jejichz recept splni `pred`,
+    /// a vsechny z nich odvozene (`NARROW`, `ADOPT`, do libovolne hloubky).
+    /// Konec supervisoru se zavre: klient dostane `PEER_CLOSED` a obnova
+    /// vrati `SERVICE_UNAVAILABLE`. Vraci pocet odvolanych listku.
+    pub fn revoke_leases(&mut self, service: &str, pred: impl Fn(&[u8]) -> bool) -> usize {
+        let Some(i) = self.find(service) else { return 0 };
+        let mut doomed: Vec<u64> = self.leases.iter().filter(|(_, l)| l.service == i && pred(&l.recipe)).map(|(k, _)| *k).collect();
+        // Potomci (rodic je vzdy starsi: klice rostou).
+        loop {
+            let more: Vec<u64> = self
+                .leases
+                .iter()
+                .filter(|(k, l)| !doomed.contains(k) && l.parent.is_some_and(|p| doomed.contains(&p)))
+                .map(|(k, _)| *k)
+                .collect();
+            if more.is_empty() {
+                break;
+            }
+            doomed.extend(more);
+        }
+        for k in &doomed {
+            self.drop_lease(*k);
+        }
+        doomed.len()
     }
 
     /// Odpovi na listku `key`; `handles` jen pri uspechu.

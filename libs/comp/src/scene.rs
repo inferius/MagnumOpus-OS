@@ -45,12 +45,17 @@ pub struct Geo {
     /// Presah stinu: vlevo, nahore, vpravo, dole.
     pub shadow: [u32; 4],
 }
-/// Nejvic rozpracovanych zprav do `COMMIT` a vrstev, bufferu a oken klienta.
+/// Nejvic rozpracovanych zprav do `COMMIT` a vrstev klienta.
 pub const MAX_STAGED: usize = 16384;
 pub const MAX_LAYERS: usize = 8192;
+/// Nejvic bufferu a oken jedne identity (aplikace), soucet pres vsechna
+/// jeji spojeni: procesy, ktere dedi relaci okna (role `Gui`), limit
+/// neobejdou.
 pub const MAX_BUFFERS: usize = 256;
 pub const MAX_WINDOWS: usize = 32;
-/// Nejvetsi buffer (64 MiB) a soucet bufferu klienta (256 MiB).
+/// Nejvic soucasnych spojeni jedne identity.
+pub const MAX_IDENTITY_CLIENTS: usize = 64;
+/// Nejvetsi buffer (64 MiB) a soucet bufferu identity (256 MiB).
 pub const MAX_BUFFER_BYTES: u64 = 64 << 20;
 pub const MAX_CLIENT_BUFFER_BYTES: u64 = 256 << 20;
 /// Nejvic bajtu rozpracovanych zprav do `COMMIT`.
@@ -100,6 +105,8 @@ pub struct Layer {
 pub struct Client {
     pub info: ConnectInfo,
     pub hello: bool,
+    /// Verze spojeni z `HELLO` (mensi z verze klienta a kompozitoru).
+    pub version: u32,
     pub staged: Vec<ClientMsg>,
     /// Priblizna velikost `staged` v bajtech (z delky zprav).
     pub staged_bytes: usize,
@@ -162,6 +169,9 @@ pub struct Window {
     pub geo: Geo,
     /// Kurzor aplikace nad obsahem okna (`SET_CURSOR`, `pointer.rs`).
     pub app_cursor: Option<guiproto::cursor::Cursor>,
+    /// Vlastnik (globalni id okna tehoz klienta, `WINDOW_OWNER`): okno se
+    /// otevre vystredene nad nim a zustava v poradi nad nim.
+    pub owner: Option<u32>,
 }
 
 impl Window {
@@ -321,7 +331,39 @@ impl Window {
     }
 }
 
+/// Co uz identita (vsechna jeji spojeni) drzi.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Usage {
+    pub clients: usize,
+    pub windows: usize,
+    pub buffers: usize,
+    pub buffer_bytes: u64,
+}
+
 impl Comp {
+    /// Spotreba identity `app` (id z manifestu) pres vsechna jeji spojeni.
+    pub fn identity_usage(&self, app: &str) -> Usage {
+        let mut u = Usage::default();
+        for cl in self.clients.values().filter(|c| c.info.id == app) {
+            u.clients += 1;
+            u.windows += cl.windows.len();
+            u.buffers += cl.buffers.len();
+            u.buffer_bytes += cl.buffers.values().map(|b| b.stride as u64 * b.h as u64 * 4).sum::<u64>();
+        }
+        u
+    }
+
+    /// Smi identita dostat dalsi spojeni ([`MAX_IDENTITY_CLIENTS`])?
+    pub fn can_add_client(&self, info: &ConnectInfo) -> bool {
+        self.identity_usage(&info.id).clients < MAX_IDENTITY_CLIENTS
+    }
+
+    /// Klienti identity `app` (odvolani GUI aplikaci: sluzba jejich kanaly
+    /// zavre a zavola [`Comp::remove_client`]).
+    pub fn clients_of(&self, app: &str) -> Vec<ClientId> {
+        self.clients.iter().filter(|(_, c)| c.info.id == app).map(|(k, _)| *k).collect()
+    }
+
     /// Novy klient (identitu dava init).
     pub fn add_client(&mut self, info: ConnectInfo, now: u64) -> ClientId {
         let id = self.next_client;
@@ -331,6 +373,7 @@ impl Comp {
             Client {
                 info,
                 hello: false,
+                version: 0,
                 staged: Vec::new(),
                 staged_bytes: 0,
                 buffers: BTreeMap::new(),
@@ -366,6 +409,10 @@ impl Comp {
 
     pub(crate) fn drop_window(&mut self, gid: u32) {
         self.pointer_unlock_window(gid);
+        // Zanikem vlastnika vazba zanikne (okna samotna zavira aplikace).
+        for w in self.windows.values_mut().filter(|w| w.owner == Some(gid)) {
+            w.owner = None;
+        }
         if let Some(w) = self.windows.remove(&gid) {
             // Cele misto okna vcetne stinu (aktivni okno ma vetsi stin).
             let r = w.visual();
@@ -419,13 +466,17 @@ impl Comp {
             ClientMsg::Hello { version } => {
                 let app = cl.info.name.clone();
                 cl.hello = true;
-                if version != guiproto::VERSION {
+                // Verze se vyjedna: starsi klient (od MIN_VERSION) dostane
+                // svou, novejsi nasi; zpravy novejsich verzi se pak hlidaji.
+                if version < guiproto::MIN_VERSION {
                     return self.error(c, guiproto::window::op::HELLO, Error::NotSupported);
                 }
+                let version = version.min(guiproto::VERSION);
+                cl.version = version;
                 self.send(
                     c,
                     ServerMsg::Welcome {
-                        version: guiproto::VERSION,
+                        version,
                         w: self.w,
                         h: self.h,
                         scale: 100,
@@ -443,12 +494,18 @@ impl Comp {
                 }
             }
             ClientMsg::BufferCreate { buffer: id, w, h, stride } => {
-                let used: u64 = cl.buffers.values().map(|b| b.stride as u64 * b.h as u64 * 4).sum();
-                let ok = buffer_ok(w, h, stride) && used + stride as u64 * h as u64 * 4 <= MAX_CLIENT_BUFFER_BYTES;
+                let dup = cl.buffers.contains_key(&id);
+                let app = cl.info.id.clone();
+                let used = self.identity_usage(&app);
+                let ok = buffer_ok(w, h, stride) && used.buffer_bytes + stride as u64 * h as u64 * 4 <= MAX_CLIENT_BUFFER_BYTES;
                 let fits = buffer.as_ref().and_then(|b| b.pixels()).is_some_and(|p| p.len() as u64 >= stride as u64 * h as u64);
-                if !ok || !fits || cl.buffers.contains_key(&id) || cl.buffers.len() >= MAX_BUFFERS {
+                if !ok || !fits || dup {
                     return self.error(c, guiproto::window::op::BUFFER_CREATE, Error::InvalidArgs);
                 }
+                if used.buffers >= MAX_BUFFERS {
+                    return self.error(c, guiproto::window::op::BUFFER_CREATE, Error::NoResources);
+                }
+                let Some(cl) = self.clients.get_mut(&c) else { return };
                 cl.buffers.insert(id, Buf { w, h, stride, px: buffer.unwrap() });
             }
             ClientMsg::BufferDestroy { buffer } => {
@@ -495,13 +552,18 @@ impl Comp {
             ClientMsg::SetCursor { window, cursor } => self.set_app_cursor(c, window, cursor),
             ClientMsg::WindowState { window, fullscreen, gesture } => self.window_state(c, window, fullscreen, gesture, now),
             ClientMsg::PointerLock { window, lock, gesture } => self.pointer_lock(c, window, lock, gesture, now),
+            ClientMsg::WindowOwner { window, owner } => self.window_owner(c, window, owner),
             _ => {}
         }
     }
 
     fn window_create(&mut self, c: ClientId, local: u32, mode: Mode, w: u32, h: u32, title: String) {
+        let app = self.clients[&c].info.id.clone();
+        if self.identity_usage(&app).windows >= MAX_WINDOWS {
+            return self.error(c, guiproto::window::op::WINDOW_CREATE, Error::NoResources);
+        }
         let cl = self.clients.get_mut(&c).unwrap();
-        if local == 0 || cl.windows.contains_key(&local) || cl.windows.len() >= MAX_WINDOWS {
+        if local == 0 || cl.windows.contains_key(&local) {
             return self.error(c, guiproto::window::op::WINDOW_CREATE, Error::InvalidArgs);
         }
         let gid = self.next_window;
@@ -551,6 +613,7 @@ impl Comp {
             badge_until: 0,
             geo: self.style.geo(),
             app_cursor: None,
+            owner: None,
         };
         self.windows.insert(gid, win);
         self.z.push(gid);
@@ -635,6 +698,10 @@ impl Comp {
             }
             if became_mapped {
                 touched.push(window);
+                // Vlastnene okno (dialog): vystredit nad vlastnikem.
+                if let Some(o) = self.windows.get(&gid).and_then(|w| w.owner) {
+                    self.center_over_owner(gid, o);
+                }
                 // Fokus jen okno spustene uzivatelem (nebo kdyz zadne jine
                 // fokus nema); jinak zvyrazneni ikony (`launch.rs`).
                 self.new_window_focus(gid, now);
@@ -874,9 +941,10 @@ impl Comp {
             w.attention = false;
             let (c, l) = (w.client, w.local);
             self.send_input(c, l, guiproto::window::InputEvent::Focus(true), 0, false, 0);
-            // Nahoru v poradi.
+            // Nahoru v poradi, vlastnena okna nad nim.
             self.z.retain(|&x| x != g);
             self.z.push(g);
+            self.raise_owned(g);
             self.damage_window(g);
             self.damage_panel();
             // Nove okno s fokusem vi, co je ve schrance (menu Vlozit).
@@ -927,5 +995,6 @@ pub(crate) fn op_of(m: &ClientMsg) -> u32 {
         ClientMsg::WindowState { .. } => op::WINDOW_STATE,
         ClientMsg::SetCursor { .. } => op::SET_CURSOR,
         ClientMsg::PointerLock { .. } => op::POINTER_LOCK,
+        ClientMsg::WindowOwner { .. } => op::WINDOW_OWNER,
     }
 }

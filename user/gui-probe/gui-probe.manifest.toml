@@ -1,0 +1,7 @@
+# Test role Gui (user/init/src/tests/gui_role.rs): okno ze zdedene relace.
+[app]
+id = "org.magnumopus.gui-probe"
+name = "Test role Gui"
+
+[limits]
+memory = "32M"

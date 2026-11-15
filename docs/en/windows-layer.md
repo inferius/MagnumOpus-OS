@@ -408,6 +408,60 @@ least rights):
   application gets the fds (patch `0007`, fixed fd numbers 1022 and 1023
   next to the process fd 1021).
 
+## Windows program windows (W3)
+
+**Status:** decided on 15 Nov 2026 (coordinator: 1A, 2A, 3A, 4A, 5A, 6C,
+7A, 8A, 9A). ⚠️ **W3 is verified only on x86_64**: the Windows layer is
+x86_64 only (Q11 A); the generic parts (the `Gui` role, window protocol
+version 7, limits per identity) are verified on x86_64 and aarch64 in the
+`gui` suite.
+
+The Wine graphics driver for our compositor (like `winewayland.drv`) is a
+separate Wine module `winemo.drv` (LGPL, only in the Wine folder as a
+patch). It talks to the compositor through our `mowin` library (C API in
+`libc.a`, our code), not through the protocol directly.
+
+| Part | Status |
+|---|---|
+| Window session for Wine processes: the `Gui` role (inherited narrowed session with the same identity, opt-out without `MO_GUI`, revocation of the whole tree, limits per identity) | **[verified in QEMU]** x86_64 and aarch64 ([GUI](gui.md#window-session-for-child-processes-the-gui-role)) |
+| Window protocol version 7: window owner (dialog above its window), `POPOVER_DISMISS`, popover within the work area, version negotiation in `HELLO` | **[implemented]** (tests in `libs/comp`) |
+| A refused clipboard in the compositor log with the app identity (without content) | **[implemented]** (test `denied_clipboard_is_logged_with_identity`) |
+| `libs/mowin`: several windows and popups on one connection, frames, events, cursor, clipboard; event module shared with `mosdl` | **[implemented]** (host tests; in QEMU with the Wine driver) |
+| `winemo.drv`: windows, GDI into the window buffer, input, cursor, decorations, popups, clipboard | **[designed]** |
+| Demos notepad, winecfg, a GDI test; a test in the `wine` suite with a screenshot | **[designed]** |
+
+Decisions:
+
+- **Identity (2A):** all Windows programs are one app `org.winehq.wine`
+  for now (shared permissions and clipboard); identity per `.exe` later.
+- **DPI (4A):** fixed 96 DPI for now (the compositor's scale is 100 %);
+  later DPI = 96 x scale / 100 per output, unaware apps are enlarged by
+  Wine's DPI virtualization, buffers in physical px.
+- **Decorations (6C):** windows with a caption and ordinary non-client
+  painting get the frame, title and buttons from the system
+  (`Mode::Standard`, look from tokens like the other windows); for them
+  the Wine driver returns `GetWindowStyleMasks` with `WS_CAPTION` and the
+  frame, win32u then leaves them out of the window surface and Wine does
+  not draw them. Windows without a caption and windows that removed their
+  non-client area (`WM_NCCALCSIZE` returns client = whole window) are
+  `Frameless` and Wine draws all of them (trust badge on hover). A window
+  that overrides only `WM_NCPAINT` gets the system frame and its own frame
+  painting is not visible (limitation).
+- **Popups (5A):** owned `WS_POPUP` windows (menus, tooltips, an open
+  list) are `POPOVER` layers of the owner window in its coordinates; a press
+  outside closes them (`POPOVER_DISMISS` -> `WM_CANCELMODE`). Unowned popups
+  (a splash screen) are their own `Frameless` windows. An owner in another
+  process is not supported.
+- **Keyboard:** evdev code -> set 1 scan code and VK through a table in the
+  driver, the character by layout from the compositor. **Compose and IME
+  come later.**
+- **Clipboard (7A):** text both ways (`CF_UNICODETEXT` <-> UTF-8), the
+  number of the process's last physical press; the compositor logs a
+  refusal.
+- **Window positions:** the compositor does not take window positions
+  from the client (like Wayland); `SetWindowPos` changes only the size
+  (`WINDOW_SIZE`).
+
 ## W1: server connection and processes (questions T1-T5)
 
 **Status: [designed]**, decided on 15 Nov 2026 (coordinator); T2

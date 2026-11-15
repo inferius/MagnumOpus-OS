@@ -134,7 +134,8 @@ fn parse_reply(data: &[u8]) -> Result<String> {
 /// Adapter kompozitoru pro supervisor.
 ///
 /// Recept relace = zakodovany `ConnectInfo` (identita aplikace
-/// z manifestu); zuzeni neni (okno nema co zuzit, `NOT_SUPPORTED`).
+/// z manifestu). Zuzeni jen prazdne (role `Gui` pro potomka: stejna
+/// identita, nikdy sirsi); okno nema co dal zuzit.
 pub struct CompdService {
     shared: CompdRef,
     /// Novou instanci napojit na `inputd` (bezny beh; prvni instanci
@@ -204,6 +205,14 @@ impl Service for CompdService {
             return Err(Error::Corrupted);
         }
         Ok(Channel::from_handle(h.remove(0)))
+    }
+
+    fn narrow(&self, parent: &[u8], narrowing: &[u8]) -> Result<Vec<u8>> {
+        if !narrowing.is_empty() {
+            return Err(Error::NotSupported);
+        }
+        // Stejny recept (overeny), at do listku nejde nic jineho.
+        Ok(ConnectInfo::decode(parent)?.encode())
     }
 
     /// Restart `inputd`: kanal fokusu a `secure` kompozitoru zustava
@@ -485,6 +494,17 @@ impl Gui {
         self.apps.push(app);
         Ok(self.apps.len() - 1)
     }
+}
+
+/// Odvola aplikaci `app` (id z manifestu) pravo na GUI: supervisor zrusi
+/// vsechny listky jeji identity u kompozitoru i z nich odvozene (role
+/// `Gui` potomku) a kompozitor zavre vsechna jeji spojeni (okna).
+/// Vraci (pocet listku, pocet spojeni).
+pub fn revoke(gui: &Gui, sup: &mut Supervisor, app: &str) -> Result<(usize, usize)> {
+    let leases = sup.revoke_leases(NAME, |r| ConnectInfo::decode(r).is_ok_and(|i| i.id == app));
+    let (n, _) = gui.command(format!("{} {app}", control::REVOKE).as_bytes(), Vec::new())?;
+    println!("init: GUI aplikace {app} odvolano ({leases} listku, {n} spojeni)");
+    Ok((leases, n.parse().unwrap_or(0)))
 }
 
 /// Relace zvuku aplikace (`tag::AUDIO`, `tag::AUDIO_LEASE`): recept
