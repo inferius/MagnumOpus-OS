@@ -23,6 +23,7 @@
 - Obraz USB má dva initfs: `os/initfs.img` (živé, vývojový profil) a `os/instfs.img` (pro instalaci) ze **samostatného sestavení** bez `DEV_PROFILE` a `install-answers` (`usb::install_initfs`). Instalovaný systém nikdy nedostane automatické přihlášení ani režim vývojáře.
 - Feature `dev-mode` (režim vývojáře, `src/devmode.rs`) dostávají programy userspace jen při vývojovém profilu; sestavení bez něj hledá v programech `devmode::MARKERS` a nález je chyba. Initfs s profilem a bez něj mají různá jména souboru běhu (`-dev`).
 - Chybný odkaz, kotva nebo neznámá značka stavu v docs je chyba sestavení (`docs_check.rs`).
+- Jádro má i v profilu `dev` `opt-level = 2` (kořenový `Cargo.toml`); `--kernel-opt <n>` ho pro jeden běh přepíše přes `cargo --config` (`cargo_build`), např. `0` pro krokování v gdb.
 
 ## Testy
 
