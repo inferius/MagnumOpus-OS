@@ -139,6 +139,7 @@ fn every_syscall_is_documented() {
         "DMA_MAP",
         "DMA_SEGMENTS",
         "DMA_SYNC",
+        "THREAD_INTERRUPT",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {

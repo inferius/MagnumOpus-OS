@@ -101,6 +101,8 @@ pub struct Thread {
     /// Pozadavek na ukonceni (kill procesu): vlakno skonci pri navratu do
     /// userspace nebo z cekani v jadre.
     kill: AtomicBool,
+    /// Cekajici preruseni (`THREAD_INTERRUPT`): bit = kod 0..63.
+    interrupts: AtomicU64,
     /// Vlakno uz bylo spusteno (vlakna procesu se vytvari a spousti zvlast).
     pub(super) started: AtomicBool,
     /// Registr ukazatele vlakna userspace (TLS; `THREAD_SET_POINTER`).
@@ -157,6 +159,7 @@ impl Thread {
             entry: SpinLock::new(entry),
             process,
             kill: AtomicBool::new(false),
+            interrupts: AtomicU64::new(0),
             started: AtomicBool::new(false),
             user_tp: AtomicU64::new(0),
             user_tp2: AtomicU64::new(0),
@@ -218,6 +221,31 @@ impl Thread {
 
     pub fn kill_requested(&self) -> bool {
         self.kill.load(Ordering::Acquire)
+    }
+
+    /// Ceka preruseni (`THREAD_INTERRUPT`)?
+    pub fn interrupt_pending(&self) -> bool {
+        self.interrupts.load(Ordering::Acquire) != 0
+    }
+
+    /// Prida cekajici preruseni (kod < 64, overi volajici).
+    pub(super) fn add_interrupt(&self, code: u32) {
+        self.interrupts.fetch_or(1 << code, Ordering::AcqRel);
+    }
+
+    /// Vezme nejnizsi cekajici kod preruseni.
+    pub(super) fn take_interrupt(&self) -> Option<u32> {
+        let mut cur = self.interrupts.load(Ordering::Acquire);
+        loop {
+            if cur == 0 {
+                return None;
+            }
+            let code = cur.trailing_zeros();
+            match self.interrupts.compare_exchange(cur, cur & !(1 << code), Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return Some(code),
+                Err(now) => cur = now,
+            }
+        }
     }
 
     pub(super) fn set_kill(&self) {

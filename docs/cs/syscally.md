@@ -550,6 +550,35 @@ Kill a `JOB_KILL` vždy vyhrají: pozastavené vlákno skončí. Vyžaduje
 `MANAGE` na vlákně. Chyby: `WRONG_TYPE` (vlákno jádra), `BAD_STATE`
 (vlákno skončilo), `NO_RESOURCES`, `BAD_HANDLE`, `ACCESS_DENIED`.
 
+### `THREAD_INTERRUPT`
+
+**[ověřeno v QEMU]** `(thread, code) -> 0`. Přerušení vlákna (číslo 76):
+nastaví čekající přerušení s kódem `code` (0..63, stejný kód se sloučí)
+a vlákno probudí. Blokující čekání (`OBJECT_WAIT_ONE`, `OBJECT_WAIT_MANY`, `FUTEX` WAIT,
+`FENCE_WAIT`) vrátí [`INTERRUPTED`](chyby.md#interrupted--39) - jako
+`EINTR`; čekání jádra uvnitř doručení výjimky přerušit nejde. Běžící
+vlákno jádro přeruší (IPI). Při návratu do userspace dostane vlákno
+doručení na obsluhu ve vlákně (`EXCEPTION_HANDLER`) s druhem
+`exception::kind::INTERRUPT` (256), stupněm `IN_THREAD` a kódem
+v `Report::code`; víc čekajících kódů jde od nejnižšího, **jeden na návrat**
+(další při návratu ze syscallu obsluhy, typicky `EXCEPTION_HANDLER`
+RETURN), takže se doručení nevnořují nad sebe. NEXT z obsluhy přerušení
+jen pokračuje - kanály výjimek přerušení nedostávají. Nevejde-li se rámec
+na zásobník, přerušení se zahodí. Pozastavené vlákno přerušení dostane až
+po obnovení. Přerušení skončeného vlákna nic nedělá.
+
+Je to obecný základ asynchronních signálů: `kill`/`pthread_kill` mezi
+procesy, Ctrl+C terminálu, `SIGCHLD` a pozastavování vláken Windows vrstvy
+([windows-vrstva.md](windows-vrstva.md)). `cstd` kód bere jako číslo
+signálu (blokovaný signál čeká v masce). Vyžaduje `MANAGE` na vlákně
+(stejné právo jako `THREAD_SUSPEND`). Chyby: `INVALID_ARGS` (kód nad 63),
+`BAD_STATE` (proces vlákna nemá obsluhu ve vlákně - přerušení by viselo
+a čekání by stále vracela `INTERRUPTED`), `WRONG_TYPE` (vlákno jádra),
+`BAD_HANDLE`, `ACCESS_DENIED`.
+
+Číslo 77 je rezervované pro `PROCESS_MEMORY` (etapa W2, čtení a zápis
+paměti jiného procesu přes jádro).
+
 ### `THREAD_STATE`
 
 `(thread, op, kind, ptr, len) -> 0`. Čtení (`thread::op::READ`, pravo

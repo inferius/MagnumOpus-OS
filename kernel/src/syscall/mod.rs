@@ -47,12 +47,21 @@ fn current_process() -> Arc<Process> {
 
 /// Zpracuje syscall `number` a vrati hodnotu pro `rax`.
 pub fn dispatch(number: u64, a: Args) -> u64 {
+    // Navrat z obsluhy vyjimky obnovi cely kontext: hodnota je rax / x0
+    // preruseneho kodu (i "zaporna", napr. chyba preruseneho syscallu),
+    // ne vysledek tohoto volani.
     let result = call(number, a);
+    if let Ok(ret) = result
+        && number == nr::EXCEPTION_HANDLER
+        && a[0] == u64::from(abi::exception::handler::RETURN)
+    {
+        return ret;
+    }
     if let Err(e) = result {
         // Ocekavane "chyby" rizeni toku nelogovat (byly by vsude a zahltily
         // by log): cekani, vyprseni a zjisteni velikosti bufferu (volajici
         // cte znovu s vetsim bufferem).
-        if !matches!(e, Error::ShouldWait | Error::TimedOut | Error::BufferTooSmall | Error::FenceFailed | Error::FenceAbandoned) {
+        if !matches!(e, Error::ShouldWait | Error::TimedOut | Error::BufferTooSmall | Error::FenceFailed | Error::FenceAbandoned | Error::Interrupted) {
             log::debug!("syscall {} ({number}) selhal: {e}", name(number));
         }
     }
@@ -136,6 +145,7 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::DMA_MAP => dma::dma_map(a),
         nr::DMA_SEGMENTS => dma::dma_segments(a),
         nr::DMA_SYNC => dma::dma_sync(a),
+        nr::THREAD_INTERRUPT => process::thread_interrupt(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -223,6 +233,7 @@ pub fn name(number: u64) -> &'static str {
         "DMA_MAP",
         "DMA_SEGMENTS",
         "DMA_SYNC",
+        "THREAD_INTERRUPT",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }

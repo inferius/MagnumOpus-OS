@@ -92,6 +92,9 @@ pub enum Error {
     /// Plot byl opusten: zavrel se posledni handle s pravem `SIGNAL` (pad
     /// producenta) a hodnota, na kterou se ceka, nebyla dosazena.
     FenceAbandoned = -38,
+    /// Blokujici cekani prerusilo `THREAD_INTERRUPT`; vlakno dostane
+    /// doruceni preruseni pri navratu do userspace (jako `EINTR`).
+    Interrupted = -39,
 }
 
 /// Vsechny chyby (pro dokumentaci a testy).
@@ -134,6 +137,7 @@ pub const ALL: &[Error] = &[
     Error::AddressNotAvailable,
     Error::FenceFailed,
     Error::FenceAbandoned,
+    Error::Interrupted,
 ];
 
 impl Error {
@@ -188,6 +192,7 @@ impl Error {
             Self::AddressNotAvailable => "ADDRESS_NOT_AVAILABLE",
             Self::FenceFailed => "FENCE_FAILED",
             Self::FenceAbandoned => "FENCE_ABANDONED",
+            Self::Interrupted => "INTERRUPTED",
         }
     }
 
@@ -232,6 +237,7 @@ impl Error {
             Self::AddressNotAvailable => "mistni adresa nepatri zadnemu rozhrani",
             Self::FenceFailed => "plot skoncil chybou",
             Self::FenceAbandoned => "plot byl opusten (producent zavrel posledni handle s pravem SIGNAL)",
+            Self::Interrupted => "cekani prerusilo preruseni vlakna (THREAD_INTERRUPT)",
         }
     }
 }

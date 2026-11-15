@@ -220,6 +220,9 @@ mod sync {
         // SAFETY: ramec od jadra.
         let f = unsafe { ex::Frame::from_raw(frame) };
         let r = f.report();
+        if r.kind == abi::exception::kind::INTERRUPT {
+            interrupt(f, r.code);
+        }
         let sig = match ex::signal_class(r.kind) {
             ex::SignalClass::Segv => SIGSEGV,
             ex::SignalClass::Bus => SIGBUS,
@@ -240,6 +243,28 @@ mod sync {
         let mut uc = crate::ucontext::from_frame(&f, &mask);
         deliver_ctx(sig, 1, r.addr as *mut c_void, &mut uc);
         crate::ucontext::to_frame(&uc, &mut f);
+        let _ = f.resume();
+        crate::stdlib::_Exit(128 + sig)
+    }
+
+    /// Preruseni vlakna (`THREAD_INTERRUPT`) = asynchronni signal s cislem
+    /// v kodu (`kill`/`pthread_kill` z jineho procesu, Ctrl+C, `SIGCHLD`):
+    /// blokovany ceka v `PENDING`, jinak obsluha s kontextem z ramce.
+    fn interrupt(mut f: ex::Frame, code: u64) -> ! {
+        let sig = code as c_int;
+        if valid(sig) {
+            if sig == SIGKILL {
+                crate::stdlib::_Exit(128 + SIGKILL);
+            }
+            if MASK.with(Cell::get) & bit(sig) != 0 && sig != SIGSTOP {
+                PENDING.fetch_or(bit(sig), Ordering::AcqRel);
+            } else {
+                let mask = [MASK.with(Cell::get), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+                let mut uc = crate::ucontext::from_frame(&f, &mask);
+                deliver_ctx(sig, SI_USER, core::ptr::null_mut(), &mut uc);
+                crate::ucontext::to_frame(&uc, &mut f);
+            }
+        }
         let _ = f.resume();
         crate::stdlib::_Exit(128 + sig)
     }

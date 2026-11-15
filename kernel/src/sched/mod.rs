@@ -36,8 +36,8 @@ pub use percpu::{MAX_CPUS, all_cpus, cpu_count, this_cpu, try_this_cpu};
 pub use qos::{QosLoan, boost, boost_current, ipc_class, rt_admitted, set_thread_qos, thread_info};
 pub use thread::{Qos, Thread};
 pub use user::{
-    create_user_thread, on_return_to_user, request_kill, start_user_thread, start_user_thread_in_kernel,
-    user_exception, user_fault, user_page_fault,
+    create_user_thread, interrupt, on_return_to_user, request_kill, start_user_thread, start_user_thread_in_kernel,
+    user_exception, user_fault, user_page_fault, wait_interrupted,
 };
 
 use crate::arch::context::{self, Context, ThreadContext};

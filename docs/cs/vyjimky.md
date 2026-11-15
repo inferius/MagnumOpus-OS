@@ -126,6 +126,7 @@ alokuje a nastaví alternativní zásobník vlákna.
 | `DIVIDE` | `Fpe` | `SIGFPE` | `EXCEPTION_INT_DIVIDE_BY_ZERO` |
 | `INVALID_OPCODE` | `Ill` | `SIGILL` | `EXCEPTION_ILLEGAL_INSTRUCTION` |
 | `BREAKPOINT` | `Trap` | `SIGTRAP` | `EXCEPTION_BREAKPOINT` |
+| `INTERRUPT` (přerušení vlákna, `THREAD_INTERRUPT`) | - (číslo signálu je `Report::code`) | podle kódu (`kill`, `pthread_kill`, Ctrl+C, `SIGCHLD`) | pozastavení vlákna serverem (`SIGUSR1` Wine) |
 
 Čísla signálů určuje `cstd`, kódy `EXCEPTION_*` Windows vrstva.
 

@@ -254,8 +254,25 @@ Rozhodnutí uživatele a koordinátora (15. 11. 2026):
 
 ## W1: spojení se serverem a procesy (otázky T1-T5)
 
-**Stav: [navrženo]**, čeká na rozhodnutí (vlákno Wine, 15. 11. 2026). Rozbor
-Wine 11 (`dlls/ntdll/unix/server.c`, `server/request.c`, `server/ptrace.c`):
+**Stav: [navrženo]**, rozhodnuto 15. 11. 2026 (koordinátor); T2
+**[ověřeno v QEMU]**. Rozbor Wine 11 (`dlls/ntdll/unix/server.c`,
+`server/request.c`, `server/ptrace.c`):
+
+| Otázka | Rozhodnutí | Kdo |
+|---|---|---|
+| T1 fd mezi procesy | **A**: obecné `AF_UNIX` v `cstd`/`osrt`. Cesta socketu zůstává v modelu capability: `bind` vytvoří ve fsd uzel typu socket, `connect` potřebuje právo zápisu na uzel; `socketpair` a `SCM_RIGHTS` = předání handlu v kanálu. | vlákno plánovače (s `AF_UNIX` v `cstd`) |
+| T2 signál vláknu jiného procesu | **A**: [`THREAD_INTERRUPT`](syscally.md#thread_interrupt) (syscall 76), právo `MANAGE` na handlu vlákna; obecné pro `kill`/`pthread_kill`, Ctrl+C a `SIGCHLD`. | vlákno Wine (jádro, `cstd` doručení) |
+| T3 paměť jiného procesu | **A v W2**: `PROCESS_MEMORY` (syscall **77 rezervovaný**), práva `READ_MEMORY`/`WRITE_MEMORY` na handlu procesu. | vlákno Wine, etapa W2 |
+| T4 dědění fd | **A**: `posix_spawn` dědí libovolná fd bez `FD_CLOEXEC` jako duplikáty handlů ve startovní zprávě. | vlákno plánovače |
+| T5 rezervace adres | **A**: `AT_MO_RESERVE`, `ld.so` rezervuje rozsahy před nahráním knihoven. | vlákno Wine |
+
+**Riziko T3 (výslovně):** `WRITE_MEMORY` dává držiteli úplnou vládu nad
+cílovým procesem (může přepsat kód, zásobník i klíče v paměti) a `READ_MEMORY`
+čte všechna jeho tajemství. Obě práva proto dostane jen **tvůrce procesu**
+(handle z `PROCESS_CREATE`/spuštění) nebo **debugger**, kterému je tvůrce
+výslovně předá; nikdy je nedává služba jiné aplikaci a handle z výčtu
+procesů je nemá. Wineserver je dostane jen pro procesy, které sám spustil
+(nebo které se k němu připojí s handlem od spouštěče vrstvy).
 
 - **Spojení:** klient se připojí k serveru přes socket `AF_UNIX` v adresáři
   prefixu (nebo zdědí socket v proměnné `WINESERVERSOCKET`, když proces

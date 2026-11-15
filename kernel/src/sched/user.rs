@@ -138,15 +138,51 @@ pub fn request_kill(t: &Arc<Thread>) {
     }
 }
 
+/// Preruseni vlakna (`THREAD_INTERRUPT`): cekajici kod, probuzeni
+/// z cekani (to vrati `INTERRUPTED`) a IPI, pokud vlakno prave bezi, aby
+/// doruceni pri navratu do userspace prislo hned.
+pub fn interrupt(t: &Arc<Thread>, code: u32) {
+    t.add_interrupt(code);
+    wake(t, t.wait_seq());
+    if t.on_cpu_after_update()
+        && let Some(cpu) = percpu::cpu(t.last_cpu.load(Ordering::Relaxed))
+    {
+        arch::send_reschedule(cpu.hw_id);
+    }
+}
+
+/// Ma cekani aktualniho vlakna skoncit kvuli preruseni? Ne, kdyz vlakno
+/// ceka na rozhodnuti obsluhy vyjimky (cekani jadra, ne programu).
+pub fn wait_interrupted(t: &Thread) -> bool {
+    t.interrupt_pending() && !super::suspend::in_exception(t)
+}
+
 /// Volano pred navratem do userspace (konec syscallu nebo preruseni
-/// z userspace) se zakazanymi prerusenimi: ukoncovane vlakno skonci.
+/// z userspace) se zakazanymi prerusenimi: ukoncovane vlakno skonci,
+/// cekajici preruseni (`THREAD_INTERRUPT`) se doruci obsluze ve vlakne -
+/// nejvys jedno na navrat: dalsi prijde pri navratu ze syscallu obsluhy
+/// (jinak by se vnorilo nad prvni a bezelo pred nim).
 pub fn on_return_to_user() {
     let cpu = percpu::this_cpu();
-    // Pozastavene vlakno tu stoji (a pouzije cekajici zapis kontextu).
-    super::suspend::park();
-    if cpu.current().kill_requested() {
+    let mut delivered = false;
+    loop {
+        // Pozastavene vlakno tu stoji (a pouzije cekajici zapis kontextu).
+        super::suspend::park();
+        let me = cpu.current();
+        if me.kill_requested() {
+            interrupts::enable();
+            exit();
+        }
+        if delivered {
+            return;
+        }
+        let Some(code) = me.take_interrupt() else { return };
+        delivered = true;
+        // Ramec na zasobnik programu (copy_to_user) s povolenymi prerusenimi
+        // jako doruceni vyjimky; pak znovu pozastaveni a kill.
         interrupts::enable();
-        exit();
+        crate::object::exception::deliver_interrupt(code);
+        interrupts::disable();
     }
 }
 

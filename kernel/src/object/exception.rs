@@ -116,6 +116,26 @@ pub fn deliver(mut report: Report) -> Outcome {
     deliver_from(&me, &process, report, stage::DEBUGGER_FIRST)
 }
 
+/// Doruci preruseni vlakna (`THREAD_INTERRUPT`) obsluze ve vlakne; bez
+/// obsluhy nebo bez mista na zasobniku se preruseni zahodi (kanaly
+/// vyjimek ho nedostavaji - neni to chyba programu). Vola se s
+/// povolenymi prerusenimi pred navratem do userspace.
+pub fn deliver_interrupt(code: u32) {
+    let me = sched::current();
+    let Some(process) = me.process.clone() else { return };
+    let report = Report {
+        kind: abi::exception::kind::INTERRUPT,
+        stage: stage::IN_THREAD,
+        pid: process.id,
+        tid: me.id,
+        code: u64::from(code),
+        ..Default::default()
+    };
+    if !in_thread(&me, &process, &report) {
+        log::debug!("proces {} ({}): preruseni {code} bez obsluhy ve vlaknu zahozeno", process.id, process.name);
+    }
+}
+
 /// Poradi obsluh od stupne `from`: debugger (prvni sance), obsluha ve
 /// vlaknu, kanal vlakna, kanal procesu, debugger (druha sance).
 fn deliver_from(
@@ -275,7 +295,10 @@ pub fn handler_return(frame_ptr: u64, disposition: u32) -> Result<u64, Error> {
     }
     interrupts::restore(irq);
     let (_, ret) = ustate::general_sp_ret(general);
+    // Preruseni vlakna nejde dal (kanaly vyjimek ho nedostavaji): NEXT =
+    // jen pokracovat.
     if disposition == action::NEXT
+        && report.kind != abi::exception::kind::INTERRUPT
         && deliver_from(&me, &process, report, stage::THREAD) == Outcome::Unhandled
     {
         log::error!(

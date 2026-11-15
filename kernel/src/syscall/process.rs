@@ -115,6 +115,24 @@ pub fn thread_suspend(a: Args) -> Result<u64> {
     Ok(p.handles().insert(token, rights)?.0 as u64)
 }
 
+/// `THREAD_INTERRUPT(thread, code)`: cekajici preruseni vlakna (pravo
+/// `MANAGE`); doruceni na obsluhu ve vlakne pri navratu do userspace.
+pub fn thread_interrupt(a: Args) -> Result<u64> {
+    let p = current_process();
+    let thread = p.handles().get_as::<Thread>(arg_handle(a[0])?, Rights::MANAGE)?;
+    if a[1] >= abi::syscall::INTERRUPT_CODES {
+        return Err(Error::InvalidArgs);
+    }
+    // Bez obsluhy ve vlakne by preruseni viselo a cekani vlakna by
+    // porad vracela INTERRUPTED.
+    let Some(target) = thread.process.as_ref() else { return Err(Error::WrongType) };
+    if target.exception_entry() == 0 {
+        return Err(Error::BadState);
+    }
+    sched::interrupt(&thread, a[1] as u32);
+    Ok(0)
+}
+
 /// `THREAD_STATE(thread, op, kind, ptr, len)`: cteni (`READ`) nebo zapis
 /// (`WRITE`) kontextu pozastaveneho vlakna (`abi::thread`).
 pub fn thread_state(a: Args) -> Result<u64> {

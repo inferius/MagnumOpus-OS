@@ -279,6 +279,9 @@ pub fn wait(
         if me.kill_requested() {
             return Err((Error::Canceled, None));
         }
+        if sched::wait_interrupted(&me) {
+            return Err((Error::Interrupted, None));
+        }
         let seq = me.prepare_wait();
         // Bitova mapa polozek s registraci (nejvys 64 polozek).
         let mut registered: u64 = 0;

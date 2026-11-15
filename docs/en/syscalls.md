@@ -567,6 +567,38 @@ win: a suspended thread ends. Requires `MANAGE` on the thread. Errors:
 `WRONG_TYPE` (kernel thread), `BAD_STATE` (the thread has ended),
 `NO_RESOURCES`, `BAD_HANDLE`, `ACCESS_DENIED`.
 
+### `THREAD_INTERRUPT`
+
+**[verified in QEMU]** `(thread, code) -> 0`. Thread interruption (number
+76): sets a pending interruption with code `code` (0..63, the same code is
+merged) and wakes the thread. A blocking wait (`OBJECT_WAIT_ONE`, `OBJECT_WAIT_MANY`,
+`FUTEX` WAIT, `FENCE_WAIT`) returns [`INTERRUPTED`](errors.md#interrupted--39)
+- like `EINTR`; kernel waits inside exception delivery cannot be
+interrupted. A running thread is interrupted by the kernel (IPI). On return
+to userspace the thread gets a delivery on its in-thread handler
+(`EXCEPTION_HANDLER`) with kind `exception::kind::INTERRUPT` (256), stage
+`IN_THREAD` and the code in `Report::code`; several pending codes go from
+the lowest, **one per return** (the next on return from a syscall of the
+handler, typically `EXCEPTION_HANDLER` RETURN), so deliveries never nest
+on top of each other. NEXT from an interruption handler just resumes -
+exception channels do not get interruptions. If the frame does not fit on
+the stack, the interruption is dropped. A suspended thread gets the
+interruption only after it is resumed. Interrupting an ended thread does
+nothing.
+
+It is the generic basis of asynchronous signals: `kill`/`pthread_kill`
+between processes, terminal Ctrl+C, `SIGCHLD` and thread suspension in the
+Windows layer ([windows-layer.md](windows-layer.md)). `cstd` takes the code
+as the signal number (a blocked signal stays pending in the mask). Requires
+`MANAGE` on the thread (the same right as `THREAD_SUSPEND`). Errors:
+`INVALID_ARGS` (code above 63), `BAD_STATE` (the thread's process has no
+in-thread handler - the interruption would hang and waits would keep
+returning `INTERRUPTED`), `WRONG_TYPE` (kernel thread), `BAD_HANDLE`,
+`ACCESS_DENIED`.
+
+Number 77 is reserved for `PROCESS_MEMORY` (stage W2, reading and writing
+another process's memory through the kernel).
+
 ### `THREAD_STATE`
 
 `(thread, op, kind, ptr, len) -> 0`. Reads (`thread::op::READ`, right

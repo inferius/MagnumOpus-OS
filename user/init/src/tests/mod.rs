@@ -61,6 +61,7 @@ mod thread_state;
 mod second_pointer;
 mod exceptions;
 mod exceptions_fast;
+mod interrupt;
 mod reboot;
 mod recovery;
 mod recovery_kit;
@@ -105,6 +106,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("procesy", second_pointer::TESTS),
     ("procesy", exceptions::TESTS),
     ("procesy", exceptions_fast::TESTS),
+    ("procesy", interrupt::TESTS),
     ("procesy", fpu::TESTS),
     ("procesy", dynlink::TESTS),
     ("joby", jobs::TESTS),

@@ -104,6 +104,10 @@ pub fn in_thread_depth(t: &Thread) -> usize {
 }
 
 /// Vlakno stoji ve vyjimce (cteni a zapis kontextu povoleny).
+pub fn in_exception(t: &Thread) -> bool {
+    t.stop.lock().in_exception
+}
+
 pub fn set_in_exception(t: &Thread, on: bool) {
     t.stop.lock().in_exception = on;
 }

@@ -133,6 +133,7 @@ NEXT)`.
 | `DIVIDE` | `Fpe` | `SIGFPE` | `EXCEPTION_INT_DIVIDE_BY_ZERO` |
 | `INVALID_OPCODE` | `Ill` | `SIGILL` | `EXCEPTION_ILLEGAL_INSTRUCTION` |
 | `BREAKPOINT` | `Trap` | `SIGTRAP` | `EXCEPTION_BREAKPOINT` |
+| `INTERRUPT` (thread interruption, `THREAD_INTERRUPT`) | - (the signal number is `Report::code`) | by code (`kill`, `pthread_kill`, Ctrl+C, `SIGCHLD`) | thread suspension by the server (Wine `SIGUSR1`) |
 
 Signal numbers are chosen by `cstd`, `EXCEPTION_*` codes by the Windows
 layer.

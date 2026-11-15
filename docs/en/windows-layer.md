@@ -269,7 +269,26 @@ Decisions of the user and the coordinator (15 Nov 2026):
 
 ## W1: server connection and processes (questions T1-T5)
 
-**Status: [designed]**, waiting for a decision (Wine thread, 15 Nov 2026).
+**Status: [designed]**, decided on 15 Nov 2026 (coordinator); T2
+**[verified in QEMU]**.
+
+| Question | Decision | Who |
+|---|---|---|
+| T1 fds between processes | **A**: generic `AF_UNIX` in `cstd`/`osrt`. The socket path stays in the capability model: `bind` creates a socket-type node in fsd, `connect` needs the write right on the node; `socketpair` and `SCM_RIGHTS` = passing a handle in a channel. | scheduler thread (with `AF_UNIX` in `cstd`) |
+| T2 a signal to a thread of another process | **A**: [`THREAD_INTERRUPT`](syscalls.md#thread_interrupt) (syscall 76), the `MANAGE` right on the thread handle; generic for `kill`/`pthread_kill`, Ctrl+C and `SIGCHLD`. | Wine thread (kernel, `cstd` delivery) |
+| T3 memory of another process | **A in W2**: `PROCESS_MEMORY` (syscall **77 reserved**), rights `READ_MEMORY`/`WRITE_MEMORY` on the process handle. | Wine thread, stage W2 |
+| T4 fd inheritance | **A**: `posix_spawn` inherits any fds without `FD_CLOEXEC` as handle duplicates in the start message. | scheduler thread |
+| T5 address reservations | **A**: `AT_MO_RESERVE`, `ld.so` reserves ranges before loading libraries. | Wine thread |
+
+**T3 risk (stated explicitly):** `WRITE_MEMORY` gives the holder full
+control over the target process (it can overwrite code, the stack and keys
+in memory) and `READ_MEMORY` reads all its secrets. Both rights therefore go
+only to the **process creator** (the handle from `PROCESS_CREATE`/spawn) or
+a **debugger** the creator explicitly hands them to; a service never gives
+them to another application and a handle from a process listing does not
+have them. The wineserver gets them only for processes it started itself
+(or that connect to it with a handle from the layer launcher).
+
 Analysis of Wine 11 (`dlls/ntdll/unix/server.c`, `server/request.c`,
 `server/ptrace.c`):
 

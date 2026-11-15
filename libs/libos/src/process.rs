@@ -123,6 +123,13 @@ impl Thread {
         sys::exception_channel(self.0.raw(), abi::exception::channel::HANDLER_THREAD).map(|_| ())
     }
 
+    /// Preruseni vlakna (pravo `MANAGE`, `THREAD_INTERRUPT`): kod 0..63 dostane
+    /// obsluha ve vlakne (`exception::kind::INTERRUPT`), blokujici cekani
+    /// vlakna vrati `Err(Interrupted)`.
+    pub fn interrupt(&self, code: u32) -> Result<()> {
+        sys::thread_interrupt(self.0.raw(), code)
+    }
+
     /// Pozastavi vlakno (pravo `MANAGE`): stoji, dokud zije vraceny token.
     /// Na skutecne zastaveni se ceka [`Thread::wait_suspended`].
     pub fn suspend(&self) -> Result<SuspendToken> {

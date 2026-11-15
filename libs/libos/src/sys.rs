@@ -396,6 +396,13 @@ pub fn process_threads(process: u32, out: &mut [u32]) -> Result<usize> {
     .map(|v| v as usize)
 }
 
+/// Preruseni vlakna (`THREAD_INTERRUPT`): kod 0..63 se doruci obsluze ve
+/// vlakne pri navratu do userspace; blokujici cekani vlakna vrati
+/// `Err(Interrupted)`. Pravo `MANAGE`.
+pub fn thread_interrupt(thread: u32, code: u32) -> Result<()> {
+    call(nr::THREAD_INTERRUPT, [thread as u64, u64::from(code), 0, 0, 0, 0]).map(|_| ())
+}
+
 pub fn thread_suspend(thread: u32) -> Result<u32> {
     call(nr::THREAD_SUSPEND, [thread as u64, 0, 0, 0, 0, 0]).map(|v| v as u32)
 }

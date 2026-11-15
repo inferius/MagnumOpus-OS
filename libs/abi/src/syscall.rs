@@ -308,6 +308,20 @@ pub const DMA_SEGMENTS: u64 = 74;
 /// (`dma::sync`); na koherentnich platformach nedela nic. Pravo `READ`.
 pub const DMA_SYNC: u64 = 75;
 
+/// Preruseni vlakna: `(thread, code) -> 0`. Nastavi cekajici preruseni
+/// `code` (0..63, `INTERRUPT_CODES`; stejny kod se slouci) a probudi vlakno
+/// z blokujiciho cekani, ktere vrati `INTERRUPTED`. Pri navratu do
+/// userspace dostane vlakno doruceni na obsluhu ve vlakne
+/// (`EXCEPTION_HANDLER`) s druhem `exception::kind::INTERRUPT` a kodem
+/// v `Report::code` (nejnizsi cekajici kod prvni). Obecny zaklad pro
+/// `kill`/`pthread_kill` mezi procesy, Ctrl+C, `SIGCHLD` a pozastaveni
+/// vlaken Windows vrstvy. Pravo `MANAGE`; proces vlakna bez obsluhy ve
+/// vlakne = `BAD_STATE`.
+pub const THREAD_INTERRUPT: u64 = 76;
+
+/// Pocet kodu preruseni (`THREAD_INTERRUPT`).
+pub const INTERRUPT_CODES: u64 = 64;
+
 /// Registr pro `THREAD_SET_POINTER`.
 pub mod thread_pointer {
     /// Ukazatel pro TLS (x86_64 `FS_BASE`, aarch64 `TPIDR_EL0`).
@@ -318,7 +332,7 @@ pub mod thread_pointer {
 }
 
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 76;
+pub const COUNT: u64 = 77;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {

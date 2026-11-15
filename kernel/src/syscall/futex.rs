@@ -37,6 +37,9 @@ fn wait(addr: u64, expected: u32, deadline: u64) -> Result<u64> {
     if me.kill_requested() {
         return Err(Error::Canceled);
     }
+    if sched::wait_interrupted(&me) {
+        return Err(Error::Interrupted);
+    }
     let seq = {
         let mut table = p.futex.lock();
         let mut value = [0u8; 4];
@@ -77,6 +80,9 @@ fn wait(addr: u64, expected: u32, deadline: u64) -> Result<u64> {
     }
     if me.kill_requested() {
         return Err(Error::Canceled);
+    }
+    if sched::wait_interrupted(&me) {
+        return Err(Error::Interrupted);
     }
     if deadline.is_some_and(|d| arch::now_ns() >= d) {
         return Err(Error::TimedOut);
