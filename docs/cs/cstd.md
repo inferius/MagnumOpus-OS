@@ -564,8 +564,7 @@ Vlastního kódu ~11 000 řádků Rustu, převzatého ~14 000 řádků. Celá mu
    `mseal` = pečeť. `PROT_EXEC` na nezapečetěné paměti jen s oprávněním
    JIT z manifestu (W^X, [sprava-pameti.md](sprava-pameti.md)), jinak
    `EACCES`. `mmap` souboru: dnes okna VMO z fsd (soukromá i sdílená se
-   zápisem, viz výše).
-   `PROT_WRITE` nebo `PROT_EXEC` bez `PROT_READ` (v `mmap`
+   zápisem, viz výše). `PROT_WRITE` nebo `PROT_EXEC` bez `PROT_READ` (v `mmap`
    i `mprotect`) znamená i čtení jako na Linuxu x86_64 a aarch64 (jádro
    stránku jen pro zápis nemá; wineserver tak mapuje `KUSER_SHARED_DATA`).
 7. **libc.a a libc.so** (otázky 1 a 2): `libc.a` (Rust `staticlib`)
@@ -987,6 +986,27 @@ s kapacitou 64 MiB (`mo_memfd_create` jinou):
   `WRITE` a `RESIZE` (zápis, mapování pro zápis i `ftruncate` jádro
   odmítne). `mo_start_handle(tag)` vezme handle, který rodič předal ve
   startovní zprávě.
+
+### Procesový fd
+
+**[ověřeno v QEMU]** x86_64 (Windows vrstva W2, sada `wine`).
+`<magnumopus/process.h>`: program svěří svou paměť serveru své aplikace
+(wineserver: `ReadProcessMemory`, `WriteProcessMemory`, debugger).
+
+- `mo_self_process_fd()` dá fd s handlem vlastního procesu **jen s právy
+  paměti** (`READ_MEMORY`, `WRITE_MEMORY`, k tomu `DUPLICATE`
+  a `TRANSFER`, aby šel předat) - ne ukončení, vlákna, mapování ani
+  ladění. Má **vždy `FD_CLOEXEC`**: do dětí se nedědí omylem, jinému
+  procesu se dostane jen výslovně (`sendmsg` se `SCM_RIGHTS`,
+  `abi::params::fd_kind::PROCESS`).
+- `mo_process_memory(fd, MO_PROCESS_READ | MO_PROCESS_WRITE, addr, buf,
+  len)` čte nebo zapisuje paměť procesu za fd
+  ([`PROCESS_MEMORY`](syscally.md#process_memory)); vrací přenesené bajty
+  (méně = částečná kopie), `-1` + `errno` (`EFAULT`, `EACCES`, `EINVAL`).
+- ⚠️ **Bezpečnost jako `ptrace` stejného uživatele na Linuxu:** kdo fd
+  dostane, čte všechna tajemství procesu a může mu přepsat data. Wine ho
+  posílá jen svému wineserveru (server stejné aplikace a prefixu); jinam
+  ho program dávat nemá.
 
 ### Semafory
 

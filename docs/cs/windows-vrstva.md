@@ -12,7 +12,7 @@ v QEMU]** x86_64, další etapy **[navrženo]** (tabulka níže).
 |---|---|---|
 | W0 | sestavení Wine 11 (DLL PE, nástroje), port unixové části nad `libc.so` | celé Wine přes `cargo xtask wine` ve WSL **[implementováno]**: 602 DLL jako PE, 25 unixových `.so` nad `libc.so` (`ntdll.so` s `libunwind.so`), zavaděč `wine` a `wineserver`; `wine --version` v systému **[ověřeno v QEMU]** ([Wine na disku](#wine-na-disku-w1)) |
 | W1 | konzolové `.exe` (`cmd`, `hostname`, vlastní test): spodní `ntdll`, TEB přes GS, SEH, paměť, soubory, `wineserver` jako proces | **[ověřeno v QEMU]** x86_64, release (sada `wine`): GS v jádře a `ucontext_t` v `cstd` **[ověřeno v QEMU]**; záplata výjimek `signal_x86_64.c` se přeloží **[implementováno]**; Wine na datovém disku jako aplikace (`/apps/org.winehq.wine`), zavaděč `wine` z disku nahraje `ntdll.so` ([DL-4c](dynamicke-linkovani.md#knihovny-z-disku-a-origin-dl-4c)) **[ověřeno v QEMU]**; nový prefix (`wineboot`), `cmd /c echo`, vlastní konzolový program `user/wintest` a `hostname` ([Wine na disku](#wine-na-disku-w1)); oprávnění `wx_compat` (RWX, Q6) zatím není potřeba **[navrženo]** |
-| W2 | víc procesů jedné aplikace, registry, pojmenované objekty, `winecfg` v režimu bez oken | **[navrženo]** |
+| W2 | víc procesů jedné aplikace, registry, pojmenované objekty, `winecfg` v režimu bez oken | rozpracováno: další proces (`CreateProcess`, čekání, kód konce), pojmenované události a `Read`/`WriteProcessMemory` přes wineserver a [`PROCESS_MEMORY`](syscally.md#process_memory) **[ověřeno v QEMU]** x86_64, release ([Paměť jiného procesu](#paměť-jiného-procesu-w2)); sdílené sekce nad souborem mezi procesy, registr (`reg add`/`reg query` v dalším procesu) **[ověřeno v QEMU]** ([Sekce a registr](#sekce-a-registr-w2)); signály serveru klientům, `winecfg` **[navrženo]** |
 | W3 | okna: ovladač Wine nad kompozitorem (`guiproto`), GDI, `notepad`, `winecfg`, schránka, vstup | **[navrženo]** |
 | W4 | zvuk nad `audiod`, jednoduchá hra (GDI: `winemine`, pak hra přes SDL nebo Direct3D 9) | **[navrženo]** |
 | W5 | DXVK a VKD3D-Proton nad Vulkanem (Venus v QEMU, ovladače GPU na HW) | **[navrženo]** |
@@ -309,6 +309,79 @@ Rozhodnutí uživatele a koordinátora (15. 11. 2026):
   oken (`nodrv`, „explorer failed to start“) a bez `RpcSs` - konzolovým
   programům nevadí.
 
+## Paměť jiného procesu (W2)
+
+**[ověřeno v QEMU]** x86_64 (sada `wine`, `wintest.exe procesy`).
+
+- Wineserver klientské procesy nespouští, takže jejich handle nemá. Klient
+  mu proto při připojení **svěří svou paměť sám**: `ntdll` vezme procesový
+  fd (`mo_self_process_fd`, [cstd](cstd.md#procesový-fd)) a pošle ho
+  serveru (`wine_server_send_fd` pod pevným číslem 1021 před
+  `init_first_thread`); server ho uloží k procesu a `read_process_memory`
+  / `write_process_memory` (`server/ptrace.c`) volají `mo_process_memory`
+  místo `process_vm_readv`/`ptrace` (záplata `0006`).
+- ⚠️ **Bezpečnost jako `ptrace` stejného uživatele:** fd nese jen práva
+  paměti (žádné ukončení ani ladění), má `FD_CLOEXEC` a dostane ho jen
+  server vlastní aplikace (prefixu). Server tak může číst a přepsat paměť
+  každého svého klienta - stejně jako na Linuxu, kde wineserver a klienti
+  běží pod jedním uživatelem.
+- Test: `wintest.exe procesy` spustí sám sebe jako dítě (`CreateProcess`),
+  domluví se s ním pojmenovanými událostmi (`Local\...`), přečte
+  a přepíše mu proměnnou (`ReadProcessMemory`, `WriteProcessMemory`)
+  a ověří jeho kód konce.
+
+## Sekce a registr (W2)
+
+**[ověřeno v QEMU]** x86_64 (sada `wine`, release).
+
+- **Sdílená sekce nad souborem** (`wintest.exe sekce`): `CreateFileMapping`
+  se jménem nad prázdným souborem (Wine ho zvětší na velikost sekce),
+  pohled v rodiči i v dítěti (`OpenFileMapping`) = tytéž stránky, zápis
+  dítěte rodič vidí; koherence pohledu s `ReadFile` jiným handlem i
+  `WriteFile` do souboru oběma směry. Stojí na `MAP_SHARED` se zápisem
+  nad okny souborů z fsd
+  ([cstd](cstd.md)); anonymní sekce dál jako `memfd`
+  (záplata `0004`).
+- **Registr**: `wine reg add` a v dalším procesu `wine reg query` vidí
+  hodnotu (registr drží wineserver). Server ho ukládá do `user.reg`
+  a `system.reg` periodicky (30 s) a při svém konci; test po
+  `wineboot -k` a `wineserver -w` najde klíč v `user.reg`.
+- Ukládá se přes dočasný soubor a `rename` na existující `user.reg`:
+  `rename` v `osrt` (tedy i `cstd` a `std`) cíl atomicky nahradí jako
+  POSIX (požadavek fsd `RENAME_REPLACE`); dřív vracel `EEXIST`.
+- Dřívější pád serveru při konci (assert v `free_async_queue`) se se
+  signály serveru (záplata `0007`) už neobjevuje: server končí s kódem 0.
+- Záplata `0003` předává při opětovném spuštění serveru všechny jeho volby
+  (`-d`, `-p`), nejen `-f`.
+
+## Signály serveru (W2)
+
+**[ověřeno v QEMU]** jádro a `cstd` x86_64 i aarch64, napojení Wine
+(záplata `0007`) x86_64 (sada `wine`, release: konec procesů prefixu
+přes `wineboot -k` a čistý konec serveru).
+
+Wineserver na Linuxu posílá klientům signály: `SIGUSR1` přes `tgkill`
+(přerušení vlákna kvůli pozastavení, kontextu a APC jiného procesu),
+`SIGQUIT` (násilný konec vlákna) a `SIGKILL` (ukončení procesu). U nás jde
+`kill` z `cstd` jen na vlastní děti, proto klient serveru svěří jen to,
+co server potřebuje (rozhodnutí A, nejmenší práva):
+
+- **Řídicí fd procesu** (`mo_self_control_fd`): handle vlastního procesu
+  jen s právem `KILL` (ukončit, `PROCESS_KILL`), k tomu `DUPLICATE`
+  a `TRANSFER`, vždy `FD_CLOEXEC`. Server ho použije místo `kill(pid,
+  SIGKILL)` (`process_sigkill`).
+- **Fd vlákna** (`mo_self_thread_fd`): handle vlákna z
+  [`THREAD_SELF`](syscally.md#thread_self) jen s právem `INTERRUPT`
+  (`THREAD_INTERRUPT`), posílá ho každé vlákno v `init_thread`. Server
+  místo `tgkill` volá `mo_thread_signal(fd, sig)`: jádro vlákno přeruší
+  s kódem = číslo signálu a `cstd` ho doručí obsluze signálu jako na Linuxu
+  (pozastavení a kontext řeší klient v obsluze `SIGUSR1` sám).
+- Nic dalšího: server nedostane `MANAGE` (pozastavení, kontext, vlákna
+  procesu) ani výčet vláken (`PROCESS_THREADS`).
+- ⚠️ **Bezpečnost jako `kill`/`tgkill` stejného uživatele na Linuxu**,
+  omezeno na server prefixu: fd dostane jen wineserver vlastní aplikace
+  (záplata `0007`, pevná čísla fd 1022 a 1023 vedle procesového fd 1021).
+
 ## W1: spojení se serverem a procesy (otázky T1-T5)
 
 **Stav: [navrženo]**, rozhodnuto 15. 11. 2026 (koordinátor); T2
@@ -319,7 +392,7 @@ Rozhodnutí uživatele a koordinátora (15. 11. 2026):
 |---|---|---|
 | T1 fd mezi procesy | **A**: obecné `AF_UNIX` v `cstd`/`osrt`. Cesta socketu zůstává v modelu capability: `bind` vytvoří ve fsd uzel typu socket, `connect` potřebuje právo zápisu na uzel; `socketpair` a `SCM_RIGHTS` = předání handlu v kanálu. | vlákno plánovače (s `AF_UNIX` v `cstd`) |
 | T2 signál vláknu jiného procesu | **A**: [`THREAD_INTERRUPT`](syscally.md#thread_interrupt) (syscall 76), právo `MANAGE` na handlu vlákna; obecné pro `kill`/`pthread_kill`, Ctrl+C a `SIGCHLD`. | vlákno Wine (jádro, `cstd` doručení) |
-| T3 paměť jiného procesu | **A v W2**: `PROCESS_MEMORY` (syscall **77 rezervovaný**), práva `READ_MEMORY`/`WRITE_MEMORY` na handlu procesu. | vlákno Wine, etapa W2 |
+| T3 paměť jiného procesu | **A v W2**: [`PROCESS_MEMORY`](syscally.md#process_memory) (syscall 77), práva `READ_MEMORY`/`WRITE_MEMORY` na handlu procesu; jádro a libos **[ověřeno v QEMU]** x86_64 i aarch64, napojení wineserveru procesovým fd **[ověřeno v QEMU]** x86_64 ([Paměť jiného procesu](#paměť-jiného-procesu-w2)). | vlákno Wine, etapa W2 |
 | T4 dědění fd | **A**: `posix_spawn` dědí libovolná fd bez `FD_CLOEXEC` jako duplikáty handlů ve startovní zprávě. | vlákno plánovače |
 | T5 rezervace adres | **A**: `AT_MO_RESERVE`, `ld.so` rezervuje rozsahy před nahráním knihoven. Provedeno ještě dřív: rezervuje `spawn` před namapováním programu i `ld.so` ([dynamicke-linkovani.md](dynamicke-linkovani.md#rezervace-adres-před-zavedením-t5)), **[ověřeno v QEMU]**. | vlákno Wine |
 

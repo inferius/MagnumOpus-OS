@@ -587,8 +587,7 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
    JIT permission from the manifest (W^X,
    [memory-management.md](memory-management.md)), otherwise `EACCES`.
    File `mmap`: today windows of VMOs from fsd (private and shared with
-   writing, see above).
-   `PROT_WRITE` or `PROT_EXEC` without `PROT_READ` (in `mmap` and
+   writing, see above). `PROT_WRITE` or `PROT_EXEC` without `PROT_READ` (in `mmap` and
    `mprotect`) also means reading, as on Linux x86_64 and aarch64 (the
    kernel has no write-only page; wineserver maps `KUSER_SHARED_DATA` this
    way).
@@ -1037,6 +1036,29 @@ with a capacity of 64 MiB (`mo_memfd_create` for another one):
   O_RDONLY)`. Read-only = a handle without `WRITE` and `RESIZE` (the kernel
   refuses writing, writable mappings and `ftruncate`). `mo_start_handle(tag)`
   takes a handle the parent passed in the start message.
+
+### Process fd
+
+**[verified in QEMU]** x86_64 (Windows layer W2, `wine` suite).
+`<magnumopus/process.h>`: a program entrusts its memory to the server of
+its application (wineserver: `ReadProcessMemory`, `WriteProcessMemory`, a
+debugger).
+
+- `mo_self_process_fd()` gives an fd with a handle to its own process
+  **with memory rights only** (`READ_MEMORY`, `WRITE_MEMORY`, plus
+  `DUPLICATE` and `TRANSFER` so it can be passed) - not termination,
+  threads, mapping or debugging. It always has **`FD_CLOEXEC`**: it is not
+  inherited into children by accident and reaches another process only
+  explicitly (`sendmsg` with `SCM_RIGHTS`, `abi::params::fd_kind::PROCESS`).
+- `mo_process_memory(fd, MO_PROCESS_READ | MO_PROCESS_WRITE, addr, buf,
+  len)` reads or writes the memory of the process behind the fd
+  ([`PROCESS_MEMORY`](syscalls.md#process_memory)); returns the transferred
+  bytes (fewer = a partial copy), `-1` + `errno` (`EFAULT`, `EACCES`,
+  `EINVAL`).
+- ⚠️ **Security like `ptrace` of the same user on Linux:** whoever gets
+  the fd reads all of the process's secrets and can overwrite its data.
+  Wine sends it only to its wineserver (the server of the same application
+  and prefix); a program should not give it elsewhere.
 
 ### Semaphores
 

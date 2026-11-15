@@ -11,6 +11,7 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 - `src/fd.rs` - tabulka čísel fd pro cstd (popis otevření: soubor, stdio, roura; `dup` sdílí popis); std ji vystavuje jako `std::os::magnumopus::runtime` (re-export celého crate, nestabilní).
 - `src/sock.rs` - sockety pro tabulku fd (stav nový/TCP/naslouchání/UDP nad netproto, neblokující = `Deadline::TRY`); `src/poll.rs` - čekání na více fd (signály kanálů, připravenost socketů, do 64 `OBJECT_WAIT_MANY`, víc port).
 - `src/fs.rs` - soubory nad fsproto; `File::path` (absolutní cesta při otevření, `openat` v cstd), `volume_space` (C `statvfs`).
+- `fd::Object::Process` - procesový fd (`process::self_memory_object`: handle vlastního procesu jen s `READ_MEMORY`/`WRITE_MEMORY`/`DUPLICATE`/`TRANSFER`); dědění a `SCM_RIGHTS` jako `fd_kind::PROCESS` (`inherit.rs`), čtení/zápis = `BadHandle`.
 - `src/fmap.rs` - `mmap` souboru po oknech fsd (`MAP_VMO`) do jedné rezervace (`MAP_IN_RESERVATION`); `MAP_PRIVATE` = klon okna jen pod koncem souboru, sdílená mapování v seznamu `SHARED` pro `munmap` (`unmapped` -> `UNMAP_VMO`, okno pokryté jiným mapováním procesu se neuvolní) a `msync` (`sync` -> `SYNC_VMO`); zapisovatelné sdílené drží handly oken a identitu souboru: po pádu fsd (`SERVICE_RESTARTED` nebo jiná generace spojení) `FsClient::recover_window`/`adopt_window` (REOPEN se zápisem + `ADOPT_VMO`) a přemapování (decommit -> mapování v rezervaci), bez práva zápisu `lost` = `msync` `SERVICE_RESTARTED`.
 - `src/memfd.rs` - paměťový fd (`fd::Object::Memory`): zvětšitelný objekt paměti s pozicí, pečetě, `map` (MAP_SHARED přímo na objekt), `export`/`import` handlu (jen pro čtení = bez `WRITE` a `RESIZE`). Výchozí kapacita 64 MiB.
 - `src/vm.rs` - re-export `libos::vm` a příznaků `abi::vm` pro `mmap` v cstd.
@@ -22,7 +23,7 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 ## Invarianty
 
 - Crate se překládá jako závislost std (`rustc-dep-of-std`): závislosti jen naše crates s toutéž feature a vendorované crates z rust-src; libos vždy s `default-features = false` (bez `rt`).
-- `env::resolve` nechává `..` (řeší ho fsd po následování odkazů), `.` maže; `env::resolve_lexical` jen pro cesty mimo fsd (program pro launchd). `set_current_dir` ukládá kanonickou cestu (`REALPATH`). `remove_file`/`remove_dir` kontrolují druh přes `lstat` (odkaz se maže jako odkaz).
+- `env::resolve` nechává `..` (řeší ho fsd po následování odkazů), `.` maže; `env::resolve_lexical` jen pro cesty mimo fsd (program pro launchd). `set_current_dir` ukládá kanonickou cestu (`REALPATH`). `remove_file`/`remove_dir` kontrolují druh přes `lstat` (odkaz se maže jako odkaz). `rename` nahradí existující cíl (`RENAME_REPLACE`, POSIX), na tom stojí ukládání přes dočasný soubor (registr Wine).
 - Handle vlastního procesu se nesmí zavřít (`start::init` ho zapomene).
 - Nové vlákno nastaví TP jako první věc, před jakýmkoli kódem std.
 - `at_exit` volá funkce bez drženého zámku (smí registrovat další); `exit_now` je nevolá.

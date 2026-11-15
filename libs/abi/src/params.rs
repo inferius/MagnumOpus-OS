@@ -99,10 +99,17 @@ pub mod fd_kind {
     /// Prazdny fd jako `/dev/null` (cteni = konec, zapis se zahodi), bez
     /// handlu a dat: stdio rodice bez kanalu (`Stdio::null`) a `/dev/null`.
     pub const NULL: u8 = 5;
+    /// Procesovy fd (`mo_self_process_fd`, Windows vrstva): handle procesu
+    /// jen s pravy pameti (`READ_MEMORY`, `WRITE_MEMORY`) `tag::FD`, data
+    /// prazdna.
+    pub const PROCESS: u8 = 6;
+    /// Fd vlakna (`mo_self_thread_fd`, Windows vrstva): handle vlakna jen
+    /// s pravem `INTERRUPT` `tag::FD`, data prazdna.
+    pub const THREAD: u8 = 7;
 
     /// Ma polozka handle ve startovni zprave?
     pub const fn has_handle(kind: u8) -> bool {
-        matches!(kind, PIPE | MEMORY | UNIX)
+        matches!(kind, PIPE | MEMORY | UNIX | PROCESS | THREAD)
     }
 }
 

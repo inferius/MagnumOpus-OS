@@ -245,3 +245,36 @@ pub fn self_id() -> u32 {
         Err(old) => old,
     }
 }
+
+/// Popis procesoveho fd (C `mo_self_process_fd`, Windows vrstva): handle
+/// vlastniho procesu jen s pravy `READ_MEMORY` a `WRITE_MEMORY` (plus
+/// `DUPLICATE` a `TRANSFER`, aby sel predat `SCM_RIGHTS`). Zadne ukonceni,
+/// vlakna, mapovani ani cekani - klient jim sveruje jen svou pamet serveru
+/// sve aplikace (jako `ptrace` stejneho uzivatele).
+pub fn self_memory_object() -> Result<crate::fd::Object, Error> {
+    let me = libos::Handle::from_raw(libos::rt::self_process());
+    let rights = libos::Rights(libos::Rights::READ_MEMORY.0 | libos::Rights::WRITE_MEMORY.0 | libos::Rights::DUPLICATE.0 | libos::Rights::TRANSFER.0);
+    let dup = me.duplicate(Some(rights));
+    // Handle vlastniho procesu se nesmi zavrit (`start::init`).
+    core::mem::forget(me);
+    Ok(crate::fd::Object::Process(libos::Process::from_handle(dup?)))
+}
+
+/// Ridici fd procesu (C `mo_self_control_fd`): handle vlastniho procesu jen
+/// s pravem `KILL` (+ `DUPLICATE`, `TRANSFER`) - server aplikace ho smi
+/// ukoncit (jako `kill` stejneho uzivatele), nic jineho.
+pub fn self_control_object() -> Result<crate::fd::Object, Error> {
+    let me = libos::Handle::from_raw(libos::rt::self_process());
+    let dup = me.duplicate(Some(libos::Rights(libos::Rights::KILL.0 | libos::Rights::DUPLICATE.0 | libos::Rights::TRANSFER.0)));
+    // Handle vlastniho procesu se nesmi zavrit (`start::init`).
+    core::mem::forget(me);
+    Ok(crate::fd::Object::Process(libos::Process::from_handle(dup?)))
+}
+
+/// Fd vlakna (C `mo_self_thread_fd`): handle volajiciho vlakna jen
+/// s pravem `INTERRUPT` (+ `DUPLICATE`, `TRANSFER`) - server aplikace mu
+/// smi posilat signaly (jako `tgkill`), nic jineho.
+pub fn self_thread_object() -> Result<crate::fd::Object, Error> {
+    let rights = libos::Rights(libos::Rights::INTERRUPT.0 | libos::Rights::DUPLICATE.0 | libos::Rights::TRANSFER.0);
+    Ok(crate::fd::Object::Thread(libos::Thread::current(Some(rights))?))
+}

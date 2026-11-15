@@ -101,7 +101,12 @@ Podrobnosti, srovnání návrhů a měření: [Plánovač](planovac.md).
   Slot, který vyčerpá generace, se vyřadí - starý handle tak nikdy nezačne
   platit pro jiný objekt.
 - **Práva** (`READ`, `WRITE`, `EXECUTE`, `MAP`, `DUPLICATE`, `TRANSFER`,
-  `WAIT`, `SIGNAL`, `MANAGE`, `DMA`) lze při duplikaci jen ubírat.
+  `WAIT`, `SIGNAL`, `MANAGE`, `SET_CLOCK`, `POWER`, `DIAG`, `DMA`,
+  `RESIZE`, `READ_MEMORY`, `WRITE_MEMORY`, `KILL`, `INTERRUPT`) lze při
+  duplikaci jen ubírat. Úzká práva pro server aplikace: `KILL` jen ukončí
+  proces (`PROCESS_KILL`), `INTERRUPT` jen přeruší vlákno
+  (`THREAD_INTERRUPT`), obojí bez zbytku `MANAGE`
+  ([Windows vrstva](windows-vrstva.md#signály-serveru-w2)).
 - **Kanály**: zprávy s daty a handly; předání handlu ho přesune (odesílatel
   o něj přijde). Zavření konce nastaví druhému `PEER_CLOSED`.
 - **Porty** (`kernel/src/object/port.rs`): jednorázové registrace „až

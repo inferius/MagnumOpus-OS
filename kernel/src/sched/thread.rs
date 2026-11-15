@@ -329,6 +329,6 @@ impl KernelObject for Thread {
     /// `MANAGE` = pozastavit, `READ` / `WRITE` = cist / zapsat kontext
     /// (`THREAD_STATE`).
     fn default_rights(&self) -> Rights {
-        Rights::BASIC | Rights::MANAGE | Rights::READ | Rights::WRITE
+        Rights::BASIC | Rights::MANAGE | Rights::READ | Rights::WRITE | Rights::INTERRUPT
     }
 }

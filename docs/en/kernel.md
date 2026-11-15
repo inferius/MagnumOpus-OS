@@ -109,7 +109,12 @@ Details, design comparison and measurements: [Scheduler](scheduler.md).
   that runs out of generations is retired, so a stale handle never becomes
   valid for another object.
 - **Rights** (`READ`, `WRITE`, `EXECUTE`, `MAP`, `DUPLICATE`, `TRANSFER`,
-  `WAIT`, `SIGNAL`, `MANAGE`, `DMA`) can only be removed when duplicating.
+  `WAIT`, `SIGNAL`, `MANAGE`, `SET_CLOCK`, `POWER`, `DIAG`, `DMA`,
+  `RESIZE`, `READ_MEMORY`, `WRITE_MEMORY`, `KILL`, `INTERRUPT`) can only be
+  removed when duplicating. Narrow rights for an application's server:
+  `KILL` only terminates a process (`PROCESS_KILL`), `INTERRUPT` only
+  interrupts a thread (`THREAD_INTERRUPT`), both without the rest of
+  `MANAGE` ([Windows layer](windows-layer.md#server-signals-w2)).
 - **Channels**: messages with data and handles; transferring a handle moves
   it (the sender loses it). Closing an end sets `PEER_CLOSED` on the other.
 - **Ports** (`kernel/src/object/port.rs`): one-shot registrations "when the

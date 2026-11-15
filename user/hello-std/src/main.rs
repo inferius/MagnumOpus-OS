@@ -156,6 +156,11 @@ fn files() -> Check {
     std::env::set_current_dir(&dir).map_err(|e| format!("set_current_dir: {e}"))?;
     fs::write("druhy.txt", b"2").map_err(|e| format!("relativni zapis: {e}"))?;
     fs::rename("druhy.txt", "treti.txt").map_err(|e| format!("rename: {e}"))?;
+    // Prejmenovani na existujici soubor ho nahradi (POSIX, std; ulozeni pres
+    // docasny soubor a rename, napr. registr Wine).
+    fs::write("ctvrty.txt", b"4").map_err(|e| format!("zapis: {e}"))?;
+    fs::rename("ctvrty.txt", "treti.txt").map_err(|e| format!("rename na existujici: {e}"))?;
+    ensure(fs::read("treti.txt").map_err(|e| e.to_string())? == b"4", "rename nenahradil cil")?;
     let mut names: Vec<String> = fs::read_dir(".")
         .map_err(|e| format!("read_dir: {e}"))?
         .map(|e| e.map(|e| e.file_name().to_string_lossy().into_owned()))

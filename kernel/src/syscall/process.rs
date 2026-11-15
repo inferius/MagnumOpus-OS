@@ -59,12 +59,34 @@ pub fn exit(a: Args) -> Result<u64> {
     Ok(0)
 }
 
-/// `PROCESS_KILL(process)`.
+/// Objekt typu `T` za handlem, ktery ma aspon jedno z prav `any` (uzke
+/// pravo jako `KILL` nebo siroke `MANAGE`).
+fn get_with_any<T: KernelObject>(p: &Process, handle: u64, any: Rights) -> Result<alloc::sync::Arc<T>> {
+    let h = arg_handle(handle)?;
+    let table = p.handles();
+    if table.rights(h)?.0 & any.0 == 0 {
+        return Err(Error::AccessDenied);
+    }
+    table.get_as::<T>(h, Rights::NONE)
+}
+
+/// `THREAD_SELF(rights) -> handle`: handle volajiciho vlakna s pravy
+/// `rights` (podmnozina vychozich, 0 = vychozi).
+pub fn thread_self(a: Args) -> Result<u64> {
+    let p = current_process();
+    let me = sched::current();
+    let default = me.default_rights();
+    let rights = if a[0] == 0 { default } else { Rights(u32::try_from(a[0]).map_err(|_| Error::InvalidArgs)?) };
+    if !default.contains(rights) {
+        return Err(Error::AccessDenied);
+    }
+    Ok(p.handles().insert(me, rights)?.0 as u64)
+}
+
+/// `PROCESS_KILL(process)`: pravo `KILL` nebo `MANAGE`.
 pub fn kill(a: Args) -> Result<u64> {
     let p = current_process();
-    let target = p
-        .handles()
-        .get_as::<Process>(arg_handle(a[0])?, Rights::MANAGE)?;
+    let target = get_with_any::<Process>(&p, a[0], Rights::KILL | Rights::MANAGE)?;
     target.terminate(abi::process::EXIT_KILLED);
     Ok(0)
 }
@@ -119,7 +141,7 @@ pub fn thread_suspend(a: Args) -> Result<u64> {
 /// `MANAGE`); doruceni na obsluhu ve vlakne pri navratu do userspace.
 pub fn thread_interrupt(a: Args) -> Result<u64> {
     let p = current_process();
-    let thread = p.handles().get_as::<Thread>(arg_handle(a[0])?, Rights::MANAGE)?;
+    let thread = get_with_any::<Thread>(&p, a[0], Rights::INTERRUPT | Rights::MANAGE)?;
     if a[1] >= abi::syscall::INTERRUPT_CODES {
         return Err(Error::InvalidArgs);
     }
@@ -131,6 +153,61 @@ pub fn thread_interrupt(a: Args) -> Result<u64> {
     }
     sched::interrupt(&thread, a[1] as u32);
     Ok(0)
+}
+
+/// Velikost bloku kopie `PROCESS_MEMORY` (buffer jadra).
+const MEMORY_CHUNK: usize = 64 * 1024;
+
+/// `PROCESS_MEMORY(process, op, addr, buf, len) -> bajty`: kopie mezi
+/// pameti volajiciho a jineho procesu pres buffer jadra po blocich (zadny
+/// zamek dvou adresnich prostoru najednou). Chyba v bufferu volajiciho =
+/// chyba; chyba v cili po prvnim bloku = castecna kopie.
+pub fn process_memory(a: Args) -> Result<u64> {
+    use abi::process::memory;
+    let p = current_process();
+    let need = match a[1] {
+        memory::READ => Rights::READ_MEMORY,
+        memory::WRITE => Rights::WRITE_MEMORY,
+        _ => return Err(Error::InvalidArgs),
+    };
+    let target = p.handles().get_as::<Process>(arg_handle(a[0])?, need)?;
+    let (addr, buf) = (a[2], a[3]);
+    let len = usize::try_from(a[4]).map_err(|_| Error::InvalidArgs)?;
+    if addr.checked_add(a[4]).is_none() || buf.checked_add(a[4]).is_none() {
+        return Err(Error::BadAddress);
+    }
+    if target.address_space().root().is_none() {
+        // Skonceny proces (prostor zrusen).
+        return Err(Error::BadState);
+    }
+    let mut chunk = alloc::vec::Vec::new();
+    chunk.try_reserve_exact(len.min(MEMORY_CHUNK)).map_err(|_| Error::NoMemory)?;
+    chunk.resize(len.min(MEMORY_CHUNK), 0);
+    let mut done = 0usize;
+    while done < len {
+        let n = (len - done).min(MEMORY_CHUNK);
+        let k = &mut chunk[..n];
+        let at = done as u64;
+        let r = if a[1] == memory::READ {
+            match target.address_space().copy_from_user(addr + at, k) {
+                Ok(()) => p.address_space().copy_to_user(buf + at, k).map_err(|e| (e, true)),
+                Err(e) => Err((e, false)),
+            }
+        } else {
+            match p.address_space().copy_from_user(buf + at, k) {
+                Ok(()) => target.address_space().copy_to_user(addr + at, k).map_err(|e| (e, false)),
+                Err(e) => Err((e, true)),
+            }
+        };
+        match r {
+            Ok(()) => done += n,
+            // Buffer volajiciho je vzdy chyba; cil po prvnim bloku = castecne.
+            Err((e, true)) => return Err(e),
+            Err((e, false)) if done == 0 => return Err(e),
+            Err(_) => break,
+        }
+    }
+    Ok(done as u64)
 }
 
 /// `THREAD_STATE(thread, op, kind, ptr, len)`: cteni (`READ`) nebo zapis

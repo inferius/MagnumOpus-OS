@@ -1,39 +1,72 @@
+diff --git a/server/main.c b/server/main.c
+--- a/server/main.c
++++ b/server/main.c
+@@ -46,6 +46,12 @@
+ int foreground = 0;
+ timeout_t master_socket_timeout = 3 * -TICKS_PER_SEC;  /* master socket timeout, default is 3 seconds */
+ const char *server_argv0;
++#ifdef __magnumopus__
++/* Vsechny argumenty (request.c: server se misto fork spusti znovu se stejnymi
++ * volbami a -f). */
++int server_argc;
++char **server_argv;
++#endif
+ 
+ /* parse-line args */
+ 
+@@ -245,6 +251,10 @@
+ {
+     setvbuf( stderr, NULL, _IOLBF, 0 );
+     server_argv0 = argv[0];
++#ifdef __magnumopus__
++    server_argc = argc;
++    server_argv = argv;
++#endif
+     parse_options( argc, argv, "d::fhk::p::vw", long_options, option_callback );
+ 
+     /* setup temporary handlers before the real signal initialization is done */
 diff --git a/server/request.c b/server/request.c
 --- a/server/request.c
 +++ b/server/request.c
-@@ -44,6 +44,10 @@
+@@ -44,6 +44,12 @@
  #endif
  #include <unistd.h>
  #include <poll.h>
 +#ifdef __magnumopus__
 +#include <spawn.h>
 +extern char **environ;
++extern int server_argc;
++extern char **server_argv;
 +#endif
  #ifdef __APPLE__
  # include <mach/mach_time.h>
  #endif
-@@ -857,6 +861,32 @@
+@@ -857,6 +863,36 @@
      if (!foreground)
      {
          if (pipe( sync_pipe ) == -1) fatal_error( "pipe: %s\n", strerror( errno ));
 +#ifdef __magnumopus__
-+        /* MagnumOpus: fork neni. Server spusti sam sebe v popredi (-f)
-+         * a cislo zapisoveho konce roury preda v prostredi (roura bez
-+         * FD_CLOEXEC se dedi). Potomek po ziskani zamku zapise do roury
-+         * (viz vetev foreground nize) a rodic skonci jako po fork. */
++        /* MagnumOpus: fork neni. Server spusti sam sebe v popredi (-f) se
++         * stejnymi volbami (-d, -p) a cislo zapisoveho konce roury preda
++         * v prostredi (roura bez FD_CLOEXEC se dedi). Potomek po ziskani
++         * zamku zapise do roury (viz vetev foreground nize) a rodic skonci
++         * jako po fork. */
 +        {
 +            char num[16];
-+            char *args[3];
-+            int err;
++            char **args = malloc( (server_argc + 2) * sizeof(*args) );
++            int err, i, n = 0;
 +
-+            args[0] = (char *)server_argv0;
-+            args[1] = (char *)"-f";
-+            args[2] = NULL;
++            if (!args) fatal_error( "out of memory\n" );
++            args[n++] = (char *)server_argv0;
++            args[n++] = (char *)"-f";
++            for (i = 1; i < server_argc; i++) args[n++] = server_argv[i];
++            args[n] = NULL;
 +            fcntl( sync_pipe[0], F_SETFD, FD_CLOEXEC );
 +            snprintf( num, sizeof(num), "%d", sync_pipe[1] );
 +            setenv( "WINESERVER_SYNC_FD", num, 1 );
 +            err = posix_spawn( &pid, server_argv0, NULL, NULL, args, environ );
 +            unsetenv( "WINESERVER_SYNC_FD" );
++            free( args );
 +            if (err) fatal_error( "posix_spawn %s: %s\n", server_argv0, strerror( err ));
 +        }
 +        close( sync_pipe[1] );
@@ -45,7 +78,7 @@ diff --git a/server/request.c b/server/request.c
          pid = fork();
          switch( pid )
          {
-@@ -895,6 +925,22 @@
+@@ -895,6 +931,22 @@
      else  /* remain in the foreground */
      {
          acquire_lock();

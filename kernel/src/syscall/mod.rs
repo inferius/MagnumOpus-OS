@@ -134,6 +134,7 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::VMO_SET_SIZE => vm::vmo_set_size(a),
         nr::VMO_SIZE => vm::vmo_size(a),
         nr::VMO_DIRTY => vm::vmo_dirty(a),
+        nr::THREAD_SELF => process::thread_self(a),
         nr::THREAD_SUSPEND => process::thread_suspend(a),
         nr::THREAD_STATE => process::thread_state(a),
         nr::EXCEPTION_CHANNEL => process::exception_channel(a),
@@ -149,6 +150,7 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::DMA_SEGMENTS => dma::dma_segments(a),
         nr::DMA_SYNC => dma::dma_sync(a),
         nr::THREAD_INTERRUPT => process::thread_interrupt(a),
+        nr::PROCESS_MEMORY => process::process_memory(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -237,10 +239,11 @@ pub fn name(number: u64) -> &'static str {
         "DMA_SEGMENTS",
         "DMA_SYNC",
         "THREAD_INTERRUPT",
-        "",
+        "PROCESS_MEMORY",
         "VMO_SET_SIZE",
         "VMO_SIZE",
         "VMO_DIRTY",
+        "THREAD_SELF",
     ];
     NAMES.get(number as usize).copied().unwrap_or("?")
 }
