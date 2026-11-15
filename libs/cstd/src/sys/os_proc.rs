@@ -18,11 +18,13 @@ fn e(err: rt::Error) -> crate::c_int {
 pub struct Child(rt::process::Child);
 
 /// Proud potomka z popisu rodice: stdio (i jiny proud, napr. stderr jako
-/// stdout po `dup2`) a roury; soubory a sockety blok parametru predat
-/// neumi (`ENOTSUP`).
+/// stdout po `dup2`), roury a soubory (proud z fsd, `OPEN_STREAM`, od
+/// aktualni pozice; potomek ma vlastni pozici). Sockety a adresare
+/// `ENOTSUP`.
 fn spec(io: ChildIo, target: Stream) -> R<StdioSpec> {
     let fd = match io {
         ChildIo::Null | ChildIo::Closed => return Ok(StdioSpec::Null),
+        ChildIo::Open(_) => return Err(errno::EINVAL),
         ChildIo::Parent(fd) => fd,
     };
     let d = rt::fd::get(fd).map_err(|_| errno::EBADF)?;
@@ -33,6 +35,13 @@ fn spec(io: ChildIo, target: Stream) -> R<StdioSpec> {
             Inherit::Null | Inherit::None => Ok(StdioSpec::Null),
         },
         Object::Pipe(p) => Ok(StdioSpec::Channel(p.try_clone().map_err(e)?.into_channel())),
+        Object::File(f) => match f.open_stream(target != Stream::In) {
+            Ok(ch) => Ok(StdioSpec::Channel(ch)),
+            // Handle bez prava pro smer proudu (soubor jen pro cteni na
+            // stdout): jako zapis do takoveho fd.
+            Err(rt::Error::AccessDenied) => Err(errno::EBADF),
+            Err(err) => Err(e(err)),
+        },
         _ => Err(errno::ENOTSUP),
     }
 }

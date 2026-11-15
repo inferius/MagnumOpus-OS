@@ -82,4 +82,9 @@ fi
 mkdir -p "$WINE_OUT/x86_64-windows" "$WINE_OUT/x86_64-unix"
 cp -u dlls/*/x86_64-windows/*.dll "$WINE_OUT/x86_64-windows/" 2>/dev/null || true
 cp -u dlls/*/*.so "$WINE_OUT/x86_64-unix/" 2>/dev/null || true
+# Zavadec Wine (PIE nad ld.so) a server.
+mkdir -p "$WINE_OUT/bin"
+for f in loader/wine server/wineserver; do
+    [ -f "$f" ] && cp -u "$f" "$WINE_OUT/bin/"
+done
 echo "xtask-wine: hotovo"

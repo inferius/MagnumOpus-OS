@@ -10,6 +10,7 @@
 #include <net/ethernet.h>
 #include <net/if.h>
 #include <net/if_arp.h>
+#include <netinet/if_ether.h>
 #include <netinet/tcp.h>
 #include <sys/un.h>
 #include <netinet/in.h>
@@ -40,6 +41,14 @@ int spawn_child_main(int argc, char **argv) {
     if (argc == 3 && strcmp(argv[2], "stdin") == 0) {
         char b[8];
         return read(0, b, sizeof b) == 0 ? 0 : 1;
+    }
+    if (argc == 3 && strcmp(argv[2], "count") == 0) {
+        /* Precte stdin do konce; kod = pocet bajtu mod 251. */
+        char b[4096];
+        long total = 0;
+        ssize_t k;
+        while ((k = read(0, b, sizeof b)) > 0) total += k;
+        return k < 0 ? 255 : (int)(total % 251);
     }
     if (argc == 3 && strcmp(argv[2], "cwd") == 0) {
         char b[256];
@@ -117,11 +126,41 @@ static int spawning(const char *dir) {
     if (p <= 0 || waitpid(p, &st, 0) != p || !WIFEXITED(st) || WEXITSTATUS(st) != 0) return 6;
     posix_spawn_file_actions_destroy(&fa);
 
-    /* Akce, ktere blok parametru neumi. */
+    /* Vystup potomka do souboru (proud z fsd) a vstup ze souboru. */
+    char out[256];
+    snprintf(out, sizeof out, "%s/spawn-out.txt", dir);
     posix_spawn_file_actions_init(&fa);
-    posix_spawn_file_actions_addopen(&fa, 1, "/std-test/out.txt", O_WRONLY | O_CREAT, 0644);
-    if (child(&fa, "exit", "0") != -ENOTSUP) return 7;
+    posix_spawn_file_actions_addopen(&fa, 1, out, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    p = child(&fa, "echo", "do souboru");
     posix_spawn_file_actions_destroy(&fa);
+    if (p <= 0 || waitpid(p, &st, 0) != p || !WIFEXITED(st) || WEXITSTATUS(st) != 0) return 7;
+    /* Proud zapisuje fsd: obsah je tam, az fsd zpracuje zpravy. */
+    int got = -1;
+    for (int i = 0; i < 200; i++) {
+        FILE *f = fopen(out, "r");
+        if (f != NULL) {
+            got = (int)fread(buf, 1, sizeof buf - 1, f);
+            fclose(f);
+        }
+        if (got == 11) break;
+        usleep(10000);
+    }
+    buf[got > 0 ? got : 0] = 0;
+    if (strcmp(buf, "do souboru\n") != 0) return 18;
+    /* 200 000 bajtu na stdin: vic zprav, plna fronta kanalu. */
+    char in[256];
+    snprintf(in, sizeof in, "%s/spawn-in.txt", dir);
+    FILE *f = fopen(in, "w");
+    if (f == NULL) return 19;
+    for (int i = 0; i < 200000; i++) fputc('a' + i % 26, f);
+    fclose(f);
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_addopen(&fa, 0, in, O_RDONLY, 0);
+    p = child(&fa, "count", NULL);
+    posix_spawn_file_actions_destroy(&fa);
+    if (p <= 0 || waitpid(p, &st, 0) != p || !WIFEXITED(st) || WEXITSTATUS(st) != 200000 % 251) return 20;
+    unlink(in);
+    unlink(out);
     posix_spawn_file_actions_init(&fa);
     posix_spawn_file_actions_adddup2(&fa, 1, 5);
     if (child(&fa, "exit", "0") != -ENOTSUP) return 8;
@@ -243,6 +282,7 @@ static int misc(void) {
     _Static_assert(sizeof(struct tcp_info) == 232, "tcp_info");
     _Static_assert(sizeof(struct ether_header) == ETH_HLEN, "ether_header");
     _Static_assert(sizeof(struct arphdr) == 8, "arphdr");
+    _Static_assert(sizeof(struct ether_arp) == 28, "ether_arp");
     caddr_t cp = host;
     (void)cp;
     return 0;

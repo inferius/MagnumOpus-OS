@@ -23,12 +23,16 @@ fn plan_of_file_actions() {
     // 2>&1 po presmerovani stdout.
     let a = [Action::Dup2(7, 1), Action::Dup2(1, 2)];
     assert_eq!(plan(&a, b"/".to_vec(), no_dir).unwrap().io, [Parent(0), Parent(7), Parent(7)]);
-    let a = [Action::Close(0), Action::Open(1, b"/dev/null".to_vec())];
+    let a = [Action::Close(0), Action::Open(1, b"/dev/null".to_vec(), 1, 0)];
     assert_eq!(plan(&a, b"/".to_vec(), no_dir).unwrap().io, [Closed, Null, Parent(2)]);
     assert_eq!(plan(&[Action::Close(0), Action::Dup2(0, 1)], b"/".to_vec(), no_dir), Err(EBADF));
     assert_eq!(plan(&[Action::Dup2(1, 5)], b"/".to_vec(), no_dir), Err(ENOTSUP));
-    assert_eq!(plan(&[Action::Open(1, b"/tmp/out.txt".to_vec())], b"/".to_vec(), no_dir), Err(ENOTSUP));
-    assert_eq!(plan(&[Action::Open(4, b"/dev/null".to_vec())], b"/".to_vec(), no_dir), Err(ENOTSUP));
+    // Soubor: otevre rodic pred spustenim (cesta vuci adresari potomka).
+    let a = [Action::Chdir(b"/data".to_vec()), Action::Open(1, b"out.txt".to_vec(), 0o1101, 0o644), Action::Dup2(1, 2)];
+    let p = plan(&a, b"/".to_vec(), no_dir).unwrap();
+    assert_eq!(p.io, [Parent(0), ChildIo::Open(0), ChildIo::Open(0)]);
+    assert_eq!(p.opens, vec![(b"/data/out.txt".to_vec(), 0o1101, 0o644)]);
+    assert_eq!(plan(&[Action::Open(4, b"/dev/null".to_vec(), 0, 0)], b"/".to_vec(), no_dir), Err(ENOTSUP));
     let a = [Action::CloseFrom(1)];
     assert_eq!(plan(&a, b"/".to_vec(), no_dir).unwrap().io, [Parent(0), Closed, Closed]);
     assert_eq!(plan(&[Action::CloseFrom(3)], b"/".to_vec(), no_dir).unwrap().io, [Parent(0), Parent(1), Parent(2)]);

@@ -97,6 +97,9 @@ pub enum ChildIo {
     Null,
     /// Proud nepredat (`posix_spawn_file_actions_addclose`).
     Closed,
+    /// Soubor z `addopen` (index v `spawn::Plan::opens`); `posix_spawn`
+    /// ho pred spustenim otevre a nahradi `Parent`.
+    Open(usize),
 }
 
 /// Pozadavek na spusteni potomka (`posix_spawn`).
