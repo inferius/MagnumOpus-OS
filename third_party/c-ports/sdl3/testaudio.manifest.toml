@@ -1,0 +1,11 @@
+# Port SDL (docs/cs/sdl.md): test zvuku SDL (prehravani souboru WAV, zarizeni).
+[app]
+id = "org.libsdl.testaudio"
+name = "SDL testaudio"
+
+[limits]
+memory = "128M"
+
+[audio]
+# testaudio umi i nahravani: dotaz uzivateli pri prvnim pouziti.
+capture = true

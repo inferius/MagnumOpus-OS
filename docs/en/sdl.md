@@ -17,7 +17,7 @@ without changes to their code.
 | clipboard, cursor, relative mouse, fullscreen, display scale | stage 6-2: text in the clipboard, system shapes and an own 64 × 64 cursor, compositor pointer lock, fullscreen on request, scale as `SDL_GetDisplayContentScale` ([Cursor and pointer lock](gui.md#cursor-and-pointer-lock)) | **[verified in QEMU]** x86_64 and aarch64 (suite `sdl`, physical input through QMP) |
 | audio | SDL audio driver `magnumopus` over the application session at `audiod` (tag `AUDIO`): playback; capture only with `[audio] capture = true` and after the user allows it, the decision stored per user and application, revoked with the `povoleni` command ([Sound](audio.md#application-sessions-and-capture)) | **[verified in QEMU]** x86_64 and aarch64 (physical Enter in the dialog through QMP) |
 | zero-copy YUV (`BUFFER_CREATE_DESC`) | postponed to the FFmpeg step (a patch of SDL internals, estimated ~300 lines) | **[designed]** |
-| SDL example games (`snake`, `woodeneye-008`), a test with a screenshot | stage 6-3 | **[designed]** |
+| SDL example games and tests in the image | stage 6-3: `snake` and `woodeneye` (examples/demo), `testsprite`, `testaudio`, `testkeys`, `checkkeys` in the initfs with manifests | **[verified in QEMU]** x86_64 and aarch64 (test `sdl: ukazkove hry snake a woodeneye-008`) |
 | gamepads | a separate step with its own design (decision Q6 B) | **[designed]** |
 
 ## How it works
@@ -103,7 +103,7 @@ The event time (ns since system start) is converted to SDL time.
   pointer lock and entering fullscreen only in response to a physical
   press (compositor rule). There is no `SDL_WarpMouse` (relative mode does
   not need it with the lock).
-- **No gamepads** (decision Q6 B), file dialogs (Q7 A: SDL returns
+- **No gamepads** (decision Q6 B): the joystick and haptic subsystems are on only with the `dummy` driver, so `SDL_Init(SDL_INIT_JOYSTICK)` succeeds (games call it) and there are no devices. No file dialogs (Q7 A: SDL returns
   unsupported), tray (`SDL_TRAY`) or `SDL_OpenURL` (will go through the
   "open path" service).
 - **Thread priority** only `SCHED_OTHER` (the scheduler does not give
@@ -116,10 +116,15 @@ The event time (ns since system start) is converted to SDL time.
 The `sdl3` port in `xtask/src/cports/mod.rs` (method `CMake`, [C ports](c-ports.md)).
 Main options: `SDL_STATIC=ON`, `SDL_SHARED=OFF`, `SDL_UNIX_CONSOLE_BUILD=ON`
 (windows come from our driver, not X11 or Wayland), X11, Wayland, KMSDRM,
-OpenGL, Vulkan, GPU, ALSA, PulseAudio, PipeWire, D-Bus, HIDAPI, joysticks,
-camera, dialogs and tray switched off. The library and headers go to
-`target/c-ports/<arch>/prefix`, the SDL tests `testsprite` and `checkkeys`
-to the initfs together with manifests and an icon.
+OpenGL, Vulkan, GPU, ALSA, PulseAudio, PipeWire, D-Bus, HIDAPI, virtual
+joystick, camera, dialogs and tray switched off (joysticks and haptics only
+`dummy`). The library and headers go to `target/c-ports/<arch>/prefix`;
+the example games `snake` and `woodeneye`, the SDL tests `testsprite`,
+`testaudio`, `testkeys`, `checkkeys` and our `testmagnumopus` go to the
+initfs with manifests (with an icon and `sdl-sample.wav`). The programs
+need a window channel from the compositor (today the init tests start
+them; from the desktop launcher with third-party applications
+**[designed]**).
 
 What SDL needed from the C library and was added in this step
 ([cstd](cstd.md#sdl-step-6)): `environ`, `fenv.h`, `nl_langinfo`, `sched_param` and
@@ -135,6 +140,7 @@ only so far) and `inttypes.h`, empty `libm.a`, `libpthread.a`, `librt.a`.
 | `sdl: checkkeys ...` | QEMU, suite `sdl` | injected input through inputd and the compositor: key A = scancode 4, text "a", right mouse button, Esc twice ends the program with code 0 |
 | `sdl: kurzor, zamek ukazatele, schranka a cela obrazovka (QMP)` | QEMU, suite `sdl` | the `testmagnumopus` program (our SDL test): display and scale as the compositor, crosshair cursor on screen; physical click = pointer lock, movement = relative motion, Super = lock cancelled, second click = copy, Ctrl+V = paste, F = fullscreen |
 | `sdl: zvuk - prehravani, nahravani s povolenim, odvolani (QMP)` | QEMU, suite `sdl` | `testmagnumopus audio`: a tone plays through the `magnumopus` driver; without the manifest key capture is denied without a question; with it the Permission dialog (physical Enter = Allow), captured data from the HDA codec; the next run without a dialog (stored decision); listing and revoking as the `povoleni` command |
+| `sdl: ukazkove hry snake a woodeneye-008` | QEMU, suite `sdl` | snake: a 576 × 432 window, the grid row with the head changes within 1 s (the snake moves); woodeneye: a window with a rendered scene (at least 3 colours in the sample) |
 | `sdl: mereni cesty videa 1080p` | QEMU, suite `sdl` | `testmagnumopus bench`: I420 1920 × 1080 -> conversion in SDL -> window ([Performance](#performance)) |
 
 ```text

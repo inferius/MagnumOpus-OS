@@ -163,7 +163,10 @@ against the C sysroot (`xtask/src/cports/`).
   a `overlay/src/audio/magnumopus/` (náš kód, licence zlib jako SDL). Úpravy se neposílají do projektu SDL: ten nepřijímá kód
   generovaný AI. / Our changes stay here: the SDL project does not accept
   AI-generated contributions.
-- **Programy / programs:** `testsprite`, `checkkeys` (testy SDL / SDL tests).
+- **Programy / programs:** ukázkové hry / example games `snake`, `woodeneye`
+  (examples/demo); testy SDL / SDL tests `testsprite`, `testaudio`,
+  `testkeys`, `checkkeys`; náš test / our test `testmagnumopus`. Data: `sdl-icon.png`,
+  `sdl-sample.wav` (z / from `test/`).
 - **Popis / Description:** `docs/cs/sdl.md`, `docs/en/sdl.md`.
 
 ## Písmo Tuffy / Tuffy font

@@ -37,6 +37,7 @@ pub const TESTS: &[Test] = &[
     ("sdl: kurzor, zamek ukazatele, schranka a cela obrazovka (QMP)", pointer_clip_fullscreen),
     ("sdl: mereni cesty videa 1080p (YUV v SDL, kopie do okna)", video_bench),
     ("sdl: zvuk - prehravani, nahravani s povolenim, odvolani (QMP)", audio_permission),
+    ("sdl: ukazkove hry snake a woodeneye-008", demo_games),
 ];
 
 /// Znacky pro fyzicky vstup z QEMU (musi sedet s `xtask/src/qmp.rs`, `sdl`).
@@ -355,4 +356,54 @@ fn audio_permission(startup: &Startup) -> TestResult {
     let list = crate::perms::for_uid(uid, "", "").map_err(|e| fail("vypis po odvolani", e))?;
     check!(!list.contains(SDL_APP), format!("po odvolani: {list}"));
     Ok(())
+}
+
+/// Radek mrizky hry (barvy stredu bunek `cells` x `cell` px na radku `row`).
+fn grid_row(s: &State, w: &guiproto::control::WindowInfo, cells: i32, cell: i32, row: i32) -> Result<Vec<u32>, String> {
+    (0..cells).map(|i| pixel(&s.inspect, w.rect.x + i * cell + cell / 2, w.rect.y + row * cell + cell / 2)).collect()
+}
+
+/// Ukazkove hry SDL (examples/demo, rozhodnuti Q9 A): had se sam pohybuje
+/// (radek s hlavou se mezi dvema okamziky zmeni), woodeneye-008 vykresli
+/// scenu (obsah okna neni jednobarevny).
+fn demo_games(startup: &Startup) -> TestResult {
+    ensure_gui(startup)?;
+    gt::with(|s| {
+        let app = launch(startup, s, "snake", &[])?;
+        let r = (|| -> TestResult {
+            let w = wait_window(&s.inspect, "org.libsdl.snake")?;
+            // 24 x 18 bunek po 24 px, hlava zacina uprostred a jede vpravo.
+            check!(w.rect.w == 24 * 24 && w.rect.h == 18 * 24, format!("okno hada {}x{}", w.rect.w, w.rect.h));
+            time::sleep(Duration::from_millis(500));
+            settle(&s.inspect)?;
+            let a = grid_row(s, &w, 24, 24, 9)?;
+            time::sleep(Duration::from_millis(1000));
+            settle(&s.inspect)?;
+            let b = grid_row(s, &w, 24, 24, 9)?;
+            check!(a != b, "had se pohnul");
+            let colors = b.iter().collect::<alloc::collections::BTreeSet<_>>().len();
+            check!(colors >= 2, "na radku je had i pozadi");
+            println!("init: test sdl: had {}x{}, radek se meni", w.rect.w, w.rect.h);
+            Ok(())
+        })();
+        app.kill();
+        r?;
+        let app = launch(startup, s, "woodeneye", &[])?;
+        let r = (|| -> TestResult {
+            let w = wait_window(&s.inspect, "org.libsdl.woodeneye")?;
+            time::sleep(Duration::from_millis(1500));
+            settle(&s.inspect)?;
+            let mut seen = alloc::collections::BTreeSet::new();
+            for i in 1..8 {
+                for j in 1..6 {
+                    seen.insert(pixel(&s.inspect, w.rect.x + w.rect.w as i32 * i / 8, w.rect.y + w.rect.h as i32 * j / 6)?);
+                }
+            }
+            check!(seen.len() >= 3, format!("scena woodeneye: {} barev", seen.len()));
+            println!("init: test sdl: woodeneye {}x{}, {} barev ve vzorku", w.rect.w, w.rect.h, seen.len());
+            Ok(())
+        })();
+        app.kill();
+        r
+    })
 }
