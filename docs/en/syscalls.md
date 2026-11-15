@@ -411,8 +411,8 @@ get it). Errors: `NOT_SUPPORTED` (object without `VMO_RESIZABLE`),
 new end, `VMO_PHYS_ADDR`), `ACCESS_DENIED` (sealed object, missing right),
 `NO_MEMORY`, `NO_RESOURCES`, `BAD_HANDLE`, `WRONG_TYPE`.
 
-Number 76 is [`THREAD_INTERRUPT`](#thread_interrupt), 77 is reserved for
-`PROCESS_MEMORY` (stage W2); the kernel returns `BAD_SYSCALL` for it for now.
+Number 76 is [`THREAD_INTERRUPT`](#thread_interrupt), 77
+[`PROCESS_MEMORY`](#process_memory).
 
 ### `VMO_SIZE`
 
@@ -562,6 +562,32 @@ running on other CPUs are interrupted. The process's memory and handles are
 released as with `PROCESS_EXIT` once the last thread ends. Requires
 `MANAGE`.
 
+### `PROCESS_MEMORY`
+
+**[verified in QEMU]** `(process, op, addr, buf, len) -> bytes`. Reading
+and writing another process's memory by copying through the kernel (number
+77; the analogue of `process_vm_readv`/`ReadProcessMemory`). `op` =
+`process::memory::READ` (from `addr` in the target process into the
+caller's `buf`, right `READ_MEMORY`) or `WRITE` (from `buf` to `addr`,
+right `WRITE_MEMORY`). The kernel copies in 64 KiB blocks through its own
+buffer and never holds the locks of two address spaces at once. Writing
+goes only into mappings with write access (pages appear on demand,
+copy-on-write is split) - it does not change code, sealed memory or memory
+mapped read-only. Returns the transferred bytes: an error in the target
+process after the first block = fewer bytes (a partial copy), an error
+right at the start or anywhere in the caller's buffer = an error.
+
+The `READ_MEMORY` and `WRITE_MEMORY` rights come with the default process
+handle from `PROCESS_CREATE` (the creator, the launcher; `launchd` gives
+them to the caller); only the creator passes them to another process (a
+debugger, the application's server). ⚠️ `WRITE_MEMORY` gives full control
+over the target, `READ_MEMORY` reads all its secrets
+([Windows layer, risk T3](windows-layer.md#w1-server-connection-and-processes-questions-t1-t5)).
+Errors: `INVALID_ARGS` (unknown operation), `BAD_ADDRESS` (range outside
+program memory, unmapped or without the needed right), `BAD_STATE` (the
+process has ended), `NO_MEMORY`, `BAD_HANDLE`, `WRONG_TYPE`,
+`ACCESS_DENIED`.
+
 ### `PROCESS_EXIT_CODE`
 
 `(process, out_code_ptr) -> 0`. Writes the exit code (i64) of a finished
@@ -629,9 +655,6 @@ as the signal number (a blocked signal stays pending in the mask). Requires
 in-thread handler - the interruption would hang and waits would keep
 returning `INTERRUPTED`), `WRONG_TYPE` (kernel thread), `BAD_HANDLE`,
 `ACCESS_DENIED`.
-
-Number 77 is reserved for `PROCESS_MEMORY` (stage W2, reading and writing
-another process's memory through the kernel).
 
 ### `THREAD_STATE`
 

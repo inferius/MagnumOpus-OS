@@ -64,10 +64,16 @@ impl Rights {
     /// jen vychozi handle objektu s `VMO_RESIZABLE`; predat ho je volba
     /// odesilatele (prijemce jen pro cteni ho nedostane).
     pub const RESIZE: Self = Self(1 << 13);
+    /// Cist pamet procesu (`PROCESS_MEMORY` READ, debugger, wineserver).
+    /// Ma ho vychozi handle procesu (tvurce); vycet procesu ho nedava.
+    pub const READ_MEMORY: Self = Self(1 << 14);
+    /// Zapisovat do pameti procesu (`PROCESS_MEMORY` WRITE): uplna vlada nad
+    /// cilem, predavat jen debuggeru nebo serveru vlastni aplikace.
+    pub const WRITE_MEMORY: Self = Self(1 << 15);
 
     pub const BASIC: Self = Self(Self::DUPLICATE.0 | Self::TRANSFER.0 | Self::WAIT.0);
     /// Vsechna prava (jen jako horni mez, napr. "zachovat prava" pri duplikaci).
-    pub const ALL: Self = Self((1 << 14) - 1);
+    pub const ALL: Self = Self((1 << 16) - 1);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0

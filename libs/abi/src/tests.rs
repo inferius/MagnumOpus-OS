@@ -136,8 +136,7 @@ fn every_syscall_is_documented() {
         "DMA_SEGMENTS",
         "DMA_SYNC",
         "THREAD_INTERRUPT",
-        // 77 rezervovane (PROCESS_MEMORY, W2)
-        "",
+        "PROCESS_MEMORY",
         "VMO_SET_SIZE",
         "VMO_SIZE",
     ];

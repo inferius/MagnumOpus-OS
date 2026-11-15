@@ -148,6 +148,7 @@ fn call(number: u64, a: Args) -> Result<u64> {
         nr::DMA_SEGMENTS => dma::dma_segments(a),
         nr::DMA_SYNC => dma::dma_sync(a),
         nr::THREAD_INTERRUPT => process::thread_interrupt(a),
+        nr::PROCESS_MEMORY => process::process_memory(a),
         nr::THREAD_YIELD => {
             sched::yield_now();
             Ok(0)
@@ -236,7 +237,7 @@ pub fn name(number: u64) -> &'static str {
         "DMA_SEGMENTS",
         "DMA_SYNC",
         "THREAD_INTERRUPT",
-        "",
+        "PROCESS_MEMORY",
         "VMO_SET_SIZE",
         "VMO_SIZE",
     ];

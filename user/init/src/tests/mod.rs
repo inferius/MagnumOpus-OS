@@ -24,6 +24,7 @@ mod fences;
 mod firewall;
 mod dynlink;
 mod dynlink_disk;
+mod process_memory;
 mod wine;
 mod fpu;
 mod fpu_avx;
@@ -112,6 +113,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("procesy", exceptions::TESTS),
     ("procesy", exceptions_fast::TESTS),
     ("procesy", interrupt::TESTS),
+    ("procesy", process_memory::TESTS),
     ("procesy", fpu::TESTS),
     ("procesy", dynlink::TESTS),
     ("procesy", dynlink_disk::TESTS),

@@ -337,7 +337,7 @@ Decisions of the user and the coordinator (15 Nov 2026):
 |---|---|---|
 | T1 fds between processes | **A**: generic `AF_UNIX` in `cstd`/`osrt`. The socket path stays in the capability model: `bind` creates a socket-type node in fsd, `connect` needs the write right on the node; `socketpair` and `SCM_RIGHTS` = passing a handle in a channel. | scheduler thread (with `AF_UNIX` in `cstd`) |
 | T2 a signal to a thread of another process | **A**: [`THREAD_INTERRUPT`](syscalls.md#thread_interrupt) (syscall 76), the `MANAGE` right on the thread handle; generic for `kill`/`pthread_kill`, Ctrl+C and `SIGCHLD`. | Wine thread (kernel, `cstd` delivery) |
-| T3 memory of another process | **A in W2**: `PROCESS_MEMORY` (syscall **77 reserved**), rights `READ_MEMORY`/`WRITE_MEMORY` on the process handle. | Wine thread, stage W2 |
+| T3 memory of another process | **A in W2**: [`PROCESS_MEMORY`](syscalls.md#process_memory) (syscall 77), rights `READ_MEMORY`/`WRITE_MEMORY` on the process handle; kernel and libos **[verified in QEMU]** x86_64 and aarch64, wiring into wineserver **[designed]**. | Wine thread, stage W2 |
 | T4 fd inheritance | **A**: `posix_spawn` inherits any fds without `FD_CLOEXEC` as handle duplicates in the start message. | scheduler thread |
 | T5 address reservations | **A**: `AT_MO_RESERVE`, `ld.so` reserves ranges before loading libraries. Done even earlier: `spawn` reserves before mapping the program and `ld.so` ([dynamic-linking.md](dynamic-linking.md#address-reservations-before-loading-t5)), **[verified in QEMU]**. | Wine thread |
 

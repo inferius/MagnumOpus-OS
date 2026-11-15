@@ -14,6 +14,14 @@ pub const EXIT_PANIC: i64 = -1_000_001;
 /// Posledni vlakno skoncilo bez `PROCESS_EXIT`.
 pub const EXIT_NO_THREADS: i64 = -1_000_002;
 
+/// Operace `PROCESS_MEMORY`.
+pub mod memory {
+    /// Cist pamet ciloveho procesu do bufferu volajiciho (`READ_MEMORY`).
+    pub const READ: u64 = 0;
+    /// Zapsat buffer volajiciho do pameti ciloveho procesu (`WRITE_MEMORY`).
+    pub const WRITE: u64 = 1;
+}
+
 /// Popis navratoveho kodu pro logy.
 pub fn describe_exit(code: i64) -> &'static str {
     match code {

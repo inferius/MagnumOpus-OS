@@ -67,6 +67,18 @@ impl Process {
         sys::process_kill(self.0.raw())
     }
 
+    /// Precte pamet procesu od `addr` do `buf` (`PROCESS_MEMORY`, pravo
+    /// `READ_MEMORY`); vraci prenesene bajty (mene = castecna kopie).
+    pub fn read_memory(&self, addr: u64, buf: &mut [u8]) -> Result<usize> {
+        sys::process_memory_read(self.0.raw(), addr, buf)
+    }
+
+    /// Zapise `data` do pameti procesu od `addr` (`PROCESS_MEMORY`, pravo
+    /// `WRITE_MEMORY`, jen mapovani se zapisem); vraci prenesene bajty.
+    pub fn write_memory(&self, addr: u64, data: &[u8]) -> Result<usize> {
+        sys::process_memory_write(self.0.raw(), addr, data)
+    }
+
     /// Kanal vyjimek procesu (`debugger` = kanal debuggeru, prvni a druha
     /// sance); pravo `MANAGE`. Zpravy cte [`crate::exception::receive`].
     pub fn exception_channel(&self, debugger: bool) -> Result<crate::Channel> {

@@ -418,6 +418,26 @@ pub fn thread_interrupt(thread: u32, code: u32) -> Result<()> {
     call(nr::THREAD_INTERRUPT, [thread as u64, u64::from(code), 0, 0, 0, 0]).map(|_| ())
 }
 
+/// `PROCESS_MEMORY` READ: z `addr` v procesu `process` do `buf`; vraci
+/// prenesene bajty (mene = castecna kopie).
+pub fn process_memory_read(process: u32, addr: u64, buf: &mut [u8]) -> Result<usize> {
+    call(
+        nr::PROCESS_MEMORY,
+        [process as u64, abi::process::memory::READ, addr, buf.as_mut_ptr() as u64, buf.len() as u64, 0],
+    )
+    .map(|v| v as usize)
+}
+
+/// `PROCESS_MEMORY` WRITE: `data` do `addr` v procesu `process`; vraci
+/// prenesene bajty.
+pub fn process_memory_write(process: u32, addr: u64, data: &[u8]) -> Result<usize> {
+    call(
+        nr::PROCESS_MEMORY,
+        [process as u64, abi::process::memory::WRITE, addr, data.as_ptr() as u64, data.len() as u64, 0],
+    )
+    .map(|v| v as usize)
+}
+
 pub fn thread_suspend(thread: u32) -> Result<u32> {
     call(nr::THREAD_SUSPEND, [thread as u64, 0, 0, 0, 0, 0]).map(|v| v as u32)
 }

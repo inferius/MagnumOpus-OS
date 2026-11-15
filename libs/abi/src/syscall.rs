@@ -332,8 +332,16 @@ pub mod thread_pointer {
     pub const SECOND: u64 = 1;
 }
 
-// 77 je rezervovane pro PROCESS_MEMORY (etapa W2 Windows vrstvy, pamet
-// jineho procesu): jadro ho jeste nema (BAD_SYSCALL).
+/// Cteni a zapis pameti jineho procesu kopii pres jadro:
+/// `(process, op, addr, buf, len) -> prenesene bajty` (`process::memory`).
+/// `READ` kopiruje z `addr` v cilovem procesu do `buf` volajiciho (pravo
+/// `READ_MEMORY`), `WRITE` z `buf` do `addr` (pravo `WRITE_MEMORY`, jen do
+/// mapovani se zapisem - kod ani zapecetenou pamet nezmeni). Chyba
+/// v pameti cile po prvnim bloku = mene bajtu (castecna kopie), chyba
+/// hned na zacatku nebo v bufferu volajiciho = chyba. Prava ma jen tvurce
+/// procesu (vychozi handle z `PROCESS_CREATE`), nikdy vycet procesu
+/// (riziko: `WRITE_MEMORY` = uplna vlada nad cilem, docs/cs/windows-vrstva.md).
+pub const PROCESS_MEMORY: u64 = 77;
 
 /// Zmeni velikost zvetsitelneho objektu pameti: `(vmo, size) -> 0`
 /// (`vm::VMO_RESIZABLE`, nejvys kapacita; pravo `RESIZE`). Zvetseni slibi

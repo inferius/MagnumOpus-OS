@@ -402,8 +402,8 @@ kapacitu), `BAD_STATE` (za novým koncem je připnutá stránka,
 `VMO_PHYS_ADDR`), `ACCESS_DENIED` (zapečetěný objekt, chybí právo),
 `NO_MEMORY`, `NO_RESOURCES`, `BAD_HANDLE`, `WRONG_TYPE`.
 
-Číslo 76 je [`THREAD_INTERRUPT`](#thread_interrupt), 77 je vyhrazené pro
-`PROCESS_MEMORY` (etapa W2); jádro na něj zatím vrací `BAD_SYSCALL`.
+Číslo 76 je [`THREAD_INTERRUPT`](#thread_interrupt), 77
+[`PROCESS_MEMORY`](#process_memory).
 
 ### `VMO_SIZE`
 
@@ -547,6 +547,30 @@ náhrobek (kód, čas CPU, jméno) - viz [jadro.md](jadro.md#procesy-a-vlákna).
 právě běží na jiném CPU, jádro přeruší. Paměť a handly procesu se uvolní
 jako u `PROCESS_EXIT`, jakmile poslední vlákno skončí. Vyžaduje `MANAGE`.
 
+### `PROCESS_MEMORY`
+
+**[ověřeno v QEMU]** `(process, op, addr, buf, len) -> bajty`. Čtení
+a zápis paměti jiného procesu kopií přes jádro (číslo 77; obdoba
+`process_vm_readv`/`ReadProcessMemory`). `op` = `process::memory::READ`
+(z `addr` v cílovém procesu do `buf` volajícího, právo `READ_MEMORY`) nebo
+`WRITE` (z `buf` do `addr`, právo `WRITE_MEMORY`). Jádro kopíruje po
+blocích 64 KiB přes vlastní buffer, nikdy nedrží zámky dvou adresních
+prostorů najednou. Zápis jde jen do mapování se zápisem (stránky vzniknou
+na požádání, kopie při zápisu se rozdělí) - kód, pečetěnou ani jen ke
+čtení mapovanou paměť nezmění. Vrací přenesené bajty: chyba v cílovém
+procesu po prvním bloku = méně bajtů (částečná kopie), chyba hned na
+začátku nebo kdekoli v bufferu volajícího = chyba.
+
+Práva `READ_MEMORY` a `WRITE_MEMORY` má výchozí handle procesu z
+`PROCESS_CREATE` (tvůrce, spouštěč, `launchd` je dá volajícímu); jinému
+procesu je předá jen tvůrce (debugger, server aplikace). ⚠️ `WRITE_MEMORY`
+dává úplnou vládu nad cílem, `READ_MEMORY` čte všechna jeho tajemství
+([Windows vrstva, riziko T3](windows-vrstva.md#w1-spojení-se-serverem-a-procesy-otázky-t1-t5)).
+Chyby: `INVALID_ARGS` (neznámá operace), `BAD_ADDRESS` (rozsah mimo
+paměť programu, nenamapovaný nebo bez potřebného práva), `BAD_STATE`
+(proces skončil), `NO_MEMORY`, `BAD_HANDLE`, `WRONG_TYPE`,
+`ACCESS_DENIED`.
+
 ### `PROCESS_EXIT_CODE`
 
 `(process, out_code_ptr) -> 0`. Zapíše návratový kód (i64) skončeného
@@ -609,9 +633,6 @@ signálu (blokovaný signál čeká v masce). Vyžaduje `MANAGE` na vlákně
 `BAD_STATE` (proces vlákna nemá obsluhu ve vlákně - přerušení by viselo
 a čekání by stále vracela `INTERRUPTED`), `WRONG_TYPE` (vlákno jádra),
 `BAD_HANDLE`, `ACCESS_DENIED`.
-
-Číslo 77 je rezervované pro `PROCESS_MEMORY` (etapa W2, čtení a zápis
-paměti jiného procesu přes jádro).
 
 ### `THREAD_STATE`
 

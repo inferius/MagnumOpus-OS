@@ -1,6 +1,6 @@
 # libs/abi
 
-Rozhraní jádro <-> userspace (`no_std`, žádná závislost na jádru): kódy chyb (`error.rs`), čísla syscallů (`syscall.rs`), práva a typy handlů (`object.rs`), příznaky mapování (`vm.rs`), joby a limity (`job.rs`, `limits.rs`), plánovač (`sched.rs`), čas (`time.rs`), formát startovní zprávy procesu (`bootstrap.rs`), parametry (`params.rs`), ACPI/napájení (`acpi.rs`), plot (`fence.rs`: stavový automat `Timeline`, `WaitItem`, `Info`), DMA po kusech (`dma.rs`: příznaky `DMA_MAP`, `Segment`, směr `DMA_SYNC`; rozpočet `job::pool::DMA`, volba `vm::VMO_PINNED`, právo `Rights::DMA`). Dokumentace: `docs/cs/syscally.md`, `docs/cs/chyby.md`, `docs/cs/jadro.md`.
+Rozhraní jádro <-> userspace (`no_std`, žádná závislost na jádru): kódy chyb (`error.rs`), čísla syscallů (`syscall.rs`), práva a typy handlů (`object.rs`), příznaky mapování (`vm.rs`), joby a limity (`job.rs`, `limits.rs`), plánovač (`sched.rs`), čas (`time.rs`), formát startovní zprávy procesu (`bootstrap.rs`), parametry (`params.rs`), ACPI/napájení (`acpi.rs`), plot (`fence.rs`: stavový automat `Timeline`, `WaitItem`, `Info`), paměť jiného procesu (`process::memory`, práva `Rights::READ_MEMORY`/`WRITE_MEMORY`, syscall `PROCESS_MEMORY`), DMA po kusech (`dma.rs`: příznaky `DMA_MAP`, `Segment`, směr `DMA_SYNC`; rozpočet `job::pool::DMA`, volba `vm::VMO_PINNED`, právo `Rights::DMA`). Dokumentace: `docs/cs/syscally.md`, `docs/cs/chyby.md`, `docs/cs/jadro.md`.
 
 ## Invarianty
 
