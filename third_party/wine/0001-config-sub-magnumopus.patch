@@ -1,0 +1,12 @@
+diff --git a/tools/config.sub b/tools/config.sub
+index 3d35cde..b4eee13 100755
+--- a/tools/config.sub
++++ b/tools/config.sub
+@@ -2109,6 +2109,7 @@ case $os in
+ 	| secbsd* \
+ 	| sei* \
+ 	| serenity* \
++	| magnumopus* \
+ 	| sim* \
+ 	| skyos* \
+ 	| solaris* \

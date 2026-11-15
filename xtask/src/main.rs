@@ -44,6 +44,7 @@ mod unicode;
 mod usb;
 mod vmware;
 mod venus;
+mod wine;
 
 use std::env;
 use std::ffi::OsString;
@@ -80,6 +81,9 @@ prikazy:
            zazalohuje a nahradi <slozka>/magnumopus.vmdk; --dir <slozka>
            nebo MO_VMWARE_DIR; bezici VM odmitne
   docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
+  wine [--keep-going]
+           Wine 11 pro Windows vrstvu ve WSL (LLVM 23, docs/cs/windows-vrstva.md);
+           jen x86_64, predpoklad `build`; --keep-going = prehled chyb portu
   unicode-tables
            tabulky libs/uniprop (tridy znaku, velikost pismen, sirka)
            z Unicode Character Database (HTTPS + SHA-256)
@@ -306,9 +310,11 @@ fn run_cli() -> Result<()> {
     let mut gpu_set = false;
     let mut vmware_dir: Option<std::path::PathBuf> = None;
     let mut no_power = false;
+    let mut keep_going = false;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--release") => opts.release = true,
+            Some("--keep-going") => keep_going = true,
             Some("--cpu") => {
                 let value = args.next().ok_or("--cpu ocekava model CPU QEMU, napr. Nehalem")?;
                 opts.cpu = Some(value.to_string_lossy().into_owned());
@@ -406,6 +412,7 @@ fn run_cli() -> Result<()> {
             stdsys::build_libc_so_locked(opts.arch, &opts).map(|p| println!("xtask: libc.so {}", p.display()))
         }
         Some("unicode-tables") => unicode::generate(),
+        Some("wine") => wine::build(opts.arch, keep_going).map(|p| println!("xtask: Wine {}", p.display())),
         Some("image") => build(&opts).and_then(|a| image_for(&a, &opts)).map(|_| ()),
         Some("run") => {
             // Okno QEMU ukazuje prvni grafickou kartu (VGA, framebuffer

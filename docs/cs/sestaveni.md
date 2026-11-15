@@ -35,6 +35,17 @@
   nasm meson pkgconf`. Ověřeno s MSYS2 2026-09-27 (nasm 3.02, Meson 1.12.1,
   Ninja 1.13.2). Proměnné `SH`, `MAKE`, `NASM`, `MESON`, `PKG_CONFIG` určí
   nástroj přímo.
+- **WSL Ubuntu 24.04 s LLVM 23** jen pro Windows vrstvu (`cargo xtask
+  wine`, [Windows vrstva](windows-vrstva.md)): Wine se staví ve WSL, protože
+  jeho `configure` a nástroje chtějí unixového hostitele. Ve WSL oficiální
+  repozitář LLVM `apt.llvm.org` (`llvm-toolchain-noble-23` s jeho
+  podpisovým klíčem) a `sudo apt install clang-23 lld-23 llvm-23 flex
+  bison make gcc`. LLVM 23 má stejné hlavní vydání jako clang hostitele
+  (ABI hlaviček a sysrootu C). xtask nástroje ve WSL kontroluje
+  (`clang-23 --version`, aspoň 23.1) a jinak skončí s radou. Ověřeno
+  2026-11-15 s clang a LLD 23.1.6 (Ubuntu 24.04.4). Jiná distribuce:
+  proměnná `WINE_WSL_DISTRO` (výchozí `Ubuntu`). Sestavení běží na ext4
+  WSL v `~/.cache/magnumopus-wine`, výsledek v `target/wine/<arch>`.
 - Volitelně **GDB** pro ladění.
 
 xtask hledá QEMU v `PATH` a na obvyklých místech, firmware vedle QEMU nebo

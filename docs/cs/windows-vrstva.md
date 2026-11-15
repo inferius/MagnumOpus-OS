@@ -9,7 +9,7 @@ z Wine, spodní naše“): aplikace a hry pro Windows nad převzatým Wine.
 
 | Část | Co | Stav |
 |---|---|---|
-| W0 | sestavení Wine 11 (DLL PE, nástroje), port unixové části nad `libc.so` | **[navrženo]** |
+| W0 | sestavení Wine 11 (DLL PE, nástroje), port unixové části nad `libc.so` | DLL jako PE (602 knihoven) přes `cargo xtask wine` ve WSL **[implementováno]**; unixová část **[navrženo]** (přehled chyb `--keep-going`) |
 | W1 | konzolové `.exe` (`cmd`, `hostname`, vlastní test): spodní `ntdll`, TEB přes GS, SEH, paměť, soubory, `wineserver` jako proces | **[navrženo]** |
 | W2 | víc procesů jedné aplikace, registry, pojmenované objekty, `winecfg` v režimu bez oken | **[navrženo]** |
 | W3 | okna: ovladač Wine nad kompozitorem (`guiproto`), GDI, `notepad`, `winecfg`, schránka, vstup | **[navrženo]** |

@@ -433,7 +433,7 @@ fn gpu_device(cmd: &mut Command, opts: &Options) {
 
 /// Windows cesta `X:\a\b` -> WSL `/mnt/x/a/b` (vsechny vyskyty v argumentu,
 /// cesta konci carkou nebo koncem argumentu).
-fn to_wsl_paths(arg: &str) -> String {
+pub(crate) fn to_wsl_paths(arg: &str) -> String {
     let b = arg.as_bytes();
     let mut out = String::new();
     let mut i = 0;

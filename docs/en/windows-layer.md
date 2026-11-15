@@ -9,7 +9,7 @@ games over adopted Wine. **Status: [designed]**, questions decided on 15 Nov 202
 
 | Part | What | Status |
 |---|---|---|
-| W0 | building Wine 11 (PE DLLs, tools), port of the Unix side over `libc.so` | **[designed]** |
+| W0 | building Wine 11 (PE DLLs, tools), port of the Unix side over `libc.so` | DLLs as PE (602 libraries) via `cargo xtask wine` in WSL **[implemented]**; the Unix side **[designed]** (error overview with `--keep-going`) |
 | W1 | console `.exe` (`cmd`, `hostname`, our own test): lower `ntdll`, TEB via GS, SEH, memory, files, `wineserver` as a process | **[designed]** |
 | W2 | several processes of one application, registry, named objects, `winecfg` without windows | **[designed]** |
 | W3 | windows: a Wine driver over the compositor (`guiproto`), GDI, `notepad`, `winecfg`, clipboard, input | **[designed]** |
