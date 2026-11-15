@@ -243,4 +243,3 @@ fn dropping_own_manage_asks_first() {
     assert_eq!(m.props.as_ref().unwrap().ask, None);
     assert_eq!(m.b.acl_sets.len(), 1);
 }
-
