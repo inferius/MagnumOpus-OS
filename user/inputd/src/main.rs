@@ -38,6 +38,15 @@ fn main(startup: Startup) -> i64 {
     let control = startup.bootstrap;
     let mut svc = Service::new();
     println!("inputd: bezim (rozlozeni {})", svc.layout.name());
+    // Klientu je promenny pocet: cekani pres port (`WaitSet`), ne pres
+    // `wait_many` (limit 64 objektu).
+    let mut waits = match libos::WaitSet::new() {
+        Ok(w) => w,
+        Err(e) => {
+            println!("inputd: port nejde vytvorit: {e}");
+            return 1;
+        }
+    };
     loop {
         let mut items: Vec<(&Handle, Signals)> = Vec::with_capacity(svc.sources.len() + 3);
         let wake = Signals::READABLE | Signals::PEER_CLOSED;
@@ -56,7 +65,7 @@ fn main(startup: Startup) -> i64 {
             items.push((ch.channel.handle(), wake));
             items.len() - 1
         });
-        let observed = match libos::wait_many(&items, svc.next_deadline()) {
+        let observed = match waits.wait(&items, svc.next_deadline()) {
             Ok((_, o)) => o,
             Err(Error::TimedOut) => {
                 svc.tick();
