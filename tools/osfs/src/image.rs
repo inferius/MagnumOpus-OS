@@ -263,7 +263,7 @@ pub fn hidden_entries<D: fs::BlockDevice>(fs: &mut Fs<D>) -> Result<Vec<HiddenEn
                 // Dataset se ve Windows zobrazi jako slozka (cesta do nej
                 // prejde na jeho koren), projde se stejne.
                 Kind::Dir | Kind::Dataset => stack.push(path),
-                Kind::File => {}
+                Kind::File | Kind::Socket => {}
             }
         }
     }

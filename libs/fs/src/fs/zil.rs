@@ -942,6 +942,7 @@ impl<D: BlockDevice> Fs<D> {
                 let kind = match kind {
                     crate::layout::KIND_DIR => Kind::Dir,
                     crate::layout::KIND_FILE => Kind::File,
+                    crate::layout::KIND_SOCKET => Kind::Socket,
                     _ => return Err(Error::Corrupted),
                 };
                 self.owner_override = Some(owner);

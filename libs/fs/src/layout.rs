@@ -502,7 +502,7 @@ impl Superblock {
 /// = poskozeny zaznam.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Inode {
-    /// `KIND_FILE`, `KIND_DIR` nebo `KIND_SYMLINK`.
+    /// `KIND_FILE`, `KIND_DIR`, `KIND_SYMLINK` nebo `KIND_SOCKET`.
     pub kind: u8,
     /// `INODE_*` (zatim jen REMOTE).
     pub flags: u8,
@@ -538,6 +538,8 @@ pub const KIND_SYMLINK: u8 = 3;
 /// Druh polozky adresare: vstup do jineho datasetu (`Dirent::oid` = cislo
 /// datasetu). Nema zaznam objektu v rodicovskem strome.
 pub const KIND_DATASET: u8 = 4;
+/// Uzel socketu `AF_UNIX` (jen jmeno a prava; spojeni drzi fsd v pameti).
+pub const KIND_SOCKET: u8 = 5;
 /// Cislo korenoveho datasetu (jeho stav je v superbloku).
 pub const ROOT_DATASET: u64 = 1;
 /// Priznak objektu: data nejsou lokalne, jen v cloudu (faze 6). FS ho musi
@@ -600,7 +602,7 @@ impl Inode {
     /// Odmitne neznamy druh, velikost nad `MAX_FILE_SIZE` a nanosekundy
     /// mimo rozsah.
     pub fn decode(b: &[u8], tf: TimeFormat) -> Result<Self> {
-        if b.len() != INODE_SIZE || !matches!(b[0], KIND_FILE | KIND_DIR | KIND_SYMLINK) {
+        if b.len() != INODE_SIZE || !matches!(b[0], KIND_FILE | KIND_DIR | KIND_SYMLINK | KIND_SOCKET) {
             return Err(Error::Corrupted);
         }
         let time = |k: usize| -> Result<Timestamp> {

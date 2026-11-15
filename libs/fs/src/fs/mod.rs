@@ -48,7 +48,7 @@ use crate::device::BlockDevice;
 use crate::hash::Algo;
 use crate::layout::{
     Timestamp,
-    BLOCK_SIZE, Dirent, Inode, KIND_DATASET, KIND_DIR, KIND_FILE, KIND_SYMLINK, Key, ROOT_DATASET,
+    BLOCK_SIZE, Dirent, Inode, KIND_DATASET, KIND_DIR, KIND_FILE, KIND_SOCKET, KIND_SYMLINK, Key, ROOT_DATASET,
     ROOT_OID, SYMLINK_MAX,
     decode_dirents, encode_dirents, item,
 };
@@ -83,6 +83,9 @@ pub enum Kind {
     /// prejde a `stat` vrati jeho korenovy adresar). Vytvari se
     /// `create_dataset` nebo `clone_snapshot`.
     Dataset,
+    /// Uzel socketu `AF_UNIX` (`bind` na cestu): bez dat, jen jmeno,
+    /// vlastnik a prava. Posluchace k uzlu prirazuje fsd za behu (ne FS).
+    Socket,
 }
 
 impl Kind {
@@ -91,6 +94,7 @@ impl Kind {
             KIND_DIR => Kind::Dir,
             KIND_SYMLINK => Kind::Symlink,
             KIND_DATASET => Kind::Dataset,
+            KIND_SOCKET => Kind::Socket,
             _ => Kind::File,
         }
     }
@@ -101,6 +105,7 @@ impl Kind {
             Kind::Dir => KIND_DIR,
             Kind::Symlink => KIND_SYMLINK,
             Kind::Dataset => KIND_DATASET,
+            Kind::Socket => KIND_SOCKET,
         }
     }
 }
@@ -988,7 +993,7 @@ impl<D: BlockDevice> Fs<D> {
         self.put(dkey, dvalue)?;
         self.touch_dir(parent)?;
         match kind {
-            Kind::File | Kind::Symlink => self.adjust_tree(parent, 0, 1, 0)?,
+            Kind::File | Kind::Symlink | Kind::Socket => self.adjust_tree(parent, 0, 1, 0)?,
             Kind::Dir => self.adjust_tree(parent, 0, 0, 1)?,
             Kind::Dataset => return Err(Error::InvalidArgs),
         }

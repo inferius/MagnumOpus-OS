@@ -117,6 +117,10 @@ impl<D: BlockDevice> Fs<D> {
                 self.symlink(dest, &target)?;
                 Ok(0)
             }
+            Kind::Socket => {
+                self.create(dest, Kind::Socket)?;
+                Ok(0)
+            }
             Kind::Dir => {
                 self.create(dest, Kind::Dir)?;
                 let mut total = 0;
