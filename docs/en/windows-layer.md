@@ -375,6 +375,36 @@ Decisions of the user and the coordinator (15 Nov 2026):
 - Patch `0003` passes all of the server's options (`-d`, `-p`) when it
   restarts itself, not only `-f`.
 
+## Server signals (W2)
+
+**[implemented]** (kernel and `cstd` **[verified in QEMU]** x86_64 and
+aarch64, the Wine wiring is being verified).
+
+On Linux wineserver sends signals to clients: `SIGUSR1` via `tgkill`
+(interrupting a thread to suspend it, read its context or run an APC of
+another process), `SIGQUIT` (violent thread death) and `SIGKILL`
+(terminating a process). Here `cstd`'s `kill` only reaches own children,
+so the client entrusts the server with exactly what it needs (decision A,
+least rights):
+
+- **The process control fd** (`mo_self_control_fd`): a handle to the own
+  process with only the `KILL` right (terminate, `PROCESS_KILL`), plus
+  `DUPLICATE` and `TRANSFER`, always `FD_CLOEXEC`. The server uses it
+  instead of `kill(pid, SIGKILL)` (`process_sigkill`).
+- **The thread fd** (`mo_self_thread_fd`): a thread handle from
+  [`THREAD_SELF`](syscalls.md#thread_self) with only the `INTERRUPT` right
+  (`THREAD_INTERRUPT`), sent by every thread in `init_thread`. Instead of
+  `tgkill` the server calls `mo_thread_signal(fd, sig)`: the kernel
+  interrupts the thread with code = the signal number and `cstd` delivers
+  it to the signal handler as on Linux (suspension and context are handled
+  by the client itself in its `SIGUSR1` handler).
+- Nothing more: the server gets neither `MANAGE` (suspension, context, the
+  process's threads) nor the thread list (`PROCESS_THREADS`).
+- ⚠️ **Security like `kill`/`tgkill` of the same user on Linux**,
+  limited to the prefix's server: only the wineserver of the own
+  application gets the fds (patch `0007`, fixed fd numbers 1022 and 1023
+  next to the process fd 1021).
+
 ## W1: server connection and processes (questions T1-T5)
 
 **Status: [designed]**, decided on 15 Nov 2026 (coordinator); T2

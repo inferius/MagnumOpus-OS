@@ -388,6 +388,6 @@ impl KernelObject for Process {
 
     fn default_rights(&self) -> Rights {
         // Pamet procesu (PROCESS_MEMORY) jen tvurci a tomu, komu ji preda.
-        Rights::BASIC | Rights::MANAGE | Rights::WRITE | Rights::READ | Rights::READ_MEMORY | Rights::WRITE_MEMORY
+        Rights::BASIC | Rights::MANAGE | Rights::WRITE | Rights::READ | Rights::READ_MEMORY | Rights::WRITE_MEMORY | Rights::KILL
     }
 }

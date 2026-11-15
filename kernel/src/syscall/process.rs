@@ -59,12 +59,34 @@ pub fn exit(a: Args) -> Result<u64> {
     Ok(0)
 }
 
-/// `PROCESS_KILL(process)`.
+/// Objekt typu `T` za handlem, ktery ma aspon jedno z prav `any` (uzke
+/// pravo jako `KILL` nebo siroke `MANAGE`).
+fn get_with_any<T: KernelObject>(p: &Process, handle: u64, any: Rights) -> Result<alloc::sync::Arc<T>> {
+    let h = arg_handle(handle)?;
+    let table = p.handles();
+    if table.rights(h)?.0 & any.0 == 0 {
+        return Err(Error::AccessDenied);
+    }
+    table.get_as::<T>(h, Rights::NONE)
+}
+
+/// `THREAD_SELF(rights) -> handle`: handle volajiciho vlakna s pravy
+/// `rights` (podmnozina vychozich, 0 = vychozi).
+pub fn thread_self(a: Args) -> Result<u64> {
+    let p = current_process();
+    let me = sched::current();
+    let default = me.default_rights();
+    let rights = if a[0] == 0 { default } else { Rights(u32::try_from(a[0]).map_err(|_| Error::InvalidArgs)?) };
+    if !default.contains(rights) {
+        return Err(Error::AccessDenied);
+    }
+    Ok(p.handles().insert(me, rights)?.0 as u64)
+}
+
+/// `PROCESS_KILL(process)`: pravo `KILL` nebo `MANAGE`.
 pub fn kill(a: Args) -> Result<u64> {
     let p = current_process();
-    let target = p
-        .handles()
-        .get_as::<Process>(arg_handle(a[0])?, Rights::MANAGE)?;
+    let target = get_with_any::<Process>(&p, a[0], Rights::KILL | Rights::MANAGE)?;
     target.terminate(abi::process::EXIT_KILLED);
     Ok(0)
 }
@@ -119,7 +141,7 @@ pub fn thread_suspend(a: Args) -> Result<u64> {
 /// `MANAGE`); doruceni na obsluhu ve vlakne pri navratu do userspace.
 pub fn thread_interrupt(a: Args) -> Result<u64> {
     let p = current_process();
-    let thread = p.handles().get_as::<Thread>(arg_handle(a[0])?, Rights::MANAGE)?;
+    let thread = get_with_any::<Thread>(&p, a[0], Rights::INTERRUPT | Rights::MANAGE)?;
     if a[1] >= abi::syscall::INTERRUPT_CODES {
         return Err(Error::InvalidArgs);
     }

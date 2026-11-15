@@ -444,6 +444,11 @@ pub fn process_memory_write(process: u32, addr: u64, data: &[u8]) -> Result<usiz
     .map(|v| v as usize)
 }
 
+/// `THREAD_SELF`: handle volajiciho vlakna s pravy `rights` (0 = vychozi).
+pub fn thread_self(rights: u32) -> Result<u32> {
+    call(nr::THREAD_SELF, [u64::from(rights), 0, 0, 0, 0, 0]).map(|v| v as u32)
+}
+
 pub fn thread_suspend(thread: u32) -> Result<u32> {
     call(nr::THREAD_SUSPEND, [thread as u64, 0, 0, 0, 0, 0]).map(|v| v as u32)
 }

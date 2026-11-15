@@ -24,6 +24,39 @@ pub fn self_process_fd() -> R<i32> {
     })
 }
 
+fn insert(obj: Object) -> R<i32> {
+    fd::insert(Description::new(obj, super::status::RDWR), 0, true).map_err(|err| match err {
+        rt::Error::NoResources => errno::EMFILE,
+        err => e(err),
+    })
+}
+
+/// Ridici fd vlastniho procesu (jen `KILL`), vzdy `FD_CLOEXEC`.
+pub fn self_control_fd() -> R<i32> {
+    insert(rt::process::self_control_object().map_err(e)?)
+}
+
+/// Fd volajiciho vlakna (jen `INTERRUPT`), vzdy `FD_CLOEXEC`.
+pub fn self_thread_fd() -> R<i32> {
+    insert(rt::process::self_thread_object().map_err(e)?)
+}
+
+/// Ukonci proces za ridicim (nebo procesovym s `KILL`) fd.
+pub fn process_kill(fd: i32) -> R<()> {
+    let d = fd::get(fd).map_err(|_| errno::EBADF)?;
+    let Object::Process(p) = &d.object else { return Err(errno::EINVAL) };
+    p.kill().map_err(e)
+}
+
+/// Signal `sig` vlaknu za fd vlakna: preruseni s kodem = cislo signalu
+/// (cstd ho v obsluze preruseni doruci jako signal, `signal.rs`).
+pub fn thread_signal(fd: i32, sig: i32) -> R<()> {
+    let d = fd::get(fd).map_err(|_| errno::EBADF)?;
+    let Object::Thread(t) = &d.object else { return Err(errno::EINVAL) };
+    let code = u32::try_from(sig).ok().filter(|&s| s > 0 && u64::from(s) < 64).ok_or(errno::EINVAL)?;
+    t.interrupt(code).map_err(e)
+}
+
 /// `PROCESS_MEMORY` nad procesovym fd: `write` = zapis `buf` do `addr`,
 /// jinak cteni z `addr` do `buf`.
 pub fn process_memory(fd: i32, write: bool, addr: u64, buf: *mut u8, len: usize) -> R<usize> {

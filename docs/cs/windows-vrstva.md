@@ -354,6 +354,33 @@ Rozhodnutí uživatele a koordinátora (15. 11. 2026):
 - Záplata `0003` předává při opětovném spuštění serveru všechny jeho volby
   (`-d`, `-p`), nejen `-f`.
 
+## Signály serveru (W2)
+
+**[implementováno]** (jádro a `cstd` **[ověřeno v QEMU]** x86_64 i aarch64,
+napojení Wine se ověřuje).
+
+Wineserver na Linuxu posílá klientům signály: `SIGUSR1` přes `tgkill`
+(přerušení vlákna kvůli pozastavení, kontextu a APC jiného procesu),
+`SIGQUIT` (násilný konec vlákna) a `SIGKILL` (ukončení procesu). U nás jde
+`kill` z `cstd` jen na vlastní děti, proto klient serveru svěří jen to,
+co server potřebuje (rozhodnutí A, nejmenší práva):
+
+- **Řídicí fd procesu** (`mo_self_control_fd`): handle vlastního procesu
+  jen s právem `KILL` (ukončit, `PROCESS_KILL`), k tomu `DUPLICATE`
+  a `TRANSFER`, vždy `FD_CLOEXEC`. Server ho použije místo `kill(pid,
+  SIGKILL)` (`process_sigkill`).
+- **Fd vlákna** (`mo_self_thread_fd`): handle vlákna z
+  [`THREAD_SELF`](syscally.md#thread_self) jen s právem `INTERRUPT`
+  (`THREAD_INTERRUPT`), posílá ho každé vlákno v `init_thread`. Server
+  místo `tgkill` volá `mo_thread_signal(fd, sig)`: jádro vlákno přeruší
+  s kódem = číslo signálu a `cstd` ho doručí obsluze signálu jako na Linuxu
+  (pozastavení a kontext řeší klient v obsluze `SIGUSR1` sám).
+- Nic dalšího: server nedostane `MANAGE` (pozastavení, kontext, vlákna
+  procesu) ani výčet vláken (`PROCESS_THREADS`).
+- ⚠️ **Bezpečnost jako `kill`/`tgkill` stejného uživatele na Linuxu**,
+  omezeno na server prefixu: fd dostane jen wineserver vlastní aplikace
+  (záplata `0007`, pevná čísla fd 1022 a 1023 vedle procesového fd 1021).
+
 ## W1: spojení se serverem a procesy (otázky T1-T5)
 
 **Stav: [navrženo]**, rozhodnuto 15. 11. 2026 (koordinátor); T2

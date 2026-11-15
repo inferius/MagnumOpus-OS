@@ -12,6 +12,7 @@ use crate::{check, check_eq};
 pub const TESTS: &[Test] = &[
     ("pamet procesu: cteni a zapis jineho procesu (PROCESS_MEMORY)", read_write_other),
     ("pamet procesu: prava, mapovani jen pro cteni, nenamapovano, skonceny proces", rights_and_limits),
+    ("uzka prava: KILL jen ukonci proces, INTERRUPT jen prerusi vlakno, THREAD_SELF", narrow_rights),
 ];
 
 /// Prazdny proces (bez vlakna) s namapovanym objektem pameti; vraci
@@ -81,5 +82,30 @@ fn rights_and_limits(_: &Startup) -> TestResult {
         0,
         "nulova delka"
     );
+    Ok(())
+}
+
+/// Uzka prava pro server aplikace (W2): `KILL` jen ukonci proces,
+/// `INTERRUPT` jen prerusi vlakno; nic dalsiho.
+fn narrow_rights(_: &Startup) -> TestResult {
+    let (p, _vmo, at) = target(4096, MAP_READ | MAP_WRITE)?;
+    let thread = libos::Thread::create(&p, "uzke").map_err(|e| fail("vlakno", e))?;
+    let int_only = libos::Thread::from_handle(
+        thread.handle().duplicate(Some(Rights::INTERRUPT | Rights::TRANSFER)).map_err(|e| fail("duplikat vlakna", e))?,
+    );
+    // Prava staci (proces nema obsluhu ve vlakne = BAD_STATE, ne ACCESS_DENIED).
+    check_eq!(int_only.interrupt(1).err(), Some(Error::BadState), "preruseni jen s INTERRUPT");
+    check_eq!(int_only.suspend().err(), Some(Error::AccessDenied), "pozastaveni jen s INTERRUPT");
+    let kill_only = Process::from_handle(p.handle().duplicate(Some(Rights::KILL | Rights::TRANSFER)).map_err(|e| fail("duplikat", e))?);
+    let mut buf = [0u8; 4];
+    check_eq!(kill_only.read_memory(at, &mut buf).err(), Some(Error::AccessDenied), "pamet jen s KILL");
+    check_eq!(kill_only.threads().err(), Some(Error::AccessDenied), "vycet vlaken jen s KILL");
+    // THREAD_SELF: vlastni vlakno s podmnozinou vychozich prav; vic = odmitnuto.
+    let me = libos::Thread::current(Some(Rights::INTERRUPT | Rights::TRANSFER)).map_err(|e| fail("THREAD_SELF", e))?;
+    check_eq!(me.suspend().err(), Some(Error::AccessDenied), "vlastni vlakno jen s INTERRUPT: pozastaveni");
+    check_eq!(libos::Thread::current(Some(Rights::ALL)).err(), Some(Error::AccessDenied), "THREAD_SELF nad vychozi prava");
+    check!(libos::Thread::current(None).is_ok(), "THREAD_SELF s vychozimi pravy");
+    kill_only.kill().map_err(|e| fail("ukonceni jen s KILL", e))?;
+    p.wait_exit(Some(libos::time::deadline_after(core::time::Duration::from_secs(5)))).map_err(|e| fail("konec", e))?;
     Ok(())
 }

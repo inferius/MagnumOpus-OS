@@ -360,9 +360,15 @@ pub const VMO_SIZE: u64 = 79;
 /// stranku oznaci znovu). Prvni volani sledovani zapne a vrati vsechny
 /// existujici stranky. Pravo `WRITE`.
 pub const VMO_DIRTY: u64 = 80;
+/// Handle aktualniho vlakna: `(rights) -> handle`. `rights` musi byt
+/// podmnozina vychozich prav vlakna (jinak `ACCESS_DENIED`); 0 = vychozi.
+/// Napr. jen `INTERRUPT | TRANSFER` pro server aplikace (signaly, jako
+/// `tgkill`). Proces si sva vlakna umi vyjmenovat i `PROCESS_THREADS`,
+/// nic noveho tim nedostane.
+pub const THREAD_SELF: u64 = 81;
 
 /// Pocet definovanych syscallu (pro tabulky a testy).
-pub const COUNT: u64 = 81;
+pub const COUNT: u64 = 82;
 
 /// Operace `LOG_CONTROL`.
 pub mod log_op {

@@ -18,6 +18,14 @@ _CSTD_BEGIN
 
 /* Novy procesovy fd vlastniho procesu (FD_CLOEXEC); -1 + errno. */
 int mo_self_process_fd(void);
+/* Ridici fd vlastniho procesu jen s pravem ukonceni (FD_CLOEXEC). */
+int mo_self_control_fd(void);
+/* Fd volajiciho vlakna jen s pravem preruseni (signaly, FD_CLOEXEC). */
+int mo_self_thread_fd(void);
+/* Ukonci proces za ridicim fd (jako SIGKILL); 0 nebo -1 + errno. */
+int mo_process_kill(int fd);
+/* Posle signal sig (1..63) vlaknu za fd vlakna; 0 nebo -1 + errno. */
+int mo_thread_signal(int fd, int sig);
 /* Cteni (MO_PROCESS_READ) z addr procesu za fd do buf, nebo zapis
  * (MO_PROCESS_WRITE) buf do addr; prenesene bajty (mene = castecne),
  * -1 + errno. */

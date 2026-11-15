@@ -111,6 +111,12 @@ impl Process {
 }
 
 impl Thread {
+    /// Handle volajiciho vlakna s pravy `rights` (`None` = vychozi;
+    /// podmnozina vychozich, jinak `ACCESS_DENIED`).
+    pub fn current(rights: Option<crate::Rights>) -> Result<Self> {
+        sys::thread_self(rights.map_or(0, |r| r.0)).map(|h| Self(Handle::from_raw(h)))
+    }
+
     pub fn create(process: &Process, name: &str) -> Result<Self> {
         sys::thread_create(process.0.raw(), name).map(|h| Self(Handle::from_raw(h)))
     }

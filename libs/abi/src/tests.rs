@@ -140,6 +140,7 @@ fn every_syscall_is_documented() {
         "VMO_SET_SIZE",
         "VMO_SIZE",
         "VMO_DIRTY",
+        "THREAD_SELF",
     ];
     assert_eq!(names.len() as u64, crate::syscall::COUNT);
     for doc in ["cs/syscally.md", "en/syscalls.md"] {

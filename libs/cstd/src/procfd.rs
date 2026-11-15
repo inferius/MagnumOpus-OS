@@ -19,6 +19,35 @@ pub extern "C" fn mo_self_process_fd() -> c_int {
     errno::ret_val(sys::self_process_fd().map(|fd| fd as i64)) as c_int
 }
 
+/// `mo_self_control_fd`: ridici fd vlastniho procesu jen s pravem ukonceni
+/// (server aplikace ho smi ukoncit, jako `kill` stejneho uzivatele);
+/// `FD_CLOEXEC`. -1 a `errno` pri chybe.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn mo_self_control_fd() -> c_int {
+    errno::ret_val(sys::self_control_fd().map(|fd| fd as i64)) as c_int
+}
+
+/// `mo_self_thread_fd`: fd volajiciho vlakna jen s pravem preruseni (server
+/// aplikace mu smi posilat signaly, jako `tgkill`); `FD_CLOEXEC`.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn mo_self_thread_fd() -> c_int {
+    errno::ret_val(sys::self_thread_fd().map(|fd| fd as i64)) as c_int
+}
+
+/// `mo_process_kill`: ukonci proces za ridicim fd (kod `EXIT_KILLED`, jako
+/// `SIGKILL`). 0 nebo -1 a `errno`.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn mo_process_kill(fd: c_int) -> c_int {
+    errno::ret(sys::process_kill(fd))
+}
+
+/// `mo_thread_signal`: posle signal `sig` (1..63) vlaknu za fd vlakna
+/// (preruseni vlakna, cstd ho doruci obsluze signalu). 0 nebo -1 a `errno`.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn mo_thread_signal(fd: c_int, sig: c_int) -> c_int {
+    errno::ret(sys::thread_signal(fd, sig))
+}
+
 /// `mo_process_memory`: cteni (`MO_PROCESS_READ`) z `addr` procesu za
 /// `fd` do `buf`, nebo zapis (`MO_PROCESS_WRITE`) `buf` do `addr`. Vraci
 /// prenesene bajty (mene = castecna kopie), -1 a `errno` pri chybe

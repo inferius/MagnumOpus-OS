@@ -103,10 +103,13 @@ pub mod fd_kind {
     /// jen s pravy pameti (`READ_MEMORY`, `WRITE_MEMORY`) `tag::FD`, data
     /// prazdna.
     pub const PROCESS: u8 = 6;
+    /// Fd vlakna (`mo_self_thread_fd`, Windows vrstva): handle vlakna jen
+    /// s pravem `INTERRUPT` `tag::FD`, data prazdna.
+    pub const THREAD: u8 = 7;
 
     /// Ma polozka handle ve startovni zprave?
     pub const fn has_handle(kind: u8) -> bool {
-        matches!(kind, PIPE | MEMORY | UNIX | PROCESS)
+        matches!(kind, PIPE | MEMORY | UNIX | PROCESS | THREAD)
     }
 }
 

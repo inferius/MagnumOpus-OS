@@ -42,6 +42,26 @@ pub fn self_process_fd() -> R<i32> {
 }
 
 #[cfg(not(target_os = "magnumopus"))]
+pub fn self_control_fd() -> R<i32> {
+    Err(crate::errno::ENOSYS)
+}
+
+#[cfg(not(target_os = "magnumopus"))]
+pub fn self_thread_fd() -> R<i32> {
+    Err(crate::errno::ENOSYS)
+}
+
+#[cfg(not(target_os = "magnumopus"))]
+pub fn process_kill(_fd: i32) -> R<()> {
+    Err(crate::errno::ENOSYS)
+}
+
+#[cfg(not(target_os = "magnumopus"))]
+pub fn thread_signal(_fd: i32, _sig: i32) -> R<()> {
+    Err(crate::errno::ENOSYS)
+}
+
+#[cfg(not(target_os = "magnumopus"))]
 pub fn process_memory(_fd: i32, _write: bool, _addr: u64, _buf: *mut u8, _len: usize) -> R<usize> {
     Err(crate::errno::ENOSYS)
 }

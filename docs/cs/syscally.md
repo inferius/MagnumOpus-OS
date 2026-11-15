@@ -412,6 +412,16 @@ velikost objektu paměti v bajtech (u běžného objektu pevná, u
 zvětšitelného podle `VMO_SET_SIZE`; C `fstat` paměťového fd v jiném
 procesu). Stačí jakékoli právo. Chyby: `BAD_HANDLE`, `WRONG_TYPE`.
 
+### `THREAD_SELF`
+
+**[ověřeno v QEMU]** `(rights) -> handle`. Handle volajícího vlákna
+(číslo 81) s právy `rights` - podmnožina výchozích práv vlákna, jinak
+`ACCESS_DENIED`; 0 = výchozí. Například jen `INTERRUPT | TRANSFER`, aby
+server aplikace mohl vláknu posílat signály (wineserver, jako `tgkill`
+stejného uživatele) a nic víc. Proces si svá vlákna umí vyjmenovat
+i [`PROCESS_THREADS`](#process_threads), nic nového tím nedostane. Chyby:
+`ACCESS_DENIED`, `INVALID_ARGS`, `NO_RESOURCES` (plná tabulka handlů).
+
 ### `VMO_DIRTY`
 
 **[ověřeno v QEMU]** x86_64 i aarch64 (self-test jádra „sledovani zapisu"

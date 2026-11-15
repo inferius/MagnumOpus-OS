@@ -421,6 +421,18 @@ current size of a memory object in bytes (fixed for an ordinary object, for
 a resizable one as set by `VMO_SET_SIZE`; C `fstat` of a memory fd in
 another process). Any right is enough. Errors: `BAD_HANDLE`, `WRONG_TYPE`.
 
+### `THREAD_SELF`
+
+**[verified in QEMU]** `(rights) -> handle`. A handle to the calling
+thread (number 81) with rights `rights` - a subset of the thread's default
+rights, otherwise `ACCESS_DENIED`; 0 = the defaults. For example only
+`INTERRUPT | TRANSFER`, so that the application's server can send the
+thread signals (wineserver, like `tgkill` of the same user) and nothing
+more. A process can list its threads with
+[`PROCESS_THREADS`](#process_threads) anyway, it gains nothing new.
+Errors: `ACCESS_DENIED`, `INVALID_ARGS`, `NO_RESOURCES` (handle table
+full).
+
 ### `VMO_DIRTY`
 
 **[verified in QEMU]** x86_64 and aarch64 (kernel self-test "sledovani

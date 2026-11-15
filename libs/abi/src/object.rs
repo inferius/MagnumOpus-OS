@@ -70,10 +70,16 @@ impl Rights {
     /// Zapisovat do pameti procesu (`PROCESS_MEMORY` WRITE): uplna vlada nad
     /// cilem, predavat jen debuggeru nebo serveru vlastni aplikace.
     pub const WRITE_MEMORY: Self = Self(1 << 15);
+    /// Jen ukoncit proces (`PROCESS_KILL`), bez ostatniho rizeni (`MANAGE`):
+    /// pro server aplikace (wineserver, jako `kill` stejneho uzivatele).
+    pub const KILL: Self = Self(1 << 16);
+    /// Jen prerusit vlakno (`THREAD_INTERRUPT`), bez pozastaveni, kontextu
+    /// a ukonceni (`MANAGE`): signaly serveru aplikace (jako `tgkill`).
+    pub const INTERRUPT: Self = Self(1 << 17);
 
     pub const BASIC: Self = Self(Self::DUPLICATE.0 | Self::TRANSFER.0 | Self::WAIT.0);
     /// Vsechna prava (jen jako horni mez, napr. "zachovat prava" pri duplikaci).
-    pub const ALL: Self = Self((1 << 16) - 1);
+    pub const ALL: Self = Self((1 << 18) - 1);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
