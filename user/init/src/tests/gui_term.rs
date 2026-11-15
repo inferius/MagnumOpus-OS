@@ -169,8 +169,9 @@ fn title_drag<R>(inspect: &libos::Channel, w: u32, pump: &dyn Fn() -> R) -> Test
     })
     .map_err(short)?;
     let bar2 = title(&moved).ok_or("titulek chybi")?;
-    // Mezi odznakem (system, vlevo) a kartou: kousek pred kartou.
-    let x = bar2.x + (tab_x - bar.x) - 6;
+    // Mezera mezi odznakem (system, vlevo) a kartou (`s2` = 4 px): jeji
+    // stred, 2 px pred kartou.
+    let x = bar2.x + (tab_x - bar.x) - 2;
     let y = bar2.y + bar2.h as i32 / 2;
     settle(inspect)?;
     println!("{QEMU_TERM_TITLE_LEFT}{x} {y} {} {}", x - 40, y - 30);

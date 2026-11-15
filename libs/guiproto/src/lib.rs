@@ -40,8 +40,9 @@ pub use wire::{Reader, Writer};
 
 /// Verze protokolu okna a displeje (2: `WINDOW_SIZE`, `WINDOW_CONTEXT`;
 /// 3: rozsireni kontextu pro tablet a TV, `context::ContextExt`;
-/// 4: seriove cislo gesta v `InputRecord`).
-pub const VERSION: u32 = 4;
+/// 4: seriove cislo gesta v `InputRecord`; 5: plocha odznaku duvery
+/// v kontextu okna, `ContextExt::title_badge`).
+pub const VERSION: u32 = 5;
 
 /// Nejvetsi sirka nebo vyska bufferu, okna a vystupu v pixelech.
 pub const MAX_DIM: u32 = 16384;

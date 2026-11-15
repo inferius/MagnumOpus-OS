@@ -60,14 +60,25 @@ impl Comp {
 
     /// Rozsireni kontextu okna `gid`: pocitac s mysi a klavesnici (tablet
     /// a TV dodaji sluzby zarizeni, az budou), dlazdice podle stavu okna,
-    /// nejmensi cil z tokenu `size.hit_min_fine`.
+    /// nejmensi cil z tokenu `size.hit_min_fine`, u okna s vlastnim
+    /// titulkem plocha odznaku duvery (souradnice obsahu okna).
     fn context_ext(&self, gid: u32) -> guiproto::context::ContextExt {
         use guiproto::context::{ContextExt, Tile};
         let tile = match self.windows.get(&gid) {
             Some(w) if w.mode == Mode::Fullscreen || w.restore.is_some() || w.fs_saved.is_some() => Tile::Full,
             _ => Tile::Floating,
         };
-        ContextExt { tile, min_hit: self.style.theme.size.hit_min_fine as u16, ..Default::default() }
+        let title_badge = match self.windows.get(&gid) {
+            Some(w) if w.mode == Mode::CustomTitle => match self.clients.get(&w.client) {
+                Some(cl) => {
+                    let b = w.badge(self.badge_width(cl));
+                    Rect::new(b.x - w.rect.x, b.y - w.rect.y, b.w, b.h)
+                }
+                None => Rect::default(),
+            },
+            _ => Rect::default(),
+        };
+        ContextExt { tile, min_hit: self.style.theme.size.hit_min_fine as u16, title_badge, ..Default::default() }
     }
 
     /// Okno zmenilo stav (maximalizace, cela obrazovka): novy kontext

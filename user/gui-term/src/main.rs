@@ -57,6 +57,9 @@ struct Look {
     ui: Family,
     /// Ikony z prototypu (`design/assets/mo.js`).
     icons: gfx::icon::Icons,
+    /// Odznak duvery v titulku od kompozitoru (`ContextExt::title_badge`;
+    /// prazdny = zatim nezname).
+    badge: Rect,
 }
 
 impl Look {
@@ -65,7 +68,7 @@ impl Look {
         // Terminal bez ligatur (`font.mono_features` je vypina); zapnute
         // vlastnosti zadne.
         let mono = Family::new(font::mono(), &[]);
-        Self { t, mono, ui: ui::Look::ui_fonts(), icons: gfx::icon::Icons::new() }
+        Self { t, mono, ui: ui::Look::ui_fonts(), icons: gfx::icon::Icons::new(), badge: Rect::default() }
     }
 
     fn title_h(&self) -> u32 {
@@ -138,12 +141,17 @@ impl Look {
         (px.div_ceil(cw) as usize).saturating_sub(3).max(1)
     }
 
-    /// Karta relace v titulku: za odznakem systemu (misto podle
-    /// `design/terminal.html`).
+    /// Karta relace v titulku: za odznakem systemu s mezerou `s2`
+    /// (`.mode-custom .win-title`: gap s2). Dokud kompozitor plochu
+    /// odznaku neposlal, odhad.
     fn tab(&self) -> Rect {
         let sp = &self.t.space;
         let h = self.t.size.control_h_compact + sp[2];
-        Rect::new((self.t.size.hit_min * 4) as i32, (self.title_h() - h) as i32, self.t.size.hit_min * 4, h)
+        let x = match self.badge.w {
+            0 => (self.t.size.hit_min * 4) as i32,
+            _ => self.badge.x + self.badge.w as i32 + sp[2] as i32,
+        };
+        Rect::new(x, (self.title_h() - h) as i32, self.t.size.hit_min * 4, h)
     }
 
     /// Motiv `term::ui` s barvami `term_*` z tokenu.
@@ -617,6 +625,9 @@ impl Term {
             self.screen.write("\r\n\x1b[33mSlužba termd není připojená, připojuji znovu...\x1b[39m");
         }
         let label = self.status();
+        if let Some(c) = &self.win.context {
+            self.look.badge = c.ext.title_badge;
+        }
         let grid = self.look.grid(self.screen.cols, self.screen.rows, self.win.h, &lines);
         let screen = &self.screen;
         let show_panel = self.panel();

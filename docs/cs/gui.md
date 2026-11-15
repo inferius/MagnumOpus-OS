@@ -304,9 +304,13 @@ WINDOW_SIZE    { window, w, h, min_w, min_h, max_frac_w, max_frac_h }
   `cx.posture`, `cx.can_hover()`, `cx.focus_only()`.
 - Terminál: `win.request_size(1040, 520, 850, 0)`, tedy 1040 px, ale nejvýš
   85 % šířky pracovní plochy.
-- Verze protokolu 4 (`guiproto::VERSION`; 4 = sériové číslo gesta
-  v `InputRecord`): kompozitor a aplikace se sestavují spolu, `HELLO`
-  vyžaduje shodu.
+- `title_badge`: oknu s vlastním titulkem kompozitor pošle plochu odznaku
+  důvěry (souřadnice obsahu okna). Aplikace za ním začne svůj obsah
+  titulku, terminál kartu relace s mezerou `s2` jako v návrhu
+  (`design/terminal.html`). **[ověřeno v QEMU]**
+- Verze protokolu 5 (`guiproto::VERSION`; 4 = sériové číslo gesta
+  v `InputRecord`, 5 = `title_badge` v kontextu okna): kompozitor
+  a aplikace se sestavují spolu, `HELLO` vyžaduje shodu.
 
 **[implementováno]** (testy `context_first_and_initial_size_without_flicker`,
 `request_size_later_and_while_maximized`, `resize_sends_new_context_generation`

@@ -8,7 +8,7 @@ Jádro kompozitoru `compd` bez závislosti na jádru OS (`no_std` + `alloc`, tes
 - Priorita vstupu před skládáním (smyčka v `user/compd`); na displeji je vždy nejvýš jeden snímek.
 - Skládají se jen poškozené oblasti a nic se nekreslí, když se nic nemění (výkon softwarového skládání, `docs/cs/gui.md`). Pod neprůhledným jádrem okna (bez rohů) se plocha ani nižší okna nekreslí (`render::visible_parts`); test `culling_keeps_pixels` hlídá stejné pixely.
 - Žádná čísla vzhledu v kódu: hodnoty jsou z tokenů `design/tokens.toml` přes `libs/theme`. Vzhled a svižnost jsou stejně důležité; efekty musí vejít do rozpočtu snímku.
-- Systémové dialogy a odznak důvěry kreslí systém, aplikace je nemůže zakrýt ani zfalšovat.
+- Systémové dialogy a odznak důvěry kreslí systém, aplikace je nemůže zakrýt ani zfalšovat. Oknu s vlastním titulkem kompozitor jen sdělí, kde odznak je (`ContextExt::title_badge`, `winsize.rs`), aby za něj aplikace dala svůj obsah titulku.
 - Po pádu kompozitoru se stav obnoví (`docs/cs/gui.md#obnova-po-pádu-kompozitoru`, `user/compd/src/snapshot.rs`).
 
 ## Testy
