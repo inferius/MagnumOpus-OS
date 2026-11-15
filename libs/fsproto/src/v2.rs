@@ -112,11 +112,43 @@ pub mod op {
     /// (nejvys `VMO_IO`) + handle VMO (pravo `WRITE`) -> precteno u32. fsd
     /// zapise data od zacatku VMO; jedna zprava misto mnoha po `MAX_IO`.
     pub const READ_VMO: u32 = 129;
-    /// Objekt pameti s obsahem souboru pro `mmap`: handle u64 -> velikost
-    /// u64 + handle VMO jen pro cteni (`READ`, `MAP`; `MAP_PRIVATE` = klon
-    /// `VMO_CLONE` u klienta). Prazdny nebo prilis velky soubor =
-    /// `NOT_SUPPORTED` (klient kopiruje), kvota relace = `NO_MEMORY`.
+    /// Okno souboru pro `mmap` (`WINDOW` bajtu od `okno * WINDOW`):
+    /// handle u64, okno u64, priznaky u8 (`map_flags`) -> velikost souboru
+    /// u64, dataset u64, oid u64 + handle objektu okna (`READ`, `MAP`, se
+    /// zapisem i `WRITE`). Objekt ma kapacitu `WINDOW` a velikost podle
+    /// souboru (pristup za ni = vyjimka, `SIGBUS`); vsechny procesy dostanou
+    /// tyz objekt. `MAP_PRIVATE` = klon `VMO_CLONE` u klienta. Sdilene
+    /// mapovani okno drzi do `UNMAP_VMO` nebo konce relace (kvota relace =
+    /// `NO_MEMORY`); zapis jen pro handle se zapisem.
     pub const MAP_VMO: u32 = 130;
+    /// Konec sdileneho mapovani okna (`munmap`): dataset u64, oid u64,
+    /// okno u64 -> (). Zmeny souboru se zapisou zpet.
+    pub const UNMAP_VMO: u32 = 131;
+    /// Zapis zmen namapovaneho souboru zpet (`msync`, `fsync`): dataset
+    /// u64, oid u64, trvale u8 -> (). `trvale` = i `FSYNC` svazku. Relace,
+    /// ktera soubor nedrzi (mapovani z doby pred restartem fsd), dostane
+    /// `SERVICE_RESTARTED`.
+    pub const SYNC_VMO: u32 = 132;
+}
+
+/// Velikost okna souboru pro `MAP_VMO` (zarovnani i kapacita objektu okna).
+pub const WINDOW: u64 = 16 * 1024 * 1024;
+
+/// Priznaky `MAP_VMO`.
+pub mod map_flags {
+    /// Okno se zapisem (jen se `SHARED` a handlem se zapisem).
+    pub const WRITE: u8 = 1;
+    /// Sdilene mapovani: okno drzi relace (kvota), zmeny jdou do souboru.
+    pub const SHARED: u8 = 2;
+}
+
+/// Okno souboru z `MAP_VMO`.
+pub struct MapWindow {
+    pub vmo: libos::Vmo,
+    /// Velikost souboru v okamziku mapovani.
+    pub size: u64,
+    /// Soubor (dataset, oid) pro `UNMAP_VMO` a `SYNC_VMO`.
+    pub file: (u64, u64),
 }
 
 /// Prihlaseni klienta ve zprave posluchaci socketu (`SOCKET_CONNECT`):
@@ -593,24 +625,40 @@ impl FsClient {
         Err(Error::ServiceRestarted)
     }
 
-    /// Objekt pameti s obsahem souboru `local` a velikost souboru
-    /// (`MAP_VMO`); handle je jen pro cteni.
-    pub fn map_vmo(&self, local: u64) -> Result<(libos::Vmo, u64)> {
+    /// Okno `idx` souboru `local` (`MAP_VMO`, priznaky `map_flags`).
+    pub fn map_vmo(&self, local: u64, idx: u64, flags: u8) -> Result<MapWindow> {
         for _ in 0..3 {
             let fsd = self.resolve(local)?;
             let mut w = Self::req(op::MAP_VMO);
-            w.u64(fsd);
+            w.u64(fsd).u64(idx).u8(flags);
             match self.call_sending(Kind::Effect, &w.finish(), Vec::new()) {
                 Ok((body, mut hs)) => {
-                    let size = Reader::new(&body).u64()?;
+                    let mut r = Reader::new(&body);
+                    let size = r.u64()?;
+                    let file = (r.u64()?, r.u64()?);
                     let h = hs.pop().ok_or(Error::Corrupted)?;
-                    return Ok((libos::Vmo::from_handle(h), size));
+                    return Ok(MapWindow { vmo: libos::Vmo::from_handle(h), size, file });
                 }
                 Err(Error::ServiceRestarted | Error::BadHandle) if self.stale(local) => {}
                 Err(e) => return Err(e),
             }
         }
         Err(Error::ServiceRestarted)
+    }
+
+    /// Konec sdileneho mapovani okna (`UNMAP_VMO`).
+    pub fn unmap_vmo(&self, file: (u64, u64), idx: u64) -> Result<()> {
+        let mut w = Self::req(op::UNMAP_VMO);
+        w.u64(file.0).u64(file.1).u64(idx);
+        self.call_sending(Kind::Effect, &w.finish(), Vec::new()).map(|_| ())
+    }
+
+    /// Zapis zmen namapovaneho souboru zpet (`SYNC_VMO`); `durable` = i
+    /// `FSYNC`.
+    pub fn sync_vmo(&self, file: (u64, u64), durable: bool) -> Result<()> {
+        let mut w = Self::req(op::SYNC_VMO);
+        w.u64(file.0).u64(file.1).u8(durable as u8);
+        self.call_sending(Kind::Effect, &w.finish(), Vec::new()).map(|_| ())
     }
 
     /// Zapise `data` po kusech. `Ok(n)` = prijato vse (`n == data.len()`);

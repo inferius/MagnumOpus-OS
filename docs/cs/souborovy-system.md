@@ -516,52 +516,123 @@ fsd následuje odkazy při hledání cesty (`user/fsd/src/links.rs`):
 
 ## Soubory jako paměť
 
-Rozhodnutí koordinátora (15. 11. 2026, otázky Q1-Q7 varianty A): `mmap`
-souboru bez kopírování přes objekt paměti (VMO), který drží fsd
-(`user/fsd/src/filevmo.rs`, operace `MAP_VMO`).
+Rozhodnutí koordinátora (15. 11. 2026, otázky Q1-Q7 varianty A, okna podle
+požadavků vlákna Wine): `mmap` souboru bez kopírování přes objekty paměti
+(VMO), které drží fsd (`user/fsd/src/filevmo.rs`, `serve_map.rs`; klient
+`libs/osrt/src/fmap.rs`, C `libs/cstd/src/mman.rs`).
 
-- **`MAP_PRIVATE` a `MAP_SHARED` jen pro čtení** **[ověřeno v QEMU]**
-  x86_64 (krok `fmap` testu `ctest`, sada `cstd`): fsd drží pro soubor
-  VMO s obsahem (cache podle dataset + oid), naplní ho celý při prvním
-  mapování a klientovi dá handle **jen pro čtení**. `MAP_PRIVATE` je klon
-  s kopií při zápisu (`VMO_CLONE`) - stránky se sdílí, dokud do nich
-  klient nezapíše, nic se nekopíruje. Platnost hlídá verze obsahu: po
-  změně souboru dostane další mapování nový objekt, existující soukromé
-  mapování zůstane snímkem (POSIX to nechává nespecifikované). Prázdný
-  soubor, soubor nad 256 MiB (`filevmo::MAX_FILE`) a rozsah za koncem
-  souboru jdou dál kopií (`READ_VMO`).
-- **Paměť:** VMO vytváří fsd, takže se počítá do **rozpočtu fsd** (vidí ho
-  diagnostika paměti jobů), ne do jobu klienta - to je omezení: klient tím
-  nezvětší svůj účet. Zneužití brání kvóta na relaci (součet různých
-  souborů 1 GiB, `SESSION_QUOTA`, překročení = `ENOMEM`) a cache VMO bez
-  odkazu fsd zahazuje od nejstaršího (512 MiB, `CACHE_MAX`; klientům jejich
-  handly a klony zůstanou). Stránky, do kterých klient v `MAP_PRIVATE`
-  zapíše, platí job klienta (klon na jeho účet).
-- **Smazání** souboru mapování neruší (sirotek, POSIX). **Odpojení
-  svazku / odvolání `GRANT`:** fsd zmenší VMO na 0, klienti dostanou při
-  přístupu výjimku za koncem (`SIGBUS`) **[navrženo]**.
-- **Pager v jádře** (plnění po stránkách při výpadku, pro velké soubory
-  a řídké čtení) je **zamýšlená další fáze** **[navrženo]**: změní se jen
-  plnění ve fsd, protokol klienta zůstane (klient vždy jen dostane
-  handle).
+**[ověřeno v QEMU]** x86_64 i aarch64 (kroky `mmap` a `fmap` testu `ctest`, sada
+`cstd`: soukromé i sdílené mapování, koherence s `read`/`write` v obou
+směrech i přes hranici oken, `ftruncate`, `msync` přes hranici oken,
+`MAP_FIXED` do vlastní rezervace `PROT_NONE` (soukromé i sdílené), dva
+procesy nad týmž souborem, trvalost po `munmap` a zavření fd).
 
-**`MAP_SHARED` se zápisem** **[navrženo]** (druhý krok, Wine W2 - sekce
-nad soubory, WAL sqlite):
+- **Okna:** soubor se mapuje po oknech 16 MiB (`fsproto::v2::WINDOW`,
+  zarovnaná). Okno je zvětšitelný VMO s kapacitou 16 MiB a velikostí podle
+  souboru; **všechny procesy dostanou totéž okno** - sdílené mapování má
+  všude tytéž rámce. Rozsah přes víc oken klient namapuje do jedné
+  rezervace adres (`MAP_IN_RESERVATION`), takže je souvislý. Soubor může
+  mít libovolnou velikost; limit platí na **namapovaný rozsah** (kvóta
+  relace), ne na soubor. Okno je i jednotka pro budoucí pager (viz níže).
+- **Handly:** klient drží handle okna jen během `mmap` (jedna zpráva
+  `MAP_VMO` na okno, mapování pak drží objekt samo) - velké mapování
+  nespotřebuje handly procesu. Mapování 1 GiB = 64 zpráv `MAP_VMO`.
+- **`MAP_PRIVATE`** = klon okna s kopií při zápisu (`VMO_CLONE`): snímek
+  v okamžiku `mmap`, zdroj i klon se navzájem neovlivní, nic se nekopíruje
+  předem. Stránky za koncem souboru zůstanou rezervací (přístup =
+  výjimka).
+- **`MAP_SHARED`** = přímo okno; se zápisem jen pro fd `O_RDWR` (jinak
+  `EACCES`). Přístup za velikost souboru (v rámci okna) = výjimka za
+  koncem objektu (`SIGBUS`), jako POSIX.
+- **Zdroj pravdy:** dokud fsd drží záznam souboru, je obsah načtených oken
+  v paměti, ne ve FS. `READ_H`, `WRITE_H`, `READ_VMO`, `SET_LEN`
+  a velikost v `STAT_H` jdou přes záznam (i přes hranici oken), takže
+  `read()` vidí zápis do mapování hned a mapování vidí `write()` hned.
+  Nenačtená okna čtou a píšou přímo FS. Před každou jinou operací (cesta,
+  `OPEN`, snapshot, kopie, verze, `COMMIT`, `FSYNC`...) fsd špinavé
+  stránky zapíše zpět a po ní znovu načte okna souboru, který se změnil
+  mimo záznam (verze objektu).
+- **`ftruncate`** změní velikost oken: zvětšení = další stránky
+  v existujících mapováních (nuly), zmenšení = přístup za konec `SIGBUS`,
+  zbytek poslední stránky za koncem jsou nuly.
+- **Zápis zpět:** každé okno je od načtení sledované syscallem
+  `VMO_DIRTY` ([syscally](syscally.md#vmo_dirty)); špinavé stránky fsd
+  zapíše přes interní handle (`Fs::pin_h` - drží objekt i po zavření fd
+  a smazání jména, nepodléhá sdílecím režimům ani povinným zámkům, jako
+  POSIX `mmap`). Kdy:
+  - `msync(MS_SYNC)` (`SYNC_VMO` s `FSYNC`; rozsah přes víc oken i souborů
+    zapíše všechny) a `fsync` klienta (operace `FSYNC` je cizí operace,
+    viz výše) - **trvale**;
+  - `munmap` celého mapování (`UNMAP_VMO`), zavření handlu souboru, konec
+    relace;
+  - před každou cizí operací a nejpozději za **30 s** (`filevmo::WRITEBACK`,
+    hlavní smyčka fsd; řádek v logu fsd s počtem stránek, souborů, oken
+    a bajtů);
+  - `msync(MS_ASYNC)` je jen žádost: nic se neposílá, zápis zpět udělá
+    fsd sám nejpozději za 30 s.
 
-- VMO ve fsd je zdroj pravdy, dokud existuje: `WRITE_H` zapíše do FS i do
-  VMO, sdílená mapování vidí změnu hned (Q2).
-- Zápis zpět: nový syscall `VMO_DIRTY` (číslo 80) vrátí špinavé stránky
-  a vyčistí je; fsd je zapíše při `msync`/`fsync` klienta, `munmap`/zavření
-  a commitu FS (Q3). Zkrácení souboru = `VMO_SET_SIZE` (přístup za konec
-  = `SIGBUS`, jádro už umí).
-- Výpadek fsd (Q5): klient po obnově relace soubor **znovu otevře s právem
-  zápisu** (práva se ověří znovu) a teprve pak předá své sdílené VMO; fsd
-  jeho obsah bere jako zápis toho klienta (žádná důvěra v původ VMO). Bez
-  práva zápisu se změny zahodí a `msync` vrátí `SERVICE_RESTARTED`.
+  Automatický commit FS (každých 5 s) mapovaná data nezahrnuje, dokud se
+  nezapíšou zpět - po pádu systému se ztratí nejvýš 30 s zápisů do
+  mapování (jako `dirty_expire` v Linuxu); jistotu dává `msync(MS_SYNC)`
+  nebo `fsync`.
+- **`munmap` části rozsahu** odmapuje jen tu část (jádro); okna zůstanou
+  držená, dokud proces neuvolní celé mapování nebo neskončí relace (okno
+  pokryté jiným mapováním téhož procesu se neuvolní). **`mremap` není**
+  (cstd ho nemá; zvětšení mapování = nové `mmap`).
+- **Cena prvního mapování:** fsd při prvním mapování okna načte celé okno
+  z FS; další mapování téhož okna jen předá handle. Čísla v tabulce pod
+  seznamem: čas jde skoro celý na čtení FS (`fs.read_h`), kopie do okna
+  a zapnutí sledování jsou proti němu malé. Čtení FS je tu výrazně
+  pomalejší než v testu „cteni velkeho souboru" - příčina se zatím
+  nehledala. Proto pager (plnění po stránkách při výpadku) je pro velké
+  soubory důležitý.
+- **Cena zápisu:** první zápis do stránky po každém vyčištění stojí jeden
+  výpadek (sledování bez dirty bitů PTE, stejně na x86_64 i aarch64).
+  Každá cizí operace stojí jedno `VMO_DIRTY` na načtené okno, dokud je
+  nějaký soubor namapovaný.
+- **Paměť:** okna vytváří fsd, takže se počítají do **rozpočtu fsd** (vidí
+  ho diagnostika paměti jobů), ne do jobu klienta - **omezení**: klient tím
+  nezvětší svůj účet. Okno slíbí paměť jen podle velikosti souboru (ne
+  kapacity; jádro platí 8 B na stránku kapacity = 32 KiB na okno);
+  zvětšení souboru slíbí další stránky hned (`ENOMEM` při
+  `ftruncate`/`write`, ne při výpadku). Sdílené mapování okno drží do
+  `munmap`/konce relace; kvóta relace 1 GiB držených oken
+  (`SESSION_QUOTA`, překročení = `ENOMEM`). Záznamy bez držení fsd
+  zahazuje od nejstaršího nad 512 MiB oken (`CACHE_MAX`, po zápisu
+  zpět). Stránky, do kterých klient zapíše v `MAP_PRIVATE`, platí job
+  klienta (klon na jeho účet).
+- **Smazání** souboru mapování neruší (interní handle drží sirotka).
 - **Riziko (výslovně):** sdílené mapování pro zápis dává klientovi
   zapisovatelnou paměť souboru - ostatní procesy se stejným souborem vidí
-  jeho zápisy bez další kontroly FS (práva se ověřují jen při otevření pro
-  zápis), stejně jako POSIX.
+  jeho zápisy bez další kontroly FS (práva se ověřují jen při mapování),
+  stejně jako POSIX. Klient s handlem okna pro zápis může zavolat i
+  `VMO_DIRTY` a tím fsd „ukrást" špinavé stránky (zápisy jiných procesů do
+  téhož okna pak nemusí dojít do souboru) - škodí jen souboru, do kterého
+  smí zapisovat. Proudy souborů (`OPEN_STREAM`) čtou FS přímo a namapované
+  okno nevidí, dokud se nezapíše zpět.
+
+| Mapování okna 16 MiB (QEMU TCG, debug obraz, soubor po zápisu a `fsync`) | Čas |
+|---|---|
+| první mapování, x86_64 (`3a65dd78` + okna) | 2197 ms |
+| z toho čtení FS po 1 MiB, x86_64 (`3a65dd78` + okna) | 130 ms/MiB |
+| z toho kopie do okna, x86_64 (`3a65dd78` + okna) | 4 ms/MiB |
+| z toho zapnutí sledování `VMO_DIRTY`, x86_64 (`3a65dd78` + okna) | 21 ms |
+| další mapování téhož okna, x86_64 (`3a65dd78` + okna) | 4 ms |
+| první / další mapování, aarch64 (`3a65dd78` + okna) | 2616 ms / 1 ms |
+| pro srovnání: čtení FS v testu „cteni velkeho souboru" (`a313581a` + mapování) | 16 ms/MiB |
+
+**[navrženo]** (další kroky):
+
+- **Výpadek fsd (Q5):** okna nového fsd jsou prázdná; `msync` starého
+  mapování vrátí `SERVICE_RESTARTED` (C `EIO`), neuložené změny se
+  ztratí. Navržená obnova: klient po obnově relace soubor znovu otevře
+  s právem zápisu (práva se ověří znovu) a předá své okno; fsd jeho obsah
+  vezme jako zápis toho klienta.
+- **Odpojení svazku / odvolání `GRANT`:** fsd zmenší okna na 0, klienti
+  dostanou při přístupu výjimku za koncem (`SIGBUS`).
+- **Pager v jádře:** okno zůstane jednotkou, kterou fsd místo načtení
+  celého při mapování plní líně po stránkách při výpadku; protokol
+  klienta (`MAP_VMO` vrací handle okna) se nezmění.
 
 ## Limity formátu
 
@@ -1815,7 +1886,9 @@ zůstávají. Z receptu systému se nezužuje. Jinak `ACCESS_DENIED`.
 | 127 | `LSTAT` | cesta | `Stat` odkazu samotného |
 | 128 | `REALPATH` | cesta | kanonická cesta relace (odkazy, `.`, `..` vyřešené) |
 | 129 | `READ_VMO` | handle u64, offset u64, délka u32 (nejvýš `VMO_IO` = 1 MiB) + handle VMO klienta (`WRITE`, `MAP`) | přečteno u32; data od začátku VMO |
-| 130 | `MAP_VMO` | handle u64 | velikost u64 + handle VMO jen pro čtení (`READ`, `MAP`); prázdný/velký soubor `NOT_SUPPORTED`, kvóta `NO_MEMORY` ([Soubory jako paměť](#soubory-jako-paměť)) |
+| 130 | `MAP_VMO` | handle u64, okno u64, příznaky u8 (`map_flags`: `WRITE` 1, `SHARED` 2) | velikost souboru u64, dataset u64, oid u64 + handle okna (`READ`, `MAP`, se zápisem i `WRITE`; kapacita `WINDOW` = 16 MiB); kvóta relace `NO_MEMORY` ([Soubory jako paměť](#soubory-jako-paměť)) |
+| 131 | `UNMAP_VMO` | dataset u64, oid u64, okno u64 | - (relace okno uvolní, soubor se zapíše zpět) |
+| 132 | `SYNC_VMO` | dataset u64, oid u64, trvale u8 | - (zápis zpět, `trvale` = i `FSYNC`); relace bez okna souboru `SERVICE_RESTARTED` |
 
 **`OPEN_STREAM`** **[ověřeno v QEMU]** (sada `cstd`, krok `posix2`:
 výstup potomka `posix_spawn` do souboru a 200 000 bajtů souboru na jeho

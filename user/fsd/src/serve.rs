@@ -135,7 +135,20 @@ impl Service {
         if let Some(fs) = self.fs.as_mut() {
             fs.set_principal(sess.identity.clone());
         }
+        // Soubory jako pamet (`filevmo.rs`): pred operaci, ktera cte nebo
+        // meni FS mimo zaznamy namapovanych souboru, zapsat zpet; po ni
+        // nacist, co se zmenilo mimo ne.
+        let opcode = msg.get(..4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+        let foreign = !self.vmos.is_empty() && !crate::filevmo::aware(opcode);
+        if foreign && let Some(fs) = self.fs.as_mut() {
+            if let Err(e) = self.vmos.flush_all(fs) {
+                libos::println!("fsd: zapis namapovanych souboru selhal: {e}");
+            }
+        }
         let r = self.handle_inner(sess, msg);
+        if foreign && let Some(fs) = self.fs.as_mut() {
+            self.vmos.refresh_all(fs);
+        }
         if let Some(fs) = self.fs.as_mut() {
             fs.set_principal(None);
         }
@@ -156,7 +169,10 @@ impl Service {
             return res;
         }
         let mut hs = core::mem::take(&mut self.in_handles);
-        let sock = self.handle_sock(sess, opcode, &mut r, &mut hs);
+        let sock = match self.handle_map(sess, opcode, &mut r, &mut hs) {
+            Some(res) => Some(res),
+            None => self.handle_sock(sess, opcode, &mut r, &mut hs),
+        };
         drop(hs);
         if let Some(res) = sock {
             return res;

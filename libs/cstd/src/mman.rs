@@ -5,10 +5,12 @@
 //!   jen rezervace adres; `mprotect` na rezervaci pamet doplni.
 //! - `MAP_SHARED` anonymni = v ramci procesu totez co soukrome (`fork`
 //!   neni).
-//! - Soubor: obsah se nacte do anonymni pameti (`MAP_PRIVATE`, nebo
-//!   `MAP_SHARED` jen pro cteni - zmeny souboru se pak neprojevi);
-//!   `MAP_SHARED` se zapisem = `ENOTSUP`, dokud fsd neda objekt pameti
-//!   souboru.
+//! - Soubor: okna objektu pameti z fsd (`osrt::fmap`): `MAP_PRIVATE` =
+//!   klon s kopii pri zapisu, `MAP_SHARED` = tytez ramce ve vsech
+//!   procesech, zapis jde do souboru (`msync`, `munmap`, `close`, nejpozdeji
+//!   za 30 s). `MAP_SHARED` se zapisem jen pro fd `O_RDWR` (`EACCES`).
+//!   Soubor mimo fsd (`ENOTSUP`): kopie do anonymni pameti (sdileny zapis
+//!   pak `ENOTSUP`).
 //! - Pametovy fd (`memfd.rs`): `MAP_SHARED` (i se zapisem) mapuje primo
 //!   objekt pameti - stejne ramce ve vsech procesech; mapovani smi pokryt
 //!   celou kapacitu, pristup za velikost = `SIGBUS`.
@@ -119,20 +121,22 @@ fn map(r: Request) -> Result<u64, c_int> {
         }
         return sys::memfd_map(fd, off, r.len, r.prot, r.addr.unwrap_or(0));
     }
-    // Soubor: objekt pameti z fsd (MAP_PRIVATE = klon s kopii pri zapisu,
-    // sdilene jen pro cteni primo); ENOTSUP = prazdny/velky soubor nebo
-    // rozsah za koncem -> kopie nize. Sdileny zapis zatim nejde.
-    if r.shared && r.prot & PROT_WRITE as u32 != 0 {
-        return Err(errno::ENOTSUP);
+    // Soubor: okna objektu pameti z fsd (MAP_PRIVATE = klon s kopii pri
+    // zapisu, MAP_SHARED = primo okna); ENOTSUP = soubor mimo fsd -> kopie
+    // nize (sdileny zapis tak nejde).
+    let shared_write = r.shared && r.prot & PROT_WRITE as u32 != 0;
+    let mode = sys::status(fd)? & sys::status::ACCMODE;
+    if shared_write && mode != sys::status::RDWR {
+        return Err(errno::EACCES);
     }
-    if sys::status(fd)? & sys::status::ACCMODE != sys::status::WRONLY {
+    if mode != sys::status::WRONLY {
         if let Some(a) = r.addr
             && r.replace
         {
             let _ = sys::vm_release(a, r.len);
         }
         match sys::file_map(fd, off, r.len, r.prot, r.addr.unwrap_or(0), !r.shared) {
-            Err(errno::ENOTSUP) => {}
+            Err(errno::ENOTSUP) if !shared_write => {}
             other => return other,
         }
     }
@@ -187,7 +191,12 @@ fn range(addr: *mut c_void, len: size_t) -> Result<(u64, u64), c_int> {
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn munmap(addr: *mut c_void, len: size_t) -> c_int {
-    errno::ret(range(addr, len).and_then(|(a, l)| sys::vm_release(a, l)))
+    errno::ret(range(addr, len).and_then(|(a, l)| {
+        sys::vm_release(a, l)?;
+        // Sdilena mapovani souboru cela v rozsahu: uvolnit okna (zapis zpet).
+        sys::file_unmapped(a, l);
+        Ok(())
+    }))
 }
 
 /// `mprotect`: cast rozsahu, ktera je jen rezervace (`PROT_NONE` z
@@ -260,10 +269,23 @@ pub unsafe extern "C" fn mseal(addr: *mut c_void, len: size_t, flags: u64) -> c_
     errno::ret(r)
 }
 
-/// `msync`: sdilene mapovani souboru neni, neni co zapsat.
+pub const MS_ASYNC: c_int = 1;
+pub const MS_INVALIDATE: c_int = 2;
+pub const MS_SYNC: c_int = 4;
+
+/// `msync`: `MS_SYNC` zapise sdilena mapovani souboru v rozsahu zpet
+/// a trvale (`SYNC_VMO`); `MS_ASYNC` je jen zadost - fsd zapisuje zpet
+/// sam nejpozdeji za 30 s, takze se nic neposila. `MS_INVALIDATE` nema
+/// co delat (mapovani a soubor jsou tytez ramce).
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn msync(addr: *mut c_void, len: size_t, _flags: c_int) -> c_int {
-    errno::ret(range(addr, len).map(|_| ()))
+pub unsafe extern "C" fn msync(addr: *mut c_void, len: size_t, flags: c_int) -> c_int {
+    let r = range(addr, len).and_then(|(a, l)| {
+        if flags & !(MS_ASYNC | MS_INVALIDATE | MS_SYNC) != 0 || flags & (MS_ASYNC | MS_SYNC) == MS_ASYNC | MS_SYNC {
+            return Err(errno::EINVAL);
+        }
+        if flags & MS_SYNC != 0 { sys::file_sync(a, l) } else { Ok(()) }
+    });
+    errno::ret(r)
 }
 
 /// `mlock`/`munlock`: pamet se neodklada na disk, uspech.

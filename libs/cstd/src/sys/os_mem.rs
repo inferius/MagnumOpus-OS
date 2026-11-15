@@ -83,6 +83,20 @@ pub fn file_map(fd: i32, off: u64, len: u64, prot: u32, addr: u64, private: bool
     })
 }
 
+/// `munmap` probehl: uvolnit okna sdilenych mapovani souboru v rozsahu.
+pub fn file_unmapped(addr: u64, len: u64) {
+    rt::fmap::unmapped(addr, len);
+}
+
+/// `msync(MS_SYNC)`: soubory sdilenych mapovani v rozsahu zpet a trvale.
+pub fn file_sync(addr: u64, len: u64) -> R<()> {
+    rt::fmap::sync(addr, len, true).map_err(|err| match err {
+        // Mapovani z doby pred restartem fsd: zmeny se zapsat nedaji.
+        rt::Error::ServiceRestarted => errno::EIO,
+        err => e(err),
+    })
+}
+
 pub fn memfd_add_seals(fd: i32, seals: u32) -> R<()> {
     memory(fd, |m| {
         m.add_seals(seals).map_err(|err| match err {

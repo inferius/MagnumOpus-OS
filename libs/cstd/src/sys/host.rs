@@ -769,6 +769,12 @@ pub fn file_map(_fd: i32, _off: u64, _len: u64, _prot: u32, _addr: u64, _private
     Err(errno::ENOTSUP)
 }
 
+pub fn file_unmapped(_addr: u64, _len: u64) {}
+
+pub fn file_sync(_addr: u64, _len: u64) -> R<()> {
+    Ok(())
+}
+
 pub fn memfd_import(_handle: u32, _writable: bool, _cloexec: bool) -> R<i32> {
     Err(errno::ENOSYS)
 }

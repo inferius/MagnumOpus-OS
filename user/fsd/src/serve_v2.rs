@@ -46,9 +46,9 @@ pub struct Session {
     pub key: u64,
     /// Ceka registrace na portu (po paketu `false` -> obslouzit a obnovit).
     pub armed: bool,
-    /// Soubory (dataset, oid), ktere relace dostala k mapovani (`MAP_VMO`),
-    /// a jejich soucet bajtu (kvota `filevmo::SESSION_QUOTA`).
-    pub mapped: BTreeSet<(u64, u64)>,
+    /// Okna (dataset, oid, okno) sdilene namapovana relaci (`MAP_VMO`) s
+    /// delkou pri mapovani; soucet je v kvote `filevmo::SESSION_QUOTA`.
+    pub mapped: BTreeMap<(u64, u64, u64), u64>,
     pub mapped_bytes: u64,
 }
 
@@ -66,7 +66,7 @@ impl Session {
             watch: None,
             key: 0,
             armed: false,
-            mapped: BTreeSet::new(),
+            mapped: BTreeMap::new(),
             mapped_bytes: 0,
         }
     }
@@ -163,6 +163,7 @@ impl Service {
         // Zamky POSIX relace (proces skoncil) a `flock` jejich handlu.
         self.posix.release_owner(sess.id);
         self.lock_pids.remove(&sess.id);
+        self.release_mapped(sess);
         for &h in &sess.handles {
             self.posix.release_owner(flock_owner(h));
             self.lock_pids.remove(&flock_owner(h));
@@ -279,6 +280,8 @@ impl Service {
             }
             op::CLOSE => {
                 let h = Self::own(sess, r.u64()?)?;
+                self.flush_handle(h);
+                let fs = self.fs.as_mut().ok_or(Error::IoError)?;
                 // Zamky `fcntl` relace na souboru konci se zavrenim jejiho
                 // posledniho handlu na nem; `flock` se zavrenim handlu.
                 let key = |fs: &mut fs::Fs<_>, h: u64| fs.revision_h(h).ok().map(|v| (v.dataset, v.oid, posix_lock::FCNTL));
@@ -373,23 +376,29 @@ impl Service {
                 let h = Self::own(sess, r.u64()?)?;
                 let off = r.u64()?;
                 let n = (r.u32()? as usize).min(fsproto::MAX_IO);
-                w.bytes(&fs.read_h(h, off, n)?);
+                w.bytes(&self.read_handle(h, off, n)?);
             }
             op::WRITE_H => {
                 let h = Self::own(sess, r.u64()?)?;
                 let off = r.u64()?;
                 let data = r.rest();
                 // Prijato = cela zprava (knihovna prijme vse, nebo nic).
-                fs.write_h(h, off, data)?;
+                self.write_handle(h, off, data)?;
                 w.u32(data.len() as u32);
             }
             op::SET_LEN => {
                 let h = Self::own(sess, r.u64()?)?;
-                fs.set_len_h(h, r.u64()?)?;
+                self.set_len_handle(h, r.u64()?)?;
             }
             op::STAT_H => {
                 let h = Self::own(sess, r.u64()?)?;
-                stat(fs.stat_h(h)?).put(&mut w);
+                let mut st = fs.stat_h(h)?;
+                // Namapovany soubor: velikost ze zaznamu (zdroj pravdy).
+                if let Some(size) = self.mapped_size(h) {
+                    st.size = size;
+                }
+                let fs = self.fs.as_mut().ok_or(Error::IoError)?;
+                stat(st).put(&mut w);
                 put_rev(&mut w, fs.revision_h(h)?);
             }
             op::LIST_H => {
