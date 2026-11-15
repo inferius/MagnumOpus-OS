@@ -7,10 +7,11 @@
 //! Akce souboru se proto vyhodnoti uz v rodici (`plan`):
 //! - `addclose(0-2)` = proud nepredat; `addclose(> 2)` nic (potomek vyssi
 //!   cisla nema);
-//! - `adddup2(x, 0-2)`, kde `x` je stdio nebo roura rodice (nebo 0-2 po
-//!   predchozich akcich); cil > 2 = `ENOTSUP`;
+//! - `adddup2(x, 0-2)`, kde `x` je stdio, roura nebo soubor rodice (nebo
+//!   0-2 po predchozich akcich); cil > 2 = `ENOTSUP`;
 //! - `addopen(0-2, "/dev/null")` = prazdny vstup / zahozeny vystup; jiny
-//!   soubor zatim `ENOTSUP` (blok parametru predava jen kanaly proudu);
+//!   soubor otevre rodic a preda ho jako proud z fsd (`OPEN_STREAM`);
+//!   cil > 2 = `ENOTSUP`;
 //! - `addchdir`, `addfchdir` = pracovni adresar potomka, `addclosefrom`.
 //!
 //! Program: cesta s `/` (relativni vuci adresari potomka), u `posix_spawn`
@@ -39,7 +40,8 @@ const FLAGS_ALL: i16 = 0xff;
 pub enum Action {
     Close(c_int),
     Dup2(c_int, c_int),
-    Open(c_int, Vec<u8>),
+    /// fd, cesta, priznaky `open`, prava noveho souboru.
+    Open(c_int, Vec<u8>, c_int, u32),
     Chdir(Vec<u8>),
     Fchdir(c_int),
     CloseFrom(c_int),
@@ -70,6 +72,9 @@ pub struct posix_spawnattr_t {
 pub struct Plan {
     pub io: [ChildIo; 3],
     pub cwd: Vec<u8>,
+    /// Soubory k otevreni pred spustenim (`ChildIo::Open(index)`):
+    /// absolutni cesta, priznaky, prava.
+    pub opens: Vec<(Vec<u8>, c_int, u32)>,
 }
 
 /// `base` + `p` (absolutni `p` beze zmeny).
@@ -90,6 +95,7 @@ pub fn join(base: &[u8], p: &[u8]) -> Vec<u8> {
 pub fn plan(actions: &[Action], cwd: Vec<u8>, dir_of: impl Fn(c_int) -> Result<Vec<u8>, c_int>) -> Result<Plan, c_int> {
     let mut io = [ChildIo::Parent(0), ChildIo::Parent(1), ChildIo::Parent(2)];
     let mut cwd = cwd;
+    let mut opens = Vec::new();
     let slot = |fd: c_int| usize::try_from(fd).ok().filter(|&i| i <= 2);
     for a in actions {
         match a {
@@ -106,12 +112,15 @@ pub fn plan(actions: &[Action], cwd: Vec<u8>, dir_of: impl Fn(c_int) -> Result<V
                     None => ChildIo::Parent(*from),
                 };
             }
-            Action::Open(fd, path) => {
+            Action::Open(fd, path, flags, mode) => {
                 let Some(i) = slot(*fd) else { return Err(errno::ENOTSUP) };
-                if path.as_slice() != b"/dev/null" {
-                    return Err(errno::ENOTSUP);
-                }
-                io[i] = ChildIo::Null;
+                io[i] = if path.as_slice() == b"/dev/null" {
+                    ChildIo::Null
+                } else {
+                    // Relativni cesta plati vuci adresari potomka v tomto kroku.
+                    opens.push((join(&cwd, path), *flags, *mode));
+                    ChildIo::Open(opens.len() - 1)
+                };
             }
             Action::Chdir(p) => cwd = join(&cwd, p),
             Action::Fchdir(fd) => cwd = dir_of(*fd)?,
@@ -124,7 +133,7 @@ pub fn plan(actions: &[Action], cwd: Vec<u8>, dir_of: impl Fn(c_int) -> Result<V
             }
         }
     }
-    Ok(Plan { io, cwd })
+    Ok(Plan { io, cwd, opens })
 }
 
 /// Program pro launchd. `exists` = je to bezny soubor?
@@ -191,6 +200,12 @@ fn check_attr(a: &posix_spawnattr_t) -> Result<(), c_int> {
     Ok(())
 }
 
+fn close_all(fds: &[c_int]) {
+    for &fd in fds {
+        let _ = sys::close(fd);
+    }
+}
+
 /// Spolecny zaklad `posix_spawn` a `posix_spawnp`; vraci kod chyby.
 ///
 /// # Safety
@@ -252,8 +267,32 @@ unsafe fn spawn(
         // SAFETY: kontrakt C.
         unsafe { strings(envp) }
     };
-    let req = SpawnReq { program, args, env, cwd: plan.cwd, io: plan.io };
-    match sys::spawn_child(req) {
+    // Soubory z `addopen` otevre rodic; potomek dostane proud z fsd.
+    let mut temp = Vec::new();
+    let mut io = plan.io;
+    for slot in io.iter_mut() {
+        if let ChildIo::Open(k) = *slot {
+            let (path, flags, _mode) = &plan.opens[k];
+            let Some(o) = crate::unistd::open_flags(*flags) else {
+                close_all(&temp);
+                return errno::EINVAL;
+            };
+            match sys::open(path, &o) {
+                Ok(fd) => {
+                    temp.push(fd);
+                    *slot = ChildIo::Parent(fd);
+                }
+                Err(e) => {
+                    close_all(&temp);
+                    return e;
+                }
+            }
+        }
+    }
+    let req = SpawnReq { program, args, env, cwd: plan.cwd, io };
+    let spawned = sys::spawn_child(req);
+    close_all(&temp);
+    match spawned {
         Ok(c) => {
             let id = wait::register(c);
             // SAFETY: kontrakt C.
@@ -376,8 +415,8 @@ pub unsafe extern "C" fn posix_spawn_file_actions_addopen(
     fa: *mut posix_spawn_file_actions_t,
     fd: c_int,
     path: *const c_char,
-    _oflag: c_int,
-    _mode: u32,
+    oflag: c_int,
+    mode: u32,
 ) -> c_int {
     if fd < 0 {
         return errno::EBADF;
@@ -386,7 +425,7 @@ pub unsafe extern "C" fn posix_spawn_file_actions_addopen(
         return errno::EINVAL;
     }
     // SAFETY: kontrakt C.
-    unsafe { push(fa, Action::Open(fd, c_bytes(path).to_vec())) }
+    unsafe { push(fa, Action::Open(fd, c_bytes(path).to_vec(), oflag, mode)) }
 }
 
 /// # Safety

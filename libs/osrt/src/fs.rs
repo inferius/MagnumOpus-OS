@@ -178,6 +178,20 @@ impl File {
         session()?.fsync()
     }
 
+    /// Proud bajtu nad souborem od aktualni pozice (stdin/stdout potomka,
+    /// fsproto `OPEN_STREAM`): `write` = zapis (soubor v rezimu append
+    /// pripojuje), jinak cteni do konce souboru. Pozice tohoto `File` se
+    /// nemeni (potomek ma vlastni).
+    pub fn open_stream(&self, write: bool) -> Result<Channel> {
+        use fsproto::v2::stream_mode;
+        let mode = match (write, self.append) {
+            (false, _) => stream_mode::READ,
+            (true, true) => stream_mode::APPEND,
+            (true, false) => stream_mode::WRITE,
+        };
+        session()?.open_stream(self.handle, mode, self.tell())
+    }
+
     /// Zamek POSIX (`fcntl`/`flock`, viz `fsproto::v2::posix_lock`).
     pub fn posix_lock(&self, cmd: u8, class: u8, write: bool, start: u64, len: u64) -> Result<fsproto::v2::PosixLock> {
         session()?.posix_lock(self.handle, cmd, class, write, start, len)

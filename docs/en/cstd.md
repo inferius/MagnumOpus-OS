@@ -834,9 +834,22 @@ fd (decision 4A), so file actions are evaluated in the parent:
 |---|---|
 | `addclose(0-2)` | the stream is not passed (empty input, discarded output) |
 | `addclose(> 2)` | nothing (the child has no higher numbers) |
-| `adddup2(x, 0-2)` | the child's stream = the description behind `x` in the parent (stdio, also another stream after `dup2`, or a pipe) or 0-2 after the previous actions; a file or socket is `ENOTSUP` |
+| `adddup2(x, 0-2)` | the child's stream = the description behind `x` in the parent (stdio, also another stream after `dup2`, a pipe or a file) or 0-2 after the previous actions; a socket is `ENOTSUP` |
 | `addopen(0-2, "/dev/null")` | empty input / discarded output |
-| `addopen(0-2, another file)`, anything with a target > 2 | `ENOTSUP` (the parameter block only carries stream channels) |
+| `addopen(0-2, file)` | the parent opens the file (path relative to the child's directory at that step, `open` flags) and passes it as a stream |
+| anything with a target > 2 | `ENOTSUP` (the parameter block only carries three streams) |
+
+**A file as a stream** (fsd message `OPEN_STREAM`, [file system](file-system.md#the-fsproto-protocol)):
+the parameter block only carries byte-stream channels, so fsd "plays" the
+file into the channel (stdin: from the current position to the end, then
+end of stream) or writes from the channel (stdout/stderr: from the current
+position, with `O_APPEND` at the end). fsd opens its own handle of the
+same file, so the stream survives closing the fd and the end of the
+parent. Difference from POSIX: the child has **its own position** in the
+file (a shared position of an open file description between processes does
+not exist); the child's writes are in the file once fsd has processed them
+(shortly after the child ends, not necessarily at once). An fsd restart ends
+the stream.
 | `addchdir(_np)`, `addfchdir(_np)` | the child's working directory (relative to the previous one); a missing one makes `posix_spawn` fail |
 | `addclosefrom_np(n)` | closes 0-2 from `n` on |
 

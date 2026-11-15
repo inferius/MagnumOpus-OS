@@ -803,9 +803,20 @@ akce souborů vyhodnotí už v rodiči:
 |---|---|
 | `addclose(0-2)` | proud se nepředá (vstup prázdný, výstup zahozený) |
 | `addclose(> 2)` | nic (potomek vyšší čísla nemá) |
-| `adddup2(x, 0-2)` | proud potomka = popis za `x` v rodiči (stdio, i jiný proud po `dup2`, nebo roura) nebo 0-2 po předchozích akcích; soubor a socket `ENOTSUP` |
+| `adddup2(x, 0-2)` | proud potomka = popis za `x` v rodiči (stdio, i jiný proud po `dup2`, roura nebo soubor) nebo 0-2 po předchozích akcích; socket `ENOTSUP` |
 | `addopen(0-2, "/dev/null")` | prázdný vstup / zahozený výstup |
-| `addopen(0-2, jiný soubor)`, cokoli s cílem > 2 | `ENOTSUP` (blok parametrů předává jen kanály proudu) |
+| `addopen(0-2, soubor)` | rodič soubor otevře (cesta vůči adresáři potomka v tom kroku, příznaky `open`) a předá ho jako proud |
+| cokoli s cílem > 2 | `ENOTSUP` (blok parametrů předává jen tři proudy) |
+
+**Soubor jako proud** (zpráva fsd `OPEN_STREAM`, [souborový systém](souborovy-system.md#protokol-fsproto)):
+blok parametrů nese jen kanály proudu bajtů, proto fsd soubor
+„přehrává“ do kanálu (stdin: od aktuální pozice do konce, pak konec
+proudu) nebo z kanálu zapisuje (stdout/stderr: od aktuální pozice, u
+`O_APPEND` na konec). fsd si otevře vlastní handle téhož souboru, takže
+proud přežije zavření fd i konec rodiče. Rozdíl proti POSIX: potomek má
+**vlastní pozici** v souboru (sdílená pozice popisu otevření mezi
+procesy není); zápis potomka je v souboru, jakmile ho fsd zpracuje (po
+skončení potomka chvíli, ne nutně hned). Restart fsd proud ukončí.
 | `addchdir(_np)`, `addfchdir(_np)` | pracovní adresář potomka (relativní vůči předchozímu); neexistující = chyba `posix_spawn` |
 | `addclosefrom_np(n)` | zavře 0-2 od `n` |
 
