@@ -19,6 +19,7 @@ pub const TESTS: &[Test] = &[
     ("ulohy: producent, rozsah klienta, zruseni", produce_and_scope),
     ("ulohy: neznamy proces v jobu", unknown_process),
     ("ulohy: scrub z fsd a sluzby ze supervisoru", fsd_and_services),
+    ("ulohy: 100 soucasnych producentu (smycka pres port)", many_producers),
 ];
 
 const TIMEOUT: Duration = Duration::from_secs(20);
@@ -130,6 +131,49 @@ fn produce_and_scope(_: &Startup) -> TestResult {
     // Producent skonci: jeho bezici uloha skonci chybou.
     drop(p);
     admin.until("konec producenta", |ts| ts.iter().any(|t| t.id == id && matches!(t.state, State::Failed { .. })))?;
+    Ok(())
+}
+
+/// Vic kanalu nez limit `OBJECT_WAIT_MANY` (64): taskd ceka pres port.
+/// 100 producentu, kazdy s ulohou; registrace v obracenem poradi, spravce
+/// vidi vsechny; konec pulky producentu ukonci jejich ulohy.
+fn many_producers(_: &Startup) -> TestResult {
+    const N: usize = 100;
+    let mut ps = Vec::new();
+    for i in 0..N {
+        ps.push(tasks::producer(&alloc::format!("test-mnoho-{i}")).map_err(|e| fail("kanal producenta", e))?);
+    }
+    for (i, p) in ps.iter().enumerate().rev() {
+        let reg = Produce::Register {
+            req: i as u32,
+            parent: 0,
+            name: alloc::format!("Hromadna uloha {i}"),
+            origin: Origin::Script,
+            who: "test".into(),
+            agent: false,
+            job: None,
+            attach: None,
+            actions: actions::CANCEL,
+        };
+        p.write(&reg.encode(), Vec::new()).map_err(|e| fail("registrace", e))?;
+    }
+    let mut ids = alloc::vec![0u64; N];
+    for (i, p) in ps.iter().enumerate().rev() {
+        let m = p.read(Some(time::deadline_after(TIMEOUT))).map_err(|e| fail(&alloc::format!("REGISTERED {i}"), e))?;
+        let (req, id) = taskproto::decode_registered(&m.data).map_err(|e| fail("REGISTERED", e))?;
+        check_eq!(req, i as u32, "cislo pozadavku");
+        ids[i] = id;
+        p.write(&Produce::Update { id, state: State::Running, progress: None, eta_ms: None }.encode(), Vec::new())
+            .map_err(|e| fail("prubeh", e))?;
+    }
+    let mut admin = Watch::new("spravce", true)?;
+    admin.until("vsechny ulohy u spravce", |ts| ids.iter().all(|id| ts.iter().any(|t| t.id == *id)))?;
+    // Zavrit kazdeho druheho producenta: jeho bezici uloha skonci chybou.
+    let keep: Vec<Channel> = ps.into_iter().enumerate().filter(|(i, _)| i % 2 == 1).map(|(_, p)| p).collect();
+    admin.until("konec pulky producentu", |ts| {
+        ids.iter().step_by(2).all(|id| ts.iter().any(|t| t.id == *id && matches!(t.state, State::Failed { .. })))
+    })?;
+    drop(keep);
     Ok(())
 }
 
