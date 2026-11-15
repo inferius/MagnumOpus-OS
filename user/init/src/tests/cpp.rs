@@ -1,7 +1,8 @@
 //! Beh C++ (krok 7a-1, docs/cs/cpp.md): program `cpptest` (user/cpptest)
 //! staticky s `libc++.a` a jako PIE nad `/system/lib/libc++.so` -
 //! kontejnery, vyjimky (i pres ramec C), RTTI, zarovnany `new`, vlakna
-//! a `thread_local`, `chrono`, `random_device`, `std::filesystem` nad fsd.
+//! a `thread_local`, `chrono`, `random_device`, `std::filesystem` nad fsd,
+//! proudy (`iostream`, `fstream`), locale a siroke znaky, `format`, `regex`.
 //! Port HarfBuzz (C++ bez vyjimek, volany z C): `hbtest` tvaruje text
 //! pismem Inter z initfs.
 
@@ -32,6 +33,10 @@ const PARTS: &[&str] = &[
     "vlakna",
     "cas-nahoda",
     "filesystem",
+    "iostream",
+    "proudy",
+    "locale-siroke-znaky",
+    "format-regex",
 ];
 
 fn run(s: &Startup, name: &str) -> TestResult {

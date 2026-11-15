@@ -235,8 +235,10 @@ the initfs.
   `LICENSE-libcxxabi.TXT`, `LICENSE-libunwind.TXT` (z archivu / from the
   archive). Zdroj / source:
   <https://github.com/llvm/llvm-project/releases/tag/llvmorg-23.1.5>.
-- **Naše úpravy / Our changes:** `0001-magnumopus.patch` (`random_device`
-  nad `getentropy`, `chrono` nad `clock_gettime` pro `__magnumopus__`).
+- **Naše úpravy / Our changes:** `0001-magnumopus.patch` pro / for
+  `__magnumopus__`: `random_device` nad / over `getentropy`, `chrono` nad /
+  over `clock_gettime`, `__cxa_thread_atexit`, backend locale `linux.h`,
+  výchozí tabulka znaků / default character table.
 - **Programy / programs:** `cpptest`, `cpptest-dyn` (náš test / our test,
   `user/cpptest/`).
 - **Popis / Description:** `docs/cs/cpp.md`, `docs/en/cpp.md`.

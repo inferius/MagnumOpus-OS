@@ -19,7 +19,7 @@ v xtasku ([Porty v C](porty-c.md), `xtask/src/cports/cxx.rs`).
 | `std::filesystem` | nad fsd: `*at` relativně k adresáři, `realpath`, `statvfs`, `sendfile` | **[ověřeno v QEMU]** x86_64 i aarch64 |
 | `chrono`, `random_device` | `clock_gettime`, `getentropy` (generátor jádra) | **[ověřeno v QEMU]** x86_64 i aarch64 |
 | HarfBuzz 14.2.0 | amalgamace bez výjimek a RTTI, volaná z C | **[ověřeno v QEMU]** x86_64 i aarch64 (test `hbtest`) |
-| `<iostream>`, `<locale>`, široké znaky | libc++ bez locale a bez `wchar_t` | **[navrženo]** etapa 7a-2 po funkcích wchar a locale v cstd |
+| proudy, locale, široké znaky (7a-2) | `<iostream>`, `<fstream>`, `<sstream>`, `<locale>` (`C`, `C.UTF-8`), `std::wstring`, `codecvt`, `<format>`, `<regex>` nad funkcemi wchar a locale v cstd | **[ověřeno v QEMU]** x86_64 i aarch64 (`cpptest`: `iostream`, `proudy`, `locale-siroke-znaky`, `format-regex`) |
 | vybrané testy `libcxx/test` | dávky testů libc++ v QEMU | **[navrženo]** |
 
 ## Vrstvy
@@ -50,7 +50,9 @@ porty, protože C++ porty (HarfBuzz) linkují libc++:
   se rozbalí jen potřebné podstromy (`fetch::prepare_subset`, asi 50 MB
   z 179 MB; testy a dokumentace ne). Záplata
   `third_party/c-ports/llvm-runtimes/0001-magnumopus.patch`:
-  `random_device` přes `getentropy`, `chrono` přes `clock_gettime`.
+  `random_device` přes `getentropy`, `chrono` přes `clock_gettime`,
+  `__cxa_thread_atexit` v libc++abi, výběr backendu locale a výchozí
+  tabulka znaků pro `__magnumopus__`.
 - **Dvě konfigurace CMake** nad `runtimes/`:
   - statická (`toolchain.cmake`, bez PIC) instaluje `libc++.a`,
     `libc++abi.a`, `libunwind.a` a hlavičky `include/c++/v1` do
@@ -58,10 +60,13 @@ porty, protože C++ porty (HarfBuzz) linkují libc++:
   - dynamická (`toolchain-dyn.cmake`, PIC nad `libc.so`) staví jednu
     `libc++.so` s libc++abi a libunwind uvnitř (jako Android) do
     `prefix-dyn`; v initfs je jako `/system/lib/libc++.so`.
-- **Bez locale a širokých znaků** (`LIBCXX_ENABLE_LOCALIZATION=OFF`,
-  `LIBCXX_ENABLE_WIDE_CHARACTERS=OFF`): `<iostream>`, `<fstream>`,
-  `<locale>`, `<regex>` zatím nejsou. Etapa 7a-2 je zapne, až budou
-  v cstd funkce wchar a locale.
+- **Locale a široké znaky** (od 7a-2, `LIBCXX_ENABLE_LOCALIZATION`,
+  `LIBCXX_ENABLE_WIDE_CHARACTERS`): backend locale libc++ je
+  `support/linux.h` (obecné POSIX 2008: `newlocale`, `uselocale`,
+  `*_l`, `mbrtowc`...; funkce dává cstd), třídy znaků pro `ctype<char>`
+  bere libc++ z vlastní výchozí tabulky (`_LIBCPP_PROVIDES_DEFAULT_RUNE_TABLE`,
+  jako musl). `wchar_t` je 32bitový (UTF-32), locale `C` jednobajtové,
+  `C.UTF-8` a ostatní jména UTF-8 ([cstd](cstd.md)).
 - **Vlákna** nad pthread z cstd (`LIBCXX_HAS_PTHREAD_API`), bez libgcc
   a compiler-rt: pomocné funkce překladače jsou v `libc.a` (staticky)
   a `libbuiltins.a` (dynamicky).
@@ -155,7 +160,7 @@ běhu C++ (titulky libass a vykreslování textu ve FFmpegu, krok 7).
 
 | Test | Kde | Co ověřuje |
 |---|---|---|
-| `cpptest: libc++ staticky` | QEMU, sada `cpp` | `user/cpptest/cpptest.cpp`: statické konstruktory, kontejnery, výjimky (i přes rámec C), RTTI, zarovnaný `new`, `bad_alloc`, vlákna a `thread_local` s destruktory, `chrono`, `random_device`, `std::filesystem` nad fsd; destruktor globálního objektu po `main` |
+| `cpptest: libc++ staticky` | QEMU, sada `cpp` | `user/cpptest/cpptest.cpp`: proudy (`iostream`, `fstream`, `stringstream`), locale `C.UTF-8` (`ctype<wchar_t>`, `codecvt`), `wstring`, `format`, `regex`, statické konstruktory, kontejnery, výjimky (i přes rámec C), RTTI, zarovnaný `new`, `bad_alloc`, vlákna a `thread_local` s destruktory, `chrono`, `random_device`, `std::filesystem` nad fsd; destruktor globálního objektu po `main` |
 | `cpptest-dyn: libc++.so` | QEMU, sada `cpp` | totéž jako PIE nad `/system/lib/libc++.so` |
 | `hbtest: HarfBuzz` | QEMU, sada `cpp` | tvarování textu s diakritikou, kerning |
 | `cxxsup_tests`, `fsat_tests` | host, `cargo test -p cstd` | pořadí `__cxa_atexit` a `__cxa_finalize` podle modulu, destruktory `thread_local`, `getentropy`, `timespec_get`, `statvfs`, cesty `*at`, `sendfile`, shoda konstant s hlavičkami |

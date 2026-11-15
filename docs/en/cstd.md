@@ -286,6 +286,7 @@ tests `cxxsup_tests`, `fsat_tests`.
 | `fcntl.h`, `sys/stat.h` | `openat`, `mkdirat`, `fstatat`, `fchmodat` relative to a directory; `AT_REMOVEDIR`, `AT_SYMLINK_NOFOLLOW` | the directory path remembered at open + the name (the FS works with paths: no protection against the directory being renamed between open and the call) |
 | `sys/statvfs.h` | `statvfs`, `fstatvfs` | size and free blocks of the fsd session volume; inode counts 0 |
 | `sys/sendfile.h` | `sendfile` | copy through a 64 KiB buffer in the process |
+| `stdio.h` | `setbuf` | like `setvbuf` (`NULL` = unbuffered); `std::filebuf` |
 | `limits.h` | `PATH_MAX` (4096), `NAME_MAX` (255) | |
 | `link.h`, `elf.h` | `dl_iterate_phdr`, `struct dl_phdr_info`, ELF64 types | static program: one module from linker script symbols (`PT_LOAD`, `PT_GNU_EH_FRAME`) |
 | (C++ ABI) | `__cxa_atexit`, `__cxa_finalize`, `__cxa_thread_atexit_impl`, `__dso_handle` | `atexit` and `__cxa_atexit` share one list (one reverse order) |

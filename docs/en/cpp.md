@@ -19,7 +19,7 @@ in xtask ([C ports](c-ports.md), `xtask/src/cports/cxx.rs`).
 | `std::filesystem` | over fsd: `*at` relative to a directory, `realpath`, `statvfs`, `sendfile` | **[verified in QEMU]** x86_64 and aarch64 |
 | `chrono`, `random_device` | `clock_gettime`, `getentropy` (kernel generator) | **[verified in QEMU]** x86_64 and aarch64 |
 | HarfBuzz 14.2.0 | amalgamation without exceptions and RTTI, called from C | **[verified in QEMU]** x86_64 and aarch64 (test `hbtest`) |
-| `<iostream>`, `<locale>`, wide characters | libc++ without locale and without `wchar_t` | **[designed]** stage 7a-2 after the wchar and locale functions in cstd |
+| streams, locale, wide characters (7a-2) | `<iostream>`, `<fstream>`, `<sstream>`, `<locale>` (`C`, `C.UTF-8`), `std::wstring`, `codecvt`, `<format>`, `<regex>` over the wchar and locale functions in cstd | **[verified in QEMU]** x86_64 and aarch64 (`cpptest`: `iostream`, `proudy`, `locale-siroke-znaky`, `format-regex`) |
 | selected `libcxx/test` tests | batches of libc++ tests in QEMU | **[designed]** |
 
 ## Layers
@@ -50,7 +50,9 @@ other ports, because C++ ports (HarfBuzz) link libc++:
   needed subtrees are extracted (`fetch::prepare_subset`, about 50 MB of
   179 MB; no tests and docs). Patch
   `third_party/c-ports/llvm-runtimes/0001-magnumopus.patch`:
-  `random_device` via `getentropy`, `chrono` via `clock_gettime`.
+  `random_device` via `getentropy`, `chrono` via `clock_gettime`,
+  `__cxa_thread_atexit` in libc++abi, the locale backend choice and the
+  default character table for `__magnumopus__`.
 - **Two CMake configurations** over `runtimes/`:
   - static (`toolchain.cmake`, no PIC) installs `libc++.a`,
     `libc++abi.a`, `libunwind.a` and the `include/c++/v1` headers into
@@ -58,10 +60,14 @@ other ports, because C++ ports (HarfBuzz) link libc++:
   - dynamic (`toolchain-dyn.cmake`, PIC over `libc.so`) builds one
     `libc++.so` with libc++abi and libunwind inside (like Android) into
     `prefix-dyn`; in the initfs it is `/system/lib/libc++.so`.
-- **No locale and wide characters** (`LIBCXX_ENABLE_LOCALIZATION=OFF`,
-  `LIBCXX_ENABLE_WIDE_CHARACTERS=OFF`): `<iostream>`, `<fstream>`,
-  `<locale>`, `<regex>` are not there yet. Stage 7a-2 turns them on once
-  cstd has the wchar and locale functions.
+- **Locale and wide characters** (since 7a-2,
+  `LIBCXX_ENABLE_LOCALIZATION`, `LIBCXX_ENABLE_WIDE_CHARACTERS`): the
+  libc++ locale backend is `support/linux.h` (generic POSIX 2008:
+  `newlocale`, `uselocale`, `*_l`, `mbrtowc`...; cstd provides the
+  functions), and libc++ takes the character classes for `ctype<char>`
+  from its own default table (`_LIBCPP_PROVIDES_DEFAULT_RUNE_TABLE`, like
+  musl). `wchar_t` is 32-bit (UTF-32), the `C` locale is single-byte,
+  `C.UTF-8` and other names are UTF-8 ([cstd](cstd.md)).
 - **Threads** over pthread from cstd (`LIBCXX_HAS_PTHREAD_API`), without
   libgcc and compiler-rt: the compiler helper functions are in `libc.a`
   (static) and `libbuiltins.a` (dynamic).
@@ -160,7 +166,7 @@ and text rendering in FFmpeg, step 7).
 
 | Test | Where | What it checks |
 |---|---|---|
-| `cpptest: libc++ staticky` | QEMU, suite `cpp` | `user/cpptest/cpptest.cpp`: static constructors, containers, exceptions (also through a C frame), RTTI, aligned `new`, `bad_alloc`, threads and `thread_local` with destructors, `chrono`, `random_device`, `std::filesystem` over fsd; destructor of a global object after `main` |
+| `cpptest: libc++ staticky` | QEMU, suite `cpp` | `user/cpptest/cpptest.cpp`: streams (`iostream`, `fstream`, `stringstream`), the `C.UTF-8` locale (`ctype<wchar_t>`, `codecvt`), `wstring`, `format`, `regex`, static constructors, containers, exceptions (also through a C frame), RTTI, aligned `new`, `bad_alloc`, threads and `thread_local` with destructors, `chrono`, `random_device`, `std::filesystem` over fsd; destructor of a global object after `main` |
 | `cpptest-dyn: libc++.so` | QEMU, suite `cpp` | the same as a PIE over `/system/lib/libc++.so` |
 | `hbtest: HarfBuzz` | QEMU, suite `cpp` | shaping text with diacritics, kerning |
 | `cxxsup_tests`, `fsat_tests` | host, `cargo test -p cstd` | order of `__cxa_atexit` and `__cxa_finalize` by module, `thread_local` destructors, `getentropy`, `timespec_get`, `statvfs`, `*at` paths, `sendfile`, constants matching the headers |

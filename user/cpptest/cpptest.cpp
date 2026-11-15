@@ -5,7 +5,8 @@
 // testu initu, user/init/src/tests/cpp.rs). Chyba = zprava na stderr
 // a kod 1. Argument 1 = adresar pro std::filesystem.
 //
-// Bez <iostream> a <locale>: etapa 7a-1 je bez locale (7a-2).
+// Od 7a-2 i proudy (<iostream>, <fstream>, <sstream>), locale, siroke znaky,
+// <format> a <regex>.
 
 #include <algorithm>
 #include <atomic>
@@ -16,6 +17,13 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <format>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <locale>
+#include <regex>
+#include <sstream>
 #include <functional>
 #include <map>
 #include <memory>
@@ -28,6 +36,8 @@
 #include <thread>
 #include <typeinfo>
 #include <unordered_map>
+#include <cwchar>
+#include <cwctype>
 #include <variant>
 #include <vector>
 
@@ -373,6 +383,72 @@ static void test_filesystem(const char *dir)
     ok("filesystem");
 }
 
+// --- proudy, locale, siroke znaky (7a-2) -----------------------------------
+
+static void test_streams(const char *dir)
+{
+    std::ostringstream os;
+    os << 42 << ' ' << std::hex << 255 << ' ' << std::dec << std::fixed << std::setprecision(3) << 3.14159;
+    CHECK(os.str() == "42 ff 3.142");
+    std::istringstream is("17 2.5 slovo");
+    int i = 0;
+    double d = 0;
+    std::string w;
+    is >> i >> d >> w;
+    CHECK(i == 17 && d == 2.5 && w == "slovo");
+    std::cout << "ok iostream" << std::endl;
+    if (dir) {
+        std::string path = std::string(dir) + "/proud.txt";
+        {
+            std::ofstream out(path);
+            CHECK(out.good());
+            out << "radek 1\n" << 12345 << "\n";
+        }
+        std::ifstream in(path);
+        std::string line;
+        CHECK(std::getline(in, line) && line == "radek 1");
+        long n = 0;
+        in >> n;
+        CHECK(n == 12345);
+    }
+    ok("proudy");
+}
+
+static void test_locale_wide()
+{
+    std::locale loc("C.UTF-8");
+    CHECK(loc.name() == "C.UTF-8");
+    auto &ct = std::use_facet<std::ctype<wchar_t>>(loc);
+    // U+010D -> U+010C, U+017E -> U+017D
+    CHECK(ct.toupper(L'\u010d') == L'\u010c');
+    CHECK(ct.is(std::ctype_base::alpha, L'\u017e'));
+    // UTF-8 -> wchar_t pres codecvt facetu: "zlut" s hacky = 4 znaky.
+    const char utf8[] = "\xc5\xbelu\xc5\xa5";
+    std::mbstate_t st{};
+    wchar_t out[8];
+    const char *from_next = nullptr;
+    wchar_t *to_next = nullptr;
+    auto &cv = std::use_facet<std::codecvt<wchar_t, char, std::mbstate_t>>(loc);
+    auto r = cv.in(st, utf8, utf8 + sizeof(utf8) - 1, from_next, out, out + 8, to_next);
+    CHECK(r == std::codecvt_base::ok && to_next - out == 4 && out[0] == L'\u017e' && out[3] == L'\u0165');
+    std::wstring ws = L"a\u010d";
+    CHECK(ws.size() == 2 && std::wcslen(ws.c_str()) == 2);
+    std::wostringstream wos;
+    wos << L"cislo " << 7;
+    CHECK(wos.str() == L"cislo 7");
+    ok("locale-siroke-znaky");
+}
+
+static void test_format_regex()
+{
+    CHECK(std::format("{:>5}|{:.2f}|{:#x}", 42, 3.14159, 255) == "   42|3.14|0xff");
+    std::regex re("([a-z]+)-([0-9]+)");
+    std::smatch m;
+    std::string text = "verze abc-123 konec";
+    CHECK(std::regex_search(text, m, re) && m[1] == "abc" && m[2] == "123");
+    ok("format-regex");
+}
+
 int main(int argc, char **argv)
 {
     test_static_init();
@@ -385,6 +461,9 @@ int main(int argc, char **argv)
     test_chrono_random();
     if (argc > 1)
         test_filesystem(argv[1]);
+    test_streams(argc > 1 ? argv[1] : nullptr);
+    test_locale_wide();
+    test_format_regex();
     if (failures)
         return 1;
     std::printf("cpptest: hotovo\n");

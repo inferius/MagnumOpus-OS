@@ -273,6 +273,7 @@ fsd přitom hlídá cyklus čekání (`EDEADLK`). `l_pid` z `F_GETLK` je -1
 | `fcntl.h`, `sys/stat.h` | `openat`, `mkdirat`, `fstatat`, `fchmodat` relativně k adresáři; `AT_REMOVEDIR`, `AT_SYMLINK_NOFOLLOW` | cesta adresáře zapamatovaná při otevření + jméno (FS pracuje s cestami: bez ochrany před přejmenováním adresáře mezi otevřením a voláním) |
 | `sys/statvfs.h` | `statvfs`, `fstatvfs` | velikost a volné bloky svazku relace fsd; počty inodů 0 |
 | `sys/sendfile.h` | `sendfile` | kopie přes buffer 64 KiB v procesu |
+| `stdio.h` | `setbuf` | jako `setvbuf` (`NULL` = bez bufferu); `std::filebuf` |
 | `limits.h` | `PATH_MAX` (4096), `NAME_MAX` (255) | |
 | `link.h`, `elf.h` | `dl_iterate_phdr`, `struct dl_phdr_info`, typy ELF64 | statický program: jeden modul ze symbolů linker skriptu (`PT_LOAD`, `PT_GNU_EH_FRAME`) |
 | (ABI C++) | `__cxa_atexit`, `__cxa_finalize`, `__cxa_thread_atexit_impl`, `__dso_handle` | `atexit` a `__cxa_atexit` mají jeden seznam (společné obrácené pořadí) |

@@ -9,8 +9,8 @@
 //!   `libc++.so` (libc++ + libc++abi + libunwind uvnitr, jako Android)
 //!   v predpone `prefix-dyn`, do initfs jako `/system/lib/libc++.so`.
 //!
-//! Etapa 7a-1 je bez sirokych znaku a locale (`<iostream>`, `<locale>`
-//! az 7a-2 s funkcemi wchar a locale v cstd).
+//! Od 7a-2 s locale a sirokymi znaky (`<iostream>`, `<fstream>`,
+//! `<locale>`, `std::wstring`) nad funkcemi wchar a locale v cstd.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -31,7 +31,9 @@ pub const LLVM: CPort = CPort {
     file: "llvm-project-23.1.5.src.tar.xz",
     sha256: "fb50b1eac93ddeb3aa8dab4cfe324dff74f4a9c2bdee6160c9e36188f8d06a6e",
     top: "llvm-project-23.1.5.src",
-    // random_device nad getentropy, chrono nad clock_gettime (__magnumopus__).
+    // __magnumopus__: random_device nad getentropy, chrono nad
+    // clock_gettime, __cxa_thread_atexit, locale backend linux.h
+    // a vychozi tabulka znaku (ctype<char>).
     patches: &["0001-magnumopus.patch"],
     build: Build::CMake { options: &[], programs: &[] },
     data: &[],
@@ -109,9 +111,10 @@ const COMMON: &[&str] = &[
     "-DLIBUNWIND_HAS_BSD_LIB=OFF",
     "-DLIBCXXABI_USE_LLVM_UNWINDER=ON",
     "-DLIBCXX_CXX_ABI=libcxxabi",
-    // 7a-1: bez sirokych znaku a locale (7a-2 po cstd-wchar).
-    "-DLIBCXX_ENABLE_WIDE_CHARACTERS=OFF",
-    "-DLIBCXX_ENABLE_LOCALIZATION=OFF",
+    // Locale a siroke znaky nad cstd (locale_t, wchar, *_l; backend
+    // support/linux.h, vychozi tabulka znaku libc++).
+    "-DLIBCXX_ENABLE_WIDE_CHARACTERS=ON",
+    "-DLIBCXX_ENABLE_LOCALIZATION=ON",
     "-DLIBCXX_ENABLE_TIME_ZONE_DATABASE=OFF",
     "-DLIBCXX_ENABLE_ABI_LINKER_SCRIPT=OFF",
     "-DLIBCXX_INSTALL_MODULES=OFF",
