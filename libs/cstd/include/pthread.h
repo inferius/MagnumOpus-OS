@@ -48,6 +48,10 @@ typedef unsigned int pthread_key_t;
 #define PTHREAD_CANCELED ((void *)-1)
 #define PTHREAD_BARRIER_SERIAL_THREAD (-1)
 #define PTHREAD_PROCESS_PRIVATE 0
+#define PTHREAD_SCOPE_SYSTEM 0
+#define PTHREAD_SCOPE_PROCESS 1
+#define PTHREAD_INHERIT_SCHED 0
+#define PTHREAD_EXPLICIT_SCHED 1
 #define PTHREAD_STACK_MIN 16384
 #define PTHREAD_KEYS_MAX 1024
 #define PTHREAD_DESTRUCTOR_ITERATIONS 4
@@ -71,6 +75,20 @@ int pthread_attr_setstacksize(pthread_attr_t *a, size_t size);
 int pthread_attr_getstacksize(const pthread_attr_t *a, size_t *size);
 int pthread_attr_setdetachstate(pthread_attr_t *a, int state);
 int pthread_attr_getdetachstate(const pthread_attr_t *a, int *state);
+/* Vlastni zasobnik: vlakno bezi opravdu v teto pameti (musi zit do konce
+ * vlakna, ochrannou oblast si zajisti volajici). */
+int pthread_attr_setstack(pthread_attr_t *a, void *addr, size_t size);
+int pthread_attr_getstack(const pthread_attr_t *a, void **addr, size_t *size);
+int pthread_attr_setguardsize(pthread_attr_t *a, size_t size);
+int pthread_attr_getguardsize(const pthread_attr_t *a, size_t *size);
+int pthread_attr_setscope(pthread_attr_t *a, int scope);
+int pthread_attr_getscope(const pthread_attr_t *a, int *scope);
+int pthread_attr_setinheritsched(pthread_attr_t *a, int inherit);
+int pthread_attr_getinheritsched(const pthread_attr_t *a, int *inherit);
+int pthread_attr_setschedpolicy(pthread_attr_t *a, int policy);
+int pthread_attr_getschedpolicy(const pthread_attr_t *a, int *policy);
+int pthread_attr_setschedparam(pthread_attr_t *a, const struct sched_param *param);
+int pthread_attr_getschedparam(const pthread_attr_t *a, struct sched_param *param);
 
 int pthread_mutexattr_init(pthread_mutexattr_t *a);
 int pthread_mutexattr_destroy(pthread_mutexattr_t *a);

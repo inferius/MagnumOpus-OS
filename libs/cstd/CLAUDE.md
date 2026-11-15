@@ -17,6 +17,8 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 - `src/misc.rs` - další funkce pro porty (řetězce, `qsort`, `rand`, `pwd.h`, `ioctl`, `uname`, `getrusage`); `src/scanf.rs` - rodina `scanf` (motor `scan_units` nad znaky `u32` v bajtovém i širokém režimu, `Input`/`Sink`).
 - `src/locale/` - `mod.rs` stav locale (globální maska `GLOBAL` + locale vlákna v TLS z `uselocale`), `setlocale`, `newlocale`/`duplocale`/`freelocale`, `__ctype_get_mb_cur_max`; `langinfo.rs` `localeconv`, `nl_langinfo` (čísla položek = modul `nl`, test `langinfo_header_matches`); `xl.rs` varianty `*_l`.
 - `src/wchar/` - `conv.rs` převody (`mbrtowc`, `mbsnrtowcs`, ...), `wcs.rs` řetězce, `num.rs` `wcstol`/`wcstod`/`wcsftime`, `wctype.rs` třídy nad `libs/uniprop`, `wio.rs` široké proudy (`FILE` má orientaci a stav, `stdio::Locked`), `wprintf.rs`, `wscanf.rs`; `c/math_ld.c` `wcstold`, `strtold_l`.
+- `src/spawn/` - `mod.rs` `posix_spawn(p)`, akce souborů (`plan`: jen fd 0-2, rozhodnutí 4A), atributy, hledání programu (`PATH`, jinak holý název pro launchd); `wait.rs` tabulka potomků (`pid_t` z cstd), `waitpid`/`wait4`/`waitid`, stav z kódu konce (`status_of`), `kill` na potomka (`kill_child`, jen ukončení). Systémová část `sys/os_proc.rs` nad `osrt::process`; host má náhradní potomky (`exit:<kód>`, `sleep:<ms>:<kód>`) v `sys/host.rs`.
+- `src/semaphore.rs` (nepojmenované nad futexem, `sem_open` = `ENOSYS`), `src/pthread/attr.rs` (atributy vláken, vlastní zásobník přes `sys::spawn_on`), `src/statfs.rs` (`statfs`/`fstatfs` nad `sys::volume_space`), `src/ifaddrs.rs` (`getifaddrs`, `if_nameindex`: `lo` + `eth0` z netd), `src/ifreq.rs` (`ioctl` `SIOCGIF*` na socketu).
 - `src/dlfcn.rs` - `dlopen` a spol. nad tabulkou zavaděče (`osrt::dl`); `crt/crt1.c` - start programu PIE nad `libc.so` (`_start` -> `__libc_start`).
 - `libs/cstd-so` - `libc.so` (cdylib nad sysrootem std jako PIC, `stdsys::build_libc_so_locked`).
 - `libs/cstd-libc` - `libc.a` (staticlib cstd + std + osrt + rozhraní SDL `libs/mosdl`) pro sysroot C (`xtask/src/csysroot.rs`), porty v C `xtask/src/cports/`. `environ` je v `osrt` (`env.rs`), ne v cstd.
@@ -38,15 +40,20 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 - `wchar_t` je jako na Linuxu: x86_64 `i32`, aarch64 `u32` (`wchar::wchar_t`); hodnoty se zpracovávají jako `u32`.
 - Nový symbol definovaný v C (`c/*.c`) patří i do `libs/cstd-so/export-c.txt` (jinak ho `libc.so` neexportuje) a do objektu, na který něco odkazuje (`c/math_ld.c`): `libc.so` vtahuje z archivu C jen odkazované objekty, samostatný nový soubor by v ní chyběl.
 - Nic v cstd nesmí spoléhat na rozbalení zásobníku (`catch_unwind`): cíl má `panic=abort`.
+- Čísla `errno` jsou celá tabulka Linuxu `asm-generic` (1-133); texty v `errno::message` pro každé číslo (test `errno_table_is_complete`).
+- Rozložení `posix_spawn_file_actions_t` (80 B), `posix_spawnattr_t` (336 B), `sem_t` (32 B), `struct statfs` (120 B) a `siginfo_t` (128 B) jako glibc na 64 bitech; hlídají testy v `posix_tests.rs` a `spawn_tests.rs`.
+- Potomek `posix_spawn` dostane jen fd 0-2; akce souborů se vyhodnotí v rodiči (`spawn::plan`), nepodporovaná akce = `ENOTSUP` hned v `posix_spawn`, nikdy tichá změna chování.
 
 ## Testy
 
 - Host: `cargo test -p cstd` (režimy `fopen`, errno, soubory, pravidla čísel fd nad `sys/host.rs`, locale a široké znaky v `locale_tests.rs` a `wchar_tests.rs` - UTF-8 jen přes `uselocale`, globální locale testy nemění).
-- QEMU: `cargo xtask test --only cstd` (program `user/ctest`, v C); sockety `--only "cstd sit"` (`ctest net`, pomocné servery hostitele jako `std sit`).
+- QEMU: `cargo xtask test --only cstd` (program `user/ctest`, v C; krok `posix2` = `c/spawncheck.c`, ctest spouští sám sebe v režimu `child`, proto dostává kanál ke launchd); sockety `--only "cstd sit"` (`ctest net`, pomocné servery hostitele jako `std sit`).
 
 ## Pasti
 
 - Host testy běží souběžně nad jednou tabulkou fd (`sys/host.rs`, nové číslo = nejnižší volné): po `close` nízkého čísla ho může hned dostat jiný test. Na zavřené číslo (druhé `close`, `EBADF`) a pevná čísla (`dup2`) jen vysoko (`fd_tests::HIGH` = 4000).
+- Host testy, které mění pracovní adresář (`chdir`, `fchdir`), by rozbily souběžné testy s relativními cestami: úspěšné `fchdir` se testuje jen v QEMU.
+- `c_long` je na hostiteli Windows 32bitový: host testy s `long` jen s hodnotami do 31 bitů.
 - Program v C je crate `#![no_main]`; `main` z C volá `osrt`. Bez `extern crate cstd;` se knihovna nepřilinkuje.
 - Deklarace v hlavičkách jen s implementací: CMake/configure portů by funkci našly a link by selhal.
 - `locale_t` se v hlavičkách definuje pod strážcem `_CSTD_LOCALE_T` (je v `locale.h`, `wchar.h`, `wctype.h`, `ctype.h`, `string.h`, `stdlib.h`, `time.h`, `langinfo.h`).

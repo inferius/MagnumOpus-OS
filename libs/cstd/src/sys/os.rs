@@ -149,6 +149,11 @@ pub fn stat(path: &[u8]) -> R<Stat> {
     rt::fs::stat_path(path).map(|s| stat_of(&s)).map_err(e)
 }
 
+/// Velikost svazku: (velikost bloku, bloku, volnych bloku).
+pub fn volume_space() -> R<(u32, u64, u64)> {
+    rt::fs::volume_space().map_err(e)
+}
+
 pub fn ftruncate(fd: i32, len: u64) -> R<()> {
     let d = desc(fd)?;
     match d.file() {
@@ -181,6 +186,20 @@ pub fn pipe(cloexec: bool, nonblock: bool) -> R<(i32, i32)> {
 
 pub fn isatty(fd: i32) -> R<bool> {
     fd::is_terminal(fd).map_err(e)
+}
+
+/// Absolutni cesta otevreneho souboru nebo adresare (`openat`).
+pub fn fd_path(fd: i32) -> R<Vec<u8>> {
+    let d = desc(fd)?;
+    let f = d.file().ok_or(errno::ENOTDIR)?;
+    Ok(f.path().as_bytes().to_vec())
+}
+
+/// Pracovni adresar = adresar otevreny jako `fd` (cesta z doby otevreni).
+pub fn fchdir(fd: i32) -> R<()> {
+    let d = desc(fd)?;
+    let f = d.file().ok_or(errno::ENOTDIR)?;
+    rt::env::set_current_dir(f.path().as_bytes()).map_err(e)
 }
 
 pub fn list_dir(fd: i32) -> R<Vec<Entry>> {
@@ -225,6 +244,11 @@ pub struct Thread(rt::thread::Thread);
 /// Nove vlakno nad osrt (TLS jako std, i pod zavadecem).
 pub fn spawn(stack: usize, f: super::ThreadFn) -> R<Thread> {
     rt::thread::spawn(stack, f).map(Thread).map_err(|_| errno::EAGAIN)
+}
+
+/// Vlakno na zasobniku volajiciho, ktery konci na `top` (`pthread_attr_setstack`).
+pub fn spawn_on(top: usize, f: super::ThreadFn) -> R<Thread> {
+    rt::thread::spawn_on(top, f).map(Thread).map_err(|_| errno::EAGAIN)
 }
 
 impl Thread {
@@ -336,6 +360,13 @@ pub fn sock_shutdown_write(fd: i32) -> R<()> {
 
 pub fn sock_name(fd: i32, peer: bool) -> R<SocketAddr> {
     sock(fd, |s, _| if peer { s.peer_addr() } else { s.local_addr() })
+}
+
+/// Rozhrani site relace; `None` = proces nema relaci site nebo pravo
+/// `INFO` (zbyde jen smycka).
+pub fn net_interface() -> Option<super::Iface> {
+    let i = rt::net::interface().ok()?;
+    Some(super::Iface { mac: i.mac, mtu: i.mtu, up: i.link_up, addr: i.addr })
 }
 
 pub fn sock_is_stream(fd: i32) -> R<(bool, bool)> {

@@ -362,13 +362,22 @@ pub unsafe extern "C" fn readlink(path: *const c_char, _buf: *mut c_char, _n: si
     }
 }
 
-/// `ioctl`: terminal zatim nema ovladani (`ENOTTY`).
+/// `ioctl`: na socketu dotazy na rozhrani `SIOCGIF*` (`ifreq.rs`);
+/// terminal zatim nema ovladani (`ENOTTY`).
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn ioctl(fd: c_int, _req: u64, _args: ...) -> c_int {
-    match crate::sys::status(fd) {
-        Ok(_) => errno::ret(Err(errno::ENOTTY)),
-        Err(e) => errno::ret(Err(e)),
+pub unsafe extern "C" fn ioctl(fd: c_int, req: u64, mut args: ...) -> c_int {
+    if let Err(e) = crate::sys::status(fd) {
+        return errno::ret(Err(e));
     }
+    if crate::ifreq::is_iface_request(req) && crate::sys::sock_is_stream(fd).is_ok() {
+        // SAFETY: pozadavky SIOCGIF* maji jako argument ukazatel.
+        let p = unsafe { args.next_arg::<*mut core::ffi::c_void>() };
+        // SAFETY: kontrakt C.
+        if let Some(r) = unsafe { crate::ifreq::ioctl(req, p) } {
+            return errno::ret(r);
+        }
+    }
+    errno::ret(Err(errno::ENOTTY))
 }
 
 // --- uname ----------------------------------------------------------------------

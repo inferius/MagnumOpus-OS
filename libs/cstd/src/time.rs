@@ -513,3 +513,121 @@ pub unsafe extern "C" fn strftime(buf: *mut c_char, max: size_t, fmt: *const c_c
     }
     out.len()
 }
+
+// --- asctime, ctime, times --------------------------------------------------
+
+const ASC_DAYS: [&[u8; 3]; 7] = [b"Sun", b"Mon", b"Tue", b"Wed", b"Thu", b"Fri", b"Sat"];
+const ASC_MONS: [&[u8; 3]; 12] = [b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec"];
+/// Velikost bufferu `asctime_r`/`ctime_r` (POSIX: aspon 26 B).
+pub const ASC_LEN: usize = 26;
+
+/// Text `asctime` (`"Sun Sep 16 01:03:52 1973\n"`, format z normy C);
+/// den nebo mesic mimo rozsah = `???` jako glibc.
+pub fn asc_text(t: &tm) -> Vec<u8> {
+    let name = |arr: &[&[u8; 3]], i: c_int| usize::try_from(i).ok().and_then(|i| arr.get(i)).map_or(*b"???", |n| **n);
+    let mut out = Vec::with_capacity(ASC_LEN);
+    out.extend_from_slice(&name(&ASC_DAYS, t.tm_wday));
+    out.push(b' ');
+    out.extend_from_slice(&name(&ASC_MONS, t.tm_mon));
+    let rest = format!("{:3} {:02}:{:02}:{:02} {}\n", t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, i64::from(t.tm_year) + 1900);
+    out.extend_from_slice(rest.as_bytes());
+    out
+}
+
+/// Zapise `asctime` do `buf` (`ASC_LEN` bajtu); delsi text (rok > 9999)
+/// = `EOVERFLOW` a NULL.
+///
+/// # Safety
+///
+/// `buf` ma aspon `ASC_LEN` bajtu.
+unsafe fn asc_into(t: &tm, buf: *mut c_char) -> *mut c_char {
+    let text = asc_text(t);
+    if text.len() + 1 > ASC_LEN {
+        errno::set(errno::EOVERFLOW);
+        return core::ptr::null_mut();
+    }
+    // SAFETY: `buf` ma `ASC_LEN` bajtu.
+    unsafe {
+        core::ptr::copy_nonoverlapping(text.as_ptr(), buf, text.len());
+        *buf.add(text.len()) = 0;
+    }
+    buf
+}
+
+thread_local! {
+    /// Vysledek `asctime`/`ctime` (staticky per vlakno).
+    static ASC_BUF: core::cell::UnsafeCell<[c_char; ASC_LEN]> = const { core::cell::UnsafeCell::new([0; ASC_LEN]) };
+}
+
+/// # Safety
+///
+/// `t` je platny `tm`, `buf` ma aspon 26 bajtu.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn asctime_r(t: *const tm, buf: *mut c_char) -> *mut c_char {
+    // SAFETY: kontrakt C.
+    let (Some(t), false) = (unsafe { t.as_ref() }, buf.is_null()) else { return core::ptr::null_mut() };
+    // SAFETY: kontrakt C.
+    unsafe { asc_into(t, buf) }
+}
+
+/// # Safety
+///
+/// `t` je platny `tm`.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn asctime(t: *const tm) -> *mut c_char {
+    // SAFETY: buffer vlakna ma ASC_LEN bajtu.
+    ASC_BUF.with(|b| unsafe { asctime_r(t, b.get().cast()) })
+}
+
+/// `ctime_r` = `asctime_r(localtime_r(t))`.
+///
+/// # Safety
+///
+/// `t` je platny ukazatel, `buf` ma aspon 26 bajtu.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn ctime_r(t: *const i64, buf: *mut c_char) -> *mut c_char {
+    let mut v = tm::default();
+    // SAFETY: kontrakt C.
+    if unsafe { localtime_r(t, &mut v) }.is_null() || buf.is_null() {
+        return core::ptr::null_mut();
+    }
+    // SAFETY: kontrakt C.
+    unsafe { asc_into(&v, buf) }
+}
+
+/// # Safety
+///
+/// `t` je platny ukazatel.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn ctime(t: *const i64) -> *mut c_char {
+    // SAFETY: buffer vlakna ma ASC_LEN bajtu.
+    ASC_BUF.with(|b| unsafe { ctime_r(t, b.get().cast()) })
+}
+
+/// `struct tms` (`sys/times.h`, 4 x `clock_t`).
+#[repr(C)]
+#[derive(Default)]
+pub struct tms {
+    pub tms_utime: c_long,
+    pub tms_stime: c_long,
+    pub tms_cutime: c_long,
+    pub tms_cstime: c_long,
+}
+
+/// Tiky `times` za sekundu (`sysconf(_SC_CLK_TCK)`).
+pub const CLK_TCK: u64 = 100;
+
+/// `times`: uplynuly cas v tiku `CLK_TCK` od startu systemu. Cas CPU
+/// jadro zatim nedava (jako u `clock`): pole `tms` jsou 0.
+///
+/// # Safety
+///
+/// `out` je NULL nebo platny ukazatel.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn times(out: *mut tms) -> c_long {
+    // SAFETY: kontrakt C.
+    if let Some(o) = unsafe { out.as_mut() } {
+        *o = tms::default();
+    }
+    (sys::monotonic_ns() / (1_000_000_000 / CLK_TCK)) as c_long
+}

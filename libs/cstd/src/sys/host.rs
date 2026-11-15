@@ -256,6 +256,16 @@ pub fn fstat(fd: i32) -> R<Stat> {
     }
 }
 
+/// Na hostiteli fd cestu neznaji (jen testy logiky).
+pub fn fd_path(_fd: i32) -> R<Vec<u8>> {
+    Err(errno::ENOTSUP)
+}
+
+/// Na hostiteli pevna velikost (jen testy logiky statvfs).
+pub fn volume_space() -> R<(u32, u64, u64)> {
+    Ok((4096, 1 << 20, 1 << 18))
+}
+
 pub fn stat(p: &[u8]) -> R<Stat> {
     fs::metadata(path(p)?).map(|m| stat_md(&m)).map_err(io)
 }
@@ -285,6 +295,24 @@ pub fn pipe(cloexec: bool, nonblock: bool) -> R<(i32, i32)> {
 pub fn isatty(fd: i32) -> R<bool> {
     let d = get(fd)?;
     Ok(matches!(d.obj, Obj::Stdin | Obj::Stdout | Obj::Stderr))
+}
+
+/// Hostitel: pevne rozhrani z dokumentacniho rozsahu (testy prevodu).
+pub const HOST_IFACE: super::Iface = super::Iface {
+    mac: [0x52, 0x54, 0, 0x12, 0x34, 0x56],
+    mtu: 1500,
+    up: true,
+    addr: Some((core::net::IpAddr::V4(core::net::Ipv4Addr::new(192, 0, 2, 10)), 24)),
+};
+
+pub fn net_interface() -> Option<super::Iface> {
+    Some(HOST_IFACE)
+}
+
+pub fn fchdir(fd: i32) -> R<()> {
+    let d = get(fd)?;
+    let Obj::Dir(p) = &d.obj else { return Err(errno::ENOTDIR) };
+    std::env::set_current_dir(p).map_err(io)
 }
 
 pub fn list_dir(fd: i32) -> R<Vec<Entry>> {
@@ -332,6 +360,12 @@ pub struct Thread(std::thread::JoinHandle<()>);
 
 pub fn spawn(stack: usize, f: super::ThreadFn) -> R<Thread> {
     std::thread::Builder::new().stack_size(stack).spawn(f).map(Thread).map_err(|_| errno::EAGAIN)
+}
+
+/// Na hostiteli nejde vlakno spustit na cizim zasobniku: vlastni zasobnik
+/// vychozi velikosti (testy kontroluji atributy a beh vlakna).
+pub fn spawn_on(_top: usize, f: super::ThreadFn) -> R<Thread> {
+    spawn(2 * 1024 * 1024, f)
 }
 
 impl Thread {
@@ -541,4 +575,62 @@ pub fn vm_query(addr: u64) -> R<super::Region> {
 /// Zamky na hostiteli nejsou (logiku testuje `libs/fs`).
 pub fn file_lock(_fd: i32, _cmd: u8, _class: u8, _write: bool, _start: u64, _len: u64) -> R<super::LockResult> {
     Err(errno::ENOLCK)
+}
+
+// --- procesy (nahrada pro testy tabulky potomku) ---------------------------
+
+/// Nahradni potomek: program `exit:<kod>` skonci hned, `sleep:<ms>:<kod>`
+/// po `ms` milisekundach; jine jmeno = `ENOENT`. `kill` = kod
+/// `abi::process::EXIT_KILLED`.
+pub struct Child {
+    /// (konec, kod konce)
+    state: Mutex<(std::time::Instant, i64)>,
+}
+
+/// Kod konce po `PROCESS_KILL` (`abi::process::EXIT_KILLED`).
+pub const HOST_EXIT_KILLED: i64 = -1_000_000;
+
+pub fn spawn_child(r: super::SpawnReq) -> R<Child> {
+    let parts: Vec<&str> = r.program.split(':').collect();
+    let (ms, code) = match parts.as_slice() {
+        ["exit", c] => (0, c.parse().map_err(|_| errno::EINVAL)?),
+        ["sleep", ms, c] => (ms.parse().map_err(|_| errno::EINVAL)?, c.parse().map_err(|_| errno::EINVAL)?),
+        _ => return Err(errno::ENOENT),
+    };
+    let end = std::time::Instant::now() + core::time::Duration::from_millis(ms);
+    Ok(Child { state: Mutex::new((end, code)) })
+}
+
+impl Child {
+    pub fn try_exit(&self) -> R<Option<i64>> {
+        let (end, code) = *self.state.lock().unwrap();
+        Ok((std::time::Instant::now() >= end).then_some(code))
+    }
+
+    pub fn wait_exit(&self) -> R<i64> {
+        loop {
+            if let Some(c) = self.try_exit()? {
+                return Ok(c);
+            }
+            std::thread::sleep(core::time::Duration::from_millis(1));
+        }
+    }
+
+    pub fn kill(&self) -> R<()> {
+        *self.state.lock().unwrap() = (std::time::Instant::now(), HOST_EXIT_KILLED);
+        Ok(())
+    }
+}
+
+pub fn wait_children(children: &[&Child], timeout_ns: Option<u64>) -> R<Option<usize>> {
+    let limit = timeout_ns.map(|t| std::time::Instant::now() + core::time::Duration::from_nanos(t));
+    loop {
+        if let Some(i) = children.iter().position(|c| matches!(c.try_exit(), Ok(Some(_)))) {
+            return Ok(Some(i));
+        }
+        if limit.is_some_and(|l| std::time::Instant::now() >= l) {
+            return Ok(None);
+        }
+        std::thread::sleep(core::time::Duration::from_millis(1));
+    }
 }

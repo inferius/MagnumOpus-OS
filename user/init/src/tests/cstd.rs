@@ -28,15 +28,20 @@ fn ctest(s: &Startup) -> TestResult {
         Err(e) => return Err(fail("adresar /std-test", e)),
     }
     let own = fs.connect().map_err(|e| fail("relace fsd", e))?;
+    // Kanal ke launchd: posix_spawn spousti ctest sam sebe (krok posix2).
+    let launch = crate::launch::client().map_err(|e| fail("kanal ke launchd", e))?;
     let run = run_std_app(
         s,
         "ctest",
         &["jedna", "dva"],
         &["CTEST_DIR=/std-test", "CTEST_HELLO=svet", "TZ=Europe/Prague"],
-        vec![StartHandle::tagged(tag::FS, own.into_channel().into_handle())],
+        vec![
+            StartHandle::tagged(tag::FS, own.into_channel().into_handle()),
+            StartHandle::tagged(tag::LAUNCH, launch.into_handle()),
+        ],
         Duration::from_secs(120),
     )?;
-    run.expect("ctest", &["args", "getenv", "format", "memory", "files", "errno", "posix", "threads", "time", "math", "mmap", "signal", "wchar"])?;
+    run.expect("ctest", &["args", "getenv", "format", "memory", "files", "errno", "posix", "threads", "time", "math", "mmap", "signal", "wchar", "posix2"])?;
     check!(run.stdout.ends_with("ctest: hotovo\n"), "atexit v obracenem poradi a vyprazdneni pri konci");
     check!(run.stderr.contains("chyba na stderr\n"), "stderr");
     check!(run.stderr.contains("ctest perror: Invalid argument\n"), "perror");

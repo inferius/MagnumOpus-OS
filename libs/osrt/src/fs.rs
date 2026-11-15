@@ -36,6 +36,13 @@ fn session() -> Result<&'static FsClient> {
     SESSION.get().ok_or(Error::NotSupported)
 }
 
+/// Velikost svazku relace: (velikost bloku, bloku celkem, volnych bloku);
+/// bloky cekajici na uvolneni se za volne nepocitaji (C `statvfs`).
+pub fn volume_space() -> Result<(u32, u64, u64)> {
+    let i = session()?.info()?;
+    Ok((i.block_size, i.block_count, i.free_blocks))
+}
+
 /// Nova relace FS se stejnou identitou a pripojenymi cestami (pro
 /// potomka); `None` = proces relaci nema.
 pub fn new_session() -> Option<Channel> {
@@ -46,6 +53,8 @@ pub fn new_session() -> Option<Channel> {
 pub fn available() -> bool {
     SESSION.get().is_some()
 }
+
+
 
 /// Jak otevrit soubor (odpovida `std::fs::OpenOptions`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -65,6 +74,9 @@ pub struct File {
     handle: u64,
     pos: AtomicU64,
     append: bool,
+    /// Absolutni cesta pri otevreni (`openat` relativne k adresari v cstd;
+    /// po prejmenovani muze byt zastarala).
+    path: String,
 }
 
 impl File {
@@ -90,7 +102,7 @@ impl File {
         // Zapis do souboru potrebuje pravo zapisu (std: truncate/create
         // bez write = chyba InvalidInput, overuje std samo).
         let opened = session()?.open(&path, acc, share::ALL, flags)?;
-        Ok(File { handle: opened.handle, pos: AtomicU64::new(0), append: o.append })
+        Ok(File { handle: opened.handle, pos: AtomicU64::new(0), append: o.append, path })
     }
 
     /// Otevre adresar pro vypis.
@@ -101,8 +113,9 @@ impl File {
             let _ = session()?.close(opened.handle);
             return Err(Error::NotADirectory);
         }
-        Ok(File { handle: opened.handle, pos: AtomicU64::new(0), append: false })
+        Ok(File { handle: opened.handle, pos: AtomicU64::new(0), append: false, path })
     }
+
 
     pub fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
         let data = session()?.read_h(self.handle, offset, buf.len())?;
@@ -168,6 +181,11 @@ impl File {
     /// Zamek POSIX (`fcntl`/`flock`, viz `fsproto::v2::posix_lock`).
     pub fn posix_lock(&self, cmd: u8, class: u8, write: bool, start: u64, len: u64) -> Result<fsproto::v2::PosixLock> {
         session()?.posix_lock(self.handle, cmd, class, write, start, len)
+    }
+
+    /// Absolutni cesta pri otevreni.
+    pub fn path(&self) -> &str {
+        &self.path
     }
 
     /// Polozky otevreneho adresare.

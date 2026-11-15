@@ -26,8 +26,11 @@ Compiling C (clang, flags, protections) is described in
 > `libc.so` **[verified in QEMU]** (suite `cstd dyn`: a PIE program in C,
 > threads, TLS, `dlopen` of a plugin). Wide characters and locale
 > **[verified in QEMU]** (step `wchar`, chapter
-> [Wide characters and locale](#wide-characters-and-locale)). Further parts
-> (`posix_spawn`, signals from other processes, `iconv`) **[designed]**, see
+> [Wide characters and locale](#wide-characters-and-locale)). POSIX
+> additions (`posix_spawn`, `waitpid`, semaphores, `getifaddrs`, `statfs`
+> ...) **[verified in QEMU]** (step `posix2`, chapter
+> [POSIX additions](#posix-additions-for-ports-and-the-windows-layer)). Further parts
+> (`termios`, signals from other processes, `iconv`) **[designed]**, see
 > [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
 
 ## Layers
@@ -324,7 +327,7 @@ numbers).
   without effect, `readlink`/`symlink`/`link` (no FS symlinks yet),
   `ioctl` (`ENOTTY`), `setlocale`/`localeconv` (see [Wide characters and locale](#wide-characters-and-locale)), `uname`,
   `getrusage`/`getrlimit`, `system` (`ENOSYS`; starting processes via
-  `posix_spawn` **[designed]**).
+  `posix_spawn`, see [POSIX additions](#processes-posix_spawn-and-waitpid)).
 - **`libc.so`**: see the [libc.so](#libcso) chapter below.
 
 ## libc.so
@@ -551,7 +554,8 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
   with `posix_spawn_file_actions_*` and `posix_spawnattr_*`: applications
   with a manifest via `launchd`, helper programs via `spawn` (like
   `std::process`), file actions for fd 0-2 (question 4), `waitpid` over the
-  process handle, `system`/`popen` via the system shell. Starting a PIE
+  process handle (done, see [POSIX additions](#processes-posix_spawn-and-waitpid)),
+  `system`/`popen` via the system shell **[designed]**. Starting a PIE
   program (dynamic process) needs a libd session in the spawner
   (`spawn::Options::libd`, DL-4b); `cstd` passes it on when the process has
   one itself.
@@ -761,6 +765,187 @@ under Unicode-3.0 (file `THIRD-PARTY.md` in the repository root).
   in byte and wide mode.
 - `long double` (`wcstold`, `strtold_l`) is in C (`c/math_ld.c`) with
   `double` precision like `strtold`.
+
+## POSIX additions for ports and the Windows layer
+
+**[verified in QEMU]** x86_64 and aarch64 (step `posix2` of the `ctest`
+test, suite `cstd`; host tests `posix_tests.rs` and `spawn_tests.rs` in
+`cargo test -p cstd`). Functions that ports and Wine need on top of what
+the library already had (Windows layer = step 8). `termios.h`
+**[designed]** (waiting for a decision, see [termios](#termios)).
+
+### Processes: `posix_spawn` and `waitpid`
+
+<figure class="diagram">
+<svg viewBox="0 0 780 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="posix_spawn without fork">
+<defs><marker id="ce9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="10" width="230" height="90" rx="6"/><text class="t b" x="125" y="34" text-anchor="middle">parent: fd table</text><text class="m" x="125" y="54" text-anchor="middle">0 stdin, 1 stdout, 2 stderr</text><text class="m" x="125" y="72" text-anchor="middle">5, 6 pipe, 7 file ...</text><text class="m" x="125" y="90" text-anchor="middle">file actions (adddup2 ...)</text>
+<path class="ln" d="M240 55 L288 55" marker-end="url(#ce9)"/>
+<rect class="acc" x="290" y="10" width="200" height="90" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">plan (cstd)</text><text class="m" x="390" y="54" text-anchor="middle">only fd 0-2: stream channel,</text><text class="m" x="390" y="72" text-anchor="middle">/dev/null or nothing;</text><text class="m" x="390" y="90" text-anchor="middle">otherwise ENOTSUP</text>
+<path class="ln" d="M490 55 L538 55" marker-end="url(#ce9)"/>
+<rect class="box" x="540" y="10" width="230" height="90" rx="6"/><text class="t b" x="655" y="34" text-anchor="middle">launchd</text><text class="m" x="655" y="54" text-anchor="middle">program, manifest, job,</text><text class="m" x="655" y="72" text-anchor="middle">FS and network sessions</text><text class="m" x="655" y="90" text-anchor="middle">(like std::process)</text>
+<path class="ln" d="M655 100 L655 148" marker-end="url(#ce9)"/>
+<rect class="ok" x="540" y="150" width="230" height="90" rx="6"/><text class="t b" x="655" y="174" text-anchor="middle">child</text><text class="m" x="655" y="194" text-anchor="middle">new process in a child job,</text><text class="m" x="655" y="212" text-anchor="middle">fd 0-2 from the parameter block,</text><text class="m" x="655" y="230" text-anchor="middle">default signals</text>
+<path class="ln" d="M538 195 L242 195" marker-end="url(#ce9)"/>
+<rect class="box" x="10" y="150" width="230" height="90" rx="6"/><text class="t b" x="125" y="174" text-anchor="middle">parent: child table</text><text class="m" x="125" y="194" text-anchor="middle">pid_t from cstd -> process handle</text><text class="m" x="125" y="212" text-anchor="middle">waitpid, wait4, waitid,</text><text class="m" x="125" y="230" text-anchor="middle">kill (termination)</text>
+</svg>
+<figcaption>posix_spawn without fork: file actions are evaluated in the parent, launchd starts the child.</figcaption>
+</figure>
+
+There is no `fork` in the system (the user's decision, see [Processes,
+locale, wchar](#processes-locale-wchar)). `posix_spawn` and `posix_spawnp`
+start the child through launchd exactly like `std::process::Command`
+([Rust std](rust-std.md)): a child job, a new FS session with the same
+identity, a network session (if the parent has one; the child's manifest
+decides what it may do) and three standard streams. The child has no other
+fd (decision 4A), so file actions are evaluated in the parent:
+
+| Action | Result |
+|---|---|
+| `addclose(0-2)` | the stream is not passed (empty input, discarded output) |
+| `addclose(> 2)` | nothing (the child has no higher numbers) |
+| `adddup2(x, 0-2)` | the child's stream = the description behind `x` in the parent (stdio, also another stream after `dup2`, or a pipe) or 0-2 after the previous actions; a file or socket is `ENOTSUP` |
+| `addopen(0-2, "/dev/null")` | empty input / discarded output |
+| `addopen(0-2, another file)`, anything with a target > 2 | `ENOTSUP` (the parameter block only carries stream channels) |
+| `addchdir(_np)`, `addfchdir(_np)` | the child's working directory (relative to the previous one); a missing one makes `posix_spawn` fail |
+| `addclosefrom_np(n)` | closes 0-2 from `n` on |
+
+- **Program:** a path with `/` (relative to the child's directory). With
+  `posix_spawn` a bare name = a file in the child's directory if it exists;
+  `posix_spawnp` searches `PATH` (without the variable `/system/bin`). A
+  bare name that is not found goes to launchd as a system program (command
+  registry, `/system/bin`, initfs). A launchd error comes back as an error
+  code (`ENOENT`, `EACCES`, without a launchd channel `ENOSYS`).
+- **Attributes:** `SETSID`, `SETPGROUP` with group 0, `SETSIGDEF`,
+  `SETSIGMASK`, `RESETIDS` are accepted (the child is always a new process
+  in a new job with default handlers and an empty signal mask; the stored
+  mask is not passed on). A group other than 0 = `ENOTSUP`, scheduling
+  other than `SCHED_OTHER` or a priority other than 0 = `EPERM`.
+- **The child's `pid_t`** is allocated by `cstd` (a table in the process,
+  numbers from `getpid() + 1`); other processes do not know them.
+- **`waitpid`, `wait`, `wait3`, `wait4`, `waitid`:** `WNOHANG`, `WNOWAIT`;
+  there are no process groups, `waitpid(0)` and `waitpid(-pgid)` wait like
+  `-1` for any child. Status like Linux: `WEXITSTATUS` = the low 8 bits of
+  the exit code; an end caused by the system is reported as a signal
+  (`PROCESS_KILL` = `SIGKILL`, or the signal from `kill`, a CPU exception =
+  `SIGSEGV`/`SIGILL`/`SIGFPE`/`SIGTRAP`/`SIGBUS`, a panic = `SIGABRT`).
+  `struct rusage` is zeroed (the kernel does not report CPU time yet).
+  Waiting for several children uses `OBJECT_WAIT_MANY` (at most 64 at a
+  time) in rounds of 50 ms, so a child started by another thread also gets
+  into the wait.
+- **`kill` on a child:** `SIGKILL`, `SIGTERM`, `SIGINT`, `SIGHUP`,
+  `SIGQUIT` end the child at once (`PROCESS_KILL`, its signal handler does
+  not run), signal 0 only checks it exists. Delivering other signals to the
+  child's handler is not possible yet (`ENOTSUP`); the parent gets no
+  `SIGCHLD`.
+
+### Semaphores
+
+`semaphore.h`: unnamed semaphores (`sem_init`, `sem_wait`, `sem_trywait`,
+`sem_timedwait`, `sem_clockwait`, `sem_post`, `sem_getvalue`,
+`sem_destroy`) over the futex, `sem_t` 32 B like Linux. Waiting is a thread
+cancellation point. `pshared` = 1 is accepted, but the semaphore only works
+between the threads of a process: the system has no memory shared between
+processes (`MAP_SHARED` with writing is `ENOTSUP`) and the kernel futex is
+in the process address space. Named semaphores (`sem_open`, `sem_close`,
+`sem_unlink`) therefore return `SEM_FAILED` / -1 with `ENOSYS`; real ones
+will come with shared memory between processes (a separate task:
+`shm_open` and a futex between processes).
+
+### Threads, files, time
+
+- **`pthread_attr_setstack`:** the thread really runs in the caller's
+  memory (`libos::thread::spawn_on_stack`); the memory must live until the
+  thread ends and the caller provides the guard area below it (Wine
+  allocates thread stacks itself). Also `getstack`, `set/getguardsize`
+  (without an own stack the thread always has the `libos` guard area),
+  `set/getscope` (only `PTHREAD_SCOPE_SYSTEM`, process scope `ENOTSUP`),
+  `set/getinheritsched`, `set/getschedpolicy` and `set/getschedparam`
+  (only `SCHED_OTHER`, priority 0).
+- **`fchdir`:** the directory opened as an fd; the path is from the time of
+  opening (`osrt::fs::File::path`) and goes stale if the directory is
+  renamed.
+- **`statfs`, `fstatfs`** (`sys/statfs.h`, `sys/vfs.h`, layout like
+  64-bit Linux; `statvfs` comes with the C++ branch 7a from the same source): block size,
+  total and free blocks of the FS session's volume (the fsd `INFO` message;
+  blocks waiting to be freed are not counted); all paths of a process are
+  on one volume, the path or fd is only validated. `f_type` =
+  `MOFS_SUPER_MAGIC` (0x4D4F4653), file counts 0 (the FS has no fixed
+  number), `ST_RDONLY` is not set (rights come from the file's ACL).
+- **`times`** (`sys/times.h`): elapsed time in ticks of
+  `sysconf(_SC_CLK_TCK)` = 100; the kernel does not report CPU time yet, so
+  the `tms` fields are 0 (like `clock()` = -1).
+- **`asctime`, `asctime_r`, `ctime`, `ctime_r`:** the C standard format
+  (`"Sun Sep 16 01:03:52 1973\n"`), a year above 9999 = `EOVERFLOW`; the
+  `asctime`/`ctime` buffer is per thread.
+- **No sessions or process groups:** a process leads its own session and
+  group (number = `getpid()`); `setsid`, `getsid`, `getpgid`, `getpgrp`
+  return it, `setpgid` only "stay in the own group", otherwise `EPERM`.
+- **`_exit`** (`unistd.h`, = `_Exit`), `select` also via `sys/time.h` (like glibc), the signal
+  numbers `SIGIO`, `SIGXCPU`, `SIGXFSZ`, `SIGPWR`, `SIGSYS`, `SIGSTKFLT`
+  (cstd does not raise them itself) and the bits `S_ISUID`, `S_ISGID`,
+  `S_ISVTX`.
+- **`errno`:** the full Linux table (`asm-generic`, numbers 1-133 without
+  the holes 41 and 58, the same on both architectures) with `strerror`
+  texts, aliases `EWOULDBLOCK`, `EDEADLOCK`, `EOPNOTSUPP`.
+
+### Network
+
+- **Constants** like Linux: `IPPROTO_*` (`netinet/in.h`), `IP_*` and
+  `IPV6_*` options, `struct ip_mreq`, `ip_mreqn`, `ipv6_mreq`,
+  `in_pktinfo`, `in6_pktinfo`, the `IN6_IS_ADDR_*` macros, `INADDR_*`;
+  `SO_*`, `MSG_*` (`sys/socket.h`), `TCP_*` (`netinet/tcp.h`). A constant
+  does not mean support: `setsockopt` accepts only timeouts and options
+  without effect (`SO_REUSEADDR`, `SO_KEEPALIVE`, buffer sizes,
+  `SO_LINGER`, `TCP_NODELAY`), the others are `ENOPROTOOPT`. `getsockopt`
+  also gives `SO_DOMAIN`, `SO_PROTOCOL` and `IP_TTL` (64).
+- **`SOCK_RAW` and `AF_PACKET` = `EPERM`** (like Linux without
+  `CAP_NET_RAW`): only netd has raw packets and frames; `AF_NETLINK` =
+  `EAFNOSUPPORT`.
+- **Control messages:** the macros `CMSG_FIRSTHDR`, `CMSG_NXTHDR`,
+  `CMSG_DATA`, `CMSG_SPACE`, `CMSG_LEN`, `CMSG_ALIGN` and `struct cmsghdr`
+  like Linux. `sendmsg` with a control message returns `EOPNOTSUPP`:
+  `SCM_RIGHTS` (passing an fd) works differently in the system (handles in
+  channels, Wine has its own transport), the others (`IP_PKTINFO` ...) are
+  not carried by netd. `recvmsg` returns none (`msg_controllen` = 0).
+- **`getifaddrs`, `freeifaddrs`** (`ifaddrs.h`) and **`if_nameindex`,
+  `if_freenameindex`, `if_nametoindex`, `if_indextoname`** (`net/if.h`):
+  the loopback `lo` (index 1; 127.0.0.1/8 and ::1/128) and the network
+  interface `eth0` (index 2) from the netd state (`INFO`: address, mask from
+  the prefix, IPv4 broadcast, `IFF_UP`/`IFF_RUNNING` from the link) - only
+  with a network session that has the `INFO` right. An interface without an
+  address has `ifa_addr` = NULL; there are no `AF_PACKET` (MAC) entries.
+- **`ioctl` `SIOCGIF*` on a socket** (`struct ifreq`, `struct ifconf`,
+  `net/if.h`): `SIOCGIFFLAGS`, `SIOCGIFMTU` (loopback 65536),
+  `SIOCGIFINDEX`, `SIOCGIFNAME`, `SIOCGIFADDR`, `SIOCGIFNETMASK`,
+  `SIOCGIFBRDADDR` (IPv4 only), `SIOCGIFHWADDR` (MAC, loopback
+  `ARPHRD_LOOPBACK`), `SIOCGIFCONF` over the same interfaces; setting
+  (`SIOCSIF*`) = `ENOTTY`.
+- **`gethostbyname`, `gethostbyaddr`** (`struct hostent`, `h_errno`,
+  `hstrerror`): the old interface returns NULL with `h_errno` =
+  `NO_RECOVERY`; programs should use `getaddrinfo`.
+
+### termios
+
+**[designed]** The terminal does not start external programs today (the
+shell is the built-in `shsess` interpreter) and `isatty` only means "the
+process has a stdio channel". The design for connecting `termios.h` to the
+terminal (a terminal control channel in the start message, a protocol for
+the mode and window size) is waiting for the coordinator's decision; until
+then `ioctl` on a terminal returns `ENOTTY`.
+
+### Internals (additions)
+
+- `cstd/src/spawn/mod.rs` file actions (`plan`), attributes, program
+  lookup; `spawn/wait.rs` the child table, `waitpid` and friends, `kill` on
+  a child; the system part `sys/os_proc.rs` over `osrt::process`
+  (`wait_any`). Host tests have stand-in children (`exit:<code>`,
+  `sleep:<ms>:<code>`) in `sys/host.rs`.
+- `cstd/src/semaphore.rs`, `pthread/attr.rs`, `statfs.rs`, `ifaddrs.rs`, `ifreq.rs`;
+  `time.rs` (`asctime`, `times`), `unistd.rs` (`setsid`), `socket.rs`
+  (`SOCK_RAW`, control messages).
+- `osrt`: `fs::volume_space`, `fs::File::path`, `net::interface`,
+  `process::wait_any`, `thread::spawn_on`; `libos::thread::spawn_on_stack`.
 
 ## FFmpeg and licences
 

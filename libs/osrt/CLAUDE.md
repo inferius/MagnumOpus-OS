@@ -11,7 +11,8 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 - `src/fd.rs` - tabulka čísel fd pro cstd (popis otevření: soubor, stdio, roura; `dup` sdílí popis); std ji vystavuje jako `std::os::magnumopus::runtime` (re-export celého crate, nestabilní).
 - `src/sock.rs` - sockety pro tabulku fd (stav nový/TCP/naslouchání/UDP nad netproto, neblokující = `Deadline::TRY`); `src/poll.rs` - čekání na více fd (signály kanálů, připravenost socketů, do 64 `OBJECT_WAIT_MANY`, víc port).
 - `src/vm.rs` - re-export `libos::vm` a příznaků `abi::vm` pro `mmap` v cstd.
-- `src/stdio.rs`, `src/pipe.rs` - protokol proudu bajtů; `src/process.rs` - `LAUNCH` ke launchd; `src/net.rs` - std::net (zámky do netproto v2).
+- `src/stdio.rs`, `src/pipe.rs` - protokol proudu bajtů; `src/process.rs` - `LAUNCH` ke launchd, `wait_any` (C `waitpid(-1)`); `src/net.rs` - std::net (zámky do netproto v2), `interface` (C `getifaddrs`).
+- `src/fs.rs` - soubory nad fsproto v2; `File::path` (cesta z doby otevření, C `fchdir`), `volume` (C `statfs`); `src/thread.rs` - `spawn`, `spawn_on` (vlákno na zásobníku volajícího, C `pthread_attr_setstack`).
 
 ## Invarianty
 

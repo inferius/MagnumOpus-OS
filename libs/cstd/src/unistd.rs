@@ -419,6 +419,13 @@ pub unsafe extern "C" fn chdir(path: *const c_char) -> c_int {
     errno::ret(sys::chdir(unsafe { c_bytes(path) }))
 }
 
+/// `fchdir`: adresar otevreny jako `fd` (cesta z doby otevreni; po
+/// prejmenovani adresare zastara).
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn fchdir(fd: c_int) -> c_int {
+    errno::ret(sys::fchdir(fd))
+}
+
 /// `access`: existence a ucinna prava relace (`X_OK` = soubor existuje;
 /// spousteni urcuje manifest, ne bit).
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
@@ -482,7 +489,7 @@ pub extern "C" fn sysconf(name: c_int) -> i64 {
     match name {
         SC_PAGESIZE => sys::page_size() as i64,
         SC_OPEN_MAX => 4096,
-        SC_CLK_TCK => 100,
+        SC_CLK_TCK => crate::time::CLK_TCK as i64,
         SC_NPROCESSORS_CONF | SC_NPROCESSORS_ONLN => {
             std::thread::available_parallelism().map_or(1, |n| n.get() as i64)
         }
@@ -496,4 +503,58 @@ pub extern "C" fn sysconf(name: c_int) -> i64 {
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn getpagesize() -> c_int {
     sys::page_size() as c_int
+}
+
+// --- relace a skupiny procesu ----------------------------------------------------
+//
+// Skupiny procesu ani relace terminalu nejsou: kazdy proces je vudce vlastni
+// relace i skupiny (cislo = `getpid()`); potomek z `posix_spawn` je v novem
+// jobu (docs/cs/cstd.md, kapitola Doplnek POSIX).
+
+/// `setsid`: proces uz je vudce sve relace, vraci jeji cislo.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn setsid() -> c_int {
+    crate::signal::getpid()
+}
+
+/// `getsid(0)` / `getsid(getpid())` = vlastni relace; jiny proces `ESRCH`.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn getsid(pid: c_int) -> c_int {
+    own_group(pid)
+}
+
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn getpgid(pid: c_int) -> c_int {
+    own_group(pid)
+}
+
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn getpgrp() -> c_int {
+    crate::signal::getpid()
+}
+
+fn own_group(pid: c_int) -> c_int {
+    let me = crate::signal::getpid();
+    if pid == 0 || pid == me {
+        me
+    } else {
+        errno::ret(Err(errno::ESRCH))
+    }
+}
+
+/// `setpgid`: jen "zustat ve vlastni skupine" (`(0, 0)` nebo vlastni cislo);
+/// presun do jine skupiny = `EPERM`.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn setpgid(pid: c_int, pgid: c_int) -> c_int {
+    let me = crate::signal::getpid();
+    if (pid == 0 || pid == me) && (pgid == 0 || pgid == me) {
+        0
+    } else {
+        errno::ret(Err(errno::EPERM))
+    }
+}
+
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn setpgrp() -> c_int {
+    0
 }
