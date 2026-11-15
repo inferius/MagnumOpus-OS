@@ -38,7 +38,7 @@ fn walk(fs: &mut Fs<MemDevice>, root: &str) -> (Vec<String>, Vec<String>) {
             let p = if d == "/" { alloc::format!("/{}", e.name) } else { alloc::format!("{d}/{}", e.name) };
             match e.kind {
                 Kind::Dir => dirs.push(p),
-                Kind::File | Kind::Symlink => files.push(p),
+                Kind::File | Kind::Symlink | Kind::Socket => files.push(p),
                 Kind::Dataset => {}
             }
         }

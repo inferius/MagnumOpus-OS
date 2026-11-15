@@ -523,7 +523,7 @@ its own identity from the manifest **[designed]**.
 | 2 `ACCOUNT_DELETE` | uid |
 | 3 `ACCOUNT_RESET_PASSWORD` | uid (does not open an encrypted home) |
 | 4 `ROLE_SET` | uid, on |
-| 5 `APPEARANCE_SYSTEM` | the login screen appearance choice (text `tmavy ne ne`); the action's service is init (`vzhled --system`), it checks the grant on the `grants` channel |
+| 5 `APPEARANCE_SYSTEM` | the login screen appearance choice (text `tmavy ne ne`); the action's service is init (`theme --system`), it checks the grant on the `grants` channel |
 | 6 `SYSTEM_FILE` | a change in `/system`: operation (write, delete, directory), path, for a write the length and the XXH3-128 fingerprint of the content (`accountproto::elevate::SystemFile`); the action's service is init (the `system` command), see [System files](#system-files) |
 | 7-15 | drivers, updates, disks, firewall, time - added by their services |
 
@@ -742,6 +742,7 @@ them after use. The channels are different capabilities:
 | `self` | user session (settings) | own account: methods, phrase, encryption, lock, sign-out, request an administration action |
 | `setup` | installer, only while no account exists | create the first account with the role |
 | `grants` | services performing administration actions (devmgr, fwd, updates, ...) | check and consume a grant |
+| `names` | the Files window (each window its own channel from init) | only the accounts' names (`NAMES`: login and display): the login screen shows the same names, nothing else about the account |
 | `init` | init (private) | sessions, homes, home keys |
 
 | Op | Channel | Name | Fields | Reply |
@@ -765,6 +766,7 @@ them after use. The channels are different capabilities:
 | 23 | self | `DEV_MODE` (development build only) | u8: 0 status, 1 off, 2 on | u8 status; a release `NOT_SUPPORTED` |
 | 30 | setup | `CREATE_FIRST` | name, display name, password secret | uid |
 | 40 | grants | `CHECK_GRANT` | token (16 B blob), action u32, parameters (blob) | - or `ACCESS_DENIED`; the token is consumed |
+| 41 | names | `NAMES` | - | accounts: uid u64, login name, display name (empty -> the login name) |
 | 50 | init | `OPEN_SESSION` (accountd -> init, + self channel handle) | uid, groups, home | session u64 |
 | 51 | init | `CLOSE_SESSION` | session | - |
 | 52, 53 | init | `LOCK_SESSION`, `UNLOCK_SESSION` | session | - |
@@ -822,8 +824,9 @@ manifest), so that nobody asks again.
   this time** / **Do not allow** (Esc = Do not allow). Allow and Do not
   allow are stored, Only this time holds until the application ends.
   Without the compositor or for an unknown user = Do not allow.
-- **Listing and revoking:** the shell command `povoleni` (list) and
-  `povoleni odvolat <app> [mikrofon]`. The shell does not talk to the
+- **Listing and revoking:** the shell command `permissions` (a table)
+  and `permissions revoke <app> [microphone]`. The permission name in the
+  shell is English (`microphone`), the stored form stays. The shell does not talk to the
   account service: the request goes to init (the power channel of the
   shell session) and init asks the account service on behalf of the user
   of the terminal session (the `permissions-admin` channel). The shell thus

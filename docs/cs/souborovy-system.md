@@ -310,7 +310,7 @@ potomků, takže strom se 100 miliony položek má jen 4 úrovně.
 
 | Offset | Pole | Význam |
 |---|---|---|
-| 0 | kind u8 | 1 = soubor, 2 = adresář, 3 = symbolický odkaz |
+| 0 | kind u8 | 1 = soubor, 2 = adresář, 3 = symbolický odkaz, 5 = uzel socketu `AF_UNIX` (bez dat) |
 | 1 | flags u8 | příznaky objektu, rezervované: 1 = data jen v cloudu (zatím 0; nastavení synchronizace jsou atributy `sync.*`, ne bity) |
 | 4 | acl u32 | číslo popisu oprávnění (0 = zdědit; přijde ve fázi 1d) |
 | 8 | size | soubor: velikost v bajtech (nejvýš 2^63-1); odkaz: délka cíle |
@@ -1328,7 +1328,7 @@ větší požadavky rozdělí.
 | op | Název | Parametry | Výsledek |
 |---|---|---|---|
 | 1 | `INFO` | - | jméno svazku, velikost bloku, bloky, volné, odložené, generace, algoritmus, návrat, přehráno |
-| 2 | `STAT` | cesta | `Stat` (oid, druh, velikost, mtime, ctime, btime, vlastník, práva, souhrny podstromu, masky `known` a `hidden` u16); čas = sekundy i64 + nanosekundy u32 |
+| 2 | `STAT` | cesta | `Stat` (oid, druh, velikost, mtime, ctime, btime, vlastník, práva, souhrny podstromu, masky `known` a `hidden` u16, mód POSIX u16); čas = sekundy i64 + nanosekundy u32 |
 | 3 | `LIST` | cesta | počet u32 + (druh u8, oid u64, jméno) - seřazené podle jména; druh 1 soubor, 2 adresář, 3 symbolický odkaz; `BUFFER_TOO_SMALL`, když se výpis do zprávy nevejde |
 | 4 | `READ` | cesta, offset u64, délka u32 | data (kratší na konci souboru) |
 | 5 | `WRITE` | cesta, offset u64, data | - |
@@ -1407,7 +1407,9 @@ i v2 (stejná obsluha).
 
 Na drátě je to +4 B na konci `Stat` (`Stat::SIZE`) i každé položky
 `LIST_STAT_PAGE` (`StatEntry::FIXED`). Protokol má kvůli tomu verzi 3
-(`HELLO`); starší tvar zprávy se nepřečte.
+(`HELLO`); starší tvar zprávy se nepřečte. Verze 4 přidala na konec `Stat`
+mód POSIX u16 (bit `MODE` masky, [Mód POSIX](#mód-posix)); `StatEntry` ho
+nemá.
 
 > **Změna proti verzi 2 protokolu:** masky `known` a `hidden`. **Proč:**
 > nula znamenala „nesmíš vidět“, „prázdné“ i „FS to nevede“ a klient
@@ -1637,9 +1639,22 @@ fs.set_acl("/home/alice/sdilene/soukrome", Some(Acl {
 | 51 | `SET_OWNER` | cesta, vlastník u64 (jen řídicí) | - |
 | 52 | `SET_NOEXEC` | kořen datasetu, zapnout u8 | - |
 | 53 | `NOEXEC` | kořen datasetu | zákaz u8 |
+| 94 | `ACL_VIEW` | cesta | jako `PERMISSIONS` + zděděné granty: počet u32, (komu u64, práva u8, původ str)…; původ = nejbližší složka výš, jejíž popis grant dědí (cesta v relaci, prázdná = mimo připojené cesty), pořadí od kořene; s `PROTECTED` prázdné |
 
 `Stat` má navíc vlastníka u64 a účinná práva volajícího u8. `OPEN` zná
 přístup `EXECUTE` (8).
+
+**V shellu:** příkaz [`acl`](prikazy-shellu.md#acl) je nad `ACL_VIEW`
+a `SET_ACL` relace uživatele terminálu: výpis (vlastník, vaše úroveň,
+dědění, vlastní i zděděné granty), přidání a odebrání grantu. Úrovně jsou
+masky `rights`, vzestupně a stejně jako karta Oprávnění v Souborech:
+Zobrazit = `VIEW`, Spouštět = `RUN`, Upravovat = `EDIT | EXECUTE`,
+Spravovat = vše; jiná maska se ukáže jako Vlastní s výčtem práv. Popis se
+zapisuje celý (přečíst, změnit, zapsat), právo Spravovat vynucuje fsd.
+Jména uživatelů (přihlašovací) dodá init z kanálu služby účtů `names`
+(`NAMES`, stejný zdroj jako karta Oprávnění) na dotaz powerproto
+`Accounts` kanálem napájení relace; známé skupiny `everyone` a `users`
+zná shell sám, ostatní skupiny zatím jen číslem. **[ověřeno v QEMU]**
 
 ### Obnova po pádu fsd
 
@@ -1701,8 +1716,12 @@ zůstávají. Z receptu systému se nezužuje. Jinak `ACCESS_DENIED`.
 |---|---|---|---|
 | 31 | `CONNECT` | příznaky u32 (1 = řídicí, jen z řídicí relace) | nová relace (handle) |
 | 118 | `REOPEN` | dataset u64, oid u64, generace u64, přístup u8, sdílení u8 | handle u64, `Stat`, `Revision` (jako `OPEN`) |
-| 119 | `POSIX_LOCK` | handle u64, příkaz u8 (`TEST` 0, `SET` 1, `SET_WAIT` 2, `UNLOCK` 3), třída u8 (`FCNTL` 0, `FLOCK` 1), výhradní u8, od u64, délka u64 (0 = do konce) | výsledek u8: `DONE` 0, `CONFLICT` 1 + výhradní u8, od u64, délka u64; `DEADLOCK` 2 |
+| 119 | `POSIX_LOCK` | handle u64, příkaz u8 (`TEST` 0, `SET` 1, `SET_WAIT` 2, `UNLOCK` 3), třída u8 (`FCNTL` 0, `FLOCK` 1), výhradní u8, od u64, délka u64 (0 = do konce), číslo procesu u32 | výsledek u8: `DONE` 0, `CONFLICT` 1 + výhradní u8, od u64, délka u64, číslo procesu držitele u32 (0 = neznámé); `DEADLOCK` 2 |
 | 120 | `OPEN_STREAM` | handle u64, režim u8 (`READ` 0, `WRITE` 1, `APPEND` 2), pozice u64 | kanál proudu bajtů (handle ve zprávě) |
+| 121 | `SOCKET_BIND` | cesta + handle kanálu posluchače | - (existující jméno `ALREADY_EXISTS`) |
+| 122 | `SOCKET_CONNECT` | cesta, číslo procesu u32 + handle konce spojení | - (`CONNECTION_REFUSED`, plná fronta `SHOULD_WAIT`) |
+| 123 | `WHOAMI` | - | uživatel u64 (0 = systém), počet u32, skupiny u64 |
+| 124 | `SET_MODE` | cesta, mód u16 (9 bitů), rozšířit u8 | - (`MANAGE`; [Mód POSIX](#mód-posix)) |
 
 **`OPEN_STREAM`** **[ověřeno v QEMU]** (sada `cstd`, krok `posix2`:
 výstup potomka `posix_spawn` do souboru a 200 000 bajtů souboru na jeho
@@ -1714,15 +1733,57 @@ relace klienta. Obsluhuje ho hlavní smyčka fsd vedle relací
 (`user/fsd/src/stream.rs`): čtení posílá kusy po 60 KiB, dokud se fronta
 kanálu nezaplní, pak zkouší znovu po 2 ms (kanál nemá signál
 „zapisovatelný“) a na konci souboru kanál zavře; zápis bere zprávy
-kanálu a zapisuje je od pozice (`APPEND` na konec). Nejvýš 16 proudů;
-relace a proudy dohromady nejvýš 62 (limit `OBJECT_WAIT_MANY` 64 bez
-řídicího kanálu a kanálu úloh). Restart fsd proudy ukončí.
+kanálu a zapisuje je od pozice (`APPEND` na konec). Nejvýš 16 proudů
+(`stream::MAX_STREAMS`); smyčka čeká přes port, počet relací omezuje jen
+paměť. Restart fsd proudy ukončí.
+
+**Uzly socketů `AF_UNIX`** **[ověřeno v QEMU]** (sada `cstd`, krok `unix`
+testu `ctest`): `SOCKET_BIND` vytvoří objekt druhu 5 (jméno, vlastník,
+práva jako soubor; data nemá) a přiřadí mu posluchače - kanál, do kterého
+fsd při `SOCKET_CONNECT` zapíše přihlášení klienta (uživatel a skupina
+z identity relace, ověřené fsd; číslo procesu od klienta) a handle konce
+spojení. `SOCKET_CONNECT` chce právo zápisu na uzel. Mapa uzel ->
+posluchač je jen v paměti fsd (`user/fsd/src/serve_sock.rs`): konec
+posluchače nebo restart fsd = `CONNECTION_REFUSED`, uzel zůstane jako na
+Unixu (smaže ho `unlink`, `bind` na existující jméno = `ALREADY_EXISTS`).
+Socket v jádře ani v FS není: spojení je dvojice kanálů mezi procesy, fsd
+jen zprostředkuje první setkání ([cstd](cstd.md#sockety-af_unix)).
+**`WHOAMI`** vrátí identitu relace (C `getuid`, `getgroups`).
 
 Relace s lístkem dnes: init (řídicí), `fwd` (`/config`). Relace pro
 `dnsd`, `ntpd` (úložiště certifikátů) a `revocd` zatím lístek nemají -
 po pádu `fsd` dostanou `SERVICE_UNAVAILABLE` (zapojení patří vláknu sítě).
 Test: sada `obnova fsd` (`user/init/src/tests/fs_recovery.rs`, klient
 `user/fsrtest`).
+
+### Mód POSIX
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (krok `mode` testu `ctest`, sada
+`cstd`; host testy `tests/mode.rs` a `perm::posix_mode_follows_grants`
+v `libs/fs`). Rozhodnutí T1A koordinátora (15. 11. 2026, varianta A):
+devět bitů `rwxrwxrwx` je jen **pohled na granty** (`libs/fs/src/mode.rs`),
+FS bity neukládá.
+
+| Třída | Odkud | Soubor | Adresář |
+|---|---|---|---|
+| user | vlastník (má vždy všechna práva) | `rw-` (spuštění určuje manifest a zákaz spouštění datasetu, ne bit) | `rwx` |
+| group | granty ostatním příjemcům kromě `EVERYONE` (skupiny i jiní uživatelé) | `r` = `READ`, `w` = `WRITE`, `x` = `EXECUTE` | `r` = `LIST`, `w` = `CREATE`, `x` = `TRAVERSE` |
+| other | grant `EVERYONE` | dtto | dtto |
+
+- **Při vytvoření** (`mkdir(path, mode)` = `CREATE` s módem,
+  `open(O_CREAT, mode)` = `OPEN` s příznakem `MODE`; mód po `umask`) mód
+  zděděné granty nového objektu **jen zúží**, nikdy nerozšíří - ve stejném
+  požadavku jako vytvoření, takže nikdo jiný objekt širší nevidí. Třída bez
+  bitů ztratí grant celý (i práva mimo mód).
+- **`chmod`** (`SET_MODE` s `rozšířit` = 1) potřebuje právo `MANAGE`
+  (vlastník ho má vždy; bez něj `EPERM`) a smí i rozšířit: přidat práva
+  existujícím grantům třídy a pro other grant `EVERYONE` jen pro objekt -
+  vědomé sdílení (změna popisu jde do žurnálu FS jako každé `SET_ACL`).
+  Bity group bez příjemce grantu zůstanou 0 (FS nemá „skupinu souboru“).
+- **Změna** = vlastní popis s `PROTECTED`: zděděné granty se zkopírují
+  zúžené (potomci adresáře je dál dědí), granty jen pro potomky
+  (`INHERIT` bez `THIS`) mód nemění. Beze změny účinku se popis nezakládá.
+- Bity setuid, setgid a sticky se ignorují; `chmod` symlinku neexistuje.
 
 ### Profily
 

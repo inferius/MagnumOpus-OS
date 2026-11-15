@@ -180,8 +180,13 @@ pub fn request_from_shell(data: &[u8], chan: Channel, session: Option<u64>) -> O
             Ok(text) => Reply::Text(text),
             Err(e) => Reply::Failed(e),
         },
-        // Povoleni aplikaci uzivatele relace (prikaz `povoleni`).
+        // Povoleni aplikaci uzivatele relace (prikaz `permissions`).
         Ok(Request::Permissions { app, perm }) => match crate::perms::shell(session, &app, &perm) {
+            Ok(text) => Reply::Text(text),
+            Err(e) => Reply::Failed(e),
+        },
+        // Jmena uctu pro prikaz `acl`.
+        Ok(Request::Accounts) => match crate::perms::accounts() {
             Ok(text) => Reply::Text(text),
             Err(e) => Reply::Failed(e),
         },

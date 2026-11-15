@@ -65,7 +65,8 @@ Code:
 | the "open a path" service reply in the status line (second window channel) | **[implemented]** (host `context_menu_and_open_reply`) |
 | a folder without the list right (someone else's home in `/home`): a lock icon, kind "Folder without access" (Czech UI text "Složka bez přístupu"); opening it shows "You do not have access to folder X." instead of the contents (another error: "Folder X cannot be opened: reason."). A refused listing is never shown as "The folder is empty" | **[implemented]** (host `foreign_folder_has_lock`, `denied_listing_is_not_empty_folder`) |
 | icon view (grid), thumbnails | **[designed]** |
-| "Try aside", taking over changes, Compare versions, editing rights | **[designed]** (prototype `design/soubory.html`) |
+| the Properties panel (context menu, Alt+Enter, action `files.properties`): the General tab and the Permissions tab (owner, shares with a level, inherited rows with their origin, inheritance into a folder's contents, turning inheritance off) | **[verified in QEMU]** (test `gui: compd: spravce souboru...`: an inherited grant from fsd, adding a share, saving); levels, read-only, confirmation host `props_tests.rs` |
+| "Try aside", taking over changes, Compare versions | **[designed]** (prototype `design/soubory.html`) |
 | "Open with..." dialog (`design/dialogy.html`) | **[designed]** - once system dialogs exist |
 
 ## Three states of values
@@ -208,6 +209,60 @@ frames) regardless of the folder size; with WHPX it is 0.2-0.3 s (the
 measurements above). Under TCG the app handles a key only ~1.5 s after
 the press; the clipboard does not mind, because the gesture is the serial
 number of the physical press (`clipproto`), not a time window.
+
+## Properties and permissions
+
+The **Properties** panel opens from the row context menu, with Alt+Enter
+or the action `files.properties`; with nothing selected it shows the
+current folder. The panel replaces the listing (the sidebar stays),
+Escape or "Close properties" (Czech UI "Zavřít vlastnosti") closes it.
+The **General** tab shows the kind, location, size, folder contents,
+dates and your rights (three value states like the preview).
+
+The **Permissions** tab (`libs/filesview/src/props.rs`, data from fsd
+`ACL_VIEW`, saving via `SET_ACL`):
+
+- **Owner** and a sentence that the owner always has all rights; only
+  the system changes the owner (`SET_OWNER` only for the control
+  session), so it is read-only.
+- **Shared:** the object's own rows. Each row has a recipient (an
+  account, "Users of the computer", "Everyone"), a level and for a folder
+  a switch "also for the folder's contents" (grant `INHERIT`). "Add
+  share" offers accounts without the owner and without those who already
+  have a row.
+- **Inherited:** grants from folders above with their origin ("inherited
+  from folder /home/jana/Dokumenty"), fixed here (accessibility reports
+  them as disabled); they are changed in the origin folder. The switch
+  "Inherit permissions from the parent folder" off = `ACL_PROTECTED`;
+  before turning it off the panel asks whether to copy the inherited rows
+  as own ones ("Copy inherited", "Do not copy", "Keep inheritance").
+- Changes are saved only with "Save permissions" (one `SET_ACL`),
+  "Discard changes" returns the loaded state.
+
+| Level | Rights |
+|---|---|
+| View (Zobrazit) | list, traverse, read |
+| Run (Spouštět) | View + execute |
+| Edit (Upravovat) | Run + write, create, delete |
+| Manage (Spravovat) | everything including changing permissions, snapshots and datasets |
+| Custom (Vlastní ...) | another combination (e.g. from the `acl` command); stays unchanged until someone switches it |
+
+The levels are ascending: each contains the previous one (host test
+`levels_are_ascending_and_custom_is_kept`).
+
+**Who may change them:** only with the Manage right (the owner always has
+it). Without it the tab is read-only with an explanation ("Read only:
+permissions can be changed by the owner or whoever has the Manage right.
+You may: ...") and without change buttons. Someone who is not the owner
+and would lose their own Manage right by saving (a row for themselves,
+"Users of the computer" or "Everyone") must confirm it ("Save anyway").
+The panel does not know other groups, so they do not count.
+
+**Names:** the window gets a `names` channel to the account service from
+init (operation `NAMES`, account names only, see
+[User accounts](accounts.md)); an unknown number shows as "Account 1234"
+or "Group 1000001", the window's user has "(you)". The number of the
+window's user is the owner of the home folder.
 
 ## Security
 

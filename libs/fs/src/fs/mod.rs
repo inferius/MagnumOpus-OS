@@ -48,7 +48,7 @@ use crate::device::BlockDevice;
 use crate::hash::Algo;
 use crate::layout::{
     Timestamp,
-    BLOCK_SIZE, Dirent, Inode, KIND_DATASET, KIND_DIR, KIND_FILE, KIND_SYMLINK, Key, ROOT_DATASET,
+    BLOCK_SIZE, Dirent, Inode, KIND_DATASET, KIND_DIR, KIND_FILE, KIND_SOCKET, KIND_SYMLINK, Key, ROOT_DATASET,
     ROOT_OID, SYMLINK_MAX,
     decode_dirents, encode_dirents, item,
 };
@@ -69,7 +69,7 @@ pub use history::{FileVersion, RestoreMode, Undone};
 pub use journal::{JournalPage, View};
 pub use merge::{AsideBegun, ConflictKind, MergeConflict, MergeReport};
 pub use trash::TrashEntry;
-pub use perm::{Permissions, ds_flags};
+pub use perm::{AclView, InheritedGrant, Permissions, ds_flags};
 pub use times::SetTimes;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,6 +83,9 @@ pub enum Kind {
     /// prejde a `stat` vrati jeho korenovy adresar). Vytvari se
     /// `create_dataset` nebo `clone_snapshot`.
     Dataset,
+    /// Uzel socketu `AF_UNIX` (`bind` na cestu): bez dat, jen jmeno,
+    /// vlastnik a prava. Posluchace k uzlu prirazuje fsd za behu (ne FS).
+    Socket,
 }
 
 impl Kind {
@@ -91,6 +94,7 @@ impl Kind {
             KIND_DIR => Kind::Dir,
             KIND_SYMLINK => Kind::Symlink,
             KIND_DATASET => Kind::Dataset,
+            KIND_SOCKET => Kind::Socket,
             _ => Kind::File,
         }
     }
@@ -101,6 +105,7 @@ impl Kind {
             Kind::Dir => KIND_DIR,
             Kind::Symlink => KIND_SYMLINK,
             Kind::Dataset => KIND_DATASET,
+            Kind::Socket => KIND_SOCKET,
         }
     }
 }
@@ -119,7 +124,9 @@ pub mod avail {
     /// Pocty v podstromu (`tree_files`, `tree_dirs`).
     pub const TREE: u16 = 1 << 5;
     pub const RIGHTS: u16 = 1 << 6;
-    pub const ALL: u16 = SIZE | MTIME | CTIME | BTIME | OWNER | TREE | RIGHTS;
+    /// Mod POSIX (`Stat::mode`, pohled na opravneni, `crate::mode`).
+    pub const MODE: u16 = 1 << 7;
+    pub const ALL: u16 = SIZE | MTIME | CTIME | BTIME | OWNER | TREE | RIGHTS | MODE;
 }
 
 /// Metadata objektu.
@@ -146,6 +153,8 @@ pub struct Stat {
     pub owner: u64,
     /// Ucinna prava volajiciho (`rights::*`; system = vsechna).
     pub rights: u8,
+    /// Mod POSIX (9 bitu `rwxrwxrwx`, `crate::mode`); plati s `avail::MODE`.
+    pub mode: u16,
     /// Platne hodnoty (`avail::*`).
     pub known: u16,
     /// Hodnoty skryte pro nedostatek prav (`avail::*`, pole jsou 0).
@@ -554,7 +563,8 @@ impl<D: BlockDevice> Fs<D> {
         let i = self.inode(root, oid)?;
         // FS vede casy, vlastnika i prava u vseho; souhrny podstromu jen
         // u adresare (u souboru `TREE` nedava smysl).
-        let known = if i.kind == KIND_DIR { avail::ALL } else { avail::ALL & !avail::TREE };
+        // Mod doplni volajici, ktery zna zdedene granty (`with_mode`).
+        let known = if i.kind == KIND_DIR { avail::ALL } else { avail::ALL & !avail::TREE } & !avail::MODE;
         Ok(Stat {
             oid,
             kind: Kind::from_raw(i.kind),
@@ -569,6 +579,7 @@ impl<D: BlockDevice> Fs<D> {
             dataset: self.cur_ds,
             owner: i.owner,
             rights: crate::perm::rights::ALL,
+            mode: 0,
             known,
             hidden: 0,
         })
@@ -641,23 +652,31 @@ impl<D: BlockDevice> Fs<D> {
             dataset: self.cur_ds,
             owner: 0,
             rights: 0,
+            mode: 0,
             known: avail::RIGHTS,
             hidden: 0,
         }))
     }
 
     fn stat_inner(&mut self, path: &str) -> Result<Stat> {
-        if !self.checking() {
-            let oid = self.enter(path)?;
-            let root = self.s.root;
-            return self.stat_oid(&root, oid);
-        }
+        // Pruchod i bez kontrol: mod potrebuje zdedene granty.
         let w = self.walk(path)?;
         let root = self.s.root;
         let mut st = self.stat_oid(&root, w.oid)?;
+        self.with_mode(&root, &mut st, &w.above)?;
+        if !self.checking() {
+            return Ok(st);
+        }
         st.rights = w.rights;
         self.limit_stat(&mut st);
         Ok(st)
+    }
+
+    /// Doplni do `st` mod POSIX ze zdedenych grantu `above`.
+    pub(super) fn with_mode(&mut self, root: &Child, st: &mut Stat, above: &crate::perm::Inherited) -> Result<()> {
+        st.mode = self.mode_at(root, st.oid, above)?;
+        st.known |= avail::MODE;
+        Ok(())
     }
 
     /// Bez prava `MANAGE` (vlastnik ho ma) souhrny podstromu nevidi: pole
@@ -988,7 +1007,7 @@ impl<D: BlockDevice> Fs<D> {
         self.put(dkey, dvalue)?;
         self.touch_dir(parent)?;
         match kind {
-            Kind::File | Kind::Symlink => self.adjust_tree(parent, 0, 1, 0)?,
+            Kind::File | Kind::Symlink | Kind::Socket => self.adjust_tree(parent, 0, 1, 0)?,
             Kind::Dir => self.adjust_tree(parent, 0, 0, 1)?,
             Kind::Dataset => return Err(Error::InvalidArgs),
         }

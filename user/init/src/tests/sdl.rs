@@ -321,7 +321,7 @@ fn audio_permission(startup: &Startup) -> TestResult {
         let d = s.gui.channel(guiproto::control::DIALOG.as_bytes()).map_err(|e| fail("kanal dialogu", e))?;
         crate::accounts::give_dialog(d).map_err(|e| fail("dialog pro sluzbu uctu", e))
     })?;
-    let _ = crate::perms::for_uid(uid, SDL_APP, "mikrofon");
+    let _ = crate::perms::for_uid(uid, SDL_APP, "microphone");
     let recipe = |capture| Recipe { app_id: SDL_APP.into(), app_name: "SDL test MagnumOpus".into(), uid, capture };
     let t = Duration::from_secs(20);
     gt::with(|s| {
@@ -349,10 +349,10 @@ fn audio_permission(startup: &Startup) -> TestResult {
         check_eq!(app.finish(t)?.code, 0, "konec programu");
         Ok(())
     })?;
-    // 4) Vypis a odvolani (jako prikaz `povoleni`).
+    // 4) Vypis a odvolani (jako prikaz `permissions`).
     let list = crate::perms::for_uid(uid, "", "").map_err(|e| fail("vypis povoleni", e))?;
-    check!(list.contains(&format!("{SDL_APP}\tmikrofon\tpovoleno")), format!("vypis: {list}"));
-    crate::perms::for_uid(uid, SDL_APP, "mikrofon").map_err(|e| fail("odvolani", e))?;
+    check!(list.contains(&format!("{SDL_APP}\tmicrophone\tallow")), format!("vypis: {list}"));
+    crate::perms::for_uid(uid, SDL_APP, "microphone").map_err(|e| fail("odvolani", e))?;
     let list = crate::perms::for_uid(uid, "", "").map_err(|e| fail("vypis po odvolani", e))?;
     check!(!list.contains(SDL_APP), format!("po odvolani: {list}"));
     Ok(())

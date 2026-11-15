@@ -490,7 +490,7 @@ nastavení se svou identitou z manifestu **[navrženo]**.
 | 2 `ACCOUNT_DELETE` | uid |
 | 3 `ACCOUNT_RESET_PASSWORD` | uid (šifrovaný domov se tím neotevře) |
 | 4 `ROLE_SET` | uid, zapnout |
-| 5 `APPEARANCE_SYSTEM` | volba vzhledu přihlašovací obrazovky (text `tmavy ne ne`); služba úkonu je init (`vzhled --system`), grant ověří na kanálu `grants` |
+| 5 `APPEARANCE_SYSTEM` | volba vzhledu přihlašovací obrazovky (text `tmavy ne ne`); služba úkonu je init (`theme --system`), grant ověří na kanálu `grants` |
 | 6 `SYSTEM_FILE` | změna v `/system`: operace (zápis, smazání, složka), cesta, u zápisu délka a otisk XXH3-128 obsahu (`accountproto::elevate::SystemFile`); služba úkonu je init (příkaz `system`), viz [Systémové soubory](#systémové-soubory) |
 | 7-15 | ovladače, aktualizace, disky, firewall, čas - doplní jejich služby |
 
@@ -689,6 +689,7 @@ použití vynulují. Kanály jsou různé capability:
 | `self` | relace uživatele (nastavení) | vlastní účet: metody, fráze, šifrování, zamčení, odhlášení, žádost o úkon správy |
 | `setup` | instalátor, jen dokud neexistuje žádný účet | založení prvního účtu s rolí |
 | `grants` | služby úkonů správy (devmgr, fwd, aktualizace, ...) | ověřit a spotřebovat grant |
+| `names` | okno Soubory (každé okno vlastní kanál od initu) | jen jména účtů (`NAMES`: přihlašovací a zobrazované): stejná jména ukazuje přihlašovací obrazovka, nic dalšího o účtu |
 | `init` | init (soukromý) | relace, domovy, klíče domovů |
 
 | Op | Kanál | Jméno | Pole | Odpověď |
@@ -712,6 +713,7 @@ použití vynulují. Kanály jsou různé capability:
 | 23 | self | `DEV_MODE` (jen vývojové sestavení) | u8: 0 stav, 1 vypnout, 2 zapnout | u8 stav; vydání `NOT_SUPPORTED` |
 | 30 | setup | `CREATE_FIRST` | jméno, zobrazované, heslo secret | uid |
 | 40 | grants | `CHECK_GRANT` | token (blob 16 B), úkon u32, parametry (blob) | - nebo `ACCESS_DENIED`; token se spotřebuje |
+| 41 | names | `NAMES` | - | účty: uid u64, přihlašovací jméno, zobrazované jméno (prázdné -> přihlašovací) |
 | 50 | init | `OPEN_SESSION` (accountd -> init, + handle kanálu self) | uid, skupiny, domov | relace u64 |
 | 51 | init | `CLOSE_SESSION` | relace | - |
 | 52, 53 | init | `LOCK_SESSION`, `UNLOCK_SESSION` | relace | - |
@@ -767,8 +769,9 @@ uživateli a aplikaci (identita z manifestu), aby se nikdo neptal znovu.
   **Nepovolit** (Esc = Nepovolit). Povolit a Nepovolit se uloží, Jen
   tentokrát platí do konce běhu aplikace. Bez kompozitoru nebo pro
   neznámého uživatele = Nepovolit.
-- **Výpis a odvolání:** příkaz shellu `povoleni` (výpis) a
-  `povoleni odvolat <aplikace> [mikrofon]`. Shell se službou účtů
+- **Výpis a odvolání:** příkaz shellu `permissions` (výpis jako tabulka)
+  a `permissions revoke <aplikace> [microphone]`. Jméno povolení v shellu
+  je anglicky (`microphone`), uložený tvar zůstává. Shell se službou účtů
   nemluví: požadavek jde initu (kanál napájení relace shellu) a ten se ptá
   služby účtů jménem uživatele relace terminálu (kanál
   `permissions-admin`). Cizí rozhodnutí tak shell nevidí. Odvolání

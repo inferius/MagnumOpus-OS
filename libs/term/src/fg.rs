@@ -405,6 +405,10 @@ impl Host for LineHost {
         self.call(move |c| c.env.dev_mode(set)).unwrap_or(Err(abi::Error::Canceled))
     }
 
+    fn accounts(&mut self) -> Result<Vec<shlang::acl::Account>, abi::Error> {
+        self.call(|c| c.env.accounts()).unwrap_or(Err(abi::Error::Canceled))
+    }
+
     fn task_spawn(&mut self, spec: TaskSpec) -> Option<Result<u64, ShError>> {
         let wire = match tasks::SpecWire::of(&spec) {
             Ok(w) => w,

@@ -2,8 +2,10 @@
 //! a pomocny proces `files-copy`. Prochazeni, kopie pres schranku okna
 //! jako uloha (okamzita kopie FS), konflikt "ponechat obe", kos, slozka
 //! s 10 000 polozkami (cas otevreni, jen viditelne radky v pristupnosti),
-//! sluzba "otevri cestu" (i z terminalu: `start`, hola cesta) a snimek
-//! obrazovky pro kontrolu vzhledu.
+//! sluzba "otevri cestu" (i z terminalu: `start`, hola cesta), panel
+//! Vlastnosti s kartou Opravneni (zdedeny grant z fsd `ACL_VIEW`, pridani
+//! sdileni a ulozeni pres `SET_ACL`) a snimek obrazovky pro kontrolu
+//! vzhledu.
 
 use alloc::string::String;
 use alloc::vec;
@@ -25,6 +27,8 @@ use crate::check;
 
 const HOME: &str = "/home/souboryt";
 const UID: u64 = 1005;
+/// Jiny uzivatel se zdedenym pravem Zobrazit ve slozce `sdilene`.
+const OTHER: u64 = 1006;
 const BIG: usize = 10_000;
 
 /// Znacky pro xtask (`xtask/src/qmp.rs`, modul `gui`): fyzicke klavesy
@@ -78,6 +82,13 @@ fn prepare(f: &FsClient) -> TestResult {
     for (i, part) in bmp(160, 120).chunks(fsproto::MAX_IO).enumerate() {
         f.write(&pic, (i * fsproto::MAX_IO) as u64, part).map_err(|e| fail("zapis obrazku", e))?;
     }
+    // Sdilena slozka: grant pro jineho uzivatele se dedi do souboru.
+    let shared = alloc::format!("{HOME}/sdilene");
+    f.create(&shared, kind::DIR).map_err(|e| fail("sdilene", e))?;
+    let share = Acl { flags: 0, grants: vec![Grant { who: OTHER, rights: rights::VIEW, flags: grant::BOTH }] };
+    f.set_acl(&shared, Some(&share)).map_err(|e| fail("acl sdilene", e))?;
+    f.create(&alloc::format!("{shared}/zprava.txt"), kind::FILE).map_err(|e| fail("sdilene/zprava.txt", e))?;
+    f.set_owner(&alloc::format!("{shared}/zprava.txt"), UID).map_err(|e| fail("vlastnik zpravy", e))?;
     f.create_dataset(&alloc::format!("{HOME}/Projekty")).map_err(|e| fail("Projekty", e))?;
     f.create(&alloc::format!("{HOME}/Projekty/plan.md"), kind::FILE).map_err(|e| fail("plan.md", e))?;
     let big = alloc::format!("{HOME}/velka");
@@ -92,7 +103,7 @@ fn prepare(f: &FsClient) -> TestResult {
 }
 
 fn params() -> Result<StartHandle, String> {
-    Params { cwd: HOME.as_bytes().to_vec(), args: vec![], env: vec![], flags: 0 }.start_handle().map_err(|e| fail("parametry", e))
+    Params { cwd: HOME.as_bytes().to_vec(), args: vec![], env: vec![], flags: 0, ..Default::default() }.start_handle().map_err(|e| fail("parametry", e))
 }
 
 fn user_fs(f: &FsClient) -> Result<Channel, String> {
@@ -225,6 +236,7 @@ fn run(startup: &Startup, s: &mut super::gui::State, f: &FsClient) -> TestResult
         wait_tree(&s.inspect, w, "domov", |t| row(t, "a.txt").is_some())?;
         println!("init: test soubory: zpet do domova (3 polozky) za {} ms", (time::now() - t1) / 1_000_000);
     }
+    properties(s, w, f, &ch, &show)?;
     open_service(startup, s, f)?;
     // Snimek vzhledu s nahledem obrazku (xtask porizuje pres QMP).
     select(s, w, "obrazek.bmp")?;
@@ -233,6 +245,40 @@ fn run(startup: &Startup, s: &mut super::gui::State, f: &FsClient) -> TestResult
     time::sleep(Duration::from_millis(1500));
     println!("{QEMU_SHOT}");
     time::sleep(Duration::from_millis(1500));
+    Ok(())
+}
+
+/// Panel Vlastnosti souboru ve sdilene slozce (akce `files.properties`):
+/// vlastnik, zdedeny grant s puvodem z fsd, pridani sdileni a ulozeni.
+fn properties(s: &super::gui::State, w: u32, f: &FsClient, ch: &Channel, show: &dyn Fn(u32, &str) -> TestResult) -> TestResult {
+    let file = alloc::format!("{HOME}/sdilene/zprava.txt");
+    show(10, &file)?;
+    wait_tree(&s.inspect, w, "soubor ve sdilene slozce", |t| row(t, "zprava.txt").is_some_and(|n| n.state & guiproto::a11y::state::SELECTED != 0))?;
+    let m = CallerMsg::Call { call: 11, app: "org.magnumopus.files".into(), action: "files.properties".into(), args: vec![], synthetic: false };
+    ch.write(&m.encode(), Vec::new()).map_err(|e| fail("akce files.properties", e))?;
+    let r = ch.read(super::gui::deadline()).map_err(|e| fail("odpoved akce", e))?;
+    check!(matches!(CallerReply::decode(&r.data), Ok(CallerReply::Result { ok: true, .. })), "akce files.properties");
+    let t = wait_tree(&s.inspect, w, "karta Obecne", |t| has(t, Role::Label, "Vlastnosti: zprava.txt") && has(t, Role::Label, "Druh: Soubor"))?;
+    act(s, w, node(&t, Role::Tab, "Oprávnění")?)?;
+    let from = alloc::format!("Účet {OTHER}: Zobrazit (zděděno ze složky {HOME}/sdilene)");
+    let owner = alloc::format!("Vlastník: Účet {UID} (vy)");
+    let t = wait_tree(&s.inspect, w, "karta Opravneni", |t| has(t, Role::Label, &from) && has(t, Role::Label, &owner))?;
+    check!(t.iter().any(|n| n.role == Role::Label && n.name == from && n.state & guiproto::a11y::state::DISABLED != 0), "zdedeny radek je nemenny");
+    // Prvni kandidat bez jmen uctu: Uzivatele pocitace, uroven Zobrazit.
+    press(s, w, "Přidat sdílení")?;
+    press(s, w, "Uložit oprávnění")?;
+    wait_tree(&s.inspect, w, "ulozeno", |t| has(t, Role::Label, "Oprávnění uložena."))?;
+    let v = f.acl_view(&file).map_err(|e| fail("ACL_VIEW", e))?;
+    let users = Grant { who: 1_000_000, rights: rights::VIEW, flags: grant::THIS };
+    check!(v.perms.acl.as_ref().is_some_and(|a| a.grants == [users]), alloc::format!("ulozeny popis: {:?}", v.perms.acl));
+    // Od korene: grant vlastnika z domova, pak grant ze sdilene slozky.
+    let got: Vec<(u64, u8, &str)> = v.inherited.iter().map(|g| (g.who, g.rights, g.from.as_str())).collect();
+    let shared = alloc::format!("{HOME}/sdilene");
+    check!(got == [(UID, rights::ALL, HOME), (OTHER, rights::VIEW, shared.as_str())], alloc::format!("zdedene: {got:?}"));
+    press(s, w, "Zavřít vlastnosti")?;
+    wait_tree(&s.inspect, w, "zpet vypis", |t| row(t, "zprava.txt").is_some())?;
+    show(12, HOME)?;
+    wait_tree(&s.inspect, w, "domov po vlastnostech", |t| row(t, "a.txt").is_some())?;
     Ok(())
 }
 
@@ -263,7 +309,7 @@ pub fn copier_resume(startup: &Startup) -> TestResult {
     }
     let start = |f: &FsClient| -> Result<(crate::apps::App, Channel, Channel), String> {
         let (ctl, theirs) = Channel::create().map_err(|e| fail("kanal", e))?;
-        let p = Params { cwd: home.as_bytes().to_vec(), args: vec![], env: vec![], flags: 0 }.start_handle().map_err(|e| fail("parametry", e))?;
+        let p = Params { cwd: home.as_bytes().to_vec(), args: vec![], env: vec![], flags: 0, ..Default::default() }.start_handle().map_err(|e| fail("parametry", e))?;
         let app = crate::apps::spawn_in(startup, "files-copy", vec![StartHandle::user(user_fs(f)?.into_handle()), StartHandle::user(theirs.into_handle()), p], None).map_err(|e| fail("files-copy", e))?;
         let (mine, client) = Channel::create().map_err(|e| fail("kanal", e))?;
         ctl.write(b"client", vec![mine.into_handle()]).map_err(|e| fail("klient", e))?;

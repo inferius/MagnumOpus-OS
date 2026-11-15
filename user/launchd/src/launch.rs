@@ -165,6 +165,8 @@ pub fn launch(d: &mut Launchd, r: &mut Reader, handles: Vec<Handle>) -> Result<V
         .into_iter()
         .filter_map(|(role, t)| take(role).map(|h| (t, h)))
         .collect();
+    // Handly zdedenych fd v poradi zpravy (polozky jsou v bloku parametru).
+    let fds: Vec<Handle> = core::iter::from_fn(|| take(Role::Fd)).collect();
 
     let source = find(d, &req.program, fs.as_ref())?;
     let (name, image, manifest): (String, Vec<u8>, Option<Manifest>) = match &source {
@@ -188,6 +190,9 @@ pub fn launch(d: &mut Launchd, r: &mut Reader, handles: Vec<Handle>) -> Result<V
     let mut start = alloc::vec![StartHandle::new(kind::PARAMS, 0, params_vmo(&req.params)?.into_handle())];
     for (t, h) in stdio {
         start.push(StartHandle::tagged(t, h));
+    }
+    for h in fds {
+        start.push(StartHandle::tagged(tag::FD, h));
     }
     if let Some(fs) = fs {
         start.push(StartHandle::tagged(tag::FS, fs.into_channel().into_handle()));

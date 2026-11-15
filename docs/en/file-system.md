@@ -312,7 +312,7 @@ content).
 
 | Offset | Field | Meaning |
 |---|---|---|
-| 0 | kind u8 | 1 = file, 2 = directory, 3 = symbolic link |
+| 0 | kind u8 | 1 = file, 2 = directory, 3 = symbolic link, 5 = `AF_UNIX` socket node (no data) |
 | 1 | flags u8 | object flags, reserved: 1 = data only in the cloud (0 for now; sync settings are `sync.*` attributes, not bits) |
 | 4 | acl u32 | permission descriptor number (0 = inherit; comes in phase 1d) |
 | 8 | size | file: size in bytes (at most 2^63-1); link: target length |
@@ -1367,7 +1367,7 @@ data = rest of the message. One read/write moves at most 32 KiB
 | op | Name | Parameters | Result |
 |---|---|---|---|
 | 1 | `INFO` | - | volume label, block size, blocks, free, delayed, generation, algorithm, fallback, replayed |
-| 2 | `STAT` | path | `Stat` (oid, kind, size, mtime, ctime, btime, owner, rights, subtree summaries, masks `known` and `hidden` u16); a time = seconds i64 + nanoseconds u32 |
+| 2 | `STAT` | path | `Stat` (oid, kind, size, mtime, ctime, btime, owner, rights, subtree summaries, masks `known` and `hidden` u16, POSIX mode u16); a time = seconds i64 + nanoseconds u32 |
 | 3 | `LIST` | path | count u32 + (kind u8, oid u64, name) - sorted by name; kind 1 file, 2 directory, 3 symbolic link; `BUFFER_TOO_SMALL` when the listing does not fit into a message |
 | 4 | `READ` | path, offset u64, length u32 | data (shorter at the end of the file) |
 | 5 | `WRITE` | path, offset u64, data | - |
@@ -1450,7 +1450,9 @@ Both `Stat` and `StatEntry` end with two u16 masks with the same bits
 
 On the wire this is +4 B at the end of `Stat` (`Stat::SIZE`) and of every
 `LIST_STAT_PAGE` entry (`StatEntry::FIXED`). Because of it the protocol has
-version 3 (`HELLO`); the older message shape is not read.
+version 3 (`HELLO`); the older message shape is not read. Version 4 added
+the POSIX mode u16 at the end of `Stat` (mask bit `MODE`,
+[POSIX mode](#posix-mode)); `StatEntry` does not have it.
 
 > **Change from protocol version 2:** the `known` and `hidden` masks.
 > **Why:** zero meant "you may not see it", "empty" and "the FS does not
@@ -1688,9 +1690,23 @@ fs.set_acl("/home/alice/shared/private", Some(Acl {
 | 51 | `SET_OWNER` | path, owner u64 (control only) | - |
 | 52 | `SET_NOEXEC` | dataset root, enable u8 | - |
 | 53 | `NOEXEC` | dataset root | flag u8 |
+| 94 | `ACL_VIEW` | path | like `PERMISSIONS` + inherited grants: count u32, (who u64, rights u8, origin str)...; origin = the nearest folder above whose descriptor the grant inherits (a session path, empty = outside the session's mounts), ordered from the root; empty with `PROTECTED` |
 
 `Stat` additionally has the owner u64 and the caller's effective rights u8.
 `OPEN` knows the `EXECUTE` access (8).
+
+**In the shell:** the [`acl`](shell-commands.md#acl) command works over
+`ACL_VIEW` and `SET_ACL` of the terminal user's session: a listing
+(owner, your level, inheritance, own and inherited grants), adding and
+removing a grant. The levels are `rights` masks, ascending and the same as the Permissions tab in Files:
+View = `VIEW`, Run = `RUN`, Edit = `EDIT | EXECUTE`, Manage = everything;
+any other mask shows as Custom with the list of rights. The descriptor is written whole (read, change,
+write), fsd enforces the Manage right. Init supplies the (login) user names from
+the account service channel `names` (`NAMES`, the same source as the
+Permissions tab) on the powerproto `Accounts` request over the session's
+power channel; the shell knows the groups `everyone` and `users` itself,
+other groups only by number so far.
+**[verified in QEMU]**
 
 ### Recovery after an fsd crash
 
@@ -1754,8 +1770,12 @@ groups stay. A system recipe cannot be narrowed. Otherwise `ACCESS_DENIED`.
 |---|---|---|---|
 | 31 | `CONNECT` | flags u32 (1 = control, only from a control session) | new session (handle) |
 | 118 | `REOPEN` | dataset u64, oid u64, generation u64, access u8, share u8 | handle u64, `Stat`, `Revision` (like `OPEN`) |
-| 119 | `POSIX_LOCK` | handle u64, command u8 (`TEST` 0, `SET` 1, `SET_WAIT` 2, `UNLOCK` 3), class u8 (`FCNTL` 0, `FLOCK` 1), exclusive u8, from u64, length u64 (0 = to the end) | result u8: `DONE` 0, `CONFLICT` 1 + exclusive u8, from u64, length u64; `DEADLOCK` 2 |
+| 119 | `POSIX_LOCK` | handle u64, command u8 (`TEST` 0, `SET` 1, `SET_WAIT` 2, `UNLOCK` 3), class u8 (`FCNTL` 0, `FLOCK` 1), exclusive u8, from u64, length u64 (0 = to the end), process number u32 | result u8: `DONE` 0, `CONFLICT` 1 + exclusive u8, from u64, length u64, holder's process number u32 (0 = unknown); `DEADLOCK` 2 |
 | 120 | `OPEN_STREAM` | handle u64, mode u8 (`READ` 0, `WRITE` 1, `APPEND` 2), position u64 | byte-stream channel (handle in the message) |
+| 121 | `SOCKET_BIND` | path + handle of the listener channel | - (an existing name `ALREADY_EXISTS`) |
+| 122 | `SOCKET_CONNECT` | path, process number u32 + handle of the connection end | - (`CONNECTION_REFUSED`, full queue `SHOULD_WAIT`) |
+| 123 | `WHOAMI` | - | user u64 (0 = system), count u32, groups u64 |
+| 124 | `SET_MODE` | path, mode u16 (9 bits), widen u8 | - (`MANAGE`; [POSIX mode](#posix-mode)) |
 
 **`OPEN_STREAM`** **[verified in QEMU]** (suite `cstd`, step `posix2`: the
 output of a `posix_spawn` child into a file and 200 000 bytes of a file on
@@ -1769,15 +1789,63 @@ session. The fsd main loop serves it next to the sessions
 queue is full, then retries after 2 ms (a channel has no "writable"
 signal) and closes the channel at the end of the file; writing takes the
 channel's messages and writes them from the position (`APPEND` at the end).
-At most 16 streams; sessions and streams together at most 62 (the
-`OBJECT_WAIT_MANY` limit of 64 without the control and task channels). An
-fsd restart ends the streams.
+At most 16 streams (`stream::MAX_STREAMS`); the loop waits through a port,
+the number of sessions is limited only by memory. An fsd restart ends the
+streams.
+
+**`AF_UNIX` socket nodes** **[verified in QEMU]** (suite `cstd`, step
+`unix` of the `ctest` test): `SOCKET_BIND` creates an object of kind 5
+(name, owner, rights like a file; it has no data) and assigns a listener to
+it - a channel into which fsd writes, on `SOCKET_CONNECT`, the client's
+credentials (user and group from the session identity, verified by fsd; the
+process number from the client) and the handle of the connection end.
+`SOCKET_CONNECT` needs the write right on the node. The node -> listener
+map lives only in fsd memory (`user/fsd/src/serve_sock.rs`): the end of the
+listener or an fsd restart = `CONNECTION_REFUSED`, the node stays as on
+Unix (`unlink` removes it, `bind` to an existing name = `ALREADY_EXISTS`).
+The socket is neither in the kernel nor in the FS: a connection is a
+channel pair between processes, fsd only arranges the first meeting
+([cstd](cstd.md#af_unix-sockets)). **`WHOAMI`** returns the session
+identity (C `getuid`, `getgroups`).
 
 Sessions with a lease today: init (control), `fwd` (`/config`). The sessions
 for `dnsd`, `ntpd` (certificate store) and `revocd` have no lease yet -
 after an `fsd` crash they get `SERVICE_UNAVAILABLE` (wiring them belongs to
 the network thread). Test: suite `obnova fsd`
 (`user/init/src/tests/fs_recovery.rs`, client `user/fsrtest`).
+
+### POSIX mode
+
+**[verified in QEMU]** x86_64 and aarch64 (step `mode` of the `ctest`
+test, suite `cstd`; host tests `tests/mode.rs` and
+`perm::posix_mode_follows_grants` in `libs/fs`). Decision T1A of the
+coordinator (15 Nov 2026, option A): the nine `rwxrwxrwx` bits are only a
+**view of the grants** (`libs/fs/src/mode.rs`), the FS does not store bits.
+
+| Class | From | File | Directory |
+|---|---|---|---|
+| user | the owner (always has all rights) | `rw-` (execution is decided by the manifest and the dataset's no-exec flag, not a bit) | `rwx` |
+| group | grants to other recipients except `EVERYONE` (groups and other users) | `r` = `READ`, `w` = `WRITE`, `x` = `EXECUTE` | `r` = `LIST`, `w` = `CREATE`, `x` = `TRAVERSE` |
+| other | the `EVERYONE` grant | same | same |
+
+- **On creation** (`mkdir(path, mode)` = `CREATE` with a mode,
+  `open(O_CREAT, mode)` = `OPEN` with the `MODE` flag; mode after `umask`)
+  the mode **only narrows** the new object's inherited grants, never widens
+  them - in the same request as the creation, so nobody else sees the
+  object wider. A class without bits loses its grant entirely (also rights
+  outside the mode).
+- **`chmod`** (`SET_MODE` with `widen` = 1) needs the `MANAGE` right (the
+  owner always has it; without it `EPERM`) and may also widen: add rights
+  to the existing grants of a class and for other an `EVERYONE` grant for
+  the object only - deliberate sharing (the description change goes to the
+  FS journal like every `SET_ACL`). Group bits without a grant recipient
+  stay 0 (the FS has no "group of a file").
+- **A change** = an own description with `PROTECTED`: inherited grants are
+  copied narrowed (a directory's children still inherit them), grants only
+  for children (`INHERIT` without `THIS`) are not changed by the mode.
+  Without a change of effect no description is created.
+- setuid, setgid and sticky bits are ignored; there is no `chmod` of a
+  symlink.
 
 ### Profiles
 

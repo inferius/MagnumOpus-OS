@@ -108,6 +108,7 @@ fn kind_raw(k: fs::Kind) -> u8 {
         fs::Kind::Dir => fsproto::kind::DIR,
         fs::Kind::Symlink => fsproto::kind::SYMLINK,
         fs::Kind::Dataset => fsproto::kind::DATASET,
+        fs::Kind::Socket => fsproto::kind::SOCKET,
     }
 }
 

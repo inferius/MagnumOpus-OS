@@ -260,3 +260,71 @@ fn invalid_descriptors_are_refused() {
     assert_eq!(fs.set_acl("/home", Some(many)).err(), Some(Error::InvalidArgs));
     assert_clean(&mut fs);
 }
+
+#[test]
+fn posix_mode_follows_grants() {
+    // /tmp jako po instalaci: skupina (TEAM) smi vypsat a vytvaret (dedi se).
+    let mut fs = home_fs();
+    fs.create("/tmp", Kind::Dir).unwrap();
+    fs.set_acl("/tmp", acl(&[(TEAM, rights::LIST | rights::TRAVERSE | rights::CREATE, grant::BOTH), (ALICE, rights::LIST | rights::TRAVERSE | rights::CREATE, grant::BOTH)])).unwrap();
+    fs.set_principal(alice());
+    fs.create("/tmp/.wine-1000", Kind::Dir).unwrap();
+    assert_eq!(fs.stat("/tmp/.wine-1000").unwrap().mode, 0o770, "zdedeny grant skupiny");
+    // mkdir(.., 0700): skupina zmizi, Bob slozku neuvidi.
+    fs.set_mode("/tmp/.wine-1000", 0o700, false).unwrap();
+    let st = fs.stat("/tmp/.wine-1000").unwrap();
+    assert_eq!((st.mode, st.known & crate::fs::avail::MODE != 0), (0o700, true));
+    let h = fs.open("/tmp/.wine-1000", access::READ, share::ALL).unwrap();
+    assert_eq!(fs.stat_h(h).unwrap().mode, 0o700);
+    fs.close(h).unwrap();
+    fs.set_principal(bob());
+    assert_eq!(fs.stat("/tmp/.wine-1000").err(), Some(Error::NotFound));
+    // chmod jen s MANAGE (Bob neni vlastnik /tmp).
+    assert_eq!(fs.set_mode("/tmp", 0o777, true).err(), Some(Error::AccessDenied));
+    // chmod o+rx: vedome sdileni pro kazdeho.
+    fs.set_principal(alice());
+    fs.set_mode("/tmp/.wine-1000", 0o705, true).unwrap();
+    assert_eq!(fs.stat("/tmp/.wine-1000").unwrap().mode, 0o705);
+    fs.set_principal(bob());
+    assert!(fs.stat("/tmp/.wine-1000").is_ok());
+    // Prehrani logu: zmena prav prezije.
+    fs.set_principal(None);
+    fs.fsync().unwrap();
+    let mut fs = remount(fs);
+    assert_eq!(fs.mode("/tmp/.wine-1000").unwrap(), 0o705);
+    assert_clean(&mut fs);
+}
+
+#[test]
+fn acl_view_lists_inherited_with_origin() {
+    let mut fs = home_fs();
+    fs.set_acl("/home/alice", acl(&[(BOB, rights::TRAVERSE, grant::THIS)])).unwrap();
+    fs.set_principal(alice());
+    fs.create("/home/alice/sdilene", Kind::Dir).unwrap();
+    fs.create("/home/alice/sdilene/projekt", Kind::Dir).unwrap();
+    fs.create("/home/alice/sdilene/projekt/a.txt", Kind::File).unwrap();
+    fs.set_acl("/home/alice/sdilene", acl(&[(BOB, rights::VIEW, grant::BOTH)])).unwrap();
+    fs.set_acl("/home/alice/sdilene/projekt", acl(&[(TEAM, rights::EDIT, grant::BOTH), (BOB, rights::RUN, grant::THIS)]))
+        .unwrap();
+    fs.set_principal(bob());
+    let v = fs.acl_view("/home/alice/sdilene/projekt/a.txt").unwrap();
+    assert_eq!(v.perms.owner, ALICE);
+    assert_eq!(v.perms.acl, None);
+    assert_eq!(v.perms.rights, rights::EDIT);
+    let got: Vec<(u64, u8, &str)> = v.inherited.iter().map(|g| (g.who, g.rights, g.from.as_str())).collect();
+    // `/` a `/home` maji jen THIS (nededi se); grant jen pro slozku (THIS) se nededi.
+    assert_eq!(got, [(BOB, rights::VIEW, "/home/alice/sdilene"), (TEAM, rights::EDIT, "/home/alice/sdilene/projekt")]);
+    // Vlastni popis s PROTECTED: nic zdedeneho neplati.
+    fs.set_principal(alice());
+    fs.set_acl(
+        "/home/alice/sdilene/projekt/a.txt",
+        Some(Acl { flags: acl_flags::PROTECTED, grants: vec![Grant { who: BOB, rights: rights::VIEW, flags: grant::THIS }] }),
+    )
+    .unwrap();
+    let v = fs.acl_view("/home/alice/sdilene/projekt/a.txt").unwrap();
+    assert!(v.inherited.is_empty());
+    assert!(v.perms.acl.is_some_and(|a| a.protected()));
+    // Kdo objekt nevidi, nedozvi se nic.
+    fs.set_principal(Some(Principal::user(2000, &[])));
+    assert_eq!(fs.acl_view("/home/alice/sdilene").err(), Some(Error::NotFound));
+}

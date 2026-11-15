@@ -7,6 +7,8 @@ Jazyk shellu MagnumOpus: jeden jazyk, dva zápisy (`no_std` + `alloc`). **B** (p
 - Nic nemá vlastní chování podle zápisu: B i C vedou na stejný strom a stejnou sémantiku. Změna jazyka = oba parsery + formátovač + interpret + docs.
 - Prostředí (soubory, programy, čas, přerušení) dodává hostitel přes `host::Host`; interpret sám nic nedělá. V OS ho dodává `user/termd`/`user/shsess`, v testech `vfs::mem::MemFs` a testovací hostitel.
 - Příkaz `install` (`eval/builtins/install.rs`) je jen průvodce: rozhodnutí a texty jsou v `libs/installplan`, zápis dělá služba `installd` (hostitel dává kanál přes `Host::installer`). Nové kroky instalace patří do `installplan`, ne sem.
+- Jména příkazů, přepínačů a slov voleb jsou anglicky (`theme dark`, `permissions revoke`, `acl add bob edit`), popisy, nápověda a hlášení česky; bez českých aliasů. Do uloženého tvaru jiné služby (`schema tmavy`) převádí příkaz, ne služba.
+- `acl` (`eval/builtins/acl.rs`, typy `acl.rs`) mění oprávnění hned přes `Fs::set_acl`, ne v konceptu řádku: v náhledu změn ho odmítne a `undo` ho nevrací. Bity práv a příznaky grantů jsou kopie `fsproto::perm` (shlang na fsproto nezávisí; převod `user/shsess/src/fs.rs`).
 - Chyby shellu jsou hodnoty (kód, popis, místo, příčina, rada; kódy `SH_*` nebo názvy chyb systému), ne panic. Hlášení jsou česky. `ShError::report`: chyba systému s příčinou stejného kódu je jedna věta „Co: proč (KÓD)“; místo ve zdroji jen u `SH_PARSE` nebo u části delšího řádku. Důvod operací se soubory dává `eval/fsctx.rs` (`sys_op`).
 
 ## Testy

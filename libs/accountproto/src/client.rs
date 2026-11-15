@@ -10,7 +10,7 @@ use libos::{Channel, time};
 use wire::Reader;
 use zeroize::Zeroize;
 
-use crate::{AccountSummary, AuthReply, Error, Method, Request, Result, Secret, WhoAmI, decode_list, parse_reply};
+use crate::{AccountName, AccountSummary, AuthReply, Error, Method, Request, Result, Secret, WhoAmI, decode_list, decode_names, parse_reply};
 
 pub const TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -21,6 +21,15 @@ fn call(ch: &Channel, req: Request) -> Result<Vec<u8>> {
     w?;
     let m = ch.read(Some(time::deadline_after(TIMEOUT)))?;
     parse_reply(&m.data).map(<[u8]>::to_vec)
+}
+
+/// Kanal names (jen cteni zobrazovanych jmen).
+pub struct Names(pub Channel);
+
+impl Names {
+    pub fn names(&self) -> Result<Vec<AccountName>> {
+        decode_names(&call(&self.0, Request::Names)?)
+    }
 }
 
 /// Kanal login.

@@ -51,6 +51,17 @@ impl Memory {
         Memory { vmo: Vmo::from_handle(h), pos: AtomicU64::new(0), writable, seals: AtomicU32::new(seal::SEAL) }
     }
 
+    /// Pametovy fd zdedeny od rodice ([`crate::inherit`]): pecete
+    /// a pozice jako u rodice (potomek ma vlastni kopii pozice).
+    pub(crate) fn inherited(h: Handle, writable: bool, seals: u32, pos: u64) -> Memory {
+        Memory { vmo: Vmo::from_handle(h), pos: AtomicU64::new(pos), writable, seals: AtomicU32::new(seals) }
+    }
+
+    /// Aktualni pozice.
+    pub fn tell(&self) -> u64 {
+        self.pos.load(Ordering::Acquire)
+    }
+
     /// Jako [`Memory::import`] se syrovym cislem handlu (C, cstd).
     /// Prava handlu jadro zjistit neumi: `writable` rika volajici; bez
     /// prava `WRITE` jadro zapis i mapovani pro zapis stejne odmitne.

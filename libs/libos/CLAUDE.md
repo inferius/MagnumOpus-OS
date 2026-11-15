@@ -19,6 +19,7 @@ Knihovna pro programy v userspace (`no_std`) a **stabilní API pro aplikace**: t
 - Spouštění sdílí kód jen programů z namapovaného initfs (`initfs::offset_of`, neměnný obsah); obraz odjinud se nahrává bez sdílení, aby záměna obrazu nepodstrčila cizí kód.
 - `Vmo::create_resizable`/`set_size`/`size` (`VMO_RESIZABLE`, `VMO_SET_SIZE`, `VMO_SIZE`); `exception::signal_class_of(&Report)` = `Bus` pro výpadek za koncem zvětšitelného objektu (`reason::BEYOND_END`), knihovny mapují signály přes ni, ne přes `signal_class(kind)`.
 - `Waiter` (`waiter.rs`): port + jednorázové registrace s jedinečnými klíči (nikdy znovu, neznámý klíč = ignorovat). Služba s proměnným počtem klientů čeká přes něj, ne přes `wait_many` (limit 64; `docs/cs/libos.md`).
+- `WaitSet` (`waitset.rs`): náhrada `wait_many` se stejným rozhraním nad portem; objekt = hodnota handlu (s generací), registrace drží mezi voláními, chybějící objekt zapomene. Vlastní klíče mají nejvyšší bit, cizí registrace na sdíleném portu (`port()`) musí mít klíč `< FOREIGN_KEYS`. Port do pole nepatří (jádro `NOT_SUPPORTED`).
 - Žádné závislosti na službách (`fsd`, `netd`): klienti jsou v `svcclient` a `*proto`.
 
 ## Testy

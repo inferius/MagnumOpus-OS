@@ -11,6 +11,7 @@
 //! Operace pres handle se uz nekontroluji: prava se overila pri `open`.
 
 use alloc::collections::BTreeMap;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use abi::{Error, Result};
@@ -20,7 +21,7 @@ use crate::btree;
 use crate::device::BlockDevice;
 use crate::layout::{KIND_DATASET, KIND_DIR, Key, META_OID, ROOT_DATASET, ROOT_OID, feature, item};
 use crate::node::Child;
-use crate::perm::{Acl, Inherited, Principal, SYSTEM, acl_hash, decode_acl, encode_acl, rights};
+use crate::perm::{Acl, Inherited, Principal, SYSTEM, acl_hash, decode_acl, encode_acl, grant, rights};
 
 /// Vlastnosti datasetu (polozka `PROPS` datasetu, bity).
 pub mod ds_flags {
@@ -36,6 +37,8 @@ pub(super) struct Walked {
     pub rights: u8,
     /// Granty pro potomky objektu.
     pub below: Inherited,
+    /// Granty, ktere k objektu prisly od rodice (mod POSIX, `crate::mode`).
+    pub above: Inherited,
 }
 
 /// Opravneni objektu, jak je vraci `Fs::permissions`.
@@ -46,6 +49,26 @@ pub struct Permissions {
     pub acl: Option<Acl>,
     /// Ucinna prava volajiciho.
     pub rights: u8,
+}
+
+/// Zdedeny grant s puvodem (`Fs::acl_view`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InheritedGrant {
+    pub who: u64,
+    pub rights: u8,
+    /// Nejblizsi nadrazena slozka, jejiz popis grant dedi (cesta ve FS).
+    pub from: String,
+}
+
+/// Opravneni objektu pro zobrazeni: vlastni popis a zdedene granty
+/// s puvodem (karta Opravneni ve Vlastnostech, prikaz `acl`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AclView {
+    pub perms: Permissions,
+    /// Zdedene granty, ktere na objekt opravdu plati (prazdne, kdyz vlastni
+    /// popis ma `PROTECTED`). Kazda slozka po ceste zvlast, poradi od
+    /// korene; v ramci slozky podle `who`.
+    pub inherited: Vec<InheritedGrant>,
 }
 
 impl<D: BlockDevice> Fs<D> {
@@ -131,7 +154,7 @@ impl<D: BlockDevice> Fs<D> {
             return Err(Error::NotFound);
         }
         let below = inherited.child(acl.as_ref());
-        Ok(Walked { oid, rights: r, below })
+        Ok(Walked { oid, rights: r, below, above: inherited })
     }
 
     /// Projde cestu a overi prava `need` (bez kontrol jen `enter`).
@@ -177,6 +200,73 @@ impl<D: BlockDevice> Fs<D> {
         let inode = self.inode(&root, oid)?;
         let acl = self.load_acl(&root, inode.acl)?;
         Ok(Permissions { owner: inode.owner, acl, rights })
+    }
+
+    /// Mod POSIX objektu (9 bitu, `crate::mode`) z vlastnika, druhu,
+    /// zdedenych grantu `above` a vlastniho popisu.
+    pub(super) fn mode_at(&mut self, root: &Child, oid: u64, above: &Inherited) -> Result<u16> {
+        let inode = self.inode(root, oid)?;
+        let acl = self.load_acl(root, inode.acl)?;
+        let grants = crate::mode::effective(above, acl.as_ref());
+        Ok(crate::mode::mode_of(inode.owner, inode.kind == KIND_DIR, &grants))
+    }
+
+    /// Mod POSIX objektu `path` (pro system i bez kontrol).
+    pub fn mode(&mut self, path: &str) -> Result<u16> {
+        let w = self.walk(path)?;
+        let root = self.s.root;
+        self.mode_at(&root, w.oid, &w.above)
+    }
+
+    /// Zmeni opravneni podle modu POSIX (9 bitu; setuid/setgid/sticky se
+    /// ignoruji). `widen` = `chmod` (smi rozsirit), jinak jen zuzi (mod
+    /// pri vytvoreni). Vyzaduje `MANAGE` (vlastnik ho ma vzdy).
+    pub fn set_mode(&mut self, path: &str, mode: u16, widen: bool) -> Result<()> {
+        let w = self.walk(path)?;
+        if self.checking() && w.rights & rights::MANAGE == 0 {
+            return Err(Error::AccessDenied);
+        }
+        let root = self.s.root;
+        let inode = self.inode(&root, w.oid)?;
+        let acl = self.load_acl(&root, inode.acl)?;
+        let dir = inode.kind == KIND_DIR;
+        let Some(new) = crate::mode::apply(inode.owner, dir, &w.above, acl.as_ref(), mode & 0o777, widen) else {
+            return Ok(());
+        };
+        let oid = w.oid;
+        self.guarded(|fs| {
+            fs.s.check_writable()?;
+            fs.ensure_room(4)?;
+            fs.set_acl_oid(oid, Some(&new))
+        })
+    }
+
+    /// Vlastnik, vlastni popis, ucinna prava a zdedene granty s puvodem.
+    /// Stejna prava jako `permissions` (jakekoli pravo k objektu): kdo
+    /// objekt vidi, smi videt, kdo k nemu ma pristup. Pruchod predky uz
+    /// prava nekontroluje (overil je `rights` celou cestou).
+    pub fn acl_view(&mut self, path: &str) -> Result<AclView> {
+        let perms = self.permissions(path)?;
+        let names: Vec<&str> = super::split_path(path).collect();
+        let mut inherited = Vec::new();
+        for i in 0..names.len() {
+            let mut dir = String::from("/");
+            dir.push_str(&names[..i].join("/"));
+            let oid = self.enter(&dir)?;
+            let root = self.s.root;
+            let inode = self.inode(&root, oid)?;
+            let Some(acl) = self.load_acl(&root, inode.acl)? else { continue };
+            if acl.protected() {
+                inherited.clear();
+            }
+            for g in acl.grants.iter().filter(|g| g.flags & grant::INHERIT != 0) {
+                inherited.push(InheritedGrant { who: g.who, rights: g.rights, from: dir.clone() });
+            }
+        }
+        if perms.acl.as_ref().is_some_and(Acl::protected) {
+            inherited.clear();
+        }
+        Ok(AclView { perms, inherited })
     }
 
     /// Nastavi vlastni popis opravneni objektu (`None` = jen dedit).

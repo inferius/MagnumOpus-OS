@@ -64,7 +64,7 @@ pub enum Request {
     /// `installplan::proto`). Odpoved [`Reply::Ok`] s kanalem jako handlem
     /// zpravy, nebo [`Reply::Failed`].
     OpenInstaller,
-    /// Jen kanal shell -> init: volba vzhledu (prikaz `vzhled`). `system`
+    /// Jen kanal shell -> init: volba vzhledu (prikaz `theme`). `system`
     /// = systemova volba (prihlasovaci obrazovka; ukon spravy pres
     /// `ELEVATE`), jinak volba uzivatele relace. `change`: prazdne = jen
     /// precist, jinak `schema svetly|tmavy|auto`, `kontrast ano|ne` nebo
@@ -74,9 +74,16 @@ pub enum Request {
     /// az po potvrzeni v dialogu.
     Appearance { system: bool, change: String },
     /// Jen kanal shell -> init: povoleni aplikaci uzivatele relace (prikaz
-    /// `povoleni`): `app` prazdne = vypis, jinak odvolat `perm` aplikace
-    /// `app`. Odpoved [`Reply::Text`] nebo [`Reply::Failed`].
+    /// `permissions`): `app` prazdne = vypis (radek na rozhodnuti
+    /// `aplikace\tpovoleni\tallow|deny`), jinak odvolat `perm` (slovo
+    /// shellu, `microphone`) aplikace `app`. Odpoved [`Reply::Text`] nebo
+    /// [`Reply::Failed`].
     Permissions { app: String, perm: String },
+    /// Jen kanal shell -> init: ucty lidi pro jmena v prikazu `acl` (cislo
+    /// <-> jmeno). Odpoved [`Reply::Text`], radek na ucet
+    /// `uid\tjmeno\tzobrazovane jmeno` (init ze sluzby uctu, `NAMES`),
+    /// nebo [`Reply::Failed`].
+    Accounts,
     /// Jen kanal shell -> init: zmena v `/system` (prikaz `system`), ukon
     /// spravy `SYSTEM_FILE` (`accountproto::elevate`). `op`:
     /// `accountproto::elevate::FileOp` jako cislo, `data` = obsah zapisu
@@ -209,10 +216,11 @@ mod op {
     pub const OPEN_INSTALLER: u32 = 10;
     pub const PERMISSIONS: u32 = 11;
     pub const APPEARANCE: u32 = 12;
-    pub const SYSTEM_FILE: u32 = 13;
+    pub const ACCOUNTS: u32 = 13;
+    pub const SYSTEM_FILE: u32 = 14;
     /// Rezim vyvojare; cislo rezervovane i ve vydani (tam neznama zprava).
     #[allow(dead_code)]
-    pub const DEV_MODE: u32 = 14;
+    pub const DEV_MODE: u32 = 15;
 
     pub const R_OK: u32 = 100;
     pub const R_FAILED: u32 = 101;
@@ -239,6 +247,7 @@ impl Request {
             Request::OpenInstaller => op::OPEN_INSTALLER,
             Request::Appearance { .. } => op::APPEARANCE,
             Request::Permissions { .. } => op::PERMISSIONS,
+            Request::Accounts => op::ACCOUNTS,
             Request::SystemFile { .. } => op::SYSTEM_FILE,
             #[cfg(feature = "dev-mode")]
             Request::DevMode { .. } => op::DEV_MODE,
@@ -278,6 +287,7 @@ impl Request {
             op::OPEN_INSTALLER => Request::OpenInstaller,
             op::APPEARANCE => Request::Appearance { system: r.u8()? != 0, change: r.str()? },
             op::PERMISSIONS => Request::Permissions { app: r.str()?, perm: r.str()? },
+            op::ACCOUNTS => Request::Accounts,
             op::SYSTEM_FILE => {
                 let (op, path) = (r.u8()?, r.str()?);
                 // Obsah = zbytek zpravy.

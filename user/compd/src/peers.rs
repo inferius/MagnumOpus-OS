@@ -68,13 +68,15 @@ pub struct Peers {
     pub frame: Option<(u64, u32, u32)>,
     /// Buffery YUV a ploty klientu (`video.rs`).
     sync: BTreeMap<ClientId, ClientSync>,
-    /// Port pro plot ziskani podrzenych commitu (jen budi smycku).
+    /// Port cekani smycky (`WaitSet::port`, duplikat handlu) pro plot
+    /// ziskani podrzenych commitu: paket jen budi smycku (klic klienta je
+    /// pod `libos::FOREIGN_KEYS`).
     port: Option<Port>,
 }
 
 impl Default for Peers {
     fn default() -> Self {
-        Self { peers: BTreeMap::new(), next: 0, frame: None, sync: BTreeMap::new(), port: Port::create().ok() }
+        Self { peers: BTreeMap::new(), next: 0, frame: None, sync: BTreeMap::new(), port: None }
     }
 }
 
@@ -113,10 +115,11 @@ impl Peers {
             let mask = if held { Signals::PEER_CLOSED } else { Signals::READABLE | Signals::PEER_CLOSED };
             items.push((p.ch.handle(), mask));
         }
-        // Port plotu ziskani az za protistranami (`serve` ho necte z `obs`).
-        if let Some(port) = &self.port {
-            items.push((port.handle(), Signals::READABLE));
-        }
+    }
+
+    /// Port smycky pro plot ziskani (duplikat portu `WaitSet`).
+    pub fn set_port(&mut self, port: Port) {
+        self.port = Some(port);
     }
 
     /// Nejblizsi termin podrzeneho commitu (`ACQUIRE_TIMEOUT`).
@@ -156,9 +159,6 @@ impl Peers {
     /// Podrzene commity: splneny plot (nebo chyba, termin) = commit do
     /// kompozitoru a cteni dalsich zprav klienta.
     fn poll_held(&mut self, c: &mut Comp, now: u64) {
-        if let Some(port) = &self.port {
-            while port.wait(Some(0)).is_ok() {}
-        }
         let ready: Vec<(ClientId, Option<libos::Error>)> = self
             .sync
             .iter()
@@ -283,7 +283,7 @@ impl Peers {
                     if !reached {
                         // Probuzeni smycky: paket do portu, az plot rozhodne.
                         if let Some(port) = &self.port {
-                            let _ = fence.wait_async(value, port, cid as u64);
+                            let _ = fence.wait_async(value, port, cid as u64 & (libos::FOREIGN_KEYS - 1));
                         }
                         sync.hold(data, handles, fence, value, now);
                         return;

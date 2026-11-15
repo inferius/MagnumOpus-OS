@@ -156,8 +156,10 @@ impl Service {
     pub fn close_session(&mut self, sess: &mut Session) {
         // Zamky POSIX relace (proces skoncil) a `flock` jejich handlu.
         self.posix.release_owner(sess.id);
+        self.lock_pids.remove(&sess.id);
         for &h in &sess.handles {
             self.posix.release_owner(flock_owner(h));
+            self.lock_pids.remove(&flock_owner(h));
         }
         let Some(fs) = self.fs.as_mut() else { return };
         for h in core::mem::take(&mut sess.handles) {
@@ -172,7 +174,7 @@ impl Service {
 
     /// Operace v2; `None` = neni v2 (obslouzi v1).
     pub fn handle_v2(&mut self, sess: &mut Session, opcode: u32, r: &mut Reader) -> Option<Result<Reply>> {
-        if (fsproto::perm::op::CONNECT_AS..=fsproto::perm::op::NOEXEC).contains(&opcode) {
+        if (fsproto::perm::op::CONNECT_AS..=fsproto::perm::op::NOEXEC).contains(&opcode) || opcode == fsproto::perm::op::ACL_VIEW {
             return Some(self.perm_op(sess, opcode, r));
         }
         if !(op::HELLO..=op::REPLACE_ABORT).contains(&opcode) && !matches!(opcode, op::REOPEN | op::POSIX_LOCK | op::OPEN_STREAM) {
@@ -217,10 +219,16 @@ impl Service {
                 let writes = access & (v2access::WRITE | v2access::DELETE) != 0
                     || flags & (open_flags::CREATE | open_flags::TRUNCATE) != 0;
                 let path = sess.map(&raw, writes)?;
+                let mode = if flags & open_flags::MODE != 0 { Some(r.u16()?) } else { None };
                 if flags & open_flags::CREATE != 0 {
                     let kind = if flags & open_flags::DIR != 0 { fs::Kind::Dir } else { fs::Kind::File };
                     match fs.create(&path, kind) {
-                        Ok(()) => {}
+                        // Mod jen pro objekt vytvoreny tady (zuzi zdedene granty).
+                        Ok(()) => {
+                            if let Some(m) = mode {
+                                fs.set_mode(&path, m, false)?;
+                            }
+                        }
                         Err(Error::AlreadyExists) if flags & open_flags::EXCL == 0 => {}
                         Err(e) => return Err(e),
                     }
@@ -277,6 +285,7 @@ impl Service {
             op::POSIX_LOCK => {
                 let h = Self::own(sess, r.u64()?)?;
                 let (cmd, class, write, start, len) = (r.u8()?, r.u8()?, r.u8()? != 0, r.u64()?, r.u64()?);
+                let pid = r.u32()?;
                 let rev = fs.revision_h(h)?;
                 let (owner, class) = match class {
                     posix_lock::FCNTL => (sess.id, posix_lock::FCNTL),
@@ -284,11 +293,16 @@ impl Service {
                     _ => return Err(Error::InvalidArgs),
                 };
                 let key = (rev.dataset, rev.oid, class);
+                if pid != 0 {
+                    self.lock_pids.insert(owner, pid);
+                }
+                let pids = &self.lock_pids;
                 let (s, e) = fs::posix_lock::range(start, len);
                 let kind = if write { fs::posix_lock::Kind::Write } else { fs::posix_lock::Kind::Read };
                 let conflict = |w: &mut Writer, c: fs::posix_lock::Lock| {
                     let l = if c.end == u64::MAX { 0 } else { c.end - c.start };
                     w.u8(posix_lock::CONFLICT).u8(u8::from(c.kind == fs::posix_lock::Kind::Write)).u64(c.start).u64(l);
+                    w.u32(pids.get(&c.owner).copied().unwrap_or(0));
                 };
                 match cmd {
                     posix_lock::TEST => match self.posix.test(key, owner, s, e, kind) {

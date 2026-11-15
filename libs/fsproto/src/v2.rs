@@ -30,7 +30,7 @@ use crate::recover::Rec;
 use crate::{DirEntry, FsClient, Reader, Stat, Writer, decode_list};
 
 /// Verze protokolu, kterou tento klient mluvi.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
 /// Kody operaci v2.
 pub mod op {
@@ -71,8 +71,10 @@ pub mod op {
     pub const REOPEN: u32 = 118;
     /// Zamek POSIX (`fcntl` F_SETLK/F_GETLK, `flock`): handle u64, prikaz
     /// u8 ([`posix_lock`]), trida u8, druh u8, start u64, delka u64 (0 = do
-    /// konce) -> vysledek u8 (`DONE`, `CONFLICT` + druh u8, start u64,
-    /// delka u64; `DEADLOCK`). Vlastnik `fcntl` = relace, `flock` = handle.
+    /// konce), cislo procesu u32 -> vysledek u8 (`DONE`, `CONFLICT` + druh
+    /// u8, start u64, delka u64, cislo procesu drzitele u32 (0 = nezname);
+    /// `DEADLOCK`). Vlastnik `fcntl` = relace, `flock` = handle; cislo
+    /// procesu je od klienta (neovereno, jen pro `l_pid`).
     pub const POSIX_LOCK: u32 = 119;
     /// Soubor jako proud bajtu (stdin/stdout potomka `posix_spawn`):
     /// handle u64, rezim u8 ([`stream_mode`]), pozice u64 -> kanal proudu
@@ -80,6 +82,38 @@ pub mod op {
     /// takze proud prezije zavreni relace klienta; konci zavrenim kanalu
     /// (zapis) nebo koncem souboru (cteni). Restart fsd proud ukonci.
     pub const OPEN_STREAM: u32 = 120;
+    /// Uzel socketu `AF_UNIX` (`bind`): cesta str + handle kanalu
+    /// posluchace (zpravy viz [`crate::v2::SocketPeer`]). Existujici jmeno
+    /// = `ALREADY_EXISTS`.
+    pub const SOCKET_BIND: u32 = 121;
+    /// Spojeni s uzlem socketu (`connect`): cesta str, cislo procesu u32
+    /// + handle konce spojeni; chce pravo zapisu na uzel. Bez posluchace
+    /// nebo jiny druh uzlu = `CONNECTION_REFUSED`, plna fronta posluchace
+    /// = `SHOULD_WAIT`.
+    pub const SOCKET_CONNECT: u32 = 122;
+    /// Identita relace: -> uzivatel u64 (0 = system), pocet u32, skupiny
+    /// u64... (C `getuid`, `getgroups`).
+    pub const WHOAMI: u32 = 123;
+    /// Mod POSIX (`chmod`): cesta, mod u16 (9 bitu), rozsirit u8 (1 =
+    /// `chmod`, smi pridat prava; 0 = jen zuzit). Vyzaduje `MANAGE`.
+    pub const SET_MODE: u32 = 124;
+}
+
+/// Prihlaseni klienta ve zprave posluchaci socketu (`SOCKET_CONNECT`):
+/// uzivatel a skupina z identity relace klienta (overi fsd), cislo procesu
+/// od klienta (neovereno). Handle zpravy = konec spojeni.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SocketPeer {
+    pub user: u64,
+    pub group: u64,
+    pub pid: u32,
+}
+
+impl SocketPeer {
+    pub fn decode(b: &[u8]) -> Result<Self> {
+        let mut r = Reader::new(b);
+        Ok(Self { user: r.u64()?, group: r.u64()?, pid: r.u32()? })
+    }
 }
 
 /// Rezimy `OPEN_STREAM`.
@@ -119,8 +153,9 @@ pub mod posix_lock {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PosixLock {
     Done,
-    /// Cizi zamek v konfliktu: vyhradni?, start, delka (0 = do konce).
-    Conflict { write: bool, start: u64, len: u64 },
+    /// Cizi zamek v konfliktu: vyhradni?, start, delka (0 = do konce),
+    /// cislo procesu drzitele (0 = nezname).
+    Conflict { write: bool, start: u64, len: u64, pid: u32 },
     Deadlock,
 }
 
@@ -150,6 +185,9 @@ pub mod open_flags {
     pub const TRUNCATE: u8 = 4;
     /// S `CREATE`: vytvorit adresar.
     pub const DIR: u8 = 8;
+    /// Za priznaky mod u16: objekt vytvoreny timto `OPEN` dostane mod
+    /// (zdedene granty jen zuzi, `open(O_CREAT, mode)`).
+    pub const MODE: u8 = 16;
 }
 
 /// Priznaky `CONNECT`.
@@ -187,6 +225,18 @@ impl Revision {
             version: r.u64()?,
         })
     }
+}
+
+/// Trvala identita otevreneho objektu: s ni ho jina relace otevre znovu
+/// ([`FsClient::open_identity`], operace `REOPEN`). Dedeni fd pri
+/// spusteni procesu (`posix_spawn`): potomek ma vlastni relaci.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Identity {
+    pub dataset: u64,
+    pub oid: u64,
+    pub generation: u64,
+    pub access: u8,
+    pub share: u8,
 }
 
 /// Otevreny soubor u klienta.
@@ -231,7 +281,82 @@ impl FsClient {
         // Otevreni bez vytvoreni a zkraceni jde zopakovat.
         let kind = if flags & (open_flags::CREATE | open_flags::TRUNCATE) != 0 { Kind::Effect } else { Kind::Idempotent };
         let body = self.call_as(kind, w)?;
+        self.adopt(&body, access, share)
+    }
+
+    /// Jako [`FsClient::open`] s modem pro nove vytvoreny objekt.
+    pub fn open_mode(&self, path: &str, access: u8, share: u8, flags: u8, mode: u16) -> Result<Opened> {
+        let mut w = Self::req(op::OPEN);
+        w.str(path).u8(access).u8(share).u8(flags | open_flags::MODE).u16(mode & 0o777);
+        let kind = if flags & (open_flags::CREATE | open_flags::TRUNCATE) != 0 { Kind::Effect } else { Kind::Idempotent };
+        let body = self.call_as(kind, w)?;
+        self.adopt(&body, access, share)
+    }
+
+    /// `chmod`: mod POSIX (`widen` = smi rozsirit prava).
+    pub fn set_mode(&self, path: &str, mode: u16, widen: bool) -> Result<()> {
+        let mut w = Self::req(op::SET_MODE);
+        w.str(path).u16(mode & 0o777).u8(u8::from(widen));
+        self.call_as(Kind::Idempotent, w).map(|_| ())
+    }
+
+    /// Identita relace: (uzivatel, skupiny); 0 = system.
+    pub fn whoami(&self) -> Result<(u64, Vec<u64>)> {
+        let body = self.call_as(Kind::Idempotent, Self::req(op::WHOAMI))?;
         let mut r = Reader::new(&body);
+        let user = r.u64()?;
+        let n = r.u32()? as usize;
+        let mut groups = Vec::with_capacity(n.min(64));
+        for _ in 0..n {
+            groups.push(r.u64()?);
+        }
+        Ok((user, groups))
+    }
+
+    /// Vytvori uzel socketu `path` a priradi mu posluchace: fsd do
+    /// `listener` zapisuje prichozi spojeni ([`SocketPeer`] + handle).
+    pub fn socket_bind(&self, path: &str, listener: Channel) -> Result<()> {
+        let mut w = Self::req(op::SOCKET_BIND);
+        w.str(path);
+        self.call_sending(Kind::Effect, &w.finish(), alloc::vec![listener.into_handle()]).map(|_| ())
+    }
+
+    /// Preda posluchaci uzlu `path` konec spojeni `end` (`pid` = cislo
+    /// procesu pro `SO_PEERCRED`).
+    pub fn socket_connect(&self, path: &str, pid: u32, end: Channel) -> Result<()> {
+        let mut w = Self::req(op::SOCKET_CONNECT);
+        w.str(path).u32(pid);
+        self.call_sending(Kind::Effect, &w.finish(), alloc::vec![end.into_handle()]).map(|_| ())
+    }
+
+    /// Trvala identita handlu `local` (pro predani jine relaci). Docasny
+    /// soubor podmineneho ulozeni ani mrtvy handle predat nejde.
+    pub fn identity(&self, local: u64) -> Result<Identity> {
+        let rec = self.handles.lock().get(local)?;
+        if rec.dead {
+            return Err(Error::BadHandle);
+        }
+        if rec.replace {
+            return Err(Error::BadState);
+        }
+        let v = rec.revision;
+        Ok(Identity { dataset: v.dataset, oid: v.oid, generation: v.generation, access: rec.access, share: rec.share })
+    }
+
+    /// Otevre objekt podle identity z jine relace (`REOPEN`): fsd overi
+    /// prava a pripojene cesty teto relace znovu, sirotka (smazany soubor
+    /// s otevrenym handlem) otevre jen vlastnik.
+    pub fn open_identity(&self, id: &Identity) -> Result<Opened> {
+        let mut w = Self::req(op::REOPEN);
+        w.u64(id.dataset).u64(id.oid).u64(id.generation).u8(id.access).u8(id.share);
+        let body = self.call_as(Kind::Idempotent, w)?;
+        self.adopt(&body, id.access, id.share)
+    }
+
+    /// Zapise odpoved `OPEN`/`REOPEN` (handle, Stat, Revision) mezi handly
+    /// knihovny.
+    fn adopt(&self, body: &[u8], access: u8, share: u8) -> Result<Opened> {
+        let mut r = Reader::new(body);
         let fsd = r.u64()?;
         let stat = Stat::get(&mut r)?;
         let revision = Revision::get(&mut r)?;
@@ -447,10 +572,10 @@ impl FsClient {
     }
 
     /// Zamek POSIX (viz [`op::POSIX_LOCK`]).
-    pub fn posix_lock(&self, h: u64, cmd: u8, class: u8, write: bool, start: u64, len: u64) -> Result<PosixLock> {
+    pub fn posix_lock(&self, h: u64, cmd: u8, class: u8, write: bool, start: u64, len: u64, pid: u32) -> Result<PosixLock> {
         let body = self.h_call(h, Kind::Effect, |fsd| {
             let mut w = Self::req(op::POSIX_LOCK);
-            w.u64(fsd).u8(cmd).u8(class).u8(u8::from(write)).u64(start).u64(len);
+            w.u64(fsd).u8(cmd).u8(class).u8(u8::from(write)).u64(start).u64(len).u32(pid);
             w
         })?;
         if cmd != posix_lock::TEST && cmd != posix_lock::UNLOCK {
@@ -459,7 +584,7 @@ impl FsClient {
         let mut r = Reader::new(&body);
         Ok(match r.u8()? {
             posix_lock::DONE => PosixLock::Done,
-            posix_lock::CONFLICT => PosixLock::Conflict { write: r.u8()? != 0, start: r.u64()?, len: r.u64()? },
+            posix_lock::CONFLICT => PosixLock::Conflict { write: r.u8()? != 0, start: r.u64()?, len: r.u64()?, pid: r.u32()? },
             _ => PosixLock::Deadlock,
         })
     }

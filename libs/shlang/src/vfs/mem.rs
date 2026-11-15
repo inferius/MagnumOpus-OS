@@ -28,11 +28,23 @@ pub struct MemFs {
     pub conflict_limit: usize,
     /// Pocet dotazu `dataset_of` (testy: cteni se na dataset nepta).
     pub dataset_queries: usize,
+    /// Vlastni popisy opravneni (klic = cesta malymi pismeny; `acl`).
+    pub acls: BTreeMap<String, crate::acl::Acl>,
+    /// Vlastnik vsech objektu a ucinna prava volajiciho (testy `acl`:
+    /// bez `MANAGE` zapis popisu selze s `ACCESS_DENIED`, jako fsd).
+    pub owner: u64,
+    pub rights: u8,
 }
 
 impl MemFs {
     pub fn new() -> Self {
-        let mut fs = Self { total: 1 << 30, conflict_limit: usize::MAX, ..Default::default() };
+        let mut fs = Self {
+            total: 1 << 30,
+            conflict_limit: usize::MAX,
+            owner: crate::acl::FIRST_USER,
+            rights: crate::acl::rights::ALL,
+            ..Default::default()
+        };
         fs.nodes.insert("/".into(), ("/".into(), Node::Dir));
         fs
     }
@@ -206,6 +218,51 @@ impl Fs for MemFs {
         self.writes += 1;
         self.bump(from);
         self.bump(to);
+        Ok(())
+    }
+
+    /// Jako `fs::Fs::acl_view`: zdedene granty predku s dedenim, od
+    /// nejblizsiho predka, ktery nededi (nebo od korene).
+    fn acl_view(&mut self, path: &str) -> FsResult<crate::acl::View> {
+        self.guard_inside(path)?;
+        let k = key(path);
+        let Some((orig, _)) = self.nodes.get(&k) else { return Err(Error::NotFound) };
+        let acl = self.acls.get(&k).cloned();
+        let mut inherited = Vec::new();
+        if !acl.as_ref().is_some_and(|a| a.protected) {
+            let mut up = String::from(orig.as_str());
+            while let Some(p) = parent(&up) {
+                up = String::from(p);
+                let (Some(a), Some((name, _))) = (self.acls.get(&key(&up)), self.nodes.get(&key(&up))) else { continue };
+                let mut here: Vec<_> = a
+                    .grants
+                    .iter()
+                    .filter(|g| g.flags & crate::acl::grant::INHERIT != 0)
+                    .map(|g| crate::acl::Inherited { who: g.who, rights: g.rights, from: name.clone() })
+                    .collect();
+                here.append(&mut inherited);
+                inherited = here;
+                if a.protected {
+                    break;
+                }
+            }
+        }
+        Ok(crate::acl::View { perms: crate::acl::Perms { owner: self.owner, rights: self.rights, acl }, inherited })
+    }
+
+    fn set_acl(&mut self, path: &str, acl: Option<&crate::acl::Acl>) -> FsResult<()> {
+        self.guard_inside(path)?;
+        let k = key(path);
+        if !self.nodes.contains_key(&k) {
+            return Err(Error::NotFound);
+        }
+        if self.rights & crate::acl::rights::MANAGE == 0 {
+            return Err(Error::AccessDenied);
+        }
+        match acl {
+            Some(a) => self.acls.insert(k, a.clone()),
+            None => self.acls.remove(&k),
+        };
         Ok(())
     }
 

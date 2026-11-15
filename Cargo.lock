@@ -1311,6 +1311,7 @@ dependencies = [
 name = "gui-files"
 version = "0.1.0"
 dependencies = [
+ "accountproto",
  "fileops",
  "filesview",
  "fsproto",

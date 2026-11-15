@@ -115,6 +115,17 @@ pub trait Fs {
     fn space(&mut self) -> FsResult<(u64, u64)> {
         Err(abi::Error::NotSupported)
     }
+    /// Opravneni objektu (prikaz `acl`, fsproto `ACL_VIEW`): vlastnik,
+    /// ucinna prava volajiciho, vlastni popis a zdedene granty s puvodem.
+    /// Bez prav k objektu `NOT_FOUND` (FS neprozradi, ze existuje).
+    fn acl_view(&mut self, _path: &str) -> FsResult<crate::acl::View> {
+        Err(abi::Error::NotSupported)
+    }
+    /// Zapise cely vlastni popis opravneni (`None` = jen zdedena prava).
+    /// Smi vlastnik nebo kdo ma pravo Spravovat, jinak `ACCESS_DENIED`.
+    fn set_acl(&mut self, _path: &str, _acl: Option<&crate::acl::Acl>) -> FsResult<()> {
+        Err(abi::Error::NotSupported)
+    }
 
     // ---- Verze (FS v3): datasety, klony bokem, pohledy ----
     //
@@ -356,17 +367,20 @@ pub trait Host {
     fn report(&mut self) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
-    /// Volba vzhledu (`vzhled`): `system` = systemova (prihlasovaci
+    /// Volba vzhledu (`theme`): `system` = systemova (prihlasovaci
     /// obrazovka, ukon spravy), jinak uzivatele relace. `change` prazdne =
-    /// jen precist, jinak `schema svetly|tmavy|auto`, `kontrast ano|ne`,
-    /// `pohyb ano|ne`. Vraci volbu ve tvaru `schema kontrast omezit_pohyb`
-    /// (napr. `auto ne ne`); `NOT_SUPPORTED` = hostitel vzhled nema.
+    /// jen precist, jinak ulozeny tvar `theme::Pref::apply`: `schema
+    /// svetly|tmavy|auto`, `kontrast ano|ne`, `pohyb ano|ne` (prikaz prevadi
+    /// ze svych anglickych slov). Vraci volbu ve tvaru `schema kontrast
+    /// omezit_pohyb` (napr. `auto ne ne`); `NOT_SUPPORTED` = hostitel vzhled
+    /// nema.
     fn appearance(&mut self, _system: bool, _change: &str) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
-    /// Povoleni aplikaci uzivatele relace (`povoleni`): `app` prazdne =
-    /// vypis, jinak odvolat `perm` aplikace `app`. `NOT_SUPPORTED` =
-    /// hostitel je nema (testy, konzole).
+    /// Povoleni aplikaci uzivatele relace (`permissions`): `app` prazdne =
+    /// vypis (radek na rozhodnuti `aplikace\tpovoleni\tallow|deny`), jinak
+    /// odvolat `perm` (napr. `microphone`) aplikace `app`. `NOT_SUPPORTED`
+    /// = hostitel je nema (testy, konzole).
     fn permissions(&mut self, _app: &str, _perm: &str) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
@@ -381,6 +395,11 @@ pub trait Host {
     /// 1 = vypnout, 2 = zapnout; vraci stav.
     #[cfg(feature = "dev-mode")]
     fn dev_mode(&mut self, _set: u8) -> Result<bool, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
+    /// Ucty lidi (jmena pro `acl`). `NOT_SUPPORTED` = hostitel sluzbu uctu
+    /// nema; `acl` pak zna jen `everyone`, `users` a cisla.
+    fn accounts(&mut self) -> Result<Vec<crate::acl::Account>, abi::Error> {
         Err(abi::Error::NotSupported)
     }
     /// Uroven logu jadra (`loglevel`): `target` prazdny = vypis.

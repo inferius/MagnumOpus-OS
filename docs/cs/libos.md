@@ -104,7 +104,9 @@ map.write::<u32>(0x14, status | 1);
 ### Čekání na mnoho klientů: `Waiter`
 
 **[ověřeno v QEMU]** x86_64 i aarch64 (fsd, test „v2: 200 soucasnych
-relaci a proud" v sadě `souborovy system`).
+relaci a proud" v sadě `souborovy system`; `WaitSet`: compd 100 klientů
+v sadě `gui`, termd 70 relací v sadě `shell`, taskd 100 producentů v sadě
+`ulohy`).
 
 `wait_many` (`OBJECT_WAIT_MANY`) bere nejvýš 64 objektů (`WAIT_MANY_MAX`,
 pole na zásobníku jádra). **Pravidlo: služba s proměnným počtem klientů
@@ -129,6 +131,19 @@ Smyčka: zaregistrovat každý objekt bez registrace -> `wait` -> u klíčů
 z paketů zrušit příznak registrace a obsloužit jen ty objekty (vyčíst vše
 do `SHOULD_WAIT`) -> znovu. Zavření objektu registraci uklidí jádro
 (vrátí rezervaci portu).
+
+**`libos::WaitSet`** - náhrada `wait_many` se stejným rozhraním pro
+smyčky, které už skládají pole `(handle, maska)` (compd, termd, accountd,
+taskd, inputd, audiod, devmgr, revocd, timed, supervisor initu):
+`wait(&items, deadline)` vrátí index první připravené položky a signály
+po položkách, termín = `TIMED_OUT`. Registrace drží mezi voláními
+(objekt bez události se znovu neregistruje), objekt pozná podle hodnoty
+handlu (obsahuje generaci slotu, po zavření a novém otevření je jiná),
+objekt, který v poli chybí, zapomene. Port jde sdílet (`port()`) pro
+vlastní registrace s klíči pod `FOREIGN_KEYS` (ploty v compd, lístky
+supervisoru): takový paket smyčku probudí, s `keep_foreign` si ho volající
+vyzvedne `take_foreign`. Port samotný do pole dát nejde (`NOT_SUPPORTED`
+jádra) - místo toho sdílet port množiny.
 
 Funkce: `wait_one`, `wait_many` (čekání na signály), `time::now`,
 `time::deadline_after`, `time::sleep`, `time::wall`, `time::local` (místní
@@ -181,7 +196,11 @@ a její lístek, [Zvuk](zvuk.md#relace-aplikací-a-nahrávání), `TTY` = řídi
 kanál terminálu, protokol `ttyproto`, [termios](cstd.md#termios)). Štítky, které
 runtime std sám nepoužije, si nechá pro knihovny
 (`osrt::start::take_tagged`). Formát v2 má pole příznaků (`abi::params::flags`:
-`STDOUT_NULL`, `STDERR_NULL` = výstup zahodit, `Stdio::null`).
+`STDOUT_NULL`, `STDERR_NULL` = výstup zahodit, `Stdio::null`). Formát v3
+přidal zděděné fd (`Params::fds`, `abi::params::Fd`: číslo, druh
+`fd_kind`, stav, data; nejvýš `MAX_FDS` = 48) - handly položek jdou se
+štítkem `FD` v pořadí položek ([posix_spawn](cstd.md#procesy-posix_spawn-a-waitpid)).
+**[ověřeno v QEMU]** (krok `inherit` testu `ctest`, sada `cstd`).
 
 ```rust
 use libos::params::Params;
@@ -190,6 +209,7 @@ let params = Params {
     cwd: b"/".to_vec(),
     args: vec![b"hello-std".to_vec(), b"alfa".to_vec()],
     env: vec![b"HELLO=svet".to_vec()],
+    ..Default::default()
 };
 let (out, out_child) = Channel::create()?;
 let handles = vec![

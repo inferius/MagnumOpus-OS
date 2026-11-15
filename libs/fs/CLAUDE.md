@@ -5,7 +5,7 @@ Souborový systém (`no_std`, `std` jen přes feature pro nástroje). Copy-on-wr
 ## Klíčové soubory
 
 - `src/fs/mod.rs` (soubory, adresáře), `fs/commit.rs`, `fs/zil.rs` (intent log), `fs/check.rs`, `fs/scrub.rs`, `fs/snap.rs`, `fs/dataset.rs`, `fs/merge.rs`.
-- `src/layout.rs` + `src/layout/` (formát na disku), `store.rs`, `records.rs`, `btree.rs`, `space/` (volné místo), `names.rs` (jména), `perm.rs` (oprávnění).
+- `src/layout.rs` + `src/layout/` (formát na disku), `store.rs`, `records.rs`, `btree.rs`, `space/` (volné místo), `names.rs` (jména), `perm.rs` (oprávnění), `mode.rs` (mód POSIX jako pohled na granty: zobrazení, zúžení při vytvoření, `chmod`; čistá logika, testy `tests/mode.rs`).
 - `src/posix_lock.rs` - zámky POSIX pro fsd (vlastník, dělení a slučování rozsahů, graf čekání pro EDEADLK); čistá logika bez I/O, testy `src/tests/posix_lock.rs`.
 - `src/tests/` - model, výpadky proudu, výkon, verze, sdílení.
 
@@ -18,6 +18,7 @@ Souborový systém (`no_std`, `std` jen přes feature pro nástroje). Copy-on-wr
 - Hodnoty z disku jsou nedůvěryhodný vstup: poškozený disk nesmí způsobit panic ani čtení mimo buffer.
 - Chyba zařízení během commitu (i `NO_MEMORY`) nesmí nechat stav v paměti nekonzistentní: `write_tree` vyjme uzly z `dirty` až po úspěšném zápisu a při chybě vrátí alokované bloky, `writeback` vrátí nezapsaná data do bufferu. Další commit to zopakuje (test `tests/commit_errors.rs`: chyba na každém zápisu commitu).
 - Logická chyba operace (už existuje, neexistuje, ...) musí přijít před první změnou stavu, jinak `guarded` svazek přepne do stavu chyby (v testech knihovny to rovnou spadne; audit `tests/logical_errors.rs`).
+- Mód POSIX se neukládá: `Stat::mode` počítá `with_mode` ze zděděných grantů (`Walked::above`, u handlu `Open::above` z doby `open`); `set_mode` mění jen vlastní popis (`PROTECTED`, zúžení při vytvoření nikdy nerozšíří).
 - `Stat` rozlišuje známou, skrytou a nedostupnou hodnotu (masky `known`/`hidden`, bity `avail` = `fsproto::avail`): nula bez bitu v `known` není hodnota. Bez `MANAGE` jsou souhrny adresáře v `hidden` (`limit_stat`), `TREE` patří jen adresáři, hranice datasetu má `known` jen `RIGHTS` (test `tests/avail.rs`).
 
 ## Testy

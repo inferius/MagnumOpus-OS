@@ -42,6 +42,7 @@ pub const TESTS: &[Test] = &[
     ("files-copy: uloha s konfliktem prezije restart procesu", super::gui_files::copier_resume),
     ("compd: spravce souboru: kopie jako uloha, konflikt, kos, 10 000 polozek, snimek (QMP)", super::gui_files::files_window),
     ("compd: video NV12 a I420 s ploty ziskani a uvolneni", super::gui_video::nv12_with_fences),
+    ("compd: 100 soucasnych klientu (smycka pres port)", super::gui_clients::many_clients),
     ("prehravac: plocha videa z mediad, prehrat a pozastavit", super::gui_player::play_pause),
     ("compd: skladani na GPU (Venus) dava stejne pixely jako CPU", super::gui_gpu::gpu_backend),
     // Posledni: kompozitor sady se ukonci.
