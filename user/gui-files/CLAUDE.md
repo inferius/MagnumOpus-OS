@@ -1,6 +1,6 @@
 # user/gui-files
 
-Aplikace Soubory: jen backend `OsBackend` nad relací FS uživatele, kanálem k `files-copy` a službě „otevři cestu“; model a rozhraní jsou v `libs/filesview`. Start: okno, lístek, relace FS, kanál `files-copy`, kanál služby; domov v bloku parametrů (cwd). Manifest: akce `files.*`, `[open]` (složky, reveal), `system = true`, více oken. Popis: `docs/cs/spravce-souboru.md`.
+Aplikace Soubory: jen backend `OsBackend` nad relací FS uživatele, kanálem k `files-copy` a službě „otevři cestu“; model a rozhraní jsou v `libs/filesview`. Start: okno, lístek, relace FS, kanál `files-copy`, kanál služby „otevři cestu“, kanál jmen účtů (`accountd` `names`, karta Oprávnění); chybějící služba = zavřený kanál; domov v bloku parametrů (cwd). Manifest: akce `files.*`, `[open]` (složky, reveal), `system = true`, více oken. Popis: `docs/cs/spravce-souboru.md`.
 
 ## Invarianty
 

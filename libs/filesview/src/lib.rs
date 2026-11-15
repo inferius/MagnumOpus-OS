@@ -7,6 +7,8 @@
 //!   virtualizovanou tabulku: 10 000 polozek stoji jen viditelne radky);
 //! - `nav` - historie a drobeckova navigace; `preview` - nahled textu
 //!   a BMP; `format` - texty hodnot a tri stavy hodnot z FS;
+//! - `props` + `props_view` - panel Vlastnosti (karty Obecne
+//!   a Opravneni);
 //! - `backend` - co aplikace potrebuje od systemu (v OS `FsClient`
 //!   a kanal k `files-copy`, v testech FS v pameti).
 //!
@@ -24,10 +26,14 @@ pub mod format;
 pub mod listing;
 pub mod nav;
 pub mod preview;
+pub mod props;
+mod props_view;
 pub mod view;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod props_tests;
 
 use alloc::string::String;
 
@@ -79,6 +85,11 @@ impl<B: Backend> ui::App for FileManager<B> {
     }
 
     fn key(&self, code: u16, ch: Option<char>, mods: u16) -> Option<Msg> {
+        if self.props.is_some() {
+            // Panel Vlastnosti: Escape zavre, ostatni klavesy ne (radky
+            // vypisu nejsou videt).
+            return (code == inputproto::code::KEY_ESC).then_some(Msg::Props(props::PropsMsg::Close));
+        }
         key_msg(self.edit.is_some(), self.mode, code, ch, mods)
     }
 
@@ -105,6 +116,7 @@ impl<B: Backend> ui::App for FileManager<B> {
             "files.back" => Msg::Back,
             "files.up" => Msg::Up,
             "files.refresh" => Msg::Refresh,
+            "files.properties" => Msg::Properties,
             "files.show" => {
                 let path = args.iter().find(|a| a.0 == "path").and_then(|a| match &a.1 {
                     guiproto::action::Value::Path(p) | guiproto::action::Value::Text(p) => Some(p.clone()),
@@ -142,6 +154,7 @@ pub fn key_msg(editing: bool, mode: app::Mode, code: u16, ch: Option<char>, mods
         (KEY_F2, false, false) if !trash => Msg::Rename,
         (KEY_DELETE, false, false) if trash => Msg::TrashPurge,
         (KEY_DELETE, false, false) => Msg::Trash,
+        (KEY_ENTER, false, true) if !trash => Msg::Properties,
         _ if ctrl && !alt => match letter? {
             'c' if !trash => Msg::Copy,
             'x' if !trash => Msg::Cut,
@@ -177,6 +190,8 @@ pub fn app_menu(selected: bool) -> alloc::vec::Vec<guiproto::menu::MenuItem> {
             item("Zpět", "files.back", "Alt+Left", true),
             item("Nahoru", "files.up", "Backspace", true),
             item("Znovu načíst", "files.refresh", "F5", true),
+            // Bez vyberu vlastnosti aktualni slozky.
+            item("Vlastnosti", "files.properties", "Alt+Enter", true),
         ],
         ..MenuItem::default()
     }]

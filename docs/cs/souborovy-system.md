@@ -1637,6 +1637,7 @@ fs.set_acl("/home/alice/sdilene/soukrome", Some(Acl {
 | 51 | `SET_OWNER` | cesta, vlastník u64 (jen řídicí) | - |
 | 52 | `SET_NOEXEC` | kořen datasetu, zapnout u8 | - |
 | 53 | `NOEXEC` | kořen datasetu | zákaz u8 |
+| 94 | `ACL_VIEW` | cesta | jako `PERMISSIONS` + zděděné granty: počet u32, (komu u64, práva u8, původ str)…; původ = nejbližší složka výš, jejíž popis grant dědí (cesta v relaci, prázdná = mimo připojené cesty), pořadí od kořene; s `PROTECTED` prázdné |
 
 `Stat` má navíc vlastníka u64 a účinná práva volajícího u8. `OPEN` zná
 přístup `EXECUTE` (8).

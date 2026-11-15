@@ -172,7 +172,7 @@ impl Service {
 
     /// Operace v2; `None` = neni v2 (obslouzi v1).
     pub fn handle_v2(&mut self, sess: &mut Session, opcode: u32, r: &mut Reader) -> Option<Result<Reply>> {
-        if (fsproto::perm::op::CONNECT_AS..=fsproto::perm::op::NOEXEC).contains(&opcode) {
+        if (fsproto::perm::op::CONNECT_AS..=fsproto::perm::op::NOEXEC).contains(&opcode) || opcode == fsproto::perm::op::ACL_VIEW {
             return Some(self.perm_op(sess, opcode, r));
         }
         if !(op::HELLO..=op::REPLACE_ABORT).contains(&opcode) && !matches!(opcode, op::REOPEN | op::POSIX_LOCK | op::OPEN_STREAM) {

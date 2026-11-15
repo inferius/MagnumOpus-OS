@@ -62,3 +62,7 @@ title = "Nahoru do nadřazené složky"
 [[action]]
 id = "files.refresh"
 title = "Znovu načíst složku"
+
+[[action]]
+id = "files.properties"
+title = "Vlastnosti a oprávnění vybrané položky"

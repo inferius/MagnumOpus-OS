@@ -64,7 +64,8 @@ Kód:
 | odpověď služby „otevři cestu“ ve stavovém řádku (druhý kanál okna) | **[implementováno]** (host `context_menu_and_open_reply`) |
 | složka bez práva výpisu (cizí domov v `/home`): ikona zámku, druh „Složka bez přístupu“; po otevření místo obsahu „Ke složce X nemáte přístup.“ (jiná chyba: „Složku X nejde otevřít: důvod.“). Odmítnutý výpis se nikdy neukáže jako „Složka je prázdná“ | **[implementováno]** (host `foreign_folder_has_lock`, `denied_listing_is_not_empty_folder`) |
 | pohled ikon (mřížka), miniatury | **[navrženo]** |
-| „Zkusit bokem“, převzetí změn, Porovnat verze, úprava práv | **[navrženo]** (prototyp `design/soubory.html`) |
+| panel Vlastnosti (kontextová nabídka, Alt+Enter, akce `files.properties`): karta Obecné a karta Oprávnění (vlastník, sdílení s úrovní, zděděné řádky s původem, dědění do obsahu složky, vypnutí dědění) | **[ověřeno v QEMU]** (test `gui: compd: spravce souboru...`: zděděný grant z fsd, přidání sdílení, uložení); úrovně, jen pro čtení, potvrzení host `props_tests.rs` |
+| „Zkusit bokem“, převzetí změn, Porovnat verze | **[navrženo]** (prototyp `design/soubory.html`) |
 | dialog „Otevřít v…“ (`design/dialogy.html`) | **[navrženo]** - až budou systémové dialogy |
 
 ## Tři stavy hodnot
@@ -197,6 +198,56 @@ až za ~2,6 s (dva snímky) bez ohledu na velikost složky; s WHPX je to
 0,2-0,3 s (měření výše). Aplikace v TCG zpracuje klávesu až ~1,5 s po
 stisku; schránce to nevadí, protože gesto je pořadové číslo fyzického
 stisku (`clipproto`), ne časové okno.
+
+## Vlastnosti a oprávnění
+
+Panel **Vlastnosti** otevře kontextová nabídka řádku, Alt+Enter nebo akce
+`files.properties`; bez výběru ukáže aktuální složku. Panel nahradí
+výpis (postranní panel zůstane), Escape nebo „Zavřít vlastnosti“ ho
+zavře. Karta **Obecné** ukazuje druh, umístění, velikost, obsah složky,
+data a vaše práva (tři stavy hodnot jako náhled).
+
+Karta **Oprávnění** (`libs/filesview/src/props.rs`, data z fsd
+`ACL_VIEW`, uložení `SET_ACL`):
+
+- **Vlastník** a věta, že má vždy všechna práva; vlastníka mění jen
+  systém (`SET_OWNER` jen řídicí relace), proto je jen ke čtení.
+- **Sdíleno:** vlastní řádky objektu. Každý řádek má příjemce (účet,
+  „Uživatelé počítače“, „Všichni“), úroveň a u složky přepínač „i pro
+  obsah složky“ (grant `INHERIT`). „Přidat sdílení“ nabídne účty bez
+  vlastníka a bez těch, kdo už řádek mají.
+- **Zděděno:** granty ze složek výš s původem („zděděno ze složky
+  /home/jana/Dokumenty“), zde neměnné (přístupnost je hlásí jako
+  zakázané); změnit jdou ve složce původu. Přepínač „Dědit oprávnění
+  z nadřazené složky“ vypnutý = `ACL_PROTECTED`; před vypnutím se
+  panel zeptá, jestli zděděné řádky zkopírovat jako vlastní
+  („Zkopírovat zděděná“, „Nekopírovat“, „Ponechat dědění“).
+- Změny se uloží až tlačítkem „Uložit oprávnění“ (jeden `SET_ACL`),
+  „Zahodit změny“ vrátí načtený stav.
+
+| Úroveň | Práva |
+|---|---|
+| Zobrazit | vypsat, projít, číst |
+| Spouštět | Zobrazit + spouštět |
+| Upravovat | Spouštět + měnit, přidávat, mazat |
+| Spravovat | vše včetně změny oprávnění, snapshotů a datasetů |
+| Vlastní (…) | jiná kombinace (např. z příkazu `acl`); zůstane beze změny, dokud ji někdo nepřepne |
+
+Úrovně jsou vzestupné: každá obsahuje předchozí (host test
+`levels_are_ascending_and_custom_is_kept`).
+
+**Kdo smí měnit:** jen s právem Spravovat (vlastník ho má vždy). Bez něj
+je karta jen pro čtení s vysvětlením „Jen pro čtení: oprávnění může
+měnit vlastník nebo kdo má právo Spravovat. Vy smíte: …“ a bez tlačítek
+změn. Kdo není vlastník a uložením by přišel o vlastní právo Spravovat
+(řádek pro sebe, „Uživatelé počítače“ nebo „Všichni“), musí to potvrdit
+(„Přesto uložit“). Skupiny mimo tyto dvě panel nezná, proto se v nich
+nepočítá.
+
+**Jména:** okno dostane od initu kanál `names` ke službě účtů (operace
+`NAMES`, jen jména účtů, viz [Uživatelské účty](ucty.md));
+neznámé číslo se ukáže jako „Účet 1234“ nebo „Skupina 1000001“,
+uživatel okna má „(vy)“. Číslo uživatele okna je vlastník domova.
 
 ## Bezpečnost
 

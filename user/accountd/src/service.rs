@@ -8,6 +8,7 @@ use core::time::Duration;
 use accountproto::ctap::hidclient::HidTransport;
 use accountproto::ctap::{Client, Transport};
 use accountproto::{
+    AccountName, encode_names,
     AuthReply, Method, Request, Secret, ToInit, WhoAmI, encode_list, flags, parse_reply, reply_err, reply_ok,
 };
 use accounts::{Engine, Outcome};
@@ -216,6 +217,13 @@ impl Service {
             _ => Err(Error::AccessDenied),
         };
         reply(r)
+    }
+
+    /// Kanal names: prihlasovaci a zobrazovana jmena uctu (jako na
+    /// prihlasovaci obrazovce, bez metod a priznaku).
+    pub fn names(&mut self) -> Vec<u8> {
+        let l: Vec<AccountName> = self.eng.list().into_iter().map(|a| AccountName { uid: a.uid, display: if a.display.is_empty() { a.name.clone() } else { a.display }, name: a.name }).collect();
+        reply(Ok(encode_names(&l)))
     }
 
     /// Kanal self relace `i`. `None` = odpoved prijde pozdeji (ukon spravy

@@ -581,6 +581,7 @@ použití vynulují. Kanály jsou různé capability:
 | `self` | relace uživatele (nastavení) | vlastní účet: metody, fráze, šifrování, zamčení, odhlášení, žádost o úkon správy |
 | `setup` | instalátor, jen dokud neexistuje žádný účet | založení prvního účtu s rolí |
 | `grants` | služby úkonů správy (devmgr, fwd, aktualizace, ...) | ověřit a spotřebovat grant |
+| `names` | okno Soubory (každé okno vlastní kanál od initu) | jen jména účtů (`NAMES`: přihlašovací a zobrazované): stejná jména ukazuje přihlašovací obrazovka, nic dalšího o účtu |
 | `init` | init (soukromý) | relace, domovy, klíče domovů |
 
 | Op | Kanál | Jméno | Pole | Odpověď |
@@ -603,6 +604,7 @@ použití vynulují. Kanály jsou různé capability:
 | 20 | self | `SET_KEY_PIN` | PIN secret | - (klíč, který PIN ještě nemá) |
 | 30 | setup | `CREATE_FIRST` | jméno, zobrazované, heslo secret | uid |
 | 40 | grants | `CHECK_GRANT` | token (blob 16 B), úkon u32, parametry (blob) | - nebo `ACCESS_DENIED`; token se spotřebuje |
+| 41 | names | `NAMES` | - | účty: uid u64, přihlašovací jméno, zobrazované jméno (prázdné -> přihlašovací) |
 | 50 | init | `OPEN_SESSION` (accountd -> init, + handle kanálu self) | uid, skupiny, domov | relace u64 |
 | 51 | init | `CLOSE_SESSION` | relace | - |
 | 52, 53 | init | `LOCK_SESSION`, `UNLOCK_SESSION` | relace | - |

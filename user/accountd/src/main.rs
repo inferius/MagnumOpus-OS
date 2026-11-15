@@ -89,6 +89,8 @@ enum Kind {
     Setup,
     /// Sluzby ukonu spravy (`CHECK_GRANT`).
     Grants,
+    /// Zobrazovana jmena uctu (`NAMES`, okno spravce souboru).
+    Names,
 }
 
 fn main(startup: Startup) -> i64 {
@@ -218,6 +220,7 @@ fn main(startup: Startup) -> i64 {
                         (_, Kind::Grants) => svc.check_grant(&msg.data),
                         (Ok(r), Kind::Login) if r.is_login() => svc.login(r),
                         (Ok(r), Kind::Setup) => svc.setup(r),
+                        (Ok(Request::Names), Kind::Names) => svc.names(),
                         (Ok(_), _) => accountproto::reply_err(Error::AccessDenied),
                         (Err(e), _) => accountproto::reply_err(e),
                     };
@@ -266,6 +269,7 @@ fn main(startup: Startup) -> i64 {
             b"login" => Some(Kind::Login),
             b"setup" => Some(Kind::Setup),
             b"grants" => Some(Kind::Grants),
+            b"names" => Some(Kind::Names),
             _ => None,
         };
         let reply = if let Some(k) = kind {

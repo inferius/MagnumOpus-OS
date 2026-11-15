@@ -63,9 +63,9 @@ pub fn close(session: u64) {
 }
 
 /// Handly pro okno spravce souboru: relace FS uzivatele, kanal
-/// k `files-copy` (kdyz bezi), domov v bloku parametru a kanal sluzby
-/// "otevri cestu". Bez `files-copy` se posle prazdny kanal (poradi handlu
-/// je pevne).
+/// k `files-copy` (kdyz bezi), domov v bloku parametru, kanal sluzby
+/// "otevri cestu" a kanal jmen uctu (`accountd` `names`). Chybejici
+/// sluzba = prazdny kanal (poradi handlu je pevne).
 pub fn window_handles(session: u64) -> Result<Vec<StartHandle>> {
     let fs = crate::session::connect(session)?;
     let mut hs = vec![StartHandle::user(fs.into_channel().into_handle())];
@@ -83,9 +83,21 @@ pub fn window_handles(session: u64) -> Result<Vec<StartHandle>> {
     drop(copiers);
     hs.push(params(session)?);
     // Sluzba "otevri cestu" (soubor v aplikaci podle typu).
+    // Bez sluzby se posle prazdny kanal (poradi handlu je pevne).
     match crate::open::endpoint(session) {
         Ok(c) => hs.push(StartHandle::user(c.into_handle())),
-        Err(e) => println!("init: spravce souboru bez otevirani v aplikacich: {e}"),
+        Err(e) => {
+            println!("init: spravce souboru bez otevirani v aplikacich: {e}");
+            hs.push(StartHandle::user(Channel::create()?.1.into_handle()));
+        }
+    }
+    // Zobrazovana jmena uctu (karta Opravneni ve Vlastnostech).
+    match crate::accounts::channel("names") {
+        Ok(c) => hs.push(StartHandle::user(c.into_handle())),
+        Err(e) => {
+            println!("init: spravce souboru bez jmen uctu: {e}");
+            hs.push(StartHandle::user(Channel::create()?.1.into_handle()));
+        }
     }
     Ok(hs)
 }
