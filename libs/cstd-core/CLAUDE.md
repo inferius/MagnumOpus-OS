@@ -10,7 +10,7 @@ Základ knihovny C v Rustu (`no_std`, ABI C): řetězce, `ctype`, `malloc` nad a
 ## Invarianty
 
 - Feature `service-io` (výchozí) exportuje `printf`, `puts`, `putchar`, `abort`, `__cstd_assert_fail` s výstupem do logu služby (`set_output`). Aplikace se std ji vypínají - tyto symboly dodává `cstd` nad std.
-- `malloc` má 16B hlavičku s velikostí (zarovnání 16 B).
+- `malloc` má 16B hlavičku těsně před ukazatelem: velikost a zarovnání (16 B, nebo víc u `alloc_aligned`, tedy `aligned_alloc` a `posix_memalign` z `cstd`); `free` z ní spočítá `Layout`. `realloc` zarovnaného bloku vrátí obyčejný blok (C větší zarovnání po `realloc` nezaručuje).
 - Žádné nebezpečné funkce (`sprintf`, `gets`, `strtok`); `%n` nic nezapíše.
 
 ## Testy

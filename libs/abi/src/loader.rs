@@ -114,4 +114,18 @@ pub struct Interface {
     /// `NARROW` na svem listku. 0 = ok (dva handly zapsane), jinak kod
     /// chyby `abi::Error`. (DL-4b; starsi zavadec pole nema - `size`.)
     pub libd_session: unsafe extern "C" fn(session: *mut u32, lease: *mut u32) -> i32,
+    /// Inicializatory modulu ze startu (`DT_INIT`, `DT_INIT_ARRAY`;
+    /// zavislosti prvni, program posledni). Zavadec je pred skokem do
+    /// programu nespousti: konstruktory (C++ staticke objekty) alokuji
+    /// a registruji `__cxa_atexit`, takze smi bezet az po priprave
+    /// behoveho prostredi programu, ktere tuto funkci zavola hned po sve
+    /// inicializaci a pred `main`. Podruhe nic nedela. Moduly z `dlopen`
+    /// inicializuje `dlopen` sam. (7a-1; starsi zavadec pole nema - `size`,
+    /// spustil inicializatory sam.)
+    pub run_init: unsafe extern "C" fn(),
+}
+
+/// Ma tabulka velikosti `size` pole konci na `end` (offset konce pole)?
+pub const fn has_field(size: u32, end: usize) -> bool {
+    size as usize >= end
 }

@@ -265,9 +265,9 @@ pub extern "C" fn main(sp: *const u64, bootstrap: u64) -> u64 {
         unsafe { (aux.loader_slot as *mut u64).write(&iface::INTERFACE as *const _ as u64) };
     }
     or_fail(seal_own_relro(aux.base, page));
-    // Inicializatory az se stavem (smi volat `dlopen`, `dl_iterate_phdr`).
-    for i in inits {
-        i.run();
-    }
+    // Inicializatory spusti az behove prostredi programu (`run_init` po
+    // sve inicializaci, abi::loader): konstruktory alokuji a registruji
+    // `__cxa_atexit`, coz pred startem runtime programu nejde.
+    iface::set_pending_init(inits);
     aux.entry
 }

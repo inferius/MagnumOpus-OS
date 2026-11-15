@@ -1,8 +1,10 @@
 //! `stdlib.h`: pamet, prevody cisel, `abort`.
 //!
-//! `malloc` bere pamet z alokatoru programu (heap libos). Pred kazdym blokem
-//! je hlavicka s velikosti (16 B, zachova zarovnani 16 B, ktere C
-//! od `malloc` ceka), aby `free` a `realloc` znaly `Layout`.
+//! `malloc` bere pamet z alokatoru programu (heap libos). Tesne pred
+//! ukazatelem pro C je hlavicka 16 B: velikost a zarovnani bloku (zachova
+//! zarovnani 16 B, ktere C od `malloc` ceka), aby `free` a `realloc` znaly
+//! `Layout`. Blok s vetsim zarovnanim (`aligned_alloc`, `posix_memalign`)
+//! zacina o `align` bajtu drive a hlavicka je na konci teto mezery.
 
 use alloc::alloc::{Layout, alloc, alloc_zeroed, dealloc, realloc as rust_realloc};
 
@@ -12,18 +14,48 @@ const HEADER: usize = 16;
 const ALIGN: usize = 16;
 
 fn layout(size: usize) -> Option<Layout> {
-    Layout::from_size_align(size.checked_add(HEADER)?, ALIGN).ok()
+    layout_aligned(size, ALIGN)
 }
 
-unsafe fn finish(p: *mut u8, size: usize) -> *mut u8 {
+/// Layout bloku s danym zarovnanim (mocnina 2, aspon `ALIGN`); mezera pred
+/// ukazatelem pro C je `align` bajtu (vejde se do ni hlavicka).
+fn layout_aligned(size: usize, align: usize) -> Option<Layout> {
+    Layout::from_size_align(size.checked_add(align)?, align).ok()
+}
+
+/// Zapise hlavicku a vrati ukazatel pro C (`p` + `align`).
+unsafe fn finish_aligned(p: *mut u8, size: usize, align: usize) -> *mut u8 {
     if p.is_null() {
         return p;
     }
-    // SAFETY: blok ma aspon HEADER bajtu, zarovnani 16.
+    // SAFETY: blok ma aspon `align` >= HEADER bajtu pred ukazatelem pro C,
+    // zarovnani aspon 16.
     unsafe {
-        (p as *mut usize).write(size);
-        p.add(HEADER)
+        let user = p.add(align);
+        (user.sub(HEADER) as *mut usize).write(size);
+        (user.sub(HEADER / 2) as *mut usize).write(align);
+        user
     }
+}
+
+unsafe fn finish(p: *mut u8, size: usize) -> *mut u8 {
+    // SAFETY: predano volajicim.
+    unsafe { finish_aligned(p, size, ALIGN) }
+}
+
+/// Blok se zarovnanim `align` (mocnina 2); mensi zarovnani nez 16 = jako
+/// `malloc`. `None` = spatne zarovnani, NULL = malo pameti nebo preteceni.
+/// Uvolnuje se obycejnym `free` (zarovnani je v hlavicce).
+pub fn alloc_aligned(size: usize, align: usize) -> Option<*mut u8> {
+    if !align.is_power_of_two() {
+        return None;
+    }
+    let align = align.max(ALIGN);
+    Some(match layout_aligned(size, align) {
+        // SAFETY: Layout ma nenulovou velikost (aspon `align`).
+        Some(l) => unsafe { finish_aligned(alloc(l), size, align) },
+        None => core::ptr::null_mut(),
+    })
 }
 
 #[cfg_attr(not(test), unsafe(no_mangle))]
@@ -54,6 +86,12 @@ unsafe fn size_of_block(p: *mut u8) -> usize {
     unsafe { (p.sub(HEADER) as *const usize).read() }
 }
 
+/// Zarovnani bloku z hlavicky.
+unsafe fn align_of_block(p: *mut u8) -> usize {
+    // SAFETY: dtto.
+    unsafe { (p.sub(HEADER / 2) as *const usize).read() }
+}
+
 #[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn free(p: *mut u8) {
     if p.is_null() {
@@ -62,7 +100,8 @@ pub unsafe extern "C" fn free(p: *mut u8) {
     // SAFETY: kontrakt C; Layout je stejny jako pri alokaci.
     unsafe {
         let size = size_of_block(p);
-        dealloc(p.sub(HEADER), layout(size).unwrap());
+        let align = align_of_block(p);
+        dealloc(p.sub(align), layout_aligned(size, align).unwrap());
     }
 }
 
@@ -78,6 +117,16 @@ pub unsafe extern "C" fn realloc(p: *mut u8, size: size_t) -> *mut u8 {
     // SAFETY: kontrakt C; stary Layout odpovida alokaci.
     unsafe {
         let old = size_of_block(p);
+        if align_of_block(p) != ALIGN {
+            // Zarovnany blok: C zarovnani po realloc nezarucuje, novy blok
+            // je obycejny (kopie a uvolneni stareho).
+            let q = malloc(size);
+            if !q.is_null() {
+                core::ptr::copy_nonoverlapping(p, q, old.min(size));
+                free(p);
+            }
+            return q;
+        }
         let q = rust_realloc(p.sub(HEADER), layout(old).unwrap(), new.size());
         finish(q, size)
     }

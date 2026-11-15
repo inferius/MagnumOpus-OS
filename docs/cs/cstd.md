@@ -93,7 +93,7 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 |---|---|---|
 | `errno.h` | `errno` (`__errno_location`), konstanty `E*` | per vlákno (TLS); čísla jako Linux/POSIX (`ENOENT` = 2, ...) |
 | `stdio.h` | `stdin`, `stdout`, `stderr`, `fopen`, `fclose`, `fflush` (i `NULL`), `fread`, `fwrite`, `fgetc`, `getc`, `getchar`, `ungetc`, `fgets`, `fputc`, `putc`, `putchar`, `fputs`, `puts`, `printf`, `vprintf`, `fprintf`, `vfprintf`, `fseek`, `ftell`, `rewind`, `feof`, `ferror`, `clearerr`, `setvbuf`, `perror`, `remove`, `rename` | `snprintf` a formátovací stroj z `cstd-core` |
-| `stdlib.h` | `exit`, `_Exit`, `atexit`, `getenv`, `abort` | `EXIT_SUCCESS`, `EXIT_FAILURE` |
+| `stdlib.h` | `exit`, `_Exit`, `atexit`, `getenv`, `abort` | `EXIT_SUCCESS`, `EXIT_FAILURE`; `atexit` sdílí seznam s `__cxa_atexit` ([Funkce pro C++](#funkce-pro-c-krok-7a)) |
 | `string.h` | `strerror` | zbytek v `cstd-core` |
 | `assert.h` | `assert` | selhání vypíše soubor a řádek na stderr a ukončí proces |
 
@@ -102,7 +102,7 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 | Hlavička | Funkce | Poznámka |
 |---|---|---|
 | `unistd.h` | `close`, `read`, `write`, `pread`, `pwrite`, `lseek`, `dup`, `dup2`, `dup3`, `pipe`, `pipe2`, `isatty`, `fsync`, `fdatasync`, `ftruncate`, `truncate`, `unlink`, `rmdir`, `getcwd`, `chdir`, `access`, `sysconf`, `getpagesize` | `fork`, `vfork`, `exec*` vrací `ENOSYS` (viz [Bez fork](#procesy-locale-wchar)) |
-| `fcntl.h` | `open`, `openat` (jen `AT_FDCWD` nebo absolutní cesta), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | hodnoty `O_*` jako Linux, `O_DIRECTORY` stejné na obou architekturách; zámky `F_GETLK`, `F_SETLK`, `F_SETLKW` viz Zámky souborů |
+| `fcntl.h` | `open`, `openat` (i relativně k adresáři, viz [Funkce pro C++](#funkce-pro-c-krok-7a)), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | hodnoty `O_*` jako Linux, `O_DIRECTORY` stejné na obou architekturách; zámky `F_GETLK`, `F_SETLK`, `F_SETLKW` viz Zámky souborů |
 | `sys/stat.h` | `stat`, `lstat` (= `stat`), `fstat`, `mkdir`, `chmod`, `fchmod`, `umask` | `st_mode` z druhu a účinných práv relace; `chmod` nemá účinek (práva jsou granty FS) |
 | `sys/uio.h` | `readv`, `writev` | `writev` jedním zápisem |
 | `dirent.h` | `opendir`, `fdopendir`, `readdir`, `closedir`, `rewinddir`, `dirfd` | první dvě položky `.` a `..` |
@@ -258,6 +258,27 @@ zavření posledního fd procesu na souboru (`flock`: zavření fd) a konec
 procesu. `F_SETLKW` a `flock` bez `LOCK_NB` čekají opakovaným zkoušením;
 fsd přitom hlídá cyklus čekání (`EDEADLK`). `l_pid` z `F_GETLK` je -1
 (čísla procesů fsd nezná).
+
+## Funkce pro C++ (krok 7a)
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (sada `cpp`, [běh C++](cpp.md)); host testy
+`cxxsup_tests`, `fsat_tests`.
+
+| Hlavička | Funkce | Poznámky |
+|---|---|---|
+| `stdlib.h` | `aligned_alloc`, `posix_memalign`, `lldiv`, `realpath` | zarovnaný blok uvolní obyčejný `free`: hlavička `malloc` (cstd-core) nese velikost i zarovnání; `realloc` zarovnaného bloku vrátí obyčejný blok |
+| `unistd.h`, `sys/random.h` | `getentropy` (nejvýš 256 B), `unlinkat`, `pathconf`, `fpathconf` | `getentropy` čeká, dokud generátor jádra není nasazený (jako Linux) |
+| `time.h` | `timespec_get` (`TIME_UTC`, `TIME_MONOTONIC`) | |
+| `fcntl.h`, `sys/stat.h` | `openat`, `mkdirat`, `fstatat`, `fchmodat` relativně k adresáři; `AT_REMOVEDIR`, `AT_SYMLINK_NOFOLLOW` | cesta adresáře zapamatovaná při otevření + jméno (FS pracuje s cestami: bez ochrany před přejmenováním adresáře mezi otevřením a voláním) |
+| `sys/statvfs.h` | `statvfs`, `fstatvfs` | velikost a volné bloky svazku relace fsd; počty inodů 0 |
+| `sys/sendfile.h` | `sendfile` | kopie přes buffer 64 KiB v procesu |
+| `limits.h` | `PATH_MAX` (4096), `NAME_MAX` (255) | |
+| `link.h`, `elf.h` | `dl_iterate_phdr`, `struct dl_phdr_info`, typy ELF64 | statický program: jeden modul ze symbolů linker skriptu (`PT_LOAD`, `PT_GNU_EH_FRAME`) |
+| (ABI C++) | `__cxa_atexit`, `__cxa_finalize`, `__cxa_thread_atexit_impl`, `__dso_handle` | `atexit` a `__cxa_atexit` mají jeden seznam (společné obrácené pořadí) |
+
+Sysroot C překládá s `-funwind-tables` (výjimky C++ projdou rámci C)
+a linkuje s `--eh-frame-hdr`; dynamická část má `lib/crtdso.o` se skrytým
+`__dso_handle` pro každou sdílenou knihovnu.
 
 ## Sysroot C a porty (část 2i)
 

@@ -49,6 +49,9 @@ pub fn exit(code: i32) -> ! {
     // Pod zavadecem: finalizatory knihoven a programu (DT_FINI_ARRAY).
     #[cfg(target_env = "dyn")]
     libos::loader::run_fini();
+    // Staticky program: .fini_array (symboly linker skriptu).
+    #[cfg(not(target_env = "dyn"))]
+    start::init_array::run_fini();
     libos::sys::process_exit(i64::from(code))
 }
 
@@ -98,4 +101,11 @@ pub fn fill_random(buf: &mut [u8]) {
         // kryptografie si vynucuje REQUIRE_SEEDED sama (libos::random).
         let _ = libos::sys::random_get(chunk, 0);
     }
+}
+
+/// Nahodne bajty jen z nasazeneho generatoru (`getentropy`, klice);
+/// `Err(ShouldWait)` = generator jeste nema dost entropie, nic se nezapsalo
+/// do zbytku bufferu.
+pub fn fill_random_seeded(buf: &mut [u8]) -> Result<()> {
+    libos::random::fill_seeded(buf)
 }

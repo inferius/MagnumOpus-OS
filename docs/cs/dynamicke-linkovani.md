@@ -322,7 +322,9 @@ sysrootu C a start `__libc_start` v `osrt`, viz [cstd.md](cstd.md#libcso).
 **[ověřeno v QEMU]** x86_64 i aarch64.
 
 - **Tabulka zavaděče** `abi::loader::Interface` (verze, velikost;
-  `thread_tls_new`, `thread_tls_free`, `run_fini`, `dl_iterate_phdr`).
+  `thread_tls_new`, `thread_tls_free`, `run_fini`, `dl_iterate_phdr`,
+  `dl*`, `libd_session`, `run_init`; nová pole jen na konec, posuny hlídá
+  test `loader_table_offsets`).
   Adresu zapíše zavaděč do auxv (`AT_MO_LOADER`, místo připraví `spawn`)
   a při skoku do programu předá navíc SP (auxv) a `ENTRY_MAGIC`
   (x86_64 `rsi`/`rdx`, aarch64 `x1`/`x2`). libos (`rt_own` -> `loader::init`)
@@ -337,6 +339,16 @@ sysrootu C a start `__libc_start` v `osrt`, viz [cstd.md](cstd.md#libcso).
   `dlopen` modulů s initial-exec TLS (ovladače Vulkan/GL z Mesy). glibc má
   pevnou rezervu 1664 B, dnes 512 B + 144 B na jmenný prostor (1520 B);
   2 KiB pokryje obojí.
+- **init** **[ověřeno v QEMU]** x86_64 i aarch64 (sady `procesy`, `cstd dyn`, `cpp`):
+  inicializátory modulů ze startu (`DT_INIT`, `DT_INIT_ARRAY`, závislosti
+  napřed, program poslední) zavaděč před skokem do programu nespouští.
+  Volá je běhové prostředí programu funkcí tabulky `run_init` hned po své
+  inicializaci a před `main` (`rt_own` po `startup`, `__libc_start` v osrt
+  po `init`, crt testu před `program_main`): konstruktory statických
+  objektů C++ alokují, registrují `__cxa_atexit` a sahají na soubory, což
+  před přípravou heapu a stdio nejde ([běh C++](cpp.md)). Podruhé nic
+  nedělá; moduly z `dlopen` inicializuje `dlopen` sám. Pole je na konci
+  tabulky (7a-1), program ho hledá podle `size`.
 - **fini:** normální konec programu (`rt_own` po `main`, crt po
   `program_main`) zavolá `run_fini`: program první, závislosti poslední,
   `DT_FINI_ARRAY` pozpátku, pak `DT_FINI`; podruhé nic. Kill a pád fini

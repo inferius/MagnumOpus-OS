@@ -256,6 +256,24 @@ pub fn fstat(fd: i32) -> R<Stat> {
     }
 }
 
+/// Na hostiteli fd cestu neznaji (jen testy logiky).
+pub fn fd_path(_fd: i32) -> R<Vec<u8>> {
+    Err(errno::ENOTSUP)
+}
+
+pub fn abs_path(path: &[u8]) -> R<Vec<u8>> {
+    let p = std::str::from_utf8(path).map_err(|_| errno::EINVAL)?;
+    if p.is_empty() {
+        return Err(errno::ENOENT);
+    }
+    std::path::absolute(p).map(|a| a.to_string_lossy().replace('\\', "/").into_bytes()).map_err(|_| errno::EINVAL)
+}
+
+/// Na hostiteli pevna velikost (jen testy logiky statvfs).
+pub fn volume_space() -> R<(u32, u64, u64)> {
+    Ok((4096, 1 << 20, 1 << 18))
+}
+
 pub fn stat(p: &[u8]) -> R<Stat> {
     fs::metadata(path(p)?).map(|m| stat_md(&m)).map_err(io)
 }
@@ -373,6 +391,17 @@ pub fn futex_wake(_f: &std::sync::atomic::AtomicU32, _all: bool) {
 pub fn monotonic_ns() -> u64 {
     static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
     START.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
+}
+
+/// Na hostiteli (jen testy logiky) z `RandomState` std.
+pub fn entropy(buf: &mut [u8]) -> bool {
+    use std::hash::{BuildHasher, Hasher};
+    for chunk in buf.chunks_mut(8) {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_usize(chunk.as_ptr() as usize);
+        chunk.copy_from_slice(&h.finish().to_le_bytes()[..chunk.len()]);
+    }
+    true
 }
 
 pub fn realtime() -> Option<(i64, u32)> {

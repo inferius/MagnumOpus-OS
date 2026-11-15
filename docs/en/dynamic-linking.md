@@ -342,7 +342,9 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
 **[verified in QEMU]** x86_64 and aarch64.
 
 - **The loader table** `abi::loader::Interface` (version, size;
-  `thread_tls_new`, `thread_tls_free`, `run_fini`, `dl_iterate_phdr`). The
+  `thread_tls_new`, `thread_tls_free`, `run_fini`, `dl_iterate_phdr`,
+  `dl*`, `libd_session`, `run_init`; new fields only at the end, the test
+  `loader_table_offsets` checks the offsets). The
   loader writes its address into auxv (`AT_MO_LOADER`, `spawn` prepares the
   slot) and when jumping to the program also passes SP (auxv) and
   `ENTRY_MAGIC` (x86_64 `rsi`/`rdx`, aarch64 `x1`/`x2`). libos (`rt_own` ->
@@ -358,6 +360,17 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
   modules loaded at start: for a later `dlopen` of modules with
   initial-exec TLS (Vulkan/GL drivers from Mesa). glibc has a fixed 1664 B
   surplus, today 512 B + 144 B per namespace (1520 B); 2 KiB covers both.
+- **init** **[verified in QEMU]** x86_64 and aarch64 (suites `procesy`, `cstd dyn`,
+  `cpp`): the loader does not run the initializers of the start-up modules
+  (`DT_INIT`, `DT_INIT_ARRAY`, dependencies first, the program last) before
+  jumping to the program. The program runtime calls them through the table
+  function `run_init` right after its own initialization and before `main`
+  (`rt_own` after `startup`, `__libc_start` in osrt after `init`, the test
+  crt before `program_main`): constructors of C++ static objects allocate,
+  register `__cxa_atexit` and touch files, which is not possible before the
+  heap and stdio are ready ([C++ runtime](cpp.md)). A second call does
+  nothing; `dlopen` initializes its modules itself. The field is at the end
+  of the table (7a-1); a program looks for it by `size`.
 - **fini:** a normal program end (`rt_own` after `main`, crt after
   `program_main`) calls `run_fini`: the program first, dependencies last,
   `DT_FINI_ARRAY` backwards, then `DT_FINI`; a second call does nothing.

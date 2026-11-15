@@ -25,6 +25,10 @@ __attribute__((noreturn)) static void mo_exit(long code) {
 // thread_tls_free, run_fini).
 #define MO_AT_LOADER 0x4D4F0001ul
 #define MO_LOADER_RUN_FINI 24
+// run_init (posledni pole, 7a-1) a velikost tabulky s nim
+// (abi::loader, test loader_table_offsets).
+#define MO_LOADER_RUN_INIT 88
+#define MO_LOADER_SIZE_WITH_INIT 96
 
 static unsigned long loader_table(unsigned long *sp) {
     unsigned long *p = sp + 1 + sp[0] + 1;
@@ -41,6 +45,11 @@ static unsigned long loader_table(unsigned long *sp) {
 
 __attribute__((noreturn, used)) void __mo_start(unsigned long bootstrap, unsigned long *sp) {
     unsigned long table = loader_table(sp);
+    // Inicializatory modulu (zavadec je odklada na program).
+    if (table != 0 && *(unsigned int *)(table + 4) >= MO_LOADER_SIZE_WITH_INIT) {
+        void (*run_init)(void) = *(void (**)(void))(table + MO_LOADER_RUN_INIT);
+        run_init();
+    }
     long code = program_main(bootstrap, sp);
     // Normalni konec: finalizatory modulu (DT_FINI_ARRAY) pres zavadec.
     if (table != 0) {

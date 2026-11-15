@@ -135,6 +135,9 @@ pub unsafe extern "C" fn __libc_start(main: CMain, bootstrap: u64, sp: u64, magi
     let startup = libos::rt::startup(bootstrap, |_| {});
     // SAFETY: bezi jen toto vlakno.
     unsafe { init(startup) };
+    // Konstruktory knihoven a programu (C++ staticke objekty) az nad
+    // pripravenym runtime (heap, stdio, soubory), pred main.
+    libos::loader::run_init();
     let (argc, argv) = c_argv();
     // SAFETY: `main` programu; `argv` zije do konce procesu.
     let code = unsafe { main(argc, argv) };
@@ -149,10 +152,59 @@ extern "C" fn start_rust(bootstrap: u64) -> ! {
     // SAFETY: bezi jen toto vlakno, nikdo nic necte.
     unsafe { init(startup) };
     let (argc, argv) = c_argv();
+    // SAFETY: konstruktory programu (staticke objekty C++), runtime je
+    // pripraveny; jen jednou pred main.
+    unsafe { init_array::run_init(argc, argv) };
     // SAFETY: `main` vygeneroval rustc nebo je z programu v C; `argv`
     // zije do konce procesu.
     let code = unsafe { main(argc, argv) };
     crate::exit(code)
+}
+
+/// `.init_array` a `.fini_array` statickeho programu (symboly linker
+/// skriptu `user/user-std.ld`). Pod zavadecem je spousti ld.so.
+#[cfg(not(target_env = "dyn"))]
+pub(crate) mod init_array {
+    /// Konstruktor: jako glibc dostane `argc`, `argv`, `envp` (vetsina je
+    /// bez argumentu, to ABI C dovoluje).
+    type InitFn = unsafe extern "C" fn(i32, *const *const u8, *const *const u8);
+    type FiniFn = unsafe extern "C" fn();
+
+    unsafe extern "C" {
+        static __init_array_start: InitFn;
+        static __init_array_end: InitFn;
+        static __fini_array_start: FiniFn;
+        static __fini_array_end: FiniFn;
+    }
+
+    /// # Safety
+    ///
+    /// Jednou pri startu, pred `main`.
+    pub(crate) unsafe fn run_init(argc: i32, argv: *const *const u8) {
+        let mut p = &raw const __init_array_start;
+        let end = &raw const __init_array_end;
+        while p < end {
+            // SAFETY: pole ukazatelu na funkce od linkeru.
+            unsafe {
+                (*p)(argc, argv, core::ptr::null());
+                p = p.add(1);
+            }
+        }
+    }
+
+    /// Destruktory `.fini_array` v obracenem poradi (po funkcich `at_exit`).
+    pub(crate) fn run_fini() {
+        let start = &raw const __fini_array_start;
+        let mut p = &raw const __fini_array_end;
+        while p > start {
+            // SAFETY: pole ukazatelu na funkce od linkeru; `exit` je vola
+            // jednou.
+            unsafe {
+                p = p.sub(1);
+                (*p)();
+            }
+        }
+    }
 }
 
 /// # Safety

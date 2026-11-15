@@ -14,11 +14,12 @@
 //!
 //! Knihovny se instaluji do predpony `target/c-ports/<arch>/prefix`
 //! (`include/`, `lib/`), kde je najdou dalsi porty. Programy jdou do
-//! initfs. Chybejici nastroj (CMake, Ninja, make) = chyba s radou
+//! initfs. Beh C++ (libc++, `cxx.rs`) se sestavi pred ostatnimi porty. Chybejici nastroj (CMake, Ninja, make) = chyba s radou
 //! k instalaci (`tools.rs`).
 
 mod cmake;
 mod configure;
+pub mod cxx;
 mod fetch;
 mod sources;
 mod tools;
@@ -70,7 +71,8 @@ pub struct CPort {
     pub patches: &'static [&'static str],
     pub build: Build,
     /// Dalsi soubory do initfs: (jmeno v initfs, cesta). `port:` = cesta
-    /// v `third_party/c-ports/<name>/` (manifesty), jinak ve zdroji portu.
+    /// v `third_party/c-ports/<name>/` (manifesty), `ws:` = v repozitari,
+    /// jinak ve zdroji portu.
     pub data: &'static [(&'static str, &'static str)],
 }
 
@@ -128,6 +130,22 @@ const PORTS: &[CPort] = &[
                 Prog { name: "sqlite3", sources: &["shell.c"] },
                 Prog { name: "sqltest", sources: &["ws:user/ctest/c/sqltest.c"] },
             ],
+        },
+    },
+    CPort {
+        // Tvarovani textu (prvni spotrebitel behu C++, krok 7a): jedna
+        // amalgamace bez vyjimek a RTTI, bez FreeType/ICU/glib.
+        name: "harfbuzz",
+        url: "https://github.com/harfbuzz/harfbuzz/releases/download/14.2.0/harfbuzz-14.2.0.tar.xz",
+        file: "harfbuzz-14.2.0.tar.xz",
+        sha256: "94017020f96d025bb66ae91574e4cf334bcad23e8175a8a40565b3721bc2eaff",
+        top: "harfbuzz-14.2.0",
+        patches: &[],
+        data: &[("hb-test.ttf", "ws:libs/font/fonts/Inter-Regular.ttf")],
+        build: Build::Sources {
+            lib: &["src/harfbuzz.cc"],
+            defines: &["-DHAVE_PTHREAD=1", "-fno-exceptions", "-fno-rtti", "-Isrc"],
+            programs: &[Prog { name: "hbtest", sources: &["ws:user/cpptest/hbtest.c"] }],
         },
     },
     CPort {
@@ -203,10 +221,10 @@ fn work_dir(arch: &Arch, p: &CPort) -> PathBuf {
     target_dir().join("c-ports").join(arch.name).join(p.name)
 }
 
-/// Prelozi porty v C pro architekturu proti sysrootu; vraci programy
-/// a soubory do initfs.
+/// Prelozi porty v C pro architekturu proti sysrootu (vcetne dynamicke
+/// casti `csysroot::add_dynamic`); vraci programy a soubory do initfs.
 pub fn build(arch: &Arch, sysroot: &Path) -> Result<Vec<Output>> {
-    let mut out = Vec::new();
+    let mut out = cxx::build(arch, sysroot)?;
     for p in PORTS {
         let src = fetch::prepare(p)?;
         let work = work_dir(arch, p);
@@ -219,9 +237,12 @@ pub fn build(arch: &Arch, sysroot: &Path) -> Result<Vec<Output>> {
         };
         out.extend(progs.into_iter().map(|(n, p)| Output::Program(n, p)));
         for (name, path) in p.data {
-            let file = match path.strip_prefix("port:") {
-                Some(rel) => fetch::port_dir(p).join(rel),
-                None => src.join(path),
+            let file = if let Some(rel) = path.strip_prefix("port:") {
+                fetch::port_dir(p).join(rel)
+            } else if let Some(rel) = path.strip_prefix("ws:") {
+                crate::workspace_root().join(rel)
+            } else {
+                src.join(path)
             };
             out.push(Output::Data(name.to_string(), file));
         }

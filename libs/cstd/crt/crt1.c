@@ -9,6 +9,10 @@
 
 int main(int argc, char **argv);
 
+/* Modul programu pro __cxa_atexit (destruktory C++); knihovny maji svuj
+ * v crtdso.o. */
+__attribute__((visibility("hidden"))) void *const __dso_handle = (void *)&__dso_handle;
+
 #if defined(__x86_64__)
 __asm__(".text\n"
         ".globl _start\n"

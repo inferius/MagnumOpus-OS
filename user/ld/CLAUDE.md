@@ -15,6 +15,7 @@ Zavaděč sdílených knihoven `ld.so` (v initfs `lib/ld.so`, `PT_INTERP` = `/sy
 - Resolver dynamického TLSDESC (`tls.rs`) mění jen `rax`/`x0` a příznaky: pomalá cesta ukládá všechny registry, které smí měnit Rust (x86_64 GPR + `xmm0-15`, zavaděč bez AVX; aarch64 `x1-x18`, `q0-q31`).
 - Čísla modulů TLS se neopakují a DTV má pevnou velikost (`tls::MAX_MODULES`): prázdná položka = líný blok ještě není. Moduly se neodstraňují.
 - Heap zavaděče nesmí být na pevné adrese heapu libos (`heap.rs`, rezervaci vybírá jádro); libos bez feature `rt`.
+- Inicializátory modulů ze startu zavaděč jen uloží (`iface::set_pending_init`); spustí je běhové prostředí programu přes `run_init` po své inicializaci (osrt `__libc_start`, libos `rt_own`, `user/dltest/crt.c`). Nový způsob startu programu pod zavaděčem musí `run_init` volat, jinak konstruktory neproběhnou.
 - Segmenty bez zápisu vždy zapečetit (W^X); TEXTREL a REL odmítá už `libs/elf`.
 - Překládá ho `xtask/src/dynlink.rs` zvlášť (`relocation-model=pie`, `-pie --no-dynamic-linker`, vlastní adresář `target/user-pie`), ne `cargo_build`.
 

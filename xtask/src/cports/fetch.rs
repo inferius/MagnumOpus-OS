@@ -75,6 +75,13 @@ fn overlay_files(p: &CPort) -> Result<Vec<(PathBuf, Vec<u8>)>> {
 
 /// Pripraveny zdroj: rozbaleny archiv se zaplatami a overlay.
 pub fn prepare(p: &CPort) -> Result<PathBuf> {
+    prepare_subset(p, &[], &[])
+}
+
+/// Jako [`prepare`], ale z archivu rozbali jen `members` (cesty v archivu
+/// vcetne `top`; prazdne = vse) bez vzoru `exclude` (`tar --exclude`).
+/// Pro velke archivy (llvm-project 179 MB, z nehoz runtime potrebuje ~50 MB).
+pub fn prepare_subset(p: &CPort, members: &[&str], exclude: &[&str]) -> Result<PathBuf> {
     let archive = fetch(p)?;
     let patches: Vec<(String, Vec<u8>)> = p
         .patches
@@ -86,6 +93,8 @@ pub fn prepare(p: &CPort) -> Result<PathBuf> {
     p.sha256.hash(&mut h);
     patches.hash(&mut h);
     overlay.hash(&mut h);
+    members.hash(&mut h);
+    exclude.hash(&mut h);
     let base = target_dir().join("c-ports").join("src").join(format!("{}-{:016x}", p.name, h.finish()));
     let src = base.join(p.top);
     let stamp = base.join(".hotovo");
@@ -94,7 +103,13 @@ pub fn prepare(p: &CPort) -> Result<PathBuf> {
     }
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(&base)?;
-    let ok = Command::new("tar").arg("-xf").arg(&archive).arg("-C").arg(&base).status()?.success();
+    let mut tar = Command::new("tar");
+    tar.arg("-xf").arg(&archive).arg("-C").arg(&base);
+    for e in exclude {
+        tar.arg(format!("--exclude={e}"));
+    }
+    tar.args(members);
+    let ok = tar.status()?.success();
     if !ok {
         return Err(format!("rozbaleni {} selhalo (tar)", p.file).into());
     }

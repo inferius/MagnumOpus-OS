@@ -93,7 +93,7 @@ pub fn to_c(s: &Stat) -> stat {
     }
 }
 
-fn fill(r: sys::R<Stat>, out: *mut stat) -> c_int {
+pub(crate) fn fill(r: sys::R<Stat>, out: *mut stat) -> c_int {
     if out.is_null() {
         return errno::ret(Err(errno::EFAULT));
     }

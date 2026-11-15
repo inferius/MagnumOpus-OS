@@ -28,4 +28,4 @@ libm = "0.2.16"
 cbuild = { path = "../cbuild" }
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("magnumopus"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("magnumopus"))', 'cfg(target_env, values("dyn"))'] }

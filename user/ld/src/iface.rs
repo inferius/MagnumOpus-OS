@@ -70,6 +70,22 @@ impl State {
 pub static STATE: Mutex<Option<State>> = Mutex::new(None);
 static FINI_DONE: AtomicBool = AtomicBool::new(false);
 
+/// Inicializatory modulu ze startu, dokud je program nezavola (`run_init`).
+static PENDING_INIT: Mutex<Option<Vec<crate::module::Init>>> = Mutex::new(None);
+
+pub fn set_pending_init(inits: Vec<crate::module::Init>) {
+    *PENDING_INIT.lock() = Some(inits);
+}
+
+/// Inicializatory ze startu (zavislosti prvni); bez zamku stavu (smi volat
+/// `dlopen`, `dl_iterate_phdr`), podruhe nic.
+unsafe extern "C" fn run_init() {
+    let Some(list) = PENDING_INIT.lock().take() else { return };
+    for i in list {
+        i.run();
+    }
+}
+
 pub fn set_state(s: State) {
     *STATE.lock() = Some(s);
 }
@@ -275,6 +291,7 @@ pub static INTERFACE: Interface = Interface {
     dlerror: crate::dl::dlerror,
     dladdr,
     libd_session,
+    run_init,
 };
 
 /// Relace s libd a listek pro behove prostredi programu (`NARROW` na

@@ -166,6 +166,8 @@ extern "C" fn start_rust(bootstrap: u64, sp: u64, magic: u64) -> ! {
     // SAFETY: registry ze vstupu procesu (zavadec nebo jadro).
     unsafe { crate::loader::init(sp, magic) };
     let startup = crate::rt::startup(bootstrap, init_heap);
+    // Konstruktory modulu (pod zavadecem) az s pripravenym heapem.
+    crate::loader::run_init();
     // SAFETY: funkci definuje program makrem `entry!` se spravnou signaturou.
     let code = unsafe { __libos_main(startup) };
     // Normalni konec: finalizatory modulu (pod zavadecem).

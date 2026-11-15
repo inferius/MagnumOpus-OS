@@ -31,13 +31,13 @@ pub extern "C" fn _Exit(code: c_int) -> ! {
     std::process::exit(code)
 }
 
-/// Zaregistruje funkci pro konec procesu; 0 = OK, -1 = plno (limit 1024).
+/// Zaregistruje funkci pro konec procesu (spolecne poradi s `__cxa_atexit`); 0 = OK.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn atexit(f: extern "C" fn()) -> c_int {
     #[cfg(target_os = "magnumopus")]
     {
-        crate::stdio::ensure_exit_hook();
-        if std::os::magnumopus::rt::at_exit(f) { 0 } else { -1 }
+        // Spolecny seznam s __cxa_atexit (destruktory C++), cxxsup.rs.
+        crate::cxxsup::atexit_fn(f)
     }
     #[cfg(not(target_os = "magnumopus"))]
     {

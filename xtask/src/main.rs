@@ -1073,13 +1073,14 @@ fn build(opts: &Options) -> Result<Artifacts> {
     let std_bin = stdsys::build_apps(&std_list, opts)?;
     // Sysroot C (libc.a, hlavicky, clang.cfg) a porty v C proti nemu.
     let c_sysroot = csysroot::assemble(a, &std_bin)?;
-    let c_ports = cports::build(a, &c_sysroot)?;
-    // libc.so (std jako PIC) a dynamicka cast sysrootu C, program PIE cdyn.
+    // libc.so (std jako PIC) a dynamicka cast sysrootu C (porty stavi i
+    // sdilene knihovny, napr. libc++.so), program PIE cdyn.
     let libc_so = {
         let _lock = stdsys::lock_std()?;
         stdsys::build_libc_so_locked(a, opts)?
     };
     csysroot::add_dynamic(a, &c_sysroot, &libc_so)?;
+    let c_ports = cports::build(a, &c_sysroot)?;
     let mut cdyn = dynlink::build_cdyn(opts, &libc_so, &c_sysroot)?;
     cdyn.push((String::from("cdyn-hello"), csysroot::build_with_cfg(&c_sysroot, "user/cdyn/hello.c", "cdyn-hello")?));
     // Zavadec sdilenych knihoven a testovaci moduly v C.

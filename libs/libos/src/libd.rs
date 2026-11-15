@@ -78,14 +78,17 @@ pub fn available() -> bool {
     c.session.is_some() || c.lease.is_some() || PROVIDER.lock().is_some() || from_loader_possible()
 }
 
+/// Konec pole `libd_session` v tabulce zavadece (starsi zavadec ho nema).
+const LIBD_SESSION_END: usize = core::mem::offset_of!(abi::loader::Interface, libd_session) + size_of::<usize>();
+
 fn from_loader_possible() -> bool {
-    crate::loader::interface().is_some_and(|i| i.size as usize >= size_of::<abi::loader::Interface>())
+    crate::loader::interface().is_some_and(|i| i.size as usize >= LIBD_SESSION_END)
 }
 
 /// Relace a listek od zavadece (program pod zavadecem, prvni pouziti).
 fn from_loader() -> Result<(Channel, Channel)> {
     let i = crate::loader::interface().ok_or(Error::NotFound)?;
-    if (i.size as usize) < size_of::<abi::loader::Interface>() {
+    if (i.size as usize) < LIBD_SESSION_END {
         return Err(Error::NotSupported);
     }
     let (mut s, mut l) = (0u32, 0u32);

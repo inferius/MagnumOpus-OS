@@ -80,7 +80,7 @@ pub fn clock_ns(clock: c_int) -> Option<i128> {
     }
 }
 
-fn to_timespec(ns: i128) -> timespec {
+pub(crate) fn to_timespec(ns: i128) -> timespec {
     timespec { tv_sec: ns.div_euclid(1_000_000_000) as i64, tv_nsec: ns.rem_euclid(1_000_000_000) as i64 }
 }
 

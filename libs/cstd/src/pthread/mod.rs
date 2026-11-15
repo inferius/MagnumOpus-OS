@@ -153,6 +153,8 @@ unsafe impl Send for SendPtr {}
 
 /// Konec vlakna s vysledkem: destruktory klicu, ulozeni vysledku.
 fn finish(value: usize) {
+    // Jako glibc: nejdriv thread_local C++, pak destruktory klicu.
+    crate::cxxsup::run_thread_dtors();
     key::run_destructors();
     // SAFETY: popis aktualniho vlakna zije, dokud ho neuvolni join.
     let info = unsafe { &*current() };

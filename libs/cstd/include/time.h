@@ -54,6 +54,11 @@ time_t timegm(struct tm *t);
 size_t strftime(char *buf, size_t max, const char *fmt, const struct tm *t);
 void tzset(void);
 
+/* C11 / C23 */
+#define TIME_UTC 1
+#define TIME_MONOTONIC 2
+int timespec_get(struct timespec *ts, int base);
+
 _CSTD_END
 
 #endif
