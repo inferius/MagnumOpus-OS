@@ -214,6 +214,13 @@ pub fn abi_errno(err: abi::Error) -> crate::c_int {
     errno::from_os(err as i32)
 }
 
+/// Pracovni adresar = adresar otevreny jako `fd` (cesta z doby otevreni).
+pub fn fchdir(fd: i32) -> R<()> {
+    let d = desc(fd)?;
+    let f = d.file().ok_or(errno::ENOTDIR)?;
+    rt::env::set_current_dir(f.path().as_bytes()).map_err(e)
+}
+
 /// Absolutni cesta otevreneho souboru nebo adresare (`openat`).
 pub fn fd_path(fd: i32) -> R<Vec<u8>> {
     let d = desc(fd)?;
@@ -221,11 +228,9 @@ pub fn fd_path(fd: i32) -> R<Vec<u8>> {
     Ok(f.path().as_bytes().to_vec())
 }
 
-/// Pracovni adresar = adresar otevreny jako `fd` (cesta z doby otevreni).
-pub fn fchdir(fd: i32) -> R<()> {
-    let d = desc(fd)?;
-    let f = d.file().ok_or(errno::ENOTDIR)?;
-    rt::env::set_current_dir(f.path().as_bytes()).map_err(e)
+/// Absolutni normalizovana cesta (`.`, `..`, pracovni adresar).
+pub fn abs_path(path: &[u8]) -> R<Vec<u8>> {
+    rt::env::resolve(path).map(String::into_bytes).map_err(e)
 }
 
 pub fn list_dir(fd: i32) -> R<Vec<Entry>> {
@@ -309,6 +314,12 @@ pub fn monotonic_ns() -> u64 {
 /// Realny cas (sekundy, ns od 1970 UTC); `None` = jadro ho nezna.
 pub fn realtime() -> Option<(i64, u32)> {
     rt::time::realtime()
+}
+
+/// Nahodne bajty z nasazeneho generatoru jadra; `false` = jeste neni
+/// nasazeny (volajici ceka a zkusi znovu).
+pub fn entropy(buf: &mut [u8]) -> bool {
+    rt::fill_random_seeded(buf).is_ok()
 }
 
 // --- sockety a cekani ------------------------------------------------------

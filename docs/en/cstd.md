@@ -102,7 +102,7 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 |---|---|---|
 | `errno.h` | `errno` (`__errno_location`), `E*` constants | per thread (TLS); numbers as in Linux/POSIX (`ENOENT` = 2, ...) |
 | `stdio.h` | `stdin`, `stdout`, `stderr`, `fopen`, `fclose`, `fflush` (also `NULL`), `fread`, `fwrite`, `fgetc`, `getc`, `getchar`, `ungetc`, `fgets`, `fputc`, `putc`, `putchar`, `fputs`, `puts`, `printf`, `vprintf`, `fprintf`, `vfprintf`, `fseek`, `ftell`, `rewind`, `feof`, `ferror`, `clearerr`, `setvbuf`, `perror`, `remove`, `rename` | `snprintf` and the formatting engine come from `cstd-core` |
-| `stdlib.h` | `exit`, `_Exit`, `atexit`, `getenv`, `abort` | `EXIT_SUCCESS`, `EXIT_FAILURE` |
+| `stdlib.h` | `exit`, `_Exit`, `atexit`, `getenv`, `abort` | `EXIT_SUCCESS`, `EXIT_FAILURE`; `atexit` shares its list with `__cxa_atexit` ([Functions for C++](#functions-for-c-step-7a)) |
 | `string.h` | `strerror` | the rest is in `cstd-core` |
 | `assert.h` | `assert` | a failure prints file and line to stderr and ends the process |
 
@@ -111,7 +111,7 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 | Header | Functions | Note |
 |---|---|---|
 | `unistd.h` | `close`, `read`, `write`, `pread`, `pwrite`, `lseek`, `dup`, `dup2`, `dup3`, `pipe`, `pipe2`, `isatty`, `fsync`, `fdatasync`, `ftruncate`, `truncate`, `unlink`, `rmdir`, `getcwd`, `chdir`, `access`, `sysconf`, `getpagesize` | `fork`, `vfork`, `exec*` return `ENOSYS` (see [No fork](#processes-locale-wchar)) |
-| `fcntl.h` | `open`, `openat` (only `AT_FDCWD` or an absolute path), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | `O_*` values as Linux, `O_DIRECTORY` the same on both architectures; locks `F_GETLK`, `F_SETLK`, `F_SETLKW` see File locks |
+| `fcntl.h` | `open`, `openat` (also relative to a directory, see [Functions for C++](#functions-for-c-step-7a)), `creat`, `fcntl` (`F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`) | `O_*` values as Linux, `O_DIRECTORY` the same on both architectures; locks `F_GETLK`, `F_SETLK`, `F_SETLKW` see File locks |
 | `sys/stat.h` | `stat`, `lstat` (= `stat`), `fstat`, `mkdir`, `chmod`, `fchmod`, `umask` | `st_mode` from the kind and the session's effective rights; `chmod` has no effect (rights are FS grants) |
 | `sys/uio.h` | `readv`, `writev` | `writev` in one write |
 | `dirent.h` | `opendir`, `fdopendir`, `readdir`, `closedir`, `rewinddir`, `dirfd` | the first two entries are `.` and `..` |
@@ -275,6 +275,28 @@ file. They are released by closing the process's last fd on the file
 `flock` without `LOCK_NB` wait by retrying; fsd watches for a wait cycle
 (`EDEADLK`). `l_pid` from `F_GETLK` is -1 (fsd does not know process
 numbers).
+
+## Functions for C++ (step 7a)
+
+**[verified in QEMU]** x86_64 and aarch64 (suite `cpp`, [C++ runtime](cpp.md)); host
+tests `cxxsup_tests`, `fsat_tests`.
+
+| Header | Functions | Notes |
+|---|---|---|
+| `stdlib.h` | `lldiv`, `realpath` | aligned memory (`aligned_alloc`, `posix_memalign`, `memalign`) is in cstd-core: plain `free` releases the block |
+| `unistd.h`, `sys/random.h` | `getentropy` (at most 256 B), `unlinkat`, `pathconf`, `fpathconf` | `getentropy` waits until the kernel generator is seeded (like Linux) |
+| `time.h` | `timespec_get` (`TIME_UTC`, `TIME_MONOTONIC`) | |
+| `fcntl.h`, `sys/stat.h` | `openat`, `mkdirat`, `fstatat`, `fchmodat` relative to a directory; `AT_REMOVEDIR`, `AT_SYMLINK_NOFOLLOW` | the directory path remembered at open + the name (the FS works with paths: no protection against the directory being renamed between open and the call) |
+| `sys/statvfs.h` | `statvfs`, `fstatvfs` | size and free blocks of the fsd session volume; inode counts 0 |
+| `sys/sendfile.h` | `sendfile` | copy through a 64 KiB buffer in the process |
+| `stdio.h` | `setbuf` | like `setvbuf` (`NULL` = unbuffered); `std::filebuf` |
+| `limits.h` | `PATH_MAX` (4096), `NAME_MAX` (255) | |
+| `link.h`, `elf.h` | `dl_iterate_phdr`, `struct dl_phdr_info`, ELF64 types | static program: one module from linker script symbols (`PT_LOAD`, `PT_GNU_EH_FRAME`) |
+| (C++ ABI) | `__cxa_atexit`, `__cxa_finalize`, `__cxa_thread_atexit_impl`, `__dso_handle` | `atexit` and `__cxa_atexit` share one list (one reverse order) |
+
+The C sysroot compiles with `-funwind-tables` (C++ exceptions pass through
+C frames) and links with `--eh-frame-hdr`; the dynamic part has
+`lib/crtdso.o` with a hidden `__dso_handle` for every shared library.
 
 ## C sysroot and ports (part 2i)
 

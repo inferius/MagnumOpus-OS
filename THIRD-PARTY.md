@@ -212,6 +212,57 @@ against the C sysroot (`xtask/src/cports/`).
   `sdl-sample.wav` (z / from `test/`).
 - **Popis / Description:** `docs/cs/sdl.md`, `docs/en/sdl.md`.
 
+## LLVM 23.1.5: libc++, libc++abi, libunwind (běh C++ / C++ runtime)
+
+Není v repozitáři: `cargo xtask` stáhne `llvm-project-23.1.5.src.tar.xz`
+z GitHubu (HTTPS, 179 MB), ověří SHA-256, rozbalí jen `runtimes/`,
+`libcxx/`, `libcxxabi/`, `libunwind/`, `libc/` (sdílené hlavičky pro
+`std::from_chars`) a `cmake/`, použije naši záplatu a sestaví runtime CMake
++ Ninja (`xtask/src/cports/cxx.rs`). Do programů se linkují staticky
+(`libc++.a`, `libc++abi.a`, `libunwind.a`) a do initfs jde sdílená
+`/system/lib/libc++.so`. / Not in the repository: `cargo xtask` downloads
+`llvm-project-23.1.5.src.tar.xz` from GitHub (HTTPS, 179 MB), verifies the
+SHA-256, extracts only `runtimes/`, `libcxx/`, `libcxxabi/`, `libunwind/`,
+`libc/` (shared headers for `std::from_chars`) and `cmake/`, applies our
+patch and builds the runtime with CMake + Ninja (`xtask/src/cports/cxx.rs`).
+Programs link it statically and the shared `/system/lib/libc++.so` goes to
+the initfs.
+
+- **Licence / Licence:** Apache-2.0 WITH LLVM-exception (výjimka LLVM:
+  binární podoba nevyžaduje uvedení licence / the LLVM exception waives the
+  attribution requirement for binary forms); plný text / full text:
+  `third_party/c-ports/llvm-runtimes/LICENSE-libcxx.TXT`,
+  `LICENSE-libcxxabi.TXT`, `LICENSE-libunwind.TXT` (z archivu / from the
+  archive). Zdroj / source:
+  <https://github.com/llvm/llvm-project/releases/tag/llvmorg-23.1.5>.
+- **Naše úpravy / Our changes:** `0001-magnumopus.patch` pro / for
+  `__magnumopus__`: `random_device` nad / over `getentropy`, `chrono` nad /
+  over `clock_gettime`, `__cxa_thread_atexit`, backend locale `linux.h`,
+  výchozí tabulka znaků / default character table.
+- **Programy / programs:** `cpptest`, `cpptest-dyn` (náš test / our test,
+  `user/cpptest/`).
+- **Popis / Description:** `docs/cs/cpp.md`, `docs/en/cpp.md`.
+
+## HarfBuzz 14.2.0 (port v C++ / C++ port)
+
+Není v repozitáři: `cargo xtask` stáhne vydání z GitHubu (HTTPS), ověří
+SHA-256 a přeloží amalgamaci `src/harfbuzz.cc` bez výjimek a RTTI proti
+libc++ (`xtask/src/cports/`). Bez úprav zdrojů. / Not in the repository:
+`cargo xtask` downloads the release from GitHub (HTTPS), verifies the
+SHA-256 and builds the `src/harfbuzz.cc` amalgamation without exceptions
+and RTTI against libc++. No source changes.
+
+- **Licence / Licence:** „Old MIT“ (MIT-like, Behdad Esfahbod, Google,
+  Red Hat a další / and others); text: `third_party/c-ports/harfbuzz/COPYING`
+  (z archivu / from the archive). Zdroj / source:
+  <https://github.com/harfbuzz/harfbuzz/releases/tag/14.2.0>. Otisk SHA-256
+  zaznamenán při prvním stažení (projekt ho nezveřejňuje) / SHA-256
+  recorded at the first download (the project does not publish one).
+- **Programy / programs:** `hbtest` (náš test / our test,
+  `user/cpptest/hbtest.c`), data `hb-test.ttf` (písmo Inter, viz níže /
+  Inter font, see below).
+- **Popis / Description:** `docs/cs/cpp.md`, `docs/en/cpp.md`.
+
 ## Unicode Character Database
 
 - **Název / Name:** Unicode Character Database (`UnicodeData.txt`, `DerivedCoreProperties.txt`, `PropList.txt`, `EastAsianWidth.txt`)

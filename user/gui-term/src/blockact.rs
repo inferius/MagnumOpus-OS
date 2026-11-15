@@ -38,8 +38,9 @@ pub fn block_of(r: &Role) -> Option<u64> {
 }
 
 /// Sirka tlacitek akci (o tolik se posune cas bloku).
-pub fn width(look: &Look, g: &Grid) -> u32 {
-    ACTS.len() as u32 * g.ch + (ACTS.len() as u32 - 1) * look.t.space[1]
+/// Tlacitko je ctverec `control_h_compact` (`.blk-act button`: 28 px).
+pub fn width(look: &Look, _g: &Grid) -> u32 {
+    ACTS.len() as u32 * look.t.size.control_h_compact + (ACTS.len() as u32 - 1) * look.t.space[1]
 }
 
 /// Tlacitka v hlavickach bloku, pro ktere `pick` vrati `true`.
@@ -51,10 +52,14 @@ pub fn layout(look: &Look, lines: &[Line], g: &Grid, pick: impl Fn(u64) -> bool)
         if !pick(block) {
             continue;
         }
-        let y = g.y + (row as u32 * g.ch) as i32;
-        let x = g.x + (g.cols as u32 * g.cw) as i32 - width(look, g) as i32;
+        if !g.visible(row) {
+            continue;
+        }
+        let s = look.t.size.control_h_compact;
+        let y = g.row_y(row) + (g.ch as i32 - s as i32) / 2;
+        let x = g.right() - width(look, g) as i32;
         for (k, act) in ACTS.into_iter().enumerate() {
-            out.push(Button { rect: Rect::new(x + k as i32 * (g.ch as i32 + gap), y, g.ch, g.ch), block, act });
+            out.push(Button { rect: Rect::new(x + k as i32 * (s as i32 + gap), y, s, s), block, act });
         }
     }
     out

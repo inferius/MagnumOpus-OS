@@ -1090,13 +1090,17 @@ fn build(opts: &Options) -> Result<Artifacts> {
     let std_bin = stdsys::build_apps(&std_list, opts)?;
     // Sysroot C (libc.a, hlavicky, clang.cfg) a porty v C proti nemu.
     let c_sysroot = csysroot::assemble(a, &std_bin)?;
-    let mut c_ports = cports::build(a, &c_sysroot, false)?;
-    // libc.so (std jako PIC) a dynamicka cast sysrootu C, program PIE cdyn.
+    // libc.so (std jako PIC) a dynamicka cast sysrootu C (beh C++ stavi
+    // i libc++.so), program PIE cdyn.
     let libc_so = {
         let _lock = stdsys::lock_std()?;
         stdsys::build_libc_so_locked(a, opts)?
     };
     csysroot::add_dynamic(a, &c_sysroot, &libc_so)?;
+    // Beh C++ (libc++ staticky i libc++.so) pred porty: porty v C++
+    // (HarfBuzz) ho linkuji.
+    let mut c_ports = cports::cxx::build(a, &c_sysroot)?;
+    c_ports.extend(cports::build(a, &c_sysroot, false)?);
     // Porty nad libc.so (dav1d, FFmpeg): az s dynamickou casti sysrootu.
     c_ports.extend(cports::build(a, &c_sysroot, true)?);
     c_ports.extend(cports::test_media()?);

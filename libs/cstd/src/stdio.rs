@@ -756,6 +756,15 @@ pub unsafe extern "C" fn setvbuf(f: *mut FILE, _buf: *mut c_char, mode: c_int, _
     0
 }
 
+/// `setbuf`: NULL = bez bufferu, jinak plne bufferovani (vlastni buffer
+/// volajiciho se nepouzije, jako u `setvbuf`).
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn setbuf(f: *mut FILE, buf: *mut c_char) {
+    let mode = if buf.is_null() { IONBF } else { IOFBF };
+    // SAFETY: kontrakt C.
+    let _ = unsafe { setvbuf(f, buf, mode, 0) };
+}
+
 /// Vystup formatovani do proudu (po kusech, ne po bajtech).
 struct FileOut {
     buf: Vec<u8>,

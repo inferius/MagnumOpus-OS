@@ -89,3 +89,41 @@ fn meson_cross_quotes() {
     let a = super::meson::array_for_test(&[String::from("-DX='1'"), String::from("C:\\x")]);
     assert_eq!(a, "['-DX=\\'1\\'', 'C:/x']");
 }
+
+#[test]
+fn llvm_runtimes_pinned_and_subset() {
+    let p = &super::cxx::LLVM;
+    assert_eq!(p.sha256.len(), 64);
+    assert!(p.url.starts_with("https://") && p.url.ends_with(p.file));
+    // Verze runtime = verze clangu hostitele (ABI hlavicek, vestavene funkce).
+    assert!(p.top.ends_with("23.1.5.src") && p.url.contains("llvmorg-23.1.5"));
+}
+
+#[test]
+fn cxx_flags_order() {
+    use crate::arch::X86_64;
+    let root = std::path::Path::new("/s");
+    let f = super::cxx::cxxflags(&X86_64, root, false).unwrap();
+    let cxx = f.iter().position(|x| x.ends_with("include/c++/v1")).unwrap();
+    let c = f.iter().position(|x| x.ends_with("/s/include")).unwrap();
+    // Obalove hlavicky libc++ pred hlavickami C (#include_next).
+    assert!(cxx < c && f.contains(&String::from("-nostdinc++")));
+    assert!(f.contains(&String::from("-funwind-tables")));
+    let l = super::cxx::cxx_ldflags(&X86_64, root, false);
+    let lc = l.iter().position(|x| x == "-lc").unwrap();
+    for lib in ["-lc++", "-lc++abi", "-lunwind"] {
+        assert!(l.iter().position(|x| x == lib).unwrap() < lc, "{lib} pred -lc");
+    }
+    assert!(l.contains(&String::from("-Wl,--eh-frame-hdr")));
+    let d = super::cxx::cxx_ldflags(&X86_64, root, true);
+    assert!(d.iter().position(|x| x == "-l:libc++.so").unwrap() < d.iter().position(|x| x == "-l:libc.so").unwrap());
+}
+
+#[test]
+fn shared_library_flags() {
+    let f = crate::csysroot::ldflags_so(std::path::Path::new("/s"));
+    assert!(f.iter().any(|x| x.ends_with("lib/crtdso.o")), "vlastni __dso_handle");
+    assert!(!f.iter().any(|x| x.ends_with("crt1.o") || x == "-Wl,-pie" || x.starts_with("-Wl,--dynamic-linker")));
+    // Ovladac clangu pro *-none-elf `-shared` linkeru nepreda.
+    assert!(f.contains(&String::from("-Wl,-shared")));
+}

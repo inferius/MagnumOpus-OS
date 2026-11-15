@@ -49,6 +49,19 @@ pub unsafe fn init(sp: u64, magic: u64) {
     }
 }
 
+/// Inicializatory modulu ze startu: behove prostredi programu je zavola po
+/// sve inicializaci, pred `main` (podruhe nic). Starsi zavadec je spustil
+/// sam pred skokem do programu.
+pub fn run_init() {
+    const END: usize = core::mem::offset_of!(Interface, run_init) + core::mem::size_of::<usize>();
+    if let Some(i) = interface()
+        && abi::loader::has_field(i.size, END)
+    {
+        // SAFETY: funkce zavadece bez argumentu.
+        unsafe { (i.run_init)() };
+    }
+}
+
 /// Finalizatory modulu (pri normalnim konci programu; podruhe nic).
 pub fn run_fini() {
     if let Some(i) = interface() {

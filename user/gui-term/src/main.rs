@@ -57,10 +57,9 @@ struct Look {
     ui: Family,
     /// Ikony z prototypu (`design/assets/mo.js`).
     icons: gfx::icon::Icons,
-    /// Zbytek vysky okna po celych radcich mrizky: jde nad mrizku, aby
-    /// radek vstupu s napovedou (paticka, `.input-wrap`) sedel u spodniho
-    /// okraje (`Look::fit`).
-    slack: u32,
+    /// Odznak duvery v titulku od kompozitoru (`ContextExt::title_badge`;
+    /// prazdny = zatim nezname).
+    badge: Rect,
 }
 
 impl Look {
@@ -69,7 +68,7 @@ impl Look {
         // Terminal bez ligatur (`font.mono_features` je vypina); zapnute
         // vlastnosti zadne.
         let mono = Family::new(font::mono(), &[]);
-        Self { t, mono, ui: ui::Look::ui_fonts(), icons: gfx::icon::Icons::new(), slack: 0 }
+        Self { t, mono, ui: ui::Look::ui_fonts(), icons: gfx::icon::Icons::new(), badge: Rect::default() }
     }
 
     fn title_h(&self) -> u32 {
@@ -89,12 +88,17 @@ impl Look {
         ((w + 0.5) as u32, s.line)
     }
 
-    /// Mrizka bunek v okne (pocatek pod titulkem s okrajem a zbytkem
-    /// vysky `slack`).
-    fn grid(&self, cols: usize) -> rows::Grid {
-        let (cw, ch) = self.cell();
+    /// Rozestupy navrhu pro role radku (`rows::Grid::layout`).
+    fn spacing(&self) -> rows::Spacing {
+        rows::Spacing { sp: self.t.space, control: self.t.size.control_h_compact, line: self.t.size.control_h }
+    }
+
+    /// Mrizka bunek v okne vysky `h` pro radky snimku `lines`: pod
+    /// titulkem s okrajem, radky od spodniho okraje paticky nahoru.
+    fn grid(&self, cols: usize, rows: usize, h: u32, lines: &[term::ui::draw::Line]) -> rows::Grid {
         let pad = self.pad() as i32;
-        rows::Grid { x: pad, y: self.title_h() as i32 + pad + self.slack as i32, cw, ch, cols }
+        let span = (self.title_h() as i32 + pad, h as i32 - self.foot_pad() as i32);
+        rows::Grid::layout(pad, self.cell(), cols, rows, span, lines, &self.spacing())
     }
 
     /// Spodni okraj paticky (`.input-wrap`: `s3`).
@@ -102,11 +106,12 @@ impl Look {
         self.t.space[3]
     }
 
-    /// Zbytek vysky okna `h` pro `rows` radku mrizky: nad mrizku, dole
-    /// zustane jen okraj paticky.
-    fn fit(&mut self, h: u32, rows: usize) {
-        let used = self.title_h() + self.pad() + rows as u32 * self.cell().1 + self.foot_pad();
-        self.slack = h.saturating_sub(used);
+    /// Okraje paticky navic proti radkum mrizky: radek vstupu vysky
+    /// `control_h` s linkou a okrajem s3, napoveda o s2 nize.
+    fn foot_extra(&self) -> u32 {
+        let sp = &self.t.space;
+        let ch = self.cell().1;
+        sp[3] + self.t.size.control_h.saturating_sub(ch) + sp[2]
     }
 
     /// Prepinac zapisu B / C v titulku vlevo od tlacitek okna (ta kresli
@@ -136,12 +141,17 @@ impl Look {
         (px.div_ceil(cw) as usize).saturating_sub(3).max(1)
     }
 
-    /// Karta relace v titulku: za odznakem systemu (misto podle
-    /// `design/terminal.html`).
+    /// Karta relace v titulku: za odznakem systemu s mezerou `s2`
+    /// (`.mode-custom .win-title`: gap s2). Dokud kompozitor plochu
+    /// odznaku neposlal, odhad.
     fn tab(&self) -> Rect {
         let sp = &self.t.space;
         let h = self.t.size.control_h_compact + sp[2];
-        Rect::new((self.t.size.hit_min * 4) as i32, (self.title_h() - h) as i32, self.t.size.hit_min * 4, h)
+        let x = match self.badge.w {
+            0 => (self.t.size.hit_min * 4) as i32,
+            _ => self.badge.x + self.badge.w as i32 + sp[2] as i32,
+        };
+        Rect::new(x, (self.title_h() - h) as i32, self.t.size.hit_min * 4, h)
     }
 
     /// Motiv `term::ui` s barvami `term_*` z tokenu.
@@ -184,6 +194,10 @@ const PANEL_NODE: u32 = 1000;
 /// relace po prepnuti karty nezasekne okno).
 const MSG_BATCH: usize = 64;
 
+/// Id uzlu radku mrizky 0 (dalsi po jedne; jen plocha radku, bez jmena:
+/// text je v hodnote terminalu).
+const ROW_NODE: u32 = 8000;
+
 /// Id uzlu prvni akce bloku (dalsi po jedne: sbalit, spustit znovu, ...).
 const ACT_NODE: u32 = 3000;
 
@@ -218,6 +232,8 @@ struct Term {
     /// Naposledy poslane oblasti titulku (`regions`); posilaji se znovu,
     /// jen kdyz se zmeni (nova karta, zmena velikosti).
     regions_sent: Vec<(Rect, RegionKind)>,
+    /// Rozlozeni radku posledniho snimku (klik, vyber, pristupnost).
+    grid: rows::Grid,
 }
 
 /// Mrizka v okne `w` x `h`; s panelem uloh je o jeho sirku uzsi.
@@ -226,7 +242,7 @@ fn grid(look: &Look, w: u32, h: u32, panel: bool) -> (usize, usize) {
     let (cw, ch) = look.cell();
     let p = look.pad() + look.foot_pad();
     let cols = (w.saturating_sub(p) / cw.max(1)).max(1);
-    let rows = (h.saturating_sub(look.title_h() + p) / ch.max(1)).max(1);
+    let rows = (h.saturating_sub(look.title_h() + p + look.foot_extra()) / ch.max(1)).max(1);
     (cols as usize, rows as usize)
 }
 
@@ -237,9 +253,8 @@ fn now() -> Option<i64> {
 
 impl Term {
     fn new(win: Window, conn: Option<Channel>) -> Self {
-        let mut look = Look::new();
+        let look = Look::new();
         let (c, r) = grid(&look, win.w, win.h, panel::shown(win.screen.0, win.w));
-        look.fit(win.h, r);
         let th = look.term_theme();
         let mut app = App::new(th, c, r);
         // Krouzek a dilci bunky pruhu kresli okno samo (term::activity).
@@ -263,6 +278,7 @@ impl Term {
             compl: None,
             place: Rect::default(),
             regions_sent: Vec::new(),
+            grid: rows::Grid::default(),
         };
         t.app.welcome = true;
         t.conn.start();
@@ -327,12 +343,12 @@ impl Term {
     /// Bunka mrizky pod bodem okna (`None` = mimo mrizku); sloupec za
     /// pravym okrajem se omezi na posledni.
     fn cell_at(&self, x: i32, y: i32) -> Option<term::select::Pos> {
-        let g = self.look.grid(self.screen.cols);
-        if x < g.x || y < g.y {
+        let g = &self.grid;
+        let row = g.row_at(y)?;
+        if x < g.x {
             return None;
         }
-        let row = ((y - g.y) as u32 / g.ch.max(1)) as usize;
-        let col = (((x - g.x) as u32 / g.cw.max(1)) as usize).min(self.screen.cols.saturating_sub(1));
+        let col = (((x - g.text_x(row)).max(0) as u32 / g.cw.max(1)) as usize).min(self.screen.cols.saturating_sub(1));
         (row < self.screen.rows).then_some((row, col))
     }
 
@@ -375,12 +391,16 @@ impl Term {
     /// doplnovaneho slova v radku vstupu posledniho snimku, plocha =
     /// pracovni plocha (presah pres okraj okna), bez znalosti polohy okno.
     fn sync_compl(&mut self) {
-        let g = self.look.grid(self.screen.cols);
+        let g = &self.grid;
         let row = self.lines.iter().position(|l| matches!(l.role, term::ui::draw::Role::Input { .. }));
         let col = self.app.menu_col().unwrap_or(0).min(self.screen.cols.saturating_sub(1));
         let anchor = match row {
-            Some(r) => Rect::new(g.x + (col as u32 * g.cw) as i32, g.y + (r as u32 * g.ch) as i32, g.cw, g.ch),
-            None => Rect::new(g.x, g.y + (self.screen.rows as u32 * g.ch) as i32, g.cw, g.ch),
+            // Cely radek vstupu i s okrajem (seznam lezi nad nim).
+            Some(r) => {
+                let (a, b) = g.span(r);
+                Rect::new(g.cell_x(r, col), a, g.cw, (b - a).max(0) as u32)
+            }
+            None => Rect::new(g.x, g.bottom, g.cw, g.ch),
         };
         let win = Rect::new(0, 0, self.win.w, self.win.h);
         let area = match &self.win.context {
@@ -413,7 +433,6 @@ impl Term {
 
     fn resize(&mut self) {
         let (c, r) = grid(&self.look, self.win.w, self.win.h, self.panel());
-        self.look.fit(self.win.h, r);
         self.screen = Screen::new(c, r);
         self.app.resize(c, r);
     }
@@ -477,9 +496,23 @@ impl Term {
             false => String::from("Výstup"),
         };
         let mut t = Node::new(4, 1, Role::Terminal, &name);
-        // Plocha = mrizka (radek `k` hodnoty lezi na `y + k * vyska`).
-        let g = self.look.grid(self.screen.cols);
-        t.bounds = Rect::new(g.x, g.y, self.screen.cols as u32 * g.cw, self.screen.rows as u32 * g.ch);
+        // Plocha = mrizka; radky maji ruznou vysku, plochu radku `k`
+        // hodnoty dava potomek `Row` c. `k` (schovany radek ma vysku 0).
+        let g = &self.grid;
+        let top = g.span(0).0;
+        let gw = self.screen.cols as u32 * g.cw;
+        t.bounds = Rect::new(g.x, top, gw, (g.bottom - top).max(0) as u32);
+        let rows: Vec<Node> = (0..self.screen.rows)
+            .map(|k| {
+                let mut n = Node::new(ROW_NODE + k as u32, 4, Role::Row, "");
+                let (a, b) = g.span(k);
+                if g.visible(k) {
+                    let a = if k > 0 { a.max(g.clip_top) } else { a };
+                    n.bounds = Rect::new(g.x, a, gw, (b - a).max(0) as u32);
+                }
+                n
+            })
+            .collect();
         // Vsechny radky mrizky (i prazdne), at radek hodnoty = radek mrizky.
         let mut v = String::new();
         for y in 0..self.screen.rows {
@@ -492,13 +525,14 @@ impl Term {
         t.state = FOCUSED | AUTOCOMPLETE | if self.compl.is_some() { EXPANDED } else { 0 };
         t.actions = actions::SET_VALUE;
         let mut nodes = vec![win, bar, tab, t];
+        nodes.extend(rows);
         if let Some(c) = &self.compl {
             nodes.extend(c.a11y(4));
         }
         // Akce bloku u vsech viditelnych hlavicek (Sbalit, Kopirovat,
         // Spustit znovu).
-        let g = self.look.grid(self.screen.cols);
-        for (k, b) in blockact::layout(&self.look, &self.lines, &g, |_| true).iter().enumerate() {
+        let g = &self.grid;
+        for (k, b) in blockact::layout(&self.look, &self.lines, g, |_| true).iter().enumerate() {
             let Some(blk) = self.app.blocks.iter().find(|x| x.id == b.block) else { continue };
             let name = match b.act {
                 blockact::Act::Fold if blk.collapsed => alloc::format!("Rozbalit blok {}", blk.line),
@@ -561,8 +595,8 @@ impl Term {
             nodes.push(n);
         }
         // Volby vyzvy jako tlacitka (cteckou i testem: ACTIVATE).
-        let g = self.look.grid(self.screen.cols);
-        for (b, label, ..) in rows::buttons(&mut self.look, &self.lines, &g) {
+        let g = &self.grid;
+        for (b, label, ..) in rows::buttons(&mut self.look, &self.lines, g) {
             let mut n = Node::new(BUTTON_NODE + b.index as u32, 4, Role::Button, &label);
             n.bounds = b.rect;
             n.actions = actions::ACTIVATE;
@@ -591,6 +625,10 @@ impl Term {
             self.screen.write("\r\n\x1b[33mSlužba termd není připojená, připojuji znovu...\x1b[39m");
         }
         let label = self.status();
+        if let Some(c) = &self.win.context {
+            self.look.badge = c.ext.title_badge;
+        }
+        let grid = self.look.grid(self.screen.cols, self.screen.rows, self.win.h, &lines);
         let screen = &self.screen;
         let show_panel = self.panel();
         let tab_list = self.tabs();
@@ -604,7 +642,7 @@ impl Term {
         self.fade.update(&lines, t_now);
         let veils = self.fade.veils(&lines, t_now, &look.t.motion);
         self.win.draw(|c: &mut Canvas<'_>| {
-            paint(c, look, screen, &label, &lines, &veils, &tab_list, (hover, &collapsed, &sel));
+            paint(c, look, screen, &grid, &label, &lines, &veils, &tab_list, (hover, &collapsed, &sel));
             if show_panel {
                 let area = panel::area(look, c.w, c.h);
                 panel::paint(c, look, tasks, area);
@@ -612,6 +650,7 @@ impl Term {
             paint_notation(c, look, c_on);
         })?;
         self.lines = lines;
+        self.grid = grid;
         // Seznam navrhu ve vrstve popoveru (muze presahovat okno).
         self.sync_compl();
         match self.compl.as_ref().map(|c| c.comp.rect()).filter(|r| !r.is_empty()) {
@@ -673,8 +712,7 @@ impl Term {
                     Some(at) => self.select.drag(&self.screen, at),
                     None => false,
                 };
-                let g = self.look.grid(self.screen.cols);
-                let row = if y >= g.y { ((y - g.y) as u32 / g.ch.max(1)) as usize } else { usize::MAX };
+                let row = self.grid.row_at(y).unwrap_or(usize::MAX);
                 let hb = self.lines.get(row).and_then(|l| blockact::block_of(&l.role));
                 let changed = hb != self.hover;
                 self.hover = hb;
@@ -703,8 +741,8 @@ impl Term {
                 }
                 // Akce bloku pod ukazatelem.
                 if let Some(hb) = self.hover {
-                    let g = self.look.grid(self.screen.cols);
-                    let hit = blockact::layout(&self.look, &self.lines, &g, |b| b == hb).into_iter().find(|b| b.rect.contains(x, y));
+                    let g = &self.grid;
+                    let hit = blockact::layout(&self.look, &self.lines, g, |b| b == hb).into_iter().find(|b| b.rect.contains(x, y));
                     if let Some(b) = hit {
                         self.block_act(b.block, b.act);
                         return Some(true);
@@ -723,8 +761,8 @@ impl Term {
                     self.send_out();
                     return Some(true);
                 }
-                let g = self.look.grid(self.screen.cols);
-                let hit = rows::buttons(&mut self.look, &self.lines, &g).into_iter().find(|(b, ..)| b.rect.contains(x, y));
+                let g = &self.grid;
+                let hit = rows::buttons(&mut self.look, &self.lines, g).into_iter().find(|(b, ..)| b.rect.contains(x, y));
                 if let Some((b, ..)) = hit {
                     self.app.prompt_pick(b.index);
                     return Some(true);
@@ -798,8 +836,8 @@ impl Term {
                 r
             }
             Event::A11yAction { node, action, .. } if action & actions::ACTIVATE != 0 && node >= ACT_NODE => {
-                let g = self.look.grid(self.screen.cols);
-                let b = blockact::layout(&self.look, &self.lines, &g, |_| true).into_iter().nth((node - ACT_NODE) as usize);
+                let g = &self.grid;
+                let b = blockact::layout(&self.look, &self.lines, g, |_| true).into_iter().nth((node - ACT_NODE) as usize);
                 if let Some(b) = b {
                     self.block_act(b.block, b.act);
                 }
@@ -974,7 +1012,7 @@ fn px((r, g, b): (u8, u8, u8)) -> u32 {
 /// Okno terminalu: titulek s kartou relace (odznak a tlacitka okna kresli
 /// system pres nej) a mrizka bunek pismem JetBrains Mono.
 #[allow(clippy::too_many_arguments)]
-fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, lines: &[term::ui::draw::Line], veils: &[u32], tabs: &[tabs::Tab], hover: Marks<'_>) {
+fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, grid: &rows::Grid, label: &str, lines: &[term::ui::draw::Line], veils: &[u32], tabs: &[tabs::Tab], hover: Marks<'_>) {
     let t = look.t.clone();
     let col = &t.color;
     let (w, h) = (c.w, c.h);
@@ -989,8 +1027,7 @@ fn paint(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, label: &str, line
     // Mrizka.
     let body = Rect::new(0, th as i32, w, h.saturating_sub(th));
     c.fill(body, col.term_bg);
-    let (cw, ch) = look.cell();
-    paint_grid(c, look, screen, lines, veils, cw, ch, w, hover);
+    paint_grid(c, look, screen, grid, lines, veils, w, hover);
 }
 
 /// Karta se stavem pripojeni (jeste neni relace: "Pripojuji...").
@@ -1018,24 +1055,37 @@ fn paint_status_tab(c: &mut Canvas<'_>, look: &mut Look, label: &str) {
 type Marks<'a> = (Option<u64>, &'a [u64], &'a [(usize, usize, usize)]);
 
 /// Mrizka bunek s prvky navrhu, prolnutim novych bloku, vyberem
-/// a kurzorem.
+/// a kurzorem. Radky obsahu se kresli jen pod stavovym radkem
+/// (`Grid::clip_top`), stavovy radek nad nim.
 #[allow(clippy::too_many_arguments)]
-fn paint_grid(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, lines: &[term::ui::draw::Line], veils: &[u32], cw: u32, ch: u32, w: u32, (hover, collapsed, sel): Marks<'_>) {
+fn paint_grid(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, grid: &rows::Grid, lines: &[term::ui::draw::Line], veils: &[u32], w: u32, (hover, collapsed, sel): Marks<'_>) {
     let t = look.t.clone();
     let col = &t.color;
     let ms = t.text.mono;
+    let (cw, ch) = (grid.cw, grid.ch);
+    let old = c.clip();
+    let below = old.intersect(&Rect::new(0, grid.clip_top, w, (grid.bottom - grid.clip_top).max(0) as u32 + ch));
+    let above = old.intersect(&Rect::new(0, look.title_h() as i32, w, (grid.clip_top - look.title_h() as i32).max(0) as u32));
+    // Text za pravym okrajem mrizky (odsazene radky) se nekresli.
+    let right = grid.right();
     // Prvky navrhu podle roli radku: pod textem, preskocene bunky, nad textem.
-    let grid = look.grid(screen.cols);
     let skips = rows::skips(lines);
-    rows::under(c, look, lines, &grid);
+    c.set_clip(below);
+    rows::under(c, look, lines, grid);
     for row in 0..screen.rows {
+        let pinned = row == 0 && grid.row_y(0) < grid.clip_top;
+        c.set_clip(if pinned { above } else { below });
         let skip = skips.get(row).map(|v| v.as_slice()).unwrap_or(&[]);
+        let oy = grid.row_y(row);
         for colm in 0..screen.cols {
             if skip.iter().any(|&(a, b)| colm >= a && colm < b) {
                 continue;
             }
             let cell = screen.cell(colm, row);
-            let (ox, oy) = (grid.x + (colm as u32 * cw) as i32, grid.y + (row as u32 * ch) as i32);
+            let ox = grid.cell_x(row, colm);
+            if ox + cw as i32 > right + look.pad() as i32 {
+                break;
+            }
             if let Some(b) = cell.bg {
                 c.fill(Rect::new(ox, oy, cw, ch), px(b));
             }
@@ -1061,23 +1111,25 @@ fn paint_grid(c: &mut Canvas<'_>, look: &mut Look, screen: &Screen, lines: &[ter
             }
         }
     }
-    rows::over(c, look, lines, &grid, hover);
+    c.set_clip(below);
+    rows::over(c, look, lines, grid, hover);
     if let Some(hb) = hover {
-        let buttons = blockact::layout(look, lines, &grid, |b| b == hb);
+        let buttons = blockact::layout(look, lines, grid, |b| b == hb);
         blockact::paint(c, look, &buttons, collapsed);
     }
     // Prolnuti noveho bloku: prekryv barvou pozadi (i pres levy pruh).
     for (row, &a) in veils.iter().enumerate().take(screen.rows) {
         if a > 0 {
-            let y = grid.y + (row as u32 * ch) as i32;
-            c.blend(Rect::new(0, y, w, ch), alpha(col.term_bg, a));
+            let (y0, y1) = grid.span(row);
+            c.blend(Rect::new(0, y0, w, (y1 - y0).max(0) as u32), alpha(col.term_bg, a));
         }
     }
     // Kurzor (blok, barva akcentu, text pod nim zustane citelny).
     if screen.x < screen.cols && screen.y < screen.rows {
-        let (ox, oy) = (grid.x + (screen.x as u32 * cw) as i32, grid.y + (screen.y as u32 * ch) as i32);
+        let (ox, oy) = (grid.cell_x(screen.y, screen.x), grid.row_y(screen.y));
         c.blend(Rect::new(ox, oy + 2, 2, ch - 4), col.accent);
     }
+    c.set_clip(old);
 }
 
 /// Prepinac zapisu B / C v titulku (`.seg` z navrhu): plocha `surface_2`,

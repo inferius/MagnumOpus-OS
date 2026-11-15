@@ -277,7 +277,12 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
   (error).
 - **`dlclose`** decrements the counter; the module stays loaded (its code
   is sealed, TLS module numbers are never reused) - like `RTLD_NODELETE`
-  for all.
+  for all (musl semantics, decision DL-3 Q4 A). The library destructors
+  (`__cxa_atexit`, `DT_FINI_ARRAY`) run only at process exit.
+  ⚠️ **Consequence:** a long-running process that repeatedly loads
+  different plugins does not get the memory of their modules back. For
+  applications with plugins we recommend plugins in a separate process.
+  Really unloading a module is a possible future step **[designed]**.
 - **`dlerror`** is per thread (by TP); the string is valid until the next
   `dl*` in the thread, reading clears the error. `dl*` calls are
   serialized by a **recursive** lock: an initializer may call `dlopen`.
@@ -342,7 +347,9 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
 **[verified in QEMU]** x86_64 and aarch64.
 
 - **The loader table** `abi::loader::Interface` (version, size;
-  `thread_tls_new`, `thread_tls_free`, `run_fini`, `dl_iterate_phdr`). The
+  `thread_tls_new`, `thread_tls_free`, `run_fini`, `dl_iterate_phdr`,
+  `dl*`, `libd_session`, `run_init`; new fields only at the end, the test
+  `loader_table_offsets` checks the offsets). The
   loader writes its address into auxv (`AT_MO_LOADER`, `spawn` prepares the
   slot) and when jumping to the program also passes SP (auxv) and
   `ENTRY_MAGIC` (x86_64 `rsi`/`rdx`, aarch64 `x1`/`x2`). libos (`rt_own` ->
@@ -358,6 +365,22 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
   modules loaded at start: for a later `dlopen` of modules with
   initial-exec TLS (Vulkan/GL drivers from Mesa). glibc has a fixed 1664 B
   surplus, today 512 B + 144 B per namespace (1520 B); 2 KiB covers both.
+- **init** **[verified in QEMU]** x86_64 and aarch64 (suites `procesy`, `cstd dyn`,
+  `cpp`): the loader does not run the initializers of the start-up modules
+  (`DT_INIT`, `DT_INIT_ARRAY`, dependencies first, the program last) before
+  jumping to the program. Order: the loader loads and relocates the
+  modules, jumps to the program, the program runtime prepares the heap,
+  stdio and files and then calls the table function `run_init`: the
+  initializers of all dependencies before the program, the program last,
+  all before `main`. **An own crt (a program start without osrt and
+  libos) must call `run_init` itself** (example `user/dltest/crt.c`),
+  otherwise constructors do not run. It is called by
+  (`rt_own` after `startup`, `__libc_start` in osrt after `init`, the test
+  crt before `program_main`): constructors of C++ static objects allocate,
+  register `__cxa_atexit` and touch files, which is not possible before the
+  heap and stdio are ready ([C++ runtime](cpp.md)). A second call does
+  nothing; `dlopen` initializes its modules itself. The field is at the end
+  of the table (7a-1); a program looks for it by `size`.
 - **fini:** a normal program end (`rt_own` after `main`, crt after
   `program_main`) calls `run_fini`: the program first, dependencies last,
   `DT_FINI_ARRAY` backwards, then `DT_FINI`; a second call does nothing.

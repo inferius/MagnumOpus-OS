@@ -245,6 +245,7 @@ fn server_messages_roundtrip() {
                 obscured: vec![(crate::context::ObstacleKind::Keyboard, Rect::new(0, 400, 1280, 330))],
                 tile: crate::context::Tile::Left,
                 min_hit: 44,
+                title_badge: Rect::new(12, 8, 104, 28),
                 ..Default::default()
             },
         },

@@ -24,12 +24,12 @@ pub const TESTS: &[Test] = &[
     ("sqlite: dva procesy nad jednou databazi (zamky fcntl ve fsd)", sqlite_two),
 ];
 
-fn fs() -> Result<&'static FsClient, String> {
+pub(super) fn fs() -> Result<&'static FsClient, String> {
     devices().and_then(|d| d.fs.as_ref()).ok_or_else(|| String::from("sluzba fsd nebezi"))
 }
 
 /// Cisty adresar testu pod `/std-test`.
-fn fresh_dir(fs: &FsClient, dir: &str, files: &[&str]) -> TestResult {
+pub(super) fn fresh_dir(fs: &FsClient, dir: &str, files: &[&str]) -> TestResult {
     for d in ["/std-test", dir] {
         match fs.create(d, fsproto::kind::DIR) {
             Ok(()) | Err(Error::AlreadyExists) => {}
@@ -42,7 +42,7 @@ fn fresh_dir(fs: &FsClient, dir: &str, files: &[&str]) -> TestResult {
     Ok(())
 }
 
-fn session(fs: &FsClient) -> Result<Vec<StartHandle>, String> {
+pub(super) fn session(fs: &FsClient) -> Result<Vec<StartHandle>, String> {
     let own = fs.connect().map_err(|e| fail("relace fsd", e))?;
     Ok(vec![StartHandle::tagged(tag::FS, own.into_channel().into_handle())])
 }

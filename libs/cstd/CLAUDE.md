@@ -21,6 +21,9 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 - `src/semaphore.rs` (nepojmenované nad futexem, `sem_open` = `ENOSYS`), `src/pthread/attr.rs` (atributy vláken, vlastní zásobník přes `sys::spawn_on`), `src/statfs.rs` (`statfs`/`fstatfs` nad `sys::volume_space`), `src/ifaddrs.rs` (`getifaddrs`, `if_nameindex`: `lo` + `eth0` z netd), `src/ifreq.rs` (`ioctl` `SIOCGIF*` na socketu).
 - `src/termios.rs` - `termios.h` nad řídicím kanálem terminálu (`libs/ttyproto`, `osrt::tty`), `ioctl` terminálu (`TCGETS` ... `TIOCSWINSZ`), vlákno `SIGWINCH`; `isatty` = stdio **a** kanál terminálu. Host: terminál v paměti v `sys/host.rs`.
 - `src/dlfcn.rs` - `dlopen` a spol. nad tabulkou zavaděče (`osrt::dl`); `crt/crt1.c` - start programu PIE nad `libc.so` (`_start` -> `__libc_start`).
+- `src/dlfcn.rs` - `dlopen` a spol. nad tabulkou zavaděče (`osrt::dl`); statický program: `dl_iterate_phdr` popíše jediný modul ze symbolů `user/user-std.ld` (`static_phdrs`, pro libunwind); `crt/crt1.c` - start programu PIE nad `libc.so` (`_start` -> `__libc_start`) a skrytý `__dso_handle`; `crt/crtdso.c` - `__dso_handle` každé `.so` (`csysroot::ldflags_so`).
+- `src/cxxsup.rs` - funkce pro běh C++ ([docs/cs/cpp.md](../../docs/cs/cpp.md)): `getentropy`, `timespec_get`, `lldiv`, `__cxa_atexit`/`__cxa_finalize` (jeden seznam s `atexit`), `__cxa_thread_atexit_impl`, `__dso_handle` statického programu.
+- `src/fsat.rs` - `openat`/`unlinkat`/`mkdirat`/`fstatat`/`fchmodat` relativně k adresáři (cesta z `osrt::fs::File::path`), `realpath`, `pathconf`, `sendfile`; `src/statvfs.rs` - `statvfs` nad `fsproto` INFO.
 - `libs/cstd-so` - `libc.so` (cdylib nad sysrootem std jako PIC, `stdsys::build_libc_so_locked`).
 - `libs/cstd-libc` - `libc.a` (staticlib cstd + std + osrt + rozhraní SDL `libs/mosdl`) pro sysroot C (`xtask/src/csysroot.rs`), porty v C `xtask/src/cports/`. `environ` je v `osrt` (`env.rs`), ne v cstd.
 - `src/stdio.rs` - `FILE` nad číslem fd (zámek, buffery: stdout po řádcích, stderr bez, soubory 4 KiB), `fdopen`/`fileno`, `getline`, seznam otevřených proudů, vyprázdnění při konci (`ensure_exit_hook`).
@@ -40,10 +43,12 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 - Locale: `C`/`POSIX` je jednobajtové (bajty 0x80-0xFF <-> U+DF80-U+DFFF), ostatní jména UTF-8, jméno s cizím kódováním se odmítne. Kódování se bere vždy z locale vlákna (`locale::ctype()`), nikdy z globální proměnné přímo. Čísla `LC_*` a velikost `struct lconv` hlídá test `locale_header_matches`.
 - `wchar_t` je jako na Linuxu: x86_64 `i32`, aarch64 `u32` (`wchar::wchar_t`); hodnoty se zpracovávají jako `u32`.
 - Nový symbol definovaný v C (`c/*.c`) patří i do `libs/cstd-so/export-c.txt` (jinak ho `libc.so` neexportuje) a do objektu, na který něco odkazuje (`c/math_ld.c`): `libc.so` vtahuje z archivu C jen odkazované objekty, samostatný nový soubor by v ní chyběl.
-- Nic v cstd nesmí spoléhat na rozbalení zásobníku (`catch_unwind`): cíl má `panic=abort`.
 - Čísla `errno` jsou celá tabulka Linuxu `asm-generic` (1-133); texty v `errno::message` pro každé číslo (test `errno_table_is_complete`).
 - Rozložení `posix_spawn_file_actions_t` (80 B), `posix_spawnattr_t` (336 B), `sem_t` (32 B), `struct statfs` (120 B) a `siginfo_t` (128 B) jako glibc na 64 bitech; hlídají testy v `posix_tests.rs` a `spawn_tests.rs`.
 - Potomek `posix_spawn` dostane jen fd 0-2; akce souborů se vyhodnotí v rodiči (`spawn::plan`), nepodporovaná akce = `ENOTSUP` hned v `posix_spawn`, nikdy tichá změna chování.
+- Nic v cstd nesmí spoléhat na rozbalení zásobníku (`catch_unwind`): cíl má `panic=abort`. Výjimka C++ přes funkci v Rustu (zpětné volání z `qsort`) = `std::terminate`.
+- `atexit` i `__cxa_atexit` jdou do jednoho seznamu v `cxxsup.rs`, spouští ho jedna funkce v `osrt::at_exit` registrovaná po vyprázdnění stdio; nejdřív destruktory `thread_local` volajícího vlákna. Konec vlákna z `pthread_create`: `run_thread_dtors` před destruktory klíčů.
+- `malloc` (cstd-core) má v hlavičce i zarovnání: `aligned_alloc`, `posix_memalign` a `memalign` (cstd-core) uvolňuje obyčejný `free`.
 
 ## Testy
 
@@ -59,5 +64,6 @@ Knihovna C pro aplikace se std (cíl `*-unknown-magnumopus`): vrstva POSIX nad `
 - Program v C je crate `#![no_main]`; `main` z C volá `osrt`. Bez `extern crate cstd;` se knihovna nepřilinkuje.
 - Deklarace v hlavičkách jen s implementací: CMake/configure portů by funkci našly a link by selhal.
 - `locale_t` se v hlavičkách definuje pod strážcem `_CSTD_LOCALE_T` (je v `locale.h`, `wchar.h`, `wctype.h`, `ctype.h`, `string.h`, `stdlib.h`, `time.h`, `langinfo.h`).
+- `include/limits.h` je z větve cstd-wchar (`MB_LEN_MAX` 4, `PATH_MAX`, `NAME_MAX`).
 - `%Lf` v `printf` vypíše `?` (`long double` nejde číst z `VaList`); `*l` funkce mají přesnost `double`.
 - `std::os::magnumopus::runtime` potřebuje `feature(rustc_private)` (crate ze sysrootu; atribut `unstable` na re-exportu se nevynucuje); jen pod `cfg(target_os = "magnumopus")`.

@@ -53,6 +53,7 @@ int feof(FILE *f);
 int ferror(FILE *f);
 void clearerr(FILE *f);
 int setvbuf(FILE *f, char *buf, int mode, size_t size);
+void setbuf(FILE *f, char *buf);
 void perror(const char *s);
 int remove(const char *path);
 int rename(const char *from, const char *to);

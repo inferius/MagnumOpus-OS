@@ -144,3 +144,15 @@ fn sched_policy_rules() {
         assert!(h.contains(&format!("#define {n} {v}\n")), "{n}");
     }
 }
+
+#[test]
+fn static_phdrs_describe_program() {
+    use crate::dlfcn::*;
+    let (h, n) = static_phdrs((0x40_0000, 0x48_0000), (0x45_0000, 0x45_0100));
+    assert_eq!(n, 2);
+    assert_eq!((h[0].p_type, h[0].p_vaddr, h[0].p_memsz), (PT_LOAD, 0x40_0000, 0x8_0000));
+    assert_eq!((h[1].p_type, h[1].p_vaddr, h[1].p_memsz), (PT_GNU_EH_FRAME, 0x45_0000, 0x100));
+    // bez .eh_frame_hdr jen PT_LOAD
+    assert_eq!(static_phdrs((0x40_0000, 0x48_0000), (0x45_0000, 0x45_0000)).1, 1);
+    assert_eq!(core::mem::size_of::<Phdr>(), 56);
+}

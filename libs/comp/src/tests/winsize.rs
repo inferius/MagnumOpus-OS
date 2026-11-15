@@ -137,6 +137,31 @@ fn context_ext_tile_follows_maximize() {
     assert!(g1 > g0);
 }
 
+/// Okno s vlastnim titulkem dostane v kontextu plochu odznaku duvery
+/// v souradnicich obsahu (tam, kde ho kompozitor kresli); okno se
+/// standardnim titulkem prazdnou.
+#[test]
+fn context_ext_title_badge_for_custom_title() {
+    let mut t = T::new();
+    let a = t.client("a");
+    let b = t.client("b");
+    t.out();
+    t.window(a, Mode::CustomTitle, RED);
+    t.window(b, Mode::Standard, RED);
+    let out = t.out();
+    let badge = |c| {
+        client_msgs(&out, c).into_iter().rev().find_map(|m| match m {
+            ServerMsg::WindowContext { ext, .. } => Some(ext.title_badge),
+            _ => None,
+        })
+    };
+    let r = t.rect_of(a);
+    let drawn = t.badge_rect(a);
+    assert_eq!(badge(a), Some(Rect::new(drawn.x - r.x, drawn.y - r.y, drawn.w, drawn.h)));
+    assert!(drawn.w > 0);
+    assert_eq!(badge(b), Some(Rect::default()));
+}
+
 /// Kaskada noveho okna nesmi vysunout pravy okraj mimo malou obrazovku
 /// (800 x 600, aarch64 ramfb): i paty siroky okno se cele vejde, at uz
 /// velikost prisla pri vytvoreni nebo zpravou `WINDOW_SIZE` pred

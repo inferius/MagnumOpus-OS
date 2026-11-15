@@ -63,6 +63,11 @@ typedef struct __locale_struct *locale_t;
 size_t strftime_l(char *buf, size_t max, const char *fmt, const struct tm *t, locale_t l);
 void tzset(void);
 
+/* C11 / C23 */
+#define TIME_UTC 1
+#define TIME_MONOTONIC 2
+int timespec_get(struct timespec *ts, int base);
+
 _CSTD_END
 
 #endif
