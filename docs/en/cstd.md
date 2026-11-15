@@ -225,10 +225,12 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
   free space.
 - **Anonymous `MAP_SHARED`** is the same as private within the process (no
   `fork`).
-- **File:** the content is read into anonymous memory (`MAP_PRIVATE`, or
-  read-only `MAP_SHARED` - later changes to the file are not visible).
-  `MAP_SHARED` with writing = `ENOTSUP` until fsd provides a file memory
-  object **[designed]**. A pipe or socket = `ENODEV`.
+- **File:** a memory object from fsd ([Files as memory](file-system.md#files-as-memory)):
+  `MAP_PRIVATE` = a copy-on-write clone without copying the contents,
+  read-only `MAP_SHARED` = the object directly (later changes to the file
+  are not visible); an empty or big file or a range past the end = read
+  into anonymous memory as before. `MAP_SHARED` with writing = `ENOTSUP`
+  **[designed]**. A pipe or socket = `ENODEV`.
 - **W^X:** `PROT_EXEC` on unsealed memory only with the JIT permission from
   the manifest ([memory-management.md](memory-management.md)), otherwise
   `EACCES`.

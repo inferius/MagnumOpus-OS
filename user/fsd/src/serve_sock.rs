@@ -35,6 +35,20 @@ impl Service {
         match opcode {
             op::SOCKET_BIND => Some(self.sock_bind(sess, r, handles)),
             op::SOCKET_CONNECT => Some(self.sock_connect(sess, r, handles)),
+            op::MAP_VMO => Some(self.map_vmo(sess, r)),
+            op::READ_VMO => Some((|| {
+                let h = r.u64()?;
+                if !sess.handles.contains(&h) {
+                    return Err(Error::BadHandle);
+                }
+                let (off, n) = (r.u64()?, (r.u32()? as usize).min(fsproto::VMO_IO));
+                let vmo = libos::Vmo::from_handle(handles.pop().ok_or(Error::InvalidArgs)?);
+                let data = self.fs.as_mut().ok_or(Error::IoError)?.read_h(h, off, n)?;
+                copy_to_vmo(&vmo, &data)?;
+                let mut w = fsproto::Writer::new();
+                w.u32(data.len() as u32);
+                Ok(Reply::body(w))
+            })()),
             op::SET_MODE => Some((|| {
                 let fs = self.fs.as_mut().ok_or(Error::IoError)?;
                 let path = sess.resolve(fs, &r.str()?, true, true)?;
@@ -114,4 +128,74 @@ impl Service {
             Err(e) => Err(e),
         }
     }
+}
+
+impl Service {
+    /// `MAP_VMO`: objekt pameti s obsahem souboru (`filevmo.rs`).
+    fn map_vmo(&mut self, sess: &mut Session, r: &mut Reader) -> Result<Reply> {
+        use crate::filevmo::{MAX_FILE, SESSION_QUOTA, write_mapped};
+        let h = r.u64()?;
+        if !sess.handles.contains(&h) {
+            return Err(Error::BadHandle);
+        }
+        let fs = self.fs.as_mut().ok_or(Error::IoError)?;
+        let st = fs.stat_h(h)?;
+        if st.kind != fs::Kind::File {
+            return Err(Error::WrongType);
+        }
+        let size = st.size;
+        if size == 0 || size > MAX_FILE {
+            return Err(Error::NotSupported);
+        }
+        let rev = fs.revision_h(h)?;
+        let key = (rev.dataset, rev.oid);
+        let new = !sess.mapped.contains(&key);
+        if new && sess.mapped_bytes.saturating_add(size) > SESSION_QUOTA {
+            return Err(Error::NoMemory);
+        }
+        let page = libos::vm::page_size();
+        let vmo = self.vmos.get(key, rev.version, size, |v| {
+            write_mapped(v, size.div_ceil(page) * page, |buf| {
+                let mut off = 0u64;
+                while off < size {
+                    let n = (size - off).min(fsproto::VMO_IO as u64) as usize;
+                    let d = fs.read_h(h, off, n)?;
+                    buf[off as usize..off as usize + d.len()].copy_from_slice(&d);
+                    if d.len() < n {
+                        break;
+                    }
+                    off += n as u64;
+                }
+                Ok(())
+            })
+        })?;
+        let ro = vmo.handle().duplicate(Some(libos::Rights::BASIC | libos::Rights::READ | libos::Rights::MAP))?;
+        if new {
+            sess.mapped.insert(key);
+            sess.mapped_bytes += size;
+        }
+        let mut w = fsproto::Writer::new();
+        w.u64(size);
+        Ok(Reply { body: w, handles: alloc::vec![ro], new_session: None, session_ops: alloc::vec::Vec::new(), watch: None })
+    }
+}
+
+/// Zapise `data` na zacatek VMO klienta: namapovat a kopirovat ve fsd
+/// (optimalizovany kod) je radove rychlejsi nez `VMO_WRITE` (kopie pres
+/// buffer jadra). Bez prava `MAP` = `VMO_WRITE`.
+fn copy_to_vmo(vmo: &libos::Vmo, data: &[u8]) -> Result<()> {
+    if data.is_empty() {
+        return Ok(());
+    }
+    let page = libos::vm::page_size();
+    let len = (data.len() as u64).div_ceil(page) * page;
+    let me = libos::rt::self_process();
+    let flags = libos::abi::vm::MAP_READ | libos::abi::vm::MAP_WRITE;
+    let Ok(addr) = libos::sys::vm_map(me, vmo.handle().raw(), 0, len, flags, 0) else {
+        return vmo.write(0, data);
+    };
+    // SAFETY: rozsah [addr, addr + len) je prave namapovany objekt pameti
+    // s pravem zapisu, nikdo jiny ve fsd na nej neukazuje.
+    unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), addr as *mut u8, data.len()) };
+    libos::sys::vm_unmap(me, addr, len)
 }

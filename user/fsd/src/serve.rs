@@ -107,6 +107,8 @@ pub struct Service {
     pub streams: Vec<crate::stream::Stream>,
     /// Cislo procesu vlastnika zamku POSIX (od klienta, pro `l_pid`).
     pub lock_pids: BTreeMap<u64, u32>,
+    /// Objekty pameti souboru pro `mmap` (`filevmo.rs`); pamet je v rozpoctu fsd.
+    pub vmos: crate::filevmo::FileVmos,
     /// Posluchaci uzlu socketu `AF_UNIX` (`serve_sock.rs`), jen v pameti.
     pub listeners: crate::serve_sock::Listeners,
     /// Handly prave zpracovavaneho pozadavku (bere si je operace, ktera je

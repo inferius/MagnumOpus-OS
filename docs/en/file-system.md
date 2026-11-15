@@ -525,6 +525,58 @@ smycka, prava, jmenny prostor relace" in the suite `souborovy system`, step
 - The link mode is `0777` only as a display (`lstat`); the target has the
   rights.
 
+## Files as memory
+
+Coordinator decision (15 Nov 2026, questions Q1-Q7 option A): `mmap` of a
+file without copying through a memory object (VMO) held by fsd
+(`user/fsd/src/filevmo.rs`, operation `MAP_VMO`).
+
+- **`MAP_PRIVATE` and read-only `MAP_SHARED`** **[verified in QEMU]**
+  x86_64 (step `fmap` of the `ctest` test, suite `cstd`): fsd keeps a VMO
+  with the file contents (a cache by dataset + oid), fills it completely on
+  the first mapping and gives the client a **read-only** handle.
+  `MAP_PRIVATE` is a copy-on-write clone (`VMO_CLONE`) - pages are shared
+  until the client writes them, nothing is copied. Validity is guarded by
+  the content version: after the file changes the next mapping gets a new
+  object, an existing private mapping stays a snapshot (POSIX leaves this
+  unspecified). An empty file, a file over 256 MiB (`filevmo::MAX_FILE`)
+  and a range past the end of the file still go by copy (`READ_VMO`).
+- **Memory:** fsd creates the VMO, so it counts towards **fsd's budget**
+  (visible in the job memory diagnostics), not towards the client's job -
+  that is a limitation: the client does not grow its own account this way.
+  Abuse is prevented by a per-session quota (sum of distinct files 1 GiB,
+  `SESSION_QUOTA`, exceeding it = `ENOMEM`), and fsd drops unreferenced
+  cache VMOs oldest first (512 MiB, `CACHE_MAX`; clients keep their handles
+  and clones). Pages the client writes in `MAP_PRIVATE` are paid by the
+  client's job (the clone is on its account).
+- **Deleting** a file does not cancel mappings (an orphan, POSIX).
+  **Unmounting a volume / revoking a `GRANT`:** fsd shrinks the VMO to 0,
+  clients get a past-the-end exception on access (`SIGBUS`)
+  **[designed]**.
+- **A pager in the kernel** (filling page by page on a fault, for big files
+  and sparse reads) is the **intended next phase** **[designed]**: only the
+  filling in fsd changes, the client protocol stays (the client always just
+  gets a handle).
+
+**Writable `MAP_SHARED`** **[designed]** (the second step, Wine W2 -
+sections over files, sqlite WAL):
+
+- The VMO in fsd is the source of truth while it exists: `WRITE_H` writes to
+  the FS and to the VMO, shared mappings see the change at once (Q2).
+- Write-back: a new syscall `VMO_DIRTY` (number 80) returns the dirty pages
+  and clears them; fsd writes them on the client's `msync`/`fsync`,
+  `munmap`/close and on an FS commit (Q3). Truncating a file =
+  `VMO_SET_SIZE` (access past the end = `SIGBUS`, the kernel already can).
+- fsd crash (Q5): after the session recovers, the client **opens the file
+  again with the write right** (rights are checked again) and only then
+  hands over its shared VMO; fsd treats its contents as that client's write
+  (no trust in the VMO's origin). Without the write right the changes are
+  dropped and `msync` returns `SERVICE_RESTARTED`.
+- **Risk (explicitly):** a writable shared mapping gives the client writable
+  memory of the file - other processes with the same file see its writes
+  without another FS check (rights are checked only when opening for
+  writing), the same as POSIX.
+
 ## Format limits
 
 > **Change from v2:** a new chapter: a file is at most 2^63-1 B, checked arithmetic, saturating summaries, an extent of 496 blocks. **Why:** sizes could overflow before. ([all changes](fs-versions.md#transition-v2---v3))
@@ -1540,7 +1592,7 @@ match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
 | 31 | `CONNECT` | - | a new session channel (a handle in the message) |
 | 32 | `OPEN` | path, access u8, share u8, flags u8 (`CREATE` 1, `EXCL` 2, `TRUNCATE` 4, `DIR` 8) | handle u64, `Stat`, `Revision` |
 | 33 | `CLOSE` | handle | - |
-| 34 | `READ_H` | handle, offset u64, length u32 | data |
+| 34 | `READ_H` | handle, offset u64, length u32 (at most `MAX_IO` = 32 KiB; the client does larger reads by 1 MiB through `READ_VMO`) | data |
 | 35 | `WRITE_H` | handle, offset u64, data | **accepted u32** |
 | 36 | `SET_LEN` | handle, size u64 | - |
 | 37 | `STAT_H` | handle | `Stat`, `Revision` |
@@ -1825,6 +1877,8 @@ groups stay. A system recipe cannot be narrowed. Otherwise `ACCESS_DENIED`.
 | 126 | `READLINK` | path | target str (`WRONG_TYPE` when not a link) |
 | 127 | `LSTAT` | path | `Stat` of the link itself |
 | 128 | `REALPATH` | path | the canonical session path (links, `.`, `..` resolved) |
+| 129 | `READ_VMO` | handle u64, offset u64, length u32 (at most `VMO_IO` = 1 MiB) + the client's VMO handle (`WRITE`, `MAP`) | read u32; data from the start of the VMO |
+| 130 | `MAP_VMO` | handle u64 | size u64 + a read-only VMO handle (`READ`, `MAP`); an empty/big file `NOT_SUPPORTED`, quota `NO_MEMORY` ([Files as memory](#files-as-memory)) |
 
 **`OPEN_STREAM`** **[verified in QEMU]** (suite `cstd`, step `posix2`: the
 output of a `posix_spawn` child into a file and 200 000 bytes of a file on
@@ -1841,6 +1895,23 @@ channel's messages and writes them from the position (`APPEND` at the end).
 At most 16 streams (`stream::MAX_STREAMS`); the loop waits through a port,
 the number of sessions is limited only by memory. An fsd restart ends the
 streams.
+
+**Large reads (`READ_VMO`)** **[verified in QEMU]** x86_64 (test "cteni
+velkeho souboru: po 32 KiB a pres VMO" in the suite `vykon FS`):
+`FsClient::read_h` above `MAX_IO` reads by 1 MiB into the client's memory
+object. The client keeps it mapped for reading (one per session), fsd maps
+it for writing for the duration of the copy - a copy through
+`VMO_WRITE`/`VMO_READ` (a kernel buffer) was an order of magnitude slower.
+fsd's dependencies on every request's path (`libos`, `wire`, `svcclient`,
+the allocator) are optimized even in the debug image
+(`[profile.dev.package.*]` in `Cargo.toml`; a rebuild after changing `libos`
+takes 13 s longer, `fs`/`fsd`/`fsproto` were optimized already).
+
+| Reading 8 MiB (x86_64, QEMU TCG, debug image) | Time |
+|---|---|
+| by 32 KiB, before the change (`34604355`) | 6829 ms |
+| by 32 KiB, fsd dependencies optimized (`a313581a` + profile) | 1186 ms |
+| through a VMO by 1 MiB, mapping in fsd and the client (`a313581a` + mapping) | 130 ms |
 
 **`AF_UNIX` socket nodes** **[verified in QEMU]** (suite `cstd`, step
 `unix` of the `ctest` test): `SOCKET_BIND` creates an object of kind 5

@@ -70,6 +70,19 @@ pub fn memfd_map(fd: i32, off: u64, len: u64, prot: u32, addr: u64) -> R<u64> {
     })
 }
 
+/// `mmap` souboru pres objekt pameti z fsd: `MAP_PRIVATE` = klon s kopii
+/// pri zapisu (nic se nekopiruje), sdilene jen pro cteni = primo objekt.
+/// `ENOTSUP` = soubor jde jen kopii (prazdny, velky, rozsah za koncem).
+pub fn file_map(fd: i32, off: u64, len: u64, prot: u32, addr: u64, private: bool) -> R<u64> {
+    let d = rt::fd::get(fd).map_err(|_| errno::EBADF)?;
+    let f = d.file().ok_or(errno::ENOTSUP)?;
+    f.map(off, len, prot, addr, private).map_err(|err| match err {
+        rt::Error::NotSupported | rt::Error::WrongType => errno::ENOTSUP,
+        rt::Error::NoMemory => errno::ENOMEM,
+        err => e(err),
+    })
+}
+
 pub fn memfd_add_seals(fd: i32, seals: u32) -> R<()> {
     memory(fd, |m| {
         m.add_seals(seals).map_err(|err| match err {

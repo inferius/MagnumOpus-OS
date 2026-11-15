@@ -226,6 +226,34 @@ impl File {
         session()?.posix_lock(self.handle, cmd, class, write, start, len, crate::process::self_id())
     }
 
+    /// Objekt pameti s obsahem souboru jen pro cteni a velikost souboru
+    /// (fsproto `MAP_VMO`, C `mmap`). `NotSupported` = prazdny nebo prilis
+    /// velky soubor (kopie pres cteni).
+    pub fn map_vmo(&self) -> Result<(libos::Vmo, u64)> {
+        session()?.map_vmo(self.handle)
+    }
+
+    /// `mmap` souboru pres objekt pameti z fsd: `private` = klon s kopii pri
+    /// zapisu (nic se nekopiruje), sdilene jen pro cteni = primo objekt.
+    /// `NotSupported` = soubor jde jen kopii (prazdny, velky, rozsah za
+    /// koncem, sdileny zapis). `addr` 0 = kamkoli, jinak pevne.
+    pub fn map(&self, off: u64, len: u64, prot: u32, addr: u64, private: bool) -> Result<u64> {
+        let (vmo, size) = self.map_vmo()?;
+        let page = libos::vm::page_size();
+        if off.checked_add(len).is_none_or(|end| end > size.div_ceil(page) * page) {
+            return Err(Error::NotSupported);
+        }
+        let me = libos::rt::self_process();
+        if private {
+            let clone = vmo.clone_range(off, len)?;
+            libos::sys::vm_map(me, clone.handle().raw(), 0, len, prot, addr)
+        } else if prot & abi::vm::MAP_WRITE != 0 {
+            Err(Error::NotSupported)
+        } else {
+            libos::sys::vm_map(me, vmo.handle().raw(), off, len, prot, addr)
+        }
+    }
+
     /// Absolutni cesta pri otevreni.
     pub fn path(&self) -> &str {
         &self.path
