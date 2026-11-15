@@ -149,6 +149,11 @@ pub fn stat(path: &[u8]) -> R<Stat> {
     rt::fs::stat_path(path).map(|s| stat_of(&s)).map_err(e)
 }
 
+/// Druhy ukazatel vlakna (x86_64 baze GS).
+pub fn set_second_pointer(value: u64) -> R<()> {
+    rt::thread::set_second_pointer(value).map_err(e)
+}
+
 /// Velikost svazku: (velikost bloku, bloku, volnych bloku).
 pub fn volume_space() -> R<(u32, u64, u64)> {
     rt::fs::volume_space().map_err(e)

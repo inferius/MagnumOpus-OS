@@ -291,7 +291,8 @@ over `libc.so`).
   system services.
 - **Naše úpravy / Our changes:** záplaty v `third_party/wine/` (LGPL jako
   Wine): `0001-config-sub-magnumopus.patch` (systém `magnumopus`
-  v `config.sub`).
+  v `config.sub`), `0002-ntdll-signal-x86_64-magnumopus.patch` (kontext
+  signálu jako Linux, TEB v GS přes `magnumopus/thread.h`, bez LDT).
 - **Popis / Description:** `docs/cs/windows-vrstva.md`,
   `docs/en/windows-layer.md`.
 

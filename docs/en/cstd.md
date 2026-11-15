@@ -294,6 +294,9 @@ tests `cxxsup_tests`, `fsat_tests`.
 | `sys/statvfs.h` | `statvfs`, `fstatvfs` | size and free blocks of the fsd session volume; inode counts 0 |
 | `sys/sendfile.h` | `sendfile` | copy through a 64 KiB buffer in the process |
 | `stdio.h` | `setbuf` | like `setvbuf` (`NULL` = unbuffered); `std::filebuf` |
+| `strings.h`, `string.h` | `ffs`, `ffsl`, `ffsll` | index of the lowest set bit from 1 |
+| `signal.h` | `si_code` values (`SEGV_*`, `BUS_*`, `FPE_*`, `ILL_*`, `TRAP_*`) | values as Linux |
+| `magnumopus/thread.h` (extension, not POSIX) | `mos_thread_set_second_pointer`, `mos_thread_get_second_pointer` | the second thread pointer (x86_64 GS base, the TEB of the [Windows layer](windows-layer.md)); aarch64 -1 and `ENOTSUP` |
 | `limits.h` | `PATH_MAX` (4096), `NAME_MAX` (255) | |
 | `link.h`, `elf.h` | `dl_iterate_phdr`, `struct dl_phdr_info`, ELF64 types | static program: one module from linker script symbols (`PT_LOAD`, `PT_GNU_EH_FRAME`) |
 | (C++ ABI) | `__cxa_atexit`, `__cxa_finalize`, `__cxa_thread_atexit_impl`, `__dso_handle` | `atexit` and `__cxa_atexit` share one list (one reverse order) |

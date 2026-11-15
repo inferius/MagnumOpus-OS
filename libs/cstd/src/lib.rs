@@ -36,6 +36,7 @@ pub mod locale;
 pub mod math;
 pub mod misc;
 pub mod mman;
+pub mod mosthread;
 pub mod poll;
 pub mod scanf;
 pub mod setjmp;

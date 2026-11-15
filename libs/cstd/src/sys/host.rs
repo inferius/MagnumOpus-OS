@@ -256,6 +256,11 @@ pub fn fstat(fd: i32) -> R<Stat> {
     }
 }
 
+/// Na hostiteli druhy ukazatel neni.
+pub fn set_second_pointer(_value: u64) -> R<()> {
+    Err(errno::ENOTSUP)
+}
+
 /// Na hostiteli fd cestu neznaji (jen testy logiky).
 pub fn fd_path(_fd: i32) -> R<Vec<u8>> {
     Err(errno::ENOTSUP)

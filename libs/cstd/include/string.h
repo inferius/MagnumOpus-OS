@@ -13,6 +13,8 @@ size_t strcspn(const char *s, const char *reject);
 char *strpbrk(const char *s, const char *accept);
 char *strtok_r(char *s, const char *delim, char **save);
 char *strdup(const char *s);
+/* Jako glibc i ve string.h (POSIX: strings.h). */
+int ffs(int v);
 char *strndup(const char *s, size_t n);
 char *stpcpy(char *dst, const char *src);
 int strcoll(const char *a, const char *b);

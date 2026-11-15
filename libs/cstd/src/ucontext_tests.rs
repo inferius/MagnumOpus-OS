@@ -59,3 +59,13 @@ fn fpsimd_roundtrip() {
     assert_eq!(u64::from_le_bytes(back[512..520].try_into().unwrap()), 0x0040_0000);
     assert_eq!(u64::from_le_bytes(back[520..528].try_into().unwrap()), 0x9);
 }
+
+#[test]
+fn ffs_values() {
+    use crate::mosthread::{ffs, ffsll};
+    assert_eq!(ffs(0), 0);
+    assert_eq!(ffs(1), 1);
+    assert_eq!(ffs(0x80), 8);
+    assert_eq!(ffs(i32::MIN), 32);
+    assert_eq!(ffsll(1 << 40), 41);
+}
