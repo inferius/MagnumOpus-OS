@@ -136,9 +136,11 @@ impl Comp {
         match m {
             CMsg::Offer { gesture, formats } => {
                 if self.focus_in_secure_field() {
+                    self.clip_denied(c, "kopirovani", "fokus v zabezpecenem poli");
                     return self.trace_clip("nabidka odmitnuta: fokus v zabezpecenem poli");
                 }
                 if !self.clip_take_gesture(c, gesture, now) {
+                    self.clip_denied(c, "kopirovani", "okno bez fokusu nebo bez platneho gesta");
                     return self.trace_clip("nabidka odmitnuta: okno bez fokusu nebo bez platneho gesta");
                 }
                 // Stara nabidka konci: rozpracovana vlozeni od ni selzou.
@@ -155,6 +157,7 @@ impl Comp {
             }
             CMsg::Request { gesture, serial, format } => {
                 if !self.clip_take_gesture(c, gesture, now) {
+                    self.clip_denied(c, "vlozeni", "okno bez fokusu nebo bez platneho gesta");
                     return self.clip_send(c, SMsg::Denied { serial, why: Denied::NoGesture });
                 }
                 match self.clipboard.owner {
@@ -219,6 +222,13 @@ impl Comp {
             let formats = self.clipboard.formats();
             self.clip_send(c, SMsg::Changed { formats });
         }
+    }
+
+    /// Odmitnuta schranka do logu sluzby s identitou aplikace (ladeni
+    /// "nefunguje mi vlozeni"); obsah schranky se nikdy neloguje.
+    fn clip_denied(&mut self, c: ClientId, what: &str, why: &str) {
+        let app = self.clients.get(&c).map_or_else(|| alloc::string::String::from("?"), |cl| cl.info.id.clone());
+        self.log(format_args!("schranka: {what} pro {app} odmitnuto ({why})"));
     }
 
     fn trace_clip(&mut self, why: &str) {

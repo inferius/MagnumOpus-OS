@@ -522,11 +522,12 @@ impl Comp {
     }
 
     /// Obdelniky popoveru okna `g` na obrazovce (viditelne korenove vrstvy
-    /// s `popover`), oriznute na obrazovku.
+    /// s `popover`), oriznute na pracovni plochu: popover nevyjede pod listu
+    /// ani mimo obrazovku (systemove vrstvy, dialogy a zamek jsou nad nim).
     pub(crate) fn popover_rects(&self, g: u32) -> Vec<Rect> {
         let Some(w) = self.windows.get(&g) else { return Vec::new() };
         let Some(cl) = self.clients.get(&w.client) else { return Vec::new() };
-        let screen = self.screen();
+        let screen = self.work_area();
         cl.layers
             .values()
             .filter(|l| l.window == w.local && l.parent == 0 && l.props.popover && l.props.visible)

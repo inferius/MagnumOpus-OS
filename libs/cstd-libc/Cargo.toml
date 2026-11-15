@@ -18,5 +18,7 @@ cstd = { path = "../cstd" }
 # Rozhrani pro port SDL (`mosdl_*`, docs/cs/sdl.md): soucast libc.a, aby
 # program mel jedinou kopii std.
 mosdl = { path = "../mosdl" }
+# Vic oken kompozitoru v procesu (`mowin_*`, ovladac grafiky Wine).
+mowin = { path = "../mowin" }
 # Objekty jadra pro programy v C (magnumopus/sys.h, proces dekoderu medii).
 mosys = { path = "../mosys" }

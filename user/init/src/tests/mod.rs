@@ -44,6 +44,8 @@ mod gui_video;
 mod gui_clients;
 mod gui_player;
 mod gui_recovery;
+mod gui_role;
+mod wine_gui;
 mod gui_palette;
 mod gui_snapshot;
 mod gui_term;

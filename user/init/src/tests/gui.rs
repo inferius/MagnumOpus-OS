@@ -45,6 +45,8 @@ pub const TESTS: &[Test] = &[
     ("compd: 100 soucasnych klientu (smycka pres port)", super::gui_clients::many_clients),
     ("prehravac: plocha videa z mediad, prehrat a pozastavit", super::gui_player::play_pause),
     ("compd: skladani na GPU (Venus) dava stejne pixely jako CPU", super::gui_gpu::gpu_backend),
+    ("role Gui: dite s MO_GUI okno otevre, bez ni ne", super::gui_role::inherit_and_opt_out),
+    ("role Gui: odvolani identity zavre okna i potomkum", super::gui_role::revoke_reaches_children),
     // Posledni: kompozitor sady se ukonci.
     ("compd: pad kompozitoru uprostred prace, okno se vrati", super::gui_recovery::crash_mid_work),
 ];

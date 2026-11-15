@@ -188,3 +188,18 @@ fn synthetic_input_and_secure_field_refused() {
     t.msg(a, ClientMsg::Clipboard { data: vec![9, 9] });
     assert!(client_msgs(&t.out(), a).iter().any(|m| matches!(m, ServerMsg::Error { .. })));
 }
+
+/// Odmitnuta schranka jde do logu sluzby s identitou aplikace (bez obsahu).
+#[test]
+fn denied_clipboard_is_logged_with_identity() {
+    let mut t = T::new();
+    let a = t.client("org.winehq.wine");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    t.c.take_logs();
+    clip(&mut t, a, CMsg::Request { gesture: 0, serial: 1, format: TEXT.into() });
+    clip(&mut t, a, CMsg::Offer { gesture: 0, formats: vec![TEXT.into()] });
+    let logs = t.c.take_logs();
+    assert!(logs.iter().any(|l| l.contains("vlozeni pro org.winehq.wine odmitnuto")), "{logs:?}");
+    assert!(logs.iter().any(|l| l.contains("kopirovani pro org.winehq.wine odmitnuto")), "{logs:?}");
+}

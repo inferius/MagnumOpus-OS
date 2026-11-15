@@ -67,6 +67,12 @@ pub mod tag {
     /// Handly zdedenych fd ([`super::Fd`]): ve stejnem poradi jako polozky
     /// bloku, ktere handle maji ([`super::fd_kind::has_handle`]).
     pub const FD: u32 = 0x7FFF_0009;
+    /// Relace okna u kompozitoru (`guiproto::window`) zdedena roli `Gui`
+    /// od rodice: stejna identita aplikace (zuzeny listek, nikdy sirsi).
+    pub const GUI: u32 = 0x7FFF_000A;
+    /// Listek k relaci `GUI` (obnova po padu kompozitoru, relace pro dalsi
+    /// potomky pres `NARROW`).
+    pub const GUI_LEASE: u32 = 0x7FFF_000B;
 }
 
 /// Nejvic zdedenych fd v jednom bloku (handly jdou ve startovni zprave

@@ -107,6 +107,8 @@ members = [
     "user/launchd",
     "user/std-net",
     "user/std-proc",
+    "user/gui-probe",
+    "libs/mowin",
     "user/std-http",
     "user/ctest",
     "user/agentd",

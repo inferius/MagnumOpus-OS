@@ -36,6 +36,7 @@ pub const WINE: CPort = CPort {
         "0005-ntdll-spawn-process-magnumopus.patch",
         "0006-process-memory-magnumopus.patch",
         "0007-server-signals-magnumopus.patch",
+        "0008-winemo-drv-magnumopus.patch",
     ],
     build: Build::Sources { lib: &[], defines: &[], programs: &[] },
     data: &[],
@@ -61,6 +62,9 @@ pub fn source_key(sha256: &str, patches: &[(String, Vec<u8>)]) -> String {
     format!("{:016x}", h.finish())
 }
 
+/// Zaplaty Wine (obsah meni otisk zdroje). Zdrojaky ovladace
+/// `third_party/wine/winemo.drv` do otisku nepatri: `build_wine.sh` je
+/// kopiruje pri kazdem behu a make prelozi jen zmenene.
 fn read_patches() -> Result<Vec<(String, Vec<u8>)>> {
     WINE.patches
         .iter()
@@ -82,6 +86,11 @@ pub fn build(arch: &Arch, keep_going: bool) -> Result<PathBuf> {
     if !sysroot.join("lib/libc.so").is_file() || !sysroot.join("lib/crtdso.o").is_file() {
         return Err("chybi dynamicka cast sysrootu C (lib/libc.so): nejdriv `cargo xtask build`".into());
     }
+    // FreeType (port C, /system/lib/libfreetype.so): pisma GDI ve Wine.
+    let cports = crate::cports::prefix(arch);
+    if !cports.join("lib/libfreetype.so").is_file() {
+        return Err("chybi port FreeType (target/c-ports/<arch>/prefix/lib/libfreetype.so): nejdriv `cargo xtask build`".into());
+    }
     let distro = wsl::distro();
     wsl::require_tools(&distro)?;
     let archive = crate::cports::fetch::fetch(&WINE)?;
@@ -96,6 +105,7 @@ pub fn build(arch: &Arch, keep_going: bool) -> Result<PathBuf> {
         ("WINE_PATCHES", wsl_path(&patch_dir())),
         ("WINE_KEY", key),
         ("MOS_SYSROOT", wsl_path(&sysroot)),
+        ("MOS_CPORTS", wsl_path(&cports)),
         ("MOS_TOOLS", wsl_path(&workspace_root().join("tools/wsl"))),
         ("WINE_OUT", wsl_path(&out)),
         ("WINE_KEEP_GOING", String::from(if keep_going { "1" } else { "0" })),

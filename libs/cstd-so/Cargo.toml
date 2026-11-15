@@ -17,3 +17,6 @@ test = false
 cstd = { path = "../cstd" }
 # Objekty jadra pro programy v C (magnumopus/sys.h): ffdec nad libc.so.
 mosys = { path = "../mosys" }
+# Vic oken kompozitoru (`mowin_*`): unixova cast ovladace grafiky Wine
+# (winemo.so) je knihovna nad libc.so.
+mowin = { path = "../mowin" }

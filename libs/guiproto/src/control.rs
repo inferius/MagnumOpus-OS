@@ -78,6 +78,10 @@ pub const SESSION: &str = "session";
 pub const ACTIONS: &str = "actions";
 pub const INSPECT: &str = "inspect";
 pub const STATUS: &str = "status";
+/// `revoke <id aplikace>`: odebrat aplikaci GUI - zavrit vsechna spojeni
+/// identity (i zdedena roli `Gui`); odpoved `ok <pocet>`. Listky stejne
+/// identity zrusi supervisor initu (`gui::revoke`).
+pub const REVOKE: &str = "revoke";
 /// `tasks <bezi> <z toho agent>`: pocet uloh pro ikonu v panelu (do
 /// pripojeni kompozitoru k taskd ho posila init nebo test).
 pub const TASKS: &str = "tasks";

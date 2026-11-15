@@ -195,6 +195,23 @@ hraje víc přehrávačů, akce jde relaci, která naposledy začala hrát
 každá služba rozšíření s verzí (vrstva 1, bod 4), jinak by ji vývojáři
 obcházeli.
 
+### Relace okna pro potomky: riziko
+
+**[ověřeno v QEMU]** x86_64. Aplikace smí svým potomkům předat relaci okna
+u kompozitoru (role `Gui`, [GUI](gui.md#relace-okna-pro-potomky-role-gui)).
+Aplikace tím dál nedostává capability k ovladači displeje ani vstupu:
+dostane jen relaci ke službě `compd` se svou identitou.
+
+- ⚠️ **Co tím potomek může:** otevírat okna, číst vstup ve svých oknech
+  a používat schránku **pod identitou rodiče** (odznak důvěry ukazuje
+  rodičovskou aplikaci). Stejné riziko jako proces, který na Linuxu zdědí
+  `DISPLAY` nebo `WAYLAND_DISPLAY`.
+- **Co nemůže:** získat širší identitu nebo práva (zúžení je jen prázdné,
+  recept ověřuje supervisor), obejít limity oken a bufferů (počítají se na
+  identitu) ani přežít odvolání (zruší se celý strom lístků a kompozitor
+  zavře všechna spojení identity).
+- **Jak dítě bez GUI:** prostředí potomka bez `MO_GUI`.
+
 ## Další krok
 
 Podrobný návrh protokolu vrstvy 1 (hlavička, schopnosti, buffery,

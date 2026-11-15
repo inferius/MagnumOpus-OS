@@ -22,6 +22,7 @@ pub const TESTS: &[Test] = &[
     ("zlib: vlastni test example, minigzip a zpet", zlib),
     ("sqlite: shell sqlite3 nad souborem", sqlite_shell),
     ("sqlite: dva procesy nad jednou databazi (zamky fcntl ve fsd)", sqlite_two),
+    ("freetype: glyf z pisma (staticky nad libfreetype.a)", freetype),
 ];
 
 pub(super) fn fs() -> Result<&'static FsClient, String> {
@@ -100,6 +101,22 @@ fn sqlite_two(s: &Startup) -> TestResult {
     let ra = a.finish(Duration::from_secs(90))?;
     ra.expect("sqltest", &["sqlite-a"])?;
     rb.expect("sqltest", &["sqlite-b"])
+}
+
+/// FreeType: `fttest` vykresli glyf pismem Inter z initfs.
+fn freetype(s: &Startup) -> TestResult {
+    let fs = fs()?;
+    let dir = "/std-test/fttest";
+    fresh_dir(fs, dir, &["pismo.ttf"])?;
+    let initfs = libos::initfs::Initfs::open(s).map_err(|e| fail("initfs", e))?;
+    let data = initfs.find("ft-test.ttf").ok_or("ft-test.ttf neni v initfs")?;
+    let path = format!("{dir}/pismo.ttf");
+    fs.create(&path, fsproto::kind::FILE).map_err(|e| fail("pismo: vytvoreni", e))?;
+    fs.write(&path, 0, data).map_err(|e| fail("pismo: zapis", e))?;
+    let run = run_std_app(s, "fttest", &[&path], &[], session(fs)?, Duration::from_secs(60))?;
+    run.expect("fttest", &[])?;
+    check!(run.stdout.contains("ok init 2.15.0") && run.stdout.contains("ok glyf"), format!("vystup fttest: {}", run.stdout.trim()));
+    Ok(())
 }
 
 pub const DYN_TESTS: &[Test] = &[

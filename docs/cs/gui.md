@@ -744,6 +744,62 @@ v QEMU sada `sdl` s fyzickým vstupem přes QMP)
 **[implementováno]** (testy `multiple_windows_per_app_and_user_launch_focus`,
 `pointer_keyboard_routing_and_focus` v `libs/comp`)
 
+### Relace okna pro potomky (role `Gui`)
+
+**[ověřeno v QEMU]** x86_64 (sada `gui`, testy `role Gui: ...`, program
+`user/gui-probe`). Aplikace, která spouští další procesy s okny (Wine:
+`explorer`, `notepad` z `cmd`, `winecfg`), jim předá relaci okna se
+**stejnou identitou**, jako dědí relaci souborů:
+
+- launchd zná role `Gui` a `GuiLease` (`launchproto`), potomek dostane
+  relaci a lístek se štítky `abi::params::tag::GUI` a `GUI_LEASE`.
+  Runtime (`osrt::gui`) relaci předá knihovně okna (`take_session`) a lístek
+  si nechá: obnova po pádu kompozitoru (`reconnect`) a relace pro další
+  potomky (`child`).
+- Relace potomka vzniká `NARROW` s prázdným zúžením na lístku rodiče
+  (adaptér `compd` v initu jiné zúžení odmítne): supervisor vydá novou relaci
+  se stejným receptem (identita z manifestu) a nový lístek **svázaný
+  s rodičovským**. Limit živých a rychlosti je stejný jako u `ADOPT`
+  (256 živých, 128 za sekundu).
+- **Opt-out:** runtime při startu nastaví `MO_GUI=1`. Potomek dostane relaci
+  jen tehdy, když jeho prostředí `MO_GUI` neprázdné má (obdoba
+  `WAYLAND_DISPLAY`). `env_remove("MO_GUI")` nebo prostředí bez ní v
+  `posix_spawn` = potomek bez GUI.
+- **Odvolání:** `gui::revoke(id)` v initu zruší všechny lístky identity
+  u kompozitoru i lístky z nich odvozené (do libovolné hloubky) a kompozitor
+  příkazem `revoke <id>` zavře všechna spojení identity. Obnova přes lístek
+  pak vrátí chybu (test: dítě po odvolání ztratí okno a `reconnect` selže).
+  Konec relace účtu ukončí job relace se všemi potomky.
+- **Limity na identitu, ne na spojení** (`libs/comp`, `scene.rs`): okna
+  (`MAX_WINDOWS` 32), buffery (`MAX_BUFFERS` 256, součet 256 MiB) a spojení
+  (`MAX_IDENTITY_CLIENTS` 64) se sčítají přes všechna spojení stejné
+  identity, takže je množství procesů neobejde (testy
+  `window_limit_counts_all_connections_of_identity`,
+  `identity_client_limit_and_revoke_list`).
+- ⚠️ Riziko: každý potomek s rolí smí otevírat okna pod identitou rodiče
+  (stejně jako proces s `DISPLAY` nebo `WAYLAND_DISPLAY`). Rozbor v
+  [Rozhraní zařízení](rozhrani-zarizeni.md#relace-okna-pro-potomky-riziko).
+
+### Vlastník okna a zavření popoveru (verze 7)
+
+**[implementováno]** (testy v `libs/comp/src/tests/owner.rs`). Verze
+protokolu se vyjednává v `HELLO`: kompozitor přijme verzi od
+`guiproto::MIN_VERSION` (6) a `WELCOME` vrátí menší z verze klienta
+a své. Zprávy verze 7 klient se starší verzí posílat nesmí
+(`NOT_SUPPORTED`) a kompozitor mu je neposílá.
+
+- `WINDOW_OWNER { window, owner }`: vlastník je jiné okno **téhož
+  spojení** (dialog). Okno se při prvním zobrazení vystředí nad vlastníkem
+  v pracovní ploše a při každém zvednutí vlastníka jde nad něj; má-li
+  vlastník fokus, dialog ho při zobrazení převezme. Okno jiného
+  spojení (i stejné identity) vlastníkem být nemůže (`NOT_SUPPORTED`), cyklus
+  = `INVALID_ARGS`.
+- `POPOVER_DISMISS { window }`: stisk tlačítka mimo popovery okna s fokusem.
+  Aplikace popovery zavře (nabídky, rozbalené seznamy) stejně jako nabídky
+  systému; stisk sám jde normálně tam, kam patří.
+- Popover se ořízne na pracovní plochu (nevyjede pod lištu) a kreslí se pod
+  systémovými vrstvami (lišta, dialogy oprávnění, zámek obrazovky).
+
 ### Paleta příkazů (v2)
 
 **Vzhled je prozatímní**, cílový podle `design/prostredi-menu.html`
@@ -1228,6 +1284,7 @@ Aplikace -> kompozitor:
 | 24 | `WINDOW_STATE` | okno, celá obrazovka (0/1), číslo gesta ([Kurzor a zámek ukazatele](#kurzor-a-zámek-ukazatele)) |
 | 25 | `SET_CURSOR` | okno, tvar (0-12) nebo 0xFF + w, h, aktivní bod, pixely B G R A |
 | 26 | `POINTER_LOCK` | okno, zamknout (0/1), číslo gesta |
+| 27 | `WINDOW_OWNER` | okno, vlastník (0 = žádný); verze 7 |
 
 Kompozitor -> aplikace:
 
@@ -1248,6 +1305,7 @@ Kompozitor -> aplikace:
 | 112 | `ERROR` | op, kód |
 | 113 | `THEME` | režim barev u8 (0 světlý, 1 tmavý, 2 vysoký kontrast); po `WELCOME` a při změně |
 | 118 | `POINTER_LOCK_STATE` | okno, zamčeno (0/1): odpověď na `POINTER_LOCK` i zrušení systémem |
+| 119 | `POPOVER_DISMISS` | okno: stisk mimo jeho popovery; verze 7 |
 
 Verze protokolu 5 (`guiproto::VERSION`): `WINDOW_STATE`, `SET_CURSOR`,
 `POINTER_LOCK`, `POINTER_LOCK_STATE` a záznam vstupu `PointerRelative`

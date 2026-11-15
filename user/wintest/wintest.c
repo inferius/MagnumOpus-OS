@@ -7,6 +7,7 @@
  *                                        udalosti, pamet jineho procesu)
  *   wine wintest.exe sekce              (W2: sdilena sekce nad souborem
  *                                        mezi procesy, koherence s I/O)
+ *   wine wintest.exe gdi | ramy         (W3: okna, gui.c)
  *
  * Kontroly: printf, argv, prostredi (getenv i GetEnvironmentVariableA),
  * soubory (fopen/fprintf/fgets v textovem rezimu, atributy, smazani),
@@ -22,6 +23,11 @@
  * (ReadProcessMemory/WriteProcessMemory = PROCESS_MEMORY pres wineserver),
  * synchronizace pojmenovanymi udalostmi, kod konce ditete 77. */
 static volatile LONG marker = 0x1234;
+
+/* gui.c (W3) */
+int gui_gdi(void);
+int gui_frames(void);
+int gui_keys(void);
 
 static int child(void)
 {
@@ -194,6 +200,9 @@ int main(int argc, char **argv)
     if (argc >= 2 && !strcmp(argv[1], "procesy")) return processes();
     if (argc >= 2 && !strcmp(argv[1], "sekce-dite")) return section_child();
     if (argc >= 2 && !strcmp(argv[1], "sekce")) return sections();
+    if (argc >= 2 && !strcmp(argv[1], "gdi")) return gui_gdi();
+    if (argc >= 2 && !strcmp(argv[1], "ramy")) return gui_frames();
+    if (argc >= 2 && !strcmp(argv[1], "klavesy")) return gui_keys();
 
     printf("wintest: start\n");
 

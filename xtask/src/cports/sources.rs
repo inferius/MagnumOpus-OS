@@ -55,6 +55,23 @@ fn is_cxx(s: &str) -> bool {
     s.ends_with(".cc") || s.ends_with(".cpp") || s.ends_with(".cxx")
 }
 
+/// Testovaci program v C (zdroje `ws:` v repozitari) linkovany staticky
+/// s priznaky `extra` (hlavicky a knihovny portu v predpone).
+pub fn program(arch: &Arch, sysroot: &Path, work: &Path, prog: &Prog, extra: &[String]) -> Result<(String, PathBuf)> {
+    let clang = cbuild::find_clang()?;
+    let mut flags = csysroot::cflags(arch, sysroot)?;
+    flags.extend(["-O2", "-Wall"].map(String::from));
+    flags.extend(extra.iter().filter(|f| f.starts_with("-I") || f.starts_with("-D")).cloned());
+    let objs: Vec<PathBuf> = prog.sources.iter().map(|s| compile(&clang, &flags, &source_path(work, s), work)).collect::<Result<_>>()?;
+    let exe = work.join(prog.name);
+    let libs = extra.iter().filter(|f| !f.starts_with("-I") && !f.starts_with("-D"));
+    let link = Command::new(&clang).args(cbuild::target_flags(arch.user_target)?).args(&objs).args(libs).args(csysroot::ldflags(sysroot)).arg("-o").arg(&exe).output()?;
+    if !link.status.success() {
+        return Err(format!("link {} selhal:\n{}", prog.name, String::from_utf8_lossy(&link.stderr)).into());
+    }
+    Ok((String::from(prog.name), exe))
+}
+
 pub fn build(arch: &Arch, sysroot: &Path, src: &Path, work: &Path, lib: &[&str], defines: &[&str], programs: &[Prog]) -> Result<Vec<(String, PathBuf)>> {
     let clang = cbuild::find_clang()?;
     let clangxx = super::cmake::llvm_tool(&clang, "clang++");

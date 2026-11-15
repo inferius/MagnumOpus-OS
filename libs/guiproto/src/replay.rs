@@ -35,6 +35,8 @@ struct Win {
     regions: Option<ClientMsg>,
     /// Uzly stromu pristupnosti podle id (poradi = poradi id).
     a11y: BTreeMap<u32, Node>,
+    /// Vlastnik okna (`WINDOW_OWNER`), 0 = zadny.
+    owner: u32,
 }
 
 /// Platny stav jedne vrstvy.
@@ -85,11 +87,20 @@ impl Replay {
                         set: None,
                         regions: None,
                         a11y: BTreeMap::new(),
+                        owner: 0,
                     },
                 );
             }
+            ClientMsg::WindowOwner { window, owner } => {
+                if let Some(w) = self.windows.get_mut(window) {
+                    w.owner = *owner;
+                }
+            }
             ClientMsg::WindowDestroy { window } => {
                 self.windows.remove(window);
+                for w in self.windows.values_mut().filter(|w| w.owner == *window) {
+                    w.owner = 0;
+                }
                 self.layers.retain(|_, l| l.window != *window);
             }
             ClientMsg::BufferCreate { buffer, w, h, stride } => {
@@ -253,6 +264,10 @@ impl Replay {
                 h: w.h,
                 title: w.title.clone(),
             });
+        }
+        // Vlastnici az po vytvoreni vsech oken.
+        for (&window, w) in self.windows.iter().filter(|(_, w)| w.owner != 0) {
+            out.push(ClientMsg::WindowOwner { window, owner: w.owner });
         }
         for (&buffer, &(w, h, stride)) in &self.buffers {
             out.push(ClientMsg::BufferCreate { buffer, w, h, stride });

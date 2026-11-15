@@ -1,0 +1,11 @@
+MODULE    = winemo.drv
+UNIXLIB   = winemo.so
+UNIX_LIBS = -lwin32u
+IMPORTS   = user32 win32u
+
+SOURCES = \
+	display.c \
+	dllmain.c \
+	event.c \
+	modrv_main.c \
+	window.c

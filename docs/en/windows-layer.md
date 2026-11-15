@@ -408,6 +408,80 @@ least rights):
   application gets the fds (patch `0007`, fixed fd numbers 1022 and 1023
   next to the process fd 1021).
 
+## Windows program windows (W3)
+
+**Status:** decided on 15 Nov 2026 (coordinator: 1A, 2A, 3A, 4A, 5A, 6C,
+7A, 8A, 9A). ⚠️ **W3 is verified only on x86_64**: the Windows layer is
+x86_64 only (Q11 A); the generic parts (the `Gui` role, window protocol
+version 7, limits per identity) are verified on x86_64 and aarch64 in the
+`gui` suite.
+
+The Wine graphics driver for our compositor (like `winewayland.drv`) is a
+separate Wine module `winemo.drv` (LGPL, only in the Wine folder as a
+patch). It talks to the compositor through our `mowin` library (C API in
+`libc.a`, our code), not through the protocol directly.
+
+| Part | Status |
+|---|---|
+| Window session for Wine processes: the `Gui` role (inherited narrowed session with the same identity, opt-out without `MO_GUI`, revocation of the whole tree, limits per identity) | **[verified in QEMU]** x86_64 and aarch64 ([GUI](gui.md#window-session-for-child-processes-the-gui-role)) |
+| Window protocol version 7: window owner (dialog above its window), `POPOVER_DISMISS`, popover within the work area, version negotiation in `HELLO` | **[implemented]** (tests in `libs/comp`) |
+| A refused clipboard in the compositor log with the app identity (without content) | **[implemented]** (test `denied_clipboard_is_logged_with_identity`) |
+| `libs/mowin`: several windows and popups on one connection, frames, events, cursor, clipboard; event module shared with `mosdl` | **[implemented]** (host tests; in QEMU with the Wine driver) |
+| `winemo.drv` (`third_party/wine/winemo.drv`, patch `0008`): windows, GDI into the window buffer, input, cursor, decorations, popups, clipboard | **[implemented]**; the GDI window and both frame branches **[verified in QEMU]** x86_64 (`wine` suite: `wintest gdi`, `wintest ramy`) |
+| Notepad (physical click and typing from QEMU, the typed text is visible, Ctrl+S, the Save As dialog as an owned window with focus, the file on disk, Alt+F4, the process ends), winecfg (dialog of a sensible size) | **[verified in QEMU]** x86_64 (`wine` suite, release) |
+| GDI fonts through FreeType 2.15.0 (`/system/lib/libfreetype.so`) | **[verified in QEMU]** x86_64 (text in Notepad, size of the winecfg dialog); the FreeType port x86_64 and aarch64 (`cstd porty` suite) |
+| Keys: `WM_KEYDOWN` with a VK also for letters without a modifier, the character once | **[verified in QEMU]** x86_64 (`wintest klavesy`, keys `a` and `z` from QEMU) |
+| Clipboard Wine -> compositor -> another app (Ctrl+A, Ctrl+C in Notepad, paste in `gui-probe`) | **[verified in QEMU]** x86_64; the other direction **[implemented]** without a test |
+| Recovery of Wine windows after a compositor crash | **[designed]** (`mowin` cannot do it yet, a lost connection ends the Wine process) |
+
+Decisions:
+
+- **Identity (2A):** all Windows programs are one app `org.winehq.wine`
+  for now (shared permissions and clipboard); identity per `.exe` later.
+- **DPI (4A):** fixed 96 DPI for now (the compositor's scale is 100 %);
+  later DPI = 96 x scale / 100 per output, unaware apps are enlarged by
+  Wine's DPI virtualization, buffers in physical px.
+- **Decorations (6C):** windows with a caption and ordinary non-client
+  painting get the frame, title and buttons from the system
+  (`Mode::Standard`, look from tokens like the other windows); for them
+  the Wine driver returns `GetWindowStyleMasks` with `WS_CAPTION` and the
+  frame, win32u then leaves them out of the window surface and Wine does
+  not draw them. Windows without a caption and windows that removed their
+  non-client area (`WM_NCCALCSIZE` returns client = whole window) are
+  `Frameless` and Wine draws all of them (trust badge on hover). A window
+  that overrides only `WM_NCPAINT` gets the system frame and its own frame
+  painting is not visible (limitation).
+- **Popups (5A):** owned `WS_POPUP` windows (menus, tooltips, an open
+  list) are `POPOVER` layers of the owner window in its coordinates; a press
+  outside closes them (`POPOVER_DISMISS` -> `WM_CANCELMODE`). Unowned popups
+  (a splash screen) are their own `Frameless` windows. An owner in another
+  process is not supported.
+- **Keyboard:** every key goes as `WM_KEYDOWN`/`WM_KEYUP` with a VK and a
+  set 1 scan code (evdev code through a table in the driver). Letters and
+  digits get the VK from the character of the system layout (the physical
+  Y key on QWERTZ gives `z` = `VK_Z`), other keys the VK from Wine's tables
+  (US positions). **`WM_CHAR` only once:** `TranslateMessage` asks the
+  driver (`ToUnicodeEx`), which returns the character the compositor sent
+  with the last press of that key (system layout); the text event with the
+  same character is then not injected again. Text without a press (dead
+  key, composed character) goes as Unicode (`VK_PACKET`). With Ctrl/Alt and
+  for control keys (Enter, Tab, Backspace, Esc) Wine's tables give the
+  character. Layout tables for Wine (`KbdLayerDescriptor`, `MapVirtualKey`
+  for all languages) later. **Compose and IME come later.**
+- **Clipboard (7A):** text both ways (`CF_UNICODETEXT` <-> UTF-8), the
+  number of the process's last physical press; the compositor logs a
+  refusal.
+- **Window positions:** the compositor does not take window positions
+  from the client (like Wayland); `SetWindowPos` changes only the size
+  (`WINDOW_SIZE`).
+- **Fonts:** GDI in Wine draws text through FreeType 2.15.0 (FTL licence,
+  [C port](c-ports.md), `/system/lib/libfreetype.so`, `win32u` loads it
+  with `dlopen`). The fonts are Wine's own fonts (`share/wine/fonts`,
+  Tahoma, Courier and others; LGPL, they stay in the Wine folder); the
+  `sfnt2fon` tool turns them into `.fon` bitmap fonts at build time (host
+  FreeType in WSL). Our system font (`libs/font`) is not used by Wine yet;
+  font substitution (fontconfig and the like) comes later.
+
 ## W1: server connection and processes (questions T1-T5)
 
 **Status: [designed]**, decided on 15 Nov 2026 (coordinator); T2

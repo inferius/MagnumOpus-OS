@@ -155,6 +155,8 @@ pub fn spawn_with_fds(s: Spawn, fds: Vec<crate::inherit::Export>) -> Result<(Chi
         fd_entries.push(e.entry);
         fd_handles.extend(e.handles);
     }
+    // Relace okna pro potomka podle jeho prostredi (`MO_GUI`).
+    let gui = crate::gui::wanted(&s.env);
     let params = libos::params::Params { cwd: s.cwd, args: s.args, env: s.env, flags, fds: fd_entries }.encode().map_err(fail)?;
 
     let mut roles = Vec::new();
@@ -182,6 +184,20 @@ pub fn spawn_with_fds(s: Spawn, fds: Vec<crate::inherit::Export>) -> Result<(Chi
     for h in fd_handles {
         roles.push(Role::Fd);
         handles.push(h);
+    }
+    // Relace okna (role Gui): jen kdyz ji proces ma a prostredi potomka ma
+    // `MO_GUI` neprazdne (bez promenne = potomek bez GUI, jako unset
+    // WAYLAND_DISPLAY). Zuzeny listek se stejnou identitou (NARROW).
+    if gui {
+        match crate::gui::child() {
+            Ok((session, lease)) => {
+                roles.push(Role::Gui);
+                handles.push(session.into_handle());
+                roles.push(Role::GuiLease);
+                handles.push(lease.into_handle());
+            }
+            Err(e) => libos::println!("osrt: relace okna pro potomka {}: {e}, spoustim bez GUI", s.program),
+        }
     }
     let req = Launch { program: s.program, flags: 0, roles, params }.encode(NEXT_ID.fetch_add(1, Ordering::Relaxed)).map_err(fail)?;
     let (_, mut hs) = call(&launch.lock(), &req, handles)?;

@@ -716,6 +716,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "mosdl",
             "--package",
+            "mowin",
+            "--package",
             "netfilter",
             "--package",
             "guiproto",
@@ -983,6 +985,7 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("gui-install.manifest.toml", "user/gui-install/gui-install.manifest.toml"),
     ("agentd.manifest.toml", "user/agentd/agentd.manifest.toml"),
     ("std-proc.manifest.toml", "user/std-proc/std-proc.manifest.toml"),
+    ("gui-probe.manifest.toml", "user/gui-probe/gui-probe.manifest.toml"),
 ];
 
 fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> Result<()> {

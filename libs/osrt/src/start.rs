@@ -234,6 +234,8 @@ unsafe fn init(mut startup: Startup) {
     let fs = take(&mut startup, abi::params::tag::FS);
     let net = take(&mut startup, abi::params::tag::NET);
     let launch = take(&mut startup, abi::params::tag::LAUNCH);
+    let gui = take(&mut startup, abi::params::tag::GUI);
+    let gui_lease = take(&mut startup, abi::params::tag::GUI_LEASE);
     let fd_handles: alloc::vec::Vec<libos::Handle> =
         core::iter::from_fn(|| startup.take_tagged(abi::params::tag::FD)).collect();
     let mut params = params.unwrap_or_default();
@@ -245,6 +247,7 @@ unsafe fn init(mut startup: Startup) {
         crate::fs::init(fs);
         crate::net::init(net);
         crate::process::init(launch);
+        crate::gui::init(gui, gui_lease);
         BOOTSTRAP.set(startup.bootstrap);
     }
     // Zdedene fd az nad pripravenou relaci FS (soubory = `REOPEN`).

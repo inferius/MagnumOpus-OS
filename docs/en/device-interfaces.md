@@ -206,6 +206,25 @@ above).
 service needs versioned extensions (layer 1, item 4), otherwise developers
 would route around it.
 
+### Window session for children: risk
+
+**[verified in QEMU]** x86_64. An app may hand its children a window
+session at the compositor (the `Gui` role,
+[GUI](gui.md#window-session-for-child-processes-the-gui-role)). The app
+still gets no capability to the display or input driver: only a session to
+the `compd` service with its own identity.
+
+- ⚠️ **What a child can do with it:** open windows, read input in its own
+  windows and use the clipboard **under the parent's identity** (the trust
+  badge shows the parent app). The same risk as a process inheriting
+  `DISPLAY` or `WAYLAND_DISPLAY` on Linux.
+- **What it cannot do:** get a wider identity or rights (the narrowing is
+  only empty, the supervisor checks the recipe), get around the limits on
+  windows and buffers (they are counted per identity) or survive revocation
+  (the whole tree of leases is cancelled and the compositor closes all
+  connections of the identity).
+- **A child without GUI:** a child environment without `MO_GUI`.
+
 ## Next step
 
 A detailed protocol design for layer 1 (header, capabilities, buffers,

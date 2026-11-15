@@ -48,6 +48,8 @@ pub mod op {
     pub const SET_CURSOR: u32 = 25;
     /// Zamek ukazatele, relativni pohyb (`PointerLock`).
     pub const POINTER_LOCK: u32 = 26;
+    /// Vlastnik okna (`WindowOwner`, verze 7).
+    pub const WINDOW_OWNER: u32 = 27;
     // Kompozitor -> aplikace.
     pub const WELCOME: u32 = 100;
     pub const CONFIGURE: u32 = 101;
@@ -74,6 +76,8 @@ pub mod op {
     pub const COMPOSE: u32 = 117;
     /// Zamek ukazatele zapnut / zrusen (`PointerLockState`).
     pub const POINTER_LOCK_STATE: u32 = 118;
+    /// Stisk mimo popover okna (`PopoverDismiss`, verze 7).
+    pub const POPOVER_DISMISS: u32 = 119;
 }
 
 /// Priznaky segmentu rozpracovaneho textu (`ServerMsg::Compose::flags`).
@@ -613,6 +617,12 @@ pub enum ClientMsg {
     /// a zamek zrusi pri ztrate fokusu nebo systemove zkratce. Vysledek
     /// a kazde zruseni prijde jako `PointerLockState`.
     PointerLock { window: u32, lock: bool, gesture: u32 },
+    /// Vlastnik okna (verze 7, jako prechodne okno ve Waylandu): `owner` je
+    /// jine okno **tehoz spojeni** (0 = bez vlastnika). Okno se pri
+    /// otevreni vystredi nad vlastnikem a zustava nad nim; zanikem
+    /// vlastnika vazba zanikne. Okno jineho spojeni (i stejne identity)
+    /// vlastnikem byt nemuze.
+    WindowOwner { window: u32, owner: u32 },
 }
 
 /// Zprava kompozitor -> aplikace.
@@ -656,6 +666,10 @@ pub enum ServerMsg {
     /// Zamek ukazatele okna je (`locked`) / neni zapnuty (odpoved na
     /// `PointerLock` i zruseni systemem).
     PointerLockState { window: u32, locked: bool },
+    /// Stisk tlacitka mimo popovery okna s fokusem (verze 7): aplikace
+    /// popovery zavre (nabidky, rozbalene seznamy), stejne jako nabidky
+    /// systemu. Stisk sam jde normalne tam, kam patri.
+    PopoverDismiss { window: u32 },
 }
 
 /// Pravdivostni hodnota: jen 0 nebo 1 (jediny tvar kodovani).
@@ -835,6 +849,10 @@ impl ClientMsg {
                 w = Writer::op(op::POINTER_LOCK);
                 w.u32(*window).u8(*lock as u8).u32(*gesture);
             }
+            WindowOwner { window, owner } => {
+                w = Writer::op(op::WINDOW_OWNER);
+                w.u32(*window).u32(*owner);
+            }
         }
         w.finish()
     }
@@ -967,6 +985,7 @@ impl ClientMsg {
             op::WINDOW_STATE => WindowState { window: r.u32()?, fullscreen: bool_r(&mut r)?, gesture: r.u32()? },
             op::SET_CURSOR => SetCursor { window: r.u32()?, cursor: crate::cursor::Cursor::read(&mut r)? },
             op::POINTER_LOCK => PointerLock { window: r.u32()?, lock: bool_r(&mut r)?, gesture: r.u32()? },
+            op::WINDOW_OWNER => WindowOwner { window: r.u32()?, owner: r.u32()? },
             _ => return Err(Error::NotSupported),
         };
         if !r.is_empty() {
@@ -1096,6 +1115,10 @@ impl ServerMsg {
                 w = Writer::op(op::POINTER_LOCK_STATE);
                 w.u32(*window).u8(*locked as u8);
             }
+            PopoverDismiss { window } => {
+                w = Writer::op(op::POPOVER_DISMISS);
+                w.u32(*window);
+            }
             WindowContext { window, generation, output, screen, work_area, scale, refresh_mhz, ext } => {
                 w = Writer::op(op::WINDOW_CONTEXT);
                 w.u32(*window).u32(*generation).u32(*output).rect(screen).rect(work_area).u32(*scale).u32(*refresh_mhz);
@@ -1196,6 +1219,7 @@ impl ServerMsg {
                 ext: crate::context::ContextExt::decode(&mut r)?,
             },
             op::POINTER_LOCK_STATE => PointerLockState { window: r.u32()?, locked: bool_r(&mut r)? },
+            op::POPOVER_DISMISS => PopoverDismiss { window: r.u32()? },
             _ => return Err(crate::Error::NotSupported),
         };
         if !r.is_empty() {

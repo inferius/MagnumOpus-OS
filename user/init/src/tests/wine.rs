@@ -24,18 +24,24 @@ pub const TESTS: &[Test] = &[
     ("wine: dalsi proces, pojmenovane udalosti, Read/WriteProcessMemory (W2)", wine_processes),
     ("wine: sdilena sekce nad souborem mezi procesy, koherence s ReadFile/WriteFile (W2)", wine_sections),
     ("wine: registr - reg add, reg query v dalsim procesu, user.reg po konci serveru (W2)", wine_registry),
+    // W3 (wine_gui.rs): okna pres winemo.drv; prvni spusti kompozitor.
+    ("wine: GDI okno, pixely v kompozitoru (W3)", super::wine_gui::gdi),
+    ("wine: ram od systemu a okno s vlastni neklientskou oblasti (W3)", super::wine_gui::frames),
+    ("wine: klavesy z QEMU - WM_KEYDOWN s VK i u pismen, znak jednou (W3)", super::wine_gui::keys),
+    ("wine: poznamkovy blok - psani z QEMU, Ulozit jako, Alt+F4 (W3)", super::wine_gui::notepad),
+    ("wine: winecfg okno (W3)", super::wine_gui::winecfg),
 ];
 
 /// Testovaci programy Windows na disku (`xtask/src/datadisk.rs`).
-const TESTS_APP: &str = "/apps/org.magnumopus.wintest";
+pub(super) const TESTS_APP: &str = "/apps/org.magnumopus.wintest";
 /// Prostredi pro programy Windows v testech (prefix z `wine_cmd`, jinak se
 /// zalozi novy - pomale).
-const WINE_ENV: &[&str] = &["HOME=/home/wine", "WINEPREFIX=/home/wine/.wine"];
+pub(super) const WINE_ENV: &[&str] = &["HOME=/home/wine", "WINEPREFIX=/home/wine/.wine"];
 
 /// Adresar aplikace Wine (`xtask/src/datadisk.rs`, `WINE_APP`).
-const APP: &str = "/apps/org.winehq.wine";
+pub(super) const APP: &str = "/apps/org.winehq.wine";
 
-fn fs() -> Result<&'static FsClient, String> {
+pub(super) fn fs() -> Result<&'static FsClient, String> {
     devices().and_then(|d| d.fs.as_ref()).ok_or_else(|| String::from("sluzba fsd nebezi"))
 }
 

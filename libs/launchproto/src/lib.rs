@@ -70,6 +70,12 @@ pub enum Role {
     /// jdou potomkovi se stitkem `abi::params::tag::FD` ve stejnem poradi
     /// (polozky fd jsou v bloku parametru).
     Fd = 7,
+    /// Relace okna u kompozitoru (zdedena od rodice, stejna identita);
+    /// jen spolu s `GuiLease`. Potomek ji dostane se stitkem
+    /// `abi::params::tag::GUI`.
+    Gui = 8,
+    /// Listek k relaci `Gui` (`abi::params::tag::GUI_LEASE`).
+    GuiLease = 9,
 }
 
 impl Role {
@@ -82,6 +88,8 @@ impl Role {
             5 => Self::Stdout,
             6 => Self::Stderr,
             7 => Self::Fd,
+            8 => Self::Gui,
+            9 => Self::GuiLease,
             _ => return None,
         })
     }

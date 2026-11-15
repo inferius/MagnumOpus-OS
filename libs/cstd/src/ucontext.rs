@@ -136,6 +136,28 @@ pub fn empty() -> Box<ucontext_t> {
     uc
 }
 
+/// `REG_CSGSFS` x86_64 jako Linux: CS v bitech 0-15, SS v 48-63 (GS a FS
+/// jsou baze v MSR, selektory 0). Uzivatelsky kod je jen 64bitovy, takze
+/// selektory preruseneho kodu jsou ty soucasne. Wine podle CS rozlisuje
+/// 64bitovy kod od 16bitoveho (`is_16bit`); s nulou by kazdou vyjimku
+/// povazoval za 16bitovou.
+#[cfg(all(target_os = "magnumopus", target_arch = "x86_64"))]
+fn csgsfs() -> u64 {
+    let (cs, ss): (u16, u16);
+    // SAFETY: cteni segmentovych registru nema vedlejsi ucinky.
+    unsafe {
+        core::arch::asm!("mov {0:x}, cs", "mov {1:x}, ss", out(reg) cs, out(reg) ss, options(nomem, nostack, preserves_flags));
+    }
+    u64::from(cs) | u64::from(ss) << 48
+}
+
+/// `REG_TRAPNO` x86_64: cislo vektoru (`abi::exception::kind` je na x86_64
+/// shodne), preruseni vlakna 0.
+#[cfg(all(target_os = "magnumopus", target_arch = "x86_64"))]
+fn trap_number(kind: u32) -> u64 {
+    if kind == abi::exception::kind::INTERRUPT { 0 } else { kind as u64 }
+}
+
 /// Kontext z ramce vyjimky (registry, FPU, adresa vypadku).
 #[cfg(target_os = "magnumopus")]
 pub fn from_frame(f: &std::os::magnumopus::runtime::exception::Frame, mask: &Set) -> Box<ucontext_t> {
@@ -151,6 +173,11 @@ pub fn from_frame(f: &std::os::magnumopus::runtime::exception::Frame, mask: &Set
             (REG_R13, g.r13), (REG_R14, g.r14), (REG_R15, g.r15), (REG_RDI, g.rdi), (REG_RSI, g.rsi),
             (REG_RBP, g.rbp), (REG_RBX, g.rbx), (REG_RDX, g.rdx), (REG_RAX, g.rax), (REG_RCX, g.rcx),
             (REG_RSP, g.rsp), (REG_RIP, g.rip), (REG_EFL, g.rflags), (REG_CR2, f.report().addr),
+            // Cislo vektoru a chybovy kod jako Linux: Wine podle nich
+            // rozlisi vypadek stranky (14) a zapis (bit 1), napr. stranky
+            // straze zasobniku a EXCEPTION_ACCESS_VIOLATION. Preruseni
+            // vlakna (signal) neni vyjimka CPU: 0.
+            (REG_TRAPNO, trap_number(f.report().kind)), (REG_CSGSFS, csgsfs()), (REG_ERR, if f.report().kind == abi::exception::kind::INTERRUPT { 0 } else { f.report().code }),
         ] {
             r[i] = v as i64;
         }

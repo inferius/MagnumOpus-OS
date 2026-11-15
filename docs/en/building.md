@@ -40,7 +40,8 @@
   because its `configure` and tools want a Unix host. In WSL, the official
   LLVM repository `apt.llvm.org` (`llvm-toolchain-noble-23` with its
   signing key) and `sudo apt install clang-23 lld-23 llvm-23 flex bison
-  make gcc`. LLVM 23 has the same major release as the host clang (ABI of
+  make gcc pkg-config libfreetype-dev` (host FreeType for the `sfnt2fon`
+  tool, Wine bitmap fonts). LLVM 23 has the same major release as the host clang (ABI of
   the headers and the C sysroot). xtask checks the tools in WSL
   (`clang-23 --version`, at least 23.1) and otherwise stops with advice.
   Verified on 2026-11-15 with clang and LLD 23.1.6 (Ubuntu 24.04.4).

@@ -692,6 +692,7 @@ dependencies = [
  "cstd",
  "mosdl",
  "mosys",
+ "mowin",
 ]
 
 [[package]]
@@ -700,6 +701,7 @@ version = "0.1.0"
 dependencies = [
  "cstd",
  "mosys",
+ "mowin",
 ]
 
 [[package]]
@@ -1353,6 +1355,14 @@ dependencies = [
  "libos",
  "mediaproto",
  "ui",
+]
+
+[[package]]
+name = "gui-probe"
+version = "0.1.0"
+dependencies = [
+ "clipproto",
+ "guiproto",
 ]
 
 [[package]]
@@ -2028,6 +2038,7 @@ dependencies = [
  "guiproto",
  "inputproto",
  "libos",
+ "mowin",
  "ui",
 ]
 
@@ -2036,6 +2047,16 @@ name = "mosys"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "libos",
+]
+
+[[package]]
+name = "mowin"
+version = "0.1.0"
+dependencies = [
+ "clipproto",
+ "guiproto",
+ "inputproto",
  "libos",
 ]
 
@@ -2207,6 +2228,7 @@ dependencies = [
  "dlmalloc",
  "fsproto",
  "launchproto",
+ "leaseproto",
  "libos",
  "netproto",
  "rustc-std-workspace-alloc",

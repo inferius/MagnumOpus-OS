@@ -40,6 +40,7 @@ pub mod gpu;
 pub mod greeter;
 pub mod input;
 pub mod output;
+mod owner;
 pub mod render;
 pub mod scene;
 pub mod tooltip;
@@ -156,6 +157,9 @@ pub struct Comp {
     pub(crate) tasks: (u32, u32),
     /// Radky trasovani vstupu (sluzba je vypise, `take_trace`).
     pub(crate) trace: Vec<alloc::string::String>,
+    /// Radky do logu sluzby (vzdy, ne jen pri trasovani): odmitnuta
+    /// schranka s identitou aplikace. Bere je `compd` ([`Comp::take_logs`]).
+    pub(crate) logs: Vec<alloc::string::String>,
     /// Poslednich [`diag::RECENT`] kroku trasovani (diagnosticky snimek).
     pub(crate) recent_input: alloc::collections::VecDeque<alloc::string::String>,
     /// Zadost o diagnosticky snimek s duvodem (vyzvedne sluzba).
@@ -240,6 +244,7 @@ impl Comp {
             input_now: 0,
             tasks: (0, 0),
             trace: Vec::new(),
+            logs: Vec::new(),
             recent_input: alloc::collections::VecDeque::new(),
             snapshot_request: None,
             snapshot_cfg: diag::Config::default(),
@@ -275,6 +280,19 @@ impl Comp {
     /// logu `vstup`, `docs/cs/gui.md`).
     pub fn take_trace(&mut self) -> Vec<alloc::string::String> {
         core::mem::take(&mut self.trace)
+    }
+
+    /// Radky pro log sluzby od posledniho volani.
+    pub fn take_logs(&mut self) -> Vec<alloc::string::String> {
+        core::mem::take(&mut self.logs)
+    }
+
+    /// Radek do logu sluzby (nejvys 64 neodebranych).
+    pub(crate) fn log(&mut self, text: core::fmt::Arguments<'_>) {
+        if self.logs.len() >= 64 {
+            self.logs.remove(0);
+        }
+        self.logs.push(alloc::format!("compd: {text}"));
     }
 
     /// Zapise krok trasovani kliku `time` (cas zaznamu z `inputd` = id).

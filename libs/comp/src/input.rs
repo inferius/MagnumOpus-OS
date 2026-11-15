@@ -821,6 +821,8 @@ impl Comp {
             return;
         }
         if pressed {
+            // Stisk mimo popovery okna s fokusem je zavre (POPOVER_DISMISS).
+            self.popover_press(px, py);
             return self.press_actions(button, mods, syn, time, now);
         }
         let act = "pusteni";

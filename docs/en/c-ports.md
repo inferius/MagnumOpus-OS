@@ -59,7 +59,7 @@ does that with `llvm-project`.
 | Method | When | Needs |
 |---|---|---|
 | `Sources` | small libraries with a simple source list (zlib, sqlite, HarfBuzz) | clang only (C++ via clang++ and libc++) |
-| `CMake` | projects with CMake (SDL) | CMake, Ninja |
+| `CMake` | projects with CMake (SDL, FreeType) | CMake, Ninja |
 | `Configure` | projects with a `configure` script (autotools, FFmpeg) | `sh`, `make`, pkgconf (nasm for FFmpeg on x86_64) |
 | `Meson` | Meson projects (dav1d) | `sh`, Meson, Ninja, pkgconf (nasm on x86_64) |
 
@@ -100,6 +100,7 @@ does that with `llvm-project`.
   library. Meson from MSYS2 is a Python script: it runs through `sh` and gets
   paths as `/j/...`; after install xtask rewrites the prefix in `.pc` files
   to `J:/...` (clang does not know MSYS2 paths).
+- **A shared library through CMake** (`libraries`, FreeType): a second build `build-dyn` with `toolchain-dyn.cmake` and `-DBUILD_SHARED_LIBS=ON` next to the static one (`build`); the library goes to initfs `lib/<soname>` (`/system/lib`). Test programs of the port (`tests`, `ws:` sources in the repository) are linked statically against the installed library (`test_flags` with `{prefix}`).
 - **Ports over `libc.so`** (`dynamic`: dav1d, FFmpeg) are built only after
   the dynamic part of the C sysroot (`libc.so`, `crt1.o`); their test
   programs are linked as PIE.
@@ -141,6 +142,7 @@ installer may not have refreshed `PATH` in an open terminal).
 | zlib | 1.3.1 | zlib | `Sources` | `zlib-example`, `minigzip` |
 | sqlite | 3.46.1 | public domain | `Sources` | `sqlite3`, `sqltest` |
 | HarfBuzz | 14.2.0 | Old MIT | `Sources` (C++) | `hbtest` ([C++ runtime](cpp.md)) |
+| FreeType | 2.15.0 | FTL (of the FTL/GPLv2 dual licence only FTL) | `CMake` (static and shared) | `fttest`; `/system/lib/libfreetype.so` (GDI fonts in [Wine](windows-layer.md#windows-program-windows-w3)) |
 | SDL | 3.4.20 | zlib | `CMake` | `snake`, `woodeneye`, `testsprite`, `testaudio`, `testkeys`, `checkkeys`, `testmagnumopus` ([SDL](sdl.md)) |
 | dav1d | 1.5.4 | BSD-2-Clause | `Meson` | - (inside `libavcodec.so`) |
 | FFmpeg | 9.0.2 | LGPL-2.1-or-later | `Configure` (shared libraries) | `lib/libav*.so`, `libsw*.so`; the `ffdec` process ([Multimedia](multimedia.md)) |

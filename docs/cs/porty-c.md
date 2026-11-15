@@ -58,7 +58,7 @@ a vzory `--exclude`), tak to dělá [běh C++](cpp.md) s `llvm-project`.
 | Způsob | Kdy | Potřebuje |
 |---|---|---|
 | `Sources` | malé knihovny, kde je seznam zdrojů jednoduchý (zlib, sqlite, HarfBuzz) | jen clang (C++ přes clang++ a libc++) |
-| `CMake` | projekty s CMake (SDL) | CMake, Ninja |
+| `CMake` | projekty s CMake (SDL, FreeType) | CMake, Ninja |
 | `Configure` | projekty se skriptem `configure` (autotools, FFmpeg) | `sh`, `make`, pkgconf (nasm pro FFmpeg na x86_64) |
 | `Meson` | projekty s Mesonem (dav1d) | `sh`, Meson, Ninja, pkgconf (nasm na x86_64) |
 
@@ -95,6 +95,7 @@ a vzory `--exclude`), tak to dělá [běh C++](cpp.md) s `llvm-project`.
   portu. Meson z MSYS2 je skript Pythonu: spouští se přes `sh`, cesty
   dostává ve tvaru `/j/...`; po instalaci xtask přepíše předponu v `.pc`
   na `J:/...` (clang cesty MSYS2 nezná).
+- **Sdílená knihovna přes CMake** (`libraries`, FreeType): druhé sestavení `build-dyn` se souborem `toolchain-dyn.cmake` a `-DBUILD_SHARED_LIBS=ON` vedle statického (`build`); knihovna jde do initfs `lib/<soname>` (`/system/lib`). Testovací programy portu (`tests`, zdroje `ws:` v repozitáři) se linkují staticky proti nainstalované knihovně (`test_flags` s `{prefix}`).
 - **Porty nad `libc.so`** (`dynamic`: dav1d, FFmpeg) se staví až po
   dynamické části sysrootu C (`libc.so`, `crt1.o`); jejich zkušební programy
   se linkují jako PIE.
@@ -136,6 +137,7 @@ v otevřeném terminálu obnovit).
 | zlib | 1.3.1 | zlib | `Sources` | `zlib-example`, `minigzip` |
 | sqlite | 3.46.1 | public domain | `Sources` | `sqlite3`, `sqltest` |
 | HarfBuzz | 14.2.0 | Old MIT | `Sources` (C++) | `hbtest` ([běh C++](cpp.md)) |
+| FreeType | 2.15.0 | FTL (z dvojí licence FTL/GPLv2 jen FTL) | `CMake` (statická i sdílená) | `fttest`; `/system/lib/libfreetype.so` (písma GDI ve [Wine](windows-vrstva.md#okna-programů-windows-w3)) |
 | SDL | 3.4.20 | zlib | `CMake` | `snake`, `woodeneye`, `testsprite`, `testaudio`, `testkeys`, `checkkeys`, `testmagnumopus` ([SDL](sdl.md)) |
 | dav1d | 1.5.4 | BSD-2-Clause | `Meson` | - (v `libavcodec.so`) |
 | FFmpeg | 9.0.2 | LGPL-2.1-or-later | `Configure` (sdílené knihovny) | `lib/libav*.so`, `libsw*.so`; proces `ffdec` ([Multimédia](multimedia.md)) |

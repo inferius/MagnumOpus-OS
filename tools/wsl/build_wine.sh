@@ -6,13 +6,14 @@
 #   WINE_PATCHES  adresar se zaplatami *.patch (third_party/wine)
 #   WINE_KEY      otisk archivu a zaplat (zmena = novy zdroj a konfigurace)
 #   MOS_SYSROOT   sysroot C (target/c-sysroot/x86_64)
+#   MOS_CPORTS    predpona portu C (target/c-ports/x86_64/prefix): FreeType
 #   MOS_TOOLS     adresar tools/wsl (obal prekladace mos-cc)
 #   WINE_OUT      kam zkopirovat vysledek (target/wine/x86_64)
 #   WINE_KEEP_GOING=1  make -k (prehled chyb portu)
 # Pracovni adresare jsou na ext4 ve WSL (~/.cache/magnumopus-wine): pres
 # /mnt by sestaveni bylo mnohonasobne pomalejsi.
 set -e
-: "${WINE_TARBALL:?}" "${WINE_TOP:?}" "${WINE_PATCHES:?}" "${WINE_KEY:?}" "${MOS_SYSROOT:?}" "${MOS_TOOLS:?}" "${WINE_OUT:?}"
+: "${WINE_TARBALL:?}" "${WINE_TOP:?}" "${WINE_PATCHES:?}" "${WINE_KEY:?}" "${MOS_SYSROOT:?}" "${MOS_CPORTS:?}" "${MOS_TOOLS:?}" "${WINE_OUT:?}"
 W=~/.cache/magnumopus-wine
 SRC=$W/src-$WINE_KEY
 mkdir -p "$W/bin" "$W/logs"
@@ -37,13 +38,26 @@ if [ ! -f "$SRC/.hotovo" ]; then
 fi
 S=$SRC/$WINE_TOP
 
+# Ovladac grafiky pro kompozitor (W3): zdrojaky jsou ve slozce Wine
+# repozitare (third_party/wine/winemo.drv), configure ho zna ze zaplaty
+# 0008. Kopiruji se pri kazdem behu jen zmenene soubory: zmena ovladace
+# prelozi jen jeho objekty (otisk zdroje WINE_KEY je jen ze zaplat).
+mkdir -p "$S/dlls/winemo.drv"
+for f in "$WINE_PATCHES"/winemo.drv/*; do
+    d="$S/dlls/winemo.drv/$(basename "$f")"
+    tr -d '\r' < "$f" > "$d.new"
+    if cmp -s "$d.new" "$d"; then rm "$d.new"; else mv "$d.new" "$d"; fi
+done
+
 # Nativni nastroje Wine (winebuild, widl, wrc, winegcc) pro krizove sestaveni.
 T=$W/tools-$WINE_KEY
-if [ ! -x "$T/tools/winebuild/winebuild" ]; then
+# S FreeType hostitele: sfnt2fon prevadi pisma Wine na .fon (W3).
+if [ ! -x "$T/tools/winebuild/winebuild" ] || [ ! -f "$T/.freetype" ]; then
     rm -rf "$T" && mkdir -p "$T" && cd "$T"
-    "$S/configure" --enable-win64 --without-x --without-freetype --disable-tests CC=gcc \
+    "$S/configure" --enable-win64 --without-x --with-freetype --disable-tests CC=gcc \
         > "$W/logs/tools-configure.log" 2>&1 || { tail -30 "$W/logs/tools-configure.log"; exit 1; }
     make -j"$(nproc)" __tooldeps__ > "$W/logs/tools-make.log" 2>&1 || { tail -30 "$W/logs/tools-make.log"; exit 1; }
+    touch "$T/.freetype"
 fi
 
 # Wine pro x86_64-unknown-magnumopus: DLL PE clangem, unixova cast mos-cc.
@@ -51,19 +65,20 @@ B=$W/build-$WINE_KEY
 # configure zjistuje hlavicky sysrootu (HAVE_SYS_UN_H ...): zmena obsahu
 # hlavicek = znovu configure na miste (objekty zustanou, make prelozi jen
 # soubory zavisle na config.h).
-SYSKEY=$(cd "$MOS_SYSROOT" && find include -type f | LC_ALL=C sort | xargs cat | sha256sum | cut -c1-16)
+SYSKEY=$( (cd "$MOS_SYSROOT" && find include -type f | LC_ALL=C sort | xargs cat; cd "$MOS_CPORTS" && find include/freetype2 -type f | LC_ALL=C sort | xargs cat) | sha256sum | cut -c1-16)
 if [ ! -f "$B/Makefile" ] || [ "$(cat "$B/.sysroot-key" 2>/dev/null)" != "$SYSKEY" ]; then
     [ -f "$B/Makefile" ] || rm -rf "$B"
     mkdir -p "$B" && cd "$B"
     "$S/configure" --host=x86_64-unknown-magnumopus --with-wine-tools="$T" \
         --enable-archs=x86_64 --with-mingw=clang --disable-tests \
-        --without-x --without-freetype --without-fontconfig --without-gstreamer --without-wayland \
+        --without-x --with-freetype --without-fontconfig --without-gstreamer --without-wayland \
         --without-vulkan --without-opengl --without-pulse --without-alsa --without-oss \
         --without-coreaudio --without-cups --without-dbus --without-gnutls --without-krb5 \
         --without-gssapi --without-netapi --without-sane --without-v4l2 --without-usb \
         --without-pcap --without-sdl --without-capi --without-gphoto --without-inotify \
         --without-udev --without-unwind --without-xinerama --without-ffmpeg --without-opencl \
         CC=mos-cc AR=llvm-ar RANLIB=llvm-ranlib STRIP=llvm-strip x86_64_CC=clang \
+        FREETYPE_CFLAGS="-I$MOS_CPORTS/include/freetype2" FREETYPE_LIBS="-L$MOS_CPORTS/lib -lfreetype" \
         > "$W/logs/configure.log" 2>&1 || { tail -40 "$W/logs/configure.log"; exit 1; }
     echo "$SYSKEY" > "$B/.sysroot-key"
 fi
@@ -84,10 +99,22 @@ fi
 # bez --wine-builtin = obycejny PE program.
 WT="$WINE_OUT/tests"
 mkdir -p "$WT"
-WSRC="$MOS_TOOLS/../../user/wintest/wintest.c"
+WSRC="$MOS_TOOLS/../../user/wintest"
 TOOLS="$W/tools-$WINE_KEY/tools"
-clang -target x86_64-windows -fuse-ld=lld --no-default-config -c -o "$WT/wintest.o" "$WSRC"     -I"$SRC/$WINE_TOP/include" -I"$SRC/$WINE_TOP/include/msvcrt" -Iinclude -D_UCRT -O2 -Wall     > "$W/logs/wintest.log" 2>&1 || { cat "$W/logs/wintest.log"; exit 1; }
-"$TOOLS/winegcc/winegcc" -o "$WT/wintest.exe" --wine-objdir . --winebuild "$TOOLS/winebuild/winebuild"     -b x86_64-windows -mconsole "$WT/wintest.o" dlls/winecrt0/x86_64-windows/libwinecrt0.a     libs/compiler-rt/x86_64-windows/libcompiler-rt.a dlls/ucrtbase/x86_64-windows/libucrtbase.a     dlls/kernel32/x86_64-windows/libkernel32.a dlls/ntdll/x86_64-windows/libntdll.a     >> "$W/logs/wintest.log" 2>&1 || { cat "$W/logs/wintest.log"; exit 1; }
+# wintest.c (konzole) a gui.c (W3: okna, GDI): user32 a gdi32 navic.
+: > "$W/logs/wintest.log"
+for c in wintest gui; do
+    clang -target x86_64-windows -fuse-ld=lld --no-default-config -c -o "$WT/$c.o" "$WSRC/$c.c" \
+        -I"$SRC/$WINE_TOP/include" -I"$SRC/$WINE_TOP/include/msvcrt" -Iinclude -D_UCRT -O2 -Wall \
+        >> "$W/logs/wintest.log" 2>&1 || { cat "$W/logs/wintest.log"; exit 1; }
+done
+"$TOOLS/winegcc/winegcc" -o "$WT/wintest.exe" --wine-objdir . --winebuild "$TOOLS/winebuild/winebuild" \
+    -b x86_64-windows -mconsole "$WT/wintest.o" "$WT/gui.o" dlls/winecrt0/x86_64-windows/libwinecrt0.a \
+    libs/compiler-rt/x86_64-windows/libcompiler-rt.a dlls/ucrtbase/x86_64-windows/libucrtbase.a \
+    dlls/user32/x86_64-windows/libuser32.a dlls/gdi32/x86_64-windows/libgdi32.a \
+    dlls/kernel32/x86_64-windows/libkernel32.a dlls/ntdll/x86_64-windows/libntdll.a \
+    >> "$W/logs/wintest.log" 2>&1 || { cat "$W/logs/wintest.log"; exit 1; }
+rm -f "$WT/gui.o"
 rm -f "$WT/wintest.o"
 
 # Vysledek do target/wine/<arch>/tree: rozlozeni adresare aplikace

@@ -377,6 +377,20 @@ impl Peers {
     }
 
     /// Odstrani zavrene protistrany a da o nich vedet jadru kompozitoru.
+    /// Odvolani: kanaly klientu `ids` zavrit (zanikne s nimi i jejich
+    /// spojeni v `Comp`, `reap`). Aplikace uvidi `PEER_CLOSED` a obnova
+    /// pres listek dostane `PEER_CLOSED` (umyslne zavreni).
+    pub fn close_clients(&mut self, ids: &[ClientId], c: &mut Comp) {
+        for p in self.peers.values_mut() {
+            if let Kind::Client(cid) = p.kind
+                && ids.contains(&cid)
+            {
+                p.closed = true;
+            }
+        }
+        self.reap(c);
+    }
+
     pub fn reap(&mut self, c: &mut Comp) {
         let gone: Vec<PeerId> = self.peers.iter().filter(|(_, p)| p.closed).map(|(&i, _)| i).collect();
         for id in gone {
