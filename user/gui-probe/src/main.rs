@@ -12,6 +12,10 @@
 //!   `gui-probe: pripraveno` a pocka na konec ditete (jeho kod vrati).
 //! - `cekej`: otevre okno, pak ceka, az mu kompozitor relaci zavre
 //!   (odvolani GUI), a zkusi obnovu pres listek. Kod 0 = obnova odmitnuta.
+//! - `vloz`: otevre okno, vypise jeho polohu (`gui-probe: okno na x y w h`)
+//!   a po prvnim fyzickem stisku klavesy v okne (Ctrl+V z QEMU) pozada
+//!   o text schranky; vypise `gui-probe: vlozeno <text>` (test schranky
+//!   Wine -> kompozitor, `wine_gui.rs`). Kod 0 = vlozeno, 5 = odmitnuto.
 
 #![feature(magnumopus_runtime, rustc_private)]
 
@@ -132,11 +136,76 @@ fn run(mode: &str) -> i32 {
                 }
             }
         }
+        "vloz" => paste(),
         _ => {
             eprintln!("gui-probe: neznamy rezim {mode}");
             2
         }
     }
+}
+
+/// Rezim `vloz`: poloha okna, pak vlozeni po fyzickem stisku klavesy.
+fn paste() -> i32 {
+    let ch = match window() {
+        Ok(ch) => ch,
+        Err(c) => return c,
+    };
+    // Okno je nakreslene az commitem: vrstva z jedne barvy staci.
+    use guiproto::window::{LayerKind, LayerProps, prop};
+    let send = |m: ClientMsg| ch.write(&m.encode(), Vec::new()).map_err(|_| REFUSED);
+    let r = (|| {
+        send(ClientMsg::LayerCreate { layer: 1, window: 1, parent: 0, kind: LayerKind::Solid })?;
+        send(ClientMsg::LayerSet { layer: 1, props: LayerProps { mask: prop::RECT | prop::COLOR, rect: guiproto::Rect::new(0, 0, 160, 90), color: 0xFF20_4060, ..Default::default() } })?;
+        send(ClientMsg::Commit { txn: 1, flags: 0, window: 1, serial: 0, token: 0 })
+    })();
+    if let Err(c) = r {
+        return c;
+    }
+    let end = Instant::now() + Duration::from_secs(120);
+    let mut asked = false;
+    while Instant::now() < end {
+        match ch.try_read() {
+            Ok(m) => match ServerMsg::decode(&m.data) {
+                Ok(ServerMsg::WindowPlace { window: 1, rect }) => {
+                    println!("gui-probe: okno na {} {} {} {}", rect.x, rect.y, rect.w, rect.h);
+                }
+                Ok(ServerMsg::Input { records, .. }) => {
+                    for r in records {
+                        let key = matches!(r.event, guiproto::window::InputEvent::Key { action: 1, .. });
+                        if key && r.serial != 0 && !asked {
+                            asked = true;
+                            let req = clipproto::ClientMsg::Request { gesture: r.serial, serial: 1, format: String::from(clipproto::TEXT) };
+                            if send(ClientMsg::Clipboard { data: req.encode() }).is_err() {
+                                return REFUSED;
+                            }
+                        }
+                    }
+                }
+                Ok(ServerMsg::Clipboard { data }) => match clipproto::ServerMsg::decode(&data) {
+                    Ok(clipproto::ServerMsg::Deliver { serial: 1, data, .. }) => {
+                        println!("gui-probe: vlozeno {}", String::from_utf8_lossy(&data));
+                        return 0;
+                    }
+                    Ok(clipproto::ServerMsg::Denied { serial: 1, why }) => {
+                        println!("gui-probe: vlozeni odmitnuto {why:?}");
+                        return 5;
+                    }
+                    _ => {}
+                },
+                Ok(ServerMsg::Ping { serial }) => {
+                    let _ = send(ClientMsg::Pong { serial });
+                }
+                _ => {}
+            },
+            Err(rt::Error::ShouldWait) => std::thread::sleep(Duration::from_millis(5)),
+            Err(e) => {
+                eprintln!("gui-probe: relace okna: {e:?}");
+                return REFUSED;
+            }
+        }
+    }
+    eprintln!("gui-probe: vlozeni nedoslo");
+    1
 }
 
 fn main() {

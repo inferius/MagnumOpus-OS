@@ -85,6 +85,7 @@ LRESULT MO_DesktopWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 /* event.c */
 void modrv_handle_event(const mowin_event *ev);
 LRESULT MO_ClipboardWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+INT MO_ToUnicodeEx(UINT virt, UINT scan, const BYTE *state, LPWSTR str, int size, UINT flags, HKL layout);
 
 /* display.c */
 UINT MO_UpdateDisplayDevices(const struct gdi_device_manager *device_manager, void *param);

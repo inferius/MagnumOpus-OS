@@ -3,6 +3,10 @@
  *
  *   wine wintest.exe gdi    okno 320 x 200 s barevnymi obdelniky z GDI
  *                           (FillRect); test overi pixely v kompozitoru
+ *   wine wintest.exe klavesy okno, ktere vypise kazde WM_KEYDOWN
+ *                           ("down <vk>") a WM_CHAR ("char <znak>") na
+ *                           stdout (test klaves z QEMU: VK i u pismen bez
+ *                           modifikatoru, znak jednou)
  *   wine wintest.exe ramy   dve okna: bezne s titulkem (ram a titulek
  *                           kresli system) a okno, ktere si neklientskou
  *                           oblast zrusi (WM_NCCALCSIZE: klient = cele
@@ -66,6 +70,22 @@ static LRESULT CALLBACK gdi_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static LRESULT CALLBACK keys_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg)
+    {
+    case WM_KEYDOWN:
+        printf("down %02x\n", (unsigned)wp);
+        fflush(stdout);
+        break;
+    case WM_CHAR:
+        printf("char %04x\n", (unsigned)wp);
+        fflush(stdout);
+        return 0;
+    }
+    return gdi_proc(hwnd, msg, wp, lp);
 }
 
 /* Okno s vlastni neklientskou oblasti: klient = cele okno, aplikace kresli
@@ -136,6 +156,14 @@ int gui_gdi(void)
     expected = 1;
     done_line = "wintest gdi: nakresleno";
     if (!make_window(L"wintest-gdi", gdi_proc, L"wintest gdi", 320, 200)) return 1;
+    return run_loop();
+}
+
+int gui_keys(void)
+{
+    expected = 1;
+    done_line = "wintest klavesy: nakresleno";
+    if (!make_window(L"wintest-klavesy", keys_proc, L"wintest klavesy", 320, 200)) return 1;
     return run_loop();
 }
 

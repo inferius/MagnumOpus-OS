@@ -14,3 +14,4 @@ bench = false
 # Program se std. Sestavuje `cargo xtask build` (stdsys::STD_PROGRAMS).
 [dependencies]
 guiproto = { path = "../../libs/guiproto" }
+clipproto = { path = "../../libs/clipproto" }

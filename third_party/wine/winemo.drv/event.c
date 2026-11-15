@@ -115,9 +115,25 @@ static WORD key2scan(UINT key)
     return 0x200 | (key & 0x7f);
 }
 
-/* Klavesy, jejichz stisk dal znak (MOWIN_EV_TEXT): ani pusteni se
- * neposila jako klavesa. */
-static BOOL text_key_down[KEY_MAX_TRACKED];
+/* Klavesnice (rozhodnuti W3, docs/cs/windows-vrstva.md):
+ * - kazda klavesa jde jako WM_KEYDOWN/WM_KEYUP s VK a scan kodem sady 1;
+ *   pismena a cislice maji VK podle znaku z rozlozeni systemu (Y na
+ *   QWERTZ = VK_Z), ostatni klavesy VK z tabulek Wine (pozice US),
+ * - WM_CHAR: TranslateMessage se pta MO_ToUnicodeEx, ta vrati znak, ktery
+ *   pri poslednim stisku te klavesy poslal kompozitor (podle rozlozeni
+ *   systemu); udalost textu stejneho znaku se pak uz nevklada,
+ * - text bez stisku (mrtva klavesa, slozeny znak) jde jako Unicode
+ *   (VK_PACKET). Compose a IME pozdeji. */
+
+/* Znak posledniho stisku podle scan kodu (0x000-0x1ff): 0 = rozhodnou
+ * tabulky Wine (Enter, Tab, zkratky s Ctrl), NO_CHAR = klavesa znak nedava
+ * (mrtva klavesa, sipky). */
+#define NO_CHAR 0xffff
+static WCHAR key_char[0x200];
+/* VK stisknute klavesy (pusteni posle stejny VK). */
+static WORD key_vk[KEY_MAX_TRACKED];
+/* Znak, ktery dal posledni stisk: stejna udalost textu se nevklada. */
+static WCHAR expect_text;
 
 static void send_unicode(HWND hwnd, WCHAR ch, BOOL up)
 {
@@ -128,44 +144,81 @@ static void send_unicode(HWND hwnd, WCHAR ch, BOOL up)
     NtUserSendHardwareInput(hwnd, 0, &input, 0);
 }
 
-static void send_scan(HWND hwnd, UINT key, BOOL up)
+/* Klavesa s VK `vk` (0 = podle scan kodu a tabulek Wine). */
+static void send_key(HWND hwnd, UINT key, WORD vk, BOOL up)
 {
     UINT scan = key2scan(key);
     INPUT input = {0};
     input.type = INPUT_KEYBOARD;
+    input.ki.wVk = vk;
     input.ki.wScan = (scan & 0x300) ? scan + 0xdf00 : scan;
-    input.ki.dwFlags = KEYEVENTF_SCANCODE;
+    input.ki.dwFlags = vk ? 0 : KEYEVENTF_SCANCODE;
     if (scan & ~0xff) input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
     if (up) input.ki.dwFlags |= KEYEVENTF_KEYUP;
     NtUserSendHardwareInput(hwnd, 0, &input, 0);
 }
 
-/* Klavesa: znak podle rozlozeni systemu prijde zvlast jako
- * MOWIN_EV_TEXT (i po mrtve klavese), proto se klavesa, ktera dava znak
- * bez Ctrl/Alt, neposila (jinak by se znak zdvojil: WM_CHAR z tabulek Wine
- * a znovu z textu). Zkratky (Ctrl+S) a netisknutelne klavesy jdou jako scan
- * kod (VK podle tabulek klavesnice Wine). Omezeni: pismena bez modifikatoru
- * nedavaji WM_KEYDOWN s VK, jen znak (VK_PACKET); tabulky rozlozeni pro
- * Wine (KbdLayerDescriptor) pozdeji. */
+/* VK pismena nebo cislice podle znaku z rozlozeni, jinak 0. */
+static WORD char_vk(WCHAR ch)
+{
+    if (ch >= 'a' && ch <= 'z') return ch - 'a' + 'A';
+    if ((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) return ch;
+    return 0;
+}
+
+/* Klavesy, ktere znak davaji vzdy podle tabulek Wine (ridici znaky). */
+static BOOL control_key(UINT scan)
+{
+    switch (scan)
+    {
+    case 0x01: case 0x0e: case 0x0f: case 0x1c: case 0x11c: return TRUE;
+    default: return FALSE;
+    }
+}
+
 static void handle_key(HWND hwnd, const mowin_event *ev)
 {
-    UINT key = ev->a;
+    UINT key = ev->a, scan = key2scan(key) & 0x1ff;
     BOOL up = ev->b == 0;
     WCHAR ch = ev->c > 0 && ev->c < 0x10000 ? ev->c : 0;
-    BOOL text = ch >= 0x20 && ch != 0x7f && !(ev->mods & (MO_MOD_CTRL | MO_MOD_ALT | MO_MOD_META));
+    BOOL mods = (ev->mods & (MO_MOD_CTRL | MO_MOD_ALT | MO_MOD_META)) != 0;
+    BOOL text = ch >= 0x20 && ch != 0x7f && !mods;
+    WORD vk;
 
-    if (key < KEY_MAX_TRACKED && up && text_key_down[key])
+    if (up)
     {
-        text_key_down[key] = FALSE;
+        vk = key < KEY_MAX_TRACKED ? key_vk[key] : 0;
+        send_key(hwnd, key, vk, TRUE);
         return;
     }
-    if (!up && text)
-    {
-        if (key < KEY_MAX_TRACKED) text_key_down[key] = TRUE;
-        return;
-    }
-    if (ev->b == 2 && text) return; /* opakovani da dalsi MOWIN_EV_TEXT */
-    send_scan(hwnd, key, up);
+    /* Znak pro MO_ToUnicodeEx (pred vstupem: TranslateMessage se pta hned). */
+    if (text) key_char[scan] = ch;
+    else if (mods || control_key(scan)) key_char[scan] = 0;
+    else key_char[scan] = ch ? 0 : NO_CHAR;
+    if (text) expect_text = ch;
+    vk = char_vk(ch);
+    if (key < KEY_MAX_TRACKED) key_vk[key] = vk;
+    send_key(hwnd, key, vk, FALSE);
+}
+
+/***********************************************************************
+ *           MO_ToUnicodeEx
+ *
+ * Znak klavesy podle rozlozeni systemu (posledni stisk); ostatni (Ctrl,
+ * Alt, ridici klavesy) tabulky Wine (-2 = vychozi).
+ */
+INT MO_ToUnicodeEx(UINT virt, UINT scan, const BYTE *state, LPWSTR str, int size, UINT flags, HKL layout)
+{
+    WCHAR c;
+
+    if (virt == VK_PACKET) return -2;
+    if ((state[VK_CONTROL] & 0x80) || (state[VK_MENU] & 0x80)) return -2;
+    c = key_char[(scan & 0xff) | (scan & 0x100)];
+    if (!c) return -2;
+    if (c == NO_CHAR) return 0;
+    if (size > 0) str[0] = c;
+    if (size > 1) str[1] = 0;
+    return 1;
 }
 
 static void send_mouse(HWND hwnd, const RECT *visible, int x, int y, DWORD flags, DWORD data)
@@ -348,6 +401,13 @@ void modrv_handle_event(const mowin_event *ev)
         handle_key(hwnd, ev);
         break;
     case MOWIN_EV_TEXT:
+        /* Znak stisku uz dala klavesa (MO_ToUnicodeEx); jinak (mrtva
+         * klavesa, slozeny znak) jako Unicode. */
+        if (ev->a == expect_text)
+        {
+            expect_text = 0;
+            break;
+        }
         if (ev->a > 0 && ev->a < 0x10000)
         {
             send_unicode(hwnd, ev->a, FALSE);

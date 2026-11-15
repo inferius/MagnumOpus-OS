@@ -35,11 +35,14 @@ const WINE_ID: &str = "org.winehq.wine";
 const LIMIT: Duration = Duration::from_secs(180);
 
 /// Znacky pro fyzicky vstup z QEMU (musi sedet s `xtask/src/qmp.rs`, `wine`).
+const QEMU_KEYS_CLICK: &str = "init: test wine: klik do okna klaves na ";
 const QEMU_CLICK: &str = "init: test wine: klik do poznamkoveho bloku na ";
 const QEMU_TYPE: &str = "init: test wine: pis do poznamkoveho bloku";
 const QEMU_SAVE_KEYS: &str = "init: test wine: Ctrl+S";
 const QEMU_SAVE: &str = "init: test wine: dialog ulozeni";
+const QEMU_COPY: &str = "init: test wine: kopiruj text";
 const QEMU_CLOSE: &str = "init: test wine: zavri poznamkovy blok";
+const QEMU_PASTE_CLICK: &str = "init: test wine: klik do vkladaciho okna na ";
 
 struct W3 {
     gui: Gui,
@@ -272,6 +275,43 @@ pub fn frames(s: &Startup) -> TestResult {
     })
 }
 
+/// Klavesy a, z z QEMU bez modifikatoru: kazda da WM_KEYDOWN s VK pismena
+/// a prave jeden WM_CHAR se stejnym pismenem (VK podle rozlozeni systemu,
+/// na QWERTZ fyzicka klavesa Z = 'y' = VK_Y).
+pub fn keys(s: &Startup) -> TestResult {
+    with(s, |w| {
+        let exe = format!("{TESTS_APP}/wintest.exe");
+        let mut run = launch(s, w, &[&exe, "klavesy"])?;
+        wait_for(s, w, &mut run, "kresleni okna", |_, r| Ok(String::from_utf8_lossy(&r.stdout).contains("nakresleno").then_some(())))?;
+        let win = wait_window(s, w, &mut run, "wintest klavesy")?;
+        settle(&w.inspect)?;
+        println!("{QEMU_KEYS_CLICK}{} {}", win.rect.x + win.rect.w as i32 / 2, win.rect.y + win.rect.h as i32 / 2);
+        let parse = |r: &Run| -> (Vec<u32>, Vec<u32>) {
+            let out = String::from_utf8_lossy(&r.stdout);
+            let num = |l: &str, p: &str| l.strip_prefix(p).and_then(|v| u32::from_str_radix(v.trim(), 16).ok());
+            let downs = out.lines().filter_map(|l| num(l, "down ")).filter(|v| (0x41..=0x5a).contains(v)).collect();
+            let chars = out.lines().filter_map(|l| num(l, "char ")).collect();
+            (downs, chars)
+        };
+        wait_for(s, w, &mut run, "klavesy a a z", |_, r| Ok((parse(r).0.len() >= 2 && parse(r).1.len() >= 2).then_some(())))?;
+        // Chvili pockat, jestli neprijde znak navic (zdvojeni).
+        let end = time::deadline_after(Duration::from_millis(1500));
+        while time::now() < end {
+            run.drain();
+            w.sup.step(s, Some(time::deadline_after(Duration::from_millis(50))));
+        }
+        let (downs, chars) = parse(&run);
+        let low = |v: u32| v + 0x20;
+        check!(
+            downs.len() == 2 && chars.len() == 2 && chars[0] == low(downs[0]) && chars[1] == low(downs[1]),
+            format!("WM_KEYDOWN {downs:x?}, WM_CHAR {chars:x?}; {}", run.text())
+        );
+        check!(downs[0] == 0x41, format!("prvni klavesa a = VK_A: {:x}", downs[0]));
+        println!("init: test wine: klavesy VK {downs:x?} znaky {chars:x?}");
+        finish(s, w, run, "wintest klavesy")
+    })
+}
+
 pub fn notepad(s: &Startup) -> TestResult {
     with(s, |w| {
         // Dialog Ulozit jako zacina ve vychozim adresari (podle verze Wine
@@ -330,6 +370,14 @@ pub fn notepad(s: &Startup) -> TestResult {
         })?;
         let text = String::from_utf8_lossy(&data);
         check!(text.contains("ahoj"), format!("obsah ulozeneho souboru: {text:?}"));
+        // Schranka (Wine -> kompozitor): Ctrl+A, Ctrl+C; kompozitor si
+        // kopii nabidky necha i po konci poznamkoveho bloku.
+        println!("{QEMU_COPY}");
+        let end = time::deadline_after(Duration::from_secs(3));
+        while time::now() < end {
+            run.drain();
+            w.sup.step(s, Some(time::deadline_after(Duration::from_millis(50))));
+        }
         // Alt+F4: okno se zavre a proces skonci.
         println!("{QEMU_CLOSE}");
         let end = time::deadline_after(Duration::from_secs(60));
@@ -343,8 +391,61 @@ pub fn notepad(s: &Startup) -> TestResult {
             }
         };
         check!(code == 0, format!("kod konce poznamkoveho bloku {code}"));
-        finish(s, w, run, "Notepad")
+        finish(s, w, run, "Notepad")?;
+        // Vlozeni do naseho okna (jina aplikace nez Wine).
+        let pasted = paste_into_probe(s, w)?;
+        check!(pasted.contains("ahoj"), format!("vlozeny text ze schranky: {pasted:?}"));
+        Ok(())
     })
+}
+
+/// `gui-probe vloz` s relaci okna (jina identita nez Wine): klik z QEMU do
+/// jeho okna a Ctrl+V; vrati vlozeny text.
+fn paste_into_probe(s: &Startup, w: &mut W3) -> Result<String, String> {
+    let info = gui::recipe(s, "gui-probe").map_err(|e| fail("identita gui-probe", e))?;
+    let (session, lease) = w.sup.session(gui::NAME, info.encode()).map_err(|e| fail("relace okna", e))?;
+    let launch = crate::launch::client().map_err(|e| fail("kanal k launchd", e))?;
+    let params = libos::params::Params { cwd: b"/".to_vec(), args: vec![b"gui-probe".to_vec(), b"vloz".to_vec()], env: Vec::new(), flags: 0, fds: Vec::new() }
+        .encode()
+        .map_err(|e| fail("blok parametru", e))?;
+    let req = Launch { program: String::from("gui-probe"), flags: 0, roles: vec![Role::Job, Role::Stdout, Role::Stderr, Role::Gui, Role::GuiLease], params }
+        .encode(1)
+        .map_err(|e| fail("pozadavek", e))?;
+    let job = libos::job::current().map_err(|e| fail("job", e))?;
+    let (out, out_child) = Channel::create().map_err(|e| fail("kanal stdout", e))?;
+    let (err, err_child) = Channel::create().map_err(|e| fail("kanal stderr", e))?;
+    launch
+        .write(
+            &req,
+            vec![job.duplicate(None).map_err(|e| fail("job", e))?.into_handle(), out_child.into_handle(), err_child.into_handle(), session.into_handle(), lease.into_handle()],
+        )
+        .map_err(|e| fail("LAUNCH", e))?;
+    let m = launch.read(Some(time::deadline_after(Duration::from_secs(10)))).map_err(|e| fail("odpoved launchd", e))?;
+    let (_, r) = launchproto::parse_reply(&m.data).map_err(|e| fail("odpoved launchd", e))?;
+    if let Err((e, msg)) = r {
+        return Err(format!("launchd: {e}: {msg}"));
+    }
+    let mut hs = m.handles;
+    let _control = hs.pop();
+    let process = Process::from_handle(hs.pop().ok_or("chybi proces")?);
+    let mut run = Run { process, out, err, stdout: Vec::new(), stderr: Vec::new() };
+    let place = wait_for(s, w, &mut run, "okno gui-probe", |_, r| {
+        let out = String::from_utf8_lossy(&r.stdout);
+        Ok(out.lines().find_map(|l| l.strip_prefix("gui-probe: okno na ")).map(String::from))
+    })?;
+    let v: Vec<i32> = place.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+    if v.len() != 4 {
+        return Err(format!("poloha okna gui-probe: {place}"));
+    }
+    println!("{QEMU_PASTE_CLICK}{} {}", v[0] + v[2] / 2, v[1] + v[3] / 2);
+    let text = wait_for(s, w, &mut run, "vlozeni v gui-probe", |_, r| {
+        let out = String::from_utf8_lossy(&r.stdout);
+        if out.contains("vlozeni odmitnuto") {
+            return Err(format!("vlozeni odmitnuto: {}", out.trim()));
+        }
+        Ok(out.lines().find_map(|l| l.strip_prefix("gui-probe: vlozeno ")).map(String::from))
+    })?;
+    Ok(text)
 }
 
 pub fn winecfg(s: &Startup) -> TestResult {

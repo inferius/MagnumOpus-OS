@@ -430,7 +430,8 @@ patch). It talks to the compositor through our `mowin` library (C API in
 | `winemo.drv` (`third_party/wine/winemo.drv`, patch `0008`): windows, GDI into the window buffer, input, cursor, decorations, popups, clipboard | **[implemented]**; the GDI window and both frame branches **[verified in QEMU]** x86_64 (`wine` suite: `wintest gdi`, `wintest ramy`) |
 | Notepad (physical click and typing from QEMU, the typed text is visible, Ctrl+S, the Save As dialog as an owned window with focus, the file on disk, Alt+F4, the process ends), winecfg (dialog of a sensible size) | **[verified in QEMU]** x86_64 (`wine` suite, release) |
 | GDI fonts through FreeType 2.15.0 (`/system/lib/libfreetype.so`) | **[verified in QEMU]** x86_64 (text in Notepad, size of the winecfg dialog); the FreeType port x86_64 and aarch64 (`cstd porty` suite) |
-| Clipboard between Wine and the compositor (text both ways) | **[implemented]**, no automated test yet |
+| Keys: `WM_KEYDOWN` with a VK also for letters without a modifier, the character once | **[verified in QEMU]** x86_64 (`wintest klavesy`, keys `a` and `z` from QEMU) |
+| Clipboard Wine -> compositor -> another app (Ctrl+A, Ctrl+C in Notepad, paste in `gui-probe`) | **[verified in QEMU]** x86_64; the other direction **[implemented]** without a test |
 | Recovery of Wine windows after a compositor crash | **[designed]** (`mowin` cannot do it yet, a lost connection ends the Wine process) |
 
 Decisions:
@@ -455,13 +456,18 @@ Decisions:
   outside closes them (`POPOVER_DISMISS` -> `WM_CANCELMODE`). Unowned popups
   (a splash screen) are their own `Frameless` windows. An owner in another
   process is not supported.
-- **Keyboard:** characters by the system layout go to Wine as Unicode (the
-  compositor's text event, also after a dead key); shortcuts with Ctrl/Alt
-  and non-printable keys as set 1 scan codes (evdev code through a table in
-  the driver, VK from Wine's tables). Limitation: letters without a
-  modifier give no `WM_KEYDOWN` with a VK, only the character
-  (`VK_PACKET`); layout tables for Wine (`KbdLayerDescriptor`) later.
-  **Compose and IME come later.**
+- **Keyboard:** every key goes as `WM_KEYDOWN`/`WM_KEYUP` with a VK and a
+  set 1 scan code (evdev code through a table in the driver). Letters and
+  digits get the VK from the character of the system layout (the physical
+  Y key on QWERTZ gives `z` = `VK_Z`), other keys the VK from Wine's tables
+  (US positions). **`WM_CHAR` only once:** `TranslateMessage` asks the
+  driver (`ToUnicodeEx`), which returns the character the compositor sent
+  with the last press of that key (system layout); the text event with the
+  same character is then not injected again. Text without a press (dead
+  key, composed character) goes as Unicode (`VK_PACKET`). With Ctrl/Alt and
+  for control keys (Enter, Tab, Backspace, Esc) Wine's tables give the
+  character. Layout tables for Wine (`KbdLayerDescriptor`, `MapVirtualKey`
+  for all languages) later. **Compose and IME come later.**
 - **Clipboard (7A):** text both ways (`CF_UNICODETEXT` <-> UTF-8), the
   number of the process's last physical press; the compositor logs a
   refusal.

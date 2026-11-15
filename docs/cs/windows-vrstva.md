@@ -403,7 +403,8 @@ záplata). Mluví s kompozitorem přes naši knihovnu `mowin` (C API v
 | `winemo.drv` (`third_party/wine/winemo.drv`, záplata `0008`): okna, GDI do bufferu okna, vstup, kurzor, dekorace, popupy, schránka | **[implementováno]**; GDI okno a obě větve rámu **[ověřeno v QEMU]** x86_64 (sada `wine`: `wintest gdi`, `wintest ramy`) |
 | Poznámkový blok (fyzický klik a psaní z QEMU, napsaný text je vidět, Ctrl+S, dialog Uložit jako jako vlastněné okno s fokusem, soubor na disku, Alt+F4, konec procesu), winecfg (dialog v rozumné velikosti) | **[ověřeno v QEMU]** x86_64 (sada `wine`, release) |
 | Písma GDI přes FreeType 2.15.0 (`/system/lib/libfreetype.so`) | **[ověřeno v QEMU]** x86_64 (text v poznámkovém bloku, velikost dialogu winecfg); port FreeType x86_64 i aarch64 (sada `cstd porty`) |
-| Schránka mezi Wine a kompozitorem (text oběma směry) | **[implementováno]**, automatický test zatím není |
+| Klávesy: `WM_KEYDOWN` s VK i u písmen bez modifikátoru, znak jednou | **[ověřeno v QEMU]** x86_64 (`wintest klavesy`, klávesy `a` a `z` z QEMU) |
+| Schránka Wine -> kompozitor -> jiná aplikace (Ctrl+A, Ctrl+C v poznámkovém bloku, vložení v `gui-probe`) | **[ověřeno v QEMU]** x86_64; opačný směr **[implementováno]** bez testu |
 | Obnova oken Wine po pádu kompozitoru | **[navrženo]** (`mowin` zatím neumí, ztráta spojení = konec procesu Wine) |
 
 Rozhodnutí:
@@ -428,13 +429,18 @@ Rozhodnutí:
   mimo ně je zavře (`POPOVER_DISMISS` -> `WM_CANCELMODE`). Nevlastněné
   popupy (úvodní obrazovka) jsou vlastní okna `Frameless`. Vlastník z jiného
   procesu není podporovaný.
-- **Klávesnice:** znaky podle rozložení systému jdou do Wine jako Unicode
-  (událost textu z kompozitoru, i po mrtvé klávese); zkratky s Ctrl/Alt
-  a netisknutelné klávesy jako scan kód sady 1 (kód evdev tabulkou
-  v ovladači, VK podle tabulek Wine). Omezení: písmena bez modifikátoru
-  nedávají `WM_KEYDOWN` s VK, jen znak (`VK_PACKET`); tabulky rozložení
-  pro Wine (`KbdLayerDescriptor`) později. **Compose a IME přijdou
-  později.**
+- **Klávesnice:** každá klávesa jde jako `WM_KEYDOWN`/`WM_KEYUP` s VK
+  a scan kódem sady 1 (kód evdev tabulkou v ovladači). Písmena a číslice
+  mají VK podle znaku z rozložení systému (fyzická klávesa Y na QWERTZ dá
+  `z` = `VK_Z`), ostatní klávesy VK z tabulek Wine (pozice US).
+  **`WM_CHAR` jen jednou:** `TranslateMessage` se ptá ovladače
+  (`ToUnicodeEx`) a ten vrátí znak, který kompozitor poslal s posledním
+  stiskem té klávesy (rozložení systému); událost textu se stejným znakem
+  se pak už nevkládá. Text bez stisku (mrtvá klávesa, složený znak) jde
+  jako Unicode (`VK_PACKET`). S Ctrl/Alt a u řídicích kláves (Enter, Tab,
+  Backspace, Esc) dávají znak tabulky Wine. Tabulky rozložení pro Wine
+  (`KbdLayerDescriptor`, `MapVirtualKey` pro všechny jazyky) později.
+  **Compose a IME přijdou později.**
 - **Schránka (7A):** text oběma směry (`CF_UNICODETEXT` <-> UTF-8), číslo
   posledního fyzického stisku procesu; odmítnutí zapíše kompozitor do logu.
 - **Polohy oken:** kompozitor polohu oken neurčuje od klienta (jako

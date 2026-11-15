@@ -41,6 +41,7 @@ static const struct user_driver_funcs modrv_funcs =
     .pSetCursor = MO_SetCursor,
     .pSetWindowText = MO_SetWindowText,
     .pSysCommand = MO_SysCommand,
+    .pToUnicodeEx = MO_ToUnicodeEx,
     .pUpdateDisplayDevices = MO_UpdateDisplayDevices,
     .pWindowMessage = MO_WindowMessage,
     .pWindowPosChanged = MO_WindowPosChanged,

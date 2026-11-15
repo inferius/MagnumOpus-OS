@@ -27,6 +27,7 @@ pub const TESTS: &[Test] = &[
     // W3 (wine_gui.rs): okna pres winemo.drv; prvni spusti kompozitor.
     ("wine: GDI okno, pixely v kompozitoru (W3)", super::wine_gui::gdi),
     ("wine: ram od systemu a okno s vlastni neklientskou oblasti (W3)", super::wine_gui::frames),
+    ("wine: klavesy z QEMU - WM_KEYDOWN s VK i u pismen, znak jednou (W3)", super::wine_gui::keys),
     ("wine: poznamkovy blok - psani z QEMU, Ulozit jako, Alt+F4 (W3)", super::wine_gui::notepad),
     ("wine: winecfg okno (W3)", super::wine_gui::winecfg),
 ];

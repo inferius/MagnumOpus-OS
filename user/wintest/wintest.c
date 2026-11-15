@@ -27,6 +27,7 @@ static volatile LONG marker = 0x1234;
 /* gui.c (W3) */
 int gui_gdi(void);
 int gui_frames(void);
+int gui_keys(void);
 
 static int child(void)
 {
@@ -201,6 +202,7 @@ int main(int argc, char **argv)
     if (argc >= 2 && !strcmp(argv[1], "sekce")) return sections();
     if (argc >= 2 && !strcmp(argv[1], "gdi")) return gui_gdi();
     if (argc >= 2 && !strcmp(argv[1], "ramy")) return gui_frames();
+    if (argc >= 2 && !strcmp(argv[1], "klavesy")) return gui_keys();
 
     printf("wintest: start\n");
 
