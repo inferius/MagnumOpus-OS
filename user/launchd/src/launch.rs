@@ -11,6 +11,7 @@ use launchproto::{Command, Launch, Reader, Registry, Role, SYSTEM_BIN, Source, W
 use libos::abi::bootstrap::kind;
 use libos::abi::params::{self, tag};
 use libos::initfs::Initfs;
+use libos::abi::job::jit;
 use libos::job::{Job, pool};
 use libos::spawn::{Options, Origin, StartHandle};
 use libos::{Channel, Error, Handle, Rights, Vmo};
@@ -122,8 +123,22 @@ fn path_manifest(fs: &FsClient, path: &str) -> Result<Option<Manifest>, Fail> {
 }
 
 /// Podrizeny job s limity z manifestu (stejne jako `init::apps::job_in`).
+///
+/// JIT (`docs/cs/sprava-pameti.md`): launchd je brana - `jit::RUN` jen
+/// programu s `[app] jit = true` v manifestu; pravo udelovat (`GRANT`) jde
+/// po retezu spousteni dal (aplikace s JIT spousti sve procesy pres launchd,
+/// napr. Wine). Jadro oboji povoli jen pod jobem s `GRANT` (relace
+/// uzivatele, init), takze launchd nic nepridava: bez `GRANT` u volajiciho
+/// program bez JIT dostane job bez JIT a program s `jit = true` chybu.
 fn child_job(parent: &Job, m: Option<&Manifest>) -> Result<Job, Fail> {
     let job = Job::create(parent).map_err(|e| fail(e, "podrizeny job"))?;
+    let want = m.is_some_and(|m| m.jit);
+    let bits = jit::GRANT | if want { jit::RUN } else { 0 };
+    match job.set_jit(bits) {
+        Ok(()) => {}
+        Err(Error::AccessDenied) if !want => {}
+        Err(e) => return Err(fail(e, "aplikace chce JIT ([app] jit), volajici ho nesmi udelit")),
+    }
     libos::sched::set_job_max(&job, libos::sched::Qos::Normal).map_err(|e| fail(e, "trida jobu"))?;
     if let Some(m) = m {
         if let Some(v) = m.limits.memory {
@@ -226,8 +241,16 @@ pub fn launch(d: &mut Launchd, r: &mut Reader, handles: Vec<Handle>) -> Result<V
     start.push(StartHandle::tagged(tag::LAUNCH, own.into_handle()));
 
     let mut opts = Options::default();
-    if let Some(s) = manifest.as_ref().and_then(|m| m.limits.stack) {
-        opts.stack_size = s;
+    if let Some(m) = manifest.as_ref() {
+        if let Some(s) = m.limits.stack {
+            opts.stack_size = s;
+        }
+        // Rezerva TLS a rezervace adres jako u aplikaci z initfs
+        // (`init::apps`); Windows vrstva (T5).
+        opts.static_tls_reserve = m.static_tls_reserve;
+        for (slot, r) in opts.reserve.iter_mut().zip(m.reserve.iter()) {
+            *slot = *r;
+        }
     }
     let (process, _, control) = libos::spawn::spawn_from(&job, &name, &image, start, opts, origin)
         .map_err(|e| fail(e, format!("{name}: spusteni")))?;

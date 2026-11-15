@@ -183,6 +183,13 @@ group** (employees, developers, kiosks, ...) at **three levels**
   ([Administering the computer](accounts.md#administering-the-computer)). The
   extended mode (time limits, web filtering, overview) is on the page
   [Parental controls](parental-controls.md).
+- **JIT for applications** **[designed]**: user sessions may grant JIT
+  (`jit::GRANT`), only applications with `[app] jit = true` in their
+  manifest get it (the gate is `launchd`,
+  [Memory management](memory-management.md#wx-sealing-and-the-jit-permission)).
+  An organisation policy or parental controls can take `GRANT` away from
+  the sessions of a group (applications with JIT, e.g. Wine or a browser,
+  then do not run).
 - **Developers:** level **Freely** + the **Relaxed** file profile
   ([Profiles](fs-v3-design.md#permissions-and-visibility)); secrets and
   other accounts stay protected even there.

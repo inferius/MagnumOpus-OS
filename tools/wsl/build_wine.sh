@@ -101,6 +101,8 @@ cp -r "$P/share/wine" "$T/share/"
 # neni objekt (data), llvm-strip odmitne a zustane beze zmeny.
 find "$T/lib" -name '*.a' -delete
 find "$T/bin" "$T/lib" -type f -exec llvm-strip {} \; 2>/dev/null || true
+# Manifest zavadece (launchd: [app] jit = true, Wine prepina PE na RX).
+cp "$WINE_PATCHES/wine.manifest.toml" "$T/lib/wine/x86_64-unix/wine.manifest.toml"
 rm -rf "$WINE_OUT/tree" "$WINE_OUT/x86_64-windows" "$WINE_OUT/x86_64-unix" "$WINE_OUT/bin"
 mv "$T" "$WINE_OUT/tree"
 rm -rf "$INST"

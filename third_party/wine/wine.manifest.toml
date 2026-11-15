@@ -1,0 +1,9 @@
+# Manifest zavadece Wine (/apps/org.winehq.wine/lib/wine/x86_64-unix/wine).
+# launchd ho najde vedle programu (<cesta>.manifest.toml).
+[app]
+id = "org.winehq.wine"
+name = "Wine"
+# Wine nahrava obrazy PE do anonymni pameti a pak je prepina RW -> RX:
+# bez opravneni JIT jadro spusteni nezapecetene pameti odmitne
+# (docs/cs/sprava-pameti.md).
+jit = true

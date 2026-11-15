@@ -13,6 +13,7 @@ use fsproto::FsClient;
 use launchproto::{Launch, Role};
 use libos::initfs::Initfs;
 use libos::spawn::{Options, Origin};
+use libos::job::Job;
 use libos::{Channel, Error, Process, Startup, time};
 
 use super::{Test, TestResult, devices, fail};
@@ -22,9 +23,12 @@ pub const TESTS: &[Test] = &[
     ("dynamicke linkovani: knihovny z disku ($ORIGIN, dlopen cesty) relaci FS procesu", disk_libraries),
     ("dynamicke linkovani: knihovny z disku sdili sablony, initfs bez relace je nenajde", disk_shares_and_needs_session),
     ("dynamicke linkovani: launchd preda zavadeci relaci FS programu ze souboru", via_launchd),
+    ("dynamicke linkovani: launchd da JIT jen s [app] jit pod jobem s GRANT", launchd_jit_gate),
 ];
 
 const PROGRAM: &str = "/dl4c/bin/dltest-origin";
+/// Manifest s `jit = true` pro test brany JIT v launchd.
+const JIT_MANIFEST: &[u8] = b"[app]\nid = \"org.magnumopus.dltest-origin\"\njit = true\n";
 const FILES: &[&str] = &["bin/dltest-origin", "lib/libdlorigin.so.1", "lib/libdlorigin2.so.1", "lib/libdlorigin3.so.1"];
 
 fn fs() -> Result<&'static FsClient, String> {
@@ -101,6 +105,42 @@ fn disk_shares_and_needs_session(s: &Startup) -> TestResult {
 fn via_launchd(s: &Startup) -> TestResult {
     let fs = fs()?;
     install(s, fs)?;
+    let job = libos::job::current().map_err(|e| fail("job", e))?;
+    let code = launch(s, fs, &job)?.map_err(|(e, msg)| format!("launchd: {e}: {msg}"))?;
+    check_eq!(code, 0, "program ze souboru pres launchd (bity viz dltest-origin)");
+    Ok(())
+}
+
+/// launchd je brana JIT: `[app] jit = true` dostane `jit::RUN` jen pod
+/// jobem volajiciho s `GRANT` (init ho ma); pod jobem bez `GRANT` chyba,
+/// program bez manifestu tam bezi bez JIT.
+fn launchd_jit_gate(s: &Startup) -> TestResult {
+    let fs = fs()?;
+    install(s, fs)?;
+    let manifest = format!("{PROGRAM}.manifest.toml");
+    let _ = fs.remove(&manifest);
+    let plain = Job::create(&libos::job::current().map_err(|e| fail("job", e))?).map_err(|e| fail("job bez JIT", e))?;
+    // Bez manifestu: pod jobem bez GRANT normalne (zadny JIT).
+    check_eq!(launch(s, fs, &plain)?.map_err(|(e, m)| format!("{e}: {m}"))?, 0, "bez manifestu pod jobem bez GRANT");
+    fs.create(&manifest, fsproto::kind::FILE).map_err(|e| fail(&manifest, e))?;
+    fs.write(&manifest, 0, JIT_MANIFEST).map_err(|e| fail(&manifest, e))?;
+    let denied = launch(s, fs, &plain)?;
+    let own = libos::job::current().map_err(|e| fail("job", e))?;
+    let granted = launch(s, fs, &own)?;
+    let _ = fs.remove(&manifest);
+    match denied {
+        Err((Error::AccessDenied, msg)) => check!(msg.contains("JIT"), format!("hlaska bez JIT: {msg}")),
+        other => return Err(format!("jit = true pod jobem bez GRANT: ocekavana chyba ACCESS_DENIED, je {other:?}")),
+    }
+    check_eq!(granted.map_err(|(e, m)| format!("{e}: {m}"))?, 0, "jit = true pod jobem s GRANT");
+    Ok(())
+}
+
+/// LAUNCH programu `PROGRAM` pres launchd s jobem `job` jako jobem
+/// volajiciho; vrati kod programu nebo chybu launchd. Supervisor se pri
+/// cekani ridi (launchd muze po restartu libd obnovovat relaci pres
+/// listek, testovaci beh ho jinak neobsluhuje).
+fn launch(s: &Startup, fs: &FsClient, job: &Job) -> Result<Result<i64, (Error, String)>, String> {
     let launch = crate::launch::client().map_err(|e| fail("kanal k launchd", e))?;
     let params = libos::params::Params { cwd: b"/".to_vec(), args: vec![PROGRAM.as_bytes().to_vec()], env: Vec::new(), flags: 0, fds: Vec::new() }
         .encode()
@@ -108,15 +148,12 @@ fn via_launchd(s: &Startup) -> TestResult {
     let req = Launch { program: String::from(PROGRAM), flags: 0, roles: vec![Role::Job, Role::Fs], params }
         .encode(1)
         .map_err(|e| fail("pozadavek", e))?;
-    let job = libos::job::current().map_err(|e| fail("job", e))?;
     let own = fs.connect().map_err(|e| fail("relace FS", e))?;
     launch
         .write(&req, vec![job.duplicate(None).map_err(|e| fail("job", e))?.into_handle(), own.into_channel().into_handle()])
         .map_err(|e| fail("LAUNCH", e))?;
-    // launchd muze po restartu libd (predchozi testy) obnovovat relaci pres
-    // listek: supervisor se pri cekani musi ridit (testovaci beh ho jinak
-    // neobsluhuje).
     let end = time::deadline_after(Duration::from_secs(20));
+    let step = || crate::supervisor::SUPERVISOR.lock().step(s, Some(time::deadline_after(Duration::from_millis(2))));
     let m = loop {
         if let Ok(m) = launch.try_read() {
             break m;
@@ -124,25 +161,23 @@ fn via_launchd(s: &Startup) -> TestResult {
         if time::now() > end {
             return Err(String::from("launchd neodpovedel"));
         }
-        crate::supervisor::SUPERVISOR.lock().step(s, Some(time::deadline_after(Duration::from_millis(2))));
+        step();
     };
     let (_, r) = launchproto::parse_reply(&m.data).map_err(|e| fail("odpoved launchd", e))?;
-    if let Err((e, msg)) = r {
-        return Err(format!("launchd: {e}: {msg}"));
+    if let Err(e) = r {
+        return Ok(Err(e));
     }
     let mut hs = m.handles;
     check_eq!(hs.len(), 2, "proces a kanal v odpovedi");
     let _control = Channel::from_handle(hs.pop().ok_or("chybi kanal")?);
     let process = Process::from_handle(hs.pop().ok_or("chybi proces")?);
-    let code = loop {
+    loop {
         match process.wait_exit(Some(time::deadline_after(Duration::from_millis(2)))) {
-            Ok(c) => break c,
+            Ok(c) => return Ok(Ok(c)),
             Err(Error::TimedOut) if time::now() <= end => {
-                crate::supervisor::SUPERVISOR.lock().step(s, Some(time::deadline_after(Duration::from_millis(2))));
+                step();
             }
             Err(e) => return Err(fail("konec programu", e)),
         }
-    };
-    check_eq!(code, 0, "program ze souboru pres launchd (bity viz dltest-origin)");
-    Ok(())
+    }
 }

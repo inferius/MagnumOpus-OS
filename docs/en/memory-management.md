@@ -183,6 +183,24 @@ comes in part 4.
   can turn it on, and removing it applies to descendants at once. Init
   gives session jobs the right to grant and gives `jit::RUN` to an app
   whose manifest has `[app] jit = true` (a browser, .NET).
+- **The gate is `launchd`** **[verified in QEMU]** x86_64: a program
+  started through `launchd` gets `jit::RUN` only with `[app] jit = true`
+  in its manifest (`<program>.manifest.toml`; a permission visible at
+  installation). The program's sub-job also gets `jit::GRANT`, so an app
+  with JIT can start its own processes (Wine: `start.exe`, `wineboot`).
+  The kernel allows both only under a job with `GRANT` (a user session,
+  init): whoever may not grant JIT gets an error for a program with
+  `jit = true`, a program without a manifest runs without JIT. Native
+  programs without a manifest do not get JIT. An organisation policy or
+  parental controls can take `GRANT` away from sessions
+  ([Organisation management](organization-management.md#the-right-to-install-applications)).
+- ⚠️ **Limitation of the gate:** a process in a job with `GRANT` can make
+  a sub-job and turn JIT on for it itself (the kernel checks only the
+  parent's flag, not who asks). The `launchd` gate therefore holds for
+  honest programs, not against a malicious process - which, however,
+  could write, seal and run code even without JIT (see the limitation
+  below). Enforcing it (only the holder of a special right to the job with
+  `GRANT` may grant) is an open point.
 - **Audit:** a process's first executable unsealed memory is logged (a
   warning with address and length) and `JOB_PROCESSES` shows
   `proc_flags::JIT_USED`.
