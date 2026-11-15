@@ -529,7 +529,13 @@ fn run_test(mut cmd: Command, opts: &Options, serial_log: &Path) -> std::result:
     let timeout = match opts.power_test {
         Some(_) => Duration::from_secs(300),
         None if opts.crash_test => Duration::from_secs(400),
-        None => opts.arch.test_timeout + std::time::Duration::from_secs(60) * opts.test_repeat.saturating_sub(1),
+        // Wine (--wine) zaklada prefix (wineboot, registrace DLL z wine.inf):
+        // v QEMU TCG minuty navic.
+        None => {
+            opts.arch.test_timeout
+                + std::time::Duration::from_secs(60) * opts.test_repeat.saturating_sub(1)
+                + if opts.wine { std::time::Duration::from_secs(900) } else { std::time::Duration::ZERO }
+        }
     };
     // Chybovy vystup QEMU jde dal na terminal a zaroven do bufferu (hlaska
     // o obsazenem portu => novy pokus).

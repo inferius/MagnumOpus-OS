@@ -10,7 +10,7 @@ games over adopted Wine. **Status: [designed]**, questions decided on 15 Nov 202
 | Part | What | Status |
 |---|---|---|
 | W0 | building Wine 11 (PE DLLs, tools), port of the Unix side over `libc.so` | all of Wine via `cargo xtask wine` in WSL **[implemented]**: 602 DLLs as PE, 25 Unix `.so` over `libc.so` (`ntdll.so` with `libunwind.so`), the `wine` loader and `wineserver`; `wine --version` in the system **[verified in QEMU]** ([Wine on disk](#wine-on-disk-w1)) |
-| W1 | console `.exe` (`cmd`, `hostname`, our own test): lower `ntdll`, TEB via GS, SEH, memory, files, `wineserver` as a process | in progress: GS in the kernel and `ucontext_t` in `cstd` **[verified in QEMU]**; the exception patch `signal_x86_64.c` compiles **[implemented]**; Wine on the data disk as an application (`/apps/org.winehq.wine`), the `wine` loader from disk loads `ntdll.so` ([DL-4c](dynamic-linking.md#libraries-from-disk-and-origin-dl-4c)) **[verified in QEMU]**; the connection to `wineserver`, `virtual.c` and the first `.exe` **[designed]** |
+| W1 | console `.exe` (`cmd`, `hostname`, our own test): lower `ntdll`, TEB via GS, SEH, memory, files, `wineserver` as a process | in progress: GS in the kernel and `ucontext_t` in `cstd` **[verified in QEMU]**; the exception patch `signal_x86_64.c` compiles **[implemented]**; Wine on the data disk as an application (`/apps/org.winehq.wine`), the `wine` loader from disk loads `ntdll.so` ([DL-4c](dynamic-linking.md#libraries-from-disk-and-origin-dl-4c)) **[verified in QEMU]**; the first console program: a new prefix (`wineboot`) and `cmd /c echo` **[verified in QEMU]** x86_64, release ([Wine on disk](#wine-on-disk-w1)); our own console test, `hostname` **[designed]** |
 | W2 | several processes of one application, registry, named objects, `winecfg` without windows | **[designed]** |
 | W3 | windows: a Wine driver over the compositor (`guiproto`), GDI, `notepad`, `winecfg`, clipboard, input | **[designed]** |
 | W4 | sound over `audiod`, a simple game (GDI: `winemine`, then a game via SDL or Direct3D 9) | **[designed]** |
@@ -292,6 +292,34 @@ Decisions of the user and the coordinator (15 Nov 2026):
 - Test (`cargo xtask test --only wine --wine`): `wine --version` via
   `launchd` prints `wine-11.0`. The `wine` suite runs only on request (the
   full run skips it without `--wine`).
+- **The first console program** **[verified in QEMU]** x86_64 (`wine`
+  suite, `--release`): `wine cmd /c echo ahoj` creates a new prefix
+  (`wineboot`: `services.exe`, `rundll32 setupapi` over `wine.inf`, the
+  registry, `C:\windows\system32`, the drives `dosdevices/c:` and `z:` as
+  symbolic links) and `cmd.exe` prints `ahoj`, about 70 s in QEMU TCG in
+  total. On the way it needed:
+  - Wine patches: `0003` wineserver without `fork` (it starts itself in the
+    foreground via `posix_spawn`), `0004` section memory as `memfd` (fsd
+    files cannot be mapped `MAP_SHARED` with write yet), `0005` a new
+    Windows process via `posix_spawn` of the loader (instead of a double
+    `fork`),
+  - `[app] jit = true` in the loader's manifest (`wine.manifest.toml`; Wine
+    switches PE images RW -> RX, [the JIT gate](memory-management.md#wx-sealing-and-the-jit-permission)),
+  - in `cstd`/`osrt`: `posix_spawn` normalises the path, the null fd,
+    passing a connected `AF_UNIX` with messages in its queue, symbolic
+    links, `mmap(PROT_WRITE)` = also read (wineserver maps
+    `KUSER_SHARED_DATA` this way; without it time stood still for clients).
+- ⚠️ **Limitation:** Wine waits for `wineboot` for a fixed 5 minutes. In a
+  debug build (QEMU TCG) creating the prefix does not make it (reading from
+  fsd about 1.7 MB/s versus 36 MB/s in release, `wine --version` 609 ms
+  versus 31 ms) and `cmd` then ends with `c0000135`; the test is therefore
+  slow and release-only. Starting a Wine process in release takes about
+  0.7 s, mostly loading PE DLLs by reading the file through fsd in 32 KiB
+  pieces (the file cannot be mapped).
+- **Notes for W2:** extended attributes (`user.DOSATTRIB`) return `ENOSYS`,
+  Wine works without them (DOS attributes from the name/permissions); no
+  window driver (`nodrv`, "explorer failed to start") and no `RpcSs` -
+  console programs do not mind.
 
 ## W1: server connection and processes (questions T1-T5)
 

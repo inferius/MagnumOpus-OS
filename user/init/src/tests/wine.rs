@@ -16,7 +16,10 @@ use libos::{Channel, Error, Process, Startup, time};
 use super::{Test, TestResult, devices, fail};
 use crate::check;
 
-pub const TESTS: &[Test] = &[("wine: zavadec z disku nahraje ntdll.so (wine --version)", wine_version)];
+pub const TESTS: &[Test] = &[
+    ("wine: zavadec z disku nahraje ntdll.so (wine --version)", wine_version),
+    ("wine: novy prefix a konzolovy cmd /c echo (pomaly, --release)", wine_cmd),
+];
 
 /// Adresar aplikace Wine (`xtask/src/datadisk.rs`, `WINE_APP`).
 const APP: &str = "/apps/org.winehq.wine";
@@ -52,6 +55,8 @@ fn launch_path(s: &Startup, path: &str, args: &[&str], env: &[&str], limit: Dura
         .map_err(|e| fail("pozadavek", e))?;
     let job = libos::job::current().map_err(|e| fail("job", e))?;
     let own = fs.connect().map_err(|e| fail("relace FS", e))?;
+    // Bez stdin: Wine posila serveru fd 0-2, prazdny stdin jde predat jako
+    // null fd (osrt::inherit).
     let (out, out_child) = Channel::create().map_err(|e| fail("kanal stdout", e))?;
     let (err, err_child) = Channel::create().map_err(|e| fail("kanal stderr", e))?;
     launch
@@ -66,7 +71,7 @@ fn launch_path(s: &Startup, path: &str, args: &[&str], env: &[&str], limit: Dura
         )
         .map_err(|e| fail("LAUNCH", e))?;
     let end = time::deadline_after(limit);
-    let step = || crate::supervisor::SUPERVISOR.lock().step(s, Some(time::deadline_after(Duration::from_millis(2))));
+    let step = || crate::supervisor::SUPERVISOR.lock().step(s, Some(time::deadline_after(Duration::from_millis(50))));
     let m = loop {
         if let Ok(m) = launch.try_read() {
             break m;
@@ -123,5 +128,32 @@ fn wine_version(s: &Startup) -> TestResult {
     }
     let run = launch_path(s, &loader, &["--version"], &[], Duration::from_secs(60))?;
     check!(run.code == 0 && run.stdout.trim() == "wine-11.0", format!("kod {}; stdout: {}; stderr: {}", run.code, run.stdout.trim(), run.stderr.trim()));
+    Ok(())
+}
+
+/// Novy prefix (wineboot: services, rundll32 setupapi nad wine.inf,
+/// registr, C:\windows\system32) a konzolovy `cmd.exe`. Pomaly test:
+/// Wine na wineboot ceka nejvys 5 minut, v QEMU TCG to stihne jen sestaveni
+/// release (`--release`, ~70 s); debug je asi 20x pomalejsi (cteni z fsd).
+fn wine_cmd(s: &Startup) -> TestResult {
+    let fs = fs()?;
+    let loader = format!("{APP}/lib/wine/x86_64-unix/wine");
+    for d in ["/home", "/home/wine"] {
+        match fs.create(d, fsproto::kind::DIR) {
+            Ok(()) | Err(Error::AlreadyExists) => {}
+            Err(e) => return Err(fail(d, e)),
+        }
+    }
+    let t0 = time::now();
+    let run = launch_path(s, &loader, &["cmd", "/c", "echo", "ahoj"], &["HOME=/home/wine", "WINEPREFIX=/home/wine/.wine"], Duration::from_secs(600))?;
+    libos::println!("init: wine: novy prefix a cmd /c echo za {} ms", (time::now() - t0) / 1_000_000);
+    check!(
+        run.code == 0 && run.stdout.lines().any(|l| l.trim() == "ahoj"),
+        format!("kod {}; stdout: {}; stderr: {}", run.code, run.stdout.trim(), run.stderr.trim())
+    );
+    // Prefix: disky jako symbolicke odkazy (fs-symlink), registr, system32.
+    for p in ["/home/wine/.wine/system.reg", "/home/wine/.wine/dosdevices/c:/windows/system32/kernel32.dll"] {
+        fs.stat(p).map_err(|e| fail(p, e))?;
+    }
     Ok(())
 }

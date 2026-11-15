@@ -10,7 +10,7 @@ z Wine, spodní naše“): aplikace a hry pro Windows nad převzatým Wine.
 | Část | Co | Stav |
 |---|---|---|
 | W0 | sestavení Wine 11 (DLL PE, nástroje), port unixové části nad `libc.so` | celé Wine přes `cargo xtask wine` ve WSL **[implementováno]**: 602 DLL jako PE, 25 unixových `.so` nad `libc.so` (`ntdll.so` s `libunwind.so`), zavaděč `wine` a `wineserver`; `wine --version` v systému **[ověřeno v QEMU]** ([Wine na disku](#wine-na-disku-w1)) |
-| W1 | konzolové `.exe` (`cmd`, `hostname`, vlastní test): spodní `ntdll`, TEB přes GS, SEH, paměť, soubory, `wineserver` jako proces | rozpracováno: GS v jádře a `ucontext_t` v `cstd` **[ověřeno v QEMU]**; záplata výjimek `signal_x86_64.c` se přeloží **[implementováno]**; Wine na datovém disku jako aplikace (`/apps/org.winehq.wine`), zavaděč `wine` z disku nahraje `ntdll.so` ([DL-4c](dynamicke-linkovani.md#knihovny-z-disku-a-origin-dl-4c)) **[ověřeno v QEMU]**; spojení s `wineserver`, `virtual.c` a první `.exe` **[navrženo]** |
+| W1 | konzolové `.exe` (`cmd`, `hostname`, vlastní test): spodní `ntdll`, TEB přes GS, SEH, paměť, soubory, `wineserver` jako proces | rozpracováno: GS v jádře a `ucontext_t` v `cstd` **[ověřeno v QEMU]**; záplata výjimek `signal_x86_64.c` se přeloží **[implementováno]**; Wine na datovém disku jako aplikace (`/apps/org.winehq.wine`), zavaděč `wine` z disku nahraje `ntdll.so` ([DL-4c](dynamicke-linkovani.md#knihovny-z-disku-a-origin-dl-4c)) **[ověřeno v QEMU]**; první konzolový program: nový prefix (`wineboot`) a `cmd /c echo` **[ověřeno v QEMU]** x86_64, release ([Wine na disku](#wine-na-disku-w1)); vlastní konzolový test, `hostname` **[navrženo]** |
 | W2 | víc procesů jedné aplikace, registry, pojmenované objekty, `winecfg` v režimu bez oken | **[navrženo]** |
 | W3 | okna: ovladač Wine nad kompozitorem (`guiproto`), GDI, `notepad`, `winecfg`, schránka, vstup | **[navrženo]** |
 | W4 | zvuk nad `audiod`, jednoduchá hra (GDI: `winemine`, pak hra přes SDL nebo Direct3D 9) | **[navrženo]** |
@@ -275,6 +275,32 @@ Rozhodnutí uživatele a koordinátora (15. 11. 2026):
 - Test (`cargo xtask test --only wine --wine`): `wine --version` přes
   `launchd` vypíše `wine-11.0`. Sada `wine` je jen na vyžádání (plný běh
   ji bez `--wine` přeskočí).
+- **První konzolový program** **[ověřeno v QEMU]** x86_64 (sada `wine`,
+  `--release`): `wine cmd /c echo ahoj` založí nový prefix (`wineboot`:
+  `services.exe`, `rundll32 setupapi` nad `wine.inf`, registr,
+  `C:\windows\system32`, disky `dosdevices/c:` a `z:` jako symbolické
+  odkazy) a `cmd.exe` vypíše `ahoj`, celkem asi 70 s v QEMU TCG. Cestou
+  bylo potřeba:
+  - záplaty Wine: `0003` wineserver bez `fork` (spustí sám sebe v popředí
+    přes `posix_spawn`), `0004` paměť sekcí jako `memfd` (soubory fsd
+    zatím nejdou `MAP_SHARED` se zápisem), `0005` nový proces Windows přes
+    `posix_spawn` zavaděče (místo dvojího `fork`),
+  - `[app] jit = true` v manifestu zavaděče (`wine.manifest.toml`; Wine
+    přepíná obrazy PE RW -> RX, [brána JIT](sprava-pameti.md#wx-pečeť-a-oprávnění-jit)),
+  - v `cstd`/`osrt`: `posix_spawn` normalizuje cestu, null fd, předání
+    spojeného `AF_UNIX` se zprávami ve frontě, symbolické odkazy,
+    `mmap(PROT_WRITE)` = i čtení (wineserver tak mapuje `KUSER_SHARED_DATA`;
+    bez toho klientům stál čas).
+- ⚠️ **Omezení:** Wine čeká na `wineboot` napevno 5 minut. V sestavení
+  debug (QEMU TCG) se založení prefixu nestihne (čtení z fsd asi
+  1,7 MB/s proti 36 MB/s v release, `wine --version` 609 ms proti 31 ms)
+  a `cmd` pak skončí `c0000135`; test je proto pomalý a jen pro
+  `--release`. Start procesu Wine v release asi 0,7 s, hlavně načítání
+  DLL PE čtením souboru přes fsd po 32 KiB (soubor nejde namapovat).
+- **Poznámky pro W2:** rozšířené atributy (`user.DOSATTRIB`) vracejí
+  `ENOSYS`, Wine bez nich funguje (atributy DOS z jména/práv); bez ovladače
+  oken (`nodrv`, „explorer failed to start“) a bez `RpcSs` - konzolovým
+  programům nevadí.
 
 ## W1: spojení se serverem a procesy (otázky T1-T5)
 
