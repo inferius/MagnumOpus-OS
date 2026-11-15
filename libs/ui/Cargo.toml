@@ -7,7 +7,7 @@ description = "Nativni knihovna UI: deklarativni prvky, rozvrzeni, kresleni, vst
 
 [features]
 # Behove prostredi pro aplikace v OS (kanal ke kompozitoru, VMO bufferu).
-os = ["dep:libos", "dep:svcclient", "dep:clipproto"]
+os = ["dep:libos", "dep:svcclient", "dep:clipproto", "dep:bufdesc"]
 
 [dependencies]
 guiproto = { path = "../guiproto" }
@@ -21,6 +21,8 @@ inputproto = { path = "../inputproto" }
 # Bez `rt`: aplikace no_std maji libos primo (vstupni bod), aplikace se
 # std (SDL pres `mosdl`) ho maji od std.
 libos = { path = "../libos", optional = true, default-features = false }
+# Popis bufferu povrchu videa (`client/video.rs`).
+bufdesc = { path = "../bufdesc", optional = true }
 # Obnova okna po padu kompozitoru (listek k supervisoru).
 svcclient = { path = "../svcclient", features = ["client"], optional = true }
 

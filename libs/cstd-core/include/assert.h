@@ -14,4 +14,9 @@ _CSTD_END
 #define assert(e) ((e) ? (void)0 : __cstd_assert_fail(#e, __FILE__, __LINE__))
 #endif
 
+/* C11: static_assert je makro (v C23 klicove slovo, v C++ take). */
+#if !defined(__cplusplus) && (!defined(__STDC_VERSION__) || __STDC_VERSION__ < 202311L)
+#define static_assert _Static_assert
+#endif
+
 #endif

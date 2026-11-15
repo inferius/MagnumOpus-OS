@@ -1469,6 +1469,8 @@ reads from the framebuffer.
 
 ## Native UI library (`libs/ui`)
 
+The video area (`node::video`) shows frames from foreign buffers (NV12 from the decoder) in its own layer without redrawing the window; description and status in [multimedia.md](multimedia.md#player-application).
+
 One library for all applications, declarative in Rust:
 
 ```rust

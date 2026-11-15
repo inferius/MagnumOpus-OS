@@ -33,6 +33,7 @@ mod install;
 mod launch;
 mod libd;
 mod logd;
+mod media;
 mod ntp;
 mod perms;
 mod power;
@@ -192,6 +193,10 @@ fn main(startup: Startup) -> i64 {
             // padu ridi supervisor, kanaly k ovladacum drzi init).
             if let Err(e) = audio::start(&startup, core::mem::take(&mut devices.audios), &mut sup) {
                 println!("init: zvukovou sluzbu nelze spustit: {e}");
+            }
+            // Media: mediad spousti procesy dekoderu (obraz z initfs).
+            if let Err(e) = media::start(&startup, &mut sup) {
+                println!("init: sluzbu medii nelze spustit: {e}");
             }
             // Sit az po FS: firewall uklada konfiguraci na FS. Zvlastni beh
             // testu napajeni sit nepotrebuje (kratsi start).

@@ -34,6 +34,7 @@ pub enum ElemKind<M> {
     Segments { items: Vec<crate::node::Segment>, legend: bool },
     Select { options: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
     Image { w: u32, h: u32, px: alloc::rc::Rc<[u32]>, alt: String },
+    Video { id: u32, w: u32, h: u32, alt: String },
     Group,
     Scroll { content_h: u32 },
 }
@@ -102,10 +103,11 @@ fn kind_tag<M>(k: &Kind<M>) -> usize {
         Kind::Segments { .. } => 17,
         Kind::Select { .. } => 18,
         Kind::Image { .. } => 19,
+        Kind::Video { .. } => 20,
     }
 }
 
-const TAGS: usize = 20;
+const TAGS: usize = 21;
 
 /// Znacky odvozenych klicu (aby se nepotkaly s vlastnimi).
 const OWN: u64 = 1;
@@ -188,7 +190,7 @@ fn measure<M>(n: &Node<M>, t: &Look, avail: u32) -> (u32, u32) {
         }
         Kind::Tabs { .. } => (th.size.hit_min * 4, ctl),
         Kind::Busy => (th.size.hit_min * 4, sp[3]),
-        Kind::Image { w, h, .. } => (*w, *h),
+        Kind::Image { w, h, .. } | Kind::Video { w, h, .. } => (*w, *h),
         Kind::Select { options, .. } => {
             let w = options.iter().map(|o| t.width(o, t.body())).max().unwrap_or(0);
             (w + 2 * sp[4] + th.size.icon_s + sp[2], ctl)
@@ -366,6 +368,9 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
         }
         Kind::Image { w, h, px, alt } => {
             push(out, ElemKind::Image { w, h, px, alt }, r);
+        }
+        Kind::Video { id, w, h, alt } => {
+            push(out, ElemKind::Video { id, w, h, alt }, r);
         }
         Kind::Spacer => {}
         Kind::Column(children) => {

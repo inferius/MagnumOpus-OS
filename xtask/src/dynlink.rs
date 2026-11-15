@@ -176,3 +176,32 @@ pub fn build_cdyn(opts: &Options, libc_so: &std::path::Path, sysroot: &std::path
         (String::from("lib/libc.so"), std::fs::read(libc_so)?),
     ])
 }
+
+/// Proces dekoderu medii `ffdec` (user/ffdec, docs/cs/multimedia.md):
+/// program PIE v C nad `libc.so` a knihovnami FFmpeg z predpony portu
+/// (`prefix/lib/libav*.so`, hlavicky `prefix/include`), rozhrani jadra
+/// `magnumopus/sys.h` (libs/mosys v libc.so).
+pub fn build_ffdec(opts: &Options, libc_so: &std::path::Path, sysroot: &std::path::Path, prefix: &std::path::Path) -> Result<(String, Vec<u8>)> {
+    let builtins = sysroot.join("lib/libbuiltins.a");
+    let a = opts.arch;
+    let src = workspace_root().join("user").join("ffdec").join("src");
+    let out = target_dir().join("ffdec").join(a.name).join(profile_dir(opts));
+    std::fs::create_dir_all(&out)?;
+    let lib = prefix.join("lib");
+    let mut link = Link::pie().needs(libc_so).object(&builtins);
+    for l in ["libavformat.so", "libavcodec.so", "libswscale.so", "libswresample.so", "libavutil.so"] {
+        link = link.needs(lib.join(l));
+    }
+    let prog = out.join("ffdec");
+    Build::new("ffdec")
+        .include(workspace_root().join("libs/cstd/include"))
+        .include(workspace_root().join("libs/cstd-core/include"))
+        .include(workspace_root().join("libs/mosys/include"))
+        .include(prefix.join("include"))
+        .flag("-O2")
+        .file(workspace_root().join("libs/cstd/crt/crt1.c"))
+        .file(src.join("proto.c"))
+        .file(src.join("ffdec.c"))
+        .link(a.user_target, &out, &prog, &link)?;
+    Ok((String::from("ffdec"), std::fs::read(&prog)?))
+}

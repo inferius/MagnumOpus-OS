@@ -1406,6 +1406,8 @@ z framebufferu nikdy nečte.
 
 ## Nativní knihovna UI (`libs/ui`)
 
+Plocha videa (`node::video`) ukazuje snímky z cizích bufferů (NV12 od dekodéru) ve vlastní vrstvě bez překreslení okna; popis a stav v [multimedia.md](multimedia.md#přehrávač-aplikace).
+
 Jedna knihovna pro všechny aplikace, deklarativní v Rustu:
 
 ```rust

@@ -68,6 +68,12 @@ pub fn spawn(startup: &Startup, name: &str, handles: Vec<StartHandle>) -> Result
 
 /// Jako [`spawn`], job programu pod jobem `parent` (`None` = job initu).
 pub fn spawn_in(startup: &Startup, name: &str, handles: Vec<StartHandle>, parent: Option<&Job>) -> Result<App> {
+    spawn_with_libd(startup, name, handles, parent, false)
+}
+
+/// Jako [`spawn_in`]; `libd` = program dostane relaci se sluzbou knihoven
+/// (spoustec programu se zavadecem, napr. `mediad` pro `ffdec`).
+pub fn spawn_with_libd(startup: &Startup, name: &str, handles: Vec<StartHandle>, parent: Option<&Job>, libd: bool) -> Result<App> {
     let fs = Initfs::open(startup)?;
     let image = fs.find(name).ok_or(Error::NotFound)?;
     let manifest = manifest(&fs, name)?;
@@ -75,7 +81,7 @@ pub fn spawn_in(startup: &Startup, name: &str, handles: Vec<StartHandle>, parent
         Some(p) => job_in(p, manifest.as_ref())?,
         None => job_for(manifest.as_ref())?,
     };
-    let mut opts = libos::spawn::Options::default();
+    let mut opts = libos::spawn::Options { libd, ..Default::default() };
     if let Some(s) = manifest.as_ref().and_then(|m| m.limits.stack) {
         opts.stack_size = s;
     }

@@ -107,6 +107,8 @@ pub fn assemble(arch: &Arch, std_bin: &Path) -> Result<PathBuf> {
     copy_tree(&workspace_root().join("libs/cstd-core/include"), &root.join("include-core"))?;
     // Rozhrani pro port SDL (symboly v libc.a).
     copy_tree(&workspace_root().join("libs/mosdl/include"), &root.join("include"))?;
+    // Objekty jadra pro programy v C (magnumopus/sys.h, symboly v libc).
+    copy_tree(&workspace_root().join("libs/mosys/include"), &root.join("include"))?;
     let libc = std::fs::read(std_bin.join("libc.a")).map_err(|e| format!("libc.a: {e}"))?;
     write_if_changed(&root.join("lib/libc.a"), &libc)?;
     // Jako musl: matematika, vlakna a hodiny jsou v libc.a, ale build
@@ -158,6 +160,51 @@ pub fn ldflags_dyn(sysroot: &Path) -> Vec<String> {
         // 128bitove deleni) staticky do programu, jako libgcc.a.
         String::from("-l:libbuiltins.a"),
     ]
+}
+
+/// Priznaky pro porty se sdilenymi knihovnami (configure FFmpeg, Meson):
+/// preklad `-fPIC`, link rozdeleny na spolecnou cast, cast jen programu PIE,
+/// cast jen knihoven a knihovny na konec. Ovladac clangu pro baremetal
+/// `-shared` neprevede na `ld.lld` a linkuje `-Bstatic`: proto `-Wl,-shared`
+/// a `-Wl,-Bdynamic` vyslovne.
+pub struct DynParts {
+    pub cflags: Vec<String>,
+    pub ld: Vec<String>,
+    pub ld_exe: Vec<String>,
+    pub ld_shared: Vec<String>,
+    pub libs: Vec<String>,
+}
+
+pub fn dyn_parts(arch: &Arch, sysroot: &Path) -> Result<DynParts> {
+    let mut cflags = cflags_dyn(arch, sysroot)?;
+    cflags.retain(|x| x != "-fPIE");
+    cflags.push(String::from("-fPIC"));
+    let target: Vec<String> = cflags.iter().filter(|f| f.starts_with("--target=")).cloned().collect();
+    let mut ld = target;
+    ld.extend(
+        [
+            "-nostdlib",
+            "-fuse-ld=lld",
+            "-Wl,-z,now",
+            "-Wl,-z,relro",
+            "-Wl,-z,text",
+            "-Wl,-z,max-page-size=65536",
+            "-Wl,-z,noexecstack",
+            "-Wl,--hash-style=both",
+        ]
+        .map(String::from),
+    );
+    ld.push(format!("-L{}", slash(&sysroot.join("lib"))));
+    ld.push(String::from("-Wl,-Bdynamic"));
+    let ld_exe = vec![
+        String::from("-Wl,-pie"),
+        format!("-Wl,--dynamic-linker={}", cbuild::INTERP),
+        String::from("-Wl,--allow-shlib-undefined"),
+        slash(&sysroot.join("lib/crt1.o")),
+    ];
+    let ld_shared = vec![String::from("-Wl,-shared")];
+    let libs = vec![String::from("-Wl,-Bdynamic"), String::from("-l:libc.so"), String::from("-l:libbuiltins.a")];
+    Ok(DynParts { cflags, ld, ld_exe, ld_shared, libs })
 }
 
 /// Dynamicka cast sysrootu: `lib/libc.so`, `lib/crt1.o` (z

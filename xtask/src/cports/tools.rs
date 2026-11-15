@@ -1,5 +1,10 @@
-//! Nastroje hostitele pro porty v C (CMake, Ninja, sh, make): hledani
-//! a srozumitelna rada k instalaci, kdyz chybi.
+//! Nastroje hostitele pro porty v C (CMake, Ninja, sh, make, nasm, Meson,
+//! pkgconf): hledani a srozumitelna rada k instalaci, kdyz chybi.
+//!
+//! Na Windows maji nastroje unixovych build systemu (sh, make, nasm, Meson,
+//! pkgconf) prednost z MSYS2 (`C:\msys64\usr\bin`, promenna `MSYS2_ROOT`):
+//! jedno prostredi misto mixu Git a MSYS2. Meson je skript Pythonu MSYS2
+//! (bez `.exe`), spousti se pres `sh` ([`unix_env`]).
 
 use std::env;
 use std::path::PathBuf;
@@ -13,6 +18,9 @@ pub enum Tool {
     Ninja,
     Sh,
     Make,
+    Nasm,
+    Meson,
+    PkgConf,
 }
 
 impl Tool {
@@ -24,6 +32,9 @@ impl Tool {
             Tool::Ninja => ("ninja", "NINJA"),
             Tool::Sh => ("sh", "SH"),
             Tool::Make => ("make", "MAKE"),
+            Tool::Nasm => ("nasm", "NASM"),
+            Tool::Meson => ("meson", "MESON"),
+            Tool::PkgConf => ("pkgconf", "PKG_CONFIG"),
         }
     }
 
@@ -35,7 +46,10 @@ impl Tool {
             // v CMAKE_FIND_ROOT_PATH, CMAKE_TRY_COMPILE_TARGET_TYPE).
             Tool::CMake => Some((3, 24)),
             Tool::Ninja => Some((1, 10)),
-            Tool::Sh | Tool::Make => None,
+            // dav1d chce nasm 2.14 (AVX-512), FFmpeg 2.13.
+            Tool::Nasm => Some((2, 14)),
+            // Meson a pkgconf z MSYS2 / systemu (verzi pro projekt hlida Meson sam).
+            Tool::Sh | Tool::Make | Tool::Meson | Tool::PkgConf => None,
         }
     }
 
@@ -47,8 +61,14 @@ impl Tool {
             (Tool::CMake, false) => "apt install cmake (Debian, Ubuntu) / dnf install cmake / brew install cmake",
             (Tool::Ninja, false) => "apt install ninja-build / dnf install ninja-build / brew install ninja",
             (Tool::Sh, true) => "Git for Windows (winget install Git.Git) obsahuje sh; nebo spustte xtask ve WSL",
-            (Tool::Make, true) => "MSYS2 (winget install MSYS2.MSYS2, pak pacman -S make) nebo spustte xtask ve WSL",
+            (Tool::Make, true) => "MSYS2 (winget install MSYS2.MSYS2, pak v MSYS2: pacman -S make) nebo spustte xtask ve WSL",
+            (Tool::Nasm, true) => "MSYS2: pacman -S nasm (winget install MSYS2.MSYS2)",
+            (Tool::Meson, true) => "MSYS2: pacman -S meson (pritahne python a ninja)",
+            (Tool::PkgConf, true) => "MSYS2: pacman -S pkgconf (s mesonem se nainstaluje samo)",
             (Tool::Sh | Tool::Make, false) => "apt install make / dnf install make (sh je soucasti systemu)",
+            (Tool::Nasm, false) => "apt install nasm / dnf install nasm / brew install nasm",
+            (Tool::Meson, false) => "apt install meson / dnf install meson / brew install meson",
+            (Tool::PkgConf, false) => "apt install pkgconf / dnf install pkgconf / brew install pkgconf",
         }
     }
 }
@@ -70,11 +90,57 @@ fn known_dirs(t: Tool) -> Vec<PathBuf> {
         }
         Tool::Ninja => local.map(|l| vec![l.join("Microsoft").join("WinGet").join("Links")]).unwrap_or_default(),
         Tool::Sh => vec![pf.join("Git").join("bin"), pf.join("Git").join("usr").join("bin")],
-        Tool::Make => vec![PathBuf::from("C:\\msys64\\usr\\bin")],
+        // MSYS2 hleda `msys2_bin` pred PATH.
+        Tool::Make | Tool::Nasm | Tool::Meson | Tool::PkgConf => Vec::new(),
     }
 }
 
-/// Najde nastroj: promenna prostredi, PATH, bezna mista instalace.
+/// `usr\bin` instalace MSYS2 (`MSYS2_ROOT`, jinak `C:\msys64`), kdyz existuje.
+pub fn msys2_bin() -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let root = env::var_os("MSYS2_ROOT").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("C:\\msys64"));
+    let bin = root.join("usr").join("bin");
+    bin.join("sh.exe").is_file().then_some(bin)
+}
+
+/// Nastroj unixoveho build systemu: na Windows ma prednost MSYS2.
+fn unix_tool(t: Tool) -> bool {
+    matches!(t, Tool::Sh | Tool::Make | Tool::Nasm | Tool::Meson | Tool::PkgConf)
+}
+
+/// Prostredi pro `sh` / `make` / `meson` portu: na Windows MSYS2 v rezimu
+/// MSYS (Meson z MSYS2 odmita bezet pod MINGW64 z Git Bash), na zacatku
+/// PATH nastroje MSYS2 a adresar clangu (configure FFmpeg nezvlada cesty
+/// s mezerou, nastroje LLVM se proto predavaji jen jmenem).
+pub fn unix_env(cmd: &mut std::process::Command, clang: &std::path::Path) {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(m) = msys2_bin() {
+        dirs.push(m);
+        cmd.env("MSYSTEM", "MSYS");
+    }
+    if let Some(d) = clang.parent() {
+        dirs.push(d.to_path_buf());
+    }
+    dirs.extend(env::var_os("PATH").map(|p| env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default());
+    if let Ok(p) = env::join_paths(dirs) {
+        cmd.env("PATH", p);
+    }
+}
+
+/// Cesta ve tvaru pro seznamy cest v `sh` z MSYS2 (`J:\a\b` -> `/j/a/b`,
+/// dvojtecka jako oddelovac); na unixu beze zmeny.
+pub fn sh_path(p: &std::path::Path) -> String {
+    let s = p.display().to_string().replace('\\', "/");
+    let b = s.as_bytes();
+    if cfg!(windows) && b.len() >= 2 && b[1] == b':' {
+        return format!("/{}{}", (b[0] as char).to_ascii_lowercase(), &s[2..]);
+    }
+    s
+}
+
+/// Najde nastroj: promenna prostredi, (MSYS2,) PATH, bezna mista instalace.
 pub fn find(t: Tool) -> Option<PathBuf> {
     let (name, var) = t.names();
     if let Some(p) = env::var_os(var).map(PathBuf::from)
@@ -82,7 +148,14 @@ pub fn find(t: Tool) -> Option<PathBuf> {
     {
         return Some(p);
     }
-    let exe = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
+    // Meson je skript (bez `.exe` i na Windows).
+    let exe = if cfg!(windows) && t != Tool::Meson { format!("{name}.exe") } else { name.to_string() };
+    if unix_tool(t)
+        && let Some(m) = msys2_bin()
+        && m.join(&exe).is_file()
+    {
+        return Some(m.join(&exe));
+    }
     let path_dirs = env::var_os("PATH").map(|p| env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
     path_dirs.into_iter().chain(known_dirs(t)).map(|d| d.join(&exe)).find(|p| p.is_file())
 }

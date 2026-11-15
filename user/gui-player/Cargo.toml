@@ -1,0 +1,19 @@
+[package]
+name = "gui-player"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "gui-player"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+guiproto = { path = "../../libs/guiproto" }
+ui = { path = "../../libs/ui", features = ["os"] }
+mediaproto = { path = "../../libs/mediaproto", features = ["client"] }
+audioproto = { path = "../../libs/audioproto", features = ["client"] }
+bufdesc = { path = "../../libs/bufdesc" }

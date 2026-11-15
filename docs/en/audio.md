@@ -138,6 +138,12 @@ The client `audioproto::conn::AudioClient` is built on `svcclient::Conn`:
 with a lease it survives a service restart, without one it returns
 `SERVICE_UNAVAILABLE`.
 
+A process other than the stream owner may write data into the ring:
+`Stream::producer_handles` returns copies of the ring VMO and the period
+event (the media decoder, [multimedia.md](multimedia.md)). Control (start,
+stop, close) stays with the owner; only the producer then waits on the
+event.
+
 ### Driver protocol
 
 `audiod` sends the driver `OPEN_OUTPUT` (format, period, number of
