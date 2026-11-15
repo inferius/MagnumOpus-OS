@@ -199,6 +199,15 @@ impl Child {
     }
 }
 
+/// Pocka, az skonci aspon jeden z potomku (C `waitpid(-1)`), nejdele do
+/// `deadline` (ns od startu, `None` = navzdy); vraci index skonceneho.
+/// Nejvys 64 potomku najednou (`OBJECT_WAIT_MANY`).
+pub fn wait_any(children: &[&Child], deadline: Option<u64>) -> Result<usize, Error> {
+    let items: Vec<(&libos::Handle, libos::Signals)> =
+        children.iter().map(|c| (c.process.handle(), libos::Signals::TERMINATED)).collect();
+    libos::wait_many(&items, deadline).map(|(i, _)| i)
+}
+
 /// Identifikator vlastniho procesu pro `std::process::id`: nahodne cislo
 /// zvolene pri startu (jadro zatim cislo procesu procesu nesdeluje).
 pub fn self_id() -> u32 {

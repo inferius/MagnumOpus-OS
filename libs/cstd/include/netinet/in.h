@@ -38,16 +38,155 @@ struct sockaddr_in6 {
     uint32_t sin6_scope_id;
 };
 
+/* Cisla protokolu jako Linux. Aplikace dostanou jen TCP a UDP (SOCK_RAW
+ * = EPERM); ostatni jsou pro prevod jmen a analyzu paketu. */
 #define IPPROTO_IP 0
+#define IPPROTO_HOPOPTS 0
+#define IPPROTO_ICMP 1
+#define IPPROTO_IGMP 2
+#define IPPROTO_IPIP 4
 #define IPPROTO_TCP 6
+#define IPPROTO_EGP 8
+#define IPPROTO_PUP 12
 #define IPPROTO_UDP 17
+#define IPPROTO_IDP 22
+#define IPPROTO_TP 29
+#define IPPROTO_DCCP 33
 #define IPPROTO_IPV6 41
+#define IPPROTO_ROUTING 43
+#define IPPROTO_FRAGMENT 44
+#define IPPROTO_RSVP 46
+#define IPPROTO_GRE 47
+#define IPPROTO_ESP 50
+#define IPPROTO_AH 51
+#define IPPROTO_ICMPV6 58
+#define IPPROTO_NONE 59
+#define IPPROTO_DSTOPTS 60
+#define IPPROTO_MTP 92
+#define IPPROTO_ENCAP 98
+#define IPPROTO_PIM 103
+#define IPPROTO_COMP 108
+#define IPPROTO_SCTP 132
+#define IPPROTO_UDPLITE 136
+#define IPPROTO_MPLS 137
+#define IPPROTO_RAW 255
+#define IPPROTO_MAX 256
+
+/* Volby IPPROTO_IP a IPPROTO_IPV6 (cisla jako Linux). Cist jde IP_TTL
+ * (vychozi 64); nastaveni netd zatim nepodporuje (ENOPROTOOPT). */
+#define IP_TOS 1
+#define IP_TTL 2
+#define IP_HDRINCL 3
+#define IP_OPTIONS 4
+#define IP_RECVOPTS 6
+#define IP_RETOPTS 7
+#define IP_PKTINFO 8
+#define IP_MTU_DISCOVER 10
+#define IP_RECVERR 11
+#define IP_RECVTTL 12
+#define IP_RECVTOS 13
+#define IP_MTU 14
+#define IP_MULTICAST_IF 32
+#define IP_MULTICAST_TTL 33
+#define IP_MULTICAST_LOOP 34
+#define IP_ADD_MEMBERSHIP 35
+#define IP_DROP_MEMBERSHIP 36
+#define IP_PMTUDISC_DONT 0
+#define IP_PMTUDISC_WANT 1
+#define IP_PMTUDISC_DO 2
+
+#define IPV6_ADDRFORM 1
+#define IPV6_2292PKTINFO 2
+#define IPV6_UNICAST_HOPS 16
+#define IPV6_MULTICAST_IF 17
+#define IPV6_MULTICAST_HOPS 18
+#define IPV6_MULTICAST_LOOP 19
+#define IPV6_JOIN_GROUP 20
+#define IPV6_ADD_MEMBERSHIP IPV6_JOIN_GROUP
+#define IPV6_LEAVE_GROUP 21
+#define IPV6_DROP_MEMBERSHIP IPV6_LEAVE_GROUP
+#define IPV6_MTU_DISCOVER 23
+#define IPV6_MTU 24
+#define IPV6_RECVERR 25
+#define IPV6_V6ONLY 26
+#define IPV6_RECVPKTINFO 49
+#define IPV6_PKTINFO 50
+#define IPV6_RECVHOPLIMIT 51
+#define IPV6_HOPLIMIT 52
+#define IPV6_TCLASS 67
 
 #define INADDR_ANY ((in_addr_t)0x00000000)
+#define INADDR_BROADCAST ((in_addr_t)0xffffffff)
 #define INADDR_LOOPBACK ((in_addr_t)0x7f000001)
 #define INADDR_NONE ((in_addr_t)0xffffffff)
+#define INADDR_UNSPEC_GROUP ((in_addr_t)0xe0000000)
+#define INADDR_ALLHOSTS_GROUP ((in_addr_t)0xe0000001)
+#define INADDR_ALLRTRS_GROUP ((in_addr_t)0xe0000002)
+#define INADDR_MAX_LOCAL_GROUP ((in_addr_t)0xe00000ff)
+#define IN_LOOPBACKNET 127
+#define IN_MULTICAST(a) ((((in_addr_t)(a)) & 0xf0000000) == 0xe0000000)
+#define IN_CLASSA(a) ((((in_addr_t)(a)) & 0x80000000) == 0)
+#define IN_CLASSA_NET 0xff000000
+#define IN_CLASSA_NSHIFT 24
+#define IN_CLASSB(a) ((((in_addr_t)(a)) & 0xc0000000) == 0x80000000)
+#define IN_CLASSB_NET 0xffff0000
+#define IN_CLASSC(a) ((((in_addr_t)(a)) & 0xe0000000) == 0xc0000000)
+#define IN_CLASSC_NET 0xffffff00
 #define INET_ADDRSTRLEN 16
 #define INET6_ADDRSTRLEN 46
+
+#define IN6ADDR_ANY_INIT { { { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } }
+#define IN6ADDR_LOOPBACK_INIT { { { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 } } }
+
+#define IN6_IS_ADDR_UNSPECIFIED(a) \
+    ((a)->__in6_u.__s6_addr32[0] == 0 && (a)->__in6_u.__s6_addr32[1] == 0 && \
+     (a)->__in6_u.__s6_addr32[2] == 0 && (a)->__in6_u.__s6_addr32[3] == 0)
+#define IN6_IS_ADDR_LOOPBACK(a) \
+    ((a)->__in6_u.__s6_addr32[0] == 0 && (a)->__in6_u.__s6_addr32[1] == 0 && \
+     (a)->__in6_u.__s6_addr32[2] == 0 && (a)->s6_addr[12] == 0 && (a)->s6_addr[13] == 0 && \
+     (a)->s6_addr[14] == 0 && (a)->s6_addr[15] == 1)
+#define IN6_IS_ADDR_MULTICAST(a) ((a)->s6_addr[0] == 0xff)
+#define IN6_IS_ADDR_LINKLOCAL(a) ((a)->s6_addr[0] == 0xfe && ((a)->s6_addr[1] & 0xc0) == 0x80)
+#define IN6_IS_ADDR_SITELOCAL(a) ((a)->s6_addr[0] == 0xfe && ((a)->s6_addr[1] & 0xc0) == 0xc0)
+#define IN6_IS_ADDR_V4MAPPED(a) \
+    ((a)->__in6_u.__s6_addr32[0] == 0 && (a)->__in6_u.__s6_addr32[1] == 0 && \
+     (a)->s6_addr[8] == 0 && (a)->s6_addr[9] == 0 && (a)->s6_addr[10] == 0xff && (a)->s6_addr[11] == 0xff)
+#define IN6_IS_ADDR_V4COMPAT(a) \
+    ((a)->__in6_u.__s6_addr32[0] == 0 && (a)->__in6_u.__s6_addr32[1] == 0 && \
+     (a)->__in6_u.__s6_addr32[2] == 0 && ntohl((a)->__in6_u.__s6_addr32[3]) > 1)
+#define IN6_ARE_ADDR_EQUAL(a, b) \
+    ((a)->__in6_u.__s6_addr32[0] == (b)->__in6_u.__s6_addr32[0] && \
+     (a)->__in6_u.__s6_addr32[1] == (b)->__in6_u.__s6_addr32[1] && \
+     (a)->__in6_u.__s6_addr32[2] == (b)->__in6_u.__s6_addr32[2] && \
+     (a)->__in6_u.__s6_addr32[3] == (b)->__in6_u.__s6_addr32[3])
+#define IN6_IS_ADDR_MC_LINKLOCAL(a) (IN6_IS_ADDR_MULTICAST(a) && ((a)->s6_addr[1] & 0xf) == 0x2)
+
+struct ip_mreq {
+    struct in_addr imr_multiaddr;
+    struct in_addr imr_interface;
+};
+
+struct ip_mreqn {
+    struct in_addr imr_multiaddr;
+    struct in_addr imr_address;
+    int imr_ifindex;
+};
+
+struct in_pktinfo {
+    int ipi_ifindex;
+    struct in_addr ipi_spec_dst;
+    struct in_addr ipi_addr;
+};
+
+struct ipv6_mreq {
+    struct in6_addr ipv6mr_multiaddr;
+    unsigned int ipv6mr_interface;
+};
+
+struct in6_pktinfo {
+    struct in6_addr ipi6_addr;
+    unsigned int ipi6_ifindex;
+};
 
 extern const struct in6_addr in6addr_any;
 extern const struct in6_addr in6addr_loopback;

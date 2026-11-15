@@ -153,7 +153,8 @@ Standard handles travel in the same message as `kind::USER` with tags from
 `abi::params::tag` (`STDIN`, `STDOUT`, `STDERR`, `FS`, `NET`, `LAUNCH` =
 channel to the launchd launcher service, `AUDIO` and `AUDIO_LEASE` = a
 session of the sound service with application rights and its lease,
-[Sound](audio.md#application-sessions-and-capture)). Tags the std runtime
+[Sound](audio.md#application-sessions-and-capture), `TTY` = the terminal
+control channel, protocol `ttyproto`, [termios](cstd.md#termios)). Tags the std runtime
 does not use itself are kept for libraries (`osrt::start::take_tagged`). Format v2 has a flags field
 (`abi::params::flags`: `STDOUT_NULL`, `STDERR_NULL` = discard the output,
 `Stdio::null`).

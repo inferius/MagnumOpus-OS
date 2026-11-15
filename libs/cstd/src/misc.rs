@@ -115,6 +115,22 @@ pub unsafe extern "C" fn strncasecmp(a: *const c_char, b: *const c_char, n: size
     casecmp(a, b, n)
 }
 
+/// `ffs`: poradi nejnizsiho nastaveneho bitu od 1, 0 pro 0.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn ffs(v: c_int) -> c_int {
+    ffsll(i64::from(v))
+}
+
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn ffsl(v: core::ffi::c_long) -> c_int {
+    ffsll(v as i64)
+}
+
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn ffsll(v: i64) -> c_int {
+    if v == 0 { 0 } else { v.trailing_zeros() as c_int + 1 }
+}
+
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn stpcpy(dst: *mut c_char, src: *const c_char) -> *mut c_char {
     // SAFETY: kontrakt C.
@@ -362,13 +378,32 @@ pub unsafe extern "C" fn readlink(path: *const c_char, _buf: *mut c_char, _n: si
     }
 }
 
-/// `ioctl`: terminal zatim nema ovladani (`ENOTTY`).
+/// `ioctl`: na socketu dotazy na rozhrani `SIOCGIF*` (`ifreq.rs`);
+/// terminal (`termios.rs`, `TCGETS` ... `TIOCSWINSZ`); jinak `ENOTTY`.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn ioctl(fd: c_int, _req: u64, _args: ...) -> c_int {
-    match crate::sys::status(fd) {
-        Ok(_) => errno::ret(Err(errno::ENOTTY)),
-        Err(e) => errno::ret(Err(e)),
+pub unsafe extern "C" fn ioctl(fd: c_int, req: u64, mut args: ...) -> c_int {
+    if let Err(e) = crate::sys::status(fd) {
+        return errno::ret(Err(e));
     }
+    if (crate::termios::TCGETS..=crate::termios::TIOCSWINSZ).contains(&req) {
+        // SAFETY: pozadavky terminalu maji jako argument ukazatel (TCFLSH
+        // cislo fronty ve stejnem registru).
+        let p = unsafe { args.next_arg::<*mut core::ffi::c_void>() };
+        // SAFETY: kontrakt C.
+        if let Some(r) = unsafe { crate::termios::ioctl(fd, req, p) } {
+            return errno::ret(r);
+        }
+        return errno::ret(Err(errno::ENOTTY));
+    }
+    if crate::ifreq::is_iface_request(req) && crate::sys::sock_is_stream(fd).is_ok() {
+        // SAFETY: pozadavky SIOCGIF* maji jako argument ukazatel.
+        let p = unsafe { args.next_arg::<*mut core::ffi::c_void>() };
+        // SAFETY: kontrakt C.
+        if let Some(r) = unsafe { crate::ifreq::ioctl(req, p) } {
+            return errno::ret(r);
+        }
+    }
+    errno::ret(Err(errno::ENOTTY))
 }
 
 // --- uname ----------------------------------------------------------------------

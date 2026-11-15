@@ -31,6 +31,12 @@ pub extern "C" fn _Exit(code: c_int) -> ! {
     std::process::exit(code)
 }
 
+/// `_exit` (unistd.h) = `_Exit`.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn _exit(code: c_int) -> ! {
+    _Exit(code)
+}
+
 /// Zaregistruje funkci pro konec procesu (spolecne poradi s `__cxa_atexit`); 0 = OK.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn atexit(f: extern "C" fn()) -> c_int {

@@ -25,6 +25,8 @@ renderproto = { path = "../../libs/renderproto" }
 bufdesc = { path = "../../libs/bufdesc" }
 yuv = { path = "../../libs/yuv" }
 netproto = { path = "../../libs/netproto", features = ["client"] }
+# Testovaci terminal pro termios (sada cstd).
+ttyproto = { path = "../../libs/ttyproto" }
 manifest = { path = "../../libs/manifest" }
 conf = { workspace = true }
 spin = "0.12"

@@ -13,6 +13,10 @@ use crate::c_int;
 mod os;
 #[cfg(target_os = "magnumopus")]
 pub use os::*;
+#[cfg(target_os = "magnumopus")]
+mod os_proc;
+#[cfg(target_os = "magnumopus")]
+pub use os_proc::*;
 
 #[cfg(not(target_os = "magnumopus"))]
 mod host;
@@ -82,6 +86,38 @@ pub enum Kind {
     Stream,
     Pipe,
     Socket,
+}
+
+/// Odkud ma potomek standardni proud (`spawn.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildIo {
+    /// Popis za cislem fd rodice (stdio, roura).
+    Parent(c_int),
+    /// Zahodit vystup / prazdny vstup (`/dev/null`).
+    Null,
+    /// Proud nepredat (`posix_spawn_file_actions_addclose`).
+    Closed,
+}
+
+/// Pozadavek na spusteni potomka (`posix_spawn`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnReq {
+    /// Absolutni cesta, nebo holy nazev programu systemu (launchd).
+    pub program: String,
+    pub args: Vec<Vec<u8>>,
+    pub env: Vec<Vec<u8>>,
+    /// Absolutni pracovni adresar potomka.
+    pub cwd: Vec<u8>,
+    pub io: [ChildIo; 3],
+}
+
+/// Sitove rozhrani mimo smycku (`ifaddrs.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Iface {
+    pub mac: [u8; 6],
+    pub mtu: u16,
+    pub up: bool,
+    pub addr: Option<(core::net::IpAddr, u8)>,
 }
 
 /// Metadata (`struct stat` je sklada v `stat.rs`).

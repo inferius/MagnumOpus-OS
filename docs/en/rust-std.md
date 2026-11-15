@@ -334,6 +334,12 @@ and aarch64). They are launched by the `launchd` service
   manifest without `[network]` = no network even with `network(true)`. A
   program without a manifest (a helper) gets the network session as the
   parent passed it.
+- **Difference from `posix_spawn` in C** ([cstd](cstd.md#processes-posix_spawn-and-waitpid)):
+  `Command` passes the network only with `network(true)`, `posix_spawn`
+  always passes it when the parent has one (POSIX: the child inherits the
+  parent's environment). The manifest rule is the same for both: for an
+  application with a manifest launchd decides about the network from the
+  manifest, not the parent.
 - **Finding the program:** a bare name = the command registry
   (`[[command]]` in manifests), then `/system/bin/<name>` in the parent's
   FS session, then initfs; an absolute path = a file in the FS opened with

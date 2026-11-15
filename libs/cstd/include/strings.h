@@ -1,4 +1,4 @@
-/* strings.h - porovnani bez ohledu na velikost pismen (cstd). */
+/* strings.h - porovnani bez ohledu na velikost pismen, ffs (cstd). */
 #ifndef _CSTD_STRINGS_H
 #define _CSTD_STRINGS_H
 
@@ -8,11 +8,10 @@
 _CSTD_BEGIN
 
 int strcasecmp(const char *a, const char *b);
-/* Index nejnizsiho nastaveneho bitu od 1 (0 = zadny). */
+int strncasecmp(const char *a, const char *b, size_t n);
 int ffs(int v);
 int ffsl(long v);
 int ffsll(long long v);
-int strncasecmp(const char *a, const char *b, size_t n);
 
 _CSTD_END
 

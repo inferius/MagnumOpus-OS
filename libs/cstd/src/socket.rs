@@ -18,8 +18,21 @@ pub const AF_UNSPEC: c_int = 0;
 pub const AF_UNIX: c_int = 1;
 pub const AF_INET: c_int = 2;
 pub const AF_INET6: c_int = 10;
+pub const AF_NETLINK: c_int = 16;
+pub const AF_PACKET: c_int = 17;
 pub const SOCK_STREAM: c_int = 1;
 pub const SOCK_DGRAM: c_int = 2;
+pub const SOCK_RAW: c_int = 3;
+pub const SOCK_SEQPACKET: c_int = 5;
+pub const SCM_RIGHTS: c_int = 1;
+pub const SO_LINGER: c_int = 13;
+pub const SO_PROTOCOL: c_int = 38;
+pub const SO_DOMAIN: c_int = 39;
+pub const IPPROTO_IP: c_int = 0;
+pub const IPPROTO_IPV6: c_int = 41;
+pub const IP_TTL: c_int = 2;
+/// Vychozi TTL / pocet skoku netd (jako Linux).
+pub const DEFAULT_TTL: c_int = 64;
 pub const SOCK_NONBLOCK: c_int = 0o4000;
 pub const SOCK_CLOEXEC: c_int = 0o2000000;
 pub const IPPROTO_TCP: c_int = 6;
@@ -149,9 +162,14 @@ pub extern "C" fn socket(domain: c_int, ty: c_int, proto: c_int) -> c_int {
     let v6 = match domain {
         AF_INET => false,
         AF_INET6 => true,
+        // Ramce linkove vrstvy jen pro netd (Linux bez CAP_NET_RAW = EPERM).
+        AF_PACKET => return errno::ret(Err(errno::EPERM)),
         _ => return errno::ret(Err(errno::EAFNOSUPPORT)),
     };
     let kind = match (ty & 0xf, proto) {
+        // Surove sockety (ICMP, vlastni hlavicky) aplikace nedostanou
+        // (jako Linux bez CAP_NET_RAW); ping a spol. jdou pres netd.
+        (SOCK_RAW, _) => return errno::ret(Err(errno::EPERM)),
         (SOCK_STREAM, 0 | IPPROTO_TCP) => SockKind::Stream,
         (SOCK_DGRAM, 0 | IPPROTO_UDP) => SockKind::Datagram,
         (SOCK_STREAM | SOCK_DGRAM, _) => return errno::ret(Err(errno::EPROTONOSUPPORT)),
@@ -309,11 +327,46 @@ pub struct msghdr {
     pub msg_flags: c_int,
 }
 
-/// `sendmsg` bez ridicich zprav: kusy se spoji do jednoho zapisu.
+/// `struct cmsghdr` (jako Linux; data za hlavickou zarovnana na `size_t`).
+#[repr(C)]
+pub struct cmsghdr {
+    pub cmsg_len: size_t,
+    pub cmsg_level: c_int,
+    pub cmsg_type: c_int,
+}
+
+/// Ridici zpravy (`msg_control`) netd neprenasi: `SCM_RIGHTS` (predani fd)
+/// jde v systemu jinak (handly v kanalech), ostatni (`IP_PKTINFO` ...) nejsou.
+/// Kazda neprazdna ridici zprava = `EOPNOTSUPP`.
+///
+/// # Safety
+///
+/// `m` je platna zprava (kontrakt C).
+pub unsafe fn control_supported(m: &msghdr) -> Result<(), c_int> {
+    if m.msg_controllen == 0 || m.msg_control.is_null() {
+        return Ok(());
+    }
+    if m.msg_controllen < size_of::<cmsghdr>() {
+        return Err(errno::EINVAL);
+    }
+    // SAFETY: aspon jedna hlavicka (kontrakt C).
+    let h = unsafe { m.msg_control.cast::<cmsghdr>().read_unaligned() };
+    if h.cmsg_len < size_of::<cmsghdr>() || h.cmsg_len > m.msg_controllen {
+        return Err(errno::EINVAL);
+    }
+    Err(errno::ENOTSUP)
+}
+
+/// `sendmsg` bez ridicich zprav (`control_supported`): kusy se spoji do
+/// jednoho zapisu.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn sendmsg(fd: c_int, m: *const msghdr, flags: c_int) -> isize {
     // SAFETY: kontrakt C.
     let Some(m) = (unsafe { m.as_ref() }) else { return errno::ret_val::<usize>(Err(errno::EFAULT)) };
+    // SAFETY: kontrakt C.
+    if let Err(e) = unsafe { control_supported(m) } {
+        return errno::ret_val::<usize>(Err(e));
+    }
     let mut all = Vec::new();
     for i in 0..m.msg_iovlen {
         // SAFETY: msg_iov ma msg_iovlen polozek.
@@ -328,7 +381,8 @@ pub unsafe extern "C" fn sendmsg(fd: c_int, m: *const msghdr, flags: c_int) -> i
     unsafe { sendto(fd, all.as_ptr().cast(), all.len(), flags, m.msg_name, m.msg_namelen) }
 }
 
-/// `recvmsg` bez ridicich zprav: data se rozdeli do kusu.
+/// `recvmsg` bez ridicich zprav (`msg_controllen` = 0): data se rozdeli do
+/// kusu.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn recvmsg(fd: c_int, m: *mut msghdr, flags: c_int) -> isize {
     // SAFETY: kontrakt C.
@@ -429,14 +483,15 @@ pub unsafe extern "C" fn setsockopt(fd: c_int, level: c_int, name: c_int, v: *co
             };
             errno::ret(r)
         }
-        (SOL_SOCKET, SO_REUSEADDR | SO_KEEPALIVE | SO_SNDBUF | SO_RCVBUF) | (IPPROTO_TCP, TCP_NODELAY) => 0,
+        // SO_LINGER: zavreni socketu necha netd dorucit data vzdy.
+        (SOL_SOCKET, SO_REUSEADDR | SO_KEEPALIVE | SO_SNDBUF | SO_RCVBUF | SO_LINGER) | (IPPROTO_TCP, TCP_NODELAY) => 0,
         _ => errno::ret(Err(errno::ENOPROTOOPT)),
     }
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn getsockopt(fd: c_int, level: c_int, name: c_int, v: *mut c_void, len: *mut u32) -> c_int {
-    let (stream, _) = match sys::sock_is_stream(fd) {
+    let (stream, v6) = match sys::sock_is_stream(fd) {
         Ok(x) => x,
         Err(e) => return errno::ret(Err(e)),
     };
@@ -461,6 +516,9 @@ pub unsafe extern "C" fn getsockopt(fd: c_int, level: c_int, name: c_int, v: *mu
         (SOL_SOCKET, SO_ACCEPTCONN) => put_int(c_int::from(sys::sock_listening(fd).unwrap_or(false))),
         (SOL_SOCKET, SO_REUSEADDR | SO_KEEPALIVE) | (IPPROTO_TCP, TCP_NODELAY) => put_int(0),
         (SOL_SOCKET, SO_SNDBUF | SO_RCVBUF) => put_int(64 * 1024),
+        (SOL_SOCKET, SO_DOMAIN) => put_int(if v6 { AF_INET6 } else { AF_INET }),
+        (SOL_SOCKET, SO_PROTOCOL) => put_int(if stream { IPPROTO_TCP } else { IPPROTO_UDP }),
+        (IPPROTO_IP, IP_TTL) if !v6 => put_int(DEFAULT_TTL),
         (SOL_SOCKET, SO_RCVTIMEO | SO_SNDTIMEO) => {
             let (r, w) = sys::sock_timeouts(fd).unwrap_or((None, None));
             let t = if name == SO_RCVTIMEO { r } else { w }.unwrap_or_default();
@@ -768,6 +826,50 @@ pub unsafe extern "C" fn freeaddrinfo(mut p: *mut addrinfo) {
         let n = unsafe { Box::from_raw(p.cast::<Node>()) };
         p = n.ai.ai_next;
     }
+}
+
+// --- stare rozhrani prekladu jmen (netdb.h) ---------------------------------------
+
+pub const HOST_NOT_FOUND: c_int = 1;
+pub const TRY_AGAIN: c_int = 2;
+pub const NO_RECOVERY: c_int = 3;
+pub const NO_DATA: c_int = 4;
+
+std::thread_local! {
+    static H_ERRNO: core::cell::Cell<c_int> = const { core::cell::Cell::new(0) };
+}
+
+/// Adresa `h_errno` aktualniho vlakna.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn __h_errno_location() -> *mut c_int {
+    H_ERRNO.with(core::cell::Cell::as_ptr)
+}
+
+/// `gethostbyname`: stare rozhrani (neni bezpecne pro vlakna, jen IPv4)
+/// neni; NULL s `h_errno` = `NO_RECOVERY`, programy maji `getaddrinfo`.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn gethostbyname(_name: *const c_char) -> *mut c_void {
+    H_ERRNO.with(|h| h.set(NO_RECOVERY));
+    core::ptr::null_mut()
+}
+
+/// `gethostbyaddr`: zpetny preklad neni (jako `getnameinfo`).
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn gethostbyaddr(_addr: *const c_void, _len: u32, _ty: c_int) -> *mut c_void {
+    H_ERRNO.with(|h| h.set(NO_RECOVERY));
+    core::ptr::null_mut()
+}
+
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub extern "C" fn hstrerror(e: c_int) -> *const c_char {
+    let s: &[u8] = match e {
+        HOST_NOT_FOUND => b"Unknown host\0",
+        TRY_AGAIN => b"Host name lookup failure\0",
+        NO_RECOVERY => b"Unknown server error\0",
+        NO_DATA => b"No address associated with name\0",
+        _ => b"Resolver internal error\0",
+    };
+    s.as_ptr().cast()
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]

@@ -58,6 +58,9 @@ pub mod tag {
     pub const AUDIO: u32 = 0x7FFF_0006;
     /// Listek k obnove relace `AUDIO` po restartu `audiod`.
     pub const AUDIO_LEASE: u32 = 0x7FFF_0007;
+    /// Ridici kanal terminalu (`ttyproto`: rezim termios, velikost okna);
+    /// jen proces spusteny v terminalu.
+    pub const TTY: u32 = 0x7FFF_0008;
 }
 
 /// Precteny blok (odkazuje do bufferu).

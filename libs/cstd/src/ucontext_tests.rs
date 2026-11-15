@@ -62,7 +62,7 @@ fn fpsimd_roundtrip() {
 
 #[test]
 fn ffs_values() {
-    use crate::mosthread::{ffs, ffsll};
+    use crate::misc::{ffs, ffsll};
     assert_eq!(ffs(0), 0);
     assert_eq!(ffs(1), 1);
     assert_eq!(ffs(0x80), 8);

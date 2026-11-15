@@ -20,21 +20,35 @@ pub struct Thread {
 
 /// Spusti `f` v novem vlakne se zasobnikem aspon `stack` bajtu.
 pub fn spawn(stack: usize, f: Box<dyn FnOnce() + Send>) -> Result<Thread> {
+    start(f, |g| libos::thread::spawn_sized("std", stack as u64, g))
+}
+
+/// Spusti `f` na zasobniku volajiciho, ktery konci na adrese `stack_top`
+/// (C `pthread_attr_setstack`). Pamet musi zit do konce vlakna; `join` ji
+/// neuvolni.
+pub fn spawn_on(stack_top: usize, f: Box<dyn FnOnce() + Send>) -> Result<Thread> {
+    start(f, |g| libos::thread::spawn_on_stack("std", stack_top as u64, g))
+}
+
+fn start(
+    f: Box<dyn FnOnce() + Send>,
+    run: impl FnOnce(Box<dyn FnOnce() + Send>) -> Result<libos::thread::JoinHandle>,
+) -> Result<Thread> {
     // Pod zavadecem ld.so dostane vlakno blok TLS vsech modulu od libos
     // (`abi::loader`); vlastni blok jednoho modulu by ho prepsal.
     if libos::loader::interface().is_some() {
-        let handle = libos::thread::spawn_sized("std", stack as u64, f)?;
+        let handle = run(f)?;
         return Ok(Thread { handle: Some(handle), tls: None });
     }
     let tls = Block::new().ok_or(Error::NoMemory)?;
     let tp = tls.thread_pointer();
-    let handle = libos::thread::spawn_sized("std", stack as u64, move || {
+    let handle = run(Box::new(move || {
         if libos::sys::thread_set_pointer(tp).is_err() {
             crate::debug_log("osrt: nelze nastavit ukazatel vlakna (TLS)");
             crate::abort();
         }
         f();
-    })?;
+    }))?;
     Ok(Thread { handle: Some(handle), tls: Some(tls) })
 }
 

@@ -34,6 +34,7 @@ pub mod sock;
 pub mod start;
 pub mod stdio;
 pub mod thread;
+pub mod tty;
 pub mod time;
 pub mod tls;
 pub mod vm;

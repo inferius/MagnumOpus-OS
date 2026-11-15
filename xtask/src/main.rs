@@ -700,6 +700,7 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "guiproto",
             "--package",
             "clipproto",
+            "ttyproto",
             "--package",
             "renderproto",
             "--package",

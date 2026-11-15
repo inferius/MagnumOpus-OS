@@ -387,12 +387,17 @@ pub extern "C" fn getppid() -> c_int {
     1
 }
 
-/// `kill`: jen vlastni proces (`pid` 0, -1 nebo `getpid()`); potomky
-/// z `posix_spawn` [navrzeno].
+/// `kill`: vlastni proces (`pid` 0, -1 nebo `getpid()`) a potomci
+/// z `posix_spawn` (`spawn::wait::kill_child`: jen ukonceni).
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn kill(pid: c_int, sig: c_int) -> c_int {
     if sig != 0 && !valid(sig) {
         return errno::ret(Err(errno::EINVAL));
+    }
+    if pid > 0 && pid != getpid() {
+        if let Some(r) = crate::spawn::wait::kill_child(pid, sig) {
+            return errno::ret(r);
+        }
     }
     if pid != 0 && pid != -1 && pid != getpid() {
         return errno::ret(Err(errno::ESRCH));

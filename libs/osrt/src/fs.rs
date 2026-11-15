@@ -54,6 +54,8 @@ pub fn available() -> bool {
     SESSION.get().is_some()
 }
 
+
+
 /// Jak otevrit soubor (odpovida `std::fs::OpenOptions`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct OpenOptions {
@@ -113,6 +115,7 @@ impl File {
         }
         Ok(File { handle: opened.handle, pos: AtomicU64::new(0), append: false, path })
     }
+
 
     pub fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
         let data = session()?.read_h(self.handle, offset, buf.len())?;

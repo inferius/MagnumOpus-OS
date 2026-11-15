@@ -24,8 +24,11 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
 > `libc.a`, sysroot C a porty zlib a sqlite. `libc.so` **[ověřeno v QEMU]**
 > (sada `cstd dyn`: program PIE v C, vlákna, TLS, `dlopen` pluginu).
 > Široké znaky a locale **[ověřeno v QEMU]** (krok `wchar`, kapitola
-> [Široké znaky a locale](#široké-znaky-a-locale)). Další části
-> (`posix_spawn`, signály od jiných procesů, `iconv`) **[navrženo]**, viz [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
+> [Široké znaky a locale](#široké-znaky-a-locale)). Doplněk POSIX
+> (`posix_spawn`, `waitpid`, semafory, `termios`, `getifaddrs`, `statfs` ...)
+> **[ověřeno v QEMU]** (krok `posix2`, kapitola
+> [Doplněk POSIX](#doplněk-posix-pro-porty-a-windows-vrstvu)). Další části
+> (signály od jiných procesů, `iconv`) **[navrženo]**, viz [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
 
 ## Vrstvy
 
@@ -342,7 +345,7 @@ a linkuje s `--eh-frame-hdr`; dynamická část má `lib/crtdso.o` se skrytým
   `readlink`/`symlink`/`link` (symlinky FS zatím nejsou), `ioctl`
   (`ENOTTY`), `setlocale`/`localeconv` (viz [Široké znaky a locale](#široké-znaky-a-locale)), `uname`,
   `getrusage`/`getrlimit`, `system` (`ENOSYS`; spouštění procesů
-  `posix_spawn` **[navrženo]**).
+  `posix_spawn`, viz [Doplněk POSIX](#procesy-posix_spawn-a-waitpid)).
 - **`libc.so`**: viz kapitola [libc.so](#libcso) níže.
 
 ## libc.so
@@ -563,7 +566,8 @@ Vlastního kódu ~11 000 řádků Rustu, převzatého ~14 000 řádků. Celá mu
   `posix_spawn_file_actions_*` a `posix_spawnattr_*`: aplikace
   s manifestem přes `launchd`, pomocné programy přes `spawn` (jako
   `std::process`), akce souborů pro fd 0-2 (otázka 4), `waitpid` nad
-  handlem procesu, `system`/`popen` přes shell systému. Spuštění programu
+  handlem procesu (hotovo, viz [Doplněk POSIX](#procesy-posix_spawn-a-waitpid)),
+  `system`/`popen` přes shell systému **[navrženo]**. Spuštění programu
   PIE (dynamický proces) potřebuje u spouštějícího relaci s libd
   (`spawn::Options::libd`, DL-4b); `cstd` ji předá, má-li ji proces sám.
 - **`vfork`** (otázka 11): návrh A **(doporučeno)** také -1 s `ENOSYS`.
@@ -764,6 +768,223 @@ licencí Unicode-3.0 (soubor `THIRD-PARTY.md` v kořeni repozitáře).
   `u32` v bajtovém i širokém režimu.
 - `long double` (`wcstold`, `strtold_l`) je v C (`c/math_ld.c`) s přesností
   `double` jako `strtold`.
+
+## Doplněk POSIX pro porty a Windows vrstvu
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (krok `posix2` testu `ctest`, sada
+`cstd`; host testy `posix_tests.rs` a `spawn_tests.rs` v `cargo test -p
+cstd`). Funkce, které chtějí porty a Wine
+nad tím, co už knihovna měla (Windows vrstva = krok 8), a `termios.h`
+(viz [termios](#termios)).
+
+### Procesy: `posix_spawn` a `waitpid`
+
+<figure class="diagram">
+<svg viewBox="0 0 780 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="posix_spawn bez fork">
+<defs><marker id="cs9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="10" width="230" height="90" rx="6"/><text class="t b" x="125" y="34" text-anchor="middle">rodič: tabulka fd</text><text class="m" x="125" y="54" text-anchor="middle">0 stdin, 1 stdout, 2 stderr</text><text class="m" x="125" y="72" text-anchor="middle">5, 6 roura, 7 soubor ...</text><text class="m" x="125" y="90" text-anchor="middle">akce souborů (adddup2 ...)</text>
+<path class="ln" d="M240 55 L288 55" marker-end="url(#cs9)"/>
+<rect class="acc" x="290" y="10" width="200" height="90" rx="6"/><text class="t b" x="390" y="34" text-anchor="middle">plán (cstd)</text><text class="m" x="390" y="54" text-anchor="middle">jen fd 0-2: kanál proudu,</text><text class="m" x="390" y="72" text-anchor="middle">/dev/null nebo nic;</text><text class="m" x="390" y="90" text-anchor="middle">jinak ENOTSUP</text>
+<path class="ln" d="M490 55 L538 55" marker-end="url(#cs9)"/>
+<rect class="box" x="540" y="10" width="230" height="90" rx="6"/><text class="t b" x="655" y="34" text-anchor="middle">launchd</text><text class="m" x="655" y="54" text-anchor="middle">program, manifest, job,</text><text class="m" x="655" y="72" text-anchor="middle">relace FS a sítě</text><text class="m" x="655" y="90" text-anchor="middle">(jako std::process)</text>
+<path class="ln" d="M655 100 L655 148" marker-end="url(#cs9)"/>
+<rect class="ok" x="540" y="150" width="230" height="90" rx="6"/><text class="t b" x="655" y="174" text-anchor="middle">potomek</text><text class="m" x="655" y="194" text-anchor="middle">nový proces v podřízeném jobu,</text><text class="m" x="655" y="212" text-anchor="middle">fd 0-2 z bloku parametrů,</text><text class="m" x="655" y="230" text-anchor="middle">výchozí signály</text>
+<path class="ln" d="M538 195 L242 195" marker-end="url(#cs9)"/>
+<rect class="box" x="10" y="150" width="230" height="90" rx="6"/><text class="t b" x="125" y="174" text-anchor="middle">rodič: tabulka potomků</text><text class="m" x="125" y="194" text-anchor="middle">pid_t z cstd -> handle procesu</text><text class="m" x="125" y="212" text-anchor="middle">waitpid, wait4, waitid,</text><text class="m" x="125" y="230" text-anchor="middle">kill (ukončení)</text>
+</svg>
+<figcaption>posix_spawn bez fork: akce souborů se vyhodnotí v rodiči, potomka spustí launchd.</figcaption>
+</figure>
+
+`fork` v systému není (rozhodnutí uživatele, viz [Procesy, locale,
+wchar](#procesy-locale-wchar)). `posix_spawn` a `posix_spawnp` spouští
+potomka přes launchd stejně jako `std::process::Command`
+([Rust std](rust-std.md)): podřízený job, nová relace FS se stejnou
+identitou, relace sítě a tři standardní proudy. Ostatní fd potomek nemá (rozhodnutí 4A), proto se
+akce souborů vyhodnotí už v rodiči:
+
+| Akce | Výsledek |
+|---|---|
+| `addclose(0-2)` | proud se nepředá (vstup prázdný, výstup zahozený) |
+| `addclose(> 2)` | nic (potomek vyšší čísla nemá) |
+| `adddup2(x, 0-2)` | proud potomka = popis za `x` v rodiči (stdio, i jiný proud po `dup2`, nebo roura) nebo 0-2 po předchozích akcích; soubor a socket `ENOTSUP` |
+| `addopen(0-2, "/dev/null")` | prázdný vstup / zahozený výstup |
+| `addopen(0-2, jiný soubor)`, cokoli s cílem > 2 | `ENOTSUP` (blok parametrů předává jen kanály proudu) |
+| `addchdir(_np)`, `addfchdir(_np)` | pracovní adresář potomka (relativní vůči předchozímu); neexistující = chyba `posix_spawn` |
+| `addclosefrom_np(n)` | zavře 0-2 od `n` |
+
+- **Síť potomka:** jako POSIX se dědí, má-li ji rodič (jinak než
+  `std::process::Command`, kde jen s `network(true)`). Aplikace s vlastním
+  manifestem ale dostane síť jen podle svého manifestu: rozhoduje launchd,
+  ne rodič (průnik relace rodiče a `[network]` manifestu, manifest bez
+  `[network]` = žádná síť). Pomocný program bez manifestu dědí relaci
+  sítě rodiče beze změny.
+- **Program:** cesta s `/` (relativní vůči adresáři potomka). U
+  `posix_spawn` holý název = soubor v adresáři potomka, existuje-li;
+  `posix_spawnp` hledá v `PATH` (bez proměnné `/system/bin`). Nenalezený
+  holý název dostane launchd jako program systému (registr příkazů,
+  `/system/bin`, initfs). Chyba launchd se vrátí jako kód chyby
+  (`ENOENT`, `EACCES`, bez kanálu ke launchd `ENOSYS`).
+- **Atributy:** `SETSID`, `SETPGROUP` se skupinou 0, `SETSIGDEF`,
+  `SETSIGMASK`, `RESETIDS` se přijmou (potomek je vždy nový proces
+  v novém jobu s výchozími obsluhami a prázdnou maskou signálů; uložená
+  maska se nepředává). Skupina jiná než 0 = `ENOTSUP`, plánování jiné než
+  `SCHED_OTHER` nebo priorita jiná než 0 = `EPERM`.
+- **`pid_t` potomka** přiděluje `cstd` (tabulka v procesu, čísla od
+  `getpid() + 1`); jiné procesy je neznají.
+- **`waitpid`, `wait`, `wait3`, `wait4`, `waitid`:** `WNOHANG`, `WNOWAIT`;
+  skupiny procesů nejsou, `waitpid(0)` a `waitpid(-pgid)` čekají jako
+  `-1` na kteréhokoli potomka. Stav jako Linux: `WEXITSTATUS` = spodních
+  8 bitů kódu konce; konec, který způsobil systém, se hlásí jako signál
+  (`PROCESS_KILL` = `SIGKILL`, nebo signál z `kill`, výjimka CPU =
+  `SIGSEGV`/`SIGILL`/`SIGFPE`/`SIGTRAP`/`SIGBUS`, panika = `SIGABRT`).
+  `struct rusage` je vynulovaná (čas CPU jádro zatím nedává). Čekání na
+  více potomků jde přes `OBJECT_WAIT_MANY` (nejvýš 64 najednou) v kolech
+  po 50 ms, aby se do čekání dostal i potomek spuštěný jiným vláknem.
+- **`kill` na potomka:** `SIGKILL`, `SIGTERM`, `SIGINT`, `SIGHUP`,
+  `SIGQUIT` potomka ukončí hned (`PROCESS_KILL`, jeho obsluha signálu
+  neproběhne), signál 0 jen ověří existenci. Doručení ostatních signálů
+  do obsluhy potomka zatím nejde (`ENOTSUP`); `SIGCHLD` rodič nedostává.
+
+### Semafory
+
+`semaphore.h`: nepojmenované semafory (`sem_init`, `sem_wait`,
+`sem_trywait`, `sem_timedwait`, `sem_clockwait`, `sem_post`,
+`sem_getvalue`, `sem_destroy`) nad futexem, `sem_t` 32 B jako Linux.
+Čekání je bod zrušení vlákna. `pshared` = 1 se přijme, semafor ale
+funguje jen mezi vlákny procesu: systém nemá sdílenou paměť mezi procesy
+(`MAP_SHARED` se zápisem je `ENOTSUP`) a futex v jádře je v adresovém
+prostoru procesu. Pojmenované semafory (`sem_open`, `sem_close`,
+`sem_unlink`) proto vrací `SEM_FAILED` / -1 s `ENOSYS`; skutečné přijdou
+se sdílenou pamětí mezi procesy (samostatný úkol: `shm_open` a futex mezi
+procesy).
+
+### Vlákna, soubory, čas
+
+- **`pthread_attr_setstack`:** vlákno opravdu běží v paměti volajícího
+  (`libos::thread::spawn_on_stack`); paměť musí žít do konce vlákna
+  a ochrannou oblast pod ní si zajistí volající (Wine si zásobníky vláken
+  přiděluje sám). Dále `getstack`, `set/getguardsize` (bez vlastního
+  zásobníku má vlákno vždy ochrannou oblast `libos`), `set/getscope` (jen
+  `PTHREAD_SCOPE_SYSTEM`, rozsah procesu `ENOTSUP`), `set/getinheritsched`,
+  `set/getschedpolicy` a `set/getschedparam` (jen `SCHED_OTHER`, priorita 0).
+- **`fchdir`:** adresář otevřený jako fd; cesta je z doby otevření
+  (`osrt::fs::File::path`), po přejmenování adresáře zastará.
+- **`statfs`, `fstatfs`** (`sys/statfs.h`, `sys/vfs.h`, rozložení jako
+  Linux na 64 bitech; `statvfs` přináší větev C++ 7a se stejným zdrojem):
+  velikost bloku, bloky celkem a volné bloky svazku relace FS (zpráva fsd
+  `INFO`, bloky čekající na uvolnění se nepočítají); všechny cesty
+  procesu jsou na jednom svazku, cesta nebo fd jen ověří platnost.
+  `f_type` = `MOFS_SUPER_MAGIC` (0x4D4F4653), počty souborů 0 (FS je nemá
+  pevně dané), `ST_RDONLY` se nenastavuje (práva jsou podle ACL souboru).
+- **`times`** (`sys/times.h`): uplynulý čas v tiku `sysconf(_SC_CLK_TCK)`
+  = 100; čas CPU jádro zatím nedává, pole `tms` jsou 0 (jako `clock()`
+  = -1).
+- **`asctime`, `asctime_r`, `ctime`, `ctime_r`:** formát normy C
+  (`"Sun Sep 16 01:03:52 1973\n"`), rok nad 9999 = `EOVERFLOW`; buffer
+  `asctime`/`ctime` je per vlákno.
+- **`ffs`, `ffsl`, `ffsll`** (`strings.h`).
+- **Relace a skupiny procesů nejsou:** proces vede vlastní relaci
+  i skupinu (číslo = `getpid()`); `setsid`, `getsid`, `getpgid`, `getpgrp`
+  ho vrací, `setpgid` jen „zůstat ve vlastní skupině“, jinak `EPERM`.
+- **`_exit`** (`unistd.h`, = `_Exit`), `select` i přes `sys/time.h` (jako glibc), čísla signálů
+  `SIGIO`, `SIGXCPU`, `SIGXFSZ`, `SIGPWR`, `SIGSYS`, `SIGSTKFLT` (cstd je
+  samo nevytváří) a bity `S_ISUID`, `S_ISGID`, `S_ISVTX`.
+- **`errno`:** úplná tabulka Linuxu (`asm-generic`, čísla 1-133 bez děr
+  41 a 58, stejná na obou architekturách) s texty `strerror`, aliasy
+  `EWOULDBLOCK`, `EDEADLOCK`, `EOPNOTSUPP`.
+
+### Síť
+
+- **Konstanty** jako Linux: `IPPROTO_*` (`netinet/in.h`), volby `IP_*`
+  a `IPV6_*`, `struct ip_mreq`, `ip_mreqn`, `ipv6_mreq`, `in_pktinfo`,
+  `in6_pktinfo`, makra `IN6_IS_ADDR_*`, `INADDR_*`; `SO_*`, `MSG_*`
+  (`sys/socket.h`), `TCP_*` (`netinet/tcp.h`). Konstanta neznamená
+  podporu: `setsockopt` přijme jen časové limity a volby bez účinku
+  (`SO_REUSEADDR`, `SO_KEEPALIVE`, velikosti bufferů, `SO_LINGER`,
+  `TCP_NODELAY`), ostatní `ENOPROTOOPT`. `getsockopt` navíc `SO_DOMAIN`,
+  `SO_PROTOCOL` a `IP_TTL` (64).
+- **`SOCK_RAW` a `AF_PACKET` = `EPERM`** (jako Linux bez `CAP_NET_RAW`):
+  surové pakety a rámce má jen netd; `AF_NETLINK` = `EAFNOSUPPORT`.
+- **Řídicí zprávy:** makra `CMSG_FIRSTHDR`, `CMSG_NXTHDR`, `CMSG_DATA`,
+  `CMSG_SPACE`, `CMSG_LEN`, `CMSG_ALIGN` a `struct cmsghdr` jako Linux.
+  `sendmsg` s řídicí zprávou vrátí `EOPNOTSUPP`: `SCM_RIGHTS` (předání
+  fd) jde v systému jinak (handly v kanálech, Wine má vlastní transport),
+  ostatní (`IP_PKTINFO` ...) netd nepřenáší. `recvmsg` žádné nevrací
+  (`msg_controllen` = 0).
+- **`getifaddrs`, `freeifaddrs`** (`ifaddrs.h`) a **`if_nameindex`,
+  `if_freenameindex`, `if_nametoindex`, `if_indextoname`** (`net/if.h`):
+  smyčka `lo` (index 1; 127.0.0.1/8 a ::1/128) a rozhraní sítě `eth0`
+  (index 2) ze stavu netd (`INFO`: adresa, maska z prefixu, broadcast
+  IPv4, `IFF_UP`/`IFF_RUNNING` podle linky) - jen s relací sítě
+  s právem `INFO`. Rozhraní bez adresy má `ifa_addr` = NULL; položky
+  `AF_PACKET` (MAC) nejsou.
+- **`ioctl` `SIOCGIF*` na socketu** (`struct ifreq`, `struct ifconf`,
+  `net/if.h`): `SIOCGIFFLAGS`, `SIOCGIFMTU` (smyčka 65536), `SIOCGIFINDEX`,
+  `SIOCGIFNAME`, `SIOCGIFADDR`, `SIOCGIFNETMASK`, `SIOCGIFBRDADDR` (jen
+  IPv4), `SIOCGIFHWADDR` (MAC, smyčka `ARPHRD_LOOPBACK`), `SIOCGIFCONF`
+  nad týmiž rozhraními; nastavování (`SIOCSIF*`) = `ENOTTY`.
+- **`gethostbyname`, `gethostbyaddr`** (`struct hostent`, `h_errno`,
+  `hstrerror`): staré rozhraní vrací NULL s `h_errno` = `NO_RECOVERY`;
+  programy mají `getaddrinfo`.
+
+### termios
+
+**[ověřeno v QEMU]** strana programu (krok `termios` testu `ctest` proti
+testovacímu terminálu v initu, host testy `termios_tests.rs`
+a `cargo test -p ttyproto`); strana okna terminálu (`shsess` spouští
+externí programy) **[navrženo]**.
+
+Proces spuštěný v terminálu dostane ve startovní zprávě vedle proudů
+stdin/stdout/stderr i **řídicí kanál terminálu** (štítek
+`abi::params::tag::TTY`, protokol `libs/ttyproto`). Data jdou dál proudy
+bajtů; kanál nese jen řízení:
+
+| op | Požadavek | Odpověď |
+|---|---|---|
+| `GET_MODE` 1 | - | režim (pole `struct termios`) |
+| `SET_MODE` 2 | kdy (`TCSANOW`/`TCSADRAIN`/`TCSAFLUSH`), režim | režim, který terminál skutečně nastavil |
+| `GET_SIZE` 3 | - | velikost okna (`struct winsize`) |
+| `SET_SIZE` 4 | velikost | - (okno terminálu ji klientovi měnit nedovolí: `ACCESS_DENIED`) |
+| `FLUSH` 5 | fronta | - |
+| `DRAIN` 6 | - | - |
+| `WATCH_SIZE` 7 | - | handle události, kterou terminál signalizuje při změně velikosti |
+
+- **Řádková disciplína je na straně terminálu** (rozhodnutí A): editor
+  řádku, echo a Ctrl+C (`SIGINT`) zůstávají v terminálu, který zná
+  nativní protokol okna; VT sekvence jsou jen adaptér pro převzaté
+  programy. V surovém režimu (`cfmakeraw`) posílá terminál bajty kláves
+  (šipky jako VT sekvence). Nepodporované příznaky terminál v odpovědi
+  `SET_MODE` vynuluje (zjistí je následné `tcgetattr`); linka je
+  virtuální (vždy 8 bitů bez parity, rychlost se jen uchová).
+- **cstd:** `tcgetattr`, `tcsetattr`, `cfmakeraw`, `cfget/setispeed`,
+  `cfget/setospeed`, `cfsetspeed`, `tcflush`, `tcdrain`, `tcflow`
+  a `tcsendbreak` (jen ověří terminál), `tcgetpgrp`/`tcsetpgrp`/`tcgetsid`
+  (vlastní skupina procesu), `ioctl` `TCGETS`, `TCSETS(W/F)`, `TCFLSH`,
+  `TIOCGWINSZ`, `TIOCSWINSZ`, `TIOCGPGRP`. Hodnoty a `struct termios`
+  (60 B) jako glibc.
+- **`isatty`** = fd 0-2 se stdio **a** proces má řídicí kanál terminálu;
+  kanál proudu od initu nebo roura terminál není (stdout je pak plně
+  bufferovaný jako na Linuxu). Jiný fd = `ENOTTY`.
+- **`SIGWINCH`:** první `tcgetattr` nebo `TIOCGWINSZ` požádá o událost
+  (`WATCH_SIZE`) a spustí vlákno, které po její signalizaci zavolá
+  `raise(SIGWINCH)`; obsluha běží v tom vlákně jako u časovače
+  (rozhodnutí 6A).
+
+### Vnitřní stavba (doplněk)
+
+- `cstd/src/spawn/mod.rs` akce souborů (`plan`), atributy, hledání
+  programu; `spawn/wait.rs` tabulka potomků, `waitpid` a spol., `kill`
+  na potomka; systémová část `sys/os_proc.rs` nad `osrt::process`
+  (`wait_any`). Host testy mají náhradní potomky (`exit:<kód>`,
+  `sleep:<ms>:<kód>`) v `sys/host.rs`.
+- `cstd/src/termios.rs` (klient `ttyproto`, `ioctl` terminálu, vlákno
+  `SIGWINCH`), `osrt::tty` (řídicí kanál ze startovní zprávy); host testy
+  mají terminál v paměti (`sys/host.rs`, `ttyproto::Tty`).
+- `cstd/src/semaphore.rs`, `pthread/attr.rs`, `statfs.rs`, `ifaddrs.rs`, `ifreq.rs`;
+  `time.rs` (`asctime`, `times`), `unistd.rs` (`setsid`), `misc.rs` (`ffs`), `socket.rs`
+  (`SOCK_RAW`, řídicí zprávy).
+- `osrt`: `fs::volume_space`, `fs::File::path`, `net::interface`,
+  `process::wait_any`, `thread::spawn_on`; `libos::thread::spawn_on_stack`.
 
 ## FFmpeg a licence
 

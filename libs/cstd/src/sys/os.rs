@@ -189,8 +189,34 @@ pub fn pipe(cloexec: bool, nonblock: bool) -> R<(i32, i32)> {
     }
 }
 
+/// Terminal = stdio a proces ma ridici kanal terminalu (`osrt::tty`);
+/// samotny kanal proudu (roura od initu) terminal neni.
 pub fn isatty(fd: i32) -> R<bool> {
-    fd::is_terminal(fd).map_err(e)
+    Ok(fd::is_terminal(fd).map_err(e)? && rt::tty::available())
+}
+
+pub fn tty_available() -> bool {
+    rt::tty::available()
+}
+
+/// Pozadavek na ridicim kanalu terminalu: (odpoved, syrove handly).
+pub fn tty_call(req: &[u8]) -> R<(Vec<u8>, Vec<u32>)> {
+    rt::tty::call(req).map_err(e)
+}
+
+/// Pocka na zmenu velikosti okna (handle udalosti z `WATCH_SIZE`).
+pub fn tty_wait_resize(ev: u32) -> R<()> {
+    rt::tty::wait_resize(ev).map_err(e)
+}
+
+/// Zavre syrove handly (nepotrebne handly odpovedi).
+pub fn close_handles(h: Vec<u32>) {
+    rt::tty::close_handles(h);
+}
+
+/// `errno` pro chybu protokolu (`abi::Error`).
+pub fn abi_errno(err: abi::Error) -> crate::c_int {
+    errno::from_os(err as i32)
 }
 
 /// Absolutni cesta otevreneho souboru nebo adresare (`openat`).
@@ -198,6 +224,13 @@ pub fn fd_path(fd: i32) -> R<Vec<u8>> {
     let d = desc(fd)?;
     let f = d.file().ok_or(errno::ENOTDIR)?;
     Ok(f.path().as_bytes().to_vec())
+}
+
+/// Pracovni adresar = adresar otevreny jako `fd` (cesta z doby otevreni).
+pub fn fchdir(fd: i32) -> R<()> {
+    let d = desc(fd)?;
+    let f = d.file().ok_or(errno::ENOTDIR)?;
+    rt::env::set_current_dir(f.path().as_bytes()).map_err(e)
 }
 
 /// Absolutni normalizovana cesta (`.`, `..`, pracovni adresar).
@@ -247,6 +280,11 @@ pub struct Thread(rt::thread::Thread);
 /// Nove vlakno nad osrt (TLS jako std, i pod zavadecem).
 pub fn spawn(stack: usize, f: super::ThreadFn) -> R<Thread> {
     rt::thread::spawn(stack, f).map(Thread).map_err(|_| errno::EAGAIN)
+}
+
+/// Vlakno na zasobniku volajiciho, ktery konci na `top` (`pthread_attr_setstack`).
+pub fn spawn_on(top: usize, f: super::ThreadFn) -> R<Thread> {
+    rt::thread::spawn_on(top, f).map(Thread).map_err(|_| errno::EAGAIN)
 }
 
 impl Thread {
@@ -364,6 +402,13 @@ pub fn sock_shutdown_write(fd: i32) -> R<()> {
 
 pub fn sock_name(fd: i32, peer: bool) -> R<SocketAddr> {
     sock(fd, |s, _| if peer { s.peer_addr() } else { s.local_addr() })
+}
+
+/// Rozhrani site relace; `None` = proces nema relaci site nebo pravo
+/// `INFO` (zbyde jen smycka).
+pub fn net_interface() -> Option<super::Iface> {
+    let i = rt::net::interface().ok()?;
+    Some(super::Iface { mac: i.mac, mtu: i.mtu, up: i.link_up, addr: i.addr })
 }
 
 pub fn sock_is_stream(fd: i32) -> R<(bool, bool)> {
