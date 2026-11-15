@@ -104,7 +104,9 @@ map.write::<u32>(0x14, status | 1);
 ### Čekání na mnoho klientů: `Waiter`
 
 **[ověřeno v QEMU]** x86_64 i aarch64 (fsd, test „v2: 200 soucasnych
-relaci a proud" v sadě `souborovy system`).
+relaci a proud" v sadě `souborovy system`; `WaitSet`: compd 100 klientů
+v sadě `gui`, termd 70 relací v sadě `shell`, taskd 100 producentů v sadě
+`ulohy`).
 
 `wait_many` (`OBJECT_WAIT_MANY`) bere nejvýš 64 objektů (`WAIT_MANY_MAX`,
 pole na zásobníku jádra). **Pravidlo: služba s proměnným počtem klientů
@@ -129,6 +131,19 @@ Smyčka: zaregistrovat každý objekt bez registrace -> `wait` -> u klíčů
 z paketů zrušit příznak registrace a obsloužit jen ty objekty (vyčíst vše
 do `SHOULD_WAIT`) -> znovu. Zavření objektu registraci uklidí jádro
 (vrátí rezervaci portu).
+
+**`libos::WaitSet`** - náhrada `wait_many` se stejným rozhraním pro
+smyčky, které už skládají pole `(handle, maska)` (compd, termd, accountd,
+taskd, inputd, audiod, devmgr, revocd, timed, supervisor initu):
+`wait(&items, deadline)` vrátí index první připravené položky a signály
+po položkách, termín = `TIMED_OUT`. Registrace drží mezi voláními
+(objekt bez události se znovu neregistruje), objekt pozná podle hodnoty
+handlu (obsahuje generaci slotu, po zavření a novém otevření je jiná),
+objekt, který v poli chybí, zapomene. Port jde sdílet (`port()`) pro
+vlastní registrace s klíči pod `FOREIGN_KEYS` (ploty v compd, lístky
+supervisoru): takový paket smyčku probudí, s `keep_foreign` si ho volající
+vyzvedne `take_foreign`. Port samotný do pole dát nejde (`NOT_SUPPORTED`
+jádra) - místo toho sdílet port množiny.
 
 Funkce: `wait_one`, `wait_many` (čekání na signály), `time::now`,
 `time::deadline_after`, `time::sleep`, `time::wall`, `time::local` (místní
