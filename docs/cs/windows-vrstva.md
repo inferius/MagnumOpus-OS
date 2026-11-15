@@ -264,7 +264,7 @@ Rozhodnutí uživatele a koordinátora (15. 11. 2026):
 | T2 signál vláknu jiného procesu | **A**: [`THREAD_INTERRUPT`](syscally.md#thread_interrupt) (syscall 76), právo `MANAGE` na handlu vlákna; obecné pro `kill`/`pthread_kill`, Ctrl+C a `SIGCHLD`. | vlákno Wine (jádro, `cstd` doručení) |
 | T3 paměť jiného procesu | **A v W2**: `PROCESS_MEMORY` (syscall **77 rezervovaný**), práva `READ_MEMORY`/`WRITE_MEMORY` na handlu procesu. | vlákno Wine, etapa W2 |
 | T4 dědění fd | **A**: `posix_spawn` dědí libovolná fd bez `FD_CLOEXEC` jako duplikáty handlů ve startovní zprávě. | vlákno plánovače |
-| T5 rezervace adres | **A**: `AT_MO_RESERVE`, `ld.so` rezervuje rozsahy před nahráním knihoven. | vlákno Wine |
+| T5 rezervace adres | **A**: `AT_MO_RESERVE`, `ld.so` rezervuje rozsahy před nahráním knihoven. Provedeno ještě dřív: rezervuje `spawn` před namapováním programu i `ld.so` ([dynamicke-linkovani.md](dynamicke-linkovani.md#rezervace-adres-před-zavedením-t5)), **[ověřeno v QEMU]**. | vlákno Wine |
 
 **Riziko T3 (výslovně):** `WRITE_MEMORY` dává držiteli úplnou vládu nad
 cílovým procesem (může přepsat kód, zásobník i klíče v paměti) a `READ_MEMORY`

@@ -221,6 +221,13 @@ pub struct Options {
     /// `[app] static_tls_reserve`; `None` = vychozi 2 KiB, zavadec omezi na
     /// 64 KiB). Jen program se zavadecem.
     pub static_tls_reserve: Option<u64>,
+    /// Rozsahy adres `(zacatek, delka)` rezervovane v potomkovi pred
+    /// namapovanim programu, zavadece a zasobniku (manifest `[app]
+    /// reserve`, spoustec Windows vrstvy); delka 0 = volne misto. Program je
+    /// najde v auxv `AT_MO_RESERVE` (`loader::reserved`). Jen program se
+    /// zavadecem (staticky = `NOT_SUPPORTED`); zarovnani na stranku
+    /// potomka, prekryv nebo rozsah mimo pamet procesu = `INVALID_ARGS`.
+    pub reserve: [(u64, u64); abi::loader::RESERVE_MAX],
     /// Staticky program dostane relaci s libd a listek (smi spoustet
     /// programy se zavadecem: shell, launchd, relace). Program se zavadecem
     /// relaci ma vzdy (pres zavadec).
@@ -233,6 +240,7 @@ impl Default for Options {
             stack_size: STACK_SIZE,
             qos: None,
             static_tls_reserve: None,
+            reserve: [(0, 0); abi::loader::RESERVE_MAX],
             libd: false,
         }
     }
@@ -333,11 +341,16 @@ pub fn spawn_with_thread(
     // mensi stranku) skonci chybou mapovani, ne smichanymi pravy.
     let page = crate::vm::page_size_of(&process)?;
 
+    // Rezervace adres jako prvni: nahodne baze modulu i zasobnik se jim
+    // vyhnou (T5, docs/cs/dynamicke-linkovani.md).
+    let reserve = reserve_ranges(&process, &opts.reserve, page, dynamic)?;
+
     // Program se zavadecem: oba na nahodne baze, auxv pro zavadec.
     let mut loader = None;
     if dynamic {
         let mut l = map_with_loader(&process, image, &elf, page)?;
         l.tls_reserve = opts.static_tls_reserve;
+        l.reserve = reserve;
         loader = Some(l);
     } else {
         map_image(&process, image, &elf, page, 0, false)?;
@@ -420,6 +433,33 @@ pub fn spawn_with_thread(
     Ok((process, thread, parent_end))
 }
 
+/// Rezervuje rozsahy `opts.reserve` v potomkovi (pevne adresy). Vraci
+/// pouzite rozsahy (pro auxv).
+fn reserve_ranges(
+    process: &Process,
+    ranges: &[(u64, u64); abi::loader::RESERVE_MAX],
+    page: u64,
+    dynamic: bool,
+) -> Result<Vec<(u64, u64)>> {
+    let used: Vec<(u64, u64)> = ranges.iter().copied().filter(|&(_, len)| len != 0).collect();
+    if used.is_empty() {
+        return Ok(used);
+    }
+    // Staticky program auxv nema: rezervace by nenasel.
+    if !dynamic {
+        return Err(Error::NotSupported);
+    }
+    for &(start, len) in &used {
+        let end = start.checked_add(len).ok_or(Error::InvalidArgs)?;
+        if start % page != 0 || len % page != 0 || start < abi::vm::USER_MIN || end > abi::vm::USER_MAX {
+            return Err(Error::InvalidArgs);
+        }
+        // Prekryv s jinym rozsahem jadro odmitne (pevna adresa).
+        process.reserve(start, len, MAP_FIXED).map_err(|e| if e == Error::NoMemory { e } else { Error::InvalidArgs })?;
+    }
+    Ok(used)
+}
+
 /// Udaje pro zavadec programu (auxv).
 struct Loader {
     phdr: u64,
@@ -429,6 +469,8 @@ struct Loader {
     ld_entry: u64,
     /// `AT_MO_TLS_RESERVE` (`None` = vychozi zavadece).
     tls_reserve: Option<u64>,
+    /// `AT_MO_RESERVE`: rezervovane rozsahy (prazdne = polozka chybi).
+    reserve: Vec<(u64, u64)>,
 }
 
 impl Loader {
@@ -451,17 +493,34 @@ impl Loader {
                 Some(r) => (abi::loader::AT_MO_TLS_RESERVE, r),
                 None => (AT_IGNORE, 0),
             },
+            // Tabulka rezervaci za auxv (adresa doplnena nize).
+            if self.reserve.is_empty() { (AT_IGNORE, 0) } else { (abi::loader::AT_MO_RESERVE, 0) },
             (AT_NULL, 0),
         ];
-        let words = 3 + 2 * pairs.len();
+        let table = if self.reserve.is_empty() { 0 } else { 1 + 2 * self.reserve.len() };
+        let words = 3 + 2 * pairs.len() + table;
         let len = (words * 8 + 16).next_multiple_of(16);
         let random_at = stack_top - 16;
+        let table_at = stack_top - len as u64 + ((3 + 2 * pairs.len()) * 8) as u64;
         let mut b = Vec::with_capacity(len);
         b.resize(len, 0);
         let mut put = |i: usize, v: u64| b[i * 8..i * 8 + 8].copy_from_slice(&v.to_le_bytes());
         for (k, (t, v)) in pairs.iter().enumerate() {
             put(3 + 2 * k, *t);
-            put(4 + 2 * k, if *t == AT_RANDOM { random_at } else { *v });
+            let v = match *t {
+                AT_RANDOM => random_at,
+                abi::loader::AT_MO_RESERVE => table_at,
+                _ => *v,
+            };
+            put(4 + 2 * k, v);
+        }
+        if table != 0 {
+            let at = 3 + 2 * pairs.len();
+            put(at, self.reserve.len() as u64);
+            for (i, &(start, rlen)) in self.reserve.iter().enumerate() {
+                put(at + 1 + 2 * i, start);
+                put(at + 2 + 2 * i, rlen);
+            }
         }
         let mut r = [0u8; 16];
         crate::random::fill(&mut r);
@@ -514,6 +573,7 @@ fn map_with_loader(process: &Process, image: &[u8], elf: &elf::ElfFile, page: u6
             ld_base,
             ld_entry: ld_base + ld_entry,
             tls_reserve: None,
+            reserve: Vec::new(),
         });
     }
     #[allow(unreachable_code)]

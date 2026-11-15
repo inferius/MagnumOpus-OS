@@ -10,6 +10,7 @@
 //! name = "Sitova sonda"            # pro dotazy uzivateli
 //! jit = true                       # smi spoustet pamet bez pecete (JIT); vychozi ne
 //! static_tls_reserve = "8K"        # rezerva statickeho TLS pro dlopen (vychozi 2K, nejvys 64K)
+//! reserve = ["0x10000-0x7fff0000"] # rozsahy adres rezervovane pred zavedenim (nejvys 8, Windows vrstva)
 //!
 //! [limits]                         # rozpocet jobu (bez sekce = bez limitu)
 //! memory = "64M"                   # uzivatelska pamet
@@ -93,6 +94,11 @@ pub struct Manifest {
     /// `[app] static_tls_reserve`: rezerva statickeho TLS pro knihovny
     /// z `dlopen` s initial-exec (`None` = vychozi zavadece 2 KiB).
     pub static_tls_reserve: Option<u64>,
+    /// `[app] reserve = ["0xZACATEK-0xKONEC", ...]`: rozsahy adres, ktere
+    /// `spawn` rezervuje v procesu pred namapovanim programu a knihoven
+    /// (`spawn::Options::reserve`, Windows vrstva). Zacatek a konec
+    /// zarovnane na 64 KiB (nejvetsi stranka), nejvys 8 rozsahu.
+    pub reserve: Vec<(u64, u64)>,
     /// Prikazy terminalu, ktere program (balicek) poskytuje.
     pub commands: Vec<CommandDecl>,
     /// `[audio] capture = true`: program smi pozadat o nahravani zvuku
@@ -137,6 +143,20 @@ impl Manifest {
         if static_tls_reserve.is_some_and(|s| s > 64 * 1024) {
             return Err(err("app.static_tls_reserve: nejvys 64K"));
         }
+        let reserve = match t.get("app.reserve") {
+            None => Vec::new(),
+            Some(_) => {
+                let items = t.get_strs("app.reserve").ok_or_else(|| err("app.reserve: seznam retezcu"))?;
+                let mut out = Vec::new();
+                for s in items {
+                    out.push(range(s).ok_or_else(|| Error(alloc::format!("app.reserve: neplatny rozsah {s}")))?);
+                }
+                if out.len() > RESERVE_MAX {
+                    return Err(err("app.reserve: nejvys 8 rozsahu"));
+                }
+                out
+            }
+        };
         let network = match t.get_table("network") {
             None => None,
             Some(n) => Some(network(n, id)?),
@@ -163,10 +183,25 @@ impl Manifest {
             network,
             jit: t.get_bool("app.jit").unwrap_or(false),
             static_tls_reserve,
+            reserve,
             commands,
             audio_capture: t.get_bool("audio.capture").unwrap_or(false),
         })
     }
+}
+
+/// Nejvic rozsahu `[app] reserve` (= `abi::loader::RESERVE_MAX`).
+pub const RESERVE_MAX: usize = 8;
+
+/// Rozsah `0xZACATEK-0xKONEC` (konec vylucne) -> `(zacatek, delka)`:
+/// zarovnani 64 KiB, neprazdny, v pameti procesu (0x10000..0x7fff_ffff_0000).
+pub fn range(s: &str) -> Option<(u64, u64)> {
+    let (a, b) = s.split_once('-')?;
+    let hex = |x: &str| u64::from_str_radix(x.trim().strip_prefix("0x")?, 16).ok();
+    let (start, end) = (hex(a)?, hex(b)?);
+    const ALIGN: u64 = 0x1_0000;
+    let ok = start % ALIGN == 0 && end % ALIGN == 0 && start >= 0x1_0000 && end > start && end <= 0x7FFF_FFFF_0000;
+    ok.then(|| (start, end - start))
 }
 
 fn size(t: &Table, path: &str) -> Result<Option<u64>, Error> {

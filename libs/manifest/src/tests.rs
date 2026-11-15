@@ -204,3 +204,26 @@ fn audio_capture_only_when_asked() {
     let c = Manifest::parse("[app]\nid = \"org.x\"\n[audio]\ncapture = true\n").unwrap();
     assert!(c.audio_capture);
 }
+
+#[test]
+fn reserve_ranges() {
+    let m = Manifest::parse("[app]\nid = \"org.x\"\n").unwrap();
+    assert!(m.reserve.is_empty(), "bez klice zadne rezervace");
+    let m = Manifest::parse("[app]\nid = \"org.x\"\nreserve = [\"0x10000-0x7fff0000\", \"0x140000000-0x150000000\"]\n").unwrap();
+    assert_eq!(m.reserve, alloc::vec![(0x1_0000, 0x7ffe_0000), (0x1_4000_0000, 0x1000_0000)]);
+    for bad in [
+        "\"0x1000-0x20000\"",
+        "\"0x10000-0x10000\"",
+        "\"0x20000-0x10000\"",
+        "\"10000-20000\"",
+        "\"0x10000-0x800000000000\"",
+        "\"0x0-0x10000\"",
+    ] {
+        let text = alloc::format!("[app]\nid = \"x\"\nreserve = [{bad}]\n");
+        assert!(Manifest::parse(&text).is_err(), "{bad}");
+    }
+    let nine: alloc::vec::Vec<alloc::string::String> =
+        (1..=9u64).map(|i| alloc::format!("\"{:#x}-{:#x}\"", i << 20, (i << 20) + 0x1_0000)).collect();
+    let text = alloc::format!("[app]\nid = \"x\"\nreserve = [{}]\n", nine.join(", "));
+    assert!(Manifest::parse(&text).is_err(), "nejvys 8 rozsahu");
+}

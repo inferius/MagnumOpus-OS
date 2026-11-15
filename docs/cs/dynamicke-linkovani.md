@@ -17,6 +17,7 @@ Wine a FFmpeg (LGPL, dynamicky). Programy v Rustu zůstávají statické
 | DL-4a | služba knihoven `libd` (zapečetěné šablony, sdílení kódu knihoven mezi procesy), spojení s libd pro každý proces (program se zavaděčem spustí kdokoli), pečeť oblastí (`PROT_SEAL`, jako `mseal`) pro kód a RELRO | **[ověřeno v QEMU]** x86_64 i aarch64 (sady `pamet`, `procesy`) |
 | DL-4b | `dlopen`/`dlsym`/`dlclose` přes libd (dynamické TLS: líná alokace přes DTV, dynamický TLSDESC), rezerva statického TLS z manifestu (`[app] static_tls_reserve`) a měření | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `procesy`) |
 | DL-4c | knihovny z disku a `$ORIGIN` (až budou aplikace z disku `/apps/<id>/`) | **[navrženo]** |
+| T5 | rezervace adres před zavedením (`AT_MO_RESERVE`, manifest `[app] reserve`) pro Windows vrstvu | **[ověřeno v QEMU]** x86_64 i aarch64 (sada `procesy`) |
 
 ## Návrh (schválené volby)
 
@@ -323,6 +324,36 @@ sysrootu C a start `__libc_start` v `osrt`, viz [cstd.md](cstd.md#libcso).
   nezarovnaným na 16 B (starý GCC), by na pomalé cestě mohl spadnout
   (clang je v pořádku).
 
+## Rezervace adres před zavedením (T5)
+
+**[ověřeno v QEMU]** x86_64 i aarch64. Pro Windows vrstvu
+([windows-vrstva.md](windows-vrstva.md#t5---rezervace-adres-pro-windows)):
+obrazy PE chtějí dolní 2 GiB a obvyklé báze (0x140000000), sdílená data
+systému leží na 0x7ffe0000. Na Linuxu je drží `wine-preloader` dřív, než
+dynamický zavaděč nahraje knihovny.
+
+- **Kdo rezervuje:** `spawn` (libos) v potomkovi **jako první krok** -
+  před namapováním programu, zavaděče i zásobníku (`VM_RESERVE` s pevnou
+  adresou). Proti rozhodnutí „rezervuje `ld.so`“ je to dřív: program
+  i `ld.so` u nás mapuje rodič, takže `ld.so` by své umístění už
+  neovlivnil. Náhodné báze modulů (`random_base`) i mapování bez pevné
+  adresy se rezervacím vyhnou samy (jádro je počítá jako obsazené).
+- **Odkud:** `spawn::Options::reserve` (až 8 rozsahů `(začátek, délka)`,
+  délka 0 = volné místo; spouštěč vrstvy) nebo manifest
+  `[app] reserve = ["0x10000-0x7fff0000", ...]` (konec výlučně, zarovnání
+  64 KiB, init ho předá do voleb).
+- **Předání programu:** auxv `abi::loader::AT_MO_RESERVE` = adresa tabulky
+  `[počet, začátek0, délka0, ...]` v bloku auxv na vrcholu zásobníku
+  hlavního vlákna (žije do konce procesu). `ld.so` ji nechá beze změny,
+  program ji čte `libos::loader::reserved()`. Rezervace patří programu:
+  mapuje do ní s `MAP_IN_RESERVATION` nebo ji uvolní.
+- **Chyby spuštění:** nezarovnaný rozsah, rozsah mimo paměť procesu nebo
+  překryv = `INVALID_ARGS`; statický program (nemá auxv) = `NOT_SUPPORTED`.
+- **Mez:** dolní rozsahy jsou u nás volné i bez rezervace (jádro dává
+  mapování bez pevné adresy od `USER_ALLOC_BASE` = 16 TiB, moduly od
+  32 TiB); rezervace chrání před mapováním s pevnou adresou nebo nápovědou
+  a dává programu jistotu, že rozsah je jeho.
+
 ## Vlákna, fini a debugger (DL-3)
 
 **[ověřeno v QEMU]** x86_64 i aarch64.
@@ -431,6 +462,8 @@ a commitují se, testy clang nepotřebují.
 | QEMU `procesy`: `rezerva statickeho TLS z voleb spusteni (manifest)` | `dltest-dl`: `dlopen` knihovny se 4 KiB initial-exec s výchozí rezervou selže s radou v `dlerror`, s `static_tls_reserve` 8 KiB uspěje a TLS sedí |
 | `cargo test -p dynload` (`surplus_*`, `tls_reserve_bounds`) | místo v rezervě pod moduly (x86_64) a nad nimi (aarch64), zarovnání, vyčerpání; mez rezervy |
 | `cargo test -p manifest` (`static_tls_reserve`) | `[app] static_tls_reserve`: velikost, nejvýš 64K |
+| QEMU `procesy`: `rezervace adres pred zavedenim (AT_MO_RESERVE)` | `dltest-rs` spuštěný s rozsahy 0x10000-0x7fff0000 a 0x140000000+256 MiB je najde v auxv a v paměti jsou celé jako rezervace; překryv a nezarovnaný začátek = `INVALID_ARGS`, statický program = `NOT_SUPPORTED` |
+| `cargo test -p manifest` (`reserve_ranges`) | `[app] reserve`: rozsahy hex, zarovnání 64 KiB, neprázdné, v paměti procesu, nejvýš 8 |
 | `cargo test -p libdproto` | jména knihoven, zprávy a meze; fuzz dekodéru (20 000 poškozených zpráv bez paniky) |
 | QEMU `pamet`: `pecet: ...` | zapečetěné mapování a rezervace: `VM_PROTECT`, `VM_UNMAP`, decommit, mapování přes ni a obsazení rezervace selžou, sousední oblasti fungují |
 | QEMU `procesy`: `libd sdili sablony knihoven mezi procesy` | druhý běh `dltest` nevytvoří novou šablonu, jen zásahy mezipaměti libd |

@@ -17,6 +17,7 @@ static (`ET_EXEC`, [rust-std.md](rust-std.md)).
 | DL-4a | the `libd` library service (sealed templates, sharing library code between processes), a libd connection for every process (anyone can start a program with the loader), region sealing (`PROT_SEAL`, like `mseal`) for code and RELRO | **[verified in QEMU]** x86_64 and aarch64 (`pamet`, `procesy` suites) |
 | DL-4b | `dlopen`/`dlsym`/`dlclose` via libd (dynamic TLS: lazy allocation via the DTV, dynamic TLSDESC), static TLS reserve from the manifest (`[app] static_tls_reserve`) and measurement | **[verified in QEMU]** x86_64 and aarch64 (`procesy` suite) |
 | DL-4c | libraries from disk and `$ORIGIN` (once applications run from disk `/apps/<id>/`) | **[designed]** |
+| T5 | address reservations before loading (`AT_MO_RESERVE`, manifest `[app] reserve`) for the Windows layer | **[verified in QEMU]** x86_64 and aarch64 (`procesy` suite) |
 
 ## Design (approved choices)
 
@@ -342,6 +343,40 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
   modules); C code calling `__tls_get_addr` with a stack not aligned to
   16 B (old GCC) could crash on the slow path (clang is fine).
 
+## Address reservations before loading (T5)
+
+**[verified in QEMU]** x86_64 and aarch64. For the Windows layer
+([windows-layer.md](windows-layer.md#t5---address-reservations-for-windows)):
+PE images want the lower 2 GiB and the usual bases (0x140000000), the
+system shared data sits at 0x7ffe0000. On Linux `wine-preloader` holds them
+before the dynamic loader loads libraries.
+
+- **Who reserves:** `spawn` (libos) in the child **as the first step** -
+  before mapping the program, the loader and the stack (`VM_RESERVE` at a
+  fixed address). Compared with the decision "`ld.so` reserves" this is
+  earlier: here the parent maps both the program and `ld.so`, so `ld.so`
+  could no longer affect its own placement. Random module bases
+  (`random_base`) and mappings without a fixed address avoid the
+  reservations by themselves (the kernel counts them as taken).
+- **From where:** `spawn::Options::reserve` (up to 8 `(start, length)`
+  ranges, length 0 = free slot; the layer launcher) or the manifest
+  `[app] reserve = ["0x10000-0x7fff0000", ...]` (end exclusive, 64 KiB
+  alignment, init passes it into the options).
+- **Handing over to the program:** auxv `abi::loader::AT_MO_RESERVE` = the
+  address of the table `[count, start0, length0, ...]` in the auxv block at
+  the top of the main thread stack (lives until the process ends). `ld.so`
+  leaves it alone, the program reads it with `libos::loader::reserved()`.
+  The reservation belongs to the program: it maps into it with
+  `MAP_IN_RESERVATION` or releases it.
+- **Spawn errors:** an unaligned range, a range outside process memory or
+  an overlap = `INVALID_ARGS`; a static program (no auxv) =
+  `NOT_SUPPORTED`.
+- **Limit:** the lower ranges are free here even without a reservation (the
+  kernel places mappings without a fixed address from `USER_ALLOC_BASE` =
+  16 TiB, modules from 32 TiB); the reservation protects against mappings
+  with a fixed address or a hint and gives the program certainty that the
+  range is its own.
+
 ## Threads, fini and the debugger (DL-3)
 
 **[verified in QEMU]** x86_64 and aarch64.
@@ -457,6 +492,8 @@ not produce it on aarch64). They are built with clang and ld.lld with
 | QEMU `procesy`: `rezerva statickeho TLS z voleb spusteni (manifest)` | `dltest-dl`: `dlopen` of a library with 4 KiB initial-exec fails with the default reserve with advice in `dlerror`, succeeds with `static_tls_reserve` 8 KiB and the TLS is right |
 | `cargo test -p dynload` (`surplus_*`, `tls_reserve_bounds`) | space in the reserve below the modules (x86_64) and above them (aarch64), alignment, exhaustion; the reserve bound |
 | `cargo test -p manifest` (`static_tls_reserve`) | `[app] static_tls_reserve`: a size, at most 64K |
+| QEMU `procesy`: `rezervace adres pred zavedenim (AT_MO_RESERVE)` | `dltest-rs` started with the ranges 0x10000-0x7fff0000 and 0x140000000+256 MiB finds them in auxv and they are whole reservations in memory; an overlap and an unaligned start = `INVALID_ARGS`, a static program = `NOT_SUPPORTED` |
+| `cargo test -p manifest` (`reserve_ranges`) | `[app] reserve`: hex ranges, 64 KiB alignment, non-empty, inside process memory, at most 8 |
 | `cargo test -p libdproto` | library names, messages and limits; decoder fuzzing (20,000 damaged messages without a panic) |
 | QEMU `pamet`: `pecet: ...` | a sealed mapping and reservation: `VM_PROTECT`, `VM_UNMAP`, decommit, mapping over it and filling the reservation fail, neighbouring regions work |
 | QEMU `procesy`: `libd sdili sablony knihoven mezi procesy` | the second `dltest` run creates no new template, only libd cache hits |
