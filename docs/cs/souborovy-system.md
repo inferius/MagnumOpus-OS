@@ -310,7 +310,7 @@ potomků, takže strom se 100 miliony položek má jen 4 úrovně.
 
 | Offset | Pole | Význam |
 |---|---|---|
-| 0 | kind u8 | 1 = soubor, 2 = adresář, 3 = symbolický odkaz |
+| 0 | kind u8 | 1 = soubor, 2 = adresář, 3 = symbolický odkaz, 5 = uzel socketu `AF_UNIX` (bez dat) |
 | 1 | flags u8 | příznaky objektu, rezervované: 1 = data jen v cloudu (zatím 0; nastavení synchronizace jsou atributy `sync.*`, ne bity) |
 | 4 | acl u32 | číslo popisu oprávnění (0 = zdědit; přijde ve fázi 1d) |
 | 8 | size | soubor: velikost v bajtech (nejvýš 2^63-1); odkaz: délka cíle |
@@ -1701,8 +1701,11 @@ zůstávají. Z receptu systému se nezužuje. Jinak `ACCESS_DENIED`.
 |---|---|---|---|
 | 31 | `CONNECT` | příznaky u32 (1 = řídicí, jen z řídicí relace) | nová relace (handle) |
 | 118 | `REOPEN` | dataset u64, oid u64, generace u64, přístup u8, sdílení u8 | handle u64, `Stat`, `Revision` (jako `OPEN`) |
-| 119 | `POSIX_LOCK` | handle u64, příkaz u8 (`TEST` 0, `SET` 1, `SET_WAIT` 2, `UNLOCK` 3), třída u8 (`FCNTL` 0, `FLOCK` 1), výhradní u8, od u64, délka u64 (0 = do konce) | výsledek u8: `DONE` 0, `CONFLICT` 1 + výhradní u8, od u64, délka u64; `DEADLOCK` 2 |
+| 119 | `POSIX_LOCK` | handle u64, příkaz u8 (`TEST` 0, `SET` 1, `SET_WAIT` 2, `UNLOCK` 3), třída u8 (`FCNTL` 0, `FLOCK` 1), výhradní u8, od u64, délka u64 (0 = do konce), číslo procesu u32 | výsledek u8: `DONE` 0, `CONFLICT` 1 + výhradní u8, od u64, délka u64, číslo procesu držitele u32 (0 = neznámé); `DEADLOCK` 2 |
 | 120 | `OPEN_STREAM` | handle u64, režim u8 (`READ` 0, `WRITE` 1, `APPEND` 2), pozice u64 | kanál proudu bajtů (handle ve zprávě) |
+| 121 | `SOCKET_BIND` | cesta + handle kanálu posluchače | - (existující jméno `ALREADY_EXISTS`) |
+| 122 | `SOCKET_CONNECT` | cesta, číslo procesu u32 + handle konce spojení | - (`CONNECTION_REFUSED`, plná fronta `SHOULD_WAIT`) |
+| 123 | `WHOAMI` | - | uživatel u64 (0 = systém), počet u32, skupiny u64 |
 
 **`OPEN_STREAM`** **[ověřeno v QEMU]** (sada `cstd`, krok `posix2`:
 výstup potomka `posix_spawn` do souboru a 200 000 bajtů souboru na jeho
@@ -1714,9 +1717,22 @@ relace klienta. Obsluhuje ho hlavní smyčka fsd vedle relací
 (`user/fsd/src/stream.rs`): čtení posílá kusy po 60 KiB, dokud se fronta
 kanálu nezaplní, pak zkouší znovu po 2 ms (kanál nemá signál
 „zapisovatelný“) a na konci souboru kanál zavře; zápis bere zprávy
-kanálu a zapisuje je od pozice (`APPEND` na konec). Nejvýš 16 proudů;
-relace a proudy dohromady nejvýš 62 (limit `OBJECT_WAIT_MANY` 64 bez
-řídicího kanálu a kanálu úloh). Restart fsd proudy ukončí.
+kanálu a zapisuje je od pozice (`APPEND` na konec). Nejvýš 16 proudů
+(`stream::MAX_STREAMS`); smyčka čeká přes port, počet relací omezuje jen
+paměť. Restart fsd proudy ukončí.
+
+**Uzly socketů `AF_UNIX`** **[ověřeno v QEMU]** (sada `cstd`, krok `unix`
+testu `ctest`): `SOCKET_BIND` vytvoří objekt druhu 5 (jméno, vlastník,
+práva jako soubor; data nemá) a přiřadí mu posluchače - kanál, do kterého
+fsd při `SOCKET_CONNECT` zapíše přihlášení klienta (uživatel a skupina
+z identity relace, ověřené fsd; číslo procesu od klienta) a handle konce
+spojení. `SOCKET_CONNECT` chce právo zápisu na uzel. Mapa uzel ->
+posluchač je jen v paměti fsd (`user/fsd/src/serve_sock.rs`): konec
+posluchače nebo restart fsd = `CONNECTION_REFUSED`, uzel zůstane jako na
+Unixu (smaže ho `unlink`, `bind` na existující jméno = `ALREADY_EXISTS`).
+Socket v jádře ani v FS není: spojení je dvojice kanálů mezi procesy, fsd
+jen zprostředkuje první setkání ([cstd](cstd.md#sockety-af_unix)).
+**`WHOAMI`** vrátí identitu relace (C `getuid`, `getgroups`).
 
 Relace s lístkem dnes: init (řídicí), `fwd` (`/config`). Relace pro
 `dnsd`, `ntpd` (úložiště certifikátů) a `revocd` zatím lístek nemají -

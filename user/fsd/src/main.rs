@@ -26,6 +26,7 @@ mod serve;
 mod serve_data;
 mod serve_hist;
 mod serve_perm;
+mod serve_sock;
 mod serve_v2;
 mod stream;
 mod tasks;
@@ -164,6 +165,9 @@ fn main(startup: Startup) -> i64 {
         orphan_cleanup: restart.map(|_| time::deadline_after(ORPHAN_GRACE)),
         posix: fs::posix_lock::PosixLocks::new(),
         streams: Vec::new(),
+        lock_pids: Default::default(),
+        listeners: Default::default(),
+        in_handles: Vec::new(),
     };
     if let Some(g) = restart {
         println!("fsd: nova instance po padu (generace {g}), sirotky uklidi za {} s", ORPHAN_GRACE.as_secs());
@@ -411,6 +415,7 @@ fn serve_session(svc: &mut Service, sessions: &mut Vec<Session>, i: usize) -> Op
         {
             return None;
         }
+        svc.in_handles = msg.handles;
         let (reply, handles, new_session, ops, watch) = match svc.handle(&mut sessions[i], &msg.data) {
             Ok(r) => (fsproto::reply(Ok(r.body)), r.handles, r.new_session, r.session_ops, r.watch),
             Err(e) => (fsproto::reply(Err(e)), Vec::new(), None, Vec::new(), None),

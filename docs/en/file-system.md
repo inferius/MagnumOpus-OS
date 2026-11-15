@@ -312,7 +312,7 @@ content).
 
 | Offset | Field | Meaning |
 |---|---|---|
-| 0 | kind u8 | 1 = file, 2 = directory, 3 = symbolic link |
+| 0 | kind u8 | 1 = file, 2 = directory, 3 = symbolic link, 5 = `AF_UNIX` socket node (no data) |
 | 1 | flags u8 | object flags, reserved: 1 = data only in the cloud (0 for now; sync settings are `sync.*` attributes, not bits) |
 | 4 | acl u32 | permission descriptor number (0 = inherit; comes in phase 1d) |
 | 8 | size | file: size in bytes (at most 2^63-1); link: target length |
@@ -1754,8 +1754,11 @@ groups stay. A system recipe cannot be narrowed. Otherwise `ACCESS_DENIED`.
 |---|---|---|---|
 | 31 | `CONNECT` | flags u32 (1 = control, only from a control session) | new session (handle) |
 | 118 | `REOPEN` | dataset u64, oid u64, generation u64, access u8, share u8 | handle u64, `Stat`, `Revision` (like `OPEN`) |
-| 119 | `POSIX_LOCK` | handle u64, command u8 (`TEST` 0, `SET` 1, `SET_WAIT` 2, `UNLOCK` 3), class u8 (`FCNTL` 0, `FLOCK` 1), exclusive u8, from u64, length u64 (0 = to the end) | result u8: `DONE` 0, `CONFLICT` 1 + exclusive u8, from u64, length u64; `DEADLOCK` 2 |
+| 119 | `POSIX_LOCK` | handle u64, command u8 (`TEST` 0, `SET` 1, `SET_WAIT` 2, `UNLOCK` 3), class u8 (`FCNTL` 0, `FLOCK` 1), exclusive u8, from u64, length u64 (0 = to the end), process number u32 | result u8: `DONE` 0, `CONFLICT` 1 + exclusive u8, from u64, length u64, holder's process number u32 (0 = unknown); `DEADLOCK` 2 |
 | 120 | `OPEN_STREAM` | handle u64, mode u8 (`READ` 0, `WRITE` 1, `APPEND` 2), position u64 | byte-stream channel (handle in the message) |
+| 121 | `SOCKET_BIND` | path + handle of the listener channel | - (an existing name `ALREADY_EXISTS`) |
+| 122 | `SOCKET_CONNECT` | path, process number u32 + handle of the connection end | - (`CONNECTION_REFUSED`, full queue `SHOULD_WAIT`) |
+| 123 | `WHOAMI` | - | user u64 (0 = system), count u32, groups u64 |
 
 **`OPEN_STREAM`** **[verified in QEMU]** (suite `cstd`, step `posix2`: the
 output of a `posix_spawn` child into a file and 200 000 bytes of a file on
@@ -1769,9 +1772,24 @@ session. The fsd main loop serves it next to the sessions
 queue is full, then retries after 2 ms (a channel has no "writable"
 signal) and closes the channel at the end of the file; writing takes the
 channel's messages and writes them from the position (`APPEND` at the end).
-At most 16 streams; sessions and streams together at most 62 (the
-`OBJECT_WAIT_MANY` limit of 64 without the control and task channels). An
-fsd restart ends the streams.
+At most 16 streams (`stream::MAX_STREAMS`); the loop waits through a port,
+the number of sessions is limited only by memory. An fsd restart ends the
+streams.
+
+**`AF_UNIX` socket nodes** **[verified in QEMU]** (suite `cstd`, step
+`unix` of the `ctest` test): `SOCKET_BIND` creates an object of kind 5
+(name, owner, rights like a file; it has no data) and assigns a listener to
+it - a channel into which fsd writes, on `SOCKET_CONNECT`, the client's
+credentials (user and group from the session identity, verified by fsd; the
+process number from the client) and the handle of the connection end.
+`SOCKET_CONNECT` needs the write right on the node. The node -> listener
+map lives only in fsd memory (`user/fsd/src/serve_sock.rs`): the end of the
+listener or an fsd restart = `CONNECTION_REFUSED`, the node stays as on
+Unix (`unlink` removes it, `bind` to an existing name = `ALREADY_EXISTS`).
+The socket is neither in the kernel nor in the FS: a connection is a
+channel pair between processes, fsd only arranges the first meeting
+([cstd](cstd.md#af_unix-sockets)). **`WHOAMI`** returns the session
+identity (C `getuid`, `getgroups`).
 
 Sessions with a lease today: init (control), `fwd` (`/config`). The sessions
 for `dnsd`, `ntpd` (certificate store) and `revocd` have no lease yet -

@@ -1,5 +1,6 @@
 //! Obsluha pozadavku protokolu `fsproto`.
 
+use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use fs::{Fs, Kind};
@@ -36,6 +37,7 @@ pub(crate) fn stat(s: fs::Stat) -> Stat {
             Kind::Dir => kind::DIR,
             Kind::Symlink => kind::SYMLINK,
             Kind::Dataset => kind::DATASET,
+            Kind::Socket => kind::SOCKET,
         },
         size: s.size,
         mtime: s.mtime,
@@ -60,6 +62,7 @@ fn kind_raw(k: Kind) -> u8 {
         Kind::Dir => kind::DIR,
         Kind::Symlink => kind::SYMLINK,
         Kind::Dataset => kind::DATASET,
+        Kind::Socket => kind::SOCKET,
     }
 }
 
@@ -100,6 +103,13 @@ pub struct Service {
     pub posix: fs::posix_lock::PosixLocks,
     /// Soubory jako proudy bajtu (`OPEN_STREAM`, `stream.rs`).
     pub streams: Vec<crate::stream::Stream>,
+    /// Cislo procesu vlastnika zamku POSIX (od klienta, pro `l_pid`).
+    pub lock_pids: BTreeMap<u64, u32>,
+    /// Posluchaci uzlu socketu `AF_UNIX` (`serve_sock.rs`), jen v pameti.
+    pub listeners: crate::serve_sock::Listeners,
+    /// Handly prave zpracovavaneho pozadavku (bere si je operace, ktera je
+    /// potrebuje; ostatni se po pozadavku zavrou).
+    pub in_handles: Vec<libos::Handle>,
 }
 
 /// Klic rozpracovaneho vypisu: (dataset, snapshot) u vypisu snapshotu
@@ -137,6 +147,12 @@ impl Service {
         }
         if opcode == op::COMMIT {
             self.commit_requested = true;
+        }
+        let mut hs = core::mem::take(&mut self.in_handles);
+        let sock = self.handle_sock(sess, opcode, &mut r, &mut hs);
+        drop(hs);
+        if let Some(res) = sock {
+            return res;
         }
         if let Some(res) = self.handle_v2(sess, opcode, &mut r) {
             return res;

@@ -132,6 +132,8 @@ pub mod kind {
     pub const SYMLINK: u8 = 3;
     /// Vstup do jineho datasetu (slozka s vlastni historii).
     pub const DATASET: u8 = 4;
+    /// Uzel socketu `AF_UNIX` (`v2::op::SOCKET_BIND`).
+    pub const SOCKET: u8 = 5;
 }
 
 /// Metadata objektu.
@@ -412,7 +414,12 @@ impl FsClient {
     }
 
     fn call_raw(&self, kind: svcclient::Kind, data: &[u8]) -> Result<(Vec<u8>, Vec<libos::Handle>)> {
-        let msg = self.conn.call(kind, data, Vec::new())?;
+        self.call_sending(kind, data, Vec::new())
+    }
+
+    /// Pozadavek s handly (napr. konec kanalu socketu).
+    pub(crate) fn call_sending(&self, kind: svcclient::Kind, data: &[u8], handles: Vec<libos::Handle>) -> Result<(Vec<u8>, Vec<libos::Handle>)> {
+        let msg = self.conn.call(kind, data, handles)?;
         let mut r = Reader::new(&msg.data);
         let status = r.i32()?;
         r.u32()?;
