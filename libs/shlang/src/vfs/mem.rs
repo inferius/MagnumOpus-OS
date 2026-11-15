@@ -221,13 +221,33 @@ impl Fs for MemFs {
         Ok(())
     }
 
-    fn permissions(&mut self, path: &str) -> FsResult<crate::acl::Perms> {
+    /// Jako `fs::Fs::acl_view`: zdedene granty predku s dedenim, od
+    /// nejblizsiho predka, ktery nededi (nebo od korene).
+    fn acl_view(&mut self, path: &str) -> FsResult<crate::acl::View> {
         self.guard_inside(path)?;
         let k = key(path);
-        if !self.nodes.contains_key(&k) {
-            return Err(Error::NotFound);
+        let Some((orig, _)) = self.nodes.get(&k) else { return Err(Error::NotFound) };
+        let acl = self.acls.get(&k).cloned();
+        let mut inherited = Vec::new();
+        if !acl.as_ref().is_some_and(|a| a.protected) {
+            let mut up = String::from(orig.as_str());
+            while let Some(p) = parent(&up) {
+                up = String::from(p);
+                let (Some(a), Some((name, _))) = (self.acls.get(&key(&up)), self.nodes.get(&key(&up))) else { continue };
+                let mut here: Vec<_> = a
+                    .grants
+                    .iter()
+                    .filter(|g| g.flags & crate::acl::grant::INHERIT != 0)
+                    .map(|g| crate::acl::Inherited { who: g.who, rights: g.rights, from: name.clone() })
+                    .collect();
+                here.append(&mut inherited);
+                inherited = here;
+                if a.protected {
+                    break;
+                }
+            }
         }
-        Ok(crate::acl::Perms { owner: self.owner, rights: self.rights, acl: self.acls.get(&k).cloned() })
+        Ok(crate::acl::View { perms: crate::acl::Perms { owner: self.owner, rights: self.rights, acl }, inherited })
     }
 
     fn set_acl(&mut self, path: &str, acl: Option<&crate::acl::Acl>) -> FsResult<()> {

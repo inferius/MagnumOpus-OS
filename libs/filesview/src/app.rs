@@ -16,6 +16,7 @@ use crate::listing::{Listing, SortBy};
 use crate::nav::Nav;
 use crate::clipfmt;
 use crate::preview::{self, Content};
+use crate::props::{Props, PropsMsg};
 
 /// Nejvetsi BMP, ktery nahled precte cely a ukaze jako obrazek.
 const IMAGE_BYTES: u64 = 24 << 20;
@@ -114,6 +115,9 @@ pub enum Msg {
     DragStart(Vec<u64>),
     /// Pusteni tazenych radku: na radek (slozku) nebo prazdne misto.
     Drop(Option<u64>, Vec<u64>),
+    /// Vlastnosti vybrane polozky (bez vyberu aktualni slozky).
+    Properties,
+    Props(PropsMsg),
 }
 
 pub struct FileManager<B: Backend> {
@@ -149,6 +153,11 @@ pub struct FileManager<B: Backend> {
     req: u32,
     /// Po navratu do rodice vybrat tuto polozku.
     reselect: Option<String>,
+    /// Otevreny panel Vlastnosti.
+    pub props: Option<Props>,
+    /// Jmena uctu (nactou se s prvnimi Vlastnostmi) a cislo uzivatele.
+    pub names: Option<Vec<(u64, String)>>,
+    pub me: Option<u64>,
 }
 
 impl<B: Backend> FileManager<B> {
@@ -178,6 +187,9 @@ impl<B: Backend> FileManager<B> {
             last_trashed: Vec::new(),
             req: 0,
             reselect: None,
+            props: None,
+            names: None,
+            me: None,
         };
         m.b.copier(ClientMsg::Hello { version: proto::VERSION });
         m.b.copier(ClientMsg::Subscribe);
@@ -295,6 +307,7 @@ impl<B: Backend> FileManager<B> {
     }
 
     fn after_nav(&mut self) {
+        self.props = None;
         self.sel.clear();
         self.edit = None;
         self.search.clear();
@@ -657,6 +670,19 @@ impl<B: Backend> FileManager<B> {
                 }
             }
             Msg::Drop(target, ids) => self.drop_on(target, ids),
+            Msg::Properties => self.open_props(),
+            Msg::Props(pm) => {
+                let names = self.names.clone().unwrap_or_default();
+                let me = self.me;
+                if let Some(p) = &mut self.props
+                    && p.update(&mut self.b, &names, me, pm)
+                {
+                    self.props = None;
+                    // Prava se mohla zmenit (zamek, druh polozky).
+                    self.preview = None;
+                    self.load();
+                }
+            }
             Msg::TrashPurgeConfirm(yes) => {
                 if yes {
                     self.trash_action(false);
@@ -679,6 +705,27 @@ impl<B: Backend> FileManager<B> {
         let sources: Vec<String> = ids.iter().filter_map(|id| self.path_of(*id)).collect();
         self.status = format!("Přesun do {}: {}.", t.e.name, crate::format::plural(sources.len() as u64, "položka", "položky", "položek"));
         self.start(Op::Move, sources, dest);
+    }
+
+    /// Panel Vlastnosti: jedna vybrana polozka, bez vyberu aktualni
+    /// slozka; v Kosi nic.
+    fn open_props(&mut self) {
+        if self.mode != Mode::Folder || self.sel.len() > 1 {
+            return;
+        }
+        let path = match self.sel.first() {
+            Some(&id) => match self.path_of(id) {
+                Some(p) => p,
+                None => return,
+            },
+            None => self.nav.cur.clone(),
+        };
+        if self.names.is_none() {
+            self.names = Some(self.b.names());
+            self.me = self.b.uid();
+        }
+        self.edit = None;
+        self.props = Some(Props::load(&mut self.b, &path, 0));
     }
 
     /// Je cesta slozka (pro akci "ukazat cestu")?

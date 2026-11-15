@@ -294,3 +294,37 @@ fn posix_mode_follows_grants() {
     assert_eq!(fs.mode("/tmp/.wine-1000").unwrap(), 0o705);
     assert_clean(&mut fs);
 }
+
+#[test]
+fn acl_view_lists_inherited_with_origin() {
+    let mut fs = home_fs();
+    fs.set_acl("/home/alice", acl(&[(BOB, rights::TRAVERSE, grant::THIS)])).unwrap();
+    fs.set_principal(alice());
+    fs.create("/home/alice/sdilene", Kind::Dir).unwrap();
+    fs.create("/home/alice/sdilene/projekt", Kind::Dir).unwrap();
+    fs.create("/home/alice/sdilene/projekt/a.txt", Kind::File).unwrap();
+    fs.set_acl("/home/alice/sdilene", acl(&[(BOB, rights::VIEW, grant::BOTH)])).unwrap();
+    fs.set_acl("/home/alice/sdilene/projekt", acl(&[(TEAM, rights::EDIT, grant::BOTH), (BOB, rights::RUN, grant::THIS)]))
+        .unwrap();
+    fs.set_principal(bob());
+    let v = fs.acl_view("/home/alice/sdilene/projekt/a.txt").unwrap();
+    assert_eq!(v.perms.owner, ALICE);
+    assert_eq!(v.perms.acl, None);
+    assert_eq!(v.perms.rights, rights::EDIT);
+    let got: Vec<(u64, u8, &str)> = v.inherited.iter().map(|g| (g.who, g.rights, g.from.as_str())).collect();
+    // `/` a `/home` maji jen THIS (nededi se); grant jen pro slozku (THIS) se nededi.
+    assert_eq!(got, [(BOB, rights::VIEW, "/home/alice/sdilene"), (TEAM, rights::EDIT, "/home/alice/sdilene/projekt")]);
+    // Vlastni popis s PROTECTED: nic zdedeneho neplati.
+    fs.set_principal(alice());
+    fs.set_acl(
+        "/home/alice/sdilene/projekt/a.txt",
+        Some(Acl { flags: acl_flags::PROTECTED, grants: vec![Grant { who: BOB, rights: rights::VIEW, flags: grant::THIS }] }),
+    )
+    .unwrap();
+    let v = fs.acl_view("/home/alice/sdilene/projekt/a.txt").unwrap();
+    assert!(v.inherited.is_empty());
+    assert!(v.perms.acl.is_some_and(|a| a.protected()));
+    // Kdo objekt nevidi, nedozvi se nic.
+    fs.set_principal(Some(Principal::user(2000, &[])));
+    assert_eq!(fs.acl_view("/home/alice/sdilene").err(), Some(Error::NotFound));
+}

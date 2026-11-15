@@ -134,9 +134,16 @@ impl Fs for FsdFs {
         self.client.stat(path).map(|s| meta(&s))
     }
 
-    fn permissions(&mut self, path: &str) -> FsResult<shlang::acl::Perms> {
-        let p = self.client.permissions(path)?;
-        Ok(shlang::acl::Perms { owner: p.owner, rights: p.rights, acl: p.acl.map(acl_in) })
+    fn acl_view(&mut self, path: &str) -> FsResult<shlang::acl::View> {
+        let v = self.client.acl_view(path)?;
+        Ok(shlang::acl::View {
+            perms: shlang::acl::Perms { owner: v.perms.owner, rights: v.perms.rights, acl: v.perms.acl.map(acl_in) },
+            inherited: v
+                .inherited
+                .into_iter()
+                .map(|g| shlang::acl::Inherited { who: g.who, rights: g.rights, from: g.from })
+                .collect(),
+        })
     }
 
     fn set_acl(&mut self, path: &str, acl: Option<&shlang::acl::Acl>) -> FsResult<()> {

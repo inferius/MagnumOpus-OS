@@ -1690,19 +1690,22 @@ fs.set_acl("/home/alice/shared/private", Some(Acl {
 | 51 | `SET_OWNER` | path, owner u64 (control only) | - |
 | 52 | `SET_NOEXEC` | dataset root, enable u8 | - |
 | 53 | `NOEXEC` | dataset root | flag u8 |
+| 94 | `ACL_VIEW` | path | like `PERMISSIONS` + inherited grants: count u32, (who u64, rights u8, origin str)...; origin = the nearest folder above whose descriptor the grant inherits (a session path, empty = outside the session's mounts), ordered from the root; empty with `PROTECTED` |
 
 `Stat` additionally has the owner u64 and the caller's effective rights u8.
 `OPEN` knows the `EXECUTE` access (8).
 
 **In the shell:** the [`acl`](shell-commands.md#acl) command works over
-`PERMISSIONS` and `SET_ACL` of the terminal user's session: a listing
+`ACL_VIEW` and `SET_ACL` of the terminal user's session: a listing
 (owner, your level, inheritance, own and inherited grants), adding and
 removing a grant. The levels are `rights` masks, ascending and the same as the Permissions tab in Files:
 View = `VIEW`, Run = `RUN`, Edit = `EDIT | EXECUTE`, Manage = everything;
 any other mask shows as Custom with the list of rights. The descriptor is written whole (read, change,
-write), fsd enforces the Manage right. Init supplies user names from the
-account list (powerproto `Accounts`), the shell knows the groups
-`everyone` and `users` itself, other groups only by number so far.
+write), fsd enforces the Manage right. Init supplies the (login) user names from
+the account service channel `names` (`NAMES`, the same source as the
+Permissions tab) on the powerproto `Accounts` request over the session's
+power channel; the shell knows the groups `everyone` and `users` itself,
+other groups only by number so far.
 **[verified in QEMU]**
 
 ### Recovery after an fsd crash

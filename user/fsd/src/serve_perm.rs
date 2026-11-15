@@ -1,4 +1,4 @@
-//! Operace identity relaci a opravneni (protokol v2, op 46-53).
+//! Operace identity relaci a opravneni (protokol v2, op 46-53 a 94).
 //!
 //! Ridici relace (hlavni kanal ze startovni zpravy, ma ho init) je
 //! system: vidi cely FS, zaklada relace uzivatelu (`CONNECT_AS`) a meni
@@ -8,7 +8,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use fsproto::perm::{Acl, Mount, get_opt_acl, op, put_opt_acl};
+use fsproto::perm::{Acl, AclView, Mount, Permissions, get_opt_acl, op, put_opt_acl};
 use fsproto::{Reader, Writer};
 use libos::{Channel, Error, Result};
 
@@ -103,6 +103,17 @@ impl Service {
                 let p = fs.permissions(&path)?;
                 w.u64(p.owner).u8(p.rights);
                 put_opt_acl(&mut w, p.acl.map(from_fs_acl).as_ref());
+            }
+            op::ACL_VIEW => {
+                let path = sess.map(&r.str()?, false)?;
+                let v = fs.acl_view(&path)?;
+                let inherited = v
+                    .inherited
+                    .into_iter()
+                    .map(|g| fsproto::perm::InheritedGrant { who: g.who, rights: g.rights, from: sess.unmap(&g.from) })
+                    .collect();
+                let perms = Permissions { owner: v.perms.owner, rights: v.perms.rights, acl: v.perms.acl.map(from_fs_acl) };
+                AclView { perms, inherited }.put(&mut w);
             }
             op::SET_ACL => {
                 let path = sess.map(&r.str()?, true)?;

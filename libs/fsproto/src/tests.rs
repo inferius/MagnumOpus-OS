@@ -109,3 +109,24 @@ fn list_stat_page_rejects_overlapping_masks() {
     encode_list_stat_page(&mut w, &[entry(avail::TREE, avail::TREE)], false);
     assert_eq!(decode_list_stat_page(&w.finish()), Err(Error::InvalidArgs));
 }
+
+#[test]
+fn acl_view_roundtrip() {
+    use crate::perm::{Acl, AclView, Grant, InheritedGrant, Permissions, grant, rights};
+    let v = AclView {
+        perms: Permissions {
+            owner: 1000,
+            rights: rights::VIEW,
+            acl: Some(Acl { flags: 0, grants: alloc::vec![Grant { who: 1001, rights: rights::EDIT, flags: grant::BOTH }] }),
+        },
+        inherited: alloc::vec![InheritedGrant { who: u64::MAX, rights: rights::RUN, from: "/home/alice".into() }],
+    };
+    let mut w = Writer::new();
+    v.put(&mut w);
+    let bytes = w.finish();
+    assert_eq!(AclView::get(&mut Reader::new(&bytes)), Ok(v));
+    // Prilis mnoho zdedenych grantu = chyba, ne alokace.
+    let mut w = Writer::new();
+    w.u64(1).u8(0).u8(0).u32(u32::MAX);
+    assert_eq!(AclView::get(&mut Reader::new(&w.finish())), Err(Error::InvalidArgs));
+}

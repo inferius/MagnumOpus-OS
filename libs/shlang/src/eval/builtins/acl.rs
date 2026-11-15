@@ -8,11 +8,10 @@ use alloc::vec::Vec;
 
 use super::super::call::Args;
 use super::super::{Flow, Interp, R};
-use crate::acl::{self, Account, Acl, Perms, grant};
+use crate::acl::{self, Account, Acl, grant};
 use crate::error::{ShError, code};
 use crate::host::Host;
 use crate::value::Value;
-use crate::vfs::path::parent;
 
 const USAGE: &str = "acl <cesta>, acl add <kdo> <view|run|edit|manage> <cesta> [--inherit], acl remove <kdo> <cesta>";
 
@@ -67,41 +66,30 @@ fn scope(flags: u8) -> &'static str {
     }
 }
 
-fn grant_row(g: &acl::Grant, accounts: &[Account], from: Option<&str>) -> Value {
-    let (level, label) = acl::level_of(g.rights);
+/// Radek grantu. `from`: `None` = vlastni grant, `Some(slozka)` =
+/// zdedeny (prazdna slozka = mimo pripojene cesty relace, puvod nevime).
+fn grant_row(who: u64, rights: u8, flags: u8, accounts: &[Account], from: Option<&str>) -> Value {
+    let (level, label) = acl::level_of(rights);
     Value::record(&[
-        ("who", Value::Str(acl::name_of(g.who, accounts))),
-        ("kind", Value::str(acl::kind_of(g.who))),
+        ("who", Value::Str(acl::name_of(who, accounts))),
+        ("kind", Value::str(acl::kind_of(who))),
         ("level", Value::Str(level)),
         ("label", Value::Str(label)),
-        ("scope", Value::str(if from.is_some() { "inherited" } else { scope(g.flags) })),
-        ("from", from.map_or(Value::Nothing, Value::str)),
+        ("scope", Value::str(if from.is_some() { "inherited" } else { scope(flags) })),
+        ("from", from.filter(|f| !f.is_empty()).map_or(Value::Nothing, Value::str)),
     ])
 }
 
-/// Vypis: vlastnik, vase uroven, dedeni a granty (vlastni i zdedene od
-/// predku az po prvni, ktery nededi).
+/// Vypis: vlastnik, vase uroven, dedeni a granty (vlastni, pak zdedene
+/// s puvodem od korene; jedna operace FS `ACL_VIEW`).
 fn show(host: &mut dyn Host, p: &str) -> Result<Value, abi::Error> {
-    let perms: Perms = host.fs().permissions(p)?;
+    let view = host.fs().acl_view(p)?;
     let accounts = accounts(host);
+    let perms = &view.perms;
     let protected = perms.acl.as_ref().is_some_and(|a| a.protected);
-    let mut rows: Vec<Value> = perms.acl.iter().flat_map(|a| a.grants.iter()).map(|g| grant_row(g, &accounts, None)).collect();
-    if !protected {
-        // Predek, ke kteremu volajici nema pravo, konci vypis zdedenych
-        // (FS ho neukaze); prava se pocitaji dal, jen je nevidime.
-        let mut cur = String::from(p);
-        while let Some(up_path) = parent(&cur) {
-            cur = String::from(up_path);
-            let Ok(up) = host.fs().permissions(&cur) else { break };
-            let Some(acl) = up.acl else { continue };
-            for g in acl.grants.iter().filter(|g| g.flags & grant::INHERIT != 0) {
-                rows.push(grant_row(g, &accounts, Some(&cur)));
-            }
-            if acl.protected {
-                break;
-            }
-        }
-    }
+    let mut rows: Vec<Value> =
+        perms.acl.iter().flat_map(|a| a.grants.iter()).map(|g| grant_row(g.who, g.rights, g.flags, &accounts, None)).collect();
+    rows.extend(view.inherited.iter().map(|g| grant_row(g.who, g.rights, grant::INHERIT, &accounts, Some(&g.from))));
     let (level, label) = acl::level_of(perms.rights);
     Ok(Value::record(&[
         ("path", Value::str(p)),
@@ -153,7 +141,7 @@ fn change(it: &mut Interp, host: &mut dyn Host, a: &Args, add: bool) -> R<Value>
         return Err(a.err(code::ARGS, alloc::format!("{cmd}: moc argumentů ({USAGE})")));
     }
     it.check_write(&p)?;
-    let cur = host.fs().permissions(&p).map_err(|e| fail(e, &p, false, a))?;
+    let cur = host.fs().acl_view(&p).map_err(|e| fail(e, &p, false, a))?.perms;
     let next: Option<Acl> = if add {
         let flags = if a.flag("inherit") { grant::THIS | grant::INHERIT } else { grant::THIS };
         Some(acl::with_grant(cur.acl, who, rights, flags))

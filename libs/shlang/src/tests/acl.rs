@@ -184,3 +184,25 @@ fn acl_urovne_a_jmena() {
     assert_eq!(acl::name_of(1007, &acc), "uživatel 1007");
     assert_eq!(acl::kind_of(acl::EVERYONE), "group");
 }
+
+#[test]
+fn acl_zdedene_od_korene_a_konec_u_nededici() {
+    let mut h = host();
+    let g = |who, flags| Grant { who, rights: rights::VIEW, flags };
+    h.fs.acls.insert("/home".into(), Acl { protected: false, grants: vec![g(1001, grant::INHERIT)] });
+    h.fs.acls.insert("/home/alice".into(), Acl { protected: false, grants: vec![g(1002, grant::THIS | grant::INHERIT), g(1003, grant::THIS)] });
+    run(&mut h, "acl Projekty/plan.txt").unwrap();
+    let rows = grants(h.emitted.last().unwrap());
+    let from: Vec<_> = rows.iter().map(|r| (r.field("who"), r.field("from"))).collect();
+    assert_eq!(
+        from,
+        vec![
+            (Some(Value::str("bob")), Some(Value::str("/home"))),
+            (Some(Value::str("uživatel 1002")), Some(Value::str("/home/alice"))),
+        ]
+    );
+    // /home/alice nededi: grant z /home se uz neukaze.
+    h.fs.acls.get_mut("/home/alice").unwrap().protected = true;
+    run(&mut h, "acl Projekty/plan.txt").unwrap();
+    assert_eq!(grants(h.emitted.last().unwrap()).len(), 1);
+}

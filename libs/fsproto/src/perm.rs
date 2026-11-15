@@ -40,6 +40,10 @@ pub mod op {
     pub const SET_NOEXEC: u32 = 52;
     /// koren datasetu -> zakaz spousteni u8
     pub const NOEXEC: u32 = 53;
+    /// cesta -> jako `PERMISSIONS` + zdedene granty (u32 + [who u64,
+    /// prava u8, puvod str]); puvod = slozka v relaci, prazdny = mimo
+    /// pripojene cesty relace
+    pub const ACL_VIEW: u32 = 94;
 }
 
 /// Priznaky pripojene cesty.
@@ -146,6 +150,52 @@ pub struct Permissions {
     pub owner: u64,
     pub rights: u8,
     pub acl: Option<Acl>,
+}
+
+/// Zdedeny grant s puvodem (odpoved `ACL_VIEW`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InheritedGrant {
+    pub who: u64,
+    pub rights: u8,
+    /// Slozka (v relaci), jejiz popis grant dedi; prazdne = mimo
+    /// pripojene cesty relace.
+    pub from: String,
+}
+
+/// Opravneni pro zobrazeni (odpoved `ACL_VIEW`): vlastni popis a zdedene
+/// granty, ktere na objekt plati (prazdne pri `ACL_PROTECTED`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AclView {
+    pub perms: Permissions,
+    pub inherited: Vec<InheritedGrant>,
+}
+
+/// Nejvic zdedenych grantu v odpovedi (jako `Acl::get`, ale pres vic
+/// slozek).
+pub const MAX_INHERITED: usize = 1024;
+
+impl AclView {
+    pub fn put(&self, w: &mut Writer) {
+        w.u64(self.perms.owner).u8(self.perms.rights);
+        put_opt_acl(w, self.perms.acl.as_ref());
+        w.u32(self.inherited.len() as u32);
+        for g in &self.inherited {
+            w.u64(g.who).u8(g.rights).str(&g.from);
+        }
+    }
+
+    pub fn get(r: &mut Reader) -> Result<Self> {
+        let perms = Permissions { owner: r.u64()?, rights: r.u8()?, acl: get_opt_acl(r)? };
+        let n = r.u32()? as usize;
+        if n > MAX_INHERITED {
+            return Err(Error::InvalidArgs);
+        }
+        let mut inherited = Vec::with_capacity(n);
+        for _ in 0..n {
+            inherited.push(InheritedGrant { who: r.u64()?, rights: r.u8()?, from: r.str()? });
+        }
+        Ok(Self { perms, inherited })
+    }
 }
 
 pub fn put_opt_acl(w: &mut Writer, acl: Option<&Acl>) {
@@ -339,6 +389,14 @@ impl FsClient {
         let body = self.call(w)?;
         let mut r = Reader::new(&body);
         Ok(Permissions { owner: r.u64()?, rights: r.u8()?, acl: get_opt_acl(&mut r)? })
+    }
+
+    /// Opravneni pro zobrazeni (vlastni popis + zdedene s puvodem).
+    pub fn acl_view(&self, path: &str) -> Result<AclView> {
+        let mut w = Self::req(op::ACL_VIEW);
+        w.str(path);
+        let body = self.call(w)?;
+        AclView::get(&mut Reader::new(&body))
     }
 
     pub fn set_acl(&self, path: &str, acl: Option<&Acl>) -> Result<()> {
