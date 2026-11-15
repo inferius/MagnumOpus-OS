@@ -21,7 +21,7 @@ use libos::{Startup, println, time};
 
 use super::{Test, TestResult, devices, fail};
 
-pub const TESTS: &[Test] = &[("radek shellu se zapisem", shell_line)];
+pub const TESTS: &[Test] = &[("radek shellu se zapisem", shell_line), ("cteni velkeho souboru: po 32 KiB a pres VMO", big_read)];
 
 /// Kolik radku zmerit (bere se median).
 const LINES: usize = 5;
@@ -133,5 +133,49 @@ fn shell_line(_: &Startup) -> TestResult {
     if ms(line) > LINE_LIMIT_MS {
         return Err(format!("radek shellu {} ms (mez {LINE_LIMIT_MS} ms):{detail}", ms(line)));
     }
+    Ok(())
+}
+
+/// Velikost souboru pro mereni cteni.
+const BIG: usize = 8 * 1024 * 1024;
+
+/// Cteni souboru 8 MiB: po zpravach (`MAX_IO`) a po 1 MiB pres objekt
+/// pameti (`READ_VMO`); vypise MB/s a overi, ze data sedi.
+fn big_read(_: &Startup) -> TestResult {
+    use fsproto::v2::{access, open_flags, share};
+    let fs = devices().and_then(|d| d.fs.as_ref()).ok_or("sluzba fsd nebezi")?;
+    ensure_dir(fs, DIR)?;
+    let path = format!("{DIR}/velky.bin");
+    let data: Vec<u8> = (0..BIG).map(|i| (i * 7 % 251) as u8).collect();
+    let o = fs.open(&path, access::READ | access::WRITE, share::ALL, open_flags::CREATE | open_flags::TRUNCATE).map_err(|e| fail("open", e))?;
+    fs.write_h(o.handle, 0, &data).map_err(|(_, e)| fail("zapis", e))?;
+    let (old, t_old) = timed(
+        || {
+            let mut v = Vec::with_capacity(BIG);
+            while v.len() < BIG {
+                let part = fs.read_h(o.handle, v.len() as u64, fsproto::MAX_IO)?;
+                if part.is_empty() {
+                    break;
+                }
+                v.extend_from_slice(&part);
+            }
+            Ok(v)
+        },
+        "cteni po zpravach",
+    )?;
+    let (new, t_new) = timed(|| fs.read_h(o.handle, 0, BIG), "cteni pres VMO")?;
+    fs.close(o.handle).map_err(|e| fail("close", e))?;
+    let _ = fs.remove(&path);
+    if old != data || new != data {
+        return Err(String::from("prectena data nesedi"));
+    }
+    let mbs = |ns: u64| (BIG as u64 * 1000) / ns.max(1);
+    println!(
+        "vykon FS: cteni 8 MiB po 32 KiB {} ms ({} MB/s), pres VMO po 1 MiB {} ms ({} MB/s)",
+        ms(t_old),
+        mbs(t_old),
+        ms(t_new),
+        mbs(t_new)
+    );
     Ok(())
 }

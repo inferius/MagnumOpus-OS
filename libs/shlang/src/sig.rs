@@ -165,7 +165,23 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("Úlohy", &["tasks", "jobs", "fg", "wait", "kill", "cancel"]),
     ("Relace a bezpečnost", &["undo", "preview", "history", "run", "error", "exit"]),
     ("Nápověda", &["help", "explain"]),
-    ("Systém", &["audio", "theme", "permissions", "acl", "loglevel", "report", "install", "shutdown", "reboot"]),
+    (
+        "Systém",
+        &[
+            "audio",
+            "theme",
+            "permissions",
+            "acl",
+            "system",
+            #[cfg(feature = "dev-mode")]
+            "devmode",
+            "loglevel",
+            "report",
+            "install",
+            "shutdown",
+            "reboot",
+        ],
+    ),
 ];
 
 pub const BUILTINS: &[Sig] = &[
@@ -286,6 +302,11 @@ pub const BUILTINS: &[Sig] = &[
         &[flag("inherit", 'i', "grant se dědí i do obsahu složky")], IN,
         Io::Records(&["path", "owner", "your_level", "your_label", "inherits", "grants"]),
         "oprávnění souboru: `acl <cesta>` výpis, `acl add <kdo> <view|run|edit|manage> <cesta>`, `acl remove <kdo> <cesta>`"),
+    sig!("system", "system-file", &[opt("op", Kind::Str), opt("path", Kind::Path), opt("source", Kind::Path)], None, NOFLAGS, IN, IN,
+        "změna v /system (úkon správy, potvrdí člověk s rolí): `system write <cíl> <zdroj>`, `system rm <cesta>`, `system mkdir <cesta>`"),
+    #[cfg(feature = "dev-mode")]
+    sig!("devmode", "system-dev-mode", &[opt("state", Kind::Str)], None, NOFLAGS, IN, Io::Records(&["devmode"]),
+        "režim vývojáře (jen vývojové sestavení): `devmode on|off`, bez argumentu stav"),
     sig!("loglevel", "system-log-level", NONE, None, NOFLAGS, IN, IN,
         "úroveň logu: bez argumentu výpis, `loglevel <modul|proces> <error|warn|info|debug|trace|vychozi>`"),
     sig!("report", "system-report", NONE, None, NOFLAGS, IN, IN,

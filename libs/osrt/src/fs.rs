@@ -226,6 +226,16 @@ impl File {
         session()?.posix_lock(self.handle, cmd, class, write, start, len, crate::process::self_id())
     }
 
+    /// `mmap` souboru pres okna objektu pameti z fsd ([`crate::fmap`]):
+    /// `private` = klon s kopii pri zapisu (nic se nekopiruje), sdilene =
+    /// primo okna (tytez ramce ve vsech procesech, zapis jde do souboru).
+    /// `addr` 0 = kamkoli, jinak presne tam (volne misto nebo cela
+    /// rezervace volajiciho, napr. `PROT_NONE` z `mmap`). Rozsah smi jit
+    /// za konec souboru; pristup za konec = vyjimka (`SIGBUS`).
+    pub fn map(&self, off: u64, len: u64, prot: u32, addr: u64, private: bool) -> Result<u64> {
+        crate::fmap::map(self.handle, off, len, prot, addr, private)
+    }
+
     /// Absolutni cesta pri otevreni.
     pub fn path(&self) -> &str {
         &self.path

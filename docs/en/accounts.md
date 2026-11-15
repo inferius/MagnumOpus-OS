@@ -255,7 +255,16 @@ there, so the second safeguard did not really add security; it only broke
 safeguard will be the image signature **[designed]**. The
 `zive-usb` test checks both: the stick boots into a terminal and an image
 without the file ends on the sign-in screen. The development account has
-no password, no administration role and is marked in the account list.
+no password and is marked in the account list. **It has the administration
+role** (the user's decision of 2026-11-15) **[implemented]**: it gets it on
+creation, and an account from an earlier version gets it at the
+development sign-in (`Engine::ensure_dev_admin`). The role applies **only
+with development enabled** (`Engine::is_admin`): the same DB without
+`accounts-dev` never picks it as the confirming account, it does not count
+among people with the role (protection of the last role) and nobody
+changes it with `ROLE_SET`. It has no password, so it cannot confirm the
+administration dialog itself; [developer mode](#developer-mode) confirms
+administration actions for it.
 
 ### Protections
 
@@ -515,11 +524,124 @@ its own identity from the manifest **[designed]**.
 | 3 `ACCOUNT_RESET_PASSWORD` | uid (does not open an encrypted home) |
 | 4 `ROLE_SET` | uid, on |
 | 5 `APPEARANCE_SYSTEM` | the login screen appearance choice (text `tmavy ne ne`); the action's service is init (`theme --system`), it checks the grant on the `grants` channel |
-| 6-15 | drivers, updates, disks, firewall, time - added by their services |
+| 6 `SYSTEM_FILE` | a change in `/system`: operation (write, delete, directory), path, for a write the length and the XXH3-128 fingerprint of the content (`accountproto::elevate::SystemFile`); the action's service is init (the `system` command), see [System files](#system-files) |
+| 7-15 | drivers, updates, disks, firewall, time - added by their services |
 
 Why: what is confirmed is a concrete action the person sees (the same
 principle as the [action API](gui.md#action-api)); whoever does longer
 administration turns the dialogs off for a while themselves, knowingly.
+
+### System files
+
+**[implemented]** (`user/init/src/sysfiles.rs`, test "systemove soubory
+pres ELEVATE" of the `ucty` suite). People have no right in `/system`
+(ACL); only init writes there with its FS session. The only way for a
+person is the administration action `SYSTEM_FILE` - **the same in a
+release and in a development build**, no back door:
+
+1. The shell command `system write <target> <source>`, `system rm <path>`
+   or `system mkdir <path>` sends init `powerproto::Request::SystemFile`
+   (content at most 60 KiB, one channel message).
+2. Init checks the path (`accountproto::elevate::system_path`): only under
+   `/system/`, without empty components, `.` and `..`; **never
+   `/system/accounts`** (`ACCESS_DENIED` - not even the administration
+   role changes password hashes and the device key). A bad path ends at
+   once, without a dialog.
+3. In a thread, init asks for `ELEVATE` `SYSTEM_FILE` on behalf of the
+   shell's session with the parameters operation, path, length and
+   XXH3-128 of the content. The dialog shows "Write system file <path>
+   (<n> B)", "Delete system file" or "Create system directory" and who
+   confirms.
+4. After the confirmation init checks and consumes the grant on the
+   `grants` channel (only this operation, path and content) and only then
+   makes the change: an atomic write (temporary file and rename), deleting
+   a file or an empty directory, creating a directory. The parent
+   directory must exist.
+
+The QEMU test: the user's session alone creates nothing in `/system`; the
+account database, a path with `..` and a path outside `/system` fail
+without a dialog; a directory, a write (a wrong password changes nothing,
+the content matches), deleting the file and the directory through the
+dialog.
+
+### Developer mode
+
+> **Approved by the user (2026-11-15):** "developer mode" instead of a back
+> door. Development build only; the single place is the `ELEVATE`
+> confirmation policy, no bypassing of permissions in fsd, init or
+> anywhere else.
+
+**[implemented]** (`user/accountd/src/devmode.rs`,
+`libs/comp/src/devmode.rs`, the `devmode` command). In the development
+profile (live USB, `xtask run`, `xtask vmware`) the **Developer mode**
+switch can be turned on: administration actions confirm themselves
+without a dialog. Everything else stays as in a release: the action goes
+through `ELEVATE`, accountd issues a grant, the action's service (init,
+...) checks it and carries it out. FS permissions do not change.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Developer mode only in the confirmation policy">
+<defs><marker id="ue6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="box" x="10" y="40" width="150" height="60" rx="6"/><text class="t b" x="85" y="65" text-anchor="middle">shell: system ...</text><text class="m" x="85" y="84" text-anchor="middle">init: ELEVATE</text>
+<rect class="acc" x="230" y="20" width="230" height="100" rx="6"/><text class="t b" x="345" y="44" text-anchor="middle">accountd: confirmation policy</text><text class="m" x="345" y="64" text-anchor="middle">release: always a dialog</text><text class="m" x="345" y="82" text-anchor="middle">development build + mode:</text><text class="m" x="345" y="100" text-anchor="middle">confirms itself, audit "vyvojar"</text>
+<rect class="ok" x="540" y="40" width="210" height="60" rx="6"/><text class="t b" x="645" y="65" text-anchor="middle">grant -> init checks</text><text class="m" x="645" y="84" text-anchor="middle">and writes to /system</text>
+<path class="ln" d="M160 70 L228 70" marker-end="url(#ue6)"/>
+<path class="ln" d="M460 70 L538 70" marker-end="url(#ue6)"/>
+<rect class="warn" x="230" y="140" width="230" height="50" rx="6"/><text class="t b" x="345" y="162" text-anchor="middle">bar: a permanent strip</text><text class="m" x="345" y="180" text-anchor="middle">"Developer mode - not protected"</text>
+<path class="ln dash" d="M345 120 L345 138" marker-end="url(#ue6)"/>
+</svg>
+<figcaption>Developer mode changes only who confirms an action; the action's path (grant, the action's service, FS permissions) is the same as in a release.</figcaption>
+</figure>
+
+- **Development build only:** the code is behind the cargo feature
+  `dev-mode` (`accountd`, `compd`, `shsess`, `init` and the protocols
+  `accountproto`, `guiproto`, `powerproto`, `shlang`, `term`). xtask turns
+  it on only for images with the development profile
+  ([Building](building.md#development-build-and-developer-mode)). The
+  image for users, the tests and the initfs for installing to a disk are
+  built without it: their programs have neither the command, nor the
+  bar pill, nor the messages. The operation number `DEV_MODE` (23) is
+  reserved; a release accountd does not know it (`NOT_SUPPORTED`).
+- **Confirmation policy** (`Service::elevate`): with the mode on, the
+  action is confirmed for an account with the administration role (the
+  same confirming account as for the dialog; without one
+  `ACCESS_DENIED`) and written to the audit as `vyvojar`. Turning the
+  mode on and off is written too (`vyvojar-zapnut`, `vyvojar-vypnut`;
+  requester 0 = the bar).
+- **Switch:** the shell command `devmode on|off` (status without
+  arguments) goes through init to the session's self channel; only an
+  account with the administration role may switch it. The bar has a
+  "Vývojář" pill; a click opens a card with the switch (physical input
+  into the system layer, the message `DialogReply::DevMode` on the
+  `dialog` channel). accountd decides the state and sends it back to the
+  bar (`DialogRequest::DevMode`), to a new compositor instance after a
+  crash too.
+- **On = a permanent prominent strip** in the bar "Režim vývojáře -
+  systém není chráněný" (developer mode - the system is not protected;
+  the danger colour, always with text; snapshot
+  `target/comp-rezim-vyvojare.png`).
+- **Scope and duration:** the whole computer, in memory only: after boot
+  the mode is off; it lasts until turned off or a restart.
+- ⚠️ **Known limitation:** `ELEVATE` from an automated source (an AI
+  agent) should **not use** developer mode, just like the administration
+  mode (always a dialog). accountd cannot tell the origin of a request yet
+  (telling the origin comes with the agent's identity, see
+  [AI agent and identity](#ai-agent-and-identity)), so today the mode
+  confirms an agent's request too.
+- A card in the Settings app **[designed]** (the app does not exist yet).
+
+Tests: on the host `cargo test -p accountproto` (`DEV_MODE` only with the
+feature), `cargo test -p accounts` (the development account's role only
+with development), `cargo test -p shlang` and `--features dev-mode` (no
+`devmode` command in a release, with the feature it switches), `cargo test
+-p comp --features dev-mode devmode` (pill, card, the switch goes to the
+accounts service, the strip in the danger colour), `cargo test -p xtask`
+(the release check); in QEMU the test "systemove soubory pres ELEVATE"
+(release: `DEV_MODE` = `NOT_SUPPORTED`) and the live USB (`--only
+zive-usb`): `devmode on`, then `system mkdir` and `system rm` in `/system`
+without a dialog. Every build without the development profile also looks
+for texts of the mode's code in the programs (`xtask/src/devmode.rs`); a
+hit is a build error.
 
 **A computer managed by an organization** (company, school): enrolling the
 computer, policies and endpoint monitoring are described in
@@ -641,6 +763,7 @@ them after use. The channels are different capabilities:
 | 18 | self | `LOGOUT` | - | - |
 | 19 | self | `ELEVATE` | action u32, parameters (`accountproto::elevate::Params`) | after the dialog: the account action's result or a grant token; `CANCELED`, `ACCESS_DENIED`, without a compositor `NOT_SUPPORTED` |
 | 20 | self | `SET_KEY_PIN` | PIN secret | - (a key that has no PIN yet) |
+| 23 | self | `DEV_MODE` (development build only) | u8: 0 status, 1 off, 2 on | u8 status; a release `NOT_SUPPORTED` |
 | 30 | setup | `CREATE_FIRST` | name, display name, password secret | uid |
 | 40 | grants | `CHECK_GRANT` | token (16 B blob), action u32, parameters (blob) | - or `ACCESS_DENIED`; the token is consumed |
 | 41 | names | `NAMES` | - | accounts: uid u64, login name, display name (empty -> the login name) |
@@ -760,6 +883,7 @@ aarch64):
 | lock and sign-out | lock, unlock with a wrong and the right password, after sign-out the session and its FS are gone |
 | session events and job | opened/locked/unlocked/closed events, name and active session, a process in the session job, the job is gone after sign-out |
 | raising privileges with the dialog | the test plays the compositor: dialog text, wrong password, cancel, allow with administration mode (the account is created), another action in the mode without a dialog, a grant only once and only for the same parameters |
+| system files through ELEVATE | the user's session creates nothing in `/system`; `/system/accounts`, `..` and a path outside `/system` refused without a dialog; a directory, a write (a wrong password changes nothing), deleting through the dialog and the grant; release: `DEV_MODE` `NOT_SUPPORTED` |
 | wrong password and slow-down | unknown account, 3rd failure = 30 s, during the wait even the right password fails |
 
 ## Risks and limitations
@@ -771,6 +895,10 @@ aarch64):
 - ⚠️ **Administration mode** (option, 5 minutes): administration actions
   from the session without a dialog - for malware in the session too. Off
   by default.
+- ⚠️ **Developer mode** (development build only): while it is on, any
+  process on the computer carries out an administration action without a
+  dialog (an AI agent too, until accountd tells the origin). The bar shows
+  it with a permanent strip; a release does not have it.
 - ⚠️ **Home encryption without a recovery key** = possible permanent data
   loss (see [Encryption](#home-encryption)). Until the FS supports
   encryption, the home **is not encrypted** and the disk can be read
@@ -798,6 +926,8 @@ aarch64):
 |---|---|
 | design (this page) | **[implemented]** |
 | administration model | approved; **[implemented]** role, first account with the role, protection of the last role, `ELEVATE` with the dialog, account actions, grants, administration mode, audit; choosing the confirming account among several **[designed]** |
+| system files (`SYSTEM_FILE`, the `system` command) | **[implemented]**, QEMU test (x86_64) |
+| developer mode (development build only) | **[implemented]**, host tests, live USB in QEMU (x86_64); a card in Settings **[designed]**; telling an agent apart **[designed]** |
 | `libs/accountproto` (messages, client, CTAP2, simulated key, administration actions) | **[implemented]**, host tests |
 | `libs/accounts` (records, Argon2id, PIN, slow-down, keys, wraps, recovery key, password reset by administration) | **[implemented]**, host tests |
 | `user/accountd` (DB on the FS, login/self/setup/grants channels, administration dialog, development sign-in) | **[implemented]**, QEMU tests |

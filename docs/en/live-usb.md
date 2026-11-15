@@ -307,6 +307,15 @@ crash handler.
 - `cargo xtask test` also runs the USB boot after the main run;
   `--only zive-usb` runs only that. FS tests on the stick:
   `cargo xtask test --data-disk usb --only "souborovy system,data FS"`.
+- **Developer mode** **[implemented]**: the live USB is a development
+  build, so the bar has a "Vývojář" pill and the shell the command
+  `devmode on|off`. With the mode on, administration actions (e.g. `system
+  write /system/config/... file`) are confirmed without a dialog and the
+  bar shows the strip "Režim vývojáře - systém není chráněný". A system
+  installed from the stick does not have it
+  ([Accounts](accounts.md#developer-mode)). The `--only zive-usb` test
+  types `devmode on`, `system mkdir` and `system rm` into the terminal and
+  waits for markers in the log.
 - Installing from the stick to an internal disk: [Installation](installation.md)
   (`--only instalace`).
 - Sources: `xtask/src/usb/` (image, listing and writing disks, boot in

@@ -292,5 +292,13 @@ není: jádro by muselo volat běhové služby UEFI z obsluhy pádu.
   `cargo xtask test --data-disk usb --only "souborovy system,data FS"`.
 - Instalace z flashky na interní disk: [Instalace](instalace.md)
   (`--only instalace`).
+- **Režim vývojáře** **[implementováno]**: živé USB je vývojové sestavení,
+  takže v liště je pilulka „Vývojář“ a v shellu příkaz `devmode on|off`.
+  Zapnutý režim potvrdí úkony správy (např. `system write
+  /system/config/... soubor`) bez dialogu a lišta ukazuje pruh „Režim
+  vývojáře - systém není chráněný“. Systém nainstalovaný z flashky ho
+  nemá ([Účty](ucty.md#režim-vývojáře)). Test `--only zive-usb` napíše do
+  terminálu `devmode on`, `system mkdir` a `system rm` a čeká na značky
+  v logu.
 - Zdrojáky: `xtask/src/usb/` (obraz, výpis a zápis disků, start v QEMU),
   `user/usb-storage/`, `libs/usbproto/src/storage.rs`.

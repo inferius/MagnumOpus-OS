@@ -5,6 +5,12 @@ edition.workspace = true
 license.workspace = true
 description = "Chytry terminal: nativni protokol, sluzba relaci, adapter VT100, obrazovka s pismem"
 
+[features]
+default = []
+# Prikaz `devmode` (rezim vyvojare): jen vyvojove sestaveni, zapina ho
+# xtask pro obrazy s vyvojovym profilem.
+dev-mode = ["shlang/dev-mode"]
+
 [dependencies]
 abi.workspace = true
 shlang = { path = "../shlang" }

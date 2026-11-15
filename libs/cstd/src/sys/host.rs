@@ -770,6 +770,16 @@ pub fn memfd_export(_fd: i32, _readonly: bool) -> R<u32> {
     Err(errno::EINVAL)
 }
 
+pub fn file_map(_fd: i32, _off: u64, _len: u64, _prot: u32, _addr: u64, _private: bool) -> R<u64> {
+    Err(errno::ENOTSUP)
+}
+
+pub fn file_unmapped(_addr: u64, _len: u64) {}
+
+pub fn file_sync(_addr: u64, _len: u64) -> R<()> {
+    Ok(())
+}
+
 pub fn memfd_import(_handle: u32, _writable: bool, _cloexec: bool) -> R<i32> {
     Err(errno::ENOSYS)
 }

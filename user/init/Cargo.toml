@@ -10,6 +10,12 @@ name = "init"
 test = false
 bench = false
 
+[features]
+default = []
+# Rezim vyvojare: jen predani prikazu `devmode` sluzbe uctu. Jen vyvojove
+# sestaveni, zapina ho xtask pro obrazy s vyvojovym profilem.
+dev-mode = ["powerproto/dev-mode", "accountproto/dev-mode"]
+
 [dependencies]
 installplan = { workspace = true }
 # Barvy vzhledu v testech GUI (stejne tokeny jako kompozitor).
@@ -40,6 +46,7 @@ audioproto = { path = "../../libs/audioproto", features = ["client"] }
 mediaproto = { path = "../../libs/mediaproto", features = ["client"] }
 audiomix = { path = "../../libs/audiomix" }
 accountproto = { path = "../../libs/accountproto", features = ["client"] }
+xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"] }
 zeroize = { version = "1.8", default-features = false, features = ["alloc"] }
 agentproto = { path = "../../libs/agentproto" }
 wire = { path = "../../libs/wire" }

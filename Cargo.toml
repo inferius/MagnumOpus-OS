@@ -210,6 +210,20 @@ opt-level = 2
 [profile.dev.package.fsd]
 opt-level = 2
 
+# Zavislosti fsd na ceste kazdeho pozadavku (kanal, alokator, kodovani
+# zprav): bez optimalizace bylo cteni ve fsd v debug obrazu radove
+# pomalejsi nez v release (mereni Wine: nacitani .so/PE).
+[profile.dev.package.libos]
+opt-level = 2
+[profile.dev.package.wire]
+opt-level = 2
+[profile.dev.package.svcclient]
+opt-level = 2
+[profile.dev.package.sizeclass]
+opt-level = 2
+[profile.dev.package.linked_list_allocator]
+opt-level = 2
+
 [profile.dev.package.fsproto]
 opt-level = 2
 [profile.dev.package.blockproto]

@@ -6,6 +6,12 @@ license.workspace = true
 publish = false
 description = "Protokol sluzby napajeni acpid: vypnuti, restart, udalosti tlacitek, teploty, baterie"
 
+[features]
+default = []
+# Rezim vyvojare (`Request::DevMode`): jen vyvojove sestaveni, zapina ho
+# xtask pro obrazy s vyvojovym profilem.
+dev-mode = []
+
 [dependencies]
 abi = { workspace = true }
 wire = { path = "../wire" }

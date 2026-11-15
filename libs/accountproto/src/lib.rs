@@ -84,6 +84,9 @@ pub mod op {
     /// Vlastni rozhodnuti o povolenich aplikaci (`perm.rs`).
     pub const PERM_LIST: u32 = 21;
     pub const PERM_REVOKE: u32 = 22;
+    /// Rezim vyvojare (`Request::DevMode`, jen feature `dev-mode`); cislo
+    /// rezervovane i ve vydani, kde ho accountd odmitne `NOT_SUPPORTED`.
+    pub const DEV_MODE: u32 = 23;
     // setup
     pub const CREATE_FIRST: u32 = 30;
     // grants (sluzby ukonu)

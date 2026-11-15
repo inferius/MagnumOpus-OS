@@ -449,6 +449,12 @@ impl Comp {
             DialogRequest::Phrase { text } => {
                 self.dialogs.phrase = text.chars().take(64).collect();
             }
+            // Stav rezimu vyvojare (jen vyvojove sestaveni).
+            #[cfg(feature = "dev-mode")]
+            DialogRequest::DevMode { on } => self.dev_mode_state(peer, on),
+            // Zprava, kterou toto sestaveni nezna (protokol s feature, kompozitor bez).
+            #[allow(unreachable_patterns)]
+            _ => {}
         }
     }
 

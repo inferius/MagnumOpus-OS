@@ -26,6 +26,7 @@ pub const TESTS: &[(&str, fn(&Startup) -> TestResult)] = &[
     ("zamceni a odhlaseni", lock_and_logout),
     ("udalosti a job relace", session_events),
     ("zvyseni prav dialogem", elevate),
+    ("systemove soubory pres ELEVATE", system_files),
     ("spatne heslo a zpomaleni", wrong_password),
 ];
 
@@ -267,6 +268,9 @@ fn answer_dialog(dialog: &libos::Channel, choice: u32, secret: &str) -> Result<a
                 return Ok(text);
             }
             DialogRequest::Cancel { .. } => return Err(String::from("dialog zrusen")),
+            // Stav rezimu vyvojare (jen vyvojove sestaveni).
+            #[allow(unreachable_patterns)]
+            _ => continue,
         }
     }
 }
@@ -299,12 +303,12 @@ fn elevate(_: &Startup) -> TestResult {
     elevate_reply(&me).map_err(|e| fail("role v rezimu spravy", e))?;
     check!(ours.try_read().is_err(), "v rezimu spravy zadny dialog");
     // Ukon jine sluzby: grant jen jednou a jen na stejne parametry.
-    send_elevate(&me, 6, b"disk0".to_vec())?;
+    send_elevate(&me, 7, b"disk0".to_vec())?;
     let token = elevate_reply(&me).map_err(|e| fail("grant", e))?;
     check_eq!(token.len(), 16, "token grantu");
     let grants = crate::accounts::channel("grants").map_err(|e| fail("kanal grants", e))?;
     let check = |params: &[u8]| -> Result<(), Error> {
-        grants.write(&encode_check(&token, 6, params), alloc::vec::Vec::new())?;
+        grants.write(&encode_check(&token, 7, params), alloc::vec::Vec::new())?;
         let m = grants.read(Some(libos::time::deadline_after(core::time::Duration::from_secs(5))))?;
         accountproto::parse_reply(&m.data).map(|_| ())
     };
@@ -312,6 +316,79 @@ fn elevate(_: &Startup) -> TestResult {
     check_eq!(check(b"disk0"), Ok(()), "grant");
     check_eq!(check(b"disk0"), Err(Error::AccessDenied), "grant podruhe");
     me.logout().map_err(|e| fail("odhlaseni", e))?;
+    drop(ours);
+    Ok(())
+}
+
+/// Vysledek zadosti `system` (kanal z `sysfiles::from_shell`).
+fn system_result(ch: &libos::Channel) -> Result<(), Error> {
+    let m = ch.read(Some(libos::time::deadline_after(core::time::Duration::from_secs(20))))?;
+    match powerproto::Reply::decode(&m.data)? {
+        powerproto::Reply::Ok => Ok(()),
+        powerproto::Reply::Failed(e) => Err(e),
+        _ => Err(Error::Corrupted),
+    }
+}
+
+/// /system jde zmenit jen ukonem spravy: init po dialogu a grantu zapise,
+/// smaze a zalozi slozku svou relaci FS; /system/accounts nikdy.
+/// Ve vydani accountd zadost o rezim vyvojare nezna.
+fn system_files(_: &Startup) -> TestResult {
+    use accountproto::elevate::FileOp;
+    let uid = alice_uid()?;
+    let session = sign_in(uid)?;
+    let (ours, theirs) = libos::Channel::create().map_err(|e| fail("kanal", e))?;
+    crate::accounts::give_dialog(theirs).map_err(|e| fail("dialog pro accountd", e))?;
+    let sys = sys_fs()?;
+    // Primo z relace uzivatele do /system nic.
+    let fs = crate::session::connect(session).map_err(|e| fail("relace FS", e))?;
+    check!(fs.create("/system/zkouska", kind::DIR).is_err(), "relace uzivatele zaklada v /system");
+    // Spatne cesty: chyba hned, zadny dialog.
+    let now = |op: FileOp, path: &str| match crate::sysfiles::from_shell(Some(session), op.to_u8(), path, alloc::vec::Vec::new()) {
+        Ok(_) => None,
+        Err(powerproto::Reply::Failed(e)) => Some(e),
+        Err(_) => Some(Error::Corrupted),
+    };
+    check_eq!(now(FileOp::Remove, "/system/accounts/users"), Some(Error::AccessDenied), "databaze uctu");
+    check_eq!(now(FileOp::Remove, "/system/x/../accounts"), Some(Error::InvalidArgs), "cesta s ..");
+    check_eq!(now(FileOp::Mkdir, "/home/alice/x"), Some(Error::InvalidArgs), "cesta mimo /system");
+    check!(ours.try_read().is_err(), "spatna cesta bez dialogu");
+    // Slozka, soubor (spatne heslo nic nezmeni), smazani.
+    let ask = |op: FileOp, path: &str, data: &[u8], pw: &str| -> Result<(String, Result<(), Error>), String> {
+        let ch = crate::sysfiles::from_shell(Some(session), op.to_u8(), path, data.to_vec()).map_err(|_| String::from("zadost odmitnuta"))?;
+        let text = answer_dialog(&ours, 0, pw)?;
+        Ok((text, system_result(&ch)))
+    };
+    let _ = sys.remove("/system/zkouska/a.txt");
+    let _ = sys.remove("/system/zkouska");
+    let (text, r) = ask(FileOp::Mkdir, "/system/zkouska", b"", PW)?;
+    check!(text.contains("Vytvořit systémovou složku /system/zkouska"), &format!("text dialogu: {text}"));
+    check_eq!(r, Ok(()), "slozka");
+    let (text, r) = ask(FileOp::Write, "/system/zkouska/a.txt", b"ahoj", "spatne heslo")?;
+    check!(text.contains("Zapsat systémový soubor /system/zkouska/a.txt (4 B)"), &format!("text dialogu: {text}"));
+    check_eq!(r, Err(Error::AccessDenied), "spatne heslo");
+    check_eq!(sys.stat("/system/zkouska/a.txt").err(), Some(Error::NotFound), "po spatnem hesle nic");
+    let (_, r) = ask(FileOp::Write, "/system/zkouska/a.txt", b"ahoj", PW)?;
+    check_eq!(r, Ok(()), "zapis");
+    check_eq!(sys.read("/system/zkouska/a.txt", 0, 16).map_err(|e| fail("cteni", e))?, b"ahoj".to_vec(), "obsah");
+    let (_, r) = ask(FileOp::Remove, "/system/zkouska/a.txt", b"", PW)?;
+    check_eq!(r, Ok(()), "smazani souboru");
+    let (_, r) = ask(FileOp::Remove, "/system/zkouska", b"", PW)?;
+    check_eq!(r, Ok(()), "smazani slozky");
+    check_eq!(sys.stat("/system/zkouska").err(), Some(Error::NotFound), "slozka smazana");
+    // Vydani: operaci rezimu vyvojare accountd nezna (a nic nepotvrdi).
+    #[cfg(not(feature = "dev-mode"))]
+    {
+        let me = SelfService(crate::session::take_self(session).ok_or_else(|| String::from("kanal self"))?);
+        let mut w = wire::Writer::op(accountproto::op::DEV_MODE);
+        w.u8(accountproto::DEV_ON);
+        let r = me.0.write(&w.finish(), alloc::vec::Vec::new()).and_then(|_| elevate_reply(&me));
+        crate::session::put_self(session, me.0);
+        check_eq!(r.err(), Some(Error::NotSupported), "rezim vyvojare ve vydani");
+    }
+    SelfService(crate::session::take_self(session).ok_or_else(|| String::from("kanal self"))?)
+        .logout()
+        .map_err(|e| fail("odhlaseni", e))?;
     drop(ours);
     Ok(())
 }

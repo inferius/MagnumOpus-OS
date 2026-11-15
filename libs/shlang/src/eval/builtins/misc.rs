@@ -185,6 +185,55 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, _i
                 )),
             }
         }
+        "system" => {
+            const USAGE: &str = "system write <cíl> <zdroj>, system rm <cesta> nebo system mkdir <cesta>";
+            let op = match a.pos(0) {
+                Some(Value::Str(s)) => s.clone(),
+                _ => return Err(a.err(code::ARGS, USAGE)),
+            };
+            let target = match a.pos(1) {
+                Some(v) => it.paths(v)?.into_iter().next(),
+                None => None,
+            };
+            let source = match a.pos(2) {
+                Some(v) => it.paths(v)?.into_iter().next(),
+                None => None,
+            };
+            let Some(target) = target else { return Err(a.err(code::ARGS, USAGE)) };
+            let (n, data) = match (op.as_str(), source) {
+                ("write", Some(src)) => (1, it.fs_read(host, &src)?),
+                ("rm", None) => (2, Vec::new()),
+                ("mkdir", None) => (3, Vec::new()),
+                _ => return Err(a.err(code::ARGS, USAGE)),
+            };
+            match host.system_file(n, &target, &data) {
+                Ok(()) => Ok(Value::Nothing),
+                Err(abi::Error::InvalidArgs) => Err(a.err(
+                    code::ARGS,
+                    &alloc::format!("system: {target} nejde (cesta pod /system/ bez . a .., soubor do 60 KiB)"),
+                )),
+                Err(e) => Err(Flow::Err(
+                    ShError::sys(e, "změna v /system se nepovedla")
+                        .at(a.span)
+                        .hint("potvrdí ji jen člověk s rolí správy; /system/accounts nejde nikdy"),
+                )),
+            }
+        }
+        #[cfg(feature = "dev-mode")]
+        "devmode" => {
+            let set = match a.pos(0) {
+                None => 0,
+                Some(Value::Str(s)) if s == "off" => 1,
+                Some(Value::Str(s)) if s == "on" => 2,
+                Some(_) => return Err(a.err(code::ARGS, "devmode: on, off, nebo bez argumentu stav")),
+            };
+            match host.dev_mode(set) {
+                Ok(on) => Ok(Value::record(&[("devmode", Value::str(if on { "on" } else { "off" }))])),
+                Err(e) => Err(Flow::Err(
+                    ShError::sys(e, "režim vývojáře se nepřepnul").at(a.span).hint("přepnout ho smí jen účet s rolí správy"),
+                )),
+            }
+        }
         "loglevel" => {
             let target = match a.pos(0) {
                 Some(Value::Str(s)) => s.clone(),

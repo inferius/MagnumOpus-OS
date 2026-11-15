@@ -44,6 +44,7 @@ mod revocation;
 mod session;
 mod supervisor;
 mod system;
+mod sysfiles;
 mod tasks;
 mod terminal;
 mod tests;

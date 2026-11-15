@@ -94,6 +94,31 @@ PROPTEST_CASES=150000 cargo test -p fs --features std --release   # důkladně
 cargo test -p fs --features std --release -- --ignored --nocapture perf   # výkon a režie
 ```
 
+## Vývojové sestavení a režim vývojáře
+
+**[implementováno]** (`xtask/src/devmode.rs`). Obraz s vývojovým profilem
+(soubor `accounts-dev` v initfs: `cargo xtask run`, `cargo xtask usb`,
+`cargo xtask vmware`) se překládá s cargo feature `dev-mode` programů
+`accountd`, `compd`, `shsess` a `init` (zapne i feature protokolů).
+Ta přidá [režim vývojáře](ucty.md#režim-vývojáře): úkony správy bez
+dialogu, pilulku a pruh v liště a příkaz `devmode`. Obraz pro uživatele
+(`cargo xtask image`), testy (`cargo xtask test`) a initfs pro instalaci
+na disk se překládají bez ní - kód režimu v nich vůbec není.
+
+- **Obraz USB = dvě sestavení:** živé `os/initfs.img` s feature
+  a `os/instfs.img` (to installd kopíruje na disk) ze samostatného
+  sestavení bez vývojového profilu a bez souboru odpovědí testu
+  (`usb::install_initfs`). Cargo drží obě varianty programů vedle sebe;
+  první obraz po změně kódu přeloží dotčené crate dvakrát, další běh je
+  jen přečte.
+- **Pojistka vydání:** sestavení bez vývojového profilu prohledá své
+  programy (Rust, ne porty C) na texty, které existují jen v kódu za
+  feature (`devmode::MARKERS`: log accountd, text pruhu, podpis příkazu
+  `devmode`). Nález = chyba sestavení. Hlídá tak i `instfs.img`.
+- Host testy feature: `cargo test -p comp --features dev-mode`,
+  `cargo test -p shlang --features dev-mode`, `cargo test -p accountproto
+  --features dev-mode`.
+
 ## Dokumentace jako web
 
 `cargo xtask docs` (a také `cargo xtask test`) vytvoří web se dvěma knihami: **Příručka**

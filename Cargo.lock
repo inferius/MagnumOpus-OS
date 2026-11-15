@@ -1648,6 +1648,7 @@ dependencies = [
  "theme",
  "ttyproto",
  "wire",
+ "xxhash-rust",
  "yuv",
  "zeroize",
 ]

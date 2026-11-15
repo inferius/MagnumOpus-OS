@@ -26,7 +26,9 @@ mod serve;
 mod serve_data;
 mod serve_hist;
 mod serve_perm;
+mod filevmo;
 mod links;
+mod serve_map;
 mod serve_sock;
 mod serve_v2;
 mod stream;
@@ -168,6 +170,7 @@ fn main(startup: Startup) -> i64 {
         streams: Vec::new(),
         lock_pids: Default::default(),
         listeners: Default::default(),
+        vmos: Default::default(),
         in_handles: Vec::new(),
     };
     if let Some(g) = restart {
@@ -176,6 +179,12 @@ fn main(startup: Startup) -> i64 {
     // Start potvrdit (init/supervisor ceka na `ok`).
     let _ = startup.bootstrap.write(b"ok", Vec::new());
     serve(&mut svc, client, startup.bootstrap);
+    // Namapovane soubory zpet pred zaverecnym commitem.
+    if let Some(fs) = svc.fs.as_mut()
+        && let Err(e) = svc.vmos.flush_all(fs)
+    {
+        println!("fsd: zapis namapovanych souboru selhal: {e}");
+    }
     if let Some(fs) = svc.fs.as_mut()
         && let Err(e) = fs.commit()
     {
@@ -236,6 +245,8 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
     let mut sessions: Vec<Session> = alloc::vec![Session::control(client)];
     let mut next_commit = time::deadline_after(COMMIT_INTERVAL);
     let mut next_history = time::deadline_after(HISTORY_INTERVAL);
+    // Zapis zpet namapovanych souboru (`filevmo::WRITEBACK`).
+    let mut next_writeback = time::deadline_after(filevmo::WRITEBACK);
     // Defragmentovat jen po zmenach (jinak by se system prochazel stale dokola).
     let mut idle = false;
     let mut changed = false;
@@ -256,6 +267,9 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
         };
         if let Some(t) = svc.orphan_cleanup {
             deadline = deadline.min(t);
+        }
+        if !svc.vmos.is_empty() {
+            deadline = deadline.min(next_writeback);
         }
         for s in &sessions {
             if let Some(w) = &s.watch {
@@ -342,6 +356,7 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
         }
         if running {
             background(svc, &mut next_commit, &mut idle, &mut changed);
+            writeback(svc, &mut next_writeback);
             history(svc, &mut next_history);
             orphans(svc);
             // Scrub jen kdyz klienti chvili nic nechteji (nizka priorita).
@@ -561,6 +576,25 @@ fn as_background<R>(f: impl FnOnce() -> R) -> R {
     let r = f();
     let _ = set_current(Qos::Normal);
     r
+}
+
+/// Zapis zpet namapovanych souboru nejpozdeji po `filevmo::WRITEBACK`
+/// (stranky spinave dele se nezapisou az pri commitu - ten je nezahrnuje).
+fn writeback(svc: &mut Service, next: &mut u64) {
+    if time::now() < *next {
+        return;
+    }
+    *next = time::deadline_after(filevmo::WRITEBACK);
+    let Some(fs) = svc.fs.as_mut() else { return };
+    match svc.vmos.flush_all(fs) {
+        Ok(0) => {}
+        Ok(n) => {
+            let (files, windows, bytes) = svc.vmos.stats();
+            println!("fsd: zapis zpet {n} stranek; namapovano {files} souboru, {windows} oken, {} KiB", bytes / 1024);
+        }
+        Err(e) => println!("fsd: zapis namapovanych souboru selhal: {e}"),
+    }
+    svc.vmos.evict(fs);
 }
 
 /// Automaticky commit a defragmentace v necinnosti.

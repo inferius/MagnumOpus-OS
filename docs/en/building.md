@@ -96,6 +96,34 @@ PROPTEST_CASES=150000 cargo test -p fs --features std --release   # thorough
 cargo test -p fs --features std --release -- --ignored --nocapture perf   # performance and overhead
 ```
 
+## Development build and developer mode
+
+**[implemented]** (`xtask/src/devmode.rs`). An image with the development
+profile (the file `accounts-dev` in initfs: `cargo xtask run`,
+`cargo xtask usb`, `cargo xtask vmware`) is built with the cargo feature
+`dev-mode` of the programs `accountd`, `compd`, `shsess` and `init` (it
+turns on the protocols' feature too). It adds
+[developer mode](accounts.md#developer-mode): administration actions
+without a dialog, a pill and a strip in the bar and the `devmode` command.
+The image for users (`cargo xtask image`), the tests (`cargo xtask test`)
+and the initfs for installing to a disk are built without it - the mode's
+code is not in them at all.
+
+- **USB image = two builds:** the live `os/initfs.img` with the feature
+  and `os/instfs.img` (installd copies it to the disk) from a separate
+  build without the development profile and without the test's answers
+  file (`usb::install_initfs`). Cargo keeps both variants of the programs
+  side by side; the first image after a code change compiles the affected
+  crates twice, the next run just reads them.
+- **Release safeguard:** a build without the development profile searches
+  its programs (Rust, not the C ports) for texts that exist only in the
+  code behind the feature (`devmode::MARKERS`: an accountd log line, the
+  strip's text, the signature of the `devmode` command). A hit = a build
+  error. So it guards `instfs.img` too.
+- Host tests of the feature: `cargo test -p comp --features dev-mode`,
+  `cargo test -p shlang --features dev-mode`, `cargo test -p accountproto
+  --features dev-mode`.
+
 ## Documentation as a website
 
 `cargo xtask docs` (and also `cargo xtask test`) builds a site with two books: the

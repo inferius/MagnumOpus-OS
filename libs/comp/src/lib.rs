@@ -25,6 +25,8 @@ pub mod appearance;
 pub mod clipboard;
 pub mod diag;
 pub mod dialog;
+#[cfg(feature = "dev-mode")]
+pub mod devmode;
 mod fade;
 pub mod flyout;
 pub mod fullscreen;
@@ -163,6 +165,9 @@ pub struct Comp {
     pub(crate) last_auto_snapshot: Option<u64>,
     /// Otevreny panel nad listou (`flyout.rs`).
     pub(crate) flyout: Option<flyout::Flyout>,
+    /// Rezim vyvojare od sluzby uctu (jen vyvojove sestaveni, `devmode.rs`).
+    #[cfg(feature = "dev-mode")]
+    pub(crate) dev_mode: devmode::DevMode,
     /// Spustitelne aplikace (id, jmeno) od initu (`launch.rs`).
     pub(crate) launchable: Vec<(alloc::string::String, alloc::string::String)>,
     /// Zadosti o spusteni aplikace (vyzvedne sluzba, posle initu).
@@ -240,6 +245,8 @@ impl Comp {
             snapshot_cfg: diag::Config::default(),
             last_auto_snapshot: None,
             flyout: None,
+            #[cfg(feature = "dev-mode")]
+            dev_mode: Default::default(),
             launchable: Vec::new(),
             launch_requests: Vec::new(),
             palette: None,

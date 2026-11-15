@@ -25,6 +25,10 @@ pub mod action {
     /// volby (`theme::Pref::to_words`, napr. `tmavy ne ne`). Sluzba ukonu
     /// je init (prikaz `vzhled --system`).
     pub const APPEARANCE_SYSTEM: u32 = 5;
+    /// Zmena systemoveho souboru v `/system` (parametry
+    /// [`super::SystemFile`]). Sluzba ukonu je init (prikaz shellu
+    /// `system`); `/system/accounts` nejde nikdy.
+    pub const SYSTEM_FILE: u32 = 6;
     pub const LAST: u32 = 15;
 }
 
@@ -97,6 +101,88 @@ impl Params {
         }
         Ok(p)
     }
+}
+
+/// Operace ukonu [`action::SYSTEM_FILE`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileOp {
+    /// Zapsat soubor (zalozit nebo prepsat cely obsah).
+    Write,
+    /// Smazat soubor nebo prazdnou slozku.
+    Remove,
+    /// Zalozit slozku.
+    Mkdir,
+}
+
+impl FileOp {
+    pub fn to_u8(self) -> u8 {
+        match self {
+            FileOp::Write => 1,
+            FileOp::Remove => 2,
+            FileOp::Mkdir => 3,
+        }
+    }
+
+    pub fn from_u8(v: u8) -> Result<Self> {
+        match v {
+            1 => Ok(FileOp::Write),
+            2 => Ok(FileOp::Remove),
+            3 => Ok(FileOp::Mkdir),
+            _ => Err(Error::InvalidArgs),
+        }
+    }
+}
+
+/// Parametry ukonu [`action::SYSTEM_FILE`]: operace, cesta a u zapisu
+/// delka a otisk obsahu (XXH3-128, spocita sluzba ukonu z dat, ktera
+/// zapise). Grant tak plati jen pro tento obsah; dialog ukaze cestu
+/// a velikost.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemFile {
+    pub op: FileOp,
+    pub path: String,
+    pub len: u64,
+    pub hash: u128,
+}
+
+impl SystemFile {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut w = Writer::new();
+        w.u8(self.op.to_u8()).str(&self.path).u64(self.len).u64(self.hash as u64).u64((self.hash >> 64) as u64);
+        w.finish()
+    }
+
+    pub fn decode(b: &[u8]) -> Result<Self> {
+        let mut r = Reader::new(b);
+        let op = FileOp::from_u8(r.u8()?)?;
+        let path = r.str()?;
+        let len = r.u64()?;
+        let hash = r.u64()? as u128 | (r.u64()? as u128) << 64;
+        if !r.is_empty() {
+            return Err(Error::InvalidArgs);
+        }
+        system_path(&path)?;
+        Ok(Self { op, path, len, hash })
+    }
+}
+
+/// Kontrola cesty ukonu [`action::SYSTEM_FILE`]: absolutni cesta pod
+/// `/system/` bez prazdnych slozek, `.` a `..`. `ACCESS_DENIED` =
+/// `/system/accounts` (databaze uctu: hashe hesel, klic zarizeni), ten
+/// nezmeni ani role spravy; `INVALID_ARGS` = spatny tvar.
+pub fn system_path(path: &str) -> Result<()> {
+    let rest = path.strip_prefix("/system/").ok_or(Error::InvalidArgs)?;
+    if rest.is_empty() || path.len() > 1024 {
+        return Err(Error::InvalidArgs);
+    }
+    let mut parts = rest.split('/');
+    if parts.clone().any(|p| p.is_empty() || p == "." || p == "..") {
+        return Err(Error::InvalidArgs);
+    }
+    if parts.next() == Some("accounts") {
+        return Err(Error::AccessDenied);
+    }
+    Ok(())
 }
 
 /// `CHECK_GRANT` (kanal `grants`): token, ukon, parametry.

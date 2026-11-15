@@ -525,6 +525,134 @@ smycka, prava, jmenny prostor relace" in the suite `souborovy system`, step
 - The link mode is `0777` only as a display (`lstat`); the target has the
   rights.
 
+## Files as memory
+
+Coordinator decision (15 Nov 2026, questions Q1-Q7 option A, windows per
+the Wine thread's requirements): `mmap` of a file without copying through
+memory objects (VMOs) held by fsd (`user/fsd/src/filevmo.rs`,
+`serve_map.rs`; client `libs/osrt/src/fmap.rs`, C `libs/cstd/src/mman.rs`).
+
+**[verified in QEMU]** x86_64 and aarch64 (steps `mmap` and `fmap` of the `ctest`
+test, suite `cstd`: private and shared mappings, coherence with
+`read`/`write` in both directions and across the window boundary,
+`ftruncate`, `msync` across the window boundary, `MAP_FIXED` into the
+caller's own `PROT_NONE` reservation (private and shared), two processes
+over the same file, durability after `munmap` and closing the fd).
+
+- **Windows:** a file is mapped in 16 MiB windows (`fsproto::v2::WINDOW`,
+  aligned). A window is a resizable VMO with a capacity of 16 MiB and a
+  size following the file; **all processes get the same window** - a
+  shared mapping has the same frames everywhere. The client maps a range
+  over several windows into one address reservation
+  (`MAP_IN_RESERVATION`), so it is contiguous. A file can have any size;
+  the limit applies to the **mapped range** (session quota), not to the
+  file. The window is also the unit for the future pager (see below).
+- **Handles:** the client holds a window handle only during `mmap` (one
+  `MAP_VMO` message per window, the mapping then holds the object by
+  itself) - a big mapping does not use up the process's handles. Mapping
+  1 GiB = 64 `MAP_VMO` messages.
+- **`MAP_PRIVATE`** = a copy-on-write clone of the window (`VMO_CLONE`): a
+  snapshot at the time of `mmap`, the source and the clone do not affect
+  each other, nothing is copied up front. Pages past the end of the file
+  stay a reservation (access = an exception).
+- **`MAP_SHARED`** = the window directly; with writing only for an
+  `O_RDWR` fd (otherwise `EACCES`). Access past the file size (within the
+  window) = a past-the-end exception (`SIGBUS`), as in POSIX.
+- **Source of truth:** while fsd holds the file's entry, the contents of
+  loaded windows live in memory, not in the FS. `READ_H`, `WRITE_H`,
+  `READ_VMO`, `SET_LEN` and the size in `STAT_H` go through the entry
+  (across the window boundary too), so `read()` sees a write to the
+  mapping at once and the mapping sees `write()` at once. Windows not
+  loaded read and write the FS directly. Before every other operation
+  (path, `OPEN`, snapshot, copy, version, `COMMIT`, `FSYNC`...) fsd writes
+  dirty pages back, and after it reloads the windows of a file changed
+  outside the entry (object version).
+- **`ftruncate`** changes the window sizes: growing = more pages in
+  existing mappings (zeros), shrinking = access past the end `SIGBUS`, the
+  rest of the last page past the end is zeros.
+- **Write-back:** every window is tracked from loading with the
+  `VMO_DIRTY` syscall ([syscalls](syscalls.md#vmo_dirty)); fsd writes the
+  dirty pages through an internal handle (`Fs::pin_h` - holds the object
+  even after the fd is closed and the name deleted, not subject to share
+  modes or mandatory locks, like POSIX `mmap`). When:
+  - `msync(MS_SYNC)` (`SYNC_VMO` with `FSYNC`; a range over several
+    windows and files writes all of them) and the client's `fsync` (the
+    `FSYNC` operation is a foreign operation, see above) - **durably**;
+  - `munmap` of a whole mapping (`UNMAP_VMO`), closing a file handle, the
+    end of a session;
+  - before every foreign operation and within **30 s** at the latest
+    (`filevmo::WRITEBACK`, fsd main loop; a line in the fsd log with the
+    number of pages, files, windows and bytes);
+  - `msync(MS_ASYNC)` is only a request: nothing is sent, fsd writes back
+    by itself within 30 s at the latest.
+
+  The automatic FS commit (every 5 s) does not include mapped data until
+  it is written back - after a system crash at most 30 s of writes to
+  mappings are lost (like `dirty_expire` in Linux); `msync(MS_SYNC)` or
+  `fsync` give certainty.
+- **`munmap` of part of a range** unmaps only that part (kernel); the
+  windows stay held until the process releases the whole mapping or the
+  session ends (a window covered by another mapping of the same process is
+  not released). **There is no `mremap`** (cstd lacks it; growing a mapping
+  = a new `mmap`).
+- **Cost of the first mapping:** on the first mapping of a window fsd
+  reads the whole window from the FS; another mapping of the same window
+  only hands over a handle. Numbers in the table below the list: almost
+  all the time goes to the FS read (`fs.read_h`), the copy into the
+  window and enabling tracking are small next to it. The FS read here is
+  much slower than in the test "cteni velkeho souboru" - the cause has not
+  been looked for yet. That is why the pager (filling page by page on a
+  fault) matters for big files.
+- **Cost of writing:** the first write to a page after every cleaning costs
+  one fault (tracking without PTE dirty bits, the same on x86_64 and
+  aarch64). Every foreign operation costs one `VMO_DIRTY` per loaded
+  window while any file is mapped.
+- **Memory:** fsd creates the windows, so they count towards **fsd's
+  budget** (visible in the job memory diagnostics), not towards the
+  client's job - a **limitation**: the client does not grow its own
+  account this way. A window commits memory only by the file size (not
+  the capacity; the kernel pays 8 B per page of capacity = 32 KiB per
+  window); growing the file commits more pages at once (`ENOMEM` at
+  `ftruncate`/`write`, not at a fault). A shared mapping holds the window
+  until `munmap`/the end of the session; session quota 1 GiB of held
+  windows (`SESSION_QUOTA`, exceeding it = `ENOMEM`). fsd drops entries
+  without holders oldest first above 512 MiB of windows (`CACHE_MAX`,
+  after writing back). Pages the client writes in `MAP_PRIVATE` are paid
+  by the client's job (the clone is on its account).
+- **Deleting** a file does not cancel mappings (the internal handle keeps
+  the orphan).
+- **Risk (explicitly):** a writable shared mapping gives the client
+  writable memory of the file - other processes with the same file see its
+  writes without another FS check (rights are checked only when mapping),
+  the same as POSIX. A client with a writable window handle can also call
+  `VMO_DIRTY` and "steal" the dirty pages from fsd (writes of other
+  processes to the same window may then not reach the file) - it harms
+  only a file it may write to. File streams (`OPEN_STREAM`) read the FS
+  directly and do not see a mapped window until it is written back.
+
+| Mapping a 16 MiB window (QEMU TCG, debug image, file after writing and `fsync`) | Time |
+|---|---|
+| first mapping, x86_64 (`3a65dd78` + windows) | 2197 ms |
+| of which FS read by 1 MiB, x86_64 (`3a65dd78` + windows) | 130 ms/MiB |
+| of which copy into the window, x86_64 (`3a65dd78` + windows) | 4 ms/MiB |
+| of which enabling `VMO_DIRTY` tracking, x86_64 (`3a65dd78` + windows) | 21 ms |
+| another mapping of the same window, x86_64 (`3a65dd78` + windows) | 4 ms |
+| first / another mapping, aarch64 (`3a65dd78` + windows) | 2616 ms / 1 ms |
+| for comparison: FS read in the test "cteni velkeho souboru" (`a313581a` + mapping) | 16 ms/MiB |
+
+**[designed]** (next steps):
+
+- **fsd crash (Q5):** the new fsd's windows are empty; `msync` of an old
+  mapping returns `SERVICE_RESTARTED` (C `EIO`), unsaved changes are lost.
+  Designed recovery: after the session recovers, the client opens the file
+  again with the write right (rights are checked again) and hands over its
+  window; fsd takes its contents as that client's write.
+- **Unmounting a volume / revoking a `GRANT`:** fsd shrinks the windows to
+  0, clients get a past-the-end exception on access (`SIGBUS`).
+- **A pager in the kernel:** the window stays the unit that fsd fills
+  lazily page by page on a fault instead of reading it whole when mapping;
+  the client protocol (`MAP_VMO` returns a window handle) does not change.
+
 ## Format limits
 
 > **Change from v2:** a new chapter: a file is at most 2^63-1 B, checked arithmetic, saturating summaries, an extent of 496 blocks. **Why:** sizes could overflow before. ([all changes](fs-versions.md#transition-v2---v3))
@@ -1540,7 +1668,7 @@ match editor.save_if("/config.toml", Some(f.revision), b"a = 3") {
 | 31 | `CONNECT` | - | a new session channel (a handle in the message) |
 | 32 | `OPEN` | path, access u8, share u8, flags u8 (`CREATE` 1, `EXCL` 2, `TRUNCATE` 4, `DIR` 8) | handle u64, `Stat`, `Revision` |
 | 33 | `CLOSE` | handle | - |
-| 34 | `READ_H` | handle, offset u64, length u32 | data |
+| 34 | `READ_H` | handle, offset u64, length u32 (at most `MAX_IO` = 32 KiB; the client does larger reads by 1 MiB through `READ_VMO`) | data |
 | 35 | `WRITE_H` | handle, offset u64, data | **accepted u32** |
 | 36 | `SET_LEN` | handle, size u64 | - |
 | 37 | `STAT_H` | handle | `Stat`, `Revision` |
@@ -1825,6 +1953,10 @@ groups stay. A system recipe cannot be narrowed. Otherwise `ACCESS_DENIED`.
 | 126 | `READLINK` | path | target str (`WRONG_TYPE` when not a link) |
 | 127 | `LSTAT` | path | `Stat` of the link itself |
 | 128 | `REALPATH` | path | the canonical session path (links, `.`, `..` resolved) |
+| 129 | `READ_VMO` | handle u64, offset u64, length u32 (at most `VMO_IO` = 1 MiB) + the client's VMO handle (`WRITE`, `MAP`) | read u32; data from the start of the VMO |
+| 130 | `MAP_VMO` | handle u64, window u64, flags u8 (`map_flags`: `WRITE` 1, `SHARED` 2) | file size u64, dataset u64, oid u64 + a window handle (`READ`, `MAP`, with writing also `WRITE`; capacity `WINDOW` = 16 MiB); session quota `NO_MEMORY` ([Files as memory](#files-as-memory)) |
+| 131 | `UNMAP_VMO` | dataset u64, oid u64, window u64 | - (the session releases the window, the file is written back) |
+| 132 | `SYNC_VMO` | dataset u64, oid u64, durable u8 | - (write-back, `durable` = also `FSYNC`); a session without a window of the file `SERVICE_RESTARTED` |
 
 **`OPEN_STREAM`** **[verified in QEMU]** (suite `cstd`, step `posix2`: the
 output of a `posix_spawn` child into a file and 200 000 bytes of a file on
@@ -1841,6 +1973,23 @@ channel's messages and writes them from the position (`APPEND` at the end).
 At most 16 streams (`stream::MAX_STREAMS`); the loop waits through a port,
 the number of sessions is limited only by memory. An fsd restart ends the
 streams.
+
+**Large reads (`READ_VMO`)** **[verified in QEMU]** x86_64 (test "cteni
+velkeho souboru: po 32 KiB a pres VMO" in the suite `vykon FS`):
+`FsClient::read_h` above `MAX_IO` reads by 1 MiB into the client's memory
+object. The client keeps it mapped for reading (one per session), fsd maps
+it for writing for the duration of the copy - a copy through
+`VMO_WRITE`/`VMO_READ` (a kernel buffer) was an order of magnitude slower.
+fsd's dependencies on every request's path (`libos`, `wire`, `svcclient`,
+the allocator) are optimized even in the debug image
+(`[profile.dev.package.*]` in `Cargo.toml`; a rebuild after changing `libos`
+takes 13 s longer, `fs`/`fsd`/`fsproto` were optimized already).
+
+| Reading 8 MiB (x86_64, QEMU TCG, debug image) | Time |
+|---|---|
+| by 32 KiB, before the change (`34604355`) | 6829 ms |
+| by 32 KiB, fsd dependencies optimized (`a313581a` + profile) | 1186 ms |
+| through a VMO by 1 MiB, mapping in fsd and the client (`a313581a` + mapping) | 130 ms |
 
 **`AF_UNIX` socket nodes** **[verified in QEMU]** (suite `cstd`, step
 `unix` of the `ctest` test): `SOCKET_BIND` creates an object of kind 5

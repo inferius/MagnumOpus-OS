@@ -225,10 +225,19 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
   free space.
 - **Anonymous `MAP_SHARED`** is the same as private within the process (no
   `fork`).
-- **File:** the content is read into anonymous memory (`MAP_PRIVATE`, or
-  read-only `MAP_SHARED` - later changes to the file are not visible).
-  `MAP_SHARED` with writing = `ENOTSUP` until fsd provides a file memory
-  object **[designed]**. A pipe or socket = `ENODEV`.
+- **File:** windows of memory objects from fsd ([Files as memory](file-system.md#files-as-memory)):
+  `MAP_PRIVATE` = a snapshot (a copy-on-write clone without copying the
+  contents), `MAP_SHARED` = the same frames in all processes, writes go to
+  the file; with writing only for an `O_RDWR` fd (otherwise `EACCES`).
+  `read`/`write` see the mapping at once and vice versa, `ftruncate`
+  changes the size of a mapped file, access past the end of the file =
+  `SIGBUS`. `msync(MS_SYNC)` writes back durably, `MS_ASYNC` is only a
+  request (fsd writes back by itself within 30 s at the latest), `munmap`
+  of a whole mapping writes back. `MAP_FIXED` also works into the caller's
+  own `PROT_NONE` reservation. No `mremap`. A file outside fsd = read into
+  anonymous memory (a shared write is then `ENOTSUP`). A pipe or socket =
+  `ENODEV`. **[verified in QEMU]** x86_64 and aarch64 (steps `mmap` and `fmap`,
+  suite `cstd`).
 - **W^X:** `PROT_EXEC` on unsealed memory only with the JIT permission from
   the manifest ([memory-management.md](memory-management.md)), otherwise
   `EACCES`.
@@ -577,9 +586,8 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
    decommit, `mseal` = seal. `PROT_EXEC` on unsealed memory only with the
    JIT permission from the manifest (W^X,
    [memory-management.md](memory-management.md)), otherwise `EACCES`.
-   File `mmap`: read-only `MAP_PRIVATE` by reading into anonymous memory;
-   file `MAP_SHARED` = `ENOTSUP` until fsd provides a file VMO.
-   `PROT_WRITE` or `PROT_EXEC` without `PROT_READ` (in `mmap` and
+   File `mmap`: today windows of VMOs from fsd (private and shared with
+   writing, see above). `PROT_WRITE` or `PROT_EXEC` without `PROT_READ` (in `mmap` and
    `mprotect`) also means reading, as on Linux x86_64 and aarch64 (the
    kernel has no write-only page; wineserver maps `KUSER_SHARED_DATA` this
    way).

@@ -177,6 +177,18 @@ pub fn give_dialog(dialog: Channel) -> Result<()> {
     Ok(())
 }
 
+/// Rezim vyvojare za relaci shellu (prikaz `devmode`; jen vyvojove
+/// sestaveni). Rozhoduje accountd (role spravy); init jen preda zadost na
+/// kanalu self relace.
+#[cfg(feature = "dev-mode")]
+pub fn dev_mode(session: Option<u64>, set: u8) -> Result<bool> {
+    let session = session.ok_or(Error::AccessDenied)?;
+    let me = accountproto::client::SelfService(crate::session::take_self(session).ok_or(Error::BadState)?);
+    let r = me.dev_mode(set);
+    crate::session::put_self(session, me.0);
+    r
+}
+
 /// Stav accountd (`status`).
 pub fn status() -> Result<alloc::string::String> {
     let a = ACCOUNTD.get().ok_or(Error::NotFound)?;

@@ -896,6 +896,18 @@ impl Comp {
                 self.choose_scheme(s, now);
                 return;
             }
+            // Rezim vyvojare: prvni radek prepne (rozhodne sluzba uctu).
+            #[cfg(feature = "dev-mode")]
+            {
+                if f == Some(crate::flyout::Flyout::Dev)
+                    && button == Button::Left
+                    && pressed
+                    && let Some(i) = self.flyout_row_at(py)
+                {
+                    self.dev_flyout_click(i);
+                    return;
+                }
+            }
             // Okna aplikace: radek = okno, posledni = nove okno.
             if let Some(crate::flyout::Flyout::AppWindows(g)) = f
                 && button == Button::Left
@@ -929,6 +941,8 @@ impl Comp {
                 (bar.volume, crate::flyout::Flyout::Volume),
                 (Some(bar.bell), crate::flyout::Flyout::Bell),
                 (Some(bar.look), crate::flyout::Flyout::Look),
+                #[cfg(feature = "dev-mode")]
+                (bar.dev, crate::flyout::Flyout::Dev),
             ]
             .into_iter()
             .find(|(r, _)| r.is_some_and(|r| r.contains(px, py)))

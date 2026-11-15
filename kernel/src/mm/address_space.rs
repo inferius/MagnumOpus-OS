@@ -358,6 +358,8 @@ impl AddressSpace {
             let Some((phys, own)) = vmo.page_state(vmo_offset + off) else {
                 continue;
             };
+            // Sledovany zapis (`VMO_DIRTY`): cista stranka jen pro cteni.
+            let own = own && !vmo.tracked_clean(vmo_offset + off);
             let map_flags = page_flags(&vmo, flags, own);
             if table
                 .map(
@@ -486,6 +488,8 @@ impl AddressSpace {
                     need.try_reserve(1).map_err(|_| Error::NoMemory)?;
                     need.push((vmo.clone(), off));
                 }
+                // Jadro zapise do stranky bez vypadku: oznacit (`VMO_DIRTY`).
+                vmo.mark_dirty(off, PAGE_SIZE);
                 pos += PAGE_SIZE;
             }
         }
