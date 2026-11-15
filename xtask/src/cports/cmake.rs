@@ -175,6 +175,8 @@ pub fn build(arch: &Arch, sysroot: &Path, p: &CPort, src: &Path, work: &Path, op
         run(&mut c, &format!("cmake (konfigurace {})", p.name))?;
         std::fs::write(&stamp, &want)?;
     }
+    let outputs: Vec<PathBuf> = programs.iter().map(|(_, rel)| build.join(rel)).collect();
+    super::relink_on_libc_change(sysroot, &build, &outputs)?;
     run(Command::new(cmake).arg("--build").arg(&build), &format!("cmake --build {}", p.name))?;
     run(Command::new(cmake).arg("--install").arg(&build), &format!("cmake --install {}", p.name))?;
     Ok(programs.iter().map(|(name, rel)| (name.to_string(), build.join(rel))).collect())

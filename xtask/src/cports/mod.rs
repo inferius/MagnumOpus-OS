@@ -417,6 +417,31 @@ pub fn test_media() -> Result<Vec<Output>> {
 }
 
 /// Predpona instalace knihoven portu pro architekturu.
+/// Staticke programy portu linkuji `libc.a` a `crt1.o` ze sysrootu, ale
+/// Ninja ani make je jako zavislost nesleduji: po zmene knihovny C (napr.
+/// novy format bloku parametru) by zustal program se starym runtime.
+/// Pri zmene otisku knihovny C proto smaze vystupy `outputs` (prelinkuji se).
+pub(super) fn relink_on_libc_change(sysroot: &Path, build: &Path, outputs: &[PathBuf]) -> Result<()> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for f in ["lib/libc.a", "lib/crt1.o"] {
+        if let Ok(b) = std::fs::read(sysroot.join(f)) {
+            b.hash(&mut h);
+        }
+    }
+    let want = format!("{:016x}", h.finish());
+    let stamp = build.join(".libc");
+    if std::fs::read_to_string(&stamp).ok().as_deref() != Some(want.as_str()) {
+        for o in outputs {
+            let _ = std::fs::remove_file(o);
+        }
+        if build.exists() {
+            std::fs::write(&stamp, &want)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn prefix(arch: &Arch) -> PathBuf {
     target_dir().join("c-ports").join(arch.name).join("prefix")
 }

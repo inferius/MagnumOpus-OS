@@ -35,6 +35,7 @@ fn spec(io: ChildIo, target: Stream) -> R<StdioSpec> {
             Inherit::Null | Inherit::None => Ok(StdioSpec::Null),
         },
         Object::Pipe(p) => Ok(StdioSpec::Channel(p.try_clone().map_err(e)?.into_channel())),
+        Object::Null => Ok(StdioSpec::Null),
         Object::File(f) => match f.open_stream(target != Stream::In) {
             Ok(ch) => Ok(StdioSpec::Channel(ch)),
             // Handle bez prava pro smer proudu (soubor jen pro cteni na
@@ -51,8 +52,12 @@ fn spec(io: ChildIo, target: Stream) -> R<StdioSpec> {
 fn inherited(fds: &[(crate::c_int, ChildIo, bool)]) -> R<Vec<rt::inherit::Export>> {
     let mut out = Vec::new();
     for &(child, io, explicit) in fds {
-        let ChildIo::Parent(fd) = io else { return Err(errno::ENOTSUP) };
-        let d = rt::fd::get(fd).map_err(|_| errno::EBADF)?;
+        let d = match io {
+            ChildIo::Parent(fd) => rt::fd::get(fd).map_err(|_| errno::EBADF)?,
+            // addopen(n, "/dev/null") nad 2.
+            ChildIo::Null => rt::fd::Description::new(Object::Null, crate::sys::status::RDWR),
+            _ => return Err(errno::ENOTSUP),
+        };
         match rt::inherit::export(child, &d) {
             Ok(x) => out.push(x),
             Err(rt::Error::NotSupported) if !explicit => {}
@@ -68,24 +73,33 @@ fn inherited(fds: &[(crate::c_int, ChildIo, bool)]) -> R<Vec<rt::inherit::Export
 /// Spusti potomka. Relaci site dostane, ma-li ji rodic (POSIX: potomek
 /// dedi prostredi rodice); co smi, urci manifest potomka v launchd.
 pub fn spawn_child(r: SpawnReq) -> R<Child> {
-    let fds = inherited(&r.fds)?;
-    let s = Spawn {
-        program: r.program,
-        args: r.args,
-        env: r.env,
-        cwd: r.cwd,
-        stdin: spec(r.io[0], Stream::In)?,
-        stdout: spec(r.io[1], Stream::Out)?,
-        stderr: spec(r.io[2], Stream::Err)?,
-        network: rt::net::available(),
-    };
-    match rt::process::spawn_with_fds(s, fds) {
-        Ok((c, _)) => Ok(Child(c)),
-        Err((err, _)) => Err(match err {
-            // Proces bez kanalu ke launchd potomky spoustet nemuze.
-            rt::Error::NotSupported => errno::ENOSYS,
-            err => e(err),
-        }),
+    // Predani socketu AF_UNIX s kanalem ve fronte muze narazit na BAD_STATE
+    // (druha strana mezitim poslala kanal): export se zopakuje
+    // (`osrt::unix`, vyctena fronta jde s nim).
+    let mut tries = 0;
+    loop {
+        let fds = inherited(&r.fds)?;
+        let s = Spawn {
+            program: r.program.clone(),
+            args: r.args.clone(),
+            env: r.env.clone(),
+            cwd: r.cwd.clone(),
+            stdin: spec(r.io[0], Stream::In)?,
+            stdout: spec(r.io[1], Stream::Out)?,
+            stderr: spec(r.io[2], Stream::Err)?,
+            network: rt::net::available(),
+        };
+        match rt::process::spawn_with_fds(s, fds) {
+            Ok((c, _)) => return Ok(Child(c)),
+            Err((rt::Error::BadState, _)) if !r.fds.is_empty() && tries < 16 => tries += 1,
+            Err((err, _)) => {
+                return Err(match err {
+                    // Proces bez kanalu ke launchd potomky spoustet nemuze.
+                    rt::Error::NotSupported => errno::ENOSYS,
+                    err => e(err),
+                });
+            }
+        }
     }
 }
 

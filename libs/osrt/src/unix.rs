@@ -14,11 +14,20 @@
 //! [`crate::inherit`]). Prijemce dostane fd prvnim `recv`, ktery zpravu
 //! nacne, a `recv` nikdy neprekroci hranici zpravy s fd (jako Linux).
 //!
+//! **Predani socketu** (dedeni, `SCM_RIGHTS`): konec kanalu, v jehoz
+//! fronte uz lezi zprava s kanalem, jadro poslat nedovoli (ochrana proti
+//! cyklum, `BAD_STATE`). Export proto frontu nejdriv vycte do pameti
+//! (`queue`) a prijemce dostane jeji kopii (duplikaty handlu) i rozectena
+//! data a fd; zapis, ktery presto narazi na `BAD_STATE` (druha strana mezitim
+//! poslala dalsi), se zopakuje. Zpravy cekajici v okamziku predani tak vidi
+//! oba procesy (odesilatel je obvykle hned zavre, jako Wine).
+//!
 //! Jmeno (`bind`, `connect` na cestu) je uzel socketu ve fsd
 //! (`fsproto::v2::op::SOCKET_BIND`): posluchac preda fsd konec kanalu,
 //! fsd do nej pri `connect` zapise prihlaseni klienta a konec spojeni.
 //! Jmeno abstraktniho prostoru (Linux `\0jmeno`) neni.
 
+use alloc::collections::VecDeque;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -26,7 +35,7 @@ use core::time::Duration;
 
 use fsproto::v2::SocketPeer;
 use libos::sync::Mutex;
-use libos::{Channel, Handle};
+use libos::{Channel, Handle, Message};
 
 use crate::fd::Description;
 use crate::{Error, Result};
@@ -72,7 +81,12 @@ pub struct UnixSocket {
     state: Mutex<State>,
     /// Vlastni jmeno (`bind`, u prijateho spojeni jmeno posluchace).
     path: Mutex<Option<String>>,
+    /// Zpravy vyctene z kanalu pri predani (`export`), ctou se pred kanalem.
+    queue: Mutex<VecDeque<Message>>,
 }
+
+/// Kolikrat zopakovat predani, ktere narazilo na `BAD_STATE`.
+const EXPORT_TRIES: usize = 16;
 
 /// Prijata data a fd z `recv_msg`.
 pub struct Received {
@@ -89,12 +103,28 @@ fn self_peer() -> SocketPeer {
 
 impl UnixSocket {
     pub fn new() -> Self {
-        Self { state: Mutex::new(State::New), path: Mutex::new(None) }
+        Self { state: Mutex::new(State::New), path: Mutex::new(None), queue: Mutex::new(VecDeque::new()) }
     }
 
     fn connected(ch: Channel, peer: SocketPeer, path: Option<String>, peer_path: Option<String>) -> Self {
         let conn = Conn { ch, rest: Mutex::new(Pending::default()), eof: Default::default(), peer, peer_path };
-        Self { state: Mutex::new(State::Connected(conn)), path: Mutex::new(path) }
+        Self { state: Mutex::new(State::Connected(conn)), path: Mutex::new(path), queue: Mutex::new(VecDeque::new()) }
+    }
+
+    /// Dalsi zprava: nejdriv z vyctene fronty, pak z kanalu.
+    fn pull(&self, ch: &Channel, nonblock: bool) -> Result<Message> {
+        if let Some(m) = self.queue.lock().pop_front() {
+            return Ok(m);
+        }
+        if nonblock { ch.try_read() } else { ch.read(None) }
+    }
+
+    /// Vycte z kanalu vse, co ceka, do `queue` (pred predanim konce).
+    fn drain(&self, ch: &Channel) {
+        let mut q = self.queue.lock();
+        while let Ok(m) = ch.try_read() {
+            q.push_back(m);
+        }
     }
 
     /// `socketpair`: dva spojene konce.
@@ -171,7 +201,7 @@ impl UnixSocket {
         let msg = {
             let st = self.state.lock();
             let State::Listening { rx } = &*st else { return Err(Error::InvalidArgs) };
-            if nonblock { rx.try_read()? } else { rx.read(None)? }
+            self.pull(rx, nonblock)?
         };
         let peer = SocketPeer::decode(&msg.data)?;
         let h = msg.handles.into_iter().next().ok_or(Error::Corrupted)?;
@@ -206,39 +236,34 @@ impl UnixSocket {
         }
         let st = self.state.lock();
         let State::Connected(c) = &*st else { return Err(Error::BadState) };
-        // Fd jen v prvnim kusu; dalsi kusy (data nad limit zpravy) bez nich.
-        let mut head = Vec::new();
-        let mut handles = Vec::new();
-        head.push(0);
-        head.push(fds.len() as u8);
-        for d in fds {
-            let e = crate::inherit::export(0, d)?;
-            head.push(e.entry.kind);
-            head.extend_from_slice(&e.entry.status.to_le_bytes());
-            head.extend_from_slice(&(e.entry.data.len() as u32).to_le_bytes());
-            head.extend_from_slice(&e.entry.data);
-            handles.extend(e.handle);
-        }
-        let room = abi::syscall::CHANNEL_MAX_DATA.saturating_sub(head.len()).max(1);
-        let mut sent = 0;
-        let mut first = true;
-        loop {
-            let chunk = &data[sent..data.len().min(sent + room)];
-            let mut msg = if first { head.clone() } else { alloc::vec![0, 0] };
+        let room = |head: &[u8]| abi::syscall::CHANNEL_MAX_DATA.saturating_sub(head.len()).max(1);
+        // Prvni kus s fd: predani socketu s plnou frontou muze narazit na
+        // BAD_STATE (druha strana mezitim poslala kanal) - export znovu.
+        let mut tries = 0;
+        let mut sent = loop {
+            let (head, handles) = encode_fds(fds)?;
+            let chunk = &data[..data.len().min(room(&head))];
+            let mut msg = head;
             msg.extend_from_slice(chunk);
-            let hs = if first { core::mem::take(&mut handles) } else { Vec::new() };
-            match write_retry(&c.ch, &msg, hs, nonblock && first) {
-                Ok(()) => {}
-                // Cast uz odesla: vratit kolik (jako kratky zapis).
-                Err(Error::ShouldWait) if !first => return Ok(sent),
+            match write_retry(&c.ch, &msg, handles, nonblock) {
+                Ok(()) => break chunk.len(),
+                Err(Error::BadState) if !fds.is_empty() && tries < EXPORT_TRIES => tries += 1,
                 Err(e) => return Err(e),
             }
-            first = false;
-            sent += chunk.len();
-            if sent >= data.len() {
-                return Ok(sent);
+        };
+        // Dalsi kusy (data nad limit zpravy) bez fd.
+        while sent < data.len() {
+            let chunk = &data[sent..data.len().min(sent + room(&[0, 0]))];
+            let mut msg = alloc::vec![0, 0];
+            msg.extend_from_slice(chunk);
+            match write_retry(&c.ch, &msg, Vec::new(), false) {
+                Ok(()) => sent += chunk.len(),
+                // Cast uz odesla: vratit kolik (jako kratky zapis).
+                Err(Error::ShouldWait) => return Ok(sent),
+                Err(e) => return Err(e),
             }
         }
+        Ok(sent)
     }
 
     /// Prijme az `buf.len()` bajtu a fd zpravy (nejvic `max_fds`, zbytek
@@ -254,7 +279,7 @@ impl UnixSocket {
             if c.eof.load(core::sync::atomic::Ordering::Acquire) {
                 return Ok(Received { len: 0, fds: Vec::new(), truncated: false });
             }
-            let msg = match if nonblock { c.ch.try_read() } else { c.ch.read(None) } {
+            let msg = match self.pull(&c.ch, nonblock) {
                 Ok(m) => m,
                 Err(Error::PeerClosed) => return Ok(Received { len: 0, fds: Vec::new(), truncated: false }),
                 Err(e) => return Err(e),
@@ -290,60 +315,105 @@ impl UnixSocket {
         match &*self.state.lock() {
             State::Connected(c) => {
                 let p = c.rest.lock();
-                let ready = p.at < p.data.len() || !p.fds.is_empty() || c.eof.load(core::sync::atomic::Ordering::Acquire);
+                let queued = !self.queue.lock().is_empty();
+                let ready = p.at < p.data.len() || !p.fds.is_empty() || queued || c.eof.load(core::sync::atomic::Ordering::Acquire);
                 c.ch.handle().duplicate(None).ok().map(|h| (h, ready))
             }
-            State::Listening { rx } => rx.handle().duplicate(None).ok().map(|h| (h, false)),
+            State::Listening { rx } => rx.handle().duplicate(None).ok().map(|h| (h, !self.queue.lock().is_empty())),
             _ => None,
         }
     }
 
-    /// Handle a stav pro predani jinemu procesu (dedeni, `SCM_RIGHTS`):
-    /// (stav u8, handle). Socket bez spojeni ani jmena predat nejde.
-    pub(crate) fn export(&self) -> Result<(Vec<u8>, Handle)> {
+    /// Data a handly pro predani jinemu procesu (dedeni, `SCM_RIGHTS`,
+    /// format `abi::params::fd_kind::UNIX`): hlavni handle, pak handly
+    /// rozectenych fd a fronty. Socket bez spojeni ani jmena predat nejde.
+    pub(crate) fn export(&self) -> Result<(Vec<u8>, Vec<Handle>)> {
         let st = self.state.lock();
         let mut data = Vec::new();
-        let h = match &*st {
+        let mut handles = Vec::new();
+        match &*st {
             State::Connected(c) => {
+                self.drain(&c.ch);
                 data.push(STATE_CONNECTED);
                 for v in [c.peer.user, c.peer.group] {
                     data.extend_from_slice(&v.to_le_bytes());
                 }
                 data.extend_from_slice(&c.peer.pid.to_le_bytes());
                 put_path(&mut data, c.peer_path.as_deref());
-                c.ch.handle().duplicate(None)?
+                handles.push(c.ch.handle().duplicate(None)?);
+                data.push(u8::from(c.eof.load(core::sync::atomic::Ordering::Acquire)));
+                let p = c.rest.lock();
+                let left = &p.data[p.at.min(p.data.len())..];
+                data.extend_from_slice(&(left.len() as u32).to_le_bytes());
+                data.extend_from_slice(left);
+                let (fds, fd_handles) = encode_fds(&p.fds)?;
+                // encode_fds: priznaky u8 + pocet u8 + polozky; priznaky se nectou.
+                data.extend_from_slice(&fds[1..]);
+                handles.extend(fd_handles);
             }
             State::Listening { rx } | State::Bound { rx } => {
+                self.drain(rx);
                 data.push(if matches!(*st, State::Listening { .. }) { STATE_LISTENING } else { STATE_BOUND });
-                rx.handle().duplicate(None)?
+                handles.push(rx.handle().duplicate(None)?);
             }
             State::New => return Err(Error::NotSupported),
-        };
+        }
         put_path(&mut data, self.path.lock().as_deref());
-        Ok((data, h))
+        let q = self.queue.lock();
+        data.extend_from_slice(&(q.len() as u32).to_le_bytes());
+        for m in q.iter() {
+            data.extend_from_slice(&(m.data.len() as u32).to_le_bytes());
+            data.extend_from_slice(&m.data);
+            data.push(u8::try_from(m.handles.len()).map_err(|_| Error::NoResources)?);
+            for h in &m.handles {
+                handles.push(h.duplicate(None)?);
+            }
+        }
+        Ok((data, handles))
     }
 
-    /// Socket z [`UnixSocket::export`] jineho procesu.
-    pub(crate) fn import(data: &[u8], h: Handle) -> Result<Self> {
+    /// Socket z [`UnixSocket::export`] jineho procesu (handly v poradi).
+    pub(crate) fn import(data: &[u8], handles: &mut dyn Iterator<Item = Handle>) -> Result<Self> {
         let (&state, mut rest) = data.split_first().ok_or(Error::Corrupted)?;
-        let ch = Channel::from_handle(h);
+        let ch = Channel::from_handle(handles.next().ok_or(Error::Corrupted)?);
         let s = match state {
             STATE_CONNECTED => {
-                let u = |r: &[u8], at: usize| -> Result<u64> {
-                    Ok(u64::from_le_bytes(r.get(at..at + 8).ok_or(Error::Corrupted)?.try_into().map_err(|_| Error::Corrupted)?))
-                };
-                let user = u(rest, 0)?;
-                let group = u(rest, 8)?;
-                let pid = u32::from_le_bytes(rest.get(16..20).ok_or(Error::Corrupted)?.try_into().map_err(|_| Error::Corrupted)?);
-                rest = &rest[20..];
+                let user = take_u64(&mut rest)?;
+                let group = take_u64(&mut rest)?;
+                let pid = take_u32(&mut rest)?;
                 let peer_path = take_path(&mut rest)?;
-                Self::connected(ch, SocketPeer { user, group, pid }, None, peer_path)
+                let s = Self::connected(ch, SocketPeer { user, group, pid }, None, peer_path);
+                let (eof, r) = rest.split_first().ok_or(Error::Corrupted)?;
+                rest = r;
+                let n = take_u32(&mut rest)? as usize;
+                let left = rest.get(..n).ok_or(Error::Corrupted)?.to_vec();
+                rest = &rest[n..];
+                let fds = decode_fds(&mut rest, handles)?;
+                if let State::Connected(c) = &*s.state.lock() {
+                    c.eof.store(*eof != 0, core::sync::atomic::Ordering::Release);
+                    *c.rest.lock() = Pending { data: left, at: 0, fds };
+                }
+                s
             }
-            STATE_LISTENING => Self { state: Mutex::new(State::Listening { rx: ch }), path: Mutex::new(None) },
-            STATE_BOUND => Self { state: Mutex::new(State::Bound { rx: ch }), path: Mutex::new(None) },
+            STATE_LISTENING | STATE_BOUND => {
+                let st = if state == STATE_LISTENING { State::Listening { rx: ch } } else { State::Bound { rx: ch } };
+                Self { state: Mutex::new(st), path: Mutex::new(None), queue: Mutex::new(VecDeque::new()) }
+            }
             _ => return Err(Error::Corrupted),
         };
         *s.path.lock() = take_path(&mut rest)?;
+        let n = take_u32(&mut rest)?;
+        let mut q = s.queue.lock();
+        for _ in 0..n {
+            let len = take_u32(&mut rest)? as usize;
+            let d = rest.get(..len).ok_or(Error::Corrupted)?.to_vec();
+            rest = &rest[len..];
+            let (&k, r) = rest.split_first().ok_or(Error::Corrupted)?;
+            rest = r;
+            let hs: Vec<Handle> = (0..k).map(|_| handles.next().ok_or(Error::Corrupted)).collect::<Result<_>>()?;
+            q.push_back(Message { data: d, handles: hs });
+        }
+        drop(q);
         Ok(s)
     }
 }
@@ -362,6 +432,56 @@ fn put_path(out: &mut Vec<u8>, p: Option<&str>) {
     let p = p.unwrap_or("");
     out.extend_from_slice(&(p.len() as u32).to_le_bytes());
     out.extend_from_slice(p.as_bytes());
+}
+
+fn take_u32(r: &mut &[u8]) -> Result<u32> {
+    let v = u32::from_le_bytes(r.get(..4).ok_or(Error::Corrupted)?.try_into().map_err(|_| Error::Corrupted)?);
+    *r = &r[4..];
+    Ok(v)
+}
+
+fn take_u64(r: &mut &[u8]) -> Result<u64> {
+    let v = u64::from_le_bytes(r.get(..8).ok_or(Error::Corrupted)?.try_into().map_err(|_| Error::Corrupted)?);
+    *r = &r[8..];
+    Ok(v)
+}
+
+/// Hlavicka ramce s fd: priznaky 0, pocet u8, polozky (druh u8, stav u32,
+/// delka u32, data) a jejich handly v poradi.
+fn encode_fds(fds: &[Arc<Description>]) -> Result<(Vec<u8>, Vec<Handle>)> {
+    let mut head = alloc::vec![0, u8::try_from(fds.len()).map_err(|_| Error::InvalidArgs)?];
+    let mut handles = Vec::new();
+    for d in fds {
+        let e = crate::inherit::export(0, d)?;
+        head.push(e.entry.kind);
+        head.extend_from_slice(&e.entry.status.to_le_bytes());
+        head.extend_from_slice(&(e.entry.data.len() as u32).to_le_bytes());
+        head.extend_from_slice(&e.entry.data);
+        handles.extend(e.handles);
+    }
+    Ok((head, handles))
+}
+
+/// Opak `encode_fds` bez priznaku: pocet u8 + polozky. Fd, ktery v tomto
+/// procesu otevrit nejde (soubor mimo relaci), se vynecha (prijemce dostane
+/// mene fd, jako Linux pri chybe); jeho handly se presto spotrebuji.
+fn decode_fds(b: &mut &[u8], handles: &mut dyn Iterator<Item = Handle>) -> Result<Vec<Arc<Description>>> {
+    let (&n, r) = b.split_first().ok_or(Error::Corrupted)?;
+    *b = r;
+    let mut fds = Vec::with_capacity(n as usize);
+    for _ in 0..n {
+        let (&kind, r) = b.split_first().ok_or(Error::Corrupted)?;
+        *b = r;
+        let status = take_u32(b)?;
+        let len = take_u32(b)? as usize;
+        let data = b.get(..len).ok_or(Error::Corrupted)?.to_vec();
+        *b = &b[len..];
+        let e = libos::params::Fd { fd: 0, kind, status, data };
+        if let Ok(obj) = crate::inherit::object(&e, handles) {
+            fds.push(Description::new(obj, status));
+        }
+    }
+    Ok(fds)
 }
 
 fn take_path(r: &mut &[u8]) -> Result<Option<String>> {
@@ -394,23 +514,8 @@ fn write_retry(ch: &Channel, msg: &[u8], handles: Vec<Handle>, nonblock: bool) -
 
 /// Rozlozi ramec: (priznaky, data, fd).
 fn parse(b: &[u8], handles: Vec<Handle>) -> Result<(u8, Vec<u8>, Vec<Arc<Description>>)> {
-    let (&flags, b) = b.split_first().ok_or(Error::Corrupted)?;
-    let (&n, mut b) = b.split_first().ok_or(Error::Corrupted)?;
+    let (&flags, mut b) = b.split_first().ok_or(Error::Corrupted)?;
     let mut handles = handles.into_iter();
-    let mut fds = Vec::with_capacity(n as usize);
-    for _ in 0..n {
-        let kind = *b.first().ok_or(Error::Corrupted)?;
-        let status = u32::from_le_bytes(b.get(1..5).ok_or(Error::Corrupted)?.try_into().map_err(|_| Error::Corrupted)?);
-        let len = u32::from_le_bytes(b.get(5..9).ok_or(Error::Corrupted)?.try_into().map_err(|_| Error::Corrupted)?) as usize;
-        let data = b.get(9..9 + len).ok_or(Error::Corrupted)?;
-        b = &b[9 + len..];
-        let h = if abi::params::fd_kind::has_handle(kind) { handles.next() } else { None };
-        let e = libos::params::Fd { fd: 0, kind, status, data: data.to_vec() };
-        // Fd, ktery v tomto procesu otevrit nejde (soubor mimo relaci),
-        // se vynecha (prijemce dostane mene fd, jako Linux pri chybe).
-        if let Ok(obj) = crate::inherit::object(&e, h) {
-            fds.push(Description::new(obj, status));
-        }
-    }
+    let fds = decode_fds(&mut b, &mut handles)?;
     Ok((flags, b.to_vec(), fds))
 }

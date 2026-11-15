@@ -106,6 +106,10 @@ pub fn build(
         }
         std::fs::write(&stamp, &want)?;
     }
+    if !shared {
+        let outputs: Vec<PathBuf> = programs.iter().map(|(_, rel)| build.join(rel)).collect();
+        super::relink_on_libc_change(sysroot, &build, &outputs)?;
+    }
     let jobs = std::thread::available_parallelism().map_or(4, |n| n.get());
     for target in [vec![format!("-j{jobs}")], vec![String::from("install")]] {
         let mut c = Command::new(make);

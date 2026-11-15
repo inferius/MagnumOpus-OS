@@ -43,6 +43,13 @@ fn desc(fd: i32) -> R<std::sync::Arc<Description>> {
 }
 
 pub fn open(path: &[u8], o: &OpenFlags) -> R<i32> {
+    // /dev/null (FS zarizeni nema): prazdny fd v tabulce.
+    if path == b"/dev/null" && !o.directory {
+        return fd::insert(Description::new(Object::Null, o.status()), 0, o.cloexec).map_err(|err| match err {
+            rt::Error::NoResources => errno::EMFILE,
+            other => e(other),
+        });
+    }
     let file = if o.directory {
         File::open_dir(path).map_err(e)?
     } else {
@@ -149,7 +156,7 @@ pub fn fstat(fd: i32) -> R<Stat> {
         Object::Stdio(_) => Ok(Stat::stream(Kind::Stream)),
         Object::Pipe(_) => Ok(Stat::stream(Kind::Pipe)),
         Object::Socket(_) | Object::Unix(_) => Ok(Stat::stream(Kind::Socket)),
-        Object::User(_) => Ok(Stat::stream(Kind::Stream)),
+        Object::User(_) | Object::Null => Ok(Stat::stream(Kind::Stream)),
         // Pametovy fd: bezny soubor s velikosti objektu pameti.
         Object::Memory(m) => {
             let mut st = Stat::stream(Kind::File);
