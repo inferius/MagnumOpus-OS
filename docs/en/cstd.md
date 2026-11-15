@@ -62,6 +62,15 @@ Compiling C (clang, flags, protections) is described in
   std. It exports the C symbols only on the `*-unknown-magnumopus` target;
   on the host the logic is tested (`cargo test -p cstd`), the symbols would
   clash with the system libc.
+- **Functions without a length parameter** (`sprintf`, `vsprintf`,
+  `strtok`) are available for ports **with a safeguard where one is
+  possible**: the C header maps `sprintf` and `vsprintf` to
+  `__sprintf_chk` / `__vsprintf_chk` with `__builtin_object_size` (like
+  `_FORTIFY_SOURCE`), so an overflow of a buffer of known size = `abort`
+  with a message instead of overwriting memory; `strtok` keeps its state per
+  thread. There is no `gets` (no safeguard is possible). `no_std` services
+  (`cstd-core`) do not have them; new code should use `snprintf` and
+  `strtok_r`.
 
 ## A C program
 
@@ -910,6 +919,10 @@ will come with shared memory between processes (a separate task:
 - **No sessions or process groups:** a process leads its own session and
   group (number = `getpid()`); `setsid`, `getsid`, `getpgid`, `getpgrp`
   return it, `setpgid` only "stay in the own group", otherwise `EPERM`.
+- **`putenv`** (a copy of the string: a later change does not reach the
+  environment, unlike glibc; without `=` it removes the variable),
+  **`gethostname`** (= `uname().nodename`, `sethostname` = `EPERM`), the BSD
+  types `caddr_t`, `u_char` ... (`sys/types.h`).
 - **`_exit`** (`unistd.h`, = `_Exit`), `select` also via `sys/time.h` (like glibc), the signal
   numbers `SIGIO`, `SIGXCPU`, `SIGXFSZ`, `SIGPWR`, `SIGSYS`, `SIGSTKFLT`
   (cstd does not raise them itself) and the bits `S_ISUID`, `S_ISGID`,
@@ -950,6 +963,13 @@ will come with shared memory between processes (a separate task:
   `SIOCGIFBRDADDR` (IPv4 only), `SIOCGIFHWADDR` (MAC, loopback
   `ARPHRD_LOOPBACK`), `SIOCGIFCONF` over the same interfaces; setting
   (`SIOCSIF*`) = `ENOTTY`.
+- **Headers for building ports** (no new functionality): `sys/un.h`
+  (`struct sockaddr_un`; `AF_UNIX` sockets do not exist yet),
+  `struct ucred` (`SO_PEERCRED`), `struct tcp_info` and the `TCP_*` states
+  (`getsockopt(TCP_INFO)` = `ENOPROTOOPT`), `net/if_arp.h` (`ARPHRD_*`,
+  `struct arphdr`), `net/ethernet.h` (`ETH_ALEN`, `struct ether_header`);
+  `ioctl(SIOCATMARK)` on a socket returns 0 (netd does not carry
+  out-of-band data).
 - **`gethostbyname`, `gethostbyaddr`** (`struct hostent`, `h_errno`,
   `hstrerror`): the old interface returns NULL with `h_errno` =
   `NO_RECOVERY`; programs should use `getaddrinfo`.

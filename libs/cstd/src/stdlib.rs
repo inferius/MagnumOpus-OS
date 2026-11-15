@@ -108,6 +108,38 @@ pub unsafe extern "C" fn setenv(name: *const c_char, value: *const c_char, overw
     0
 }
 
+/// `putenv("JMENO=HODNOTA")`: nastavi promennou (kopii - pozdejsi zmena
+/// retezce volajicim se do prostredi neprojevi, jinak nez v glibc);
+/// retezec bez `=` promennou smaze (jako glibc).
+///
+/// # Safety
+///
+/// `s` je retezec C.
+#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
+pub unsafe extern "C" fn putenv(s: *mut c_char) -> c_int {
+    if s.is_null() {
+        crate::errno::set(crate::errno::EINVAL);
+        return -1;
+    }
+    // SAFETY: retezec C.
+    let b = unsafe { c_bytes(s) };
+    let Some(eq) = b.iter().position(|&c| c == b'=') else {
+        // SAFETY: retezec C.
+        return unsafe { unsetenv(s) };
+    };
+    let (Ok(n), v) = (core::str::from_utf8(&b[..eq]), &b[eq + 1..]) else {
+        crate::errno::set(crate::errno::EINVAL);
+        return -1;
+    };
+    if n.is_empty() {
+        crate::errno::set(crate::errno::EINVAL);
+        return -1;
+    }
+    // SAFETY: viz setenv.
+    unsafe { std::env::set_var(n, os_str(v)) };
+    0
+}
+
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub unsafe extern "C" fn unsetenv(name: *const c_char) -> c_int {
     let Some(n) = env_name(name) else {

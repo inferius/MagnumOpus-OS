@@ -30,6 +30,7 @@ pub mod dirent;
 pub mod dlfcn;
 pub mod errno;
 pub mod fenv;
+pub mod fortify;
 pub mod ifaddrs;
 pub mod ifreq;
 pub mod flock;
