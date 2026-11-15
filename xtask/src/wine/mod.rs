@@ -28,7 +28,12 @@ pub const WINE: CPort = CPort {
     file: "wine-11.0.tar.xz",
     sha256: "c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701",
     top: "wine-11.0",
-    patches: &["0001-config-sub-magnumopus.patch", "0002-ntdll-signal-x86_64-magnumopus.patch"],
+    patches: &[
+        "0001-config-sub-magnumopus.patch",
+        "0002-ntdll-signal-x86_64-magnumopus.patch",
+        "0003-server-no-fork-magnumopus.patch",
+        "0004-server-memfd-sections-magnumopus.patch",
+    ],
     build: Build::Sources { lib: &[], defines: &[], programs: &[] },
     data: &[],
     dynamic: true,

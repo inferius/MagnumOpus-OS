@@ -1,0 +1,70 @@
+diff --git a/server/request.c b/server/request.c
+--- a/server/request.c
++++ b/server/request.c
+@@ -44,6 +44,10 @@
+ #endif
+ #include <unistd.h>
+ #include <poll.h>
++#ifdef __magnumopus__
++#include <spawn.h>
++extern char **environ;
++#endif
+ #ifdef __APPLE__
+ # include <mach/mach_time.h>
+ #endif
+@@ -857,6 +861,32 @@
+     if (!foreground)
+     {
+         if (pipe( sync_pipe ) == -1) fatal_error( "pipe: %s\n", strerror( errno ));
++#ifdef __magnumopus__
++        /* MagnumOpus: fork neni. Server spusti sam sebe v popredi (-f)
++         * a cislo zapisoveho konce roury preda v prostredi (roura bez
++         * FD_CLOEXEC se dedi). Potomek po ziskani zamku zapise do roury
++         * (viz vetev foreground nize) a rodic skonci jako po fork. */
++        {
++            char num[16];
++            char *args[3];
++            int err;
++
++            args[0] = (char *)server_argv0;
++            args[1] = (char *)"-f";
++            args[2] = NULL;
++            fcntl( sync_pipe[0], F_SETFD, FD_CLOEXEC );
++            snprintf( num, sizeof(num), "%d", sync_pipe[1] );
++            setenv( "WINESERVER_SYNC_FD", num, 1 );
++            err = posix_spawn( &pid, server_argv0, NULL, NULL, args, environ );
++            unsetenv( "WINESERVER_SYNC_FD" );
++            if (err) fatal_error( "posix_spawn %s: %s\n", server_argv0, strerror( err ));
++        }
++        close( sync_pipe[1] );
++        if (read( sync_pipe[0], &dummy, 1 ) == 1) _exit(0);
++        waitpid( pid, &status, 0 );
++        if (WIFEXITED(status)) _exit( WEXITSTATUS(status) );
++        _exit(1);
++#endif
+         pid = fork();
+         switch( pid )
+         {
+@@ -895,6 +925,22 @@
+     else  /* remain in the foreground */
+     {
+         acquire_lock();
++#ifdef __magnumopus__
++        /* Spusteny rodicem misto fork: zamek mame, rodic muze skoncit. */
++        {
++            const char *sync = getenv( "WINESERVER_SYNC_FD" );
++            if (sync)
++            {
++                int sfd = atoi( sync );
++                unsetenv( "WINESERVER_SYNC_FD" );
++                dup2( fd, 0 );
++                dup2( fd, 1 );
++                dummy = 0;
++                write( sfd, &dummy, 1 );
++                close( sfd );
++            }
++        }
++#endif
+     }
+ 
+     /* init the process tracing mechanism */

@@ -292,7 +292,14 @@ over `libc.so`).
 - **Naše úpravy / Our changes:** záplaty v `third_party/wine/` (LGPL jako
   Wine): `0001-config-sub-magnumopus.patch` (systém `magnumopus`
   v `config.sub`), `0002-ntdll-signal-x86_64-magnumopus.patch` (kontext
-  signálu jako Linux, TEB v GS přes `magnumopus/thread.h`, bez LDT).
+  signálu jako Linux, TEB v GS přes `magnumopus/thread.h`, bez LDT),
+  `0003-server-no-fork-magnumopus.patch` (wineserver se místo `fork`
+  spustí znovu v popředí přes `posix_spawn`, synchronizace rourou jako
+  dřív / wineserver restarts itself in the foreground via `posix_spawn`
+  instead of `fork`, the same pipe handshake),
+  `0004-server-memfd-sections-magnumopus.patch` (paměť anonymních sekcí
+  jako `memfd` místo dočasného souboru / anonymous section memory as a
+  `memfd` instead of a temporary file).
 - **Popis / Description:** `docs/cs/windows-vrstva.md`,
   `docs/en/windows-layer.md`.
 

@@ -1,0 +1,42 @@
+diff --git a/server/mapping.c b/server/mapping.c
+--- a/server/mapping.c
++++ b/server/mapping.c
+@@ -30,6 +30,9 @@
+ #include <sys/mman.h>
+ #include <unistd.h>
+ 
++#ifdef __magnumopus__
++#include <magnumopus/memfd.h>
++#endif
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
+ #include "windef.h"
+@@ -365,6 +368,28 @@
+     char tmpfn[16];
+     int fd;
+ 
++#ifdef __magnumopus__
++    /* MagnumOpus: pamet sekci jako pametovy fd (memfd): soubory fsd zatim
++     * nejdou mapovat MAP_SHARED se zapisem, memfd sdili ramce mezi procesy
++     * a predava se pres SCM_RIGHTS. Kapacita = velikost + 2 stranky
++     * (grow_file zapisuje bajt za konec). */
++    {
++        file_pos_t page = get_page_size();
++        fd = mo_memfd_create( "wine-mapping", MFD_CLOEXEC, (size + 2 * page) & ~(page - 1) );
++        if (fd == -1)
++        {
++            file_set_error();
++            return -1;
++        }
++        if (!grow_file( fd, size ))
++        {
++            close( fd );
++            return -1;
++        }
++        return fd;
++    }
++#endif
++
+     if (temp_dir_fd == -1)
+     {
+         temp_dir_fd = server_dir_fd;

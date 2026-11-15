@@ -266,6 +266,17 @@ unsafe fn spawn(
     let exists = |p: &[u8]| matches!(sys::stat(p), Ok(s) if s.kind == Kind::File);
     let program = resolve_program(name, &plan.cwd, path_var.as_deref(), exists);
     let Ok(program) = String::from_utf8(program) else { return errno::EINVAL };
+    // `.` a `..` vyresit jako `open` (fsd ani launchd je v ceste neberou;
+    // Wine spousti `.../lib/wine/../../bin/wineserver`).
+    let program = if program.starts_with('/') {
+        match sys::abs_path(program.as_bytes()).map(String::from_utf8) {
+            Ok(Ok(p)) => p,
+            Ok(Err(_)) => return errno::EINVAL,
+            Err(e) => return e,
+        }
+    } else {
+        program
+    };
     // SAFETY: kontrakt C.
     let mut args = unsafe { strings(argv) };
     if args.is_empty() {
