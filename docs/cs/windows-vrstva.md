@@ -12,7 +12,7 @@ v QEMU]** x86_64, další etapy **[navrženo]** (tabulka níže).
 |---|---|---|
 | W0 | sestavení Wine 11 (DLL PE, nástroje), port unixové části nad `libc.so` | celé Wine přes `cargo xtask wine` ve WSL **[implementováno]**: 602 DLL jako PE, 25 unixových `.so` nad `libc.so` (`ntdll.so` s `libunwind.so`), zavaděč `wine` a `wineserver`; `wine --version` v systému **[ověřeno v QEMU]** ([Wine na disku](#wine-na-disku-w1)) |
 | W1 | konzolové `.exe` (`cmd`, `hostname`, vlastní test): spodní `ntdll`, TEB přes GS, SEH, paměť, soubory, `wineserver` jako proces | **[ověřeno v QEMU]** x86_64, release (sada `wine`): GS v jádře a `ucontext_t` v `cstd` **[ověřeno v QEMU]**; záplata výjimek `signal_x86_64.c` se přeloží **[implementováno]**; Wine na datovém disku jako aplikace (`/apps/org.winehq.wine`), zavaděč `wine` z disku nahraje `ntdll.so` ([DL-4c](dynamicke-linkovani.md#knihovny-z-disku-a-origin-dl-4c)) **[ověřeno v QEMU]**; nový prefix (`wineboot`), `cmd /c echo`, vlastní konzolový program `user/wintest` a `hostname` ([Wine na disku](#wine-na-disku-w1)); oprávnění `wx_compat` (RWX, Q6) zatím není potřeba **[navrženo]** |
-| W2 | víc procesů jedné aplikace, registry, pojmenované objekty, `winecfg` v režimu bez oken | rozpracováno: další proces (`CreateProcess`, čekání, kód konce), pojmenované události a `Read`/`WriteProcessMemory` přes wineserver a [`PROCESS_MEMORY`](syscally.md#process_memory) **[ověřeno v QEMU]** x86_64, release ([Paměť jiného procesu](#paměť-jiného-procesu-w2)); registry, `winecfg` **[navrženo]** |
+| W2 | víc procesů jedné aplikace, registry, pojmenované objekty, `winecfg` v režimu bez oken | rozpracováno: další proces (`CreateProcess`, čekání, kód konce), pojmenované události a `Read`/`WriteProcessMemory` přes wineserver a [`PROCESS_MEMORY`](syscally.md#process_memory) **[ověřeno v QEMU]** x86_64, release ([Paměť jiného procesu](#paměť-jiného-procesu-w2)); sdílené sekce nad souborem mezi procesy, registr (`reg add`/`reg query` v dalším procesu) **[ověřeno v QEMU]** ([Sekce a registr](#sekce-a-registr-w2)); signály serveru klientům, `winecfg` **[navrženo]** |
 | W3 | okna: ovladač Wine nad kompozitorem (`guiproto`), GDI, `notepad`, `winecfg`, schránka, vstup | **[navrženo]** |
 | W4 | zvuk nad `audiod`, jednoduchá hra (GDI: `winemine`, pak hra přes SDL nebo Direct3D 9) | **[navrženo]** |
 | W5 | DXVK a VKD3D-Proton nad Vulkanem (Venus v QEMU, ovladače GPU na HW) | **[navrženo]** |
@@ -329,6 +329,30 @@ Rozhodnutí uživatele a koordinátora (15. 11. 2026):
   domluví se s ním pojmenovanými událostmi (`Local\...`), přečte
   a přepíše mu proměnnou (`ReadProcessMemory`, `WriteProcessMemory`)
   a ověří jeho kód konce.
+
+## Sekce a registr (W2)
+
+**[ověřeno v QEMU]** x86_64 (sada `wine`, release).
+
+- **Sdílená sekce nad souborem** (`wintest.exe sekce`): `CreateFileMapping`
+  se jménem nad prázdným souborem (Wine ho zvětší na velikost sekce),
+  pohled v rodiči i v dítěti (`OpenFileMapping`) = tytéž stránky, zápis
+  dítěte rodič vidí; koherence pohledu s `ReadFile` jiným handlem i
+  `WriteFile` do souboru oběma směry. Stojí na `MAP_SHARED` se zápisem
+  nad okny souborů z fsd
+  ([cstd](cstd.md)); anonymní sekce dál jako `memfd`
+  (záplata `0004`).
+- **Registr**: `wine reg add` a v dalším procesu `wine reg query` vidí
+  hodnotu (registr drží wineserver). Server ho ukládá do `user.reg`
+  a `system.reg` periodicky (30 s).
+- ⚠️ **Otevřené:** při ukončení serveru assert v `free_async_queue`
+  (ve frontě naslouchání pojmenované roury zůstala uvolněná asynchronní
+  operace), takže změny od posledního periodického uložení se při konci
+  serveru ztratí. Pravděpodobně souvisí se signály serveru klientům
+  (`SIGUSR1`/`SIGQUIT`/`SIGKILL`), které zatím nedoručíme; ověří se po
+  jejich zavedení (řídicí fd, rozhodnutí A).
+- Záplata `0003` předává při opětovném spuštění serveru všechny jeho volby
+  (`-d`, `-p`), nejen `-f`.
 
 ## W1: spojení se serverem a procesy (otázky T1-T5)
 

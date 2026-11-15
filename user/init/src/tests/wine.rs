@@ -22,6 +22,8 @@ pub const TESTS: &[Test] = &[
     ("wine: vlastni konzolovy program (printf, argv, prostredi, soubory, vlakno, kod konce)", wine_program),
     ("wine: hostname", wine_hostname),
     ("wine: dalsi proces, pojmenovane udalosti, Read/WriteProcessMemory (W2)", wine_processes),
+    ("wine: sdilena sekce nad souborem mezi procesy, koherence s ReadFile/WriteFile (W2)", wine_sections),
+    ("wine: registr - reg add a reg query v dalsim procesu (W2)", wine_registry),
 ];
 
 /// Testovaci programy Windows na disku (`xtask/src/datadisk.rs`).
@@ -42,6 +44,9 @@ struct Run {
     code: i64,
     stdout: String,
     stderr: String,
+    /// Kanal stderr (procesy, ktere program spustil, ho mohou drzet dal,
+    /// napr. wineserver).
+    err: Channel,
 }
 
 /// Spusti program `path` ze souboru pres launchd (job, relace FS, stdout
@@ -122,7 +127,7 @@ fn launch_path(s: &Startup, path: &str, args: &[&str], env: &[&str], limit: Dura
             buf.extend_from_slice(&m.data);
         }
     }
-    let run = Run { code, stdout: String::from_utf8_lossy(&stdout).into_owned(), stderr: String::from_utf8_lossy(&stderr).into_owned() };
+    let run = Run { code, stdout: String::from_utf8_lossy(&stdout).into_owned(), stderr: String::from_utf8_lossy(&stderr).into_owned(), err };
     for line in run.stdout.lines().chain(run.stderr.lines()) {
         libos::println!("init: wine: {line}");
     }
@@ -200,5 +205,33 @@ fn wine_processes(s: &Startup) -> TestResult {
         run.code == 42 && run.stdout.contains("wintest procesy: chyby 0"),
         format!("kod {} (42 = ok, 100 + bity viz user/wintest); stdout: {}; stderr: {}", run.code, run.stdout.trim(), run.stderr.trim())
     );
+    Ok(())
+}
+
+fn wine_sections(s: &Startup) -> TestResult {
+    let loader = format!("{APP}/lib/wine/x86_64-unix/wine");
+    let exe = format!("{TESTS_APP}/wintest.exe");
+    let run = launch_path(s, &loader, &[&exe, "sekce"], WINE_ENV, Duration::from_secs(600))?;
+    check!(
+        run.code == 42 && run.stdout.contains("wintest sekce: chyby 0"),
+        format!("kod {} (42 = ok, 100 + bity viz user/wintest); stdout: {}; stderr: {}", run.code, run.stdout.trim(), run.stderr.trim())
+    );
+    Ok(())
+}
+
+fn wine_registry(s: &Startup) -> TestResult {
+    let loader = format!("{APP}/lib/wine/x86_64-unix/wine");
+    let key = "HKCU\\Software\\MagnumOpus";
+    let add = launch_path(s, &loader, &["reg", "add", key, "/v", "Zkouska", "/d", "hodnota-42", "/f"], WINE_ENV, Duration::from_secs(600))?;
+    check!(add.code == 0, format!("reg add: kod {}; stdout: {}; stderr: {}", add.code, add.stdout.trim(), add.stderr.trim()));
+    let query = launch_path(s, &loader, &["reg", "query", key, "/v", "Zkouska"], WINE_ENV, Duration::from_secs(600))?;
+    check!(
+        query.code == 0 && query.stdout.contains("hodnota-42"),
+        format!("reg query: kod {}; stdout: {}; stderr: {}", query.code, query.stdout.trim(), query.stderr.trim())
+    );
+    // Ulozeni do user.reg pri konci serveru zatim neoverujeme: wineserver pri
+    // ukonceni pada (uvolnena operace ve fronte pojmenovane roury, souvisi
+    // se signaly serveru klientum, ktere zatim nejdou) - otevreny bod W2.
+    let _ = add.err;
     Ok(())
 }

@@ -12,7 +12,7 @@ in QEMU]** x86_64, later stages **[designed]** (table below).
 |---|---|---|
 | W0 | building Wine 11 (PE DLLs, tools), port of the Unix side over `libc.so` | all of Wine via `cargo xtask wine` in WSL **[implemented]**: 602 DLLs as PE, 25 Unix `.so` over `libc.so` (`ntdll.so` with `libunwind.so`), the `wine` loader and `wineserver`; `wine --version` in the system **[verified in QEMU]** ([Wine on disk](#wine-on-disk-w1)) |
 | W1 | console `.exe` (`cmd`, `hostname`, our own test): lower `ntdll`, TEB via GS, SEH, memory, files, `wineserver` as a process | **[verified in QEMU]** x86_64, release (`wine` suite): GS in the kernel and `ucontext_t` in `cstd` **[verified in QEMU]**; the exception patch `signal_x86_64.c` compiles **[implemented]**; Wine on the data disk as an application (`/apps/org.winehq.wine`), the `wine` loader from disk loads `ntdll.so` ([DL-4c](dynamic-linking.md#libraries-from-disk-and-origin-dl-4c)) **[verified in QEMU]**; a new prefix (`wineboot`), `cmd /c echo`, our own console program `user/wintest` and `hostname` ([Wine on disk](#wine-on-disk-w1)); the `wx_compat` permission (RWX, Q6) is not needed yet **[designed]** |
-| W2 | several processes of one application, registry, named objects, `winecfg` without windows | in progress: another process (`CreateProcess`, waiting, exit code), named events and `Read`/`WriteProcessMemory` through wineserver and [`PROCESS_MEMORY`](syscalls.md#process_memory) **[verified in QEMU]** x86_64, release ([Memory of another process](#memory-of-another-process-w2)); registry, `winecfg` **[designed]** |
+| W2 | several processes of one application, registry, named objects, `winecfg` without windows | in progress: another process (`CreateProcess`, waiting, exit code), named events and `Read`/`WriteProcessMemory` through wineserver and [`PROCESS_MEMORY`](syscalls.md#process_memory) **[verified in QEMU]** x86_64, release ([Memory of another process](#memory-of-another-process-w2)); shared sections over a file between processes, the registry (`reg add`/`reg query` in another process) **[verified in QEMU]** ([Sections and the registry](#sections-and-the-registry-w2)); server signals to clients, `winecfg` **[designed]** |
 | W3 | windows: a Wine driver over the compositor (`guiproto`), GDI, `notepad`, `winecfg`, clipboard, input | **[designed]** |
 | W4 | sound over `audiod`, a simple game (GDI: `winemine`, then a game via SDL or Direct3D 9) | **[designed]** |
 | W5 | DXVK and VKD3D-Proton over Vulkan (Venus in QEMU, GPU drivers on HW) | **[designed]** |
@@ -350,6 +350,30 @@ Decisions of the user and the coordinator (15 Nov 2026):
   synchronises with it through named events (`Local\...`), reads and
   overwrites one of its variables (`ReadProcessMemory`,
   `WriteProcessMemory`) and checks its exit code.
+
+## Sections and the registry (W2)
+
+**[verified in QEMU]** x86_64 (`wine` suite, release).
+
+- **A shared section over a file** (`wintest.exe sekce`): a named
+  `CreateFileMapping` over an empty file (Wine grows it to the section
+  size), a view in the parent and in the child (`OpenFileMapping`) = the
+  same pages, the parent sees the child's write; coherence of the view with
+  `ReadFile` through another handle and `WriteFile` into the file in both
+  directions. It rests on write-enabled `MAP_SHARED` over file windows from
+  fsd ([cstd](cstd.md)); anonymous sections remain `memfd`
+  (patch `0004`).
+- **The registry**: `wine reg add` and `wine reg query` in another process
+  see the value (wineserver holds the registry). The server saves it to
+  `user.reg` and `system.reg` periodically (30 s).
+- ⚠️ **Open:** when the server ends, an assert in `free_async_queue` (a
+  freed asynchronous operation left in the listen queue of a named pipe),
+  so changes since the last periodic save are lost when the server ends.
+  Probably related to the server's signals to clients
+  (`SIGUSR1`/`SIGQUIT`/`SIGKILL`), which we do not deliver yet; to be
+  checked once they exist (control fd, decision A).
+- Patch `0003` passes all of the server's options (`-d`, `-p`) when it
+  restarts itself, not only `-f`.
 
 ## W1: server connection and processes (questions T1-T5)
 
