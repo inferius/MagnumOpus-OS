@@ -118,6 +118,10 @@ pub enum Kind<M> {
     /// Obrazek (pixely 0xAARRGGBB, sdilene bez kopie), zmenseny do
     /// prvku se zachovanim pomeru stran; `alt` = popis pro ctecku.
     Image { w: u32, h: u32, px: alloc::rc::Rc<[u32]>, alt: String },
+    /// Plocha videa `id` s pomerem stran `w`:`h`: obraz kresli klient do
+    /// vlastni vrstvy z cizich bufferu (`client::video`), prvek jen
+    /// rezervuje misto (viz [`video`]).
+    Video { id: u32, w: u32, h: u32, alt: String },
     /// Vyber jedne moznosti z rozbalovaciho seznamu.
     Select { options: Vec<String>, selected: usize, on_select: Option<Box<dyn Fn(usize) -> M>> },
 
@@ -423,6 +427,14 @@ pub fn image<M>(w: u32, h: u32, px: alloc::rc::Rc<[u32]>, alt: &str) -> Node<M> 
     let ok = px.len() as u64 >= w as u64 * h as u64;
     let (w, h) = if ok { (w, h) } else { (0, 0) };
     node(Kind::Image { w, h, px, alt: alt.into() })
+}
+
+/// Plocha videa `id` (0..[`crate::MAX_VIDEOS`]) s pomerem stran `w`:`h`
+/// (prirozena velikost prvku). Snimky do ni dava aplikace pres
+/// `App::video_frame`; klient je ukazuje ve vrstve nad oknem bez kopie
+/// a bez prekresleni okna. Mensi prostor ji zmensi se zachovanim pomeru.
+pub fn video<M>(id: u32, w: u32, h: u32, alt: &str) -> Node<M> {
+    node(Kind::Video { id, w: w.max(1), h: h.max(1), alt: alt.into() })
 }
 
 /// Rozbalovaci vyber jedne z `options` (zprava `on_pick`).

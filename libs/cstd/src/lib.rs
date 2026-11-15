@@ -32,6 +32,7 @@ pub mod errno;
 pub mod fenv;
 pub mod flock;
 pub mod fsat;
+pub mod locale;
 pub mod math;
 pub mod misc;
 pub mod mman;
@@ -48,6 +49,7 @@ pub mod socket;
 pub mod sys;
 pub mod time;
 pub mod unistd;
+pub mod wchar;
 
 #[cfg(test)]
 mod tests;
@@ -71,6 +73,10 @@ mod fenv_tests;
 mod cxxsup_tests;
 #[cfg(test)]
 mod fsat_tests;
+#[cfg(test)]
+mod locale_tests;
+#[cfg(test)]
+mod wchar_tests;
 
 pub use cstd_core::ctypes::{c_char, c_int, c_long, c_uint, c_ulong, size_t};
 

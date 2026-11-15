@@ -8,3 +8,4 @@
 
 extern crate cstd;
 extern crate mosdl;
+extern crate mosys;

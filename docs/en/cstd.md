@@ -24,8 +24,10 @@ Compiling C (clang, flags, protections) is described in
 > two processes, `EDEADLK`). Part 2i **[verified in QEMU]** (suite
 > `cstd porty`): `libc.a`, the C sysroot and the zlib and sqlite ports.
 > `libc.so` **[verified in QEMU]** (suite `cstd dyn`: a PIE program in C,
-> threads, TLS, `dlopen` of a plugin). Further parts (`posix_spawn`, signals
-> from other processes, `iconv`, wide streams) **[designed]**, see
+> threads, TLS, `dlopen` of a plugin). Wide characters and locale
+> **[verified in QEMU]** (step `wchar`, chapter
+> [Wide characters and locale](#wide-characters-and-locale)). Further parts
+> (`posix_spawn`, signals from other processes, `iconv`) **[designed]**, see
 > [Continuation](#continuation-a-complete-libc-and-posix-parts-2-8).
 
 ## Layers
@@ -278,7 +280,7 @@ tests `cxxsup_tests`, `fsat_tests`.
 
 | Header | Functions | Notes |
 |---|---|---|
-| `stdlib.h` | `aligned_alloc`, `posix_memalign`, `lldiv`, `realpath` | an aligned block is freed by plain `free`: the `malloc` header (cstd-core) carries both size and alignment; `realloc` of an aligned block returns a plain block |
+| `stdlib.h` | `lldiv`, `realpath` | aligned memory (`aligned_alloc`, `posix_memalign`, `memalign`) is in cstd-core: plain `free` releases the block |
 | `unistd.h`, `sys/random.h` | `getentropy` (at most 256 B), `unlinkat`, `pathconf`, `fpathconf` | `getentropy` waits until the kernel generator is seeded (like Linux) |
 | `time.h` | `timespec_get` (`TIME_UTC`, `TIME_MONOTONIC`) | |
 | `fcntl.h`, `sys/stat.h` | `openat`, `mkdirat`, `fstatat`, `fchmodat` relative to a directory; `AT_REMOVEDIR`, `AT_SYMLINK_NOFOLLOW` | the directory path remembered at open + the name (the FS works with paths: no protection against the directory being renamed between open and the call) |
@@ -341,7 +343,7 @@ C frames) and links with `--eh-frame-hdr`; the dynamic part has
   `bsearch`, `rand`, `div`, `atol`, the `scanf` family, `getpwuid` (user
   from `USER` and `HOME`), `getuid` and friends (0), `fchown` and `utimes`
   without effect, `readlink`/`symlink`/`link` (no FS symlinks yet),
-  `ioctl` (`ENOTTY`), `setlocale`/`localeconv` (C, C.UTF-8), `uname`,
+  `ioctl` (`ENOTTY`), `setlocale`/`localeconv` (see [Wide characters and locale](#wide-characters-and-locale)), `uname`,
   `getrusage`/`getrlimit`, `system` (`ENOSYS`; starting processes via
   `posix_spawn` **[designed]**).
 - **`libc.so`**: see the [libc.so](#libcso) chapter below.
@@ -600,15 +602,10 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
 Changes are stored as port patches (`third_party/`); programs with
 configuration often only need an option (`--disable-fork`, `HAVE_FORK=0`);
 FFmpeg, sqlite, zlib and SDL do not need `fork`.
-- **Locale:** only `C` (the default at start-up, as POSIX requires) and
-  `C.UTF-8`. `setlocale(LC_ALL, "")` selects `C.UTF-8`; any `*.UTF-8` name
-  is accepted as `C.UTF-8`. The decimal separator is always `.`, texts and
-  months in English. Localising applications is not the job of libc.
-- **wchar:** `wchar_t` is 32 bits (UTF-32) on both architectures,
-  `MB_CUR_MAX` 1 in `C` and 4 in `C.UTF-8`. Conversions (`mbrtowc`,
-  `wcrtomb`, `mbstowcs`, ...), `wcs*` strings, `wctype.h` (Unicode classes
-  from tables), `swprintf`. Wide streams (`fwprintf`, `fgetwc`) only when a
-  port needs them.
+- **Locale and wchar:** done, see [Wide characters and locale](#wide-characters-and-locale)
+  (`C` single-byte, `C.UTF-8` and other names UTF-8, categories not
+  localised yet; 32-bit `wchar_t`, complete `wchar.h` and `wctype.h`
+  including wide streams).
 
 ### Decisions
 
@@ -698,12 +695,93 @@ What the SDL port needed and was added:
 | `sched.h`, `pthread_getschedparam`/`setschedparam` | only `SCHED_OTHER` with priority 0; `SCHED_FIFO`/`SCHED_RR` = `EPERM` (like Linux without privileges), nonsense = `EINVAL` |
 | `fenv.h` | exceptions, rounding, `fegetenv`/`feholdexcept`/`fesetenv`/`feupdateenv`, `FE_DFL_ENV`; x86_64 over x87 and MXCSR, aarch64 over FPCR and FPSR (`src/fenv.rs`), values and `fenv_t` as in glibc. Exception traps are never enabled. Test: step `math` (`ctest`) on both architectures, host test on x86_64 (SDL converts audio with NEON under `feholdexcept`) |
 | `SIGVTALRM`, `SIGPROF` | numbers as in Linux (26, 27) for signal masks; `setitimer` timers do not exist yet |
-| `wchar.h` | types and constants only so far (`wint_t`, `mbstate_t`, `WEOF`); `wcs*` functions and conversions come with full wchar support (below) |
+| `wchar.h` | complete, see [Wide characters and locale](#wide-characters-and-locale) |
 | `inttypes.h` | `PRI*`/`SCN*` macros (LP64), `imaxabs`, `imaxdiv`, `strtoimax`, `strtoumax` |
 | `libm.a`, `libpthread.a`, `librt.a` | empty archives in the sysroot (everything is in `libc.a`, as in musl); build systems link `-lm -lpthread` |
 
 `dlfcn.h` comes with `libc.so` (a separate branch); SDL does not need it
 yet (our patch switches off GTK and `dlopen` for MagnumOpus).
+
+## Wide characters and locale
+
+**[verified in QEMU]** x86_64 and aarch64 (step `wchar` of the `ctest`
+test, suite `cstd`; host tests `cargo test -p cstd`, `-p cstd-core`,
+`-p uniprop`). Groundwork for libc++ (step 7a-2, the C++ runtime): complete
+`wchar.h` and `wctype.h`, `locale.h` with `locale_t` objects and the `*_l`
+variants.
+
+### Encoding
+
+| Locale | Encoding | `MB_CUR_MAX` | `CODESET` |
+|---|---|---|---|
+| `C`, `POSIX` (the default at start-up) | single-byte: 0x00-0x7F ASCII, bytes 0x80-0xFF map reversibly to U+DF80-U+DFFF as wide characters (like musl) | 1 | `ANSI_X3.4-1968` |
+| `C.UTF-8`, `""` and any other name without a foreign codeset (`cs_CZ.UTF-8`, `en_US`, `de_DE@euro`) | UTF-8 (valid only: no overlong forms, no surrogates) | 4 | `UTF-8` |
+| a name with another codeset (`cs_CZ.ISO-8859-2`) | rejected (`setlocale` returns `NULL`, `newlocale` `ENOENT`) | - | - |
+
+- Why a single-byte `C`: a program in the C locale (the default) can pass
+  arbitrary data through wide characters without loss and without errors;
+  POSIX requires it and musl does the same. Programs that want UTF-8 call
+  `setlocale(LC_ALL, "")` as everywhere else.
+- `""` reads `LC_ALL`, `LC_<category>`, `LANG`; nothing set = `C.UTF-8`
+  (the system is UTF-8).
+- Categories are **not localised yet**: numbers, dates and collation are
+  as in the C locale everywhere (decimal point, English month names,
+  `strcoll` = `strcmp`). Only `LC_CTYPE` decides the encoding; the other
+  categories just remember the name (`setlocale(LC_ALL, NULL)` returns the
+  composite name `C.UTF-8;C;C;C;C;C`, which can be passed back). Czech
+  collation comes later.
+- Thread locale: `uselocale` (otherwise the global one from `setlocale`
+  applies), `newlocale`/`duplocale`/`freelocale`. Uniform locales (`C`,
+  `C.UTF-8`) are shared without allocation. `LC_GLOBAL_LOCALE` =
+  `(locale_t)-1`.
+
+### Functions
+
+| Header | Functions | Note |
+|---|---|---|
+| `wchar.h` conversions | `mbrtowc`, `mbrlen`, `mbsinit`, `wcrtomb`, `btowc`, `wctob`, `mbsrtowcs`, `mbsnrtowcs`, `wcsrtombs`, `wcsnrtombs` | `mbstate_t` state (8 B, zeros = initial); a null state pointer = per-thread state |
+| `stdlib.h` | `mblen`, `mbtowc`, `wctomb`, `mbstowcs`, `wcstombs`, `MB_CUR_MAX` (`__ctype_get_mb_cur_max`) | `MB_LEN_MAX` 4 (`limits.h`) |
+| `wchar.h` strings | `wcslen`, `wcsnlen`, `wcscpy`, `wcpcpy`, `wcsncpy`, `wcpncpy`, `wcscat`, `wcsncat`, `wcslcpy`, `wcslcat`, `wcscmp`, `wcsncmp`, `wcscasecmp`, `wcsncasecmp`, `wcscoll`, `wcsxfrm`, `wcschr`, `wcsrchr`, `wcsspn`, `wcscspn`, `wcspbrk`, `wcsstr`, `wcstok`, `wcsdup`, `wmem*`, `wcwidth`, `wcswidth` | comparison by `wchar_t` value; `wcscasecmp` via simple Unicode case mapping |
+| `wchar.h` numbers and time | `wcstol`, `wcstoll`, `wcstoul`, `wcstoull`, `wcstoimax`, `wcstoumax`, `wcstod`, `wcstof`, `wcstold`, `wcsftime` | leading white space by `iswspace`, ASCII digits only; `ERANGE` |
+| `wchar.h` streams | `fgetwc`, `getwc`, `getwchar`, `fputwc`, `putwc`, `putwchar`, `ungetwc`, `fgetws`, `fputws`, `fwide` | the stream holds the thread locale's encoding; `FILE` remembers a partial character |
+| `wchar.h` formatting | `wprintf`, `fwprintf`, `swprintf`, `vwprintf`, `vfwprintf`, `vswprintf`, `wscanf`, `fwscanf`, `swscanf` and the `v` variants | the same engine as `printf`/`scanf`; `swprintf` returns -1 when the output does not fit |
+| `wctype.h` | `isw*`, `towupper`, `towlower`, `wctype`, `iswctype`, `wctrans`, `towctrans` | by Unicode, locale-independent; `iswdigit`/`iswxdigit` ASCII only |
+| `locale.h` | `setlocale`, `localeconv`, `newlocale`, `uselocale`, `duplocale`, `freelocale`, `LC_*_MASK` | see above |
+| `*_l` | `is*_l`, `toupper_l`, `tolower_l`, `isw*_l`, `towupper_l`, `towlower_l`, `iswctype_l`, `wctype_l`, `wctrans_l`, `towctrans_l`, `strcoll_l`, `strxfrm_l`, `wcscoll_l`, `wcsxfrm_l`, `strftime_l`, `wcsftime_l`, `strto{d,f,ld}_l`, `strto{l,ll,ul,ull}_l`, `nl_langinfo_l` | libc++ calls these instead of `uselocale` |
+| `printf` | `%lc`, `%ls`, `%C`, `%S`; `asprintf`, `vasprintf` (buffer from `malloc`) | converted to the locale encoding; a character outside it = -1 and `EILSEQ`; precision in bytes, never half a character |
+| `scanf` | `%lc`, `%ls`, `%l[` | in `scanf` converted from the locale encoding, in `wscanf` the other way round for `%c %s %[` |
+
+### Unicode tables
+
+Character classes (`iswalpha` = the Alphabetic property, `iswupper`/
+`iswlower` = Uppercase/Lowercase, `iswspace` = White_Space without the
+no-break spaces U+00A0, U+2007, U+202F), simple case mappings (fields 12
+and 13 of `UnicodeData.txt`) and the terminal width of a character
+(`wcwidth`: 2 for East_Asian_Width W/F, 0 for combining marks and format
+characters, -1 for non-printable) live in the `libs/uniprop` crate
+(`no_std`, the terminal will use it too). The tables (`src/tables.rs`,
+sorted ranges, binary search, an ASCII fast path) are generated by
+`cargo xtask unicode-tables` from the UCD in the compiler's
+`core::char::UNICODE_VERSION` (18.0.0 today); the files are downloaded over
+HTTPS with a SHA-256 check. A host test checks that the version matches and
+that `iswalpha`, `iswupper`, `iswlower` and the case mappings agree with
+Rust's `char` for all 1.1 million code points. The UCD data is licensed
+under Unicode-3.0 (file `THIRD-PARTY.md` in the repository root).
+
+### Internals
+
+- `cstd-core/src/mb.rs`: the UTF-8 automaton and the single-byte encoding
+  (`Enc`), `mbstate_t`. The formatting engine (`format.rs`) is shared by
+  bytes and wide characters (`Out<u8>`/`Out<u32>`); it learns the locale
+  encoding through a hook that `cstd` registers on the first locale change
+  (until then C applies, also in `no_std` services).
+- `cstd/src/locale/`: locale state (a global mask plus a per-thread locale
+  in TLS), `nl_langinfo`, the `*_l` variants (`xl.rs`).
+- `cstd/src/wchar/`: `conv.rs`, `wcs.rs`, `num.rs`, `wctype.rs`, `wio.rs`,
+  `wprintf.rs`, `wscanf.rs`. The `scanf` engine works on `u32` characters
+  in byte and wide mode.
+- `long double` (`wcstold`, `strtold_l`) is in C (`c/math_ld.c`) with
+  `double` precision like `strtold`.
 
 ## FFmpeg and licences
 

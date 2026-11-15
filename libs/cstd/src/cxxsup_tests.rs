@@ -19,27 +19,6 @@ fn getentropy_limits() {
 }
 
 #[test]
-fn aligned_alloc_and_posix_memalign() {
-    unsafe {
-        let p = aligned_alloc(256, 1000);
-        assert!(!p.is_null());
-        assert_eq!(p as usize % 256, 0);
-        cstd_core::stdlib::free(p.cast());
-        assert!(aligned_alloc(3, 8).is_null());
-        assert_eq!(errno::get(), errno::EINVAL);
-
-        let mut out: *mut c_void = core::ptr::null_mut();
-        assert_eq!(posix_memalign(&mut out, 64, 10), 0);
-        assert_eq!(out as usize % 64, 0);
-        cstd_core::stdlib::free(out.cast());
-        // zarovnani mensi nez sizeof(void *) nebo ne mocnina 2
-        assert_eq!(posix_memalign(&mut out, 4, 10), errno::EINVAL);
-        assert_eq!(posix_memalign(&mut out, 24, 10), errno::EINVAL);
-        assert_eq!(posix_memalign(&mut out, 64, usize::MAX), errno::ENOMEM);
-    }
-}
-
-#[test]
 fn timespec_get_bases() {
     let mut t = timespec { tv_sec: 0, tv_nsec: 0 };
     unsafe {

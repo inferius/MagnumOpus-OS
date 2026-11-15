@@ -92,8 +92,9 @@ pub fn net_state(data: &[u8]) -> Option<comp::render::NetState> {
     })
 }
 
-pub fn volume(data: &[u8]) -> Option<(u8, bool)> {
+/// Hlasitost, ztlumeni a nahravajici aplikace ze stavu `audiod`.
+pub fn volume(data: &[u8]) -> Option<((u8, bool), alloc::vec::Vec<alloc::string::String>)> {
     let body = audioproto::decode_reply(data).ok()?;
     let s = audioproto::client::Status::decode(body).ok()?;
-    Some((s.master, s.muted))
+    Some(((s.master, s.muted), s.capturing))
 }

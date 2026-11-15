@@ -11,8 +11,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::Result;
 
 const SECTOR: u64 = 512;
-/// Celkova velikost obrazu.
-const DISK_SIZE: u64 = 128 * 1024 * 1024;
+/// Celkova velikost obrazu. 256 MiB: ladici initfs (~80 MiB), jadro a od
+/// kroku 7 knihovny FFmpeg (`lib/libav*.so`, ~20 MiB na architekturu) se do
+/// 128 MiB nevejdou.
+const DISK_SIZE: u64 = 256 * 1024 * 1024;
 /// Oddil zacina na 1 MiB (zarovnani obvykle pro SSD a flash).
 const PARTITION_START_LBA: u64 = 2048;
 

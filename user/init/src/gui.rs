@@ -43,7 +43,7 @@ pub static GUI: spin::Mutex<Option<Gui>> = spin::Mutex::new(None);
 pub static LAUNCHER: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
 
 /// Aplikace plochy, ktere lze spustit z listy (programy v initfs).
-pub const DESKTOP_APPS: &[&str] = &["gui-term", "gui-demo", "gui-tasks", "gui-komponenty", "gui-files"];
+pub const DESKTOP_APPS: &[&str] = &["gui-term", "gui-demo", "gui-tasks", "gui-komponenty", "gui-files", "gui-player"];
 
 /// Graficky instalator: jen na zivem USB (v liste a po prihlaseni se sam
 /// otevre jako ostatni aplikace plochy).
@@ -441,10 +441,12 @@ impl Gui {
     /// Spusti aplikaci relace `session` v jejim jobu s oknem, ktere
     /// prezije pad kompozitoru (relace a listek od supervisoru `sup`),
     /// s dalsimi handly aplikace za listkem (napr. kanal terminalu).
-    pub fn launch_for_session(&mut self, startup: &Startup, name: &str, sup: &mut Supervisor, extra: Vec<StartHandle>, session: u64) -> Result<usize> {
+    pub fn launch_for_session(&mut self, startup: &Startup, name: &str, sup: &mut Supervisor, mut extra: Vec<StartHandle>, session: u64) -> Result<usize> {
         let info = recipe(startup, name)?;
         let job = crate::session::job(session)?;
         let (ch, lease) = sup.session(NAME, info.encode())?;
+        // Zvuk s pravy aplikace (bez zvukove sluzby aplikace bezi bez zvuku).
+        extra.extend(audio_handles(startup, name, sup, crate::session::uid(session).unwrap_or(0)));
         let i = self.launch_in(startup, name, ch, lease, extra, Some(&job))?;
         self.session_apps.push((session, i));
         Ok(i)
@@ -476,6 +478,30 @@ impl Gui {
         }
         self.apps.push(app);
         Ok(self.apps.len() - 1)
+    }
+}
+
+/// Relace zvuku aplikace (`tag::AUDIO`, `tag::AUDIO_LEASE`): recept
+/// z manifestu (identita, jmeno, `[audio] capture`) a uzivatele relace.
+/// Prazdne, kdyz zvukova sluzba nebezi nebo program nema manifest.
+pub fn audio_handles(startup: &Startup, name: &str, sup: &mut Supervisor, uid: u64) -> Vec<StartHandle> {
+    let Ok(fs) = Initfs::open(startup) else { return Vec::new() };
+    let Ok(Some(m)) = crate::apps::manifest(&fs, name) else { return Vec::new() };
+    let r = audioproto::session::Recipe {
+        app_id: m.id.clone(),
+        app_name: m.name.clone(),
+        uid,
+        capture: if m.audio_capture { audioproto::session::Capture::Ask } else { audioproto::session::Capture::No },
+    };
+    match crate::audio::app_session(sup, &r) {
+        Ok((ch, lease)) => alloc::vec![
+            StartHandle::tagged(libos::abi::params::tag::AUDIO, ch.into_handle()),
+            StartHandle::tagged(libos::abi::params::tag::AUDIO_LEASE, lease.into_handle()),
+        ],
+        Err(e) => {
+            println!("init: zvuk pro {name}: {e}");
+            Vec::new()
+        }
     }
 }
 
@@ -559,6 +585,15 @@ pub fn launch_app(gui: &mut Gui, startup: &Startup, sup: &mut Supervisor, progra
         // Instalator: kanal k installd (spusti ho init, jen zive USB);
         // v testu GUI instalace navic soubor odpovedi (autopilot).
         INSTALLER_APP => crate::install::app_handles()?,
+        // Prehravac: relace mediad, volitelne kanal k audiod (bez zvukove
+        // karty hraje bez zvuku).
+        "gui-player" => {
+            let mut v = vec![StartHandle::user(crate::media::connect()?.into_handle())];
+            if let Ok(a) = crate::audio::connect() {
+                v.push(StartHandle::user(a.into_handle()));
+            }
+            v
+        }
         _ => Vec::new(),
     };
     gui.launch_for_session(startup, program, sup, extra, session)

@@ -61,6 +61,10 @@ pub enum Cursor {
     DiagDown,
     /// Roh vpravo nahore / vlevo dole.
     DiagUp,
+    /// Kurzor aplikace okna (`SET_CURSOR`, `pointer.rs`).
+    App(u32),
+    /// Skryty (zamek ukazatele).
+    Hidden,
 }
 
 /// Systemovy ovladaci prvek (akce az pri pusteni nad nim).
@@ -112,6 +116,8 @@ pub struct InputState {
     title_click: Option<(u32, u64, i32, i32)>,
     /// Tvar kurzoru (okraj okna: zmena velikosti).
     pub cursor: Cursor,
+    /// Posledni absolutni poloha od zarizeni (zamek ukazatele s tabletem).
+    pub(crate) abs_last: (i32, i32),
 }
 
 impl InputState {
@@ -131,6 +137,7 @@ impl InputState {
             hover: None,
             sys_press: None,
             title_click: None,
+            abs_last: (w as i32 / 2, h as i32 / 2),
         }
     }
 
@@ -173,6 +180,8 @@ impl Comp {
     pub(crate) fn cursor_rect(&self) -> Rect {
         match self.input.cursor {
             Cursor::Arrow => Rect::new(self.input.px, self.input.py, CURSOR_W, CURSOR_H),
+            Cursor::Hidden => Rect::new(self.input.px, self.input.py, 0, 0),
+            Cursor::App(g) => self.app_cursor_rect(g),
             // Kurzory zmeny velikosti maji aktivni bod uprostred.
             _ => {
                 let e = crate::render::RESIZE_CURSOR as i32;
@@ -182,7 +191,7 @@ impl Comp {
     }
 
     /// Zmena tvaru kurzoru: poskodit stare i nove misto.
-    fn set_cursor(&mut self, k: Cursor) {
+    pub(crate) fn set_cursor(&mut self, k: Cursor) {
         if self.input.cursor == k {
             return;
         }
@@ -300,12 +309,22 @@ impl Comp {
         let mods = r.mods;
         match r.event {
             Event::Motion { dx, dy } => {
+                if self.pointer_locked_motion(dx, dy, mods, syn, r.time) {
+                    return;
+                }
                 let (x, y) = (self.input.px.saturating_add(dx), self.input.py.saturating_add(dy));
                 self.pointer_to(x, y, mods, syn, r.time, now);
             }
             Event::Absolute { x, y } => {
                 let x = (x as i64 * self.w as i64 / 65536) as i32;
                 let y = (y as i64 * self.h as i64 / 65536) as i32;
+                // Zamek s absolutnim zarizenim (tablet v QEMU): posun od
+                // posledni polohy, kurzor na miste.
+                if self.plock.is_some() && self.pointer_locked_motion(x - self.input.abs_last.0, y - self.input.abs_last.1, mods, syn, r.time) {
+                    self.input.abs_last = (x, y);
+                    return;
+                }
+                self.input.abs_last = (x, y);
                 self.pointer_to(x, y, mods, syn, r.time, now);
             }
             Event::Button { button, action } => {
@@ -347,6 +366,12 @@ impl Comp {
                 // Jen mistni fyzicka klavesnice, bez otevreneho dialogu.
                 if !syn && self.dialogs.active().is_none() {
                     let meta = code == inputproto::code::KEY_LEFTMETA || code == inputproto::code::KEY_RIGHTMETA;
+                    // Super vzdy uvolni zamek ukazatele (aplikaci nejde).
+                    if meta && action == Action::Press && self.plock.is_some() {
+                        self.pointer_unlock();
+                        self.input.meta_alone = false;
+                        return;
+                    }
                     match (meta, action) {
                         (true, Action::Press) => self.input.meta_alone = true,
                         (true, Action::Release) if core::mem::take(&mut self.input.meta_alone) => {
@@ -601,7 +626,12 @@ impl Comp {
         };
         let now = self.input_now;
         self.max_hover(over, px, py, now);
-        let k = if self.panel_rect().contains(px, py) { Cursor::Arrow } else { hit.map_or(Cursor::Arrow, |(_, z)| z.cursor()) };
+        let k = match hit {
+            _ if self.panel_rect().contains(px, py) => Cursor::Arrow,
+            // Nad obsahem okna kurzor aplikace (jen bez dialogu systemu).
+            Some((g, Zone::Content(..))) if self.dialogs.active().is_none() && self.windows.get(&g).is_some_and(|w| w.app_cursor.is_some()) => Cursor::App(g),
+            h => h.map_or(Cursor::Arrow, |(_, z)| z.cursor()),
+        };
         self.set_cursor(k);
     }
 

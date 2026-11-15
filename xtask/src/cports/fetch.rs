@@ -21,25 +21,31 @@ pub fn sha256(data: &[u8]) -> String {
 
 /// Stazeny a overeny archiv portu.
 fn fetch(p: &CPort) -> Result<PathBuf> {
+    fetch_file(p.url, p.file, p.sha256)
+}
+
+/// Stazeny a overeny soubor (archiv portu, testovaci data) v
+/// `target/c-ports/dl`; stahuje se jen, kdyz chybi nebo nesedi otisk.
+pub fn fetch_file(url: &str, file: &str, want: &str) -> Result<PathBuf> {
     let dl = target_dir().join("c-ports").join("dl");
     std::fs::create_dir_all(&dl)?;
-    let path = dl.join(p.file);
+    let path = dl.join(file);
     if let Ok(data) = std::fs::read(&path)
-        && sha256(&data) == p.sha256
+        && sha256(&data) == want
     {
         return Ok(path);
     }
-    println!("xtask: stahuji {}", p.url);
-    let tmp = dl.join(format!("{}.part", p.file));
-    let ok = Command::new("curl").args(["-sSfL", "-o"]).arg(&tmp).arg(p.url).status()?.success();
+    println!("xtask: stahuji {url}");
+    let tmp = dl.join(format!("{file}.part"));
+    let ok = Command::new("curl").args(["-sSfL", "-o"]).arg(&tmp).arg(url).status()?.success();
     if !ok {
-        return Err(format!("stazeni {} selhalo (curl)", p.url).into());
+        return Err(format!("stazeni {url} selhalo (curl)").into());
     }
     let data = std::fs::read(&tmp)?;
     let got = sha256(&data);
-    if got != p.sha256 {
+    if got != want {
         let _ = std::fs::remove_file(&tmp);
-        return Err(format!("{}: SHA-256 {got} nesedi (ocekavano {})", p.file, p.sha256).into());
+        return Err(format!("{file}: SHA-256 {got} nesedi (ocekavano {want})").into());
     }
     std::fs::rename(&tmp, &path)?;
     Ok(path)

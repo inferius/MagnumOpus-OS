@@ -1,0 +1,7 @@
+# Port SDL (docs/cs/sdl.md): ukazkova hra SDL (examples/demo/01-snake).
+[app]
+id = "org.libsdl.snake"
+name = "SDL Had"
+
+[limits]
+memory = "128M"

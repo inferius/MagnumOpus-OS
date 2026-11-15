@@ -35,6 +35,7 @@ pub const LLVM: CPort = CPort {
     patches: &["0001-magnumopus.patch"],
     build: Build::CMake { options: &[], programs: &[] },
     data: &[],
+    dynamic: false,
 };
 
 /// Casti archivu, ktere runtime potrebuje (z 179 MB asi 40 MB).

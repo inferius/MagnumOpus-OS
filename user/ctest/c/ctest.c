@@ -20,6 +20,7 @@ int net_main(void);
 int mmap_test(const char *dir);
 int signal_test(void);
 int lock_main(const char *side, const char *dir);
+int wchar_test(const char *dir);
 
 #define CHECK(name, cond)                                              \
     do {                                                               \
@@ -152,6 +153,9 @@ int main(int argc, char **argv) {
     int sg = signal_test();
     if (sg != 0) fprintf(stderr, "ctest signal: krok %d errno %d\n", sg, errno);
     CHECK("signal", sg == 0);
+    int wc = dir != NULL ? wchar_test(dir) : -1;
+    if (wc != 0) fprintf(stderr, "ctest wchar: krok %d errno %d\n", wc, errno);
+    CHECK("wchar", wc == 0);
     assert(failures == 0);
     fputs("chyba na stderr\n", stderr);
     fflush(stdout);

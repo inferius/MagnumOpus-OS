@@ -196,3 +196,11 @@ id = \"x\"
         assert!(Manifest::parse(&text).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn audio_capture_only_when_asked() {
+    let m = Manifest::parse("[app]\nid = \"org.x\"\n").unwrap();
+    assert!(!m.audio_capture, "nahravani jen kdyz ho manifest chce");
+    let c = Manifest::parse("[app]\nid = \"org.x\"\n[audio]\ncapture = true\n").unwrap();
+    assert!(c.audio_capture);
+}

@@ -116,27 +116,3 @@ fn malloc_realloc_free() {
         free(core::ptr::null_mut());
     }
 }
-
-#[test]
-fn aligned_alloc_free_realloc() {
-    unsafe {
-        for align in [1usize, 16, 32, 64, 4096] {
-            let p = alloc_aligned(100, align).unwrap();
-            assert!(!p.is_null());
-            assert_eq!(p as usize % align.max(16), 0, "{align}");
-            for i in 0..100 {
-                *p.add(i) = i as u8;
-            }
-            // realloc zarovnaneho bloku = kopie do obycejneho bloku
-            let q = realloc(p, 200);
-            assert_eq!(q as usize % 16, 0);
-            assert!((0..100).all(|i| *q.add(i) == i as u8));
-            free(q);
-            let r = alloc_aligned(10, align).unwrap();
-            free(r);
-        }
-        assert!(alloc_aligned(8, 24).is_none(), "zarovnani neni mocnina 2");
-        assert!(alloc_aligned(8, 0).is_none());
-        assert!(alloc_aligned(usize::MAX, 64).unwrap().is_null());
-    }
-}

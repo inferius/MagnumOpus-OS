@@ -195,12 +195,13 @@ impl Terminals {
                 }
             }
             Wait::PowerSession(i, k) if sig.intersects(Signals::READABLE | Signals::PEER_CLOSED) => {
+                let session = self.clients[i].session;
                 let slot = &mut self.clients[i].power_sessions[k];
                 if let Some(chan) = slot.take() {
                     match chan.try_read() {
                         // Pozadavek: init si kanal vezme (odpoved pri chybe),
                         // nebo ho vrati.
-                        Ok(m) => *slot = crate::power::request_from_shell(&m.data, chan),
+                        Ok(m) => *slot = crate::power::request_from_shell(&m.data, chan, session),
                         Err(Error::ShouldWait) => *slot = Some(chan),
                         // Relace skoncila: kanal zahodit.
                         Err(_) => {}

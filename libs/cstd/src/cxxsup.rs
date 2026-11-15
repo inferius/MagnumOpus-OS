@@ -1,6 +1,7 @@
 //! Funkce C, ktere potrebuje beh C++ (libc++, libc++abi): `getentropy`
-//! (`std::random_device`), `aligned_alloc` a `posix_memalign` (`operator
-//! new` se zarovnanim), `timespec_get` (C11, `<ctime>`). Plan: docs/cs/cpp.md.
+//! (`std::random_device`), `timespec_get` (C11, `<ctime>`), `lldiv`,
+//! konec procesu a `thread_local` (`__cxa_*`). Popis: docs/cs/cpp.md.
+//! Zarovnana pamet (`aligned_alloc`, `posix_memalign`) je v cstd-core.
 //!
 //! Locale a siroke znaky (`<locale>`, `<cwchar>`) jsou jinde (`wchar.rs`,
 //! `locale.rs`).
@@ -44,40 +45,6 @@ pub unsafe extern "C" fn getentropy(buf: *mut c_void, len: size_t) -> c_int {
     let b = unsafe { core::slice::from_raw_parts_mut(buf.cast::<u8>(), len) };
     entropy_blocking(b);
     0
-}
-
-#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub extern "C" fn aligned_alloc(align: size_t, size: size_t) -> *mut c_void {
-    // C17: zarovnani musi byt platne (mocnina 2); velikost nemusi byt
-    // nasobkem zarovnani (DR 460).
-    match cstd_core::stdlib::alloc_aligned(size, align) {
-        Some(p) if !p.is_null() => p.cast(),
-        Some(_) => {
-            errno::set(errno::ENOMEM);
-            core::ptr::null_mut()
-        }
-        None => {
-            errno::set(errno::EINVAL);
-            core::ptr::null_mut()
-        }
-    }
-}
-
-#[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn posix_memalign(out: *mut *mut c_void, align: size_t, size: size_t) -> c_int {
-    // POSIX: zarovnani je mocnina 2 a nasobek sizeof(void *); chyba se
-    // vraci, errno se nemeni.
-    if !align.is_power_of_two() || align % core::mem::size_of::<*mut c_void>() != 0 {
-        return errno::EINVAL;
-    }
-    match cstd_core::stdlib::alloc_aligned(size, align) {
-        Some(p) if !p.is_null() => {
-            // SAFETY: kontrakt C: `out` je platny ukazatel.
-            unsafe { *out = p.cast() };
-            0
-        }
-        _ => errno::ENOMEM,
-    }
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]

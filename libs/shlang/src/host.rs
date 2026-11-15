@@ -356,6 +356,12 @@ pub trait Host {
     fn report(&mut self) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Povoleni aplikaci uzivatele relace (`povoleni`): `app` prazdne =
+    /// vypis, jinak odvolat `perm` aplikace `app`. `NOT_SUPPORTED` =
+    /// hostitel je nema (testy, konzole).
+    fn permissions(&mut self, _app: &str, _perm: &str) -> Result<String, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Uroven logu jadra (`loglevel`): `target` prazdny = vypis.
     fn log_level(&mut self, _target: &str, _level: &str) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)

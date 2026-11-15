@@ -882,7 +882,7 @@ on the previous one:
 | 3 | Memory management: `mmap`, reserving address space at fixed addresses, demand paging, CoW, W^X with a "may JIT" permission | Wine, browsers, .NET | [verified in QEMU] |
 | 4 | Dynamic linking: loading shared libraries (ELF `ET_DYN`) | Wine and most C/C++ projects | [verified in QEMU] |
 | 5 | Exception delivery (SEH, signals) and suspending a thread with reading and writing its context | Wine, debuggers | [verified in QEMU] |
-| 6 | SDL2/3 on top of the compositor and `audiod` | one port opens games and multimedia apps | [designed] |
+| 6 | SDL 3 on top of the compositor and `audiod` ([SDL](sdl.md)) | one port opens games and multimedia apps | [verified in QEMU] |
 | 6a | Graphics and video foundations in the kernel: fence object, shared buffer, scatter-gather DMA mapped into the IOMMU, render class ([NVIDIA and AMD graphics](gpu-amd-nvidia.md#impact-on-the-foundations), points 1, 2, 4, 8) | fences and copy-free buffers for video (FFmpeg), the compositor, Vulkan and GPU drivers; Linux's `dma-fence` is GPL, we need our own | [verified in QEMU] |
 | 7 | FFmpeg as an isolated process (LGPL), then a player | multimedia | [designed] |
 | 7a | C++ runtime: libc++, libc++abi, libunwind, C++ exceptions (LLVM, Apache-2.0 with LLVM exception) on top of `cstd` and exceptions | Wine, browsers (Ladybird, SpiderMonkey in Servo), LLVM and rustc on the system | [designed] |

@@ -258,7 +258,13 @@ sysrootu C a start `__libc_start` v `osrt`, viz [cstd.md](cstd.md#libcso).
   = adresa ve volajícím vlákně (líný blok se případně založí), IFUNC =
   výsledek resolveru. `RTLD_NEXT` zatím není (chyba).
 - **`dlclose`** sníží počítadlo; modul zůstává nahraný (kód je zapečetěný,
-  čísla modulů TLS se neopakují) - jako `RTLD_NODELETE` u všech.
+  čísla modulů TLS se neopakují) - jako `RTLD_NODELETE` u všech
+  (sémantika musl, rozhodnutí DL-3 Q4 A). Destruktory knihovny
+  (`__cxa_atexit`, `DT_FINI_ARRAY`) proběhnou až při konci procesu.
+  ⚠️ **Důsledek:** dlouho běžící proces, který opakovaně nahrává různé
+  pluginy, paměť jejich modulů nevrací. Aplikacím s pluginy doporučujeme
+  pluginy v samostatném procesu. Skutečné uvolnění modulu je možný budoucí
+  krok **[navrženo]**.
 - **`dlerror`** je pro každé vlákno zvlášť (podle TP); řetězec platí do
   dalšího `dl*` ve vlákně, čtení chybu vymaže. Volání `dl*` jsou
   serializovaná **rekurzivním** zámkem: inicializátor smí volat `dlopen`.

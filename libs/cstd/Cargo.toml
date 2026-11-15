@@ -22,6 +22,8 @@ abi.workspace = true
 tz = { path = "../tz" }
 # math.h (port musl libm do Rustu, MIT/Apache).
 libm = "0.2.16"
+# Tridy znaku a velikost pismen Unicode pro wctype.h (tabulky z UCD).
+uniprop = { path = "../uniprop" }
 
 [build-dependencies]
 # Cast knihovny v C (long double) jen pro cil magnumopus.

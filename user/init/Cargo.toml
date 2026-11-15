@@ -34,6 +34,7 @@ powerproto = { path = "../../libs/powerproto" }
 abi = { workspace = true }
 term = { path = "../../libs/term" }
 audioproto = { path = "../../libs/audioproto", features = ["client"] }
+mediaproto = { path = "../../libs/mediaproto", features = ["client"] }
 audiomix = { path = "../../libs/audiomix" }
 accountproto = { path = "../../libs/accountproto", features = ["client"] }
 zeroize = { version = "1.8", default-features = false, features = ["alloc"] }

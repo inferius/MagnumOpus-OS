@@ -126,7 +126,25 @@ const AUDIT: &str = "/db/audit";
 /// Nejvetsi audit; starsi polovina se pak zahodi.
 const AUDIT_MAX: usize = 256 * 1024;
 
+/// Rozhodnuti o povolenich aplikaci (`accountproto::perm`), soubor na
+/// uzivatele.
+pub const PERMISSIONS: &str = "/db/permissions";
+
 impl FsStore {
+    /// Ulozena rozhodnuti uzivatele (chybejici soubor = zadna).
+    pub fn load_perms(&self, uid: u64) -> Result<Vec<accountproto::perm::Entry>> {
+        let data = load(&self.fs, &format!("{PERMISSIONS}/{uid}"))?.unwrap_or_default();
+        Ok(accountproto::perm::parse(core::str::from_utf8(&data).unwrap_or("")))
+    }
+
+    pub fn save_perms(&self, uid: u64, entries: &[accountproto::perm::Entry]) -> Result<()> {
+        match self.fs.create(PERMISSIONS, fsproto::kind::DIR) {
+            Ok(()) | Err(Error::AlreadyExists) => {}
+            Err(e) => return Err(e),
+        }
+        save(&self.fs, &format!("{PERMISSIONS}/{uid}"), accountproto::perm::serialize(entries).as_bytes())
+    }
+
     /// Prida radek do auditu spravy (`cas uid_zadal uid_potvrdil ukon jak`).
     pub fn append_audit(&mut self, line: &[u8]) -> Result<()> {
         let mut data = load(&self.fs, AUDIT)?.unwrap_or_default();

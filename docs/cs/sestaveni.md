@@ -24,6 +24,17 @@
   (`cmake --version`, `ninja --version`) a při chybějícím nebo starém
   nástroji skončí s radou k instalaci. Ověřeno s CMake 4.4.4 a Ninja
   1.13.2 (Windows, winget). Jiné místo: proměnné `CMAKE`, `NINJA`.
+- **sh, make, nasm 2.14+, Meson a pkgconf** pro porty FFmpeg a dav1d
+  ([Multimédia](multimedia.md), [Porty v C](porty-c.md)): na Windows
+  z **MSYS2** (`winget install MSYS2.MSYS2`, pak v MSYS2 `pacman -S make
+  nasm meson`; pkgconf, ninja a python přijdou se závislostmi), jen
+  z oficiálních repozitářů MSYS2. xtask nástroje MSYS2 (`C:\msys64\usr\bin`,
+  jiné místo proměnná `MSYS2_ROOT`) bere přednostně a spouští je v režimu
+  `MSYSTEM=MSYS`; chybějící nástroj = chyba s radou k instalaci.
+  Debian/Ubuntu `apt install make nasm meson pkgconf`, macOS `brew install
+  nasm meson pkgconf`. Ověřeno s MSYS2 2026-09-27 (nasm 3.02, Meson 1.12.1,
+  Ninja 1.13.2). Proměnné `SH`, `MAKE`, `NASM`, `MESON`, `PKG_CONFIG` určí
+  nástroj přímo.
 - Volitelně **GDB** pro ladění.
 
 xtask hledá QEMU v `PATH` a na obvyklých místech, firmware vedle QEMU nebo

@@ -64,6 +64,10 @@ pub enum Request {
     /// `installplan::proto`). Odpoved [`Reply::Ok`] s kanalem jako handlem
     /// zpravy, nebo [`Reply::Failed`].
     OpenInstaller,
+    /// Jen kanal shell -> init: povoleni aplikaci uzivatele relace (prikaz
+    /// `povoleni`): `app` prazdne = vypis, jinak odvolat `perm` aplikace
+    /// `app`. Odpoved [`Reply::Text`] nebo [`Reply::Failed`].
+    Permissions { app: String, perm: String },
 }
 
 /// Udalost hlasena sluzbou bez pozadavku.
@@ -177,6 +181,7 @@ mod op {
     pub const LOG_LEVEL: u32 = 8;
     pub const SNAPSHOT: u32 = 9;
     pub const OPEN_INSTALLER: u32 = 10;
+    pub const PERMISSIONS: u32 = 11;
 
     pub const R_OK: u32 = 100;
     pub const R_FAILED: u32 = 101;
@@ -201,9 +206,13 @@ impl Request {
             Request::LogLevel { .. } => op::LOG_LEVEL,
             Request::Snapshot => op::SNAPSHOT,
             Request::OpenInstaller => op::OPEN_INSTALLER,
+            Request::Permissions { .. } => op::PERMISSIONS,
         });
         if let Request::LogLevel { target, level } = self {
             w.str(target).str(level);
+        }
+        if let Request::Permissions { app, perm } = self {
+            w.str(app).str(perm);
         }
         w.finish()
     }
@@ -221,6 +230,7 @@ impl Request {
             op::LOG_LEVEL => Request::LogLevel { target: r.str()?, level: r.str()? },
             op::SNAPSHOT => Request::Snapshot,
             op::OPEN_INSTALLER => Request::OpenInstaller,
+            op::PERMISSIONS => Request::Permissions { app: r.str()?, perm: r.str()? },
             _ => return Err(Error::InvalidArgs),
         };
         if !r.is_empty() {

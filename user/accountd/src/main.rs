@@ -18,6 +18,7 @@
 extern crate alloc;
 
 mod admin;
+mod perms;
 mod os;
 mod service;
 mod store;
@@ -133,7 +134,7 @@ fn main(startup: Startup) -> i64 {
     for (name, e) in &eng.broken {
         println!("accountd: poskozeny zaznam uctu {name}: {e}");
     }
-    let mut svc = Service { eng, init, sessions: Vec::new(), keys: Vec::new(), events: Vec::new(), admin: Default::default() };
+    let mut svc = Service { eng, init, sessions: Vec::new(), keys: Vec::new(), events: Vec::new(), admin: Default::default(), perms: Default::default() };
     if bootstrap.write(b"ok", Vec::new()).is_err() {
         return 4;
     }
@@ -166,6 +167,15 @@ fn main(startup: Startup) -> i64 {
         if let Some(d) = &svc.admin.dialog {
             items.push((d.handle(), rd));
         }
+        // Kanaly povoleni az posledni (indexy vyse jsou pevne).
+        let perm_idx = svc.perms.chan.as_ref().map(|p| {
+            items.push((p.handle(), rd));
+            items.len() - 1
+        });
+        let perm_admin_idx = svc.perms.admin.as_ref().map(|p| {
+            items.push((p.handle(), rd));
+            items.len() - 1
+        });
         let observed = match libos::wait_many(&items, None) {
             Ok((_, o)) => o,
             Err(e) => {
@@ -226,6 +236,12 @@ fn main(startup: Startup) -> i64 {
                 }
             }
         }
+        if perm_idx.is_some_and(|i| observed.get(i).is_some_and(|s| s.intersects(rd))) {
+            svc.perm_requests();
+        }
+        if perm_admin_idx.is_some_and(|i| observed.get(i).is_some_and(|s| s.intersects(rd))) {
+            svc.perm_admin();
+        }
         if observed[1].contains(Signals::READABLE) {
             while let Ok(msg) = svc.init.try_read() {
                 svc.init_event(&msg.data);
@@ -265,6 +281,24 @@ fn main(startup: Startup) -> i64 {
             match msg.handles.into_iter().next() {
                 Some(h) => {
                     svc.admin.dialog = Some(Channel::from_handle(h));
+                    String::from("ok")
+                }
+                None => String::from("err:chybi handle"),
+            }
+        } else if msg.data == b"permissions-admin" {
+            // Kanal initu pro spravu rozhodnuti (prikaz shellu `povoleni`).
+            match msg.handles.into_iter().next() {
+                Some(h) => {
+                    svc.perms.admin = Some(Channel::from_handle(h));
+                    String::from("ok")
+                }
+                None => String::from("err:chybi handle"),
+            }
+        } else if msg.data == b"permissions" {
+            // Kanal sluzby zarizeni pro povoleni aplikaci (`perms.rs`).
+            match msg.handles.into_iter().next() {
+                Some(h) => {
+                    svc.perms.chan = Some(Channel::from_handle(h));
                     String::from("ok")
                 }
                 None => String::from("err:chybi handle"),

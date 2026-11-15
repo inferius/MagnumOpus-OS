@@ -131,7 +131,7 @@ zavaděč nevolá: zničit objekty knihovny, která zůstává nahraná a při d
 | Funkce | Pro |
 |---|---|
 | `getentropy`, `sys/random.h` | `std::random_device`; čeká, dokud generátor jádra není nasazený |
-| `aligned_alloc`, `posix_memalign` | `operator new` se zarovnáním; uvolní obyčejný `free` (zarovnání je v hlavičce bloku, [cstd](cstd.md)) |
+| `aligned_alloc`, `posix_memalign` (cstd-core) | `operator new` se zarovnáním; uvolní obyčejný `free` (zarovnání je v hlavičce bloku, [cstd](cstd.md)) |
 | `timespec_get`, `lldiv` | `<ctime>`, `<cstdlib>` |
 | `dl_iterate_phdr` (statický), `link.h`, `elf.h` | libunwind |
 | `openat`, `unlinkat`, `mkdirat`, `fstatat`, `fchmodat` relativně k adresáři, `realpath`, `pathconf`, `statvfs`, `sendfile`, `PATH_MAX` | `std::filesystem` |
@@ -158,8 +158,7 @@ běhu C++ (titulky libass a vykreslování textu ve FFmpegu, krok 7).
 | `cpptest: libc++ staticky` | QEMU, sada `cpp` | `user/cpptest/cpptest.cpp`: statické konstruktory, kontejnery, výjimky (i přes rámec C), RTTI, zarovnaný `new`, `bad_alloc`, vlákna a `thread_local` s destruktory, `chrono`, `random_device`, `std::filesystem` nad fsd; destruktor globálního objektu po `main` |
 | `cpptest-dyn: libc++.so` | QEMU, sada `cpp` | totéž jako PIE nad `/system/lib/libc++.so` |
 | `hbtest: HarfBuzz` | QEMU, sada `cpp` | tvarování textu s diakritikou, kerning |
-| `cxxsup_tests`, `fsat_tests` | host, `cargo test -p cstd` | pořadí `__cxa_atexit` a `__cxa_finalize` podle modulu, destruktory `thread_local`, `getentropy`, `aligned_alloc`, `posix_memalign`, `timespec_get`, `statvfs`, cesty `*at`, `sendfile`, shoda konstant s hlavičkami |
-| `aligned_alloc_free_realloc` | host, `cargo test -p cstd-core` | zarovnané bloky, `free` a `realloc` zarovnaného bloku |
+| `cxxsup_tests`, `fsat_tests` | host, `cargo test -p cstd` | pořadí `__cxa_atexit` a `__cxa_finalize` podle modulu, destruktory `thread_local`, `getentropy`, `timespec_get`, `statvfs`, cesty `*at`, `sendfile`, shoda konstant s hlavičkami |
 
 Spuštění: `cargo xtask test --only cpp` (`--arch aarch64` pro druhou
 architekturu).

@@ -277,7 +277,12 @@ Test modules are in `user/dltest` (a minimal `crt.c`: `_start` ->
   (error).
 - **`dlclose`** decrements the counter; the module stays loaded (its code
   is sealed, TLS module numbers are never reused) - like `RTLD_NODELETE`
-  for all.
+  for all (musl semantics, decision DL-3 Q4 A). The library destructors
+  (`__cxa_atexit`, `DT_FINI_ARRAY`) run only at process exit.
+  ⚠️ **Consequence:** a long-running process that repeatedly loads
+  different plugins does not get the memory of their modules back. For
+  applications with plugins we recommend plugins in a separate process.
+  Really unloading a module is a possible future step **[designed]**.
 - **`dlerror`** is per thread (by TP); the string is valid until the next
   `dl*` in the thread, reading clears the error. `dl*` calls are
   serialized by a **recursive** lock: an initializer may call `dlopen`.

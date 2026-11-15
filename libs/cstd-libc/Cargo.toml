@@ -18,3 +18,5 @@ cstd = { path = "../cstd" }
 # Rozhrani pro port SDL (`mosdl_*`, docs/cs/sdl.md): soucast libc.a, aby
 # program mel jedinou kopii std.
 mosdl = { path = "../mosdl" }
+# Objekty jadra pro programy v C (magnumopus/sys.h, proces dekoderu medii).
+mosys = { path = "../mosys" }

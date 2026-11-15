@@ -9,6 +9,8 @@ use crate::format::{Args, Buf, Len, format};
 enum A<'a> {
     I(i64),
     S(Option<&'a str>),
+    B(&'a [u8]),
+    W(Option<&'a [u32]>),
     P(usize),
     D(f64),
 }
@@ -48,14 +50,40 @@ impl Args for List<'_> {
             _ => panic!("cekal ukazatel"),
         }
     }
-    fn string(&mut self, max: usize, out: &mut dyn FnMut(u8)) -> bool {
+    fn string(&mut self, out: &mut dyn FnMut(u8) -> bool) -> bool {
         match self.next() {
             A::S(Some(s)) => {
-                s.bytes().take(max).for_each(out);
+                for b in s.bytes() {
+                    if !out(b) {
+                        break;
+                    }
+                }
+                true
+            }
+            A::B(s) => {
+                for &b in s {
+                    if !out(b) {
+                        break;
+                    }
+                }
                 true
             }
             A::S(None) => false,
             _ => panic!("cekal retezec"),
+        }
+    }
+    fn wstring(&mut self, out: &mut dyn FnMut(u32) -> bool) -> bool {
+        match self.next() {
+            A::W(Some(s)) => {
+                for &c in s {
+                    if c == 0 || !out(c) {
+                        break;
+                    }
+                }
+                true
+            }
+            A::W(None) => false,
+            _ => panic!("cekal siroky retezec"),
         }
     }
     fn double(&mut self) -> f64 {
@@ -157,3 +185,6 @@ fn floats_like_glibc() {
     // Velke cislo: vsechny cislice celeho cisla.
     assert_eq!(f("%.0f", &[d(1e22)]), "10000000000000000000000");
 }
+
+#[path = "format_wide_tests.rs"]
+mod wide;

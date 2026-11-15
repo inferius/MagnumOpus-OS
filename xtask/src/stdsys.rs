@@ -372,7 +372,18 @@ pub fn build_libc_so_locked(arch: &Arch, opts: &Options) -> Result<PathBuf> {
     if std::fs::read_to_string(&ver_path).ok().as_deref() != Some(ver.as_str()) {
         std::fs::write(&ver_path, &ver)?;
     }
-    let flags = format!("{flags}\u{1f}-Clink-arg=--version-script={}", ver_path.display());
+    // Otisk seznamu v priznacich: zmena jen seznamu (stejna cesta skriptu)
+    // by jinak libc.so znovu neslinkovala a novy symbol by chybel.
+    let ver_hash = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        ver.hash(&mut h);
+        h.finish()
+    };
+    let flags = format!(
+        "{flags}\u{1f}-Clink-arg=--version-script={}\u{1f}--cfg=mo_export=\"{ver_hash:016x}\"\u{1f}--check-cfg=cfg(mo_export,values(any()))",
+        ver_path.display()
+    );
     let mut cmd = Command::new(cargo());
     cmd.current_dir(workspace_root())
         .args(["build", "--package", "cstd-so"])

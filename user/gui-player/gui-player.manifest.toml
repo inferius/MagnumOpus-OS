@@ -1,0 +1,6 @@
+[app]
+id = "org.magnumopus.player"
+name = "Přehrávač"
+
+[limits]
+memory = "96M"

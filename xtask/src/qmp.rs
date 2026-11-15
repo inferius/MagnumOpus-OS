@@ -150,6 +150,7 @@ const STARTS: &[&str] = &[
     gui::PALETTE_SWITCH,
     gui::SHOT[0],
     gui::FILES_CLICK,
+    sdl::CLICK,
 ];
 
 /// Konec testovaciho behu userspace (dal uz zadny usek neprijde).
@@ -282,7 +283,45 @@ fn script(ps2: bool) -> Vec<Step> {
     }
     usb_steps(&mut s);
     gui_steps(&mut s);
+    sdl_steps(&mut s);
     s
+}
+
+/// Port SDL (`user/init/src/tests/sdl.rs`, program `testmagnumopus`):
+/// zamek ukazatele, schranka a cela obrazovka plati jen po fyzickem vstupu.
+fn sdl_steps(s: &mut Vec<Step>) {
+    // Klik: zamek ukazatele; posun: relativni pohyb; Super: zruseni.
+    s.push(Step::ClickAt(sdl::CLICK));
+    s.push(Step::WaitFor(sdl::MOVE));
+    s.push(Step::Send(vec![rel("x", 30), rel("y", 10)]));
+    s.push(Step::WaitFor(sdl::SUPER));
+    s.push(Step::Send(vec![key("meta_l", true)]));
+    s.push(Step::Send(vec![key("meta_l", false)]));
+    // Druhy klik: kopie do schranky; Ctrl+V: vlozeni.
+    s.push(Step::ClickAt(sdl::CLICK2));
+    s.push(Step::WaitFor(sdl::PASTE));
+    for (name, d) in [("ctrl", true), ("v", true), ("v", false), ("ctrl", false)] {
+        s.push(Step::Send(vec![key(name, d)]));
+    }
+    // F: cela obrazovka; Esc: konec programu.
+    // Dialog povoleni nahravani: Enter = Povolit (prvni volba).
+    for (marker, k) in [(sdl::FULL, "f"), (sdl::ESC, "esc"), (sdl::PERM, "ret")] {
+        s.push(Step::WaitFor(marker));
+        s.push(Step::Send(vec![key(k, true)]));
+        s.push(Step::Send(vec![key(k, false)]));
+    }
+}
+
+/// Znacky testu SDL (musi sedet s `user/init/src/tests/sdl.rs`).
+mod sdl {
+    pub const CLICK: &str = "init: test sdl: klik mysi na ";
+    pub const MOVE: &str = "init: test sdl: ceka na posun mysi";
+    pub const SUPER: &str = "init: test sdl: ceka na Super";
+    pub const CLICK2: &str = "init: test sdl: druhy klik na ";
+    pub const PASTE: &str = "init: test sdl: ceka na Ctrl+V";
+    pub const FULL: &str = "init: test sdl: ceka na F";
+    pub const ESC: &str = "init: test sdl: ceka na Esc";
+    pub const PERM: &str = "init: test sdl: dialog povoleni ceka na Enter";
 }
 
 /// GUI (`user/init/src/tests/gui.rs`): fyzicka klavesnice odpovi na

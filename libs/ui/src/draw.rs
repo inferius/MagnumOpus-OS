@@ -192,6 +192,9 @@ impl<M: Clone> Ui<M> {
                 ElemKind::Progress { value } => progress_bar(c, r, *value, e.agent, col),
                 ElemKind::Table(_) => self.draw_table(c, i, st),
                 ElemKind::Select { .. } => self.draw_select(c, i, st),
+                // Obraz kresli klient do vrstvy videa nad oknem; pod nim je
+                // jen pozadi okna (pruhy pri jinem pomeru stran).
+                ElemKind::Video { .. } => {}
                 ElemKind::Image { w, h, px, .. } => {
                     // Zmenseni se zachovanim pomeru stran, na stred prvku.
                     if let Some(img) = gfx::Image::new(px, *w, *h, *w) {

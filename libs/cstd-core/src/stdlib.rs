@@ -1,10 +1,11 @@
 //! `stdlib.h`: pamet, prevody cisel, `abort`.
 //!
-//! `malloc` bere pamet z alokatoru programu (heap libos). Tesne pred
-//! ukazatelem pro C je hlavicka 16 B: velikost a zarovnani bloku (zachova
-//! zarovnani 16 B, ktere C od `malloc` ceka), aby `free` a `realloc` znaly
-//! `Layout`. Blok s vetsim zarovnanim (`aligned_alloc`, `posix_memalign`)
-//! zacina o `align` bajtu drive a hlavicka je na konci teto mezery.
+//! `malloc` bere pamet z alokatoru programu (heap libos). Pred kazdym blokem
+//! je hlavicka 16 B (zachova zarovnani 16 B, ktere C od `malloc` ceka):
+//! velikost a zarovnani bloku, aby `free` a `realloc` znaly `Layout`.
+//! Zarovnane bloky (`posix_memalign`, `aligned_alloc`, `memalign`; SIMD
+//! v FFmpeg a dav1d chce 32-64 B) maji pred ukazatelem `align` bajtu, z nichz
+//! poslednich 16 je hlavicka.
 
 use alloc::alloc::{Layout, alloc, alloc_zeroed, dealloc, realloc as rust_realloc};
 
@@ -14,48 +15,90 @@ const HEADER: usize = 16;
 const ALIGN: usize = 16;
 
 fn layout(size: usize) -> Option<Layout> {
-    layout_aligned(size, ALIGN)
-}
-
-/// Layout bloku s danym zarovnanim (mocnina 2, aspon `ALIGN`); mezera pred
-/// ukazatelem pro C je `align` bajtu (vejde se do ni hlavicka).
-fn layout_aligned(size: usize, align: usize) -> Option<Layout> {
-    Layout::from_size_align(size.checked_add(align)?, align).ok()
-}
-
-/// Zapise hlavicku a vrati ukazatel pro C (`p` + `align`).
-unsafe fn finish_aligned(p: *mut u8, size: usize, align: usize) -> *mut u8 {
-    if p.is_null() {
-        return p;
-    }
-    // SAFETY: blok ma aspon `align` >= HEADER bajtu pred ukazatelem pro C,
-    // zarovnani aspon 16.
-    unsafe {
-        let user = p.add(align);
-        (user.sub(HEADER) as *mut usize).write(size);
-        (user.sub(HEADER / 2) as *mut usize).write(align);
-        user
-    }
+    Layout::from_size_align(size.checked_add(HEADER)?, ALIGN).ok()
 }
 
 unsafe fn finish(p: *mut u8, size: usize) -> *mut u8 {
-    // SAFETY: predano volajicim.
-    unsafe { finish_aligned(p, size, ALIGN) }
+    if p.is_null() {
+        return p;
+    }
+    // SAFETY: blok ma aspon HEADER bajtu, zarovnani 16.
+    unsafe {
+        (p as *mut usize).write(size);
+        (p.add(8) as *mut usize).write(ALIGN);
+        p.add(HEADER)
+    }
 }
 
-/// Blok se zarovnanim `align` (mocnina 2); mensi zarovnani nez 16 = jako
-/// `malloc`. `None` = spatne zarovnani, NULL = malo pameti nebo preteceni.
-/// Uvolnuje se obycejnym `free` (zarovnani je v hlavicce).
-pub fn alloc_aligned(size: usize, align: usize) -> Option<*mut u8> {
-    if !align.is_power_of_two() {
-        return None;
+/// Layout zarovnaneho bloku: `align` bajtu pred ukazatelem (hlavicka na
+/// jejich konci) + data.
+fn aligned_layout(size: usize, align: usize) -> Option<Layout> {
+    Layout::from_size_align(size.checked_add(align)?, align).ok()
+}
+
+/// Blok `size` bajtu zarovnany na `align` (mocnina 2); `align <= 16` = malloc.
+unsafe fn alloc_aligned(size: usize, align: usize) -> *mut u8 {
+    if align <= ALIGN {
+        // SAFETY: jako malloc.
+        return unsafe { malloc(size) };
     }
-    let align = align.max(ALIGN);
-    Some(match layout_aligned(size, align) {
-        // SAFETY: Layout ma nenulovou velikost (aspon `align`).
-        Some(l) => unsafe { finish_aligned(alloc(l), size, align) },
-        None => core::ptr::null_mut(),
-    })
+    let Some(l) = aligned_layout(size, align) else {
+        return core::ptr::null_mut();
+    };
+    // SAFETY: Layout ma nenulovou velikost; ukazatel = zacatek + align, takze
+    // hlavicka (16 B pred nim) lezi v bloku a ukazatel je zarovnany.
+    unsafe {
+        let base = alloc(l);
+        if base.is_null() {
+            return base;
+        }
+        let p = base.add(align);
+        (p.sub(HEADER) as *mut usize).write(size);
+        (p.sub(8) as *mut usize).write(align);
+        p
+    }
+}
+
+/// Zarovnani bloku z hlavicky.
+unsafe fn align_of_block(p: *mut u8) -> usize {
+    // SAFETY: `p` vratil alokator teto knihovny (kontrakt C).
+    unsafe { (p.sub(8) as *const usize).read() }
+}
+
+/// `posix_memalign`: `align` mocnina 2 a nasobek velikosti ukazatele.
+#[cfg_attr(not(test), unsafe(no_mangle))]
+pub unsafe extern "C" fn posix_memalign(out: *mut *mut u8, align: size_t, size: size_t) -> c_int {
+    const EINVAL: c_int = 22;
+    const ENOMEM: c_int = 12;
+    if !align.is_power_of_two() || align % core::mem::size_of::<usize>() != 0 {
+        return EINVAL;
+    }
+    // SAFETY: zarovnani overeno; `out` je platny ukazatel (kontrakt C).
+    unsafe {
+        let p = alloc_aligned(size, align);
+        if p.is_null() {
+            return ENOMEM;
+        }
+        out.write(p);
+    }
+    0
+}
+
+/// `aligned_alloc` (C11): `align` mocnina 2 (velikost nemusi byt nasobek).
+#[cfg_attr(not(test), unsafe(no_mangle))]
+pub unsafe extern "C" fn aligned_alloc(align: size_t, size: size_t) -> *mut u8 {
+    if !align.is_power_of_two() {
+        return core::ptr::null_mut();
+    }
+    // SAFETY: zarovnani overeno.
+    unsafe { alloc_aligned(size, align) }
+}
+
+/// `memalign` (zastarale, ale pouzivane): jako `aligned_alloc`.
+#[cfg_attr(not(test), unsafe(no_mangle))]
+pub unsafe extern "C" fn memalign(align: size_t, size: size_t) -> *mut u8 {
+    // SAFETY: jako aligned_alloc.
+    unsafe { aligned_alloc(align, size) }
 }
 
 #[cfg_attr(not(test), unsafe(no_mangle))]
@@ -86,12 +129,6 @@ unsafe fn size_of_block(p: *mut u8) -> usize {
     unsafe { (p.sub(HEADER) as *const usize).read() }
 }
 
-/// Zarovnani bloku z hlavicky.
-unsafe fn align_of_block(p: *mut u8) -> usize {
-    // SAFETY: dtto.
-    unsafe { (p.sub(HEADER / 2) as *const usize).read() }
-}
-
 #[cfg_attr(not(test), unsafe(no_mangle))]
 pub unsafe extern "C" fn free(p: *mut u8) {
     if p.is_null() {
@@ -101,7 +138,11 @@ pub unsafe extern "C" fn free(p: *mut u8) {
     unsafe {
         let size = size_of_block(p);
         let align = align_of_block(p);
-        dealloc(p.sub(align), layout_aligned(size, align).unwrap());
+        if align > ALIGN {
+            dealloc(p.sub(align), aligned_layout(size, align).unwrap());
+        } else {
+            dealloc(p.sub(HEADER), layout(size).unwrap());
+        }
     }
 }
 
@@ -117,9 +158,9 @@ pub unsafe extern "C" fn realloc(p: *mut u8, size: size_t) -> *mut u8 {
     // SAFETY: kontrakt C; stary Layout odpovida alokaci.
     unsafe {
         let old = size_of_block(p);
-        if align_of_block(p) != ALIGN {
-            // Zarovnany blok: C zarovnani po realloc nezarucuje, novy blok
-            // je obycejny (kopie a uvolneni stareho).
+        if align_of_block(p) > ALIGN {
+            // Zarovnany blok: novy obycejny blok, kopie, uvolneni (C realloc
+            // zarovnani nad 16 B nezarucuje).
             let q = malloc(size);
             if !q.is_null() {
                 core::ptr::copy_nonoverlapping(p, q, old.min(size));

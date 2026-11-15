@@ -49,6 +49,44 @@ pub fn crash_driver() -> Result<()> {
     st.control.as_ref().ok_or(Error::ServiceUnavailable)?.write(b"crash-driver", Vec::new())
 }
 
+/// Relace aplikace (`audioproto::session::Recipe`) na ridicim kanalu.
+fn app_session_on(control: &Channel, recipe: &[u8]) -> Result<Channel> {
+    while control.try_read().is_ok() {}
+    let mut m = Vec::from(&b"app\0"[..]);
+    m.extend_from_slice(recipe);
+    control.write(&m, Vec::new())?;
+    let r = control.read(Some(time::deadline_after(REPLY_TIMEOUT)))?;
+    audioproto::decode_reply(&r.data)?;
+    r.handles.into_iter().next().map(Channel::from_handle).ok_or(Error::Corrupted)
+}
+
+/// Spoji audiod se sluzbou uctu kvuli povolenim nahravani (kanal
+/// `permissions`): pri startu a po kazdem restartu audiod. Bez sluzby uctu
+/// nic (nahravani pro aplikace pak neni).
+fn link_permissions(control: &Channel) {
+    match crate::accounts::channel("permissions") {
+        Ok(c) => {
+            if let Err(e) = control.write(b"perm", alloc::vec![c.into_handle()]) {
+                println!("init: zvuk: kanal povoleni: {e}");
+            }
+        }
+        Err(Error::NotFound) => {}
+        Err(e) => println!("init: zvuk: kanal povoleni od sluzby uctu: {e}"),
+    }
+}
+
+/// Relace zvuku pro aplikaci s oknem: kanal a listek (`tag::AUDIO`,
+/// `tag::AUDIO_LEASE`). Recept nese identitu a prava (`session.rs`).
+pub fn app_session(sup: &mut crate::supervisor::Supervisor, recipe: &audioproto::session::Recipe) -> Result<(Channel, Channel)> {
+    sup.session("audiod", recipe.encode())
+}
+
+/// Relace aplikace bez listku (testy: program spousteny testem).
+pub fn app_channel(recipe: &audioproto::session::Recipe) -> Result<Channel> {
+    let st = STATE.lock();
+    app_session_on(st.control.as_ref().ok_or(Error::ServiceUnavailable)?, &recipe.encode())
+}
+
 /// Novy kanal ke zvukove sluzbe bez listku (testy).
 pub fn connect() -> Result<Channel> {
     let st = STATE.lock();
@@ -75,6 +113,7 @@ impl Service for Audiod {
         st.kept.retain(|k| k.give().is_ok_and(|c| !closed(&c)));
         let (process, control) = spawn(ctx.startup, &st.kept)?;
         let started = Started { process: process.handle().duplicate(None)?, ready: Some(control.handle().duplicate(None)?) };
+        link_permissions(&control);
         st.control = Some(control);
         // Proces drzi supervisor (Started); nas handle muze zaniknout.
         drop(process);
@@ -92,12 +131,14 @@ impl Service for Audiod {
         }
     }
 
-    fn connect(&mut self, _recipe: &[u8]) -> Result<Channel> {
+    fn connect(&mut self, recipe: &[u8]) -> Result<Channel> {
         let st = STATE.lock();
-        connect_on(st.control.as_ref().ok_or(Error::ServiceUnavailable)?)
+        let control = st.control.as_ref().ok_or(Error::ServiceUnavailable)?;
+        // Prazdny recept = systemova relace (termd, lista), jinak aplikace.
+        if recipe.is_empty() { connect_on(control) } else { app_session_on(control, recipe) }
     }
 
-    /// Relace sluzby nemaji prava, zuzeni nic nemeni.
+    /// Prava relace urcuje recept (aplikace / system), zuzeni nic nemeni.
     fn narrow(&self, parent: &[u8], _narrowing: &[u8]) -> Result<Vec<u8>> {
         Ok(parent.to_vec())
     }
@@ -124,6 +165,7 @@ pub fn start(startup: &Startup, devices: Vec<Channel>, sup: &mut crate::supervis
         let _ = process.kill();
         return Err(Error::Corrupted);
     }
+    link_permissions(&control);
     {
         let mut st = STATE.lock();
         st.kept = kept;

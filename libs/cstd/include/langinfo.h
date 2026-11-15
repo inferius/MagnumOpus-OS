@@ -61,7 +61,12 @@ typedef int nl_item;
 #define ABMON_12 48
 #define CRNCYSTR 49
 
+#ifndef _CSTD_LOCALE_T
+#define _CSTD_LOCALE_T
+typedef struct __locale_struct *locale_t;
+#endif
 char *nl_langinfo(nl_item item);
+char *nl_langinfo_l(nl_item item, locale_t l);
 
 _CSTD_END
 

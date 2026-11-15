@@ -54,6 +54,18 @@ pub fn bootstrap_channel() -> Option<&'static Channel> {
 static HANDLES: Init<alloc::vec::Vec<u32>> = Init::new();
 static HANDLES_TAKEN: AtomicBool = AtomicBool::new(false);
 
+/// Tagovane handly, ktere runtime nepouzil (napr. `tag::AUDIO` pro
+/// `mosdl`): (stitek, syrovy handle). Bere je [`take_tagged`].
+static TAGGED: libos::sync::Mutex<alloc::vec::Vec<(u32, u32)>> = libos::sync::Mutex::new(alloc::vec::Vec::new());
+
+/// Vezme tagovany handle startovni zpravy, ktery runtime nepouzil
+/// (volajici ho vlastni a zavira). Kazdy jen jednou.
+pub fn take_tagged(tag: u32) -> Option<u32> {
+    let mut t = TAGGED.lock();
+    let i = t.iter().position(|(k, _)| *k == tag)?;
+    Some(t.remove(i).1)
+}
+
 /// Vezme netagovane handly startovni zpravy (syrova cisla, volajici je
 /// vlastni a zavira). Jen jednou: dalsi volani vrati prazdny seznam.
 pub fn take_handles() -> alloc::vec::Vec<u32> {
@@ -232,6 +244,7 @@ unsafe fn init(mut startup: Startup) {
         BOOTSTRAP.set(startup.bootstrap);
         HANDLES.set(core::mem::take(&mut startup.handles).into_iter().map(|h| h.into_raw()).collect());
     }
+    *TAGGED.lock() = core::mem::take(&mut startup.tagged).into_iter().map(|(t, h)| (t, h.into_raw())).collect();
     // Handle vlastniho procesu pouziva runtime po celou dobu behu
     // (`libos::rt::self_process`: mapovani pameti, vlakna); zavrit se
     // nesmi. Netagovane handly ceka `take_handles`; ostatni nepouzite

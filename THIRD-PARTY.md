@@ -101,30 +101,73 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-## FFmpeg (plánováno / planned)
+## FFmpeg 9.0.2 a dav1d 1.5.4 (porty v C / C ports)
 
-Zatím není v repozitáři; pravidla platí od prvního převzatého kódu.
-Not in the repository yet; the rules apply from the first vendored code.
+Nejsou v repozitáři: `cargo xtask` je stáhne z oficiálních míst (HTTPS),
+ověří SHA-256 (`xtask/src/cports/mod.rs`, tabulka `PORTS`) a přeloží proti
+sysrootu C bez úprav zdrojů. / Not in the repository: `cargo xtask` downloads
+them from the official sites (HTTPS), checks SHA-256 and builds them against
+the C sysroot without source changes.
 
-- **Licence / Licence:** jen LGPL-2.1-or-later. Nikdy `--enable-gpl`,
-  `--enable-version3` jen po kontrole, nikdy `--enable-nonfree`. / Only
-  LGPL-2.1-or-later. Never `--enable-gpl`, `--enable-version3` only after a
-  review, never `--enable-nonfree`.
-- **Použití / Use:** samostatný izolovaný proces (služba přehrávání
-  a dekódování), aplikace FFmpeg nelinkují. Povinnost LGPL (znovu slinkovat
-  upravenou knihovnu) se týká jen binárky tohoto procesu. / A separate
-  isolated process (the playback and decoding service); applications do not
-  link FFmpeg. The LGPL relinking obligation applies only to that process
-  binary.
-- **Co dodáme / What we ship:** zdroje použité verze, naše úpravy
-  (patche) a skript sestavení procesu, kterým si uživatel proces sestaví
-  s vlastní verzí knihovny; později dynamické linkování (stačí vyměnit
-  sdílenou knihovnu). / The sources of the version used, our changes
-  (patches) and the build script for the process, so users can rebuild it
-  with their own version of the library; later dynamic linking (replacing
-  the shared library is enough).
-- **Popis / Description:** `docs/cs/cstd.md` (kapitola FFmpeg a licence),
-  `docs/en/cstd.md`.
+- **FFmpeg:** <https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz>, SHA-256
+  `8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e`
+  (archiv podepsaný klíčem FFmpeg FCF9 86EA 15E6 E293 A564 4F10 B432 2F04
+  D676 58D8, podpis ověřen při připnutí / archive signed with the FFmpeg
+  release key, signature checked when pinned).
+- **dav1d:** <https://downloads.videolan.org/pub/videolan/dav1d/1.5.4/dav1d-1.5.4.tar.xz>,
+  SHA-256 `686616b7c69eb88d44459391ab25cac13b6647a3b288835c5784e71c1514a5c5`
+  (shodný s oficiálním `.sha256` / matches the official `.sha256`).
+- **Licence / Licence:** FFmpeg jen LGPL-2.1-or-later: `--disable-gpl
+  --disable-version3 --disable-nonfree`; xtask po sestavení ověří
+  v `config.h`, že `CONFIG_GPL`, `CONFIG_NONFREE` a `CONFIG_VERSION3` jsou 0,
+  jinak sestavení selže. dav1d BSD-2-Clause. / FFmpeg only
+  LGPL-2.1-or-later; xtask checks `config.h` after the build and fails
+  otherwise. dav1d BSD-2-Clause.
+- **Použití / Use:** jen proces dekodéru `ffdec` (`user/ffdec`), který
+  spouští služba `mediad`; aplikace FFmpeg nelinkují. FFmpeg je dynamicky:
+  `lib/libavutil.so.61`, `libswresample.so.7`, `libswscale.so.10`,
+  `libavcodec.so.63` (s dav1d staticky uvnitř), `libavformat.so.63` nad
+  `libc.so`. / Only the `ffdec` decoder process started by the `mediad`
+  service; applications do not link FFmpeg. FFmpeg is dynamic (the libraries
+  above over `libc.so`).
+- **Povinnosti LGPL / LGPL obligations:** knihovny jdou nahradit vlastní
+  verzí (výměna souborů v `/system/lib`); zdroje = připnutý archiv,
+  přepínače configure jsou v `xtask/src/cports/mod.rs` (`FFMPEG_ARGS`),
+  záplaty žádné; `cargo xtask build` je skript pro opětovné sestavení.
+  / The libraries can be replaced by the user's own version (replace the
+  files in `/system/lib`); sources = the pinned archive, configure switches
+  in `xtask/src/cports/mod.rs` (`FFMPEG_ARGS`), no patches; `cargo xtask
+  build` is the rebuild script.
+- **Patentové kodeky / Patent-encumbered codecs:** výchozí obraz obsahuje
+  nativní dekodéry FFmpeg pro H.264, HEVC a AAC (LGPL, žádné x264/x265,
+  fdk-aac). **Riziko:** při šíření systému (hlavně v USA) mohou patentové
+  pooly (MPEG LA / Via LA, Access Advance) uplatnit licenční nároky; licence
+  FFmpeg patenty nepokrývá. `XTASK_BEZ_PATENTOVYCH_KODEKU=1` sestaví obraz
+  bez těchto dekodérů (ověřeno v `config_components.h`). / The default image
+  contains FFmpeg's native H.264, HEVC and AAC decoders (LGPL, no x264/x265,
+  fdk-aac). **Risk:** when distributing the system (mainly in the USA) patent
+  pools (MPEG LA / Via LA, Access Advance) may raise licence claims; the
+  FFmpeg licence does not cover patents. `XTASK_BEZ_PATENTOVYCH_KODEKU=1`
+  builds an image without these decoders.
+- **Související knihovny / Related libraries (plánováno / planned):**
+  libass (ISC), HarfBuzz (MIT), FriBidi (LGPL-2.1-or-later, dynamicky /
+  dynamically), FreeType (zvolena licence FTL, ne GPL; vyžaduje zmínku
+  "Portions of this software are copyright The FreeType Project" / FTL
+  chosen, not the GPL; requires the credit above). Všechny jen v procesu
+  dekodéru `ffdec`. / All only inside the `ffdec` decoder process.
+- **Popis / Description:** `docs/cs/multimedia.md`, `docs/en/multimedia.md`.
+
+## Testovací vektory AV1 a VP9 / AV1 and VP9 test vectors
+
+Jen v obrazu testů a vývoje (`media/` v initfs), stažené s SHA-256
+(`xtask/src/cports/mod.rs`, `TEST_MEDIA`). / Only in the image for tests
+and development (`media/` in initfs), downloaded with SHA-256.
+
+- `av1-1-b8-01-size-64x64.ivf` (+ `.md5`): Alliance for Open Media,
+  <https://storage.googleapis.com/aom-test-data/>, BSD-2-Clause.
+- `vp90-2-02-size-64x64.webm` (+ `.md5`): WebM Project (libvpx),
+  <https://storage.googleapis.com/downloads.webmproject.org/test_data/libvpx/>,
+  BSD-3-Clause.
 
 ## zlib 1.3.1 a SQLite 3.46.1 (porty v C / C ports)
 
@@ -157,13 +200,16 @@ against the C sysroot (`xtask/src/cports/`).
 - **Licence / Licence:** zlib (Sam Lantinga a přispěvatelé / and
   contributors); zdroj / source:
   <https://github.com/libsdl-org/SDL/releases/tag/release-3.4.20>.
-- **Naše úpravy / Our changes:** `0001-video-magnumopus.patch` (registrace
-  ovladače, `SDL_PLATFORM_MAGNUMOPUS`, bez GTK a `misc/unix`) a ovladač
-  `overlay/src/video/magnumopus/SDL_mosvideo.c` (náš kód, licence zlib jako
-  SDL). Úpravy se neposílají do projektu SDL: ten nepřijímá kód
+- **Naše úpravy / Our changes:** `0001-magnumopus.patch` (registrace
+  ovladačů videa a zvuku, `SDL_PLATFORM_MAGNUMOPUS`, bez GTK a `misc/unix`,
+  test `testmagnumopus`) a ovladače `overlay/src/video/magnumopus/`
+  a `overlay/src/audio/magnumopus/` (náš kód, licence zlib jako SDL). Úpravy se neposílají do projektu SDL: ten nepřijímá kód
   generovaný AI. / Our changes stay here: the SDL project does not accept
   AI-generated contributions.
-- **Programy / programs:** `testsprite`, `checkkeys` (testy SDL / SDL tests).
+- **Programy / programs:** ukázkové hry / example games `snake`, `woodeneye`
+  (examples/demo); testy SDL / SDL tests `testsprite`, `testaudio`,
+  `testkeys`, `checkkeys`; náš test / our test `testmagnumopus`. Data: `sdl-icon.png`,
+  `sdl-sample.wav` (z / from `test/`).
 - **Popis / Description:** `docs/cs/sdl.md`, `docs/en/sdl.md`.
 
 ## LLVM 23.1.5: libc++, libc++abi, libunwind (běh C++ / C++ runtime)
@@ -214,6 +260,15 @@ and RTTI against libc++. No source changes.
   `user/cpptest/hbtest.c`), data `hb-test.ttf` (písmo Inter, viz níže /
   Inter font, see below).
 - **Popis / Description:** `docs/cs/cpp.md`, `docs/en/cpp.md`.
+
+## Unicode Character Database
+
+- **Název / Name:** Unicode Character Database (`UnicodeData.txt`, `DerivedCoreProperties.txt`, `PropList.txt`, `EastAsianWidth.txt`)
+- **Verze / Version:** 18.0.0 (= `core::char::UNICODE_VERSION` překladače / of the compiler)
+- **Zdroj / Source:** https://www.unicode.org/Public/18.0.0/ucd/ (stahuje / downloaded by `cargo xtask unicode-tables`, SHA-256 v / in `xtask/src/unicode.rs`)
+- **Licence / Licence:** Unicode License v3 (Unicode-3.0), plný text / full text: `libs/uniprop/UNICODE-LICENSE.txt`
+- **Cesta / Path:** `libs/uniprop/src/tables.rs` (odvozené tabulky, ne soubory UCD / derived tables, not the UCD files)
+- **Popis / Description:** `docs/cs/cstd.md`, `docs/en/cstd.md` (kapitola Široké znaky a locale / chapter Wide characters and locale).
 
 ## Písmo Tuffy / Tuffy font
 

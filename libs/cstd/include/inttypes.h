@@ -79,6 +79,12 @@ static inline imaxdiv_t imaxdiv(intmax_t a, intmax_t b)
 }
 static inline intmax_t strtoimax(const char *s, char **end, int base) { return strtoll(s, end, base); }
 static inline uintmax_t strtoumax(const char *s, char **end, int base) { return strtoull(s, end, base); }
+#ifndef __cplusplus
+#define __need_wchar_t
+#include <stddef.h>
+#endif
+intmax_t wcstoimax(const wchar_t *s, wchar_t **end, int base);
+uintmax_t wcstoumax(const wchar_t *s, wchar_t **end, int base);
 
 _CSTD_END
 

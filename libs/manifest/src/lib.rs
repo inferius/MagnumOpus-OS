@@ -30,6 +30,9 @@
 //! [[network.listen]]
 //! ports = "8080"
 //!
+//! [audio]                          # zvuk (prehravani ma kazda aplikace s oknem)
+//! capture = true                   # nahravani: dotaz uzivateli pri prvnim pouziti
+//!
 //! [[command]]                      # prikaz terminalu (registr prikazu)
 //! name = "rg"                      # jmeno pro `Command::new` a shell
 //! program = "rg"                   # program balicku (vychozi tento)
@@ -92,6 +95,9 @@ pub struct Manifest {
     pub static_tls_reserve: Option<u64>,
     /// Prikazy terminalu, ktere program (balicek) poskytuje.
     pub commands: Vec<CommandDecl>,
+    /// `[audio] capture = true`: program smi pozadat o nahravani zvuku
+    /// (rozhodne uzivatel pri prvnim pouziti, docs/cs/zvuk.md).
+    pub audio_capture: bool,
 }
 
 /// Prikaz terminalu z `[[command]]`.
@@ -158,6 +164,7 @@ impl Manifest {
             jit: t.get_bool("app.jit").unwrap_or(false),
             static_tls_reserve,
             commands,
+            audio_capture: t.get_bool("audio.capture").unwrap_or(false),
         })
     }
 }

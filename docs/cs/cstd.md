@@ -22,9 +22,10 @@ příznaky, ochrany) popisuje [Překlad C](preklad-c.md).
 > `setjmp`. Zámky souborů **[ověřeno v QEMU]** (test `ctest lock`: dva
 > procesy, `EDEADLK`). Část 2i **[ověřeno v QEMU]** (sada `cstd porty`):
 > `libc.a`, sysroot C a porty zlib a sqlite. `libc.so` **[ověřeno v QEMU]**
-> (sada `cstd dyn`: program PIE v C, vlákna, TLS, `dlopen` pluginu). Další
-> části (`posix_spawn`, signály od jiných procesů, `iconv`, široké proudy)
-> **[navrženo]**, viz [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
+> (sada `cstd dyn`: program PIE v C, vlákna, TLS, `dlopen` pluginu).
+> Široké znaky a locale **[ověřeno v QEMU]** (krok `wchar`, kapitola
+> [Široké znaky a locale](#široké-znaky-a-locale)). Další části
+> (`posix_spawn`, signály od jiných procesů, `iconv`) **[navrženo]**, viz [Pokračování](#pokračování-úplná-libc-a-posix-části-2-8).
 
 ## Vrstvy
 
@@ -266,7 +267,7 @@ fsd přitom hlídá cyklus čekání (`EDEADLK`). `l_pid` z `F_GETLK` je -1
 
 | Hlavička | Funkce | Poznámky |
 |---|---|---|
-| `stdlib.h` | `aligned_alloc`, `posix_memalign`, `lldiv`, `realpath` | zarovnaný blok uvolní obyčejný `free`: hlavička `malloc` (cstd-core) nese velikost i zarovnání; `realloc` zarovnaného bloku vrátí obyčejný blok |
+| `stdlib.h` | `lldiv`, `realpath` | zarovnaná paměť (`aligned_alloc`, `posix_memalign`, `memalign`) je v cstd-core: blok uvolní obyčejný `free` |
 | `unistd.h`, `sys/random.h` | `getentropy` (nejvýš 256 B), `unlinkat`, `pathconf`, `fpathconf` | `getentropy` čeká, dokud generátor jádra není nasazený (jako Linux) |
 | `time.h` | `timespec_get` (`TIME_UTC`, `TIME_MONOTONIC`) | |
 | `fcntl.h`, `sys/stat.h` | `openat`, `mkdirat`, `fstatat`, `fchmodat` relativně k adresáři; `AT_REMOVEDIR`, `AT_SYMLINK_NOFOLLOW` | cesta adresáře zapamatovaná při otevření + jméno (FS pracuje s cestami: bez ochrany před přejmenováním adresáře mezi otevřením a voláním) |
@@ -328,7 +329,7 @@ a linkuje s `--eh-frame-hdr`; dynamická část má `lib/crtdso.o` se skrytým
   `rand`, `div`, `atol`, rodina `scanf`, `getpwuid` (uživatel z `USER`
   a `HOME`), `getuid` a spol. (0), `fchown` a `utimes` bez účinku,
   `readlink`/`symlink`/`link` (symlinky FS zatím nejsou), `ioctl`
-  (`ENOTTY`), `setlocale`/`localeconv` (C, C.UTF-8), `uname`,
+  (`ENOTTY`), `setlocale`/`localeconv` (viz [Široké znaky a locale](#široké-znaky-a-locale)), `uname`,
   `getrusage`/`getrlimit`, `system` (`ENOSYS`; spouštění procesů
   `posix_spawn` **[navrženo]**).
 - **`libc.so`**: viz kapitola [libc.so](#libcso) níže.
@@ -579,15 +580,10 @@ Vlastního kódu ~11 000 řádků Rustu, převzatého ~14 000 řádků. Celá mu
 Úpravy se ukládají jako patche portu (`third_party/`), u programů s
 konfigurací často stačí volba (`--disable-fork`, `HAVE_FORK=0`); FFmpeg,
 sqlite, zlib a SDL `fork` nepotřebují.
-- **Locale:** jen `C` (výchozí při startu, jak chce POSIX) a `C.UTF-8`.
-  `setlocale(LC_ALL, "")` vybere `C.UTF-8`; jakékoli jméno `*.UTF-8`
-  se přijme jako `C.UTF-8`. Desetinná tečka vždy `.`, texty a měsíce
-  anglicky. Lokalizace aplikací není úkol libc.
-- **wchar:** `wchar_t` 32 bitů (UTF-32) na obou architekturách,
-  `MB_CUR_MAX` 1 v `C` a 4 v `C.UTF-8`. Převody (`mbrtowc`, `wcrtomb`,
-  `mbstowcs`, ...), řetězce `wcs*`, `wctype.h` (třídy Unicode z tabulek),
-  `swprintf`. Široké proudy (`fwprintf`, `fgetwc`) až když je bude
-  potřebovat port.
+- **Locale a wchar:** hotové, viz [Široké znaky a locale](#široké-znaky-a-locale)
+  (`C` jednobajtové, `C.UTF-8` a ostatní jména UTF-8, kategorie zatím
+  nelokalizované; `wchar_t` 32 bitů, plné `wchar.h` a `wctype.h` včetně
+  širokých proudů).
 
 ### Rozhodnutí
 
@@ -673,12 +669,90 @@ SDL potřeboval a doplnilo se:
 | `sched.h`, `pthread_getschedparam`/`setschedparam` | jen `SCHED_OTHER` s prioritou 0; `SCHED_FIFO`/`SCHED_RR` = `EPERM` (jako Linux bez oprávnění), nesmysl = `EINVAL` |
 | `fenv.h` | výjimky, zaokrouhlení, `fegetenv`/`feholdexcept`/`fesetenv`/`feupdateenv`, `FE_DFL_ENV`; x86_64 nad x87 a MXCSR, aarch64 nad FPCR a FPSR (`src/fenv.rs`), hodnoty a `fenv_t` jako glibc. Pasti výjimek se nezapínají. Test: krok `math` (`ctest`) na obou architekturách, host test na x86_64 (SDL převádí zvuk přes NEON s `feholdexcept`) |
 | `SIGVTALRM`, `SIGPROF` | čísla jako v Linuxu (26, 27) pro masky signálů; časovače `setitimer` zatím nejsou |
-| `wchar.h` | zatím jen typy a konstanty (`wint_t`, `mbstate_t`, `WEOF`); funkce `wcs*` a převody s plnou podporou wchar (níže) |
+| `wchar.h` | úplné, viz [Široké znaky a locale](#široké-znaky-a-locale) |
 | `inttypes.h` | makra `PRI*`/`SCN*` (LP64), `imaxabs`, `imaxdiv`, `strtoimax`, `strtoumax` |
 | `libm.a`, `libpthread.a`, `librt.a` | prázdné archivy v sysrootu (vše je v `libc.a`, jako musl); build systémy linkují `-lm -lpthread` |
 
 `dlfcn.h` přinese `libc.so` (samostatná větev); SDL ho zatím nepotřebuje
 (GTK a `dlopen` záplata pro MagnumOpus vypíná).
+
+## Široké znaky a locale
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (krok `wchar` testu `ctest`, sada
+`cstd`; host testy `cargo test -p cstd`, `-p cstd-core`, `-p uniprop`).
+Podklad pro libc++ (krok 7a-2, běhové prostředí C++): `wchar.h`
+a `wctype.h` úplně, `locale.h` s objekty `locale_t` a varianty `*_l`.
+
+### Kódování
+
+| Locale | Kódování | `MB_CUR_MAX` | `CODESET` |
+|---|---|---|---|
+| `C`, `POSIX` (výchozí při startu) | jednobajtové: 0x00-0x7F ASCII, bajty 0x80-0xFF se v širokých znacích vratně mapují na U+DF80-U+DFFF (jako musl) | 1 | `ANSI_X3.4-1968` |
+| `C.UTF-8`, `""` a každé jiné jméno bez cizího kódování (`cs_CZ.UTF-8`, `en_US`, `de_DE@euro`) | UTF-8 (jen platné: bez příliš dlouhých zápisů a náhradních polovin) | 4 | `UTF-8` |
+| jméno s jiným kódováním (`cs_CZ.ISO-8859-2`) | odmítne se (`setlocale` vrátí `NULL`, `newlocale` `ENOENT`) | - | - |
+
+- Proč jednobajtové `C`: program v locale C (výchozí) může libovolná data
+  projít přes široké znaky bez ztráty a bez chyby; to POSIX vyžaduje
+  a dělá to i musl. Programy, které chtějí UTF-8, volají
+  `setlocale(LC_ALL, "")` jako všude jinde.
+- `""` čte `LC_ALL`, `LC_<kategorie>`, `LANG`; nic nenastaveno = `C.UTF-8`
+  (systém je UTF-8).
+- Kategorie se **zatím nelokalizují**: čísla, datum a řazení jsou všude
+  jako v locale C (desetinná tečka, anglické názvy měsíců, `strcoll` =
+  `strcmp`). Kódování určuje jen `LC_CTYPE`; ostatní kategorie si jméno
+  pamatují (`setlocale(LC_ALL, NULL)` vrátí složené jméno
+  `C.UTF-8;C;C;C;C;C`, které jde předat zpět). České řazení přijde
+  později.
+- Locale vlákna: `uselocale` (jinak platí globální ze `setlocale`),
+  `newlocale`/`duplocale`/`freelocale`. Jednotná locale (`C`, `C.UTF-8`)
+  jsou sdílená bez alokace. `LC_GLOBAL_LOCALE` = `(locale_t)-1`.
+
+### Funkce
+
+| Hlavička | Funkce | Poznámka |
+|---|---|---|
+| `wchar.h` převody | `mbrtowc`, `mbrlen`, `mbsinit`, `wcrtomb`, `btowc`, `wctob`, `mbsrtowcs`, `mbsnrtowcs`, `wcsrtombs`, `wcsnrtombs` | stav `mbstate_t` (8 B, nuly = počátek); nulový ukazatel na stav = stav vlákna |
+| `stdlib.h` | `mblen`, `mbtowc`, `wctomb`, `mbstowcs`, `wcstombs`, `MB_CUR_MAX` (`__ctype_get_mb_cur_max`) | `MB_LEN_MAX` 4 (`limits.h`) |
+| `wchar.h` řetězce | `wcslen`, `wcsnlen`, `wcscpy`, `wcpcpy`, `wcsncpy`, `wcpncpy`, `wcscat`, `wcsncat`, `wcslcpy`, `wcslcat`, `wcscmp`, `wcsncmp`, `wcscasecmp`, `wcsncasecmp`, `wcscoll`, `wcsxfrm`, `wcschr`, `wcsrchr`, `wcsspn`, `wcscspn`, `wcspbrk`, `wcsstr`, `wcstok`, `wcsdup`, `wmem*`, `wcwidth`, `wcswidth` | porovnání podle hodnot `wchar_t`; `wcscasecmp` přes jednoduchý převod Unicode |
+| `wchar.h` čísla a čas | `wcstol`, `wcstoll`, `wcstoul`, `wcstoull`, `wcstoimax`, `wcstoumax`, `wcstod`, `wcstof`, `wcstold`, `wcsftime` | úvodní bílé znaky podle `iswspace`, číslice jen ASCII; `ERANGE` |
+| `wchar.h` proudy | `fgetwc`, `getwc`, `getwchar`, `fputwc`, `putwc`, `putwchar`, `ungetwc`, `fgetws`, `fputws`, `fwide` | v proudu kódování locale vlákna; rozpracovaný znak si pamatuje `FILE` |
+| `wchar.h` formát | `wprintf`, `fwprintf`, `swprintf`, `vwprintf`, `vfwprintf`, `vswprintf`, `wscanf`, `fwscanf`, `swscanf` a `v`-varianty | stejný stroj jako `printf`/`scanf`; `swprintf` vrátí -1, když se výstup nevejde |
+| `wctype.h` | `isw*`, `towupper`, `towlower`, `wctype`, `iswctype`, `wctrans`, `towctrans` | podle Unicode, nezávisí na locale; `iswdigit`/`iswxdigit` jen ASCII |
+| `locale.h` | `setlocale`, `localeconv`, `newlocale`, `uselocale`, `duplocale`, `freelocale`, `LC_*_MASK` | viz výše |
+| `*_l` | `is*_l`, `toupper_l`, `tolower_l`, `isw*_l`, `towupper_l`, `towlower_l`, `iswctype_l`, `wctype_l`, `wctrans_l`, `towctrans_l`, `strcoll_l`, `strxfrm_l`, `wcscoll_l`, `wcsxfrm_l`, `strftime_l`, `wcsftime_l`, `strto{d,f,ld}_l`, `strto{l,ll,ul,ull}_l`, `nl_langinfo_l` | libc++ je volá místo `uselocale` |
+| `printf` | `%lc`, `%ls`, `%C`, `%S`; `asprintf`, `vasprintf` (buffer z `malloc`) | převod do kódování locale; znak mimo kódování = -1 a `EILSEQ`; přesnost v bajtech, nikdy půl znaku |
+| `scanf` | `%lc`, `%ls`, `%l[` | v `scanf` převod z kódování locale, v `wscanf` naopak `%c %s %[` do vícebajtového |
+
+### Tabulky Unicode
+
+Třídy znaků (`iswalpha` = vlastnost Alphabetic, `iswupper`/`iswlower`
+= Uppercase/Lowercase, `iswspace` = White_Space bez mezer bez zalomení
+U+00A0, U+2007, U+202F), jednoduché převody velikosti (pole 12 a 13
+`UnicodeData.txt`) a šířka znaku v terminálu (`wcwidth`: 2 pro
+East_Asian_Width W/F, 0 pro kombinující znaménka a formátovací znaky,
+-1 pro netisknutelné) jsou v crate `libs/uniprop` (`no_std`, použije ho
+i terminál). Tabulky (`src/tables.rs`, seřazené rozsahy, binární hledání,
+ASCII rychlou cestou) generuje `cargo xtask unicode-tables` z UCD ve verzi
+`core::char::UNICODE_VERSION` překladače (dnes 18.0.0); soubory se
+stahují přes HTTPS s kontrolou SHA-256. Host test hlídá, že verze sedí
+a že `iswalpha`, `iswupper`, `iswlower` a převody velikosti dávají totéž
+co `char` v Rustu pro všech 1,1 milionu kódových bodů. Data UCD jsou pod
+licencí Unicode-3.0 (soubor `THIRD-PARTY.md` v kořeni repozitáře).
+
+### Vnitřní stavba
+
+- `cstd-core/src/mb.rs`: automat UTF-8 a jednobajtové kódování (`Enc`),
+  `mbstate_t`. Formátovací stroj (`format.rs`) je společný pro bajty
+  i široké znaky (`Out<u8>`/`Out<u32>`); kódování locale zjistí přes
+  háček, který `cstd` zaregistruje při první změně locale (do té doby
+  platí C, i ve službách `no_std`).
+- `cstd/src/locale/`: stav locale (globální maska + locale vlákna v TLS),
+  `nl_langinfo`, varianty `*_l` (`xl.rs`).
+- `cstd/src/wchar/`: `conv.rs`, `wcs.rs`, `num.rs`, `wctype.rs`,
+  `wio.rs`, `wprintf.rs`, `wscanf.rs`. Motor `scanf` pracuje se znaky
+  `u32` v bajtovém i širokém režimu.
+- `long double` (`wcstold`, `strtold_l`) je v C (`c/math_ld.c`) s přesností
+  `double` jako `strtold`.
 
 ## FFmpeg a licence
 

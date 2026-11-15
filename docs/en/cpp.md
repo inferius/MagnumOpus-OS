@@ -135,7 +135,7 @@ library that stays loaded and is not initialized again on the next
 | Function | For |
 |---|---|
 | `getentropy`, `sys/random.h` | `std::random_device`; waits until the kernel generator is seeded |
-| `aligned_alloc`, `posix_memalign` | aligned `operator new`; freed by plain `free` (the alignment is in the block header, [cstd](cstd.md)) |
+| `aligned_alloc`, `posix_memalign` (cstd-core) | aligned `operator new`; freed by plain `free` (the alignment is in the block header, [cstd](cstd.md)) |
 | `timespec_get`, `lldiv` | `<ctime>`, `<cstdlib>` |
 | `dl_iterate_phdr` (static), `link.h`, `elf.h` | libunwind |
 | `openat`, `unlinkat`, `mkdirat`, `fstatat`, `fchmodat` relative to a directory, `realpath`, `pathconf`, `statvfs`, `sendfile`, `PATH_MAX` | `std::filesystem` |
@@ -163,8 +163,7 @@ and text rendering in FFmpeg, step 7).
 | `cpptest: libc++ staticky` | QEMU, suite `cpp` | `user/cpptest/cpptest.cpp`: static constructors, containers, exceptions (also through a C frame), RTTI, aligned `new`, `bad_alloc`, threads and `thread_local` with destructors, `chrono`, `random_device`, `std::filesystem` over fsd; destructor of a global object after `main` |
 | `cpptest-dyn: libc++.so` | QEMU, suite `cpp` | the same as a PIE over `/system/lib/libc++.so` |
 | `hbtest: HarfBuzz` | QEMU, suite `cpp` | shaping text with diacritics, kerning |
-| `cxxsup_tests`, `fsat_tests` | host, `cargo test -p cstd` | order of `__cxa_atexit` and `__cxa_finalize` by module, `thread_local` destructors, `getentropy`, `aligned_alloc`, `posix_memalign`, `timespec_get`, `statvfs`, `*at` paths, `sendfile`, constants matching the headers |
-| `aligned_alloc_free_realloc` | host, `cargo test -p cstd-core` | aligned blocks, `free` and `realloc` of an aligned block |
+| `cxxsup_tests`, `fsat_tests` | host, `cargo test -p cstd` | order of `__cxa_atexit` and `__cxa_finalize` by module, `thread_local` destructors, `getentropy`, `timespec_get`, `statvfs`, `*at` paths, `sendfile`, constants matching the headers |
 
 Run: `cargo xtask test --only cpp` (`--arch aarch64` for the second
 architecture).

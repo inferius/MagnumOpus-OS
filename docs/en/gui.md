@@ -693,6 +693,39 @@ the screen size and the `FULLSCREEN` flag and needs to support nothing.
   notifications and showing them on return, the exceptions (calls,
   battery, security) and a config key in Settings **[designed]**.
 
+### Cursor and pointer lock
+
+Windows that draw themselves (SDL through [`libs/mosdl`](sdl.md)) control
+the cursor, pointer lock and fullscreen with protocol version 5 messages
+(`libs/guiproto/src/cursor.rs`, compositor `libs/comp/src/pointer.rs`).
+**[verified in QEMU]** (`libs/comp` tests `app_cursor_over_content_only`,
+`fullscreen_request_needs_gesture`, `pointer_lock_rules_and_release`,
+`pointer_lock_ends_with_focus_and_window`, `synthetic_input_cannot_lock`;
+in QEMU the `sdl` suite with physical input through QMP)
+
+- **Cursor (`SET_CURSOR`):** a system shape (arrow, text, wait, crosshair,
+  progress, four double arrows, move, not allowed, hand, hidden) or an own
+  B G R A image of at most 64 × 64 with a hot spot. It applies only over the
+  window content; over the frame, the bar and under a system dialog the
+  system cursor always applies. The compositor draws system shapes like
+  the arrow (black with a white outline). After a compositor restart
+  `mosdl` sends it again.
+- **Fullscreen (`WINDOW_STATE`):** the same path as the system shortcut
+  (badge, exit button, held Esc work). Entering only **in response to a
+  physical press in the focused window** (gesture number as for the
+  clipboard, one gesture = one action), otherwise `ACCESS_DENIED`; leaving
+  at any time. The app gets a `CONFIGURE` with the `FULLSCREEN` state.
+- **Pointer lock (`POINTER_LOCK`):** only the focused window after a
+  physical press and without a system dialog. The cursor hides and stays,
+  the window gets `PointerRelative { dx, dy }` (also from an absolute
+  device: the offset from the last position). A system notice "Aplikace
+  převzala myš. Uvolnění: klávesa Super" shows at the top for 3 s. The lock
+  is **always cancelled** by the Super key (it does not go to the app),
+  loss of focus, closing the window, a system dialog and the login screen;
+  the app gets `POINTER_LOCK_STATE` 0.
+- **Synthetic and remote input** gets no gesture number: it can turn on
+  neither the lock nor fullscreen (test `synthetic_input_cannot_lock`).
+
 ### Controls: act on release, tooltips, double click
 
 - **Act on release** over the same element for every system control (bar,
@@ -1243,6 +1276,9 @@ Application -> compositor:
 | 18 | `ACTION_RESULT` | call, result |
 | 22 | `BUFFER_CREATE_DESC` | buffer, `bufdesc` description (72 B) + VMO handle |
 | 23 | `SYNC_POINTS` | window, acquire fence (flag, value), release fence (flag, value) + fence handles |
+| 24 | `WINDOW_STATE` | window, fullscreen (0/1), gesture number ([Cursor and pointer lock](#cursor-and-pointer-lock)) |
+| 25 | `SET_CURSOR` | window, shape (0-12) or 0xFF + w, h, hot spot, B G R A pixels |
+| 26 | `POINTER_LOCK` | window, lock (0/1), gesture number |
 
 Compositor -> application:
 
@@ -1262,6 +1298,11 @@ Compositor -> application:
 | 111 | `ACTION_INVOKE` | call, action, arguments |
 | 112 | `ERROR` | op, code |
 | 113 | `THEME` | color mode u8 (0 light, 1 dark, 2 high contrast); after `WELCOME` and on change |
+| 118 | `POINTER_LOCK_STATE` | window, locked (0/1): reply to `POINTER_LOCK` and cancellation by the system |
+
+Protocol version 5 (`guiproto::VERSION`): `WINDOW_STATE`, `SET_CURSOR`,
+`POINTER_LOCK`, `POINTER_LOCK_STATE` and the input record `PointerRelative`
+(kind 8: `dx`, `dy`).
 
 Example (a window with one buffer):
 
@@ -1427,6 +1468,8 @@ reads from the framebuffer.
   it does not matter.
 
 ## Native UI library (`libs/ui`)
+
+The video area (`node::video`) shows frames from foreign buffers (NV12 from the decoder) in its own layer without redrawing the window; description and status in [multimedia.md](multimedia.md#player-application).
 
 One library for all applications, declarative in Rust:
 

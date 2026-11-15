@@ -14,8 +14,10 @@ without changes to their code.
 | build | SDL 3.4.20 (pinned version), CMake + Ninja, static `libSDL3.a` in the port prefix | **[verified in QEMU]** x86_64 and aarch64 (suite `sdl`) |
 | `libs/mosdl` | the C interface `mosdl_*` over the window from `libs/ui`, part of `libc.a` | **[verified in QEMU]** x86_64 and aarch64; event translation by host tests |
 | `magnumopus` video driver | one window, software framebuffer, keyboard (evdev codes), text, mouse, wheel, focus, resize, waiting for events with wake-up | **[verified in QEMU]** `testsprite` (pixels), `checkkeys` (injected input) |
-| audio, clipboard, cursor, relative mouse, HiDPI, fullscreen, zero-copy YUV | stage 6-2 | **[designed]** |
-| SDL example games (`snake`, `woodeneye-008`), a test with a screenshot | stage 6-3 | **[designed]** |
+| clipboard, cursor, relative mouse, fullscreen, display scale | stage 6-2: text in the clipboard, system shapes and an own 64 × 64 cursor, compositor pointer lock, fullscreen on request, scale as `SDL_GetDisplayContentScale` ([Cursor and pointer lock](gui.md#cursor-and-pointer-lock)) | **[verified in QEMU]** x86_64 and aarch64 (suite `sdl`, physical input through QMP) |
+| audio | SDL audio driver `magnumopus` over the application session at `audiod` (tag `AUDIO`): playback; capture only with `[audio] capture = true` and after the user allows it, the decision stored per user and application, revoked with the `povoleni` command ([Sound](audio.md#application-sessions-and-capture)) | **[verified in QEMU]** x86_64 and aarch64 (physical Enter in the dialog through QMP) |
+| zero-copy YUV (`BUFFER_CREATE_DESC`) | postponed to the FFmpeg step (a patch of SDL internals, estimated ~300 lines) | **[designed]** |
+| SDL example games and tests in the image | stage 6-3: `snake` and `woodeneye` (examples/demo), `testsprite`, `testaudio`, `testkeys`, `checkkeys` in the initfs with manifests | **[verified in QEMU]** x86_64 and aarch64 (test `sdl: ukazkove hry snake a woodeneye-008`) |
 | gamepads | a separate step with its own design (decision Q6 B) | **[designed]** |
 
 ## How it works
@@ -38,7 +40,7 @@ without changes to their code.
 
 - **The video driver** (`third_party/c-ports/sdl3/overlay/src/video/magnumopus/`)
   is our C code inside SDL. It calls only the `mosdl_*` functions from the
-  `mosdl.h` header in the C sysroot. The patch `0001-video-magnumopus.patch`
+  `mosdl.h` header in the C sysroot. The patch `0001-magnumopus.patch`
   registers it in SDL and adds the `SDL_PLATFORM_MAGNUMOPUS` macro.
 - **`libs/mosdl`** is in Rust and is part of `libc.a`. Two static Rust
   libraries in one program would each have their own copy of std
@@ -93,9 +95,15 @@ The event time (ns since system start) is converted to SDL time.
   (`BUFFER_CREATE_DESC`) is stage 6-2.
 - **Software renderer.** Vulkan for SDL (render and the GPU API) comes with
   GPU drivers for applications ([render](render.md)).
-- **No audio and clipboard** (SDL audio driver `dummy`), cursor, relative
-  mouse, HiDPI or fullscreen: stage 6-2.
-- **No gamepads** (decision Q6 B), file dialogs (Q7 A: SDL returns
+- **Audio**: one default device for playback and one for capture (choosing the card is up to the system); the buffer latency is the driver constant `MOS_LATENCY_US`. Capture only after permission (a system dialog on first use).
+- **HiDPI only as a scale**: window buffers are 1:1, the compositor has no
+  scale other than 100 % and no buffer scaling yet; SDL gets the scale as
+  `SDL_GetDisplayContentScale` (pixel density 1).
+- **Clipboard text only** (`text/plain;charset=utf-8`); copy, paste,
+  pointer lock and entering fullscreen only in response to a physical
+  press (compositor rule). There is no `SDL_WarpMouse` (relative mode does
+  not need it with the lock).
+- **No gamepads** (decision Q6 B): the joystick and haptic subsystems are on only with the `dummy` driver, so `SDL_Init(SDL_INIT_JOYSTICK)` succeeds (games call it) and there are no devices. No file dialogs (Q7 A: SDL returns
   unsupported), tray (`SDL_TRAY`) or `SDL_OpenURL` (will go through the
   "open path" service).
 - **Thread priority** only `SCHED_OTHER` (the scheduler does not give
@@ -108,10 +116,15 @@ The event time (ns since system start) is converted to SDL time.
 The `sdl3` port in `xtask/src/cports/mod.rs` (method `CMake`, [C ports](c-ports.md)).
 Main options: `SDL_STATIC=ON`, `SDL_SHARED=OFF`, `SDL_UNIX_CONSOLE_BUILD=ON`
 (windows come from our driver, not X11 or Wayland), X11, Wayland, KMSDRM,
-OpenGL, Vulkan, GPU, ALSA, PulseAudio, PipeWire, D-Bus, HIDAPI, joysticks,
-camera, dialogs and tray switched off. The library and headers go to
-`target/c-ports/<arch>/prefix`, the SDL tests `testsprite` and `checkkeys`
-to the initfs together with manifests and an icon.
+OpenGL, Vulkan, GPU, ALSA, PulseAudio, PipeWire, D-Bus, HIDAPI, virtual
+joystick, camera, dialogs and tray switched off (joysticks and haptics only
+`dummy`). The library and headers go to `target/c-ports/<arch>/prefix`;
+the example games `snake` and `woodeneye`, the SDL tests `testsprite`,
+`testaudio`, `testkeys`, `checkkeys` and our `testmagnumopus` go to the
+initfs with manifests (with an icon and `sdl-sample.wav`). The programs
+need a window channel from the compositor (today the init tests start
+them; from the desktop launcher with third-party applications
+**[designed]**).
 
 What SDL needed from the C library and was added in this step
 ([cstd](cstd.md#sdl-step-6)): `environ`, `fenv.h`, `nl_langinfo`, `sched_param` and
@@ -125,11 +138,45 @@ only so far) and `inttypes.h`, empty `libm.a`, `libpthread.a`, `librt.a`.
 | `cargo test -p mosdl` | host | event translation, frame copy (cropping, padding, hostile sizes), match with `mosdl.h` |
 | `sdl: testsprite ...` | QEMU, suite `sdl` | an SDL program window in the compositor; a deterministic frame (`--iterations 0`): red corner point, green top, blue left and red bottom line on screen |
 | `sdl: checkkeys ...` | QEMU, suite `sdl` | injected input through inputd and the compositor: key A = scancode 4, text "a", right mouse button, Esc twice ends the program with code 0 |
+| `sdl: kurzor, zamek ukazatele, schranka a cela obrazovka (QMP)` | QEMU, suite `sdl` | the `testmagnumopus` program (our SDL test): display and scale as the compositor, crosshair cursor on screen; physical click = pointer lock, movement = relative motion, Super = lock cancelled, second click = copy, Ctrl+V = paste, F = fullscreen |
+| `sdl: zvuk - prehravani, nahravani s povolenim, odvolani (QMP)` | QEMU, suite `sdl` | `testmagnumopus audio`: a tone plays through the `magnumopus` driver; without the manifest key capture is denied without a question; with it the Permission dialog (physical Enter = Allow), captured data from the HDA codec; the next run without a dialog (stored decision); listing and revoking as the `povoleni` command |
+| `sdl: ukazkove hry snake a woodeneye-008` | QEMU, suite `sdl` | snake: a 576 × 432 window, the grid row with the head changes within 1 s (the snake moves); woodeneye: a window with a rendered scene (at least 3 colours in the sample) |
+| `sdl: mereni cesty videa 1080p` | QEMU, suite `sdl` | `testmagnumopus bench`: I420 1920 × 1080 -> conversion in SDL -> window ([Performance](#performance)) |
 
 ```text
 cargo xtask test --only sdl
 cargo xtask test --arch aarch64 --only sdl
 ```
+
+## Performance
+
+Today's video path through SDL (input for the zero-copy YUV decision): an
+I420 1920 × 1080 texture -> `SDL_UpdateYUVTexture` (conversion to RGB in
+SDL) -> `SDL_RenderTexture` into a 960 × 540 window -> `SDL_RenderPresent`
+(copy into the window buffer through `mosdl`). Mean of 60 frames after 10
+warm-up frames (`testmagnumopus bench`, test `sdl: mereni cesty videa
+1080p`).
+
+| Architecture | System build | ms per frame |
+|---|---|---|
+| x86_64 | debug (`cargo xtask test`) | 139.6 |
+| x86_64 | release (`--release`) | 102.0 |
+| aarch64 | debug | 150.4 |
+
+Conditions: revision `5ab30f2`, QEMU 11.1.0 without acceleration (TCG),
+`-cpu max` (aarch64 `cortex-a76`), `-smp 4`, `-m 1G`, host AMD Ryzen 9
+9950X3D, Windows 11. SDL built as Release (CMake), on 1 thread. Numbers
+from TCG emulation are for comparing paths, not for a real machine;
+measuring on hardware with KVM/WHPX is **[designed]**.
+
+**Zero-copy YUV** (the frame as NV12/I420 through `BUFFER_CREATE_DESC`,
+SIMD conversion in the compositor, later on the GPU) is a follow-up step
+together with FFmpeg: a patch of `SDL_render.c` (an unconverted YUV texture
+for the magnumopus window, detecting a single YUV texture over the whole
+window in `RenderPresent`), `ui::Window::present_yuv` and a test; estimated
+~300 lines of SDL patch **[designed]**. The system player goes through
+`mediad` and windows with `bufdesc` directly, SDL and `ffplay` are a side
+path.
 
 ## Decisions (2026-11-14)
 
