@@ -11,7 +11,7 @@
 - **Úlohy:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Relace a bezpečnost:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Nápověda:** [`help`](#help), [`explain`](#explain)
-- **Systém:** [`audio`](#audio), [`povoleni`](#povoleni), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **Systém:** [`audio`](#audio), [`theme`](#theme), [`permissions`](#permissions), [`acl`](#acl), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Soubory
 
@@ -1810,22 +1810,71 @@ audio tone 440 -d 500ms
 **Chyby:** `NOT_FOUND`, `NOT_SUPPORTED`
 
 
-### `povoleni`
+### `theme`
 
-povolení aplikací: bez argumentu výpis, `povoleni odvolat <aplikace> [mikrofon]`
+vzhled: light, dark, auto (podle slunce); contrast on|off, reduce-motion on|off; bez argumentu stav
 
-Bez argumentu vypíše uložená rozhodnutí uživatele o povoleních aplikací (dnes mikrofon). `povoleni odvolat <aplikace>` rozhodnutí smaže: aplikace se příště zeptá znovu.
+Přepne vzhled celého prostředí: světlý (`light`), tmavý (`dark`) nebo automaticky podle východu a západu slunce v časovém pásmu (`auto`). `contrast on` zapne vysoký kontrast (Přístupnost, přebije světlý i tmavý), `reduce-motion on` omezí pohyb (přechod bez animace). Bez argumentu vypíše stav (`scheme`, `contrast`, `reduce_motion`). Volba se uloží k účtu a platí hned i po dalším přihlášení. S `--system` mění volbu přihlašovací obrazovky pro všechny; to je úkon správy a potvrdí ho člověk s rolí správy v systémovém dialogu.
 
 ```shell
-povoleni
+theme [what] [value] [-s]
 ```
 
-Plné jméno `system-permissions` · vstup: nic · výstup: nic
+Plné jméno `system-theme` · vstup: nic · výstup: tabulka (scheme, contrast, reduce_motion)
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[what]` | text |  | light, dark, auto, contrast nebo reduce-motion |
+| `[value]` | text |  | on nebo off (u contrast a reduce-motion) |
+| `-s, --system` | přepínač |  | systémová volba (přihlašovací obrazovka) |
+
+Tmavý vzhled.
+
+```shell
+theme dark
+```
+
+Světlý přes den, tmavý v noci.
+
+```shell
+theme auto
+```
+
+Vysoký kontrast.
+
+```shell
+theme contrast on
+```
+
+**Potřebuje:** relace uživatele (s `--system` potvrzení správce)
+
+**Chyby:** `SH_ARGS`, `ACCESS_DENIED`, `CANCELED`, `NOT_SUPPORTED`
+
+**Souvisí:** [`audio`](#audio)
+
+
+### `permissions`
+
+povolení aplikací (mikrofon): bez argumentu výpis, `permissions revoke <aplikace> [microphone]`
+
+Bez argumentu vypíše uložená rozhodnutí uživatele o povoleních aplikací jako tabulku (`app`, `permission`, `allowed`; dnes jen mikrofon, `microphone`). `permissions revoke <aplikace>` rozhodnutí smaže: aplikace se příště zeptá znovu.
+
+```shell
+permissions [action] [app] [permission]
+```
+
+Plné jméno `system-permissions` · vstup: nic · výstup: tabulka (app, permission, allowed)
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[action]` | text |  | revoke (odvolat), bez něj výpis |
+| `[app]` | text |  | identita aplikace z výpisu |
+| `[permission]` | text | microphone | povolení |
 
 Aplikace se znovu zeptá na mikrofon.
 
 ```shell
-povoleni odvolat org.libsdl.testaudio
+permissions revoke org.libsdl.testaudio
 ```
 
 **Potřebuje:** přihlášená relace (rozhodnutí patří uživateli relace)
@@ -1833,6 +1882,49 @@ povoleni odvolat org.libsdl.testaudio
 **Chyby:** `SH_ARGS`, `NOT_FOUND`, `ACCESS_DENIED`, `NOT_SUPPORTED`
 
 **Souvisí:** [`audio`](#audio)
+
+
+### `acl`
+
+oprávnění souboru: `acl <cesta>` výpis, `acl add <kdo> <view|run|edit|manage> <cesta>`, `acl remove <kdo> <cesta>`
+
+Oprávnění vlastních souborů a složek. `acl <cesta>` vypíše vlastníka, vaši úroveň, zda objekt dědí od nadřazené složky (`inherits`) a granty: komu (`who`, uživatel nebo skupina), úroveň (`level` a popis `label`: Zobrazit, Spouštět, Upravovat včetně spouštění, Spravovat) a rozsah (`this` jen objekt, `this+children` i obsah složky, `inherited` zděděno od složky `from`). `acl add <kdo> <úroveň> <cesta>` přidá grant nebo změní úroveň existujícího, s `--inherit` se dědí i do obsahu složky. `acl remove <kdo> <cesta>` odebere vlastní grant (zděděný se odebírá na složce, odkud přišel). Kdo: jméno účtu, `users` (všichni lidé), `everyone` (každý) nebo číslo. Měnit smí vlastník nebo kdo má právo Spravovat. Změna platí hned (ne nanečisto) a `undo` ji nevrací.
+
+```shell
+acl path ... [-i]
+```
+
+Plné jméno `file-acl` · vstup: nic · výstup: tabulka (path, owner, your_level, your_label, inherits, grants)
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `path` | hodnota |  | cesta, nebo add / remove |
+| `...` | hodnota |  | kdo, úroveň (view, run, edit, manage) a cesta |
+| `-i, --inherit` | přepínač |  | grant se dědí i do obsahu složky |
+
+Kdo smí do složky Projekty.
+
+```shell
+acl ~/Projekty
+```
+
+Bob smí upravovat složku i její obsah.
+
+```shell
+acl add bob edit ~/Projekty --inherit
+```
+
+Bob o grant přijde.
+
+```shell
+acl remove bob ~/Projekty
+```
+
+**Potřebuje:** FS s oprávněními (fsd); pro změnu vlastnictví nebo právo Spravovat
+
+**Chyby:** `SH_ARGS`, `ACCESS_DENIED`, `NOT_FOUND`, `NOT_SUPPORTED`
+
+**Souvisí:** [`ls`](#ls)
 
 
 ### `loglevel`

@@ -25,10 +25,12 @@ pub enum Part {
     Bar,
     /// Z vrstvy nad okny: ztlumeni a systemovy dialog.
     Dialog,
+    /// Prechod rezimu: michani stareho a noveho snimku (`fade.rs`).
+    Fade,
 }
 
-pub const PARTS: usize = 7;
-const NAMES: [&str; PARTS] = ["plocha", "stiny", "okna", "rozmazani listy", "nad okny", "z toho lista", "z toho dialog"];
+pub const PARTS: usize = 8;
+const NAMES: [&str; PARTS] = ["plocha", "stiny", "okna", "rozmazani listy", "nad okny", "z toho lista", "z toho dialog", "prechod rezimu"];
 
 /// Soucty casu po castech (ns) od posledniho `take`.
 #[derive(Debug, Clone, Default)]

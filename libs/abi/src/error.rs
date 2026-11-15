@@ -95,6 +95,9 @@ pub enum Error {
     /// Blokujici cekani prerusilo `THREAD_INTERRUPT`; vlakno dostane
     /// doruceni preruseni pri navratu do userspace (jako `EINTR`).
     Interrupted = -39,
+    /// Prilis mnoho symbolickych odkazu pri hledani cesty (vic nez 40, nebo
+    /// smycka); C `ELOOP`.
+    TooManyLinks = -40,
 }
 
 /// Vsechny chyby (pro dokumentaci a testy).
@@ -138,6 +141,7 @@ pub const ALL: &[Error] = &[
     Error::FenceFailed,
     Error::FenceAbandoned,
     Error::Interrupted,
+    Error::TooManyLinks,
 ];
 
 impl Error {
@@ -193,6 +197,7 @@ impl Error {
             Self::FenceFailed => "FENCE_FAILED",
             Self::FenceAbandoned => "FENCE_ABANDONED",
             Self::Interrupted => "INTERRUPTED",
+            Self::TooManyLinks => "TOO_MANY_LINKS",
         }
     }
 
@@ -238,6 +243,7 @@ impl Error {
             Self::FenceFailed => "plot skoncil chybou",
             Self::FenceAbandoned => "plot byl opusten (producent zavrel posledni handle s pravem SIGNAL)",
             Self::Interrupted => "cekani prerusilo preruseni vlakna (THREAD_INTERRUPT)",
+            Self::TooManyLinks => "prilis mnoho symbolickych odkazu (smycka)",
         }
     }
 }

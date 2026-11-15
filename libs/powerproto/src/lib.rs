@@ -64,10 +64,26 @@ pub enum Request {
     /// `installplan::proto`). Odpoved [`Reply::Ok`] s kanalem jako handlem
     /// zpravy, nebo [`Reply::Failed`].
     OpenInstaller,
+    /// Jen kanal shell -> init: volba vzhledu (prikaz `theme`). `system`
+    /// = systemova volba (prihlasovaci obrazovka; ukon spravy pres
+    /// `ELEVATE`), jinak volba uzivatele relace. `change`: prazdne = jen
+    /// precist, jinak `schema svetly|tmavy|auto`, `kontrast ano|ne` nebo
+    /// `pohyb ano|ne` (omezit pohyb). Odpoved [`Reply::Text`] s volbou
+    /// (`theme::Pref::to_words`) nebo [`Reply::Failed`]; systemova zmena
+    /// odpovi [`Reply::Ok`] s kanalem (handle), na ktery prijde vysledek
+    /// az po potvrzeni v dialogu.
+    Appearance { system: bool, change: String },
     /// Jen kanal shell -> init: povoleni aplikaci uzivatele relace (prikaz
-    /// `povoleni`): `app` prazdne = vypis, jinak odvolat `perm` aplikace
-    /// `app`. Odpoved [`Reply::Text`] nebo [`Reply::Failed`].
+    /// `permissions`): `app` prazdne = vypis (radek na rozhodnuti
+    /// `aplikace\tpovoleni\tallow|deny`), jinak odvolat `perm` (slovo
+    /// shellu, `microphone`) aplikace `app`. Odpoved [`Reply::Text`] nebo
+    /// [`Reply::Failed`].
     Permissions { app: String, perm: String },
+    /// Jen kanal shell -> init: ucty lidi pro jmena v prikazu `acl` (cislo
+    /// <-> jmeno). Odpoved [`Reply::Text`], radek na ucet
+    /// `uid\tjmeno\tzobrazovane jmeno` (init ze sluzby uctu, `NAMES`),
+    /// nebo [`Reply::Failed`].
+    Accounts,
 }
 
 /// Udalost hlasena sluzbou bez pozadavku.
@@ -182,6 +198,8 @@ mod op {
     pub const SNAPSHOT: u32 = 9;
     pub const OPEN_INSTALLER: u32 = 10;
     pub const PERMISSIONS: u32 = 11;
+    pub const APPEARANCE: u32 = 12;
+    pub const ACCOUNTS: u32 = 13;
 
     pub const R_OK: u32 = 100;
     pub const R_FAILED: u32 = 101;
@@ -206,10 +224,15 @@ impl Request {
             Request::LogLevel { .. } => op::LOG_LEVEL,
             Request::Snapshot => op::SNAPSHOT,
             Request::OpenInstaller => op::OPEN_INSTALLER,
+            Request::Appearance { .. } => op::APPEARANCE,
             Request::Permissions { .. } => op::PERMISSIONS,
+            Request::Accounts => op::ACCOUNTS,
         });
         if let Request::LogLevel { target, level } = self {
             w.str(target).str(level);
+        }
+        if let Request::Appearance { system, change } = self {
+            w.u8(*system as u8).str(change);
         }
         if let Request::Permissions { app, perm } = self {
             w.str(app).str(perm);
@@ -230,7 +253,9 @@ impl Request {
             op::LOG_LEVEL => Request::LogLevel { target: r.str()?, level: r.str()? },
             op::SNAPSHOT => Request::Snapshot,
             op::OPEN_INSTALLER => Request::OpenInstaller,
+            op::APPEARANCE => Request::Appearance { system: r.u8()? != 0, change: r.str()? },
             op::PERMISSIONS => Request::Permissions { app: r.str()?, perm: r.str()? },
+            op::ACCOUNTS => Request::Accounts,
             _ => return Err(Error::InvalidArgs),
         };
         if !r.is_empty() {

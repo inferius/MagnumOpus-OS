@@ -54,7 +54,13 @@ pub fn install(cx: &mut Ctx, plan: &Plan, settings: &Settings, account: &Account
     // Zdroj nejdriv (chyba = nic se nezapsalo). Na flashce to trva
     // (zavadec, jadro, dva initfs): vlastni krok prubehu.
     (cx.progress)(0, "Čtu systém ze živého USB");
+    let t0 = libos::time::now();
     let sources = read_sources(cx.live)?;
+    // Otisk kazdeho souboru hned po precteni: overeni porovna zapsana data
+    // s nim (zdroj se z pameti uvolni hned po zapisu).
+    let sums: Vec<Sum> = sources.iter().map(|d| Sum::of(d)).collect();
+    let bytes: usize = sources.iter().map(Vec::len).sum();
+    println!("installd: cteni zdroje {} MiB za {} ms", bytes >> 20, ms_since(t0));
 
     (cx.progress)(1, "Zapisuji tabulku oddílů");
     match &plan.gpt {
@@ -77,13 +83,15 @@ pub fn install(cx: &mut Ctx, plan: &Plan, settings: &Settings, account: &Account
     fatw::format::format(&mut esp, esp_sectors, b"MAGNUMOS   ", plan.esp.0, u32::from_le_bytes(id)).map_err(fat_err)?;
 
     (cx.progress)(3, "Kopíruji zavaděč a systém");
+    let t0 = libos::time::now();
     let mut vol = fatw::Volume::open(esp).map_err(fat_err)?;
-    for ((_, to), data) in files().iter().zip(&sources) {
+    for ((_, to), data) in files().iter().zip(sources) {
         let (dir, name) = to.rsplit_once('/').unwrap_or(("", to));
-        vol.write_file(dir, name, data, fatw::Stamp::default()).map_err(fat_err)?;
+        vol.write_file(dir, name, &data, fatw::Stamp::default()).map_err(fat_err)?;
     }
     vol.write_file("os", "boot.cfg", boot_cfg(settings.default_magnum).as_bytes(), fatw::Stamp::default())
         .map_err(fat_err)?;
+    println!("installd: kopie na ESP za {} ms", ms_since(t0));
 
     let data_part = || Part { disk: cx.target, first: plan.data.0, sectors: plan.data.1 - plan.data.0 + 1 };
     let mut fs = if plan.format_data {
@@ -140,7 +148,9 @@ pub fn install(cx: &mut Ctx, plan: &Plan, settings: &Settings, account: &Account
     drop(fs);
 
     (cx.progress)(7, "Ověřuji instalaci");
-    verify(cx, plan, &sources)?;
+    let t0 = libos::time::now();
+    verify(cx, plan, &sums)?;
+    println!("installd: overeni za {} ms", ms_since(t0));
 
     let mut s = String::from("Instalace je hotová.\n");
     match created {
@@ -162,6 +172,24 @@ pub fn install(cx: &mut Ctx, plan: &Plan, settings: &Settings, account: &Account
     s.push_str("Secure Boot ve firmwaru musí být vypnutý.\n");
     println!("installd: instalace dokoncena na '{}'", cx.target.model);
     Ok(s)
+}
+
+fn ms_since(t0: u64) -> u64 {
+    libos::time::now().saturating_sub(t0) / 1_000_000
+}
+
+/// Otisk souboru systemu: delka a XXH3-128 (odhali chybu zapisu nebo
+/// cteni, ne zamerne podvrzeni - zdroj i cil jsou v rukou instalatoru).
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Sum {
+    len: usize,
+    hash: u128,
+}
+
+impl Sum {
+    fn of(data: &[u8]) -> Self {
+        Self { len: data.len(), hash: xxhash_rust::xxh3::xxh3_128(data) }
+    }
 }
 
 fn fat_err(e: fatw::Error) -> Error {
@@ -192,9 +220,9 @@ fn read_sources(live: &Disk) -> Result<Vec<Vec<u8>>> {
     Ok(out)
 }
 
-/// Overeni: GPT ukazuje nas oddil, soubory na ESP sedi, FS jde pripojit
-/// (jen pro cteni) a ma nastaveni.
-fn verify(cx: &Ctx, plan: &Plan, sources: &[Vec<u8>]) -> Result<()> {
+/// Overeni: GPT ukazuje nas oddil, soubory na ESP prectene zpet z disku
+/// maji otisk zdroje, FS jde pripojit (jen pro cteni) a ma nastaveni.
+fn verify(cx: &Ctx, plan: &Plan, sums: &[Sum]) -> Result<()> {
     let sectors = cx.target.sectors();
     let d = diskguard::decide(sectors, SECTOR, |lba, buf| cx.target.read(lba, buf).is_ok());
     if !d.kind.is_ours() || d.start != plan.data.0 {
@@ -203,8 +231,8 @@ fn verify(cx: &Ctx, plan: &Plan, sources: &[Vec<u8>]) -> Result<()> {
     }
     let esp = Part { disk: cx.target, first: plan.esp.0, sectors: plan.esp.1 - plan.esp.0 + 1 };
     let mut vol = fatw::Volume::open(esp).map_err(fat_err)?;
-    for ((_, to), data) in files().iter().zip(sources) {
-        if vol.read_file(to).map_err(fat_err)?.as_deref() != Some(data.as_slice()) {
+    for ((_, to), sum) in files().iter().zip(sums) {
+        if vol.read_file(to).map_err(fat_err)?.map(|d| Sum::of(&d)) != Some(*sum) {
             println!("installd: overeni: {to} na ESP nesouhlasi");
             return Err(Error::Corrupted);
         }

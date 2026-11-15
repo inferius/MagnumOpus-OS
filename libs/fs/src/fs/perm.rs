@@ -11,6 +11,7 @@
 //! Operace pres handle se uz nekontroluji: prava se overila pri `open`.
 
 use alloc::collections::BTreeMap;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use abi::{Error, Result};
@@ -18,9 +19,9 @@ use abi::{Error, Result};
 use super::{DirEntry, Fs, Kind, split_parent, zil};
 use crate::btree;
 use crate::device::BlockDevice;
-use crate::layout::{KIND_DATASET, KIND_DIR, Key, META_OID, ROOT_DATASET, ROOT_OID, feature, item};
+use crate::layout::{KIND_DATASET, KIND_DIR, KIND_SYMLINK, Key, META_OID, ROOT_DATASET, ROOT_OID, feature, item};
 use crate::node::Child;
-use crate::perm::{Acl, Inherited, Principal, SYSTEM, acl_hash, decode_acl, encode_acl, rights};
+use crate::perm::{Acl, Inherited, Principal, SYSTEM, acl_hash, decode_acl, encode_acl, grant, rights};
 
 /// Vlastnosti datasetu (polozka `PROPS` datasetu, bity).
 pub mod ds_flags {
@@ -48,6 +49,26 @@ pub struct Permissions {
     pub acl: Option<Acl>,
     /// Ucinna prava volajiciho.
     pub rights: u8,
+}
+
+/// Zdedeny grant s puvodem (`Fs::acl_view`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InheritedGrant {
+    pub who: u64,
+    pub rights: u8,
+    /// Nejblizsi nadrazena slozka, jejiz popis grant dedi (cesta ve FS).
+    pub from: String,
+}
+
+/// Opravneni objektu pro zobrazeni: vlastni popis a zdedene granty
+/// s puvodem (karta Opravneni ve Vlastnostech, prikaz `acl`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AclView {
+    pub perms: Permissions,
+    /// Zdedene granty, ktere na objekt opravdu plati (prazdne, kdyz vlastni
+    /// popis ma `PROTECTED`). Kazda slozka po ceste zvlast, poradi od
+    /// korene; v ramci slozky podle `who`.
+    pub inherited: Vec<InheritedGrant>,
 }
 
 impl<D: BlockDevice> Fs<D> {
@@ -136,6 +157,54 @@ impl<D: BlockDevice> Fs<D> {
         Ok(Walked { oid, rights: r, below, above: inherited })
     }
 
+    /// Prvni symbolicky odkaz na ceste (pro nasledovani odkazu ve fsd):
+    /// `Some((index slozky v ceste, cil))`. Posledni slozka se pocita jen
+    /// s `last`. Cesta, ktera dal nevede (chybi, neni adresar, bez prava
+    /// `TRAVERSE`, neviditelny odkaz), = `None`: operaci pak vrati chybu
+    /// sama. Prava jako `walk` (odkaz v adresari bez `TRAVERSE` se nenajde).
+    pub fn find_link(&mut self, path: &str, last: bool) -> Result<Option<(usize, alloc::string::String)>> {
+        if !path.starts_with('/') {
+            return Err(Error::InvalidArgs);
+        }
+        self.activate(ROOT_DATASET)?;
+        let p = self.principal.clone().unwrap_or_default();
+        let mut root = self.s.root;
+        let mut oid = ROOT_OID;
+        let mut inherited = Inherited::default();
+        let mut inode = self.inode(&root, oid)?;
+        let mut acl = self.load_acl(&root, inode.acl)?;
+        let names: Vec<&str> = super::split_path(path).collect();
+        for (i, name) in names.iter().enumerate() {
+            if inode.kind != KIND_DIR {
+                return Ok(None);
+            }
+            if inherited.rights_of(&p, inode.owner, acl.as_ref()) & rights::TRAVERSE == 0 {
+                return Ok(None);
+            }
+            inherited = inherited.child(acl.as_ref());
+            let Some(d) = self.lookup_child(&root, oid, name)? else { return Ok(None) };
+            if d.kind == KIND_DATASET {
+                if self.is_boundary(oid, &d)? {
+                    return Ok(None);
+                }
+                self.activate(d.oid)?;
+                root = self.s.root;
+                oid = ROOT_OID;
+            } else {
+                oid = d.oid;
+            }
+            inode = self.inode(&root, oid)?;
+            acl = self.load_acl(&root, inode.acl)?;
+            if inode.kind == KIND_SYMLINK && (i + 1 < names.len() || last) {
+                if inherited.rights_of(&p, inode.owner, acl.as_ref()) == 0 {
+                    return Ok(None);
+                }
+                return Ok(Some((i, self.readlink_oid(&root, oid)?)));
+            }
+        }
+        Ok(None)
+    }
+
     /// Projde cestu a overi prava `need` (bez kontrol jen `enter`).
     pub(super) fn require(&mut self, path: &str, need: u8) -> Result<u64> {
         if !self.checking() {
@@ -218,6 +287,34 @@ impl<D: BlockDevice> Fs<D> {
             fs.ensure_room(4)?;
             fs.set_acl_oid(oid, Some(&new))
         })
+    }
+
+    /// Vlastnik, vlastni popis, ucinna prava a zdedene granty s puvodem.
+    /// Stejna prava jako `permissions` (jakekoli pravo k objektu): kdo
+    /// objekt vidi, smi videt, kdo k nemu ma pristup. Pruchod predky uz
+    /// prava nekontroluje (overil je `rights` celou cestou).
+    pub fn acl_view(&mut self, path: &str) -> Result<AclView> {
+        let perms = self.permissions(path)?;
+        let names: Vec<&str> = super::split_path(path).collect();
+        let mut inherited = Vec::new();
+        for i in 0..names.len() {
+            let mut dir = String::from("/");
+            dir.push_str(&names[..i].join("/"));
+            let oid = self.enter(&dir)?;
+            let root = self.s.root;
+            let inode = self.inode(&root, oid)?;
+            let Some(acl) = self.load_acl(&root, inode.acl)? else { continue };
+            if acl.protected() {
+                inherited.clear();
+            }
+            for g in acl.grants.iter().filter(|g| g.flags & grant::INHERIT != 0) {
+                inherited.push(InheritedGrant { who: g.who, rights: g.rights, from: dir.clone() });
+            }
+        }
+        if perms.acl.as_ref().is_some_and(Acl::protected) {
+            inherited.clear();
+        }
+        Ok(AclView { perms, inherited })
     }
 
     /// Nastavi vlastni popis opravneni objektu (`None` = jen dedit).

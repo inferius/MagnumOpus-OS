@@ -4,7 +4,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use fsproto::hist::Change;
-use fsproto::{FsClient, Stat, kind};
+use fsproto::{FsClient, Stat, kind, perm};
 use libos::time::WallTime;
 use libos::Error;
 use shlang::host::{Applied, Aside, DirEntry, Fs, FsChange, FsChangeKind, FsResult, Meta, NodeKind, ViewRef, hidden};
@@ -114,9 +114,40 @@ impl FsdFs {
     }
 }
 
+/// Popis opravneni fsproto -> shell (`shlang::acl`, stejne bity).
+fn acl_in(a: perm::Acl) -> shlang::acl::Acl {
+    shlang::acl::Acl {
+        protected: a.flags & perm::ACL_PROTECTED != 0,
+        grants: a.grants.into_iter().map(|g| shlang::acl::Grant { who: g.who, rights: g.rights, flags: g.flags }).collect(),
+    }
+}
+
+fn acl_out(a: &shlang::acl::Acl) -> perm::Acl {
+    perm::Acl {
+        flags: if a.protected { perm::ACL_PROTECTED } else { 0 },
+        grants: a.grants.iter().map(|g| perm::Grant { who: g.who, rights: g.rights, flags: g.flags }).collect(),
+    }
+}
+
 impl Fs for FsdFs {
     fn stat(&mut self, path: &str) -> FsResult<Meta> {
         self.client.stat(path).map(|s| meta(&s))
+    }
+
+    fn acl_view(&mut self, path: &str) -> FsResult<shlang::acl::View> {
+        let v = self.client.acl_view(path)?;
+        Ok(shlang::acl::View {
+            perms: shlang::acl::Perms { owner: v.perms.owner, rights: v.perms.rights, acl: v.perms.acl.map(acl_in) },
+            inherited: v
+                .inherited
+                .into_iter()
+                .map(|g| shlang::acl::Inherited { who: g.who, rights: g.rights, from: g.from })
+                .collect(),
+        })
+    }
+
+    fn set_acl(&mut self, path: &str, acl: Option<&shlang::acl::Acl>) -> FsResult<()> {
+        self.client.set_acl(path, acl.map(acl_out).as_ref())
     }
 
     /// Vypis i s metadaty jednim dotazem na stranku (`LIST_STAT_PAGE`).

@@ -36,6 +36,10 @@ pub enum Request {
     PermList,
     /// Odvolat vlastni rozhodnuti (aplikace se priste zepta znovu).
     PermRevoke { app_id: String, perm: crate::perm::Perm },
+    /// Kanal names: prihlasovaci a zobrazovana jmena uctu
+    /// ([`encode_names`]). Nic dalsiho o uctu (metody, priznaky) - stejna
+    /// jmena ukazuje prihlasovaci obrazovka.
+    Names,
 }
 
 impl Request {
@@ -60,13 +64,14 @@ impl Request {
             Request::CreateFirst { .. } => op::CREATE_FIRST,
             Request::PermList => op::PERM_LIST,
             Request::PermRevoke { .. } => op::PERM_REVOKE,
+            Request::Names => op::NAMES,
         }
     }
 
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::op(self.op());
         match self {
-            Request::List | Request::WhoAmI | Request::Lock | Request::Logout | Request::PermList => {}
+            Request::List | Request::WhoAmI | Request::Lock | Request::Logout | Request::PermList | Request::Names => {}
             Request::PermRevoke { app_id, perm } => {
                 w.str(app_id).u8(*perm as u8);
             }
@@ -148,6 +153,7 @@ impl Request {
             op::LOCK => Request::Lock,
             op::LOGOUT => Request::Logout,
             op::PERM_LIST => Request::PermList,
+            op::NAMES => Request::Names,
             op::PERM_REVOKE => Request::PermRevoke { app_id: r.str()?, perm: crate::perm::Perm::from_u8(r.u8()?)? },
             op::ELEVATE => Request::Elevate { action: r.u32()?, params: get_blob(&mut r)? },
             op::SET_KEY_PIN => Request::SetKeyPin { pin: get_secret(&mut r)? },
@@ -225,6 +231,35 @@ pub fn decode_list(b: &[u8]) -> Result<Vec<AccountSummary>> {
         return Err(Error::InvalidArgs);
     }
     (0..n).map(|_| AccountSummary::get(&mut r)).collect()
+}
+
+/// Jmena uctu (odpoved `NAMES`): stejna, jaka ukazuje prihlasovaci
+/// obrazovka.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountName {
+    pub uid: u64,
+    /// Prihlasovaci jmeno (zadani v shellu, `acl add bob ...`).
+    pub name: String,
+    /// Zobrazovane jmeno (prazdne -> `name`).
+    pub display: String,
+}
+
+pub fn encode_names(list: &[AccountName]) -> Vec<u8> {
+    let mut w = Writer::new();
+    w.u32(list.len() as u32);
+    for a in list {
+        w.u64(a.uid).str(&a.name).str(&a.display);
+    }
+    w.finish()
+}
+
+pub fn decode_names(b: &[u8]) -> Result<Vec<AccountName>> {
+    let mut r = Reader::new(b);
+    let n = r.u32()? as usize;
+    if n > 10_000 {
+        return Err(Error::InvalidArgs);
+    }
+    (0..n).map(|_| Ok(AccountName { uid: r.u64()?, name: r.str()?, display: r.str()? })).collect()
 }
 
 /// Vysledek overeni.

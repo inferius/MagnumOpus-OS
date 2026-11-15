@@ -125,6 +125,9 @@ fn get_avail(r: &mut Reader) -> Result<(u16, u16)> {
     Ok((known, hidden))
 }
 
+/// Nejdelsi cil symbolickeho odkazu (bajty; jako `PATH_MAX`).
+pub const SYMLINK_MAX: usize = 4096;
+
 /// Druh objektu.
 pub mod kind {
     pub const FILE: u8 = 1;

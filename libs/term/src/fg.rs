@@ -385,9 +385,18 @@ impl Host for LineHost {
         self.call(move |c| c.env.log_level(&t, &l)).unwrap_or(Err(abi::Error::Canceled))
     }
 
+    fn appearance(&mut self, system: bool, change: &str) -> Result<String, abi::Error> {
+        let c = String::from(change);
+        self.call(move |s| s.env.appearance(system, &c)).unwrap_or(Err(abi::Error::Canceled))
+    }
+
     fn permissions(&mut self, app: &str, perm: &str) -> Result<String, abi::Error> {
         let (a, p) = (String::from(app), String::from(perm));
         self.call(move |c| c.env.permissions(&a, &p)).unwrap_or(Err(abi::Error::Canceled))
+    }
+
+    fn accounts(&mut self) -> Result<Vec<shlang::acl::Account>, abi::Error> {
+        self.call(|c| c.env.accounts()).unwrap_or(Err(abi::Error::Canceled))
     }
 
     fn task_spawn(&mut self, spec: TaskSpec) -> Option<Result<u64, ShError>> {

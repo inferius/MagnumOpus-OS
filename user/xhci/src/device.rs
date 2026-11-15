@@ -14,17 +14,20 @@ use crate::ring::{Dma, Ring, Trb, trb};
 pub struct Endpoint {
     pub dci: u8,
     pub ring: Ring,
-    /// Buffer pro data: interrupt jedna stranka, bulk 32 KiB, z nich se
+    /// Buffer pro data: interrupt jedna stranka, bulk 64 KiB, z nich se
     /// pouziva okno [`Endpoint::window`].
     pub buf: Dma,
     /// Okno v `buf` pro jeden prenos: (offset, delka). Jeden TRB nesmi
-    /// prekrocit hranici 64 KiB (xHCI 4.11.7.1), proto bulk okno 16 KiB
-    /// lezi v bufferu 32 KiB tak, aby hranici neprekrocilo.
+    /// prekrocit hranici 64 KiB (xHCI 4.11.7.1), proto bulk okno 32 KiB
+    /// lezi v bufferu 64 KiB tak, aby hranici neprekrocilo.
     pub window: (u64, u64),
 }
 
 /// Velikost bufferu bulk endpointu (dvojnasobek okna).
 pub const BULK_BUF: u64 = 2 * usbproto::msg::MAX_DATA as u64;
+/// Buffer kontrolnich prenosu EP0 (deskriptory, pozadavky tridy).
+pub const EP0_BUF: u64 = 16 * 1024;
+const _: () = assert!(usbproto::msg::MAX_DATA <= 32 * 1024, "bulk okno musi byt <= 32 KiB (window_offset)");
 
 /// Okno `len` bajtu v souvislem bufferu od fyzicke adresy `phys` o delce
 /// `2 * len`, ktere neprekroci hranici 64 KiB (`len` <= 32 KiB). Vraci
@@ -233,7 +236,7 @@ impl Hc {
         let out_ctx = Dma::new(&self.res, 32 * ctx)?;
         let in_ctx = Dma::new(&self.res, 33 * ctx)?;
         let ep0 = Ring::new(&self.res)?;
-        let ep0_buf = Dma::new(&self.res, 16 * 1024)?;
+        let ep0_buf = Dma::new(&self.res, EP0_BUF)?;
         self.set_dcbaa(slot, out_ctx.phys);
 
         // Kontext vstupu: pridat slot (A0) a EP0 (A1).

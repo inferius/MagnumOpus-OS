@@ -60,19 +60,19 @@ impl Service {
         fs.set_time(now);
         match opcode {
             op::CLONE => {
-                let src = sess.map(&r.str()?, false)?;
-                let dst = sess.map(&r.str()?, true)?;
+                let src = sess.resolve(fs, &r.str()?, false, true)?;
+                let dst = sess.resolve(fs, &r.str()?, true, false)?;
                 w.u64(fs.clone_path(&src, &dst)?);
             }
             op::CLONE_RANGE => {
-                let src = sess.map(&r.str()?, false)?;
+                let src = sess.resolve(fs, &r.str()?, false, true)?;
                 let src_off = r.u64()?;
-                let dst = sess.map(&r.str()?, true)?;
+                let dst = sess.resolve(fs, &r.str()?, true, true)?;
                 let (dst_off, len) = (r.u64()?, r.u64()?);
                 fs.clone_range(&src, src_off, &dst, dst_off, len)?;
             }
             op::FALLOCATE => {
-                let path = sess.map(&r.str()?, true)?;
+                let path = sess.resolve(fs, &r.str()?, true, true)?;
                 let (offset, len, keep) = (r.u64()?, r.u64()?, r.u8()? != 0);
                 fs.fallocate(&path, offset, len, keep)?;
             }

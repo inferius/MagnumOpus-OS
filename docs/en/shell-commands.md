@@ -11,7 +11,7 @@
 - **Tasks:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Session and safety:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Help:** [`help`](#help), [`explain`](#explain)
-- **System:** [`audio`](#audio), [`povoleni`](#povoleni), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **System:** [`audio`](#audio), [`theme`](#theme), [`permissions`](#permissions), [`acl`](#acl), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Files
 
@@ -1810,22 +1810,71 @@ audio tone 440 -d 500ms
 **Errors:** `NOT_FOUND`, `NOT_SUPPORTED`
 
 
-### `povoleni`
+### `theme`
 
-app permissions: list without arguments, `povoleni odvolat <app> [mikrofon]` revokes
+appearance: light, dark, auto (by the sun); contrast on|off, reduce-motion on|off; status without arguments
 
-Without arguments lists the user's stored decisions about app permissions (the microphone today). `povoleni odvolat <app>` deletes the decision: the app asks again next time.
+Switches the appearance of the whole environment: light (`light`), dark (`dark`) or automatic by sunrise and sunset in the time zone (`auto`). `contrast on` turns on high contrast (Accessibility, overrides light and dark), `reduce-motion on` reduces motion (switch without animation). Without arguments it shows the state (`scheme`, `contrast`, `reduce_motion`). The choice is stored with the account and applies at once and after the next login. With `--system` it changes the login screen choice for everyone; that is an administration action confirmed by a person with the administration role in a system dialog.
 
 ```shell
-povoleni
+theme [what] [value] [-s]
 ```
 
-Full name `system-permissions` · input: nothing · output: nothing
+Full name `system-theme` · input: nothing · output: table (scheme, contrast, reduce_motion)
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `[what]` | text |  | light, dark, auto, contrast or reduce-motion |
+| `[value]` | text |  | on or off (for contrast and reduce-motion) |
+| `-s, --system` | switch |  | the system choice (login screen) |
+
+Dark appearance.
+
+```shell
+theme dark
+```
+
+Light by day, dark at night.
+
+```shell
+theme auto
+```
+
+High contrast.
+
+```shell
+theme contrast on
+```
+
+**Needs:** a user session (with `--system` an administrator's confirmation)
+
+**Errors:** `SH_ARGS`, `ACCESS_DENIED`, `CANCELED`, `NOT_SUPPORTED`
+
+**Related:** [`audio`](#audio)
+
+
+### `permissions`
+
+app permissions (microphone): list without arguments, `permissions revoke <app> [microphone]`
+
+Without arguments lists the user's stored decisions about app permissions as a table (`app`, `permission`, `allowed`; only the microphone today, `microphone`). `permissions revoke <app>` deletes the decision: the app asks again next time.
+
+```shell
+permissions [action] [app] [permission]
+```
+
+Full name `system-permissions` · input: nothing · output: table (app, permission, allowed)
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `[action]` | text |  | revoke, without it the list |
+| `[app]` | text |  | the app identity from the list |
+| `[permission]` | text | microphone | the permission |
 
 The app asks for the microphone again.
 
 ```shell
-povoleni odvolat org.libsdl.testaudio
+permissions revoke org.libsdl.testaudio
 ```
 
 **Needs:** a signed-in session (decisions belong to the session's user)
@@ -1833,6 +1882,49 @@ povoleni odvolat org.libsdl.testaudio
 **Errors:** `SH_ARGS`, `NOT_FOUND`, `ACCESS_DENIED`, `NOT_SUPPORTED`
 
 **Related:** [`audio`](#audio)
+
+
+### `acl`
+
+file permissions: `acl <path>` lists, `acl add <who> <view|run|edit|manage> <path>`, `acl remove <who> <path>`
+
+Permissions of your own files and folders. `acl <path>` lists the owner, your level, whether the object inherits from the parent folder (`inherits`) and the grants: to whom (`who`, a user or a group), the level (`level` and the description `label`: View, Run, Edit including running, Manage) and the scope (`this` the object only, `this+children` also the folder contents, `inherited` inherited from the folder `from`). `acl add <who> <level> <path>` adds a grant or changes the level of an existing one, with `--inherit` it is also inherited into the folder contents. `acl remove <who> <path>` removes an own grant (an inherited one is removed on the folder it came from). Who: an account name, `users` (all people), `everyone` (anyone) or a number. Only the owner or someone with the Manage right may change them. The change applies at once (not as a draft) and `undo` does not revert it.
+
+```shell
+acl path ... [-i]
+```
+
+Full name `file-acl` · input: nothing · output: table (path, owner, your_level, your_label, inherits, grants)
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `path` | value |  | a path, or add / remove |
+| `...` | value |  | who, level (view, run, edit, manage) and path |
+| `-i, --inherit` | switch |  | the grant is also inherited into the folder contents |
+
+Who may access the Projekty folder.
+
+```shell
+acl ~/Projekty
+```
+
+Bob may edit the folder and its contents.
+
+```shell
+acl add bob edit ~/Projekty --inherit
+```
+
+Bob loses the grant.
+
+```shell
+acl remove bob ~/Projekty
+```
+
+**Needs:** a FS with permissions (fsd); for a change ownership or the Manage right
+
+**Errors:** `SH_ARGS`, `ACCESS_DENIED`, `NOT_FOUND`, `NOT_SUPPORTED`
+
+**Related:** [`ls`](#ls)
 
 
 ### `loglevel`

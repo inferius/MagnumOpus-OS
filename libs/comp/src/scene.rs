@@ -432,7 +432,7 @@ impl Comp {
                         app,
                     },
                 );
-                let mode = crate::style::mode_code(self.style.mode());
+                let mode = crate::style::mode_code(self.mode());
                 self.send(c, ServerMsg::Theme { mode });
             }
             ClientMsg::WindowCreate { window, mode, w, h, title } => self.window_create(c, window, mode, w, h, clip_title(title)),

@@ -368,7 +368,7 @@ C frames) and links with `--eh-frame-hdr`; the dynamic part has
   `strtok_r`, `strdup`, `strndup`, `strcasecmp`, `strerror_r`, `qsort`,
   `bsearch`, `rand`, `div`, `atol`, the `scanf` family, `getpwuid` (user
   from `USER` and `HOME`), `getuid` and friends (the FS session identity, see [AF_UNIX sockets](#af_unix-sockets)), `fchown` and `utimes`
-  without effect, `readlink`/`symlink`/`link` (no FS symlinks yet),
+  without effect, `readlink`/`readlinkat`/`symlink`/`symlinkat` (fsd follows links in the session namespace, [Symbolic links](file-system.md#symbolic-links); `lstat`, `fstatat(AT_SYMLINK_NOFOLLOW)`, `open(O_NOFOLLOW)` = `ELOOP` on a link, `realpath` through fsd), `link` (`ENOTSUP`),
   `ioctl` (`ENOTTY`), `setlocale`/`localeconv` (see [Wide characters and locale](#wide-characters-and-locale)), `uname`,
   `getrusage`/`getrlimit`, `system` (`ENOSYS`; starting processes via
   `posix_spawn`, see [POSIX additions](#processes-posix_spawn-and-waitpid)).
@@ -545,7 +545,7 @@ About 11,000 lines of own Rust, about 14,000 adopted lines. All of musl is
    (`st_mode` as a view of the grants, `st_uid` = the owner), `opendir`/`readdir`, `mkdir`, `unlink`, `rmdir`, `rename`,
    `access`, `getcwd`/`chdir`, `pipe` (a channel pair), `isatty`.
    `chmod` changes the grants (since T1, [POSIX mode](file-system.md#posix-mode)), `link`/
-   `symlink` = `ENOTSUP` until FS v3. `fcntl`/`flock` locks are held by
+   `symlink` since fs-symlink (see above). `fcntl`/`flock` locks are held by
    fsd (decision 8).
 3. **`math.h`** (question 3) and floating point in `printf`/`scanf`/
    `strtod`. Hard-float everywhere (x86-64-v2, NEON). `long double`:

@@ -88,6 +88,8 @@ pub mod op {
     pub const CREATE_FIRST: u32 = 30;
     // grants (sluzby ukonu)
     pub const CHECK_GRANT: u32 = 40;
+    // names (jen cteni: cislo -> zobrazovane jmeno; spravce souboru)
+    pub const NAMES: u32 = 41;
     // init (accountd -> init)
     pub const OPEN_SESSION: u32 = 50;
     pub const CLOSE_SESSION: u32 = 51;

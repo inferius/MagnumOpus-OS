@@ -225,6 +225,7 @@ pub fn from_os(code: i32) -> c_int {
         -32 => EADDRINUSE,
         -36 => EADDRNOTAVAIL,
         -39 => EINTR,
+        -40 => ELOOP,
         _ => EIO,
     }
 }

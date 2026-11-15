@@ -16,6 +16,7 @@
 
 #![cfg_attr(not(test), no_std)]
 
+mod place;
 mod settings;
 mod table;
 #[cfg(test)]
@@ -24,6 +25,7 @@ mod tests;
 use core::fmt;
 
 pub use abi::time::{Civil, WallTime, weekday};
+pub use place::Place;
 pub use settings::{ParseError, Settings, rtc_local_correction};
 pub use table::ZONES;
 

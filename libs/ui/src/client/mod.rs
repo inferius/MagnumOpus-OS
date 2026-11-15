@@ -424,11 +424,7 @@ impl Window {
                 first
             }
             ServerMsg::Close { .. } => Some(Event::Close),
-            ServerMsg::Theme { mode } => Some(Event::Theme(match mode {
-                1 => theme::Mode::Dark,
-                2 => theme::Mode::Contrast,
-                _ => theme::Mode::Light,
-            })),
+            ServerMsg::Theme { mode } => Some(Event::Theme(mode_of(mode))),
             ServerMsg::A11yAction { node, action, value, .. } => Some(Event::A11yAction { node, action, value }),
             ServerMsg::Clipboard { data } => clipproto::ServerMsg::decode(&data).ok().map(Event::Clipboard),
             ServerMsg::WindowPlace { rect, .. } => Some(Event::Place(rect)),
@@ -1073,6 +1069,7 @@ fn handle_event<A: App>(win: &mut Window, ui: &mut Ui<A::Msg>, app: &mut A, ev: 
         Event::Restored { .. } => *dirty = true,
         Event::Theme(m) => {
             ui.look.set_mode(m);
+            ui.cx.mode = m;
             ui.refresh(app);
             *dirty = true;
         }
@@ -1156,4 +1153,13 @@ fn render<M: Clone>(win: &mut Window, ui: &mut Ui<M>) -> Result<()> {
         win.title = ui.title.clone();
     }
     win.commit_redrawn(true)
+}
+
+/// Kod rezimu ze zpravy `THEME` (neznamy = svetly).
+fn mode_of(code: u8) -> theme::Mode {
+    match code {
+        1 => theme::Mode::Dark,
+        2 => theme::Mode::Contrast,
+        _ => theme::Mode::Light,
+    }
 }

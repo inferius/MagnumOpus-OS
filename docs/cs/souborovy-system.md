@@ -66,7 +66,7 @@ sporné, co funguje:
 | Okamžitá velikost adresáře (souhrny podstromu) | hotovo | [Souhrny](#okamžité-velikosti-adresářů) |
 | Jména bez ohledu na velikost písmen (Unicode NFC) | hotovo | [Jména](#jména-souborů) |
 | Jména až 1024 znaků, zákaz řídicích znaků směru textu | hotovo | [Jména](#jména-souborů) |
-| Symbolické odkazy | hotovo (knihovna; v protokolu jen výpis) | [Symbolické odkazy](#symbolické-odkazy) |
+| Symbolické odkazy | hotovo (knihovna, fsd následuje ve jmenném prostoru relace) | [Symbolické odkazy](#symbolické-odkazy) |
 | Soubory až 2^63-1 B, kontrolovaná aritmetika | hotovo | [Limity](#limity-formátu) |
 | UUID svazku a příznaky vlastností (compat/ro/incompat) | hotovo | [Superblok](#superblok) |
 | Snapshoty jen pro čtení a jejich mazání (deadlisty) | hotovo | [Snapshoty](#snapshoty) |
@@ -467,13 +467,52 @@ fs.remove("/projekt/CTIME")?;
 ```
 
 - Knihovna při procházení cesty odkazy **nenásleduje**: odkaz uprostřed
-  cesty dá `NOT_A_DIRECTORY`, `read`/`write` odkazu `WRONG_TYPE`. Následování
-  (s limitem hloubky proti smyčkám) bude dělat vrstva nad ním (VFS/fsd).
+  cesty dá `NOT_A_DIRECTORY`, `read`/`write` odkazu `WRONG_TYPE`. Najde ho
+  `find_link` (první odkaz na cestě, práva jako `walk`); následuje fsd.
 - Odkaz se v souhrnech adresáře počítá jako soubor s velikostí 0.
 - `symlink` se zapisuje do intent logu (záznam 7), takže přežije `fsync`
-  i bez commitu.
-- Protokol fsproto v1 odkaz jen ukáže (`kind::SYMLINK` ve `STAT` a
-  `LIST`); vytváření přes službu přijde s protokolem v2.
+  i bez commitu. Formát se kvůli následování nemění (odkazy jsou ve v3 od
+  začátku).
+- `readlink` chce jen viditelnost odkazu (POSIX: průchod složkou).
+
+### Následování ve fsd
+
+**[ověřeno v QEMU]** x86_64 (test „symbolicke odkazy: nasledovani,
+smycka, prava, jmenny prostor relace" v sadě `souborovy system`, krok
+`link` testu `ctest` v sadě `cstd`; host testy `objects::find_link_on_path`).
+fsd následuje odkazy při hledání cesty (`user/fsd/src/links.rs`):
+
+- **Kde:** v prostředních složkách vždy, v poslední podle operace -
+  `STAT`, `OPEN`, `LIST*`, `READ`, `WRITE`, `TRUNCATE`, `SET_MODE`, práva,
+  `SOCKET_CONNECT`, `REALPATH` ano; `CREATE`, `REMOVE`, `RENAME`,
+  `SYMLINK`, `READLINK`, `LSTAT`, `SOCKET_BIND` ne (působí na odkaz, ne na
+  cíl). `OPEN` s příznakem `NOFOLLOW` na odkaz = `TOO_MANY_LINKS` (C
+  `ELOOP`). Operace historie a datasetů odkazy nenásledují.
+- **Jak:** relativní cíl od složky odkazu, absolutní od **kořene relace**;
+  `..` po následování podle POSIX (od už vyřešené fyzické cesty; nad
+  kořenem relace zůstane kořen). Víc než 40 odkazů = `TOO_MANY_LINKS`
+  (smyčka).
+- Cesta se řeší ve **jmenném prostoru relace** (připojené cesty, ne cesty
+  ve FS): každý krok se znovu mapuje přes připojené cesty relace.
+- Klient (`osrt::env::resolve`) `..` nechává fsd (dřív ho řešil
+  lexikálně); složka před `..` musí existovat. `chdir` ukládá kanonickou
+  cestu (`REALPATH`), `getcwd` je fyzická cesta jako v POSIX.
+- `stat` přes odkaz vrací `st_dev`/`st_ino` cíle; jména s `:` (`c:`,
+  `com1`) FS povoluje.
+
+**Bezpečnost (výslovně):**
+
+- Odkaz **nic neopravňuje**: práva se kontrolují na cíli i na každé
+  složce cesty k němu; cíl, který relace nevidí, = `NOT_FOUND`.
+- Cíl mimo jmenný prostor relace (absolutní cesta, která v relaci není
+  připojená, nebo `..` nad připojenou cestou) = `NOT_FOUND`, **ne
+  průchod** - odkaz nikdy nevede mimo capability relace. Tentýž odkaz
+  může v jiné relaci vést jinam (aplikace s `/app` vidí jen svůj adresář).
+- Vytvoření odkazu chce právo vytváření ve složce; `rename` a `unlink`
+  působí na odkaz, cíl zůstane.
+- Odkaz v cíli připojené cesty (mimo jmenný prostor relace) se
+  nenásleduje (`NOT_FOUND`).
+- Mód odkazu je `0777` jen jako zobrazení (`lstat`); práva má cíl.
 
 ## Limity formátu
 
@@ -1639,9 +1678,22 @@ fs.set_acl("/home/alice/sdilene/soukrome", Some(Acl {
 | 51 | `SET_OWNER` | cesta, vlastník u64 (jen řídicí) | - |
 | 52 | `SET_NOEXEC` | kořen datasetu, zapnout u8 | - |
 | 53 | `NOEXEC` | kořen datasetu | zákaz u8 |
+| 94 | `ACL_VIEW` | cesta | jako `PERMISSIONS` + zděděné granty: počet u32, (komu u64, práva u8, původ str)…; původ = nejbližší složka výš, jejíž popis grant dědí (cesta v relaci, prázdná = mimo připojené cesty), pořadí od kořene; s `PROTECTED` prázdné |
 
 `Stat` má navíc vlastníka u64 a účinná práva volajícího u8. `OPEN` zná
 přístup `EXECUTE` (8).
+
+**V shellu:** příkaz [`acl`](prikazy-shellu.md#acl) je nad `ACL_VIEW`
+a `SET_ACL` relace uživatele terminálu: výpis (vlastník, vaše úroveň,
+dědění, vlastní i zděděné granty), přidání a odebrání grantu. Úrovně jsou
+masky `rights`, vzestupně a stejně jako karta Oprávnění v Souborech:
+Zobrazit = `VIEW`, Spouštět = `RUN`, Upravovat = `EDIT | EXECUTE`,
+Spravovat = vše; jiná maska se ukáže jako Vlastní s výčtem práv. Popis se
+zapisuje celý (přečíst, změnit, zapsat), právo Spravovat vynucuje fsd.
+Jména uživatelů (přihlašovací) dodá init z kanálu služby účtů `names`
+(`NAMES`, stejný zdroj jako karta Oprávnění) na dotaz powerproto
+`Accounts` kanálem napájení relace; známé skupiny `everyone` a `users`
+zná shell sám, ostatní skupiny zatím jen číslem. **[ověřeno v QEMU]**
 
 ### Obnova po pádu fsd
 
@@ -1709,6 +1761,10 @@ zůstávají. Z receptu systému se nezužuje. Jinak `ACCESS_DENIED`.
 | 122 | `SOCKET_CONNECT` | cesta, číslo procesu u32 + handle konce spojení | - (`CONNECTION_REFUSED`, plná fronta `SHOULD_WAIT`) |
 | 123 | `WHOAMI` | - | uživatel u64 (0 = systém), počet u32, skupiny u64 |
 | 124 | `SET_MODE` | cesta, mód u16 (9 bitů), rozšířit u8 | - (`MANAGE`; [Mód POSIX](#mód-posix)) |
+| 125 | `SYMLINK` | cesta, cíl str (1-4096 B, bez NUL) | - (právo vytváření ve složce; [Symbolické odkazy](#symbolické-odkazy)) |
+| 126 | `READLINK` | cesta | cíl str (`WRONG_TYPE`, když není odkaz) |
+| 127 | `LSTAT` | cesta | `Stat` odkazu samotného |
+| 128 | `REALPATH` | cesta | kanonická cesta relace (odkazy, `.`, `..` vyřešené) |
 
 **`OPEN_STREAM`** **[ověřeno v QEMU]** (sada `cstd`, krok `posix2`:
 výstup potomka `posix_spawn` do souboru a 200 000 bajtů souboru na jeho

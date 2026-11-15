@@ -127,8 +127,18 @@ pub trait Env {
     fn log_level(&mut self, _target: &str, _level: &str) -> Result<String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
-    /// Povoleni aplikaci (prikaz `povoleni`); vychozi = relace je nema.
+    /// Volba vzhledu (prikaz `theme`, `shlang::host::Host::appearance`);
+    /// vychozi = relace ji nema.
+    fn appearance(&mut self, _system: bool, _change: &str) -> Result<String, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
+    /// Povoleni aplikaci (prikaz `permissions`); vychozi = relace je nema.
     fn permissions(&mut self, _app: &str, _perm: &str) -> Result<String, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
+    /// Ucty lidi pro jmena v prikazu `acl`; vychozi = relace je nema
+    /// (`acl` pak zna jen `everyone`, `users` a cisla).
+    fn accounts(&mut self) -> Result<alloc::vec::Vec<shlang::acl::Account>, abi::Error> {
         Err(abi::Error::NotSupported)
     }
     /// Sluzba "otevri cestu" (`start`, hola cesta k souboru): poslani
@@ -564,8 +574,16 @@ impl Host for SessionHost<'_> {
         self.env.log_level(target, level)
     }
 
+    fn appearance(&mut self, system: bool, change: &str) -> Result<String, abi::Error> {
+        self.env.appearance(system, change)
+    }
+
     fn permissions(&mut self, app: &str, perm: &str) -> Result<String, abi::Error> {
         self.env.permissions(app, perm)
+    }
+
+    fn accounts(&mut self) -> Result<Vec<shlang::acl::Account>, abi::Error> {
+        self.env.accounts()
     }
 
     fn open_path(&mut self, path: &str, app_only: bool) -> Result<Opened, abi::Error> {

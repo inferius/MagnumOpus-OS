@@ -68,7 +68,7 @@ what works:
 | Instant directory size (subtree summaries) | done | [Summaries](#instant-directory-sizes) |
 | Case-insensitive names (Unicode NFC) | done | [Names](#file-names) |
 | Names up to 1024 characters, text direction controls forbidden | done | [Names](#file-names) |
-| Symbolic links | done (library; listing only in the protocol) | [Symbolic links](#symbolic-links) |
+| Symbolic links | done (library, fsd follows them in the session namespace) | [Symbolic links](#symbolic-links) |
 | Files up to 2^63-1 B, checked arithmetic | done | [Limits](#format-limits) |
 | Volume UUID and feature flags (compat/ro/incompat) | done | [Superblock](#superblock) |
 | Read-only snapshots and their deletion (deadlists) | done | [Snapshots](#snapshots) |
@@ -472,13 +472,58 @@ fs.remove("/project/READ")?;
 
 - The library does **not follow** links while walking a path: a link in the
   middle of a path gives `NOT_A_DIRECTORY`, `read`/`write` of a link
-  `WRONG_TYPE`. Following (with a depth limit against loops) will be done by
-  the layer above (VFS/fsd).
+  `WRONG_TYPE`. `find_link` finds it (the first link on a path, rights as
+  `walk`); fsd follows.
 - In directory summaries a link counts as a file of size 0.
 - `symlink` is written to the intent log (record 7), so it survives `fsync`
-  even without a commit.
-- Protocol fsproto v1 only shows a link (`kind::SYMLINK` in `STAT` and
-  `LIST`); creating one through the service comes with protocol v2.
+  even without a commit. Following does not change the format (links are in
+  v3 from the start).
+- `readlink` only needs the link to be visible (POSIX: search of the
+  directory).
+
+### Following in fsd
+
+**[verified in QEMU]** x86_64 (test "symbolicke odkazy: nasledovani,
+smycka, prava, jmenny prostor relace" in the suite `souborovy system`, step
+`link` of the `ctest` test in the suite `cstd`; host tests
+`objects::find_link_on_path`). fsd follows links while looking up a path
+(`user/fsd/src/links.rs`):
+
+- **Where:** always in intermediate components, in the last one depending on
+  the operation - `STAT`, `OPEN`, `LIST*`, `READ`, `WRITE`, `TRUNCATE`,
+  `SET_MODE`, rights, `SOCKET_CONNECT`, `REALPATH` yes; `CREATE`, `REMOVE`,
+  `RENAME`, `SYMLINK`, `READLINK`, `LSTAT`, `SOCKET_BIND` no (they act on
+  the link, not the target). `OPEN` with the `NOFOLLOW` flag on a link =
+  `TOO_MANY_LINKS` (C `ELOOP`). History and dataset operations do not follow
+  links.
+- **How:** a relative target from the link's directory, an absolute one from
+  the **session root**; `..` after following as in POSIX (from the already
+  resolved physical path; above the session root the root stays). More than
+  40 links = `TOO_MANY_LINKS` (a loop).
+- The path is resolved in the **session namespace** (mounted paths, not FS
+  paths): every step is mapped again through the session's mounted paths.
+- The client (`osrt::env::resolve`) leaves `..` to fsd (it used to resolve
+  it lexically); the directory before `..` must exist. `chdir` stores the
+  canonical path (`REALPATH`), `getcwd` is the physical path as in POSIX.
+- `stat` through a link returns the target's `st_dev`/`st_ino`; names with
+  `:` (`c:`, `com1`) are allowed by the FS.
+
+**Security (explicitly):**
+
+- A link **grants nothing**: rights are checked on the target and on every
+  directory of the path to it; a target the session cannot see =
+  `NOT_FOUND`.
+- A target outside the session namespace (an absolute path not mounted in
+  the session, or `..` above a mounted path) = `NOT_FOUND`, **not a way
+  through** - a link never leads outside the session's capability. The same
+  link may lead elsewhere in another session (an application with `/app`
+  sees only its own directory).
+- Creating a link needs the create right in the directory; `rename` and
+  `unlink` act on the link, the target stays.
+- A link inside a mounted path's target (outside the session namespace) is
+  not followed (`NOT_FOUND`).
+- The link mode is `0777` only as a display (`lstat`); the target has the
+  rights.
 
 ## Format limits
 
@@ -1690,9 +1735,23 @@ fs.set_acl("/home/alice/shared/private", Some(Acl {
 | 51 | `SET_OWNER` | path, owner u64 (control only) | - |
 | 52 | `SET_NOEXEC` | dataset root, enable u8 | - |
 | 53 | `NOEXEC` | dataset root | flag u8 |
+| 94 | `ACL_VIEW` | path | like `PERMISSIONS` + inherited grants: count u32, (who u64, rights u8, origin str)...; origin = the nearest folder above whose descriptor the grant inherits (a session path, empty = outside the session's mounts), ordered from the root; empty with `PROTECTED` |
 
 `Stat` additionally has the owner u64 and the caller's effective rights u8.
 `OPEN` knows the `EXECUTE` access (8).
+
+**In the shell:** the [`acl`](shell-commands.md#acl) command works over
+`ACL_VIEW` and `SET_ACL` of the terminal user's session: a listing
+(owner, your level, inheritance, own and inherited grants), adding and
+removing a grant. The levels are `rights` masks, ascending and the same as the Permissions tab in Files:
+View = `VIEW`, Run = `RUN`, Edit = `EDIT | EXECUTE`, Manage = everything;
+any other mask shows as Custom with the list of rights. The descriptor is written whole (read, change,
+write), fsd enforces the Manage right. Init supplies the (login) user names from
+the account service channel `names` (`NAMES`, the same source as the
+Permissions tab) on the powerproto `Accounts` request over the session's
+power channel; the shell knows the groups `everyone` and `users` itself,
+other groups only by number so far.
+**[verified in QEMU]**
 
 ### Recovery after an fsd crash
 
@@ -1762,6 +1821,10 @@ groups stay. A system recipe cannot be narrowed. Otherwise `ACCESS_DENIED`.
 | 122 | `SOCKET_CONNECT` | path, process number u32 + handle of the connection end | - (`CONNECTION_REFUSED`, full queue `SHOULD_WAIT`) |
 | 123 | `WHOAMI` | - | user u64 (0 = system), count u32, groups u64 |
 | 124 | `SET_MODE` | path, mode u16 (9 bits), widen u8 | - (`MANAGE`; [POSIX mode](#posix-mode)) |
+| 125 | `SYMLINK` | path, target str (1-4096 B, no NUL) | - (create right in the directory; [Symbolic links](#symbolic-links)) |
+| 126 | `READLINK` | path | target str (`WRONG_TYPE` when not a link) |
+| 127 | `LSTAT` | path | `Stat` of the link itself |
+| 128 | `REALPATH` | path | the canonical session path (links, `.`, `..` resolved) |
 
 **`OPEN_STREAM`** **[verified in QEMU]** (suite `cstd`, step `posix2`: the
 output of a `posix_spawn` child into a file and 200 000 bytes of a file on

@@ -48,7 +48,8 @@ impl Comp {
             Tip::Bar(SysKey::Launcher) => Some(bar.launcher),
             Tip::Bar(SysKey::BarIcon(0)) => bar.net,
             Tip::Bar(SysKey::BarIcon(1)) => bar.volume,
-            Tip::Bar(SysKey::BarIcon(_)) => Some(bar.bell),
+            Tip::Bar(SysKey::BarIcon(2)) => Some(bar.bell),
+            Tip::Bar(SysKey::BarIcon(_)) => Some(bar.look),
             Tip::Bar(SysKey::Tasks) => bar.tasks,
             Tip::Bar(_) => None,
         }
@@ -73,7 +74,8 @@ impl Comp {
                 Some((v, false)) => format!("Zvuk: hlasitost {v} %"),
                 None => String::from("Zvuk"),
             },
-            Tip::Bar(SysKey::BarIcon(_)) => String::from(if self.do_not_disturb() { "Oznámení: nerušit" } else { "Oznámení" }),
+            Tip::Bar(SysKey::BarIcon(2)) => String::from(if self.do_not_disturb() { "Oznámení: nerušit" } else { "Oznámení" }),
+            Tip::Bar(SysKey::BarIcon(_)) => self.look_tip(),
             Tip::Bar(SysKey::Tasks) => self.tasks_tip(),
             Tip::Bar(_) => String::new(),
         }

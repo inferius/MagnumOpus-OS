@@ -115,8 +115,8 @@ may wait on one endpoint, otherwise `ALREADY_EXISTS`.
 | 2 `CONTROL` | all | control transfer on EP0: data = 8-byte setup + OUT data; reply = IN data. `SET_ADDRESS` and `SET_CONFIGURATION` = `ACCESS_DENIED` (the controller handles them) |
 | 3 `INTERRUPT_IN` | all | `a` = endpoint (e.g. 0x81), `b` = byte limit; the reply comes when data arrives. Only endpoints of the caller's own interface, otherwise `ACCESS_DENIED` |
 | 4 `INTERRUPT_OUT` | all | `a` = endpoint, data = payload |
-| 5 `BULK_IN` | all | `a` = bulk endpoint, `b` = at most bytes (16 KiB); reply = data read (shorter on a short packet) |
-| 6 `BULK_OUT` | all | `a` = bulk endpoint, data = payload (at most 16 KiB) |
+| 5 `BULK_IN` | all | `a` = bulk endpoint, `b` = at most bytes (32 KiB); reply = data read (shorter on a short packet) |
+| 6 `BULK_OUT` | all | `a` = bulk endpoint, data = payload (at most 32 KiB) |
 | 16 `ATTACH` | hub | a device was attached to port `a` (the port is enabled after reset); reply `actual` = slot |
 | 17 `DETACH` | hub | the device on port `a` is gone: the controller closes its interface channels and releases the slot |
 | 18 `SCAN_DONE` | hub | the first pass over the ports is complete |
@@ -142,15 +142,15 @@ driver. It reports its disks just like a disk controller driver (`block`
 at boot is in the disk list before init looks for the file system (live
 USB, [Live USB](live-usb.md)).
 
-**Bulk transfers in `xhci`.** A bulk endpoint has a 32 KiB buffer and one
-transfer uses a 16 KiB window that does not cross a 64 KiB boundary (one
+**Bulk transfers in `xhci`.** A bulk endpoint has a 64 KiB buffer and one
+transfer uses a 32 KiB window that does not cross a 64 KiB boundary (one
 TRB must not cross it, xHCI 4.11.7.1). Endpoint type 2 (OUT) and 6 (IN),
 interval 0, average TRB length 3 KiB.
 
 **One BOT command** (`libs/usbproto/src/storage.rs`, `user/usb-storage/src/bot.rs`):
 
 1. CBW (31 B, signature `USBC`, tag, data length, direction, LUN, SCSI command) on bulk OUT,
-2. data in pieces of at most 16 KiB on bulk IN or OUT; a short packet or a
+2. data in pieces of at most 32 KiB on bulk IN or OUT; a short packet or a
    STALL ends the phase (STALL: `CLEAR_FEATURE(ENDPOINT_HALT)`),
 3. CSW (13 B, `USBS`, the same tag, residue, status) on bulk IN; one more
    attempt after a STALL.
@@ -158,6 +158,13 @@ interval 0, average TRB length 3 KiB.
 An invalid CSW, a phase error or a transfer error = **Reset Recovery**
 (interface reset, clearing both endpoints) and the command is retried (at
 most 3 times).
+
+**Merged reads** **[verified in QEMU]**: a BOT command costs three transfers
+(CBW, data, CSW), so `usb-storage` reports a larger `Disks::max_read` and the
+server merges a client's consecutive reads into one READ command (see
+[Disks](disks.md)): at most 1 MiB on USB 3, 240 sectors (120 KiB) at older
+speeds (some USB 2 flash drives cannot handle a larger command; Linux uses
+the same limit). Writes stay at 32 KiB.
 
 **Start-up:** Get Max LUN (STALL = one LUN), INQUIRY for each LUN (only
 direct-access disks, type 0), TEST UNIT READY retried for up to 15 s (a
@@ -348,7 +355,7 @@ Other limits of the first version:
 - no multi-touch (the Finger collection) or gestures yet, only one pen or
   one point,
 - no isochronous endpoints yet (audio, cameras), one interrupter,
-- bulk: one transfer at most 16 KiB, on USB 3 without bursts (MaxBurst 0) -
+- bulk: one transfer at most 32 KiB, on USB 3 without bursts (MaxBurst 0) -
   a USB 3 disk is therefore slower than it could be,
 - cancelling a hanging transfer (the Stop Endpoint command) is not there
   yet: a USB disk that does not answer a transfer within 20 s stays

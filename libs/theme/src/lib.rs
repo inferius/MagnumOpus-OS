@@ -27,6 +27,7 @@ extern crate alloc;
 
 mod color;
 mod motion;
+mod pref;
 
 #[cfg(test)]
 mod tests;
@@ -39,6 +40,7 @@ use conf::Table;
 
 pub use color::{contrast_ratio, parse_color, to_premul, unpremul};
 pub use motion::{Curve, Motion};
+pub use pref::{Pref, Scheme};
 
 /// Tokeny vlozene pri prekladu (`design/tokens.toml`).
 pub static DEFAULT: &str = include_str!("../../../design/tokens.toml");

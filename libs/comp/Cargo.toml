@@ -13,6 +13,8 @@ gfx = { path = "../gfx" }
 theme = { path = "../theme" }
 # Systemove pohledy (paleta, spoustec) nad knihovnou komponent (bez os).
 ui = { path = "../ui" }
+# Vychod a zapad slunce (sin, cos, acos bez std; `src/sun.rs`).
+libm = "0.2.16"
 
 [dev-dependencies]
 # Testy kresli skutecnym Interem (snimky pro porovnani s prototypem).

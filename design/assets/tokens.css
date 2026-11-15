@@ -96,10 +96,17 @@
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --ease-enter: cubic-bezier(0.05, 0.7, 0.1, 1);
   --ease-exit: cubic-bezier(0.3, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.42, 0, 0.58, 1);
   --m-reduced: 90ms;
   --m-unresponsive-ms: 3000ms;
   --m-badge-flash-ms: 3000ms;
   --m-dialog-guard-ms: 300ms;
+  --m-caret-blink: 530ms;
+  --m-caret-blink-stop: 10000ms;
+  --m-search-delay: 150ms;
+  --m-autoscroll: 50ms;
+  --m-theme: 600ms;
+  --m-theme-auto: 3000ms;
   --z-desktop: 0;
   --z-window: 100;
   --z-bar: 200;

@@ -30,8 +30,10 @@ impl Disk {
         self.client.read(lba, buf)
     }
 
+    /// Zapis bez cekani na odpoved ovladace (`write_queued`): chyba se
+    /// ohlasi u dalsiho cteni nebo `flush` (FAT i FS po zapisu flushuji).
     pub fn write(&self, lba: u64, data: &[u8]) -> Result<()> {
-        self.client.write(lba, data)
+        self.client.write_queued(lba, data)
     }
 
     /// Aktualni GPT (`None` = bez tabulky nebo poskozena).

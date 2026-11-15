@@ -27,6 +27,7 @@ fn roundtrip(r: Request) {
 #[test]
 fn pozadavky_tam_a_zpet() {
     roundtrip(Request::List);
+    roundtrip(Request::Names);
     roundtrip(Request::Phrase { uid: 1000 });
     roundtrip(Request::Auth { uid: 1000, method: Method::Password, secret: Secret::from("heslo") });
     roundtrip(Request::Unlock { session: 7, method: Method::Pin, secret: Secret::from("1234") });
@@ -452,4 +453,15 @@ fn ctap2_nesmyslna_odpoved_klice() {
     let mut b = vec![0];
     b.extend_from_slice(&info.encode());
     assert_eq!(Client::new(Bad(b)).err(), Some(CtapError::Unsupported));
+}
+
+#[test]
+fn jmena_tam_a_zpet() {
+    let l = vec![
+        AccountName { uid: 1000, name: String::from("alice"), display: String::from("Alice Nováková") },
+        AccountName { uid: 1001, name: String::from("bob"), display: String::new() },
+    ];
+    assert_eq!(decode_names(&encode_names(&l)).unwrap(), l);
+    assert!(decode_names(&encode_names(&l)[..5]).is_err());
+    assert!(!Request::Names.is_login() && !Request::Names.is_self());
 }

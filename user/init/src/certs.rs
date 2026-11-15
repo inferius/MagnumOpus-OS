@@ -31,7 +31,7 @@ pub const DIR: &str = "/system/config/certs";
 pub const NOBODY: u64 = 65_534;
 
 /// Cely soubor a jeho revize (`None` = soubor neexistuje).
-fn load(fs: &FsClient, path: &str) -> Result<Option<(Vec<u8>, Revision)>> {
+pub(crate) fn load(fs: &FsClient, path: &str) -> Result<Option<(Vec<u8>, Revision)>> {
     let f = match fs.open(path, access::READ, share::ALL, 0) {
         Ok(f) => f,
         Err(Error::NotFound) => return Ok(None),
@@ -55,7 +55,7 @@ fn load(fs: &FsClient, path: &str) -> Result<Option<(Vec<u8>, Revision)>> {
 
 /// Ulozi `data`, kdyz se lisi od souboru (atomicky: docasny soubor
 /// a prejmenovani). Vraci, jestli se zapisovalo.
-fn store(fs: &FsClient, path: &str, data: &[u8]) -> Result<bool> {
+pub(crate) fn store(fs: &FsClient, path: &str, data: &[u8]) -> Result<bool> {
     let expected = match load(fs, path)? {
         Some((old, _)) if old == data => return Ok(false),
         Some((_, rev)) => Some(rev),

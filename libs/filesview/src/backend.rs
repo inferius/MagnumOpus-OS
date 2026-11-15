@@ -12,6 +12,7 @@ use fileops::proto::ClientMsg;
 use fileops::{Kind, Vfs};
 use fsproto::datasets::{DatasetEntry, Origin};
 use fsproto::hist::{FileVersion, TrashEntry};
+use fsproto::perm::{Acl, AclView, Permissions};
 use fsproto::{Stat, StatEntry, avail, kind};
 use tz::Zone;
 
@@ -45,6 +46,14 @@ pub trait Backend {
     fn open(&mut self, path: &str) -> bool;
     fn now(&self) -> Option<WallTime>;
     fn zone(&self) -> Option<&Zone>;
+    /// Opravneni pro kartu Opravneni (`FsClient::acl_view`).
+    fn acl_view(&mut self, path: &str) -> Result<AclView>;
+    /// Vlastni popis opravneni (`None` = jen dedit); vyzaduje Spravovat.
+    fn set_acl(&mut self, path: &str, acl: Option<&Acl>) -> Result<()>;
+    /// Zobrazovana jmena uctu (cislo, jmeno); prazdne = sluzba uctu neni.
+    fn names(&mut self) -> Vec<(u64, String)>;
+    /// Cislo uctu uzivatele okna (vlastnik domova); `None` = nezname.
+    fn uid(&mut self) -> Option<u64>;
 }
 
 /// Backend pro testy na hostiteli: FS v pameti (`fileops::mem`), masky
@@ -66,6 +75,13 @@ pub struct TestBackend {
     /// Kos: (dataset, polozka, obsah).
     pub trash: Vec<(String, TrashEntry, Vec<(String, Node)>)>,
     next_trash: u64,
+    /// Opravneni podle cesty; chybejici = vlastnik `uid`, vsechna prava,
+    /// nic zdedeneho.
+    pub perms: BTreeMap<String, AclView>,
+    /// Zapsane popisy (`set_acl`).
+    pub acl_sets: Vec<(String, Option<Acl>)>,
+    pub names: Vec<(u64, String)>,
+    pub uid: Option<u64>,
 }
 
 pub const T0: WallTime = WallTime { secs: 1_794_571_200, nanos: 0 };
@@ -80,7 +96,14 @@ impl TestBackend {
             .file("/home/jana/obrazek.bmp", &sample_bmp(2, 2))
             .dataset("/home/jana/Projekty")
             .file("/home/jana/Projekty/plan.md", b"# plan");
-        let mut b = Self { fs, home: String::from("/home/jana"), now: Some(T0), ..Self::default() };
+        let mut b = Self {
+            fs,
+            home: String::from("/home/jana"),
+            now: Some(T0),
+            names: alloc::vec![(1000, String::from("Jana Nováková")), (1001, String::from("Petr Svoboda"))],
+            uid: Some(1000),
+            ..Self::default()
+        };
         b.versions.insert(
             String::from("/home/jana/zprava.txt"),
             alloc::vec![FileVersion { snapshot: String::from("auto-1"), snapshot_id: 1, time: WallTime { secs: T0.secs - 3600, nanos: 0 }, size: 5, mtime: WallTime { secs: T0.secs - 4000, nanos: 0 }, version: 1 }],
@@ -259,5 +282,35 @@ impl Backend for TestBackend {
 
     fn zone(&self) -> Option<&Zone> {
         None
+    }
+
+    fn acl_view(&mut self, path: &str) -> Result<AclView> {
+        self.fs.stat(path)?;
+        Ok(self.perms.get(path).cloned().unwrap_or(AclView {
+            perms: Permissions { owner: self.uid.unwrap_or(0), rights: fsproto::perm::rights::ALL, acl: None },
+            inherited: Vec::new(),
+        }))
+    }
+
+    fn set_acl(&mut self, path: &str, acl: Option<&Acl>) -> Result<()> {
+        let mut v = self.acl_view(path)?;
+        if v.perms.rights & fsproto::perm::rights::MANAGE == 0 {
+            return Err(abi::Error::AccessDenied);
+        }
+        v.perms.acl = acl.cloned();
+        if acl.is_some_and(|a| a.flags & fsproto::perm::ACL_PROTECTED != 0) {
+            v.inherited.clear();
+        }
+        self.perms.insert(String::from(path), v);
+        self.acl_sets.push((String::from(path), acl.cloned()));
+        Ok(())
+    }
+
+    fn names(&mut self) -> Vec<(u64, String)> {
+        self.names.clone()
+    }
+
+    fn uid(&mut self) -> Option<u64> {
+        self.uid
     }
 }

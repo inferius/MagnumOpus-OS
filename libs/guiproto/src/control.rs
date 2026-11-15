@@ -41,6 +41,13 @@ pub const LOGIN_ARG: &str = "login";
 /// `theme light|dark|contrast`: rezim barev vzhledu (tokeny
 /// `design/tokens.toml`).
 pub const THEME: &str = "theme";
+/// Volba vzhledu (`theme::Pref::to_words`, napr. `auto ne ne`):
+/// `appearance system <slova>` (prihlasovaci obrazovka) a
+/// `appearance user <uid> <slova>` (relace uzivatele). Kompozitor z ni
+/// pocita rezim (i podle denni doby) a prechod prolne. Opacne posila
+/// kompozitor zmenu z listy na kanal [`LAUNCHER`] jako
+/// `appearance user <uid> <slova>` (init ji ulozi).
+pub const APPEARANCE: &str = "appearance";
 /// `sources [net] [audio]`: kanaly pro stav v liste (handly ve stejnem
 /// poradi): relace site jen s pravem `INFO`, kanal zvukove sluzby.
 pub const SOURCES: &str = "sources";
@@ -51,7 +58,8 @@ pub const SNAPSHOTS: &str = "snapshots";
 /// a spoustec (poradi = poradi v liste).
 pub const APPS: &str = "apps";
 /// `launcher`: kanal k initu (handle) pro zadosti `launch <id>` (klik na
-/// nespustenou aplikaci v liste nebo ve spousteci).
+/// nespustenou aplikaci v liste nebo ve spousteci), `system shutdown|reboot`
+/// (paleta) a `appearance user <uid> <slova>` (volba vzhledu z listy).
 pub const LAUNCHER: &str = "launcher";
 /// `dnd-fullscreen on|off`: Nerusit automaticky pri cele obrazovce
 /// (vychozi zapnuto).

@@ -55,6 +55,7 @@ v tomto dokumentu i v anglické verzi popsaná každá chyba.
 | -37 | `FENCE_FAILED` | plot skončil chybou |
 | -38 | `FENCE_ABANDONED` | plot byl opuštěn (producent zavřel poslední handle s právem `SIGNAL`) |
 | -39 | `INTERRUPTED` | čekání přerušilo přerušení vlákna (`THREAD_INTERRUPT`) |
+| -40 | `TOO_MANY_LINKS` | příliš mnoho symbolických odkazů při hledání cesty (smyčka) |
 
 ## Podrobně
 
@@ -498,6 +499,16 @@ obsluze ve vlákně při návratu ze syscallu.
 **Co dělat:** čekání zopakovat (se stejným termínem); `cstd` vrací
 `EINTR`, `std` chybu `ErrorKind::Interrupted` (běžné smyčky čtení ji
 opakují samy).
+### `TOO_MANY_LINKS` (-40)
+
+**Význam:** při hledání cesty bylo potřeba následovat víc než 40
+symbolických odkazů (typicky smyčka odkazů); C `ELOOP`.
+
+**Kdy vzniká:** operace fsd s cestou ([Symbolické odkazy](souborovy-system.md#symbolické-odkazy)),
+`OPEN` s `NOFOLLOW` na odkaz.
+
+**Co dělat:** opravit odkazy (smyčku); `lstat`/`readlink` na odkaz
+samotný funguje.
 
 ## Návratové kódy procesů
 

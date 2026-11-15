@@ -9,6 +9,7 @@ Služba souborového systému nad knihovnou `libs/fs`. Startovní zpráva (kind 
 
 ## Invarianty
 
+- `ACL_VIEW` (op 94, mimo rozsah 46-53, `serve_v2::handle_v2`) vrací zděděné granty s původem; původ jde přes `unmap` (mimo připojené cesty prázdný).
 - Oprávnění a identita relace jsou vynucené tady: identitu a připojené cesty relace určuje `CONNECT_AS` (`libs/fsproto/src/perm.rs`); `docs/cs/souborovy-system.md#oprávnění-a-identita-relací`.
 - Hodnoty z disku i požadavky klientů jsou nedůvěryhodný vstup.
 - Pád `fsd` nesmí poškodit data (commit je atomický, `libs/fs`); klienti se po restartu připojí přes lístky (`docs/cs/obnova-sluzeb.md`).
@@ -16,6 +17,7 @@ Služba souborového systému nad knihovnou `libs/fs`. Startovní zpráva (kind 
 - `DATASETS` (`serve_hist.rs`, protokol `libs/fsproto/src/datasets.rs`): jen datasety, jejichž kořen relace vidí a které leží v jejích připojených cestách (cesty relace přes `unmap`); `Stat` kořene beze změny masek; původ klonu ve třech stavech - známý, skrytý (relace ho nevidí, i když existuje: nikdy neprozradit cestu), neexistuje. Průchod adresářů svazku je drahý, nevolat ho v jiných operacích.
 - Zámky POSIX (`op::POSIX_LOCK`, `Service.posix` = `fs::posix_lock::PosixLocks`): vlastník `fcntl` = `Session.id`, `flock` = handle s horním bitem (`flock_owner`); uvolnit při `CLOSE` posledního handlu relace na souboru a v `close_session`. Čekání vede klient, fsd jen pamatuje graf čekání (EDEADLK).
 - Hlavní smyčka čeká přes port (`libos::Waiter`), nikdy přes `wait_many` nad relacemi: relace a proudy mají `key` (přidělí smyčka, nikdy znovu) a `armed`; po paketu se obslouží jen objekty s `armed == false` a pak se znovu zaregistrují (nová relace z `CONNECT` má `armed` false = obslouží se a zaregistruje v dalším kole). Počet relací omezuje jen paměť, proudů `stream::MAX_STREAMS`. Nový kanál úloh = nový klíč. Proud má vlastní handle (`reopen`) s právy jen podle handlu klienta (`check_access_h`); čtecí proud s plnou frontou zkouší znovu po `stream::RETRY` (nečekat v něm, smyčka obsluhuje všechny).
+- Cesty z požadavků jdou přes `Session::resolve` (`links.rs`), ne přímo `map`: následování odkazů ve jmenném prostoru relace (každý krok znovu `map`, cíl mimo relaci = `NOT_FOUND`), `..` až po vyřešení, nejvýš `links::MAX_HOPS`. Poslední složka podle operace (vytvoření, smazání, přejmenování, `LSTAT`, `READLINK`, `SYMLINK` ne). Operace historie a datasetů stále přes `map` (bez odkazů, `..` = `INVALID_ARGS`).
 - Handly příchozího požadavku jsou v `Service.in_handles` jen po dobu `handle` (bere si je `handle_sock`, ostatní se zavřou). Číslo procesu vlastníka zámku (`lock_pids`, pro `l_pid`) je od klienta a neověřuje se; uklidí se v `close_session`.
 - Masky dostupnosti z `fs::Stat` jdou do `fsproto::Stat` beze změny (shodu bitů hlídá `const assert` v `serve.rs`); `StatEntry` dostane jen bity svých polí (`ENTRY_AVAIL`). Změna tvaru `Stat` = nová verze v `fsproto::v2::VERSION`.
 

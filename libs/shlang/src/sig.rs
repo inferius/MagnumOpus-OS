@@ -165,7 +165,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("Úlohy", &["tasks", "jobs", "fg", "wait", "kill", "cancel"]),
     ("Relace a bezpečnost", &["undo", "preview", "history", "run", "error", "exit"]),
     ("Nápověda", &["help", "explain"]),
-    ("Systém", &["audio", "povoleni", "loglevel", "report", "install", "shutdown", "reboot"]),
+    ("Systém", &["audio", "theme", "permissions", "acl", "loglevel", "report", "install", "shutdown", "reboot"]),
 ];
 
 pub const BUILTINS: &[Sig] = &[
@@ -275,8 +275,17 @@ pub const BUILTINS: &[Sig] = &[
     sig!("install", "system-install", NONE, None,
         &[Flag { long: "odpovedi", short: None, value: Some(Kind::Str), help: "soubor odpovědí (instalace bez dotazů)" }], IN, IN,
         "nainstaluje systém ze živého USB na disk (průvodce v krocích; s --odpovedi bez dotazů)"),
-    sig!("povoleni", "system-permissions", NONE, None, NOFLAGS, IN, IN,
-        "povolení aplikací: bez argumentu výpis, `povoleni odvolat <aplikace> [mikrofon]`"),
+    sig!("theme", "system-theme", &[opt("what", Kind::Str), opt("value", Kind::Str)], None,
+        &[flag("system", 's', "systémová volba (přihlašovací obrazovka; potvrdí správce)")], IN,
+        Io::Records(&["scheme", "contrast", "reduce_motion"]),
+        "vzhled: light, dark, auto (podle slunce); contrast on|off, reduce-motion on|off; bez argumentu stav"),
+    sig!("permissions", "system-permissions", &[opt("action", Kind::Str), opt("app", Kind::Str), opt("permission", Kind::Str)], None,
+        NOFLAGS, IN, Io::Records(&["app", "permission", "allowed"]),
+        "povolení aplikací (mikrofon): bez argumentu výpis, `permissions revoke <aplikace> [microphone]`"),
+    sig!("acl", "file-acl", &[p("path", Kind::Any)], Some(Kind::Any),
+        &[flag("inherit", 'i', "grant se dědí i do obsahu složky")], IN,
+        Io::Records(&["path", "owner", "your_level", "your_label", "inherits", "grants"]),
+        "oprávnění souboru: `acl <cesta>` výpis, `acl add <kdo> <view|run|edit|manage> <cesta>`, `acl remove <kdo> <cesta>`"),
     sig!("loglevel", "system-log-level", NONE, None, NOFLAGS, IN, IN,
         "úroveň logu: bez argumentu výpis, `loglevel <modul|proces> <error|warn|info|debug|trace|vychozi>`"),
     sig!("report", "system-report", NONE, None, NOFLAGS, IN, IN,

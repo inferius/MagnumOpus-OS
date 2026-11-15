@@ -420,6 +420,8 @@ max = 320
 ease_standard = "0.2 0 0 1"
 ease_enter = "0.05 0.7 0.1 1"
 ease_exit = "0.3 0 1 1"
+# Pomaly zacatek i konec (prechod rezimu barev).
+ease_in_out = "0.42 0 0.58 1"
 # Kdyz je zapnute "Omezit pohyb": posuny a meritka se nahradi prolnutim
 # s touto delkou, nic se neposouva.
 reduced = 90
@@ -438,6 +440,12 @@ caret_blink_stop = 10000
 search_delay = 150
 # Tah mysi s vyberem za okraj pole: krok automatickeho posunu.
 autoscroll = 50
+# Prechod rezimu (svetly <-> tmavy, kontrast): kompozitor smicha stary
+# a novy snimek po pixelech v linearnim svetle po krivce ease_in_out. `theme` = rucni prepnuti (lista,
+# prikaz), `theme_auto` = automaticky pri vychodu a zapadu slunce (pomalu,
+# nerusi). Omezit pohyb = okamzite.
+theme = 600
+theme_auto = 3000
 
 # Kryti (0-1). Pruhlednost jen tam, kde nesnizi kontrast textu pod limit;
 # ve vysokem kontrastu je lista vzdy plna (1).

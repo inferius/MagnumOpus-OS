@@ -47,7 +47,7 @@ impl Interp {
         resolve(&self.cwd, &self.home, p)
     }
 
-    fn check_read(&self, p: &str) -> R<()> {
+    pub(crate) fn check_read(&self, p: &str) -> R<()> {
         if let Some(n) = &self.needs
             && !n.read.iter().chain(&n.write).any(|r| within(p, r))
         {
@@ -59,7 +59,7 @@ impl Interp {
         Ok(())
     }
 
-    fn check_write(&self, p: &str) -> R<()> {
+    pub(crate) fn check_write(&self, p: &str) -> R<()> {
         if let Some(n) = &self.needs
             && !n.write.iter().any(|r| within(p, r))
         {

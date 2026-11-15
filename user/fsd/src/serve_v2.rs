@@ -174,7 +174,7 @@ impl Service {
 
     /// Operace v2; `None` = neni v2 (obslouzi v1).
     pub fn handle_v2(&mut self, sess: &mut Session, opcode: u32, r: &mut Reader) -> Option<Result<Reply>> {
-        if (fsproto::perm::op::CONNECT_AS..=fsproto::perm::op::NOEXEC).contains(&opcode) {
+        if (fsproto::perm::op::CONNECT_AS..=fsproto::perm::op::NOEXEC).contains(&opcode) || opcode == fsproto::perm::op::ACL_VIEW {
             return Some(self.perm_op(sess, opcode, r));
         }
         if !(op::HELLO..=op::REPLACE_ABORT).contains(&opcode) && !matches!(opcode, op::REOPEN | op::POSIX_LOCK | op::OPEN_STREAM) {
@@ -218,7 +218,12 @@ impl Service {
                 let (access, share, flags) = (r.u8()?, r.u8()?, r.u8()?);
                 let writes = access & (v2access::WRITE | v2access::DELETE) != 0
                     || flags & (open_flags::CREATE | open_flags::TRUNCATE) != 0;
-                let path = sess.map(&raw, writes)?;
+                // Posledni slozka se nasleduje, krome `NOFOLLOW` (odkaz = TOO_MANY_LINKS, C ELOOP).
+                let nofollow = flags & open_flags::NOFOLLOW != 0;
+                let path = sess.resolve(fs, &raw, writes, !nofollow)?;
+                if nofollow && fs.stat(&path).is_ok_and(|s| s.kind == fs::Kind::Symlink) {
+                    return Err(Error::TooManyLinks);
+                }
                 let mode = if flags & open_flags::MODE != 0 { Some(r.u16()?) } else { None };
                 if flags & open_flags::CREATE != 0 {
                     let kind = if flags & open_flags::DIR != 0 { fs::Kind::Dir } else { fs::Kind::File };
@@ -409,12 +414,12 @@ impl Service {
                 fs.set_delete_on_close(h, r.u8()? != 0)?;
             }
             op::RENAME_REPLACE => {
-                let from = sess.map(&r.str()?, true)?;
-                let to = sess.map(&r.str()?, true)?;
+                let from = sess.resolve(fs, &r.str()?, true, false)?;
+                let to = sess.resolve(fs, &r.str()?, true, false)?;
                 fs.rename_replace(&from, &to)?;
             }
             op::REPLACE_BEGIN => {
-                let target = sess.map(&r.str()?, true)?;
+                let target = sess.resolve(fs, &r.str()?, true, true)?;
                 let has = r.u8()? != 0;
                 let rev = get_rev(r)?;
                 let expected = has.then_some(rev);

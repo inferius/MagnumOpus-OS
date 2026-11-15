@@ -125,6 +125,8 @@ static PENDING: spin::Mutex<Option<(bool, Channel)>> = spin::Mutex::new(None);
 /// Zprava od relace shellu na kanalu napajeni. Vypnuti/restart se jen
 /// zaznamena (provede ho supervisor, [`run_pending`]) a kanal si init
 /// nechá; jinak odpovi hned a kanal vrati.
+/// `session` = relace uzivatele shellu (`None` = system: testy, zalozni
+/// konzole).
 pub fn request_from_shell(data: &[u8], chan: Channel, session: Option<u64>) -> Option<Channel> {
     let reply = match Request::decode(data) {
         Ok(Request::Shutdown) | Ok(Request::Reboot) => {
@@ -143,6 +145,16 @@ pub fn request_from_shell(data: &[u8], chan: Channel, session: Option<u64>) -> O
             };
             return Some(chan);
         }
+        // Volba vzhledu (`vzhled`): systemova zmena = odpoved s kanalem,
+        // na ktery prijde vysledek po potvrzeni v dialogu.
+        Ok(Request::Appearance { system, change }) => match crate::appearance::from_shell(session, system, &change) {
+            Ok(Some(ch)) => {
+                let _ = chan.write(&Reply::Ok.encode(), alloc::vec![ch.into_handle()]);
+                return Some(chan);
+            }
+            Ok(None) => Reply::Ok,
+            Err(r) => r,
+        },
         Ok(Request::Report) => match crate::logd::report() {
             Ok((path, preview)) => Reply::Text(alloc::format!("{path}
 {preview}")),
@@ -152,8 +164,13 @@ pub fn request_from_shell(data: &[u8], chan: Channel, session: Option<u64>) -> O
             Ok(text) => Reply::Text(text),
             Err(e) => Reply::Failed(e),
         },
-        // Povoleni aplikaci uzivatele relace (prikaz `povoleni`).
+        // Povoleni aplikaci uzivatele relace (prikaz `permissions`).
         Ok(Request::Permissions { app, perm }) => match crate::perms::shell(session, &app, &perm) {
+            Ok(text) => Reply::Text(text),
+            Err(e) => Reply::Failed(e),
+        },
+        // Jmena uctu pro prikaz `acl`.
+        Ok(Request::Accounts) => match crate::perms::accounts() {
             Ok(text) => Reply::Text(text),
             Err(e) => Reply::Failed(e),
         },

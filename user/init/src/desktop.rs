@@ -43,6 +43,8 @@ fn opened(startup: &Startup, sup: &mut Supervisor, session: u64) {
     let who = crate::session::name(session).unwrap_or_default();
     let uid = crate::session::uid(session).unwrap_or(0);
     println!("init: plocha relace {session} ({who})");
+    // Volba vzhledu driv nez relace: jeden prechod z prihlasovaci obrazovky.
+    crate::appearance::send_user(uid);
     // Kompozitor skryje prihlasovaci obrazovku.
     crate::gui::session_event(&format!("open {session} {uid} {who}"));
     let mut g = GUI.lock();

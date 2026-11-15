@@ -1,4 +1,4 @@
-//! Operace identity relaci a opravneni (protokol v2, op 46-53).
+//! Operace identity relaci a opravneni (protokol v2, op 46-53 a 94).
 //!
 //! Ridici relace (hlavni kanal ze startovni zpravy, ma ho init) je
 //! system: vidi cely FS, zaklada relace uzivatelu (`CONNECT_AS`) a meni
@@ -8,7 +8,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use fsproto::perm::{Acl, Mount, get_opt_acl, op, put_opt_acl};
+use fsproto::perm::{Acl, AclView, Mount, Permissions, get_opt_acl, op, put_opt_acl};
 use fsproto::{Reader, Writer};
 use libos::{Channel, Error, Result};
 
@@ -99,26 +99,37 @@ impl Service {
         let fs = self.fs.as_mut().ok_or(Error::IoError)?;
         match opcode {
             op::PERMISSIONS => {
-                let path = sess.map(&r.str()?, false)?;
+                let path = sess.resolve(fs, &r.str()?, false, true)?;
                 let p = fs.permissions(&path)?;
                 w.u64(p.owner).u8(p.rights);
                 put_opt_acl(&mut w, p.acl.map(from_fs_acl).as_ref());
             }
+            op::ACL_VIEW => {
+                let path = sess.resolve(fs, &r.str()?, false, true)?;
+                let v = fs.acl_view(&path)?;
+                let inherited = v
+                    .inherited
+                    .into_iter()
+                    .map(|g| fsproto::perm::InheritedGrant { who: g.who, rights: g.rights, from: sess.unmap(&g.from) })
+                    .collect();
+                let perms = Permissions { owner: v.perms.owner, rights: v.perms.rights, acl: v.perms.acl.map(from_fs_acl) };
+                AclView { perms, inherited }.put(&mut w);
+            }
             op::SET_ACL => {
-                let path = sess.map(&r.str()?, true)?;
+                let path = sess.resolve(fs, &r.str()?, true, true)?;
                 let acl = get_opt_acl(r)?.map(to_fs_acl);
                 fs.set_acl(&path, acl)?;
             }
             op::SET_OWNER => {
-                let path = sess.map(&r.str()?, true)?;
+                let path = sess.resolve(fs, &r.str()?, true, true)?;
                 fs.set_owner(&path, r.u64()?)?;
             }
             op::SET_NOEXEC => {
-                let path = sess.map(&r.str()?, true)?;
+                let path = sess.resolve(fs, &r.str()?, true, true)?;
                 fs.set_noexec(&path, r.u8()? != 0)?;
             }
             op::NOEXEC => {
-                let path = sess.map(&r.str()?, false)?;
+                let path = sess.resolve(fs, &r.str()?, false, true)?;
                 w.u8(fs.noexec(&path)? as u8);
             }
             _ => return Err(Error::NotSupported),

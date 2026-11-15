@@ -7,9 +7,10 @@
 //! Startovni zprava (kind USER): 1. kanal okna ke kompozitoru, 2. listek
 //! k supervisoru, 3. relace FS uzivatele (`CONNECT_AS` s celym stromem,
 //! prava rozhoduji), 4. kanal k `files-copy` (bez procesu zavreny: jde
-//! vse krome kopirovani a presunu mezi slozkami), 5. volitelne kanal
-//! sluzby "otevri cestu" (init, `libs/openwith`). Pracovni adresar
-//! v bloku parametru = domov uzivatele.
+//! vse krome kopirovani a presunu mezi slozkami), 5. kanal sluzby
+//! "otevri cestu" (init, `libs/openwith`), 6. kanal jmen uctu (`accountd`
+//! `names`, karta Opravneni). Chybejici sluzba = zavreny kanal. Pracovni
+//! adresar v bloku parametru = domov uzivatele.
 
 #![no_std]
 #![no_main]
@@ -41,6 +42,8 @@ struct OsBackend {
     opener: Option<Channel>,
     replies: Option<Channel>,
     zone: Option<Zone>,
+    /// Kanal jmen uctu (jen cteni zobrazovanych jmen).
+    names: Option<accountproto::client::Names>,
 }
 
 impl Backend for OsBackend {
@@ -142,6 +145,31 @@ impl Backend for OsBackend {
     fn zone(&self) -> Option<&Zone> {
         self.zone.as_ref()
     }
+
+    fn acl_view(&mut self, path: &str) -> Result<fsproto::perm::AclView> {
+        self.fs.acl_view(path)
+    }
+
+    fn set_acl(&mut self, path: &str, acl: Option<&fsproto::perm::Acl>) -> Result<()> {
+        self.fs.set_acl(path, acl)
+    }
+
+    fn names(&mut self) -> Vec<(u64, String)> {
+        match self.names.as_ref().map(|n| n.names()) {
+            Some(Ok(l)) => l.into_iter().map(|a| (a.uid, a.display)).collect(),
+            Some(Err(e)) => {
+                println!("gui-files: jmena uctu: {e:?}");
+                Vec::new()
+            }
+            None => Vec::new(),
+        }
+    }
+
+    fn uid(&mut self) -> Option<u64> {
+        // Domov patri uzivateli okna.
+        let home = self.home.clone();
+        self.fs.stat(&home).ok().map(|s| s.owner).filter(|&o| o != 0)
+    }
 }
 
 /// Aplikace s merenim: pomale zpracovani (nad 50 ms) jde do logu.
@@ -234,6 +262,7 @@ fn main(startup: Startup) -> i64 {
     let fs = FsClient::new(Channel::from_handle(fs));
     let copier = handles.next().map(Channel::from_handle);
     let opener = handles.next().map(Channel::from_handle);
+    let names = handles.next().map(|h| accountproto::client::Names(Channel::from_handle(h)));
     // Zapis pres druhy handle stejneho kanalu (cteni zustane run_with).
     let writer = match copier.as_ref().map(|c| c.handle().duplicate(None)) {
         Some(Ok(d)) => Some(Channel::from_handle(d)),
@@ -253,7 +282,7 @@ fn main(startup: Startup) -> i64 {
         (Some(_), Ok((rx, tx))) => (Some(rx), Some(tx)),
         _ => (None, None),
     };
-    let app = Timed(FileManager::new(OsBackend { fs, home, copier: writer, opener, replies, zone }));
+    let app = Timed(FileManager::new(OsBackend { fs, home, copier: writer, opener, replies, zone, names }));
     // Kanal 0 = files-copy, 1 = odpovedi sluzby (prazdny kanal, kdyz neni).
     let mut extras = Vec::new();
     for c in [copier, reply_rx] {

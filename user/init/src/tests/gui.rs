@@ -27,6 +27,8 @@ use crate::{check, check_eq};
 
 pub const TESTS: &[Test] = &[
     ("compd: displej, okno ukazky, strom pristupnosti", window_and_a11y),
+    ("compd: volba vzhledu: plynuly prechod barev, omezit pohyb", super::gui_look::fade),
+    ("init: volba vzhledu se ulozi jen pro system", super::gui_look::store),
     ("compd: umely vstup klika v aplikaci", injected_click),
     ("compd: akce aplikace: overeni argumentu a potvrzeni", app_actions),
     ("compd: systemovy dialog prijme jen fyzicky vstup (QMP)", dialog_physical_only),

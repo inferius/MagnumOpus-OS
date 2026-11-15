@@ -14,5 +14,6 @@ Motiv vzhledu: tokeny design systému jako data. **Jediný zdroj pravdy je `desi
 
 ## Pasti
 
+- Volba vzhledu `Pref` (`pref.rs`) je uložený formát (`/system/config/vzhled`): nové klíče jen s výchozí hodnotou, neznámý klíč je chyba čtení.
 - `tokens.css` a `tokens.js` jsou generované; needituj je ručně.
 - Uživatelské motivy (parse za běhu) mají stejné schéma jako vestavěný; přidání povinného tokenu je lámající změna pro ně.

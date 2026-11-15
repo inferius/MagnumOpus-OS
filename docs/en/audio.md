@@ -298,7 +298,7 @@ before.
 - the decision holds for the rest of the session; "Allow" and "Do not
   allow" are stored permanently per user and application
   ([Accounts](accounts.md#application-permissions)), revoked with the shell
-  command `povoleni odvolat <app>`;
+  command `permissions revoke <app>`;
 - without the account service (or without the compositor for the dialog)
   there is no capture for applications.
 

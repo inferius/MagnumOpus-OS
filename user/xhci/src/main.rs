@@ -365,7 +365,7 @@ impl Server {
                 if !control_allowed(&setup, iface, dcis) {
                     return Err(Error::AccessDenied);
                 }
-                if setup.length as usize > msg::MAX_DATA
+                if setup.length as u64 > device::EP0_BUF
                     || (!setup.is_in() && out.len() != setup.length as usize)
                 {
                     return Err(Error::InvalidArgs);

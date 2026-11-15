@@ -118,13 +118,49 @@ pub fn set_current_dir(path: &[u8]) -> Result<()> {
     if st.kind != fsproto::kind::DIR && st.kind != fsproto::kind::DATASET {
         return Err(Error::NotADirectory);
     }
-    *CWD.lock() = abs;
+    // Pracovni adresar je fyzicka cesta (odkazy a `..` vyresene ve fsd,
+    // jako POSIX `getcwd`); bez relace FS lexikalne.
+    let canon = crate::fs::realpath_abs(&abs).or_else(|_| normalize("/", &abs))?;
+    *CWD.lock() = canon;
     Ok(())
 }
 
-/// Absolutni normalizovana cesta pro sluzbu FS (relativni vuci pracovnimu
-/// adresari). Cesty v systemu jsou UTF-8.
+/// Absolutni cesta pro sluzbu FS (relativni vuci pracovnimu adresari).
+/// `.` a prazdne slozky zmizi, `..` zustava: resi ho fsd po nasledovani
+/// symbolickych odkazu (POSIX: `odkaz/..` je rodic cile, ne slozka odkazu).
+/// Cesty v systemu jsou UTF-8.
 pub fn resolve(path: &[u8]) -> Result<String> {
+    let path = core::str::from_utf8(path).map_err(|_| Error::InvalidArgs)?;
+    if path.is_empty() {
+        return Err(Error::NotFound);
+    }
+    if path.contains('\0') {
+        return Err(Error::InvalidArgs);
+    }
+    let cwd;
+    let full: [&str; 2] = if path.starts_with('/') {
+        [path, ""]
+    } else {
+        cwd = CWD.lock().clone();
+        [cwd.as_str(), path]
+    };
+    let mut out = String::new();
+    for piece in full.iter().flat_map(|p| p.split('/')) {
+        if piece.is_empty() || piece == "." {
+            continue;
+        }
+        out.push('/');
+        out.push_str(piece);
+    }
+    if out.is_empty() {
+        out.push('/');
+    }
+    Ok(out)
+}
+
+/// Absolutni cesta s `..` vyresenym lexikalne (bez ohledu na odkazy): pro
+/// cesty, ktere nejdou do fsd (napr. program pro launchd).
+pub fn resolve_lexical(path: &[u8]) -> Result<String> {
     let path = core::str::from_utf8(path).map_err(|_| Error::InvalidArgs)?;
     if path.is_empty() {
         return Err(Error::NotFound);
