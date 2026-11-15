@@ -86,6 +86,8 @@ pub(super) struct Open {
     view: Option<(crate::perm::Principal, crate::perm::Inherited)>,
     /// Ucinna prava otevirajiciho v okamziku `open` (pro `stat_h`).
     rights: u8,
+    /// Granty od rodice v okamziku `open` (mod POSIX v `stat_h`).
+    above: crate::perm::Inherited,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -131,7 +133,8 @@ impl<D: BlockDevice> Fs<D> {
         if access_bits & !(access::READ | access::WRITE | access::DELETE | access::EXECUTE) != 0 {
             return Err(Error::InvalidArgs);
         }
-        let (oid, view) = if self.checking() {
+        // Pruchod i bez kontrol: zdedene granty pro mod POSIX (`stat_h`).
+        let (oid, view, above) = if self.checking() {
             let w = self.walk(path)?;
             let mut need = 0;
             for (a, r) in [
@@ -147,9 +150,10 @@ impl<D: BlockDevice> Fs<D> {
             if w.rights & need != need {
                 return Err(Error::AccessDenied);
             }
-            (w.oid, Some((self.principal.clone().unwrap_or_default(), w.below, w.rights)))
+            (w.oid, Some((self.principal.clone().unwrap_or_default(), w.below, w.rights)), w.above)
         } else {
-            (self.enter(path)?, None)
+            let w = self.walk(path)?;
+            (w.oid, None, w.above)
         };
         let rights = view.as_ref().map_or(crate::perm::rights::ALL, |v| v.2);
         let view = view.map(|(p, b, _)| (p, b));
@@ -186,6 +190,7 @@ impl<D: BlockDevice> Fs<D> {
                 share: share_bits,
                 view,
                 rights,
+                above,
             },
         );
         Ok(h)
@@ -265,6 +270,8 @@ impl<D: BlockDevice> Fs<D> {
                 share: share_bits,
                 view,
                 rights: crate::perm::rights::READ | crate::perm::rights::WRITE | crate::perm::rights::DELETE,
+                // Sirotek nema rodice: jen vlastni popis.
+                above: crate::perm::Inherited::default(),
             },
         );
         Ok((h, None))
@@ -359,6 +366,7 @@ impl<D: BlockDevice> Fs<D> {
         let (o, _) = self.handle_object(h, 0)?;
         let root = self.s.root;
         let mut st = self.stat_oid(&root, o.oid)?;
+        self.with_mode(&root, &mut st, &o.above)?;
         if o.view.is_some() {
             st.rights = o.rights;
             self.limit_stat(&mut st);

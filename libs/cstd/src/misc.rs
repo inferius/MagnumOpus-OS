@@ -336,26 +336,28 @@ pub extern "C" fn getpwnam(_name: *const c_char) -> *mut passwd {
     getpwuid(0)
 }
 
-/// Cisla uzivatelu a skupin POSIX: identita je v relaci FS, ne cislo;
-/// vsechny 0 (vlastnik vlastnich souboru), `chown` nema ucinek.
+/// Cisla uzivatelu a skupin POSIX = identita relace FS (fsproto
+/// `WHOAMI`): uzivatel (0 = system) a skupiny, hlavni skupina je prvni
+/// (bez skupin = cislo uzivatele). Shoduje se se `st_uid` souboru, ktere
+/// uzivatel vytvoril. `chown` nema ucinek, `setuid` a spol. nejsou.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn getuid() -> u32 {
-    0
+    crate::sys::user_id()
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn geteuid() -> u32 {
-    0
+    getuid()
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn getgid() -> u32 {
-    0
+    crate::sys::group_ids().first().copied().unwrap_or_else(getuid)
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
 pub extern "C" fn getegid() -> u32 {
-    0
+    getgid()
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]

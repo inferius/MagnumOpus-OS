@@ -5,7 +5,8 @@
  *
  *  A: zapis [0,100) -> znacka a-ready -> ceka na b-ready -> F_SETLKW zapis
  *     [200,300) (drzi ho B pro cteni) -> po ziskani a-got, konec (uvolni vse).
- *  B: ceka na a-ready -> F_SETLK zapis [0,100) = EAGAIN, F_GETLK ukaze A,
+ *  B: ceka na a-ready -> F_SETLK zapis [0,100) = EAGAIN, F_GETLK ukaze A
+ *     (i jeho l_pid = getpid A ze znacky a-pid),
  *     cteni [200,300) -> b-ready -> chvili pocka (A ceka na B) -> F_SETLKW
  *     zapis [0,100) = EDEADLK (cyklus) -> odemkne [200,300) -> po konci A
  *     F_SETLKW [0,100) uspeje; flock LOCK_EX|LOCK_NB na dvou fd.
@@ -49,6 +50,13 @@ static int lock(int fd, int cmd, short type, off_t start, off_t len) {
 
 static int side_a(int fd) {
     if (lock(fd, F_SETLK, F_WRLCK, 0, 100) != 0) return 1;
+    /* Cislo procesu pro kontrolu l_pid v B. */
+    char p[256];
+    path(p, sizeof p, "a-pid");
+    FILE *f = fopen(p, "w");
+    if (f == NULL) return 4;
+    fprintf(f, "%d", (int)getpid());
+    fclose(f);
     mark("a-ready");
     if (wait_mark("b-ready") != 0) return 2;
     /* Ceka na B (ten drzi [200,300) pro cteni). */
@@ -66,6 +74,13 @@ static int side_b(int fd) {
     q.l_start = 50;
     q.l_len = 1;
     if (fcntl(fd, F_GETLK, &q) != 0 || q.l_type != F_WRLCK || q.l_start != 0 || q.l_len != 100) return 12;
+    /* l_pid = getpid drzitele (Wine cte cislo procesu wineserveru). */
+    char pp[256];
+    path(pp, sizeof pp, "a-pid");
+    FILE *f = fopen(pp, "r");
+    int apid = 0;
+    if (f == NULL || fscanf(f, "%d", &apid) != 1 || q.l_pid != apid || apid == getpid()) return 21;
+    fclose(f);
     if (lock(fd, F_SETLK, F_RDLCK, 200, 100) != 0) return 13;
     /* Vlastni zamky se nebiji: zapis na casti vlastniho cteni. */
     if (lock(fd, F_SETLK, F_WRLCK, 250, 10) != 0 || lock(fd, F_SETLK, F_RDLCK, 250, 10) != 0) return 14;

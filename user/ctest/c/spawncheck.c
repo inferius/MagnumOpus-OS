@@ -29,9 +29,12 @@
 #include <unistd.h>
 
 extern char **environ;
+int inherit_child_main(void);
+int unix_child_main(const char *path);
+int unixpair_child_main(void);
 
 /* Rezim potomka: "child exit N", "child echo TEXT", "child stdin",
- * "child cwd", "child sleep". */
+ * "child cwd", "child sleep", "child fds" (inheritcheck.c). */
 int spawn_child_main(int argc, char **argv) {
     if (argc == 4 && strcmp(argv[2], "exit") == 0) return atoi(argv[3]);
     if (argc == 4 && strcmp(argv[2], "echo") == 0) {
@@ -63,6 +66,9 @@ int spawn_child_main(int argc, char **argv) {
         sprintf(small, "%d", n);
         return 0;
     }
+    if (argc == 3 && strcmp(argv[2], "fds") == 0) return inherit_child_main();
+    if (argc == 4 && strcmp(argv[2], "unix") == 0) return unix_child_main(argv[3]);
+    if (argc == 3 && strcmp(argv[2], "unixpair") == 0) return unixpair_child_main();
     if (argc == 3 && strcmp(argv[2], "sleep") == 0) {
         sleep(60);
         return 0;
@@ -161,9 +167,10 @@ static int spawning(const char *dir) {
     if (p <= 0 || waitpid(p, &st, 0) != p || !WIFEXITED(st) || WEXITSTATUS(st) != 200000 % 251) return 20;
     unlink(in);
     unlink(out);
+    /* dup2 z neotevreneho cisla. */
     posix_spawn_file_actions_init(&fa);
-    posix_spawn_file_actions_adddup2(&fa, 1, 5);
-    if (child(&fa, "exit", "0") != -ENOTSUP) return 8;
+    posix_spawn_file_actions_adddup2(&fa, 77, 5);
+    if (child(&fa, "exit", "0") != -EBADF) return 8;
     posix_spawn_file_actions_destroy(&fa);
     char *argv[] = {"neni", NULL};
     if (posix_spawn(&p, "/neni/takovy/program", NULL, NULL, argv, environ) != ENOENT) return 9;

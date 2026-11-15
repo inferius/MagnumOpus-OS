@@ -59,6 +59,7 @@ pub mod termios;
 pub mod time;
 pub mod ucontext;
 pub mod unistd;
+pub mod unix;
 pub mod wchar;
 
 #[cfg(test)]
@@ -71,6 +72,8 @@ mod pthread_tests;
 mod time_tests;
 #[cfg(test)]
 mod socket_tests;
+#[cfg(test)]
+mod unix_tests;
 #[cfg(test)]
 mod mman_tests;
 #[cfg(test)]

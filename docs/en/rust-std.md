@@ -257,8 +257,8 @@ Format `abi::params`, reading and creating with `libos::params::Params`,
 passed in the startup message as `kind::PARAMS` **[verified in QEMU]**
 (hello-std; format tests on the host `cargo test -p abi params`). Standard
 handles have tags from `abi::params::tag` (`STDIN`, `STDOUT`, `STDERR`,
-`FS`, `NET`, `LAUNCH`); format v2 has the `STDOUT_NULL`/`STDERR_NULL`
-flags (`Stdio::null`). Details and an example: [libos](libos.md#process-parameter-block).
+`FS`, `NET`, `LAUNCH`, `FD`); format v2 has the `STDOUT_NULL`/`STDERR_NULL`
+flags (`Stdio::null`), v3 inherited fds (`posix_spawn`). Details and an example: [libos](libos.md#process-parameter-block).
 
 ### Byte-stream protocol
 

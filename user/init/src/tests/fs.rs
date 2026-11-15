@@ -26,6 +26,7 @@ pub const TESTS: &[Test] = &[
     ("v2: podminene ulozeni a konflikt", v2_conditional_save),
     ("v2: docasne jmeno nikdy nesmaze cizi soubor", v2_temp_collision),
     ("v2: konec relace uklidi handly, zamky mezi relacemi", v2_session_cleanup_and_locks),
+    ("v2: 200 soucasnych relaci a proud (smycka pres port)", v2_many_sessions),
     ("opravneni: identita relace, pripojene cesty, GRANT", perm_sessions),
     ("opravneni: zakaz spousteni a sdileni mezi uzivateli", perm_noexec_and_sharing),
     ("kontrola konzistence a scrub", check_clean),
@@ -430,6 +431,59 @@ const ALICE: u64 = 1000;
 const BOB: u64 = 1001;
 
 /// Domov /perm/alice patri Alici; / a /perm jde projit.
+/// Pocet relaci uz neomezuje limit `OBJECT_WAIT_MANY` (64): fsd ceka pres
+/// port. 200 relaci, kazda s vlastnim handlem; proud za nimi; po zavreni
+/// pulky ostatni dal funguji.
+fn v2_many_sessions(_: &Startup) -> TestResult {
+    const N: usize = 200;
+    let f = fs()?;
+    f.save_if("/v2-mnoho.txt", None, b"mnoho relaci").map_err(|e| fail("ulozeni", e))?;
+    let mut sessions = Vec::new();
+    for i in 0..N {
+        let c = f.connect().map_err(|e| fail(&alloc::format!("connect {i}"), e))?;
+        let h = c.open("/v2-mnoho.txt", access::READ, share::ALL, 0).map_err(|e| fail(&alloc::format!("open {i}"), e))?;
+        sessions.push((c, h.handle));
+    }
+    // Vsechny relace odpovidaji (i ty nad starym limitem), v obracenem poradi.
+    for (i, (c, h)) in sessions.iter().enumerate().rev() {
+        let d = c.read_h(*h, 0, 5).map_err(|e| fail(&alloc::format!("cteni {i}"), e))?;
+        check_eq!(&d[..], b"mnoho", "obsah v relaci");
+    }
+    // Proud se vejde i pri 200 relacich (drive sdileny limit relaci a proudu).
+    let (last, lh) = &sessions[N - 1];
+    let chan = last.open_stream(*lh, fsproto::v2::stream_mode::READ, 0).map_err(|e| fail("proud", e))?;
+    let mut got = Vec::new();
+    loop {
+        match libos::wait_one(chan.handle(), libos::Signals::READABLE | libos::Signals::PEER_CLOSED, None) {
+            Ok(_) => {}
+            Err(e) => return Err(fail("cekani proudu", e)),
+        }
+        match chan.try_read() {
+            Ok(m) => got.extend_from_slice(&m.data),
+            Err(Error::ShouldWait) => continue,
+            Err(_) => break,
+        }
+    }
+    check_eq!(&got[..], b"mnoho relaci", "obsah proudu");
+    // Zavrit kazdou druhou relaci (bez CLOSE: konec kanalu); ostatni dal funguji.
+    let mut keep = Vec::new();
+    for (i, s) in sessions.into_iter().enumerate() {
+        if i % 2 == 1 {
+            keep.push(s);
+        }
+    }
+    for (c, h) in &keep {
+        let d = c.read_h(*h, 6, 6).map_err(|e| fail("cteni po zavreni pulky", e))?;
+        check_eq!(&d[..], b"relaci", "obsah po zavreni pulky");
+    }
+    for (c, h) in &keep {
+        c.close(*h).map_err(|e| fail("close", e))?;
+    }
+    drop(keep);
+    f.remove("/v2-mnoho.txt").map_err(|e| fail("smazani", e))?;
+    Ok(())
+}
+
 fn perm_setup(f: &FsClient) -> TestResult {
     let traverse = Acl { flags: 0, grants: alloc::vec![Grant { who: EVERYONE, rights: rights::TRAVERSE, flags: grant::THIS }] };
     f.set_acl("/", Some(&traverse)).map_err(|e| fail("acl /", e))?;

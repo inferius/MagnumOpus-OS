@@ -116,13 +116,13 @@ pub unsafe fn fcntl_lock(fd: c_int, cmd: c_int, p: *mut flock) -> c_int {
         }
         if cmd == F_GETLK {
             match sys::file_lock(fd, wire::TEST, wire::FCNTL, write, start, len)? {
-                LockResult::Conflict { write, start, len } => {
+                LockResult::Conflict { write, start, len, pid } => {
                     l.l_type = if write { F_WRLCK } else { F_RDLCK };
                     l.l_whence = 0;
                     l.l_start = start as i64;
                     l.l_len = len as i64;
-                    // Cislo procesu drzitele fsd nezna.
-                    l.l_pid = -1;
+                    // Cislo procesu drzitele (jeho getpid); nezname = -1.
+                    l.l_pid = if pid > 0 { pid } else { -1 };
                 }
                 _ => l.l_type = F_UNLCK,
             }

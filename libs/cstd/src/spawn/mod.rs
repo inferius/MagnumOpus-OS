@@ -3,16 +3,20 @@
 //! spusti launchd stejne jako `std::process::Command`
 //! (`sys::spawn_child`), cekani a stav potomku jsou ve [`wait`].
 //!
-//! Potomek dostane jen fd 0, 1 a 2 (blok parametru predava tri proudy).
-//! Akce souboru se proto vyhodnoti uz v rodici (`plan`):
-//! - `addclose(0-2)` = proud nepredat; `addclose(> 2)` nic (potomek vyssi
-//!   cisla nema);
-//! - `adddup2(x, 0-2)`, kde `x` je stdio, roura nebo soubor rodice (nebo
-//!   0-2 po predchozich akcich); cil > 2 = `ENOTSUP`;
-//! - `addopen(0-2, "/dev/null")` = prazdny vstup / zahozeny vystup; jiny
-//!   soubor otevre rodic a preda ho jako proud z fsd (`OPEN_STREAM`);
-//!   cil > 2 = `ENOTSUP`;
-//! - `addchdir`, `addfchdir` = pracovni adresar potomka, `addclosefrom`.
+//! Potomek dedi fd rodice bez `FD_CLOEXEC` (rozhodnuti T4A, jako POSIX).
+//! Akce souboru se vyhodnoti uz v rodici nad kopii tabulky fd (`plan`):
+//! - `addclose`, `addclosefrom` = cislo potomkovi nepredat;
+//! - `adddup2(x, y)` = `y` ukazuje na totez co `x` (bez `FD_CLOEXEC`;
+//!   `x == y` jen priznak zrusi);
+//! - `addopen(y, ...)` otevre soubor rodic pred spustenim; `/dev/null`
+//!   na 0-2 = prazdny vstup / zahozeny vystup (nad 2 `ENOTSUP`);
+//! - `addchdir`, `addfchdir` = pracovni adresar potomka.
+//!
+//! Na konci se zahodi cisla s `FD_CLOEXEC`. Fd 0-2 dostane potomek jako
+//! proudy (soubor = proud z fsd, `OPEN_STREAM`), vyssi cisla jako zdedene
+//! fd v bloku parametru (`osrt::inherit`: roura a pametovy fd = duplikat
+//! handlu, soubor = `REOPEN` ve fsd s kopii pozice). Socket zdedit nejde:
+//! zdedeny se preskoci, `adddup2` socketu = `ENOTSUP`.
 //!
 //! Program: cesta s `/` (relativni vuci adresari potomka), u `posix_spawn`
 //! holy nazev = soubor v adresari potomka, kdyz existuje; `posix_spawnp`
@@ -67,10 +71,13 @@ pub struct posix_spawnattr_t {
     _pad: [c_int; 16],
 }
 
-/// Vysledek akci souboru: proudy 0-2 a pracovni adresar potomka.
+/// Vysledek akci souboru: proudy 0-2, zdedene fd a pracovni adresar
+/// potomka.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
     pub io: [ChildIo; 3],
+    /// Fd nad 2 vzestupne: (cislo v potomkovi, zdroj, z akce souboru).
+    pub fds: Vec<(c_int, ChildIo, bool)>,
     pub cwd: Vec<u8>,
     /// Soubory k otevreni pred spustenim (`ChildIo::Open(index)`):
     /// absolutni cesta, priznaky, prava.
@@ -90,50 +97,60 @@ pub fn join(base: &[u8], p: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Cislo v tabulce potomka behem `plan`.
+#[derive(Clone, Copy)]
+struct Entry {
+    src: ChildIo,
+    cloexec: bool,
+    /// Z akce souboru (ne jen zdedene).
+    explicit: bool,
+}
+
 /// Vyhodnoti akce souboru (poradi jako v potomkovi). `cwd` = adresar
-/// rodice, `dir_of` = cesta adresare za cislem fd rodice.
-pub fn plan(actions: &[Action], cwd: Vec<u8>, dir_of: impl Fn(c_int) -> Result<Vec<u8>, c_int>) -> Result<Plan, c_int> {
-    let mut io = [ChildIo::Parent(0), ChildIo::Parent(1), ChildIo::Parent(2)];
+/// rodice, `parent` = otevrena cisla rodice s `FD_CLOEXEC`, `dir_of` =
+/// cesta adresare za cislem fd rodice.
+pub fn plan(
+    actions: &[Action],
+    cwd: Vec<u8>,
+    parent: &[(c_int, bool)],
+    dir_of: impl Fn(c_int) -> Result<Vec<u8>, c_int>,
+) -> Result<Plan, c_int> {
+    use std::collections::BTreeMap;
+    let mut t: BTreeMap<c_int, Entry> =
+        parent.iter().map(|&(fd, cloexec)| (fd, Entry { src: ChildIo::Parent(fd), cloexec, explicit: false })).collect();
     let mut cwd = cwd;
     let mut opens = Vec::new();
-    let slot = |fd: c_int| usize::try_from(fd).ok().filter(|&i| i <= 2);
     for a in actions {
         match a {
             Action::Close(fd) => {
-                if let Some(i) = slot(*fd) {
-                    io[i] = ChildIo::Closed;
-                }
+                t.remove(fd);
             }
             Action::Dup2(from, to) => {
-                let Some(t) = slot(*to) else { return Err(errno::ENOTSUP) };
-                io[t] = match slot(*from) {
-                    Some(f) if io[f] == ChildIo::Closed => return Err(errno::EBADF),
-                    Some(f) => io[f],
-                    None => ChildIo::Parent(*from),
-                };
+                let Some(e) = t.get(from).copied() else { return Err(errno::EBADF) };
+                t.insert(*to, Entry { src: e.src, cloexec: false, explicit: true });
             }
             Action::Open(fd, path, flags, mode) => {
-                let Some(i) = slot(*fd) else { return Err(errno::ENOTSUP) };
-                io[i] = if path.as_slice() == b"/dev/null" {
+                let src = if path.as_slice() == b"/dev/null" && *fd <= 2 {
                     ChildIo::Null
+                } else if path.as_slice() == b"/dev/null" {
+                    return Err(errno::ENOTSUP);
                 } else {
                     // Relativni cesta plati vuci adresari potomka v tomto kroku.
                     opens.push((join(&cwd, path), *flags, *mode));
                     ChildIo::Open(opens.len() - 1)
                 };
+                t.insert(*fd, Entry { src, cloexec: flags & crate::unistd::O_CLOEXEC != 0, explicit: true });
             }
             Action::Chdir(p) => cwd = join(&cwd, p),
             Action::Fchdir(fd) => cwd = dir_of(*fd)?,
-            Action::CloseFrom(from) => {
-                for (i, x) in io.iter_mut().enumerate() {
-                    if i as c_int >= *from {
-                        *x = ChildIo::Closed;
-                    }
-                }
-            }
+            Action::CloseFrom(from) => t.retain(|fd, _| fd < from),
         }
     }
-    Ok(Plan { io, cwd, opens })
+    t.retain(|_, e| !e.cloexec);
+    let get = |i: c_int| t.get(&i).map_or(ChildIo::Closed, |e| e.src);
+    let io = [get(0), get(1), get(2)];
+    let fds = t.iter().filter(|(fd, _)| **fd > 2).map(|(fd, e)| (*fd, e.src, e.explicit)).collect();
+    Ok(Plan { io, fds, cwd, opens })
 }
 
 /// Program pro launchd. `exists` = je to bezny soubor?
@@ -234,7 +251,7 @@ unsafe fn spawn(
         Some(f) if !f.list.is_null() => unsafe { &*f.list },
         _ => &[],
     };
-    let plan = match plan(actions, sys::getcwd(), sys::fd_path) {
+    let plan = match plan(actions, sys::getcwd(), &sys::fd_list(), sys::fd_path) {
         Ok(p) => p,
         Err(e) => return e,
     };
@@ -267,10 +284,12 @@ unsafe fn spawn(
         // SAFETY: kontrakt C.
         unsafe { strings(envp) }
     };
-    // Soubory z `addopen` otevre rodic; potomek dostane proud z fsd.
+    // Soubory z `addopen` otevre rodic; potomek dostane proud z fsd (0-2)
+    // nebo zdedeny soubor (nad 2).
     let mut temp = Vec::new();
     let mut io = plan.io;
-    for slot in io.iter_mut() {
+    let mut fds = plan.fds;
+    for slot in io.iter_mut().chain(fds.iter_mut().map(|(_, s, _)| s)) {
         if let ChildIo::Open(k) = *slot {
             let (path, flags, _mode) = &plan.opens[k];
             let Some(o) = crate::unistd::open_flags(*flags) else {
@@ -289,7 +308,7 @@ unsafe fn spawn(
             }
         }
     }
-    let req = SpawnReq { program, args, env, cwd: plan.cwd, io };
+    let req = SpawnReq { program, args, env, cwd: plan.cwd, io, fds };
     let spawned = sys::spawn_child(req);
     close_all(&temp);
     match spawned {

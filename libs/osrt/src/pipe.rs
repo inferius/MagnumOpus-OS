@@ -38,6 +38,27 @@ impl Pipe {
         read_stream(&self.ch, &self.rest, buf)
     }
 
+    /// Jako [`Pipe::read`] bez cekani (`O_NONBLOCK`): prazdna roura =
+    /// `ShouldWait` (C `EAGAIN`).
+    pub fn try_read(&self, buf: &mut [u8]) -> Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let mut rest = self.rest.lock();
+        while rest.1 >= rest.0.len() {
+            match self.ch.try_read() {
+                Ok(msg) => *rest = (msg.data, 0),
+                Err(Error::PeerClosed) => return Ok(0),
+                Err(e) => return Err(e),
+            }
+        }
+        let (data, at) = &mut *rest;
+        let n = buf.len().min(data.len() - *at);
+        buf[..n].copy_from_slice(&data[*at..*at + n]);
+        *at += n;
+        Ok(n)
+    }
+
     /// Zapise cely `buf` (po zpravach nejvys `CHANNEL_MAX_DATA`).
     pub fn write(&self, buf: &[u8]) -> Result<usize> {
         write_stream(&self.ch, buf)?;

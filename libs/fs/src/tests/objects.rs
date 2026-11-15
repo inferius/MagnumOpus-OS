@@ -104,6 +104,26 @@ fn symlinks() {
 }
 
 #[test]
+fn socket_nodes() {
+    // Uzel socketu AF_UNIX: jen jmeno a vlastnik; prezije intent log.
+    let mut fs = new_fs(2048);
+    fs.create("/tmp", Kind::Dir).unwrap();
+    fs.commit().unwrap();
+    fs.create("/tmp/socket", Kind::Socket).unwrap();
+    assert_eq!(fs.create("/tmp/socket", Kind::Socket).err(), Some(Error::AlreadyExists));
+    let st = fs.stat("/tmp/socket").unwrap();
+    assert_eq!((st.kind, st.size), (Kind::Socket, 0));
+    assert_eq!(fs.stat("/tmp").unwrap().tree_files, 1);
+    fs.fsync().unwrap();
+    let mut fs = remount(fs);
+    assert_eq!(fs.stat("/tmp/socket").unwrap().kind, Kind::Socket);
+    assert!(fs.list("/tmp").unwrap().iter().any(|e| e.name == "socket" && e.kind == Kind::Socket));
+    fs.remove("/tmp/socket").unwrap();
+    assert_eq!(fs.stat("/tmp").unwrap().tree_files, 0);
+    assert_clean(&mut fs);
+}
+
+#[test]
 fn symlink_survives_fsync() {
     let mut fs = new_fs(2048);
     fs.commit().unwrap();

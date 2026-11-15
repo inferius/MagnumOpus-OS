@@ -22,9 +22,6 @@ use crate::blkdev::BlkDev;
 
 /// Nejvic soubeznych proudu.
 pub const MAX_STREAMS: usize = 16;
-/// Objektu v jednom `OBJECT_WAIT_MANY` pro relace a proudy: limit jadra
-/// bez ridiciho kanalu a kanalu uloh.
-pub const WAIT_BUDGET: usize = libos::abi::syscall::WAIT_MANY_MAX - 2;
 /// Kus cteni poslany jednou zpravou.
 const CHUNK: usize = 60 * 1024;
 /// Za jak dlouho zkusit znovu poslat do plne fronty (ns).
@@ -38,14 +35,17 @@ pub struct Stream {
     pub offset: u64,
     /// Kus cteni, ktery se do plne fronty nevesel.
     pending: Option<Vec<u8>>,
+    /// Klic a stav registrace na portu hlavni smycky (jako `Session`).
+    pub key: u64,
+    pub armed: bool,
 }
 
 impl Stream {
     pub fn new(chan: Channel, h: u64, mode: u8, offset: u64) -> Self {
-        Stream { chan, h, mode, offset, pending: None }
+        Stream { chan, h, mode, offset, pending: None, key: 0, armed: false }
     }
 
-    /// Na co ceka smycka (`wait_many`).
+    /// Na co ceka smycka (registrace na portu).
     pub fn signals(&self) -> Signals {
         if self.mode == stream_mode::READ { Signals::PEER_CLOSED } else { Signals::READABLE | Signals::PEER_CLOSED }
     }

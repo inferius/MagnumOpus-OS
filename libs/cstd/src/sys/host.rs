@@ -97,6 +97,7 @@ fn stat_md(m: &fs::Metadata) -> Stat {
         uid: 0,
         readable: true,
         writable: !m.permissions().readonly(),
+        mode: None,
     }
 }
 
@@ -216,6 +217,11 @@ pub fn dup2(old: i32, new: i32, cloexec: bool) -> R<i32> {
     });
     drop(prev);
     Ok(new)
+}
+
+/// Otevrena cisla s `FD_CLOEXEC` (`posix_spawn`).
+pub fn fd_list() -> Vec<(i32, bool)> {
+    with(|v| v.iter().enumerate().filter_map(|(i, s)| s.as_ref().map(|s| (i as i32, s.cloexec))).collect())
 }
 
 pub fn cloexec(fd: i32) -> R<bool> {
@@ -386,6 +392,15 @@ pub fn list_dir(fd: i32) -> R<Vec<Entry>> {
 
 pub fn mkdir(p: &[u8]) -> R<()> {
     fs::create_dir(path(p)?).map_err(io)
+}
+
+pub fn mkdir_mode(p: &[u8], _mode: u16) -> R<()> {
+    mkdir(p)
+}
+
+/// `chmod` na hostiteli: jen existence (prava hostitele se nemeni).
+pub fn chmod(p: &[u8], _mode: u16) -> R<()> {
+    stat(p).map(|_| ())
 }
 
 pub fn unlink(p: &[u8]) -> R<()> {
@@ -743,4 +758,66 @@ pub fn memfd_import(_handle: u32, _writable: bool, _cloexec: bool) -> R<i32> {
 
 pub fn start_handle(_tag: u32) -> Option<u32> {
     None
+}
+
+// --- sockety AF_UNIX (jen v systemu; na hostiteli zadne cislo neni AF_UNIX) ---
+
+pub fn is_unix(_fd: i32) -> bool {
+    false
+}
+
+pub fn unix_socket(_cloexec: bool, _nonblock: bool) -> R<i32> {
+    Err(errno::EAFNOSUPPORT)
+}
+
+pub fn unix_pair(_cloexec: bool, _nonblock: bool) -> R<(i32, i32)> {
+    Err(errno::EAFNOSUPPORT)
+}
+
+pub fn unix_bind(_fd: i32, _path: &[u8]) -> R<()> {
+    Err(errno::ENOTSOCK)
+}
+
+pub fn unix_listen(_fd: i32) -> R<()> {
+    Err(errno::ENOTSOCK)
+}
+
+pub fn unix_listening(_fd: i32) -> R<bool> {
+    Err(errno::ENOTSOCK)
+}
+
+pub fn unix_connect(_fd: i32, _path: &[u8]) -> R<()> {
+    Err(errno::ENOTSOCK)
+}
+
+pub fn unix_accept(_fd: i32, _cloexec: bool, _nonblock: bool) -> R<i32> {
+    Err(errno::ENOTSOCK)
+}
+
+pub fn unix_send(_fd: i32, _data: &[u8], _fds: &[i32], _dontwait: bool) -> R<usize> {
+    Err(errno::ENOTSOCK)
+}
+
+pub fn unix_recv(_fd: i32, _buf: &mut [u8], _max_fds: usize, _dontwait: bool, _cloexec: bool) -> R<(usize, Vec<i32>, bool)> {
+    Err(errno::ENOTSOCK)
+}
+
+pub fn unix_shutdown_write(_fd: i32) -> R<()> {
+    Err(errno::ENOTSOCK)
+}
+
+pub fn unix_name(_fd: i32, _peer: bool) -> R<Option<Vec<u8>>> {
+    Err(errno::ENOTSOCK)
+}
+
+pub fn unix_peer(_fd: i32) -> R<(i32, u32, u32)> {
+    Err(errno::ENOTSOCK)
+}
+
+pub fn user_id() -> u32 {
+    0
+}
+
+pub fn group_ids() -> Vec<u32> {
+    Vec::new()
 }

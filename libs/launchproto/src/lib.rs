@@ -66,6 +66,10 @@ pub enum Role {
     Stdin = 4,
     Stdout = 5,
     Stderr = 6,
+    /// Handle zdedeneho fd (`posix_spawn`); role se smi opakovat, handly
+    /// jdou potomkovi se stitkem `abi::params::tag::FD` ve stejnem poradi
+    /// (polozky fd jsou v bloku parametru).
+    Fd = 7,
 }
 
 impl Role {
@@ -77,13 +81,15 @@ impl Role {
             4 => Self::Stdin,
             5 => Self::Stdout,
             6 => Self::Stderr,
+            7 => Self::Fd,
             _ => return None,
         })
     }
 }
 
-/// Nejvic roli (handlu) v jednom `LAUNCH`.
-pub const MAX_ROLES: usize = 8;
+/// Nejvic roli (handlu) v jednom `LAUNCH`: sest jedinecnych a handly
+/// zdedenych fd.
+pub const MAX_ROLES: usize = 6 + abi::params::MAX_FDS;
 
 /// Pozadavek `LAUNCH` (bez handlu; ty jdou ve zprave v poradi `roles`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,7 +129,7 @@ impl Launch {
         let mut roles = Vec::with_capacity(n);
         for _ in 0..n {
             let role = Role::from_u8(r.u8()?).ok_or(Error::InvalidArgs)?;
-            if roles.contains(&role) {
+            if role != Role::Fd && roles.contains(&role) {
                 return Err(Error::InvalidArgs);
             }
             roles.push(role);

@@ -93,13 +93,22 @@ fn main(mut startup: Startup) -> i64 {
 
     let mut sync = sync::Sync::new();
     let mut clients: Vec<Channel> = Vec::new();
+    // Klientu je promenny pocet: cekani pres port (`WaitSet`), ne pres
+    // `wait_many` (limit 64 objektu).
+    let mut waits = match libos::WaitSet::new() {
+        Ok(w) => w,
+        Err(e) => {
+            println!("timed: port nejde vytvorit: {e}");
+            return 1;
+        }
+    };
     loop {
         let mut items: Vec<(&libos::Handle, Signals)> = Vec::with_capacity(1 + clients.len());
         items.push((channel.handle(), Signals::READABLE | Signals::PEER_CLOSED));
         for c in &clients {
             items.push((c.handle(), Signals::READABLE | Signals::PEER_CLOSED));
         }
-        let observed = match libos::wait_many(&items, None) {
+        let observed = match waits.wait(&items, None) {
             Ok((_, o)) => o,
             Err(e) => {
                 println!("timed: cekani selhalo: {e}");

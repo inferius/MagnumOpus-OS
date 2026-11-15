@@ -4,7 +4,7 @@ Služba souborového systému nad knihovnou `libs/fs`. Startovní zpráva (kind 
 
 ## Klíčové soubory
 
-- `src/main.rs` - smyčka a konfigurace; `blkdev.rs` - adaptér ovladače disku na `BlockDevice`; `serve.rs` + `serve_data.rs`, `serve_hist.rs` (historie), `serve_perm.rs` (oprávnění), `serve_v2.rs`; `tasks.rs` (přehled úloh); `stream.rs` - soubory jako proudy bajtů (`OPEN_STREAM`, stdin/stdout potomka `posix_spawn`).
+- `src/main.rs` - smyčka a konfigurace; `blkdev.rs` - adaptér ovladače disku na `BlockDevice`; `serve.rs` + `serve_data.rs`, `serve_hist.rs` (historie), `serve_perm.rs` (oprávnění), `serve_v2.rs`; `tasks.rs` (přehled úloh); `stream.rs` - soubory jako proudy bajtů (`OPEN_STREAM`, stdin/stdout potomka `posix_spawn`); `serve_sock.rs` - uzly socketů `AF_UNIX` (`SOCKET_BIND`/`SOCKET_CONNECT`, mapa uzel -> kanál posluchače jen v paměti), `WHOAMI` a `SET_MODE` (`chmod`); mód při vytvoření (`CREATE` s módem, `OPEN` s `open_flags::MODE`) se uplatní ve stejném požadavku jako vytvoření.
 - Protokol: `libs/fsproto`; klient `libs/fsproto` (`FsClient`).
 
 ## Invarianty
@@ -15,7 +15,8 @@ Služba souborového systému nad knihovnou `libs/fs`. Startovní zpráva (kind 
 - Pozdní práce (defrag, scrub) musí ustoupit požadavkům klientů (malé kroky mezi požadavky).
 - `DATASETS` (`serve_hist.rs`, protokol `libs/fsproto/src/datasets.rs`): jen datasety, jejichž kořen relace vidí a které leží v jejích připojených cestách (cesty relace přes `unmap`); `Stat` kořene beze změny masek; původ klonu ve třech stavech - známý, skrytý (relace ho nevidí, i když existuje: nikdy neprozradit cestu), neexistuje. Průchod adresářů svazku je drahý, nevolat ho v jiných operacích.
 - Zámky POSIX (`op::POSIX_LOCK`, `Service.posix` = `fs::posix_lock::PosixLocks`): vlastník `fcntl` = `Session.id`, `flock` = handle s horním bitem (`flock_owner`); uvolnit při `CLOSE` posledního handlu relace na souboru a v `close_session`. Čekání vede klient, fsd jen pamatuje graf čekání (EDEADLK).
-- Relace a proudy (`Service.streams`) sdílí limit `OBJECT_WAIT_MANY`: relace + proudy <= `stream::WAIT_BUDGET` (64 - řídicí kanál - kanál úloh); jinak by `wait_many` selhal a smyčka skončila. Proud má vlastní handle (`reopen`) s právy jen podle handlu klienta (`check_access_h`); čtecí proud s plnou frontou zkouší znovu po `stream::RETRY` (nečekat v něm, smyčka obsluhuje všechny).
+- Hlavní smyčka čeká přes port (`libos::Waiter`), nikdy přes `wait_many` nad relacemi: relace a proudy mají `key` (přidělí smyčka, nikdy znovu) a `armed`; po paketu se obslouží jen objekty s `armed == false` a pak se znovu zaregistrují (nová relace z `CONNECT` má `armed` false = obslouží se a zaregistruje v dalším kole). Počet relací omezuje jen paměť, proudů `stream::MAX_STREAMS`. Nový kanál úloh = nový klíč. Proud má vlastní handle (`reopen`) s právy jen podle handlu klienta (`check_access_h`); čtecí proud s plnou frontou zkouší znovu po `stream::RETRY` (nečekat v něm, smyčka obsluhuje všechny).
+- Handly příchozího požadavku jsou v `Service.in_handles` jen po dobu `handle` (bere si je `handle_sock`, ostatní se zavřou). Číslo procesu vlastníka zámku (`lock_pids`, pro `l_pid`) je od klienta a neověřuje se; uklidí se v `close_session`.
 - Masky dostupnosti z `fs::Stat` jdou do `fsproto::Stat` beze změny (shodu bitů hlídá `const assert` v `serve.rs`); `StatEntry` dostane jen bity svých polí (`ENTRY_AVAIL`). Změna tvaru `Stat` = nová verze v `fsproto::v2::VERSION`.
 
 ## Testy

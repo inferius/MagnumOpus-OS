@@ -51,9 +51,17 @@ pub fn spawn(list: Vec<Watched>, ctx: Ctx) {
 fn run(mut list: Vec<Watched>, ctx: Ctx) {
     let ecams: Vec<Option<Ecam>> = ctx.windows.iter().map(|(v, a)| Ecam::new(v, *a).ok()).collect();
     let mut starts: Vec<Vec<u64>> = vec![Vec::new(); list.len()];
+    // Ovladacu je promenny pocet: cekani pres port, ne `wait_many` (limit 64).
+    let mut waits = match libos::WaitSet::new() {
+        Ok(w) => w,
+        Err(e) => {
+            println!("devmgr: port pro restart ovladacu: {e}");
+            return;
+        }
+    };
     while !list.is_empty() {
         let items: Vec<_> = list.iter().map(|w| (w.process.handle(), Signals::TERMINATED)).collect();
-        let observed = match libos::wait_many(&items, None) {
+        let observed = match waits.wait(&items, None) {
             Ok((_, o)) => o,
             Err(e) => {
                 println!("devmgr: cekani na ovladace: {e}");

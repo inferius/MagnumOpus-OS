@@ -16,6 +16,7 @@ fn kind_of(k: u8) -> Kind {
     match k {
         rt::fs::kind::DIR | rt::fs::kind::DATASET => Kind::Dir,
         rt::fs::kind::SYMLINK => Kind::Symlink,
+        rt::fs::kind::SOCKET => Kind::Socket,
         _ => Kind::File,
     }
 }
@@ -33,6 +34,7 @@ fn stat_of(s: &rt::fs::Stat) -> Stat {
         uid: s.owner,
         readable: s.rights & r != 0,
         writable: s.rights & w != 0,
+        mode: (s.known & rt::fs::avail::MODE != 0).then_some(s.mode),
     }
 }
 
@@ -51,6 +53,7 @@ pub fn open(path: &[u8], o: &OpenFlags) -> R<i32> {
             truncate: o.trunc,
             create: o.create && !o.excl,
             create_new: o.create && o.excl,
+            mode: o.mode,
         };
         let f = File::open(path, &opts).map_err(e)?;
         // Adresar otevreny jen pro cteni je v POSIX povoleny (fdopendir).
@@ -117,6 +120,11 @@ pub fn dup2(old: i32, new: i32, cloexec: bool) -> R<i32> {
     fd::dup2(old, new, cloexec).map_err(e)
 }
 
+/// Otevrena cisla s `FD_CLOEXEC` (`posix_spawn`).
+pub fn fd_list() -> Vec<(i32, bool)> {
+    fd::list()
+}
+
 pub fn cloexec(fd: i32) -> R<bool> {
     fd::cloexec(fd).map_err(e)
 }
@@ -140,7 +148,7 @@ pub fn fstat(fd: i32) -> R<Stat> {
         Object::File(f) => f.stat().map(|s| stat_of(&s)).map_err(e),
         Object::Stdio(_) => Ok(Stat::stream(Kind::Stream)),
         Object::Pipe(_) => Ok(Stat::stream(Kind::Pipe)),
-        Object::Socket(_) => Ok(Stat::stream(Kind::Socket)),
+        Object::Socket(_) | Object::Unix(_) => Ok(Stat::stream(Kind::Socket)),
         Object::User(_) => Ok(Stat::stream(Kind::Stream)),
         // Pametovy fd: bezny soubor s velikosti objektu pameti.
         Object::Memory(m) => {
@@ -255,6 +263,18 @@ pub fn list_dir(fd: i32) -> R<Vec<Entry>> {
 
 pub fn mkdir(path: &[u8]) -> R<()> {
     rt::fs::create_dir(path).map_err(e)
+}
+
+pub fn mkdir_mode(path: &[u8], mode: u16) -> R<()> {
+    rt::fs::create_dir_mode(path, mode).map_err(e)
+}
+
+/// `chmod`: bez prava `MANAGE` = `EPERM` (POSIX: neni vlastnik).
+pub fn chmod(path: &[u8], mode: u16) -> R<()> {
+    rt::fs::set_mode(path, mode).map_err(|err| match err {
+        rt::Error::AccessDenied => errno::EPERM,
+        other => e(other),
+    })
 }
 
 pub fn unlink(path: &[u8]) -> R<()> {
@@ -532,7 +552,7 @@ pub fn file_lock(fd: i32, cmd: u8, class: u8, write: bool, start: u64, len: u64)
     match f.posix_lock(cmd, class, write, start, len) {
         Ok(fsproto_lock) => Ok(match fsproto_lock {
             rt::fs::PosixLock::Done => LockResult::Done,
-            rt::fs::PosixLock::Conflict { write, start, len } => LockResult::Conflict { write, start, len },
+            rt::fs::PosixLock::Conflict { write, start, len, pid } => LockResult::Conflict { write, start, len, pid: pid as i32 },
             rt::fs::PosixLock::Deadlock => LockResult::Deadlock,
         }),
         Err(rt::Error::ServiceRestarted) => Err(errno::ENOLCK),

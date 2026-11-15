@@ -1,8 +1,10 @@
 //! `sys/stat.h`: `stat`, `fstat`, `lstat`, `mkdir`, `chmod`, `umask`.
 //!
-//! Prava v FS jsou granty, ne bity: `st_mode` se sklada z druhu objektu
-//! a ucinnych prav relace (cteni, zapis). `chmod` nema ucinek (uspeje,
-//! kdyz objekt existuje), prava se meni popisem opravneni (ACL).
+//! Prava v FS jsou granty, ne bity: `st_mode` je pohled na granty
+//! (`fs::mode`: user = vlastnik, group = granty jinym prijemcum, other =
+//! `EVERYONE`). Mod pri vytvoreni (`mkdir`, `open(O_CREAT)`) po `umask`
+//! zdedene granty jen zuzi; `chmod` je meni (pravo `MANAGE`, jinak
+//! `EPERM`) a smi i rozsirit. Bity setuid, setgid a sticky se ignoruji.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -45,8 +47,32 @@ pub struct stat {
     pub st_ctim: timespec,
 }
 
+/// Mod po `umask` (9 bitu).
+pub fn masked(mode: u32) -> u16 {
+    (mode & 0o777 & !UMASK.load(Ordering::Relaxed)) as u16
+}
+
 /// `st_mode` z druhu a prav.
 pub fn mode_of(s: &Stat) -> u32 {
+    if let Some(m) = s.mode {
+        return type_bits(s.kind) | u32::from(m);
+    }
+    mode_from_rights(s)
+}
+
+fn type_bits(k: Kind) -> u32 {
+    match k {
+        Kind::File => S_IFREG,
+        Kind::Dir => S_IFDIR,
+        Kind::Symlink => S_IFLNK,
+        Kind::Stream => S_IFCHR,
+        Kind::Pipe => S_IFIFO,
+        Kind::Socket => S_IFSOCK,
+    }
+}
+
+/// `st_mode` z ucinnych prav (proudy, roury, FS bez modu).
+fn mode_from_rights(s: &Stat) -> u32 {
     let (t, base) = match s.kind {
         Kind::File => (S_IFREG, 0o111),
         Kind::Dir => (S_IFDIR, 0o111),
@@ -126,20 +152,25 @@ pub unsafe extern "C" fn fstat(fd: c_int, out: *mut stat) -> c_int {
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn mkdir(path: *const c_char, _mode: u32) -> c_int {
+pub unsafe extern "C" fn mkdir(path: *const c_char, mode: u32) -> c_int {
     // SAFETY: retezec C.
-    errno::ret(sys::mkdir(unsafe { c_bytes(path) }))
+    errno::ret(sys::mkdir_mode(unsafe { c_bytes(path) }, masked(mode)))
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn chmod(path: *const c_char, _mode: u32) -> c_int {
+pub unsafe extern "C" fn chmod(path: *const c_char, mode: u32) -> c_int {
     // SAFETY: retezec C.
-    errno::ret(sys::stat(unsafe { c_bytes(path) }).map(|_| ()))
+    errno::ret(sys::chmod(unsafe { c_bytes(path) }, (mode & 0o777) as u16))
 }
 
+/// `fchmod`: soubor podle cesty z doby otevreni (`File::path`); jiny fd
+/// (roura, socket) jen overi cislo.
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub extern "C" fn fchmod(fd: c_int, _mode: u32) -> c_int {
-    errno::ret(sys::status(fd).map(|_| ()))
+pub extern "C" fn fchmod(fd: c_int, mode: u32) -> c_int {
+    match sys::fd_path(fd) {
+        Ok(p) => errno::ret(sys::chmod(&p, (mode & 0o777) as u16)),
+        Err(_) => errno::ret(sys::status(fd).map(|_| ())),
+    }
 }
 
 static UMASK: AtomicU32 = AtomicU32::new(0o022);

@@ -71,7 +71,7 @@ fn ctest(s: &Startup) -> TestResult {
         ],
         Duration::from_secs(120),
     )?;
-    run.expect("ctest", &["args", "getenv", "format", "memory", "files", "errno", "posix", "threads", "time", "math", "mmap", "signal", "wchar", "posix2", "termios", "memfd"])?;
+    run.expect("ctest", &["args", "getenv", "format", "memory", "files", "errno", "posix", "threads", "time", "math", "mmap", "signal", "wchar", "posix2", "inherit", "unix", "mode", "termios", "memfd"])?;
     // Konec ctest zavre kanal terminalu: vlakno serveru skonci.
     server.join(None).map_err(|e| fail("konec vlakna terminalu", e))?;
     check!(run.stdout.ends_with("ctest: hotovo\n"), "atexit v obracenem poradi a vyprazdneni pri konci");

@@ -7,7 +7,7 @@
 //! (tam je `*at` vazane na inode adresare).
 
 use crate::stat::{fill, stat};
-use crate::unistd::{AT_FDCWD, open};
+use crate::unistd::AT_FDCWD;
 use crate::{c_bytes, c_char, c_int, errno, size_t, sys};
 
 /// `unlinkat`: odebrat adresar (`rmdir`).
@@ -74,11 +74,13 @@ fn c_path(p: Vec<u8>) -> Vec<u8> {
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn openat(dir: c_int, path: *const c_char, flags: c_int, _mode: ...) -> c_int {
+pub unsafe extern "C" fn openat(dir: c_int, path: *const c_char, flags: c_int, mut mode: ...) -> c_int {
+    // SAFETY: s O_CREAT predava volajici treti argument (mode_t).
+    let m = (flags & crate::unistd::O_CREAT != 0).then(|| unsafe { mode.next_arg::<u32>() });
     // SAFETY: kontrakt C.
     match unsafe { at_path(dir, path) } {
         // SAFETY: retezec zakonceny nulou zije po dobu volani.
-        Ok(p) => unsafe { open(c_path(p).as_ptr(), flags, 0) },
+        Ok(p) => unsafe { crate::unistd::open_mode(c_path(p).as_ptr(), flags, m) },
         Err(e) => errno::ret(Err(e)),
     }
 }
@@ -94,9 +96,9 @@ pub unsafe extern "C" fn unlinkat(dir: c_int, path: *const c_char, flags: c_int)
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn mkdirat(dir: c_int, path: *const c_char, _mode: u32) -> c_int {
+pub unsafe extern "C" fn mkdirat(dir: c_int, path: *const c_char, mode: u32) -> c_int {
     // SAFETY: kontrakt C.
-    errno::ret(unsafe { at_path(dir, path) }.and_then(|p| sys::mkdir(&p)))
+    errno::ret(unsafe { at_path(dir, path) }.and_then(|p| sys::mkdir_mode(&p, crate::stat::masked(mode))))
 }
 
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
@@ -110,12 +112,12 @@ pub unsafe extern "C" fn fstatat(dir: c_int, path: *const c_char, out: *mut stat
 
 /// `fchmodat`: jako `chmod` jen overi existenci (prava jsou granty FS).
 #[cfg_attr(target_os = "magnumopus", unsafe(no_mangle))]
-pub unsafe extern "C" fn fchmodat(dir: c_int, path: *const c_char, _mode: u32, flags: c_int) -> c_int {
+pub unsafe extern "C" fn fchmodat(dir: c_int, path: *const c_char, mode: u32, flags: c_int) -> c_int {
     if flags & !AT_SYMLINK_NOFOLLOW != 0 {
         return errno::ret(Err(errno::EINVAL));
     }
     // SAFETY: kontrakt C.
-    errno::ret(unsafe { at_path(dir, path) }.and_then(|p| sys::stat(&p)).map(|_| ()))
+    errno::ret(unsafe { at_path(dir, path) }.and_then(|p| sys::chmod(&p, (mode & 0o777) as u16)))
 }
 
 /// `realpath`: absolutni cesta bez `.` a `..` k existujici polozce (FS

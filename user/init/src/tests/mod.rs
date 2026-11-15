@@ -36,6 +36,7 @@ mod gui;
 mod sdl;
 mod gui_gpu;
 mod gui_video;
+mod gui_clients;
 mod gui_player;
 mod gui_recovery;
 mod gui_palette;

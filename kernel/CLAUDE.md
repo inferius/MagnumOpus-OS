@@ -13,6 +13,7 @@ Mikrojádro (`no_std`, `no_main`): paměť, plánovač, objekty s handly a práv
 
 ## Invarianty
 
+- `OBJECT_WAIT_MANY` má pevný limit 64 objektů (`WAIT_MANY_MAX`, pole na zásobníku jádra). Služba s proměnným počtem klientů na něm nesmí čekat nad seznamem klientů, jen přes port (`OBJECT_WAIT_ASYNC` + `PORT_WAIT`, v userspace `libos::Waiter`); limit nezvyšovat kvůli službám.
 - Zbytek jádra volá architekturu jen přes fasádu `crate::arch`; nikdy `arch::x86_64::...` ani `arch::aarch64::...`. Kód architektury volá do jádra jen přes `crate::trap` a obecné služby (`log`, `sync`, `error`, `fatal`, `mm`, `acpi::read`). Podrobné pravidlo: `docs/cs/architektura.md#rozhraní-architektury`.
 - Obě architektury mají stejné rozložení adresního prostoru, rámec 4 KiB a per-CPU strukturu s ukazatelem na sebe na offsetu 0.
 - Vše v `trap` se volá se zakázanými přerušeními; výjimka je `trap::syscall`.

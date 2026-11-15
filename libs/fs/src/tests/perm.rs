@@ -260,3 +260,37 @@ fn invalid_descriptors_are_refused() {
     assert_eq!(fs.set_acl("/home", Some(many)).err(), Some(Error::InvalidArgs));
     assert_clean(&mut fs);
 }
+
+#[test]
+fn posix_mode_follows_grants() {
+    // /tmp jako po instalaci: skupina (TEAM) smi vypsat a vytvaret (dedi se).
+    let mut fs = home_fs();
+    fs.create("/tmp", Kind::Dir).unwrap();
+    fs.set_acl("/tmp", acl(&[(TEAM, rights::LIST | rights::TRAVERSE | rights::CREATE, grant::BOTH), (ALICE, rights::LIST | rights::TRAVERSE | rights::CREATE, grant::BOTH)])).unwrap();
+    fs.set_principal(alice());
+    fs.create("/tmp/.wine-1000", Kind::Dir).unwrap();
+    assert_eq!(fs.stat("/tmp/.wine-1000").unwrap().mode, 0o770, "zdedeny grant skupiny");
+    // mkdir(.., 0700): skupina zmizi, Bob slozku neuvidi.
+    fs.set_mode("/tmp/.wine-1000", 0o700, false).unwrap();
+    let st = fs.stat("/tmp/.wine-1000").unwrap();
+    assert_eq!((st.mode, st.known & crate::fs::avail::MODE != 0), (0o700, true));
+    let h = fs.open("/tmp/.wine-1000", access::READ, share::ALL).unwrap();
+    assert_eq!(fs.stat_h(h).unwrap().mode, 0o700);
+    fs.close(h).unwrap();
+    fs.set_principal(bob());
+    assert_eq!(fs.stat("/tmp/.wine-1000").err(), Some(Error::NotFound));
+    // chmod jen s MANAGE (Bob neni vlastnik /tmp).
+    assert_eq!(fs.set_mode("/tmp", 0o777, true).err(), Some(Error::AccessDenied));
+    // chmod o+rx: vedome sdileni pro kazdeho.
+    fs.set_principal(alice());
+    fs.set_mode("/tmp/.wine-1000", 0o705, true).unwrap();
+    assert_eq!(fs.stat("/tmp/.wine-1000").unwrap().mode, 0o705);
+    fs.set_principal(bob());
+    assert!(fs.stat("/tmp/.wine-1000").is_ok());
+    // Prehrani logu: zmena prav prezije.
+    fs.set_principal(None);
+    fs.fsync().unwrap();
+    let mut fs = remount(fs);
+    assert_eq!(fs.mode("/tmp/.wine-1000").unwrap(), 0o705);
+    assert_clean(&mut fs);
+}

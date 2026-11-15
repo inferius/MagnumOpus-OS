@@ -12,37 +12,68 @@ fn no_dir(_: crate::c_int) -> Result<Vec<u8>, crate::c_int> {
     Err(EBADF)
 }
 
+/// Tabulka rodice: 0-2, roura 6 a 7, soubor 9; 8 s `FD_CLOEXEC`.
+const PARENT: &[(crate::c_int, bool)] = &[(0, false), (1, false), (2, false), (6, false), (7, false), (8, true), (9, false)];
+const STD: &[(crate::c_int, bool)] = &[(0, false), (1, false), (2, false)];
+
+fn io(a: &[Action]) -> [ChildIo; 3] {
+    plan(a, b"/".to_vec(), PARENT, no_dir).unwrap().io
+}
+
 #[test]
 fn plan_of_file_actions() {
-    let p = plan(&[], b"/home".to_vec(), no_dir).unwrap();
+    let p = plan(&[], b"/home".to_vec(), STD, no_dir).unwrap();
     assert_eq!(p.io, [Parent(0), Parent(1), Parent(2)]);
+    assert!(p.fds.is_empty());
     assert_eq!(p.cwd, b"/home");
-    // Roura rodice na stdout, zavreni obou koncu (vyssi cisla = nic).
-    let a = [Action::Dup2(6, 1), Action::Close(5), Action::Close(6)];
-    assert_eq!(plan(&a, b"/".to_vec(), no_dir).unwrap().io, [Parent(0), Parent(6), Parent(2)]);
+    // Roura rodice na stdout, zavreni obou koncu.
+    let a = [Action::Dup2(6, 1), Action::Close(6), Action::Close(7)];
+    let p = plan(&a, b"/".to_vec(), PARENT, no_dir).unwrap();
+    assert_eq!(p.io, [Parent(0), Parent(6), Parent(2)]);
+    assert_eq!(p.fds, vec![(9, Parent(9), false)]);
     // 2>&1 po presmerovani stdout.
-    let a = [Action::Dup2(7, 1), Action::Dup2(1, 2)];
-    assert_eq!(plan(&a, b"/".to_vec(), no_dir).unwrap().io, [Parent(0), Parent(7), Parent(7)]);
-    let a = [Action::Close(0), Action::Open(1, b"/dev/null".to_vec(), 1, 0)];
-    assert_eq!(plan(&a, b"/".to_vec(), no_dir).unwrap().io, [Closed, Null, Parent(2)]);
-    assert_eq!(plan(&[Action::Close(0), Action::Dup2(0, 1)], b"/".to_vec(), no_dir), Err(EBADF));
-    assert_eq!(plan(&[Action::Dup2(1, 5)], b"/".to_vec(), no_dir), Err(ENOTSUP));
+    assert_eq!(io(&[Action::Dup2(7, 1), Action::Dup2(1, 2)]), [Parent(0), Parent(7), Parent(7)]);
+    assert_eq!(io(&[Action::Close(0), Action::Open(1, b"/dev/null".to_vec(), 1, 0)]), [Closed, Null, Parent(2)]);
+    assert_eq!(plan(&[Action::Close(0), Action::Dup2(0, 1)], b"/".to_vec(), PARENT, no_dir), Err(EBADF));
+    assert_eq!(plan(&[Action::Dup2(5, 1)], b"/".to_vec(), PARENT, no_dir), Err(EBADF), "5 rodic nema");
     // Soubor: otevre rodic pred spustenim (cesta vuci adresari potomka).
     let a = [Action::Chdir(b"/data".to_vec()), Action::Open(1, b"out.txt".to_vec(), 0o1101, 0o644), Action::Dup2(1, 2)];
-    let p = plan(&a, b"/".to_vec(), no_dir).unwrap();
+    let p = plan(&a, b"/".to_vec(), STD, no_dir).unwrap();
     assert_eq!(p.io, [Parent(0), ChildIo::Open(0), ChildIo::Open(0)]);
     assert_eq!(p.opens, vec![(b"/data/out.txt".to_vec(), 0o1101, 0o644)]);
-    assert_eq!(plan(&[Action::Open(4, b"/dev/null".to_vec(), 0, 0)], b"/".to_vec(), no_dir), Err(ENOTSUP));
-    let a = [Action::CloseFrom(1)];
-    assert_eq!(plan(&a, b"/".to_vec(), no_dir).unwrap().io, [Parent(0), Closed, Closed]);
-    assert_eq!(plan(&[Action::CloseFrom(3)], b"/".to_vec(), no_dir).unwrap().io, [Parent(0), Parent(1), Parent(2)]);
+    assert_eq!(plan(&[Action::Open(4, b"/dev/null".to_vec(), 0, 0)], b"/".to_vec(), STD, no_dir), Err(ENOTSUP));
+    assert_eq!(io(&[Action::CloseFrom(1)]), [Parent(0), Closed, Closed]);
+    assert_eq!(io(&[Action::CloseFrom(3)]), [Parent(0), Parent(1), Parent(2)]);
+    assert!(plan(&[Action::CloseFrom(3)], b"/".to_vec(), PARENT, no_dir).unwrap().fds.is_empty());
     // Adresar: relativni vuci predchozimu, fd pres `dir_of`.
     let a = [Action::Chdir(b"src".to_vec()), Action::Chdir(b"lib".to_vec())];
-    assert_eq!(plan(&a, b"/home/u".to_vec(), no_dir).unwrap().cwd, b"/home/u/src/lib");
+    assert_eq!(plan(&a, b"/home/u".to_vec(), STD, no_dir).unwrap().cwd, b"/home/u/src/lib");
     let dir = |fd| if fd == 9 { Ok(b"/data".to_vec()) } else { Err(EBADF) };
     let a = [Action::Fchdir(9), Action::Chdir(b"x".to_vec())];
-    assert_eq!(plan(&a, b"/".to_vec(), dir).unwrap().cwd, b"/data/x");
-    assert_eq!(plan(&[Action::Fchdir(3)], b"/".to_vec(), dir), Err(EBADF));
+    assert_eq!(plan(&a, b"/".to_vec(), STD, dir).unwrap().cwd, b"/data/x");
+    assert_eq!(plan(&[Action::Fchdir(3)], b"/".to_vec(), STD, dir), Err(EBADF));
+}
+
+#[test]
+fn plan_inherits_fds_without_cloexec() {
+    // Bez akci: vse bez FD_CLOEXEC (8 ne), vzestupne.
+    let p = plan(&[], b"/".to_vec(), PARENT, no_dir).unwrap();
+    assert_eq!(p.fds, vec![(6, Parent(6), false), (7, Parent(7), false), (9, Parent(9), false)]);
+    // dup2 na vysoke cislo a z cloexec cisla (dup2 priznak rusi).
+    let a = [Action::Dup2(6, 40), Action::Dup2(8, 3), Action::Close(6)];
+    let p = plan(&a, b"/".to_vec(), PARENT, no_dir).unwrap();
+    assert_eq!(p.fds, vec![(3, Parent(8), true), (7, Parent(7), false), (9, Parent(9), false), (40, Parent(6), true)]);
+    // dup2(x, x) zrusi FD_CLOEXEC.
+    let p = plan(&[Action::Dup2(8, 8)], b"/".to_vec(), PARENT, no_dir).unwrap();
+    assert!(p.fds.contains(&(8, Parent(8), true)));
+    // Stdio rodice s FD_CLOEXEC potomek nedostane.
+    let p = plan(&[], b"/".to_vec(), &[(0, true), (1, false), (2, false)], no_dir).unwrap();
+    assert_eq!(p.io, [Closed, Parent(1), Parent(2)]);
+    // addopen nad 2; s O_CLOEXEC se zahodi.
+    let a = [Action::Open(5, b"log".to_vec(), 0o101, 0o644), Action::Open(6, b"x".to_vec(), crate::unistd::O_CLOEXEC, 0)];
+    let p = plan(&a, b"/d".to_vec(), STD, no_dir).unwrap();
+    assert_eq!(p.fds, vec![(5, ChildIo::Open(0), true)]);
+    assert_eq!(p.opens[0].0, b"/d/log");
 }
 
 #[test]
@@ -75,7 +106,7 @@ fn wait_status_encoding() {
 /// Spusti nahradniho potomka primo pres sys (bez posix_spawn).
 fn child(prog: &str) -> crate::c_int {
     let io: [ChildIo; 3] = [Parent(0), Parent(1), Parent(2)];
-    let req = crate::sys::SpawnReq { program: prog.into(), args: vec![], env: vec![], cwd: b"/".to_vec(), io };
+    let req = crate::sys::SpawnReq { program: prog.into(), args: vec![], env: vec![], cwd: b"/".to_vec(), io, fds: vec![] };
     register(crate::sys::spawn_child(req).unwrap())
 }
 

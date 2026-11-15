@@ -22,8 +22,17 @@ fn launch_roundtrip() {
 }
 
 #[test]
+fn fd_role_repeats() {
+    let l = Launch { program: String::from("x"), flags: 0, roles: vec![Role::Job, Role::Fd, Role::Stdout, Role::Fd], params: vec![] };
+    let b = l.encode(2).unwrap();
+    let mut r = Reader::new(&b);
+    request_head(&mut r).unwrap();
+    assert_eq!(Launch::decode(&mut r).unwrap(), l);
+}
+
+#[test]
 fn launch_rejects_bad_input() {
-    let mut l = Launch { program: String::from("x"), flags: 0, roles: vec![Role::Job; 9], params: vec![] };
+    let mut l = Launch { program: String::from("x"), flags: 0, roles: vec![Role::Job; crate::MAX_ROLES + 1], params: vec![] };
     assert_eq!(l.encode(1).err(), Some(Error::InvalidArgs), "moc roli");
     l.roles = vec![Role::Job];
     l.flags = 1 << 30;

@@ -96,6 +96,8 @@ fn proto_kind(k: Kind) -> osfs_proto::Kind {
         Kind::Dir => osfs_proto::Kind::Dir,
         Kind::Symlink => osfs_proto::Kind::Symlink,
         Kind::Dataset => osfs_proto::Kind::Dataset,
+        // Uzel socketu AF_UNIX Windows nezna: prazdny soubor bez dat.
+        Kind::Socket => osfs_proto::Kind::File,
     }
 }
 

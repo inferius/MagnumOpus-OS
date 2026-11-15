@@ -45,6 +45,8 @@ struct Service {
     focus: Option<Channel>,
     secure: Option<Channel>,
     peers: Peers,
+    /// Cekani smycky pres port (pocet klientu bez limitu `wait_many`).
+    waits: libos::WaitSet,
     /// Ovladac hlasil zmenu konektoru (`HOTPLUG`), vyridi se po kole.
     pending_hotplug: bool,
     /// Ovladac displeje zacal znovu (`RESET`).
@@ -102,13 +104,26 @@ impl Service {
 
 fn main(startup: Startup) -> i64 {
     println!("compd: bezim");
+    let waits = match libos::WaitSet::new() {
+        Ok(w) => w,
+        Err(e) => {
+            println!("compd: port nejde vytvorit: {e}");
+            return 1;
+        }
+    };
+    let mut peers = Peers::default();
+    match waits.port().handle().duplicate(None) {
+        Ok(h) => peers.set_port(libos::Port::from_handle(h)),
+        Err(e) => println!("compd: port pro ploty: {e}"),
+    }
     let mut s = Service {
         control: startup.bootstrap,
         screen: None,
         comp: None,
         focus: None,
         secure: None,
-        peers: Peers::default(),
+        peers,
+        waits,
         pending_hotplug: false,
         pending_reset: false,
         gpu: None,
@@ -185,7 +200,7 @@ impl Service {
             items.push((s.handle(), rd));
         }
         self.peers.wait_items(&mut items);
-        let r = libos::wait_many(&items, deadline);
+        let r = self.waits.wait(&items, deadline);
         drop(items);
         let obs = match r {
             Ok((_, o)) => o,

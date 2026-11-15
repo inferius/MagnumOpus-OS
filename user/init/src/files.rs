@@ -36,7 +36,7 @@ fn home(session: u64) -> Result<alloc::string::String> {
 
 /// Blok parametru s domovem jako pracovnim adresarem.
 fn params(session: u64) -> Result<StartHandle> {
-    Params { cwd: home(session)?.into_bytes(), args: vec![], env: vec![], flags: 0 }.start_handle()
+    Params { cwd: home(session)?.into_bytes(), args: vec![], env: vec![], flags: 0, ..Default::default() }.start_handle()
 }
 
 /// Spusti `files-copy` pro relaci (pri otevreni relace).

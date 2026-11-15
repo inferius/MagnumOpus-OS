@@ -21,6 +21,10 @@ pub use os_mem::*;
 mod os_proc;
 #[cfg(target_os = "magnumopus")]
 pub use os_proc::*;
+#[cfg(target_os = "magnumopus")]
+mod os_unix;
+#[cfg(target_os = "magnumopus")]
+pub use os_unix::*;
 
 #[cfg(not(target_os = "magnumopus"))]
 mod host;
@@ -52,6 +56,8 @@ pub struct OpenFlags {
     pub directory: bool,
     pub cloexec: bool,
     pub nonblock: bool,
+    /// Mod noveho souboru po `umask` (`O_CREAT`); `None` = jen zdedit.
+    pub mode: Option<u16>,
 }
 
 impl OpenFlags {
@@ -116,6 +122,10 @@ pub struct SpawnReq {
     /// Absolutni pracovni adresar potomka.
     pub cwd: Vec<u8>,
     pub io: [ChildIo; 3],
+    /// Zdedene fd nad 2: (cislo v potomkovi, `ChildIo::Parent` nebo
+    /// `Null`, z akce souboru). Druh, ktery zdedit nejde (socket), se
+    /// u zdedeneho fd preskoci, u akce je to `ENOTSUP`.
+    pub fds: Vec<(c_int, ChildIo, bool)>,
 }
 
 /// Sitove rozhrani mimo smycku (`ifaddrs.rs`).
@@ -140,6 +150,8 @@ pub struct Stat {
     pub uid: u64,
     pub readable: bool,
     pub writable: bool,
+    /// Mod POSIX z FS (9 bitu, pohled na opravneni); `None` = neznamy.
+    pub mode: Option<u16>,
 }
 
 impl Stat {
@@ -154,6 +166,7 @@ impl Stat {
             uid: 0,
             readable: true,
             writable: true,
+            mode: None,
         }
     }
 }
@@ -199,6 +212,7 @@ pub struct Region {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LockResult {
     Done,
-    Conflict { write: bool, start: u64, len: u64 },
+    /// `pid` = cislo procesu drzitele (`getpid` jeho cstd; 0 = nezname).
+    Conflict { write: bool, start: u64, len: u64, pid: i32 },
     Deadlock,
 }
