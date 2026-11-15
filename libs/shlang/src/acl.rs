@@ -68,6 +68,25 @@ pub struct Perms {
     pub acl: Option<Acl>,
 }
 
+/// Zdedeny grant s puvodem (jako `fsproto::perm::InheritedGrant`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Inherited {
+    pub who: u64,
+    pub rights: u8,
+    /// Slozka (cesta relace), jejiz popis grant dedi; prazdne = mimo
+    /// pripojene cesty relace (FS puvod neprozradi).
+    pub from: String,
+}
+
+/// Opravneni pro vypis (jako `fsproto::perm::AclView`): vlastni popis
+/// a zdedene granty, ktere na objekt plati (od korene; prazdne, kdyz
+/// objekt nededi).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct View {
+    pub perms: Perms,
+    pub inherited: Vec<Inherited>,
+}
+
 /// Ucet ze sluzby uctu (jmeno pro prikaz, zobrazovane jmeno).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Account {

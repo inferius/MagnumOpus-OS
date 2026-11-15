@@ -115,10 +115,10 @@ pub trait Fs {
     fn space(&mut self) -> FsResult<(u64, u64)> {
         Err(abi::Error::NotSupported)
     }
-    /// Opravneni objektu (prikaz `acl`): vlastnik, ucinna prava volajiciho
-    /// a vlastni popis. Bez prav k objektu `NOT_FOUND` (FS neprozradi, ze
-    /// existuje).
-    fn permissions(&mut self, _path: &str) -> FsResult<crate::acl::Perms> {
+    /// Opravneni objektu (prikaz `acl`, fsproto `ACL_VIEW`): vlastnik,
+    /// ucinna prava volajiciho, vlastni popis a zdedene granty s puvodem.
+    /// Bez prav k objektu `NOT_FOUND` (FS neprozradi, ze existuje).
+    fn acl_view(&mut self, _path: &str) -> FsResult<crate::acl::View> {
         Err(abi::Error::NotSupported)
     }
     /// Zapise cely vlastni popis opravneni (`None` = jen zdedena prava).

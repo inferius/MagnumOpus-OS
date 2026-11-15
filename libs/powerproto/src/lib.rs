@@ -81,8 +81,8 @@ pub enum Request {
     Permissions { app: String, perm: String },
     /// Jen kanal shell -> init: ucty lidi pro jmena v prikazu `acl` (cislo
     /// <-> jmeno). Odpoved [`Reply::Text`], radek na ucet
-    /// `uid\tjmeno\tzobrazovane jmeno` (totez, co vidi prihlasovaci
-    /// obrazovka), nebo [`Reply::Failed`].
+    /// `uid\tjmeno\tzobrazovane jmeno` (init ze sluzby uctu, `NAMES`),
+    /// nebo [`Reply::Failed`].
     Accounts,
 }
 

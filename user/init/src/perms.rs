@@ -55,12 +55,14 @@ pub fn for_uid(uid: u64, app: &str, perm: &str) -> Result<String> {
 }
 
 /// Ucty lidi pro jmena v prikazu `acl`: radek na ucet
-/// `uid\tjmeno\tzobrazovane jmeno`. Stejny seznam jako na prihlasovaci
-/// obrazovce (kanal `login`, `LIST`), bez tajemstvi.
+/// `uid\tjmeno\tzobrazovane jmeno`. Zdroj je kanal accountd `names`
+/// (`NAMES`, jen jmena; stejny jako karta Opravneni v Souborech). Shell
+/// kanal nedostava primo: duplikat sdileny relacemi by michal odpovedi,
+/// dotaz jde kanalem napajeni, ktery ma kazda relace vlastni.
 pub fn accounts() -> Result<String> {
-    let login = accountproto::client::Login(crate::accounts::channel("login")?);
+    let names = accountproto::client::Names(crate::accounts::channel("names")?);
     let mut s = String::new();
-    for a in login.list()? {
+    for a in names.names()? {
         s.push_str(&format!("{}\t{}\t{}\n", a.uid, a.name, a.display));
     }
     Ok(s)
