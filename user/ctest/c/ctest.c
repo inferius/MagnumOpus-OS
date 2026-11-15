@@ -26,6 +26,7 @@ int inherit_test(const char *dir);
 int unix_test(const char *dir);
 int mode_test(const char *dir);
 int link_test(const char *dir);
+int fmap_test(const char *dir);
 int termios_test(const char *dir);
 int memfd_test(void);
 int memfd_main(const char *side);
@@ -184,6 +185,9 @@ int main(int argc, char **argv) {
     int lk = dir != NULL ? link_test(dir) : -1;
     if (lk != 0) fprintf(stderr, "ctest link: krok %d errno %d\n", lk, errno);
     CHECK("link", lk == 0);
+    int fm = dir != NULL ? fmap_test(dir) : -1;
+    if (fm != 0) fprintf(stderr, "ctest fmap: krok %d errno %d\n", fm, errno);
+    CHECK("fmap", fm == 0);
     int tt = dir != NULL ? termios_test(dir) : -1;
     if (tt != 0) fprintf(stderr, "ctest termios: krok %d errno %d\n", tt, errno);
     CHECK("termios", tt == 0);

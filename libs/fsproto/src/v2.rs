@@ -112,6 +112,11 @@ pub mod op {
     /// (nejvys `VMO_IO`) + handle VMO (pravo `WRITE`) -> precteno u32. fsd
     /// zapise data od zacatku VMO; jedna zprava misto mnoha po `MAX_IO`.
     pub const READ_VMO: u32 = 129;
+    /// Objekt pameti s obsahem souboru pro `mmap`: handle u64 -> velikost
+    /// u64 + handle VMO jen pro cteni (`READ`, `MAP`; `MAP_PRIVATE` = klon
+    /// `VMO_CLONE` u klienta). Prazdny nebo prilis velky soubor =
+    /// `NOT_SUPPORTED` (klient kopiruje), kvota relace = `NO_MEMORY`.
+    pub const MAP_VMO: u32 = 130;
 }
 
 /// Prihlaseni klienta ve zprave posluchaci socketu (`SOCKET_CONNECT`):
@@ -580,6 +585,26 @@ impl FsClient {
                     // do nej uz nepise (odpoved prisla po zapisu).
                     out.extend_from_slice(unsafe { core::slice::from_raw_parts(addr as *const u8, got) });
                     return Ok(got);
+                }
+                Err(Error::ServiceRestarted | Error::BadHandle) if self.stale(local) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Err(Error::ServiceRestarted)
+    }
+
+    /// Objekt pameti s obsahem souboru `local` a velikost souboru
+    /// (`MAP_VMO`); handle je jen pro cteni.
+    pub fn map_vmo(&self, local: u64) -> Result<(libos::Vmo, u64)> {
+        for _ in 0..3 {
+            let fsd = self.resolve(local)?;
+            let mut w = Self::req(op::MAP_VMO);
+            w.u64(fsd);
+            match self.call_sending(Kind::Effect, &w.finish(), Vec::new()) {
+                Ok((body, mut hs)) => {
+                    let size = Reader::new(&body).u64()?;
+                    let h = hs.pop().ok_or(Error::Corrupted)?;
+                    return Ok((libos::Vmo::from_handle(h), size));
                 }
                 Err(Error::ServiceRestarted | Error::BadHandle) if self.stale(local) => {}
                 Err(e) => return Err(e),

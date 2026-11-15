@@ -26,6 +26,7 @@ mod serve;
 mod serve_data;
 mod serve_hist;
 mod serve_perm;
+mod filevmo;
 mod links;
 mod serve_sock;
 mod serve_v2;
@@ -168,6 +169,7 @@ fn main(startup: Startup) -> i64 {
         streams: Vec::new(),
         lock_pids: Default::default(),
         listeners: Default::default(),
+        vmos: Default::default(),
         in_handles: Vec::new(),
     };
     if let Some(g) = restart {

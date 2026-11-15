@@ -119,9 +119,22 @@ fn map(r: Request) -> Result<u64, c_int> {
         }
         return sys::memfd_map(fd, off, r.len, r.prot, r.addr.unwrap_or(0));
     }
-    // Soubor ve fsd zatim objekt pameti nedava: sdileny zapis nejde.
+    // Soubor: objekt pameti z fsd (MAP_PRIVATE = klon s kopii pri zapisu,
+    // sdilene jen pro cteni primo); ENOTSUP = prazdny/velky soubor nebo
+    // rozsah za koncem -> kopie nize. Sdileny zapis zatim nejde.
     if r.shared && r.prot & PROT_WRITE as u32 != 0 {
         return Err(errno::ENOTSUP);
+    }
+    if sys::status(fd)? & sys::status::ACCMODE != sys::status::WRONLY {
+        if let Some(a) = r.addr
+            && r.replace
+        {
+            let _ = sys::vm_release(a, r.len);
+        }
+        match sys::file_map(fd, off, r.len, r.prot, r.addr.unwrap_or(0), !r.shared) {
+            Err(errno::ENOTSUP) => {}
+            other => return other,
+        }
     }
     // Soubor: nacist do pameti s pravem zapisu, pak nastavit prava.
     let st = sys::status(fd)?;

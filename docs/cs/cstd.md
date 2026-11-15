@@ -215,10 +215,12 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
   nahradí, co v rozsahu bylo; `MAP_FIXED_NOREPLACE` jen volné místo.
 - **`MAP_SHARED` anonymní** je v rámci procesu totéž co soukromá (`fork`
   není).
-- **Soubor:** obsah se načte do anonymní paměti (`MAP_PRIVATE`, nebo
-  `MAP_SHARED` jen pro čtení - pozdější změny souboru se neprojeví).
-  `MAP_SHARED` se zápisem = `ENOTSUP`, dokud fsd nedá objekt paměti
-  souboru **[navrženo]**. Roura nebo socket = `ENODEV`.
+- **Soubor:** objekt paměti z fsd ([Soubory jako paměť](souborovy-system.md#soubory-jako-paměť)):
+  `MAP_PRIVATE` = klon s kopií při zápisu bez kopírování obsahu,
+  `MAP_SHARED` jen pro čtení = přímo objekt (pozdější změny souboru se
+  neprojeví); prázdný, velký soubor nebo rozsah za koncem = načtení do
+  anonymní paměti jako dřív. `MAP_SHARED` se zápisem = `ENOTSUP`
+  **[navrženo]**. Roura nebo socket = `ENODEV`.
 - **W^X:** `PROT_EXEC` na nezapečetěné paměti jen s oprávněním JIT
   z manifestu ([sprava-pameti.md](sprava-pameti.md)), jinak `EACCES`.
 - `madvise(MADV_DONTNEED | MADV_FREE)` vrátí paměť a další čtení vrátí

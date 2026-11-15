@@ -46,6 +46,10 @@ pub struct Session {
     pub key: u64,
     /// Ceka registrace na portu (po paketu `false` -> obslouzit a obnovit).
     pub armed: bool,
+    /// Soubory (dataset, oid), ktere relace dostala k mapovani (`MAP_VMO`),
+    /// a jejich soucet bajtu (kvota `filevmo::SESSION_QUOTA`).
+    pub mapped: BTreeSet<(u64, u64)>,
+    pub mapped_bytes: u64,
 }
 
 impl Session {
@@ -62,6 +66,8 @@ impl Session {
             watch: None,
             key: 0,
             armed: false,
+            mapped: BTreeSet::new(),
+            mapped_bytes: 0,
         }
     }
 

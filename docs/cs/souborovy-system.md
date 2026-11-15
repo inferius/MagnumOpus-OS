@@ -514,6 +514,55 @@ fsd následuje odkazy při hledání cesty (`user/fsd/src/links.rs`):
   nenásleduje (`NOT_FOUND`).
 - Mód odkazu je `0777` jen jako zobrazení (`lstat`); práva má cíl.
 
+## Soubory jako paměť
+
+Rozhodnutí koordinátora (15. 11. 2026, otázky Q1-Q7 varianty A): `mmap`
+souboru bez kopírování přes objekt paměti (VMO), který drží fsd
+(`user/fsd/src/filevmo.rs`, operace `MAP_VMO`).
+
+- **`MAP_PRIVATE` a `MAP_SHARED` jen pro čtení** **[ověřeno v QEMU]**
+  x86_64 (krok `fmap` testu `ctest`, sada `cstd`): fsd drží pro soubor
+  VMO s obsahem (cache podle dataset + oid), naplní ho celý při prvním
+  mapování a klientovi dá handle **jen pro čtení**. `MAP_PRIVATE` je klon
+  s kopií při zápisu (`VMO_CLONE`) - stránky se sdílí, dokud do nich
+  klient nezapíše, nic se nekopíruje. Platnost hlídá verze obsahu: po
+  změně souboru dostane další mapování nový objekt, existující soukromé
+  mapování zůstane snímkem (POSIX to nechává nespecifikované). Prázdný
+  soubor, soubor nad 256 MiB (`filevmo::MAX_FILE`) a rozsah za koncem
+  souboru jdou dál kopií (`READ_VMO`).
+- **Paměť:** VMO vytváří fsd, takže se počítá do **rozpočtu fsd** (vidí ho
+  diagnostika paměti jobů), ne do jobu klienta - to je omezení: klient tím
+  nezvětší svůj účet. Zneužití brání kvóta na relaci (součet různých
+  souborů 1 GiB, `SESSION_QUOTA`, překročení = `ENOMEM`) a cache VMO bez
+  odkazu fsd zahazuje od nejstaršího (512 MiB, `CACHE_MAX`; klientům jejich
+  handly a klony zůstanou). Stránky, do kterých klient v `MAP_PRIVATE`
+  zapíše, platí job klienta (klon na jeho účet).
+- **Smazání** souboru mapování neruší (sirotek, POSIX). **Odpojení
+  svazku / odvolání `GRANT`:** fsd zmenší VMO na 0, klienti dostanou při
+  přístupu výjimku za koncem (`SIGBUS`) **[navrženo]**.
+- **Pager v jádře** (plnění po stránkách při výpadku, pro velké soubory
+  a řídké čtení) je **zamýšlená další fáze** **[navrženo]**: změní se jen
+  plnění ve fsd, protokol klienta zůstane (klient vždy jen dostane
+  handle).
+
+**`MAP_SHARED` se zápisem** **[navrženo]** (druhý krok, Wine W2 - sekce
+nad soubory, WAL sqlite):
+
+- VMO ve fsd je zdroj pravdy, dokud existuje: `WRITE_H` zapíše do FS i do
+  VMO, sdílená mapování vidí změnu hned (Q2).
+- Zápis zpět: nový syscall `VMO_DIRTY` (číslo 80) vrátí špinavé stránky
+  a vyčistí je; fsd je zapíše při `msync`/`fsync` klienta, `munmap`/zavření
+  a commitu FS (Q3). Zkrácení souboru = `VMO_SET_SIZE` (přístup za konec
+  = `SIGBUS`, jádro už umí).
+- Výpadek fsd (Q5): klient po obnově relace soubor **znovu otevře s právem
+  zápisu** (práva se ověří znovu) a teprve pak předá své sdílené VMO; fsd
+  jeho obsah bere jako zápis toho klienta (žádná důvěra v původ VMO). Bez
+  práva zápisu se změny zahodí a `msync` vrátí `SERVICE_RESTARTED`.
+- **Riziko (výslovně):** sdílené mapování pro zápis dává klientovi
+  zapisovatelnou paměť souboru - ostatní procesy se stejným souborem vidí
+  jeho zápisy bez další kontroly FS (práva se ověřují jen při otevření pro
+  zápis), stejně jako POSIX.
+
 ## Limity formátu
 
 > **Změna proti v2:** nová kapitola: soubor nejvýš 2^63-1 B, kontrolovaná aritmetika, saturující souhrny, extent 496 bloků. **Proč:** dřív mohly velikosti přetéct. ([všechny změny](fs-verze.md#přechod-v2---v3))
@@ -1766,6 +1815,7 @@ zůstávají. Z receptu systému se nezužuje. Jinak `ACCESS_DENIED`.
 | 127 | `LSTAT` | cesta | `Stat` odkazu samotného |
 | 128 | `REALPATH` | cesta | kanonická cesta relace (odkazy, `.`, `..` vyřešené) |
 | 129 | `READ_VMO` | handle u64, offset u64, délka u32 (nejvýš `VMO_IO` = 1 MiB) + handle VMO klienta (`WRITE`, `MAP`) | přečteno u32; data od začátku VMO |
+| 130 | `MAP_VMO` | handle u64 | velikost u64 + handle VMO jen pro čtení (`READ`, `MAP`); prázdný/velký soubor `NOT_SUPPORTED`, kvóta `NO_MEMORY` ([Soubory jako paměť](#soubory-jako-paměť)) |
 
 **`OPEN_STREAM`** **[ověřeno v QEMU]** (sada `cstd`, krok `posix2`:
 výstup potomka `posix_spawn` do souboru a 200 000 bajtů souboru na jeho

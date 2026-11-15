@@ -35,6 +35,7 @@ impl Service {
         match opcode {
             op::SOCKET_BIND => Some(self.sock_bind(sess, r, handles)),
             op::SOCKET_CONNECT => Some(self.sock_connect(sess, r, handles)),
+            op::MAP_VMO => Some(self.map_vmo(sess, r)),
             op::READ_VMO => Some((|| {
                 let h = r.u64()?;
                 if !sess.handles.contains(&h) {
@@ -126,6 +127,56 @@ impl Service {
             }
             Err(e) => Err(e),
         }
+    }
+}
+
+impl Service {
+    /// `MAP_VMO`: objekt pameti s obsahem souboru (`filevmo.rs`).
+    fn map_vmo(&mut self, sess: &mut Session, r: &mut Reader) -> Result<Reply> {
+        use crate::filevmo::{MAX_FILE, SESSION_QUOTA, write_mapped};
+        let h = r.u64()?;
+        if !sess.handles.contains(&h) {
+            return Err(Error::BadHandle);
+        }
+        let fs = self.fs.as_mut().ok_or(Error::IoError)?;
+        let st = fs.stat_h(h)?;
+        if st.kind != fs::Kind::File {
+            return Err(Error::WrongType);
+        }
+        let size = st.size;
+        if size == 0 || size > MAX_FILE {
+            return Err(Error::NotSupported);
+        }
+        let rev = fs.revision_h(h)?;
+        let key = (rev.dataset, rev.oid);
+        let new = !sess.mapped.contains(&key);
+        if new && sess.mapped_bytes.saturating_add(size) > SESSION_QUOTA {
+            return Err(Error::NoMemory);
+        }
+        let page = libos::vm::page_size();
+        let vmo = self.vmos.get(key, rev.version, size, |v| {
+            write_mapped(v, size.div_ceil(page) * page, |buf| {
+                let mut off = 0u64;
+                while off < size {
+                    let n = (size - off).min(fsproto::VMO_IO as u64) as usize;
+                    let d = fs.read_h(h, off, n)?;
+                    buf[off as usize..off as usize + d.len()].copy_from_slice(&d);
+                    if d.len() < n {
+                        break;
+                    }
+                    off += n as u64;
+                }
+                Ok(())
+            })
+        })?;
+        let ro = vmo.handle().duplicate(Some(libos::Rights::BASIC | libos::Rights::READ | libos::Rights::MAP))?;
+        if new {
+            sess.mapped.insert(key);
+            sess.mapped_bytes += size;
+        }
+        let mut w = fsproto::Writer::new();
+        w.u64(size);
+        Ok(Reply { body: w, handles: alloc::vec![ro], new_session: None, session_ops: alloc::vec::Vec::new(), watch: None })
     }
 }
 

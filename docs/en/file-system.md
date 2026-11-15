@@ -525,6 +525,58 @@ smycka, prava, jmenny prostor relace" in the suite `souborovy system`, step
 - The link mode is `0777` only as a display (`lstat`); the target has the
   rights.
 
+## Files as memory
+
+Coordinator decision (15 Nov 2026, questions Q1-Q7 option A): `mmap` of a
+file without copying through a memory object (VMO) held by fsd
+(`user/fsd/src/filevmo.rs`, operation `MAP_VMO`).
+
+- **`MAP_PRIVATE` and read-only `MAP_SHARED`** **[verified in QEMU]**
+  x86_64 (step `fmap` of the `ctest` test, suite `cstd`): fsd keeps a VMO
+  with the file contents (a cache by dataset + oid), fills it completely on
+  the first mapping and gives the client a **read-only** handle.
+  `MAP_PRIVATE` is a copy-on-write clone (`VMO_CLONE`) - pages are shared
+  until the client writes them, nothing is copied. Validity is guarded by
+  the content version: after the file changes the next mapping gets a new
+  object, an existing private mapping stays a snapshot (POSIX leaves this
+  unspecified). An empty file, a file over 256 MiB (`filevmo::MAX_FILE`)
+  and a range past the end of the file still go by copy (`READ_VMO`).
+- **Memory:** fsd creates the VMO, so it counts towards **fsd's budget**
+  (visible in the job memory diagnostics), not towards the client's job -
+  that is a limitation: the client does not grow its own account this way.
+  Abuse is prevented by a per-session quota (sum of distinct files 1 GiB,
+  `SESSION_QUOTA`, exceeding it = `ENOMEM`), and fsd drops unreferenced
+  cache VMOs oldest first (512 MiB, `CACHE_MAX`; clients keep their handles
+  and clones). Pages the client writes in `MAP_PRIVATE` are paid by the
+  client's job (the clone is on its account).
+- **Deleting** a file does not cancel mappings (an orphan, POSIX).
+  **Unmounting a volume / revoking a `GRANT`:** fsd shrinks the VMO to 0,
+  clients get a past-the-end exception on access (`SIGBUS`)
+  **[designed]**.
+- **A pager in the kernel** (filling page by page on a fault, for big files
+  and sparse reads) is the **intended next phase** **[designed]**: only the
+  filling in fsd changes, the client protocol stays (the client always just
+  gets a handle).
+
+**Writable `MAP_SHARED`** **[designed]** (the second step, Wine W2 -
+sections over files, sqlite WAL):
+
+- The VMO in fsd is the source of truth while it exists: `WRITE_H` writes to
+  the FS and to the VMO, shared mappings see the change at once (Q2).
+- Write-back: a new syscall `VMO_DIRTY` (number 80) returns the dirty pages
+  and clears them; fsd writes them on the client's `msync`/`fsync`,
+  `munmap`/close and on an FS commit (Q3). Truncating a file =
+  `VMO_SET_SIZE` (access past the end = `SIGBUS`, the kernel already can).
+- fsd crash (Q5): after the session recovers, the client **opens the file
+  again with the write right** (rights are checked again) and only then
+  hands over its shared VMO; fsd treats its contents as that client's write
+  (no trust in the VMO's origin). Without the write right the changes are
+  dropped and `msync` returns `SERVICE_RESTARTED`.
+- **Risk (explicitly):** a writable shared mapping gives the client writable
+  memory of the file - other processes with the same file see its writes
+  without another FS check (rights are checked only when opening for
+  writing), the same as POSIX.
+
 ## Format limits
 
 > **Change from v2:** a new chapter: a file is at most 2^63-1 B, checked arithmetic, saturating summaries, an extent of 496 blocks. **Why:** sizes could overflow before. ([all changes](fs-versions.md#transition-v2---v3))
@@ -1826,6 +1878,7 @@ groups stay. A system recipe cannot be narrowed. Otherwise `ACCESS_DENIED`.
 | 127 | `LSTAT` | path | `Stat` of the link itself |
 | 128 | `REALPATH` | path | the canonical session path (links, `.`, `..` resolved) |
 | 129 | `READ_VMO` | handle u64, offset u64, length u32 (at most `VMO_IO` = 1 MiB) + the client's VMO handle (`WRITE`, `MAP`) | read u32; data from the start of the VMO |
+| 130 | `MAP_VMO` | handle u64 | size u64 + a read-only VMO handle (`READ`, `MAP`); an empty/big file `NOT_SUPPORTED`, quota `NO_MEMORY` ([Files as memory](#files-as-memory)) |
 
 **`OPEN_STREAM`** **[verified in QEMU]** (suite `cstd`, step `posix2`: the
 output of a `posix_spawn` child into a file and 200 000 bytes of a file on
