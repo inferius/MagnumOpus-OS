@@ -245,3 +245,17 @@ pub fn self_id() -> u32 {
         Err(old) => old,
     }
 }
+
+/// Popis procesoveho fd (C `mo_self_process_fd`, Windows vrstva): handle
+/// vlastniho procesu jen s pravy `READ_MEMORY` a `WRITE_MEMORY` (plus
+/// `DUPLICATE` a `TRANSFER`, aby sel predat `SCM_RIGHTS`). Zadne ukonceni,
+/// vlakna, mapovani ani cekani - klient jim sveruje jen svou pamet serveru
+/// sve aplikace (jako `ptrace` stejneho uzivatele).
+pub fn self_memory_object() -> Result<crate::fd::Object, Error> {
+    let me = libos::Handle::from_raw(libos::rt::self_process());
+    let rights = libos::Rights(libos::Rights::READ_MEMORY.0 | libos::Rights::WRITE_MEMORY.0 | libos::Rights::DUPLICATE.0 | libos::Rights::TRANSFER.0);
+    let dup = me.duplicate(Some(rights));
+    // Handle vlastniho procesu se nesmi zavrit (`start::init`).
+    core::mem::forget(me);
+    Ok(crate::fd::Object::Process(libos::Process::from_handle(dup?)))
+}

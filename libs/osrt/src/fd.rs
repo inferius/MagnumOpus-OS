@@ -53,6 +53,9 @@ pub enum Object {
     /// Objekt knihovny nad std (napr. mnozina `epoll` v cstd); cteni
     /// a zapis nejdou.
     User(alloc::boxed::Box<dyn core::any::Any + Send + Sync>),
+    /// Procesovy fd: handle procesu jen s pravy pameti (`PROCESS_MEMORY`;
+    /// cstd `mo_self_process_fd`). Cteni a zapis nejdou.
+    Process(libos::Process),
 }
 
 /// Popis otevreni (sdileny vsemi duplikaty cisla).
@@ -96,7 +99,7 @@ impl Description {
         match &self.object {
             Object::File(f) => f.read(buf),
             Object::Stdio(Stream::In) => stdio::read(buf),
-            Object::Stdio(_) | Object::User(_) => Err(Error::BadHandle),
+            Object::Stdio(_) | Object::User(_) | Object::Process(_) => Err(Error::BadHandle),
             Object::Pipe(p) if self.nonblock() => p.try_read(buf),
             Object::Pipe(p) => p.read(buf),
             Object::Socket(s) => s.recv(buf, self.nonblock()),
@@ -113,7 +116,7 @@ impl Description {
         }
         match &self.object {
             Object::File(f) => f.write(data),
-            Object::Stdio(Stream::In) | Object::User(_) => Err(Error::BadHandle),
+            Object::Stdio(Stream::In) | Object::User(_) | Object::Process(_) => Err(Error::BadHandle),
             Object::Stdio(s) => stdio::write(*s, data),
             Object::Pipe(p) => p.write(data),
             Object::Socket(s) => s.send(data, self.nonblock()),

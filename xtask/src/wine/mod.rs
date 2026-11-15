@@ -34,6 +34,7 @@ pub const WINE: CPort = CPort {
         "0003-server-no-fork-magnumopus.patch",
         "0004-server-memfd-sections-magnumopus.patch",
         "0005-ntdll-spawn-process-magnumopus.patch",
+        "0006-process-memory-magnumopus.patch",
     ],
     build: Build::Sources { lib: &[], defines: &[], programs: &[] },
     data: &[],

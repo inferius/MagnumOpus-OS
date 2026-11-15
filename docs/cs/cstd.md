@@ -980,6 +980,27 @@ s kapacitou 64 MiB (`mo_memfd_create` jinou):
   odmítne). `mo_start_handle(tag)` vezme handle, který rodič předal ve
   startovní zprávě.
 
+### Procesový fd
+
+**[ověřeno v QEMU]** x86_64 (Windows vrstva W2, sada `wine`).
+`<magnumopus/process.h>`: program svěří svou paměť serveru své aplikace
+(wineserver: `ReadProcessMemory`, `WriteProcessMemory`, debugger).
+
+- `mo_self_process_fd()` dá fd s handlem vlastního procesu **jen s právy
+  paměti** (`READ_MEMORY`, `WRITE_MEMORY`, k tomu `DUPLICATE`
+  a `TRANSFER`, aby šel předat) - ne ukončení, vlákna, mapování ani
+  ladění. Má **vždy `FD_CLOEXEC`**: do dětí se nedědí omylem, jinému
+  procesu se dostane jen výslovně (`sendmsg` se `SCM_RIGHTS`,
+  `abi::params::fd_kind::PROCESS`).
+- `mo_process_memory(fd, MO_PROCESS_READ | MO_PROCESS_WRITE, addr, buf,
+  len)` čte nebo zapisuje paměť procesu za fd
+  ([`PROCESS_MEMORY`](syscally.md#process_memory)); vrací přenesené bajty
+  (méně = částečná kopie), `-1` + `errno` (`EFAULT`, `EACCES`, `EINVAL`).
+- ⚠️ **Bezpečnost jako `ptrace` stejného uživatele na Linuxu:** kdo fd
+  dostane, čte všechna tajemství procesu a může mu přepsat data. Wine ho
+  posílá jen svému wineserveru (server stejné aplikace a prefixu); jinam
+  ho program dávat nemá.
+
 ### Semafory
 
 `semaphore.h`: nepojmenované semafory (`sem_init`, `sem_wait`,

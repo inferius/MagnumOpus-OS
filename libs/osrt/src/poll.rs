@@ -70,7 +70,7 @@ fn source(p: &PollFd) -> Result<Source> {
     let can_write = st != fd::status::RDONLY;
     Ok(match &d.object {
         Object::File(_) | Object::Memory(_) => Source::Now(want & (ev::IN | ev::OUT)),
-        Object::User(_) => Source::Now(0),
+        Object::User(_) | Object::Process(_) => Source::Now(0),
         // /dev/null je vzdy pripraveny (cteni hned konec).
         Object::Null => Source::Now(want & (ev::IN | ev::OUT)),
         Object::Stdio(Stream::In) => {

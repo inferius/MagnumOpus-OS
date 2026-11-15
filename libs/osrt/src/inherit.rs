@@ -77,6 +77,8 @@ pub fn export(child_fd: i32, desc: &Description) -> Result<Export> {
             Inherit::Null | Inherit::None => Export { entry: entry(fd_kind::NULL, Vec::new()), handles: Vec::new() },
         },
         Object::Null => Export { entry: entry(fd_kind::NULL, Vec::new()), handles: Vec::new() },
+        // Procesovy fd: duplikat se stejnymi (zuzenymi) pravy.
+        Object::Process(p) => Export { entry: entry(fd_kind::PROCESS, Vec::new()), handles: alloc::vec![p.handle().duplicate(None)?] },
         Object::Memory(m) => {
             let mut w = Vec::with_capacity(13);
             w.push(u8::from(m.writable()));
@@ -127,6 +129,7 @@ pub(crate) fn object(e: &Fd, handles: &mut dyn Iterator<Item = Handle>) -> Resul
             Ok(Object::File(File::from_identity(&id, pos, append, path)?))
         }
         fd_kind::NULL => Ok(Object::Null),
+        fd_kind::PROCESS => Ok(Object::Process(libos::Process::from_handle(handle.ok_or(Error::Corrupted)?))),
         fd_kind::UNIX => Ok(Object::Unix(crate::unix::UnixSocket::import(&e.data, handles)?)),
         _ => Err(Error::NotSupported),
     }

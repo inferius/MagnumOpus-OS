@@ -302,7 +302,11 @@ over `libc.so`).
   `memfd` instead of a temporary file),
   `0005-ntdll-spawn-process-magnumopus.patch` (nový proces Windows přes
   `posix_spawn` zavaděče místo dvojího `fork` / a new Windows process via
-  `posix_spawn` of the loader instead of a double `fork`).
+  `posix_spawn` of the loader instead of a double `fork`),
+  `0006-process-memory-magnumopus.patch` (klient svěří wineserveru paměť
+  procesovým fd, `read/write_process_memory` přes `PROCESS_MEMORY` / the
+  client entrusts its memory to wineserver with a process fd,
+  `read/write_process_memory` via `PROCESS_MEMORY`).
 - **Popis / Description:** `docs/cs/windows-vrstva.md`,
   `docs/en/windows-layer.md`.
 

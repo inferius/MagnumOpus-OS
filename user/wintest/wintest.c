@@ -3,6 +3,8 @@
  * Wine (tools/wsl/build_wine.sh). Spousti ho sada `wine` v QEMU:
  *
  *   wine wintest.exe alfa "beta gama"   (prostredi WINTEST_VAR=hodnota)
+ *   wine wintest.exe procesy            (W2: dalsi proces, pojmenovane
+ *                                        udalosti, pamet jineho procesu)
  *
  * Kontroly: printf, argv, prostredi (getenv i GetEnvironmentVariableA),
  * soubory (fopen/fprintf/fgets v textovem rezimu, atributy, smazani),
@@ -13,6 +15,71 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
+
+/* Rezim "procesy" (W2): dite nastavi marker, rodic ho precte a prepise
+ * (ReadProcessMemory/WriteProcessMemory = PROCESS_MEMORY pres wineserver),
+ * synchronizace pojmenovanymi udalostmi, kod konce ditete 77. */
+static volatile LONG marker = 0x1234;
+
+static int child(void)
+{
+    HANDLE ready = OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, FALSE, "Local\\wintest_ready");
+    HANDLE quit = OpenEventA(SYNCHRONIZE, FALSE, "Local\\wintest_quit");
+
+    marker = 0x5678;
+    if (!ready || !quit || !SetEvent(ready)) return 70;
+    if (WaitForSingleObject(quit, 60000) != WAIT_OBJECT_0) return 71;
+    return marker == 0x9abc ? 77 : 78;
+}
+
+static int processes(void)
+{
+    PROCESS_INFORMATION pi;
+    STARTUPINFOA si;
+    char self[MAX_PATH], cmd[MAX_PATH + 16];
+    HANDLE ready, quit;
+    LONG value = 0;
+    SIZE_T n = 0;
+    DWORD code = 0;
+    int bad = 0;
+
+    ready = CreateEventA(NULL, TRUE, FALSE, "Local\\wintest_ready");
+    quit = CreateEventA(NULL, TRUE, FALSE, "Local\\wintest_quit");
+    if (!ready || !quit) bad |= 1;
+    GetModuleFileNameA(NULL, self, sizeof(self));
+    snprintf(cmd, sizeof(cmd), "\"%s\" dite", self);
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+    {
+        printf("wintest procesy: CreateProcess %lu\n", GetLastError());
+        return 100 + 2;
+    }
+    if (WaitForSingleObject(ready, 60000) != WAIT_OBJECT_0) bad |= 4;
+    if (!ReadProcessMemory(pi.hProcess, (void *)&marker, &value, sizeof(value), &n) || n != sizeof(value) ||
+        value != 0x5678)
+    {
+        printf("wintest procesy: ReadProcessMemory %lu, hodnota %lx\n", GetLastError(), (unsigned long)value);
+        bad |= 8;
+    }
+    value = 0x9abc;
+    if (!WriteProcessMemory(pi.hProcess, (void *)&marker, &value, sizeof(value), &n) || n != sizeof(value))
+    {
+        printf("wintest procesy: WriteProcessMemory %lu\n", GetLastError());
+        bad |= 16;
+    }
+    SetEvent(quit);
+    if (WaitForSingleObject(pi.hProcess, 60000) != WAIT_OBJECT_0 || !GetExitCodeProcess(pi.hProcess, &code) ||
+        code != 77)
+    {
+        printf("wintest procesy: kod ditete %lu\n", code);
+        bad |= 32;
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    printf("wintest procesy: chyby %d\n", bad);
+    return bad ? 100 + bad : 42;
+}
 
 static DWORD WINAPI worker(void *arg)
 {
@@ -29,6 +96,9 @@ int main(int argc, char **argv)
     const char *env;
     int bad = 0, value = 0;
     FILE *f;
+
+    if (argc >= 2 && !strcmp(argv[1], "dite")) return child();
+    if (argc >= 2 && !strcmp(argv[1], "procesy")) return processes();
 
     printf("wintest: start\n");
 

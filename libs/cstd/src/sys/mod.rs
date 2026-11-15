@@ -22,6 +22,10 @@ mod os_proc;
 #[cfg(target_os = "magnumopus")]
 pub use os_proc::*;
 #[cfg(target_os = "magnumopus")]
+mod os_procfd;
+#[cfg(target_os = "magnumopus")]
+pub use os_procfd::*;
+#[cfg(target_os = "magnumopus")]
 mod os_unix;
 #[cfg(target_os = "magnumopus")]
 pub use os_unix::*;
@@ -30,6 +34,17 @@ pub use os_unix::*;
 mod host;
 #[cfg(not(target_os = "magnumopus"))]
 pub use host::*;
+
+/// Procesovy fd na hostiteli neni (objekt procesu jadra).
+#[cfg(not(target_os = "magnumopus"))]
+pub fn self_process_fd() -> R<i32> {
+    Err(crate::errno::ENOSYS)
+}
+
+#[cfg(not(target_os = "magnumopus"))]
+pub fn process_memory(_fd: i32, _write: bool, _addr: u64, _buf: *mut u8, _len: usize) -> R<usize> {
+    Err(crate::errno::ENOSYS)
+}
 
 /// Vysledek se `errno` jako chybou.
 pub type R<T> = Result<T, c_int>;

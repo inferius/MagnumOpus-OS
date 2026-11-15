@@ -1,0 +1,152 @@
+diff --git a/server/process.h b/server/process.h
+--- a/server/process.h
++++ b/server/process.h
+@@ -51,6 +51,9 @@
+     timeout_t            sigkill_delay;   /* delay before final SIGKILL */
+     unsigned short       machine;         /* client machine type */
+     int                  unix_pid;        /* Unix pid for final SIGKILL */
++#ifdef __magnumopus__
++    int                  mem_fd;          /* MagnumOpus: procesovy fd klienta (PROCESS_MEMORY) */
++#endif
+     int                  exit_code;       /* process exit code */
+     int                  running_threads; /* number of threads running in this process */
+     timeout_t            start_time;      /* absolute time at process start */
+diff --git a/server/process.c b/server/process.c
+--- a/server/process.c
++++ b/server/process.c
+@@ -673,6 +673,9 @@
+     process->sigkill_delay   = TICKS_PER_SEC / 64;
+     process->machine         = native_machine;
+     process->unix_pid        = -1;
++#ifdef __magnumopus__
++    process->mem_fd          = -1;
++#endif
+     process->exit_code       = STILL_ACTIVE;
+     process->running_threads = 0;
+     process->priority        = PROCESS_PRIOCLASS_NORMAL;
+@@ -786,6 +789,9 @@
+ 
+     close_process_handles( process );
+     set_process_startup_state( process, STARTUP_ABORTED );
++#ifdef __magnumopus__
++    if (process->mem_fd != -1) close( process->mem_fd );
++#endif
+ 
+     if (process->job)
+     {
+diff --git a/server/thread.c b/server/thread.c
+--- a/server/thread.c
++++ b/server/thread.c
+@@ -1756,6 +1756,11 @@
+ 
+     current->unix_pid = process->unix_pid = req->unix_pid;
+     current->unix_tid = req->unix_tid;
++#ifdef __magnumopus__
++    /* Procesovy fd, ktery klient poslal pred pozadavkem (ntdll server.c):
++     * pamet klienta pro read/write_process_memory (ptrace.c). */
++    if (process->mem_fd == -1) process->mem_fd = thread_get_inflight_fd( current, 1021 );
++#endif
+ 
+     if (!process->parent_id)
+         process->affinity = current->affinity = get_thread_affinity( current );
+diff --git a/server/ptrace.c b/server/ptrace.c
+--- a/server/ptrace.c
++++ b/server/ptrace.c
+@@ -471,9 +471,35 @@
+     return !len;
+ }
+ 
++#ifdef __magnumopus__
++#include <magnumopus/process.h>
++
++/* MagnumOpus: pamet klienta pres jeho procesovy fd (PROCESS_MEMORY v jadre,
++ * klient ho serveru sveril pri pripojeni); ptrace ani /proc neni. */
++static int mo_process_access( struct process *process, int op, client_ptr_t ptr, data_size_t size,
++                              char *buf, data_size_t *done )
++{
++    ssize_t len;
++
++    if (process->mem_fd == -1 || !is_process_init_done( process ) || (unsigned long)ptr != ptr)
++    {
++        set_error( STATUS_ACCESS_DENIED );
++        return 0;
++    }
++    len = mo_process_memory( process->mem_fd, op, ptr, buf, size );
++    if (done) *done = max( len, 0 );
++    if (len == size) return 1;
++    set_error( len >= 0 ? STATUS_PARTIAL_COPY : STATUS_ACCESS_DENIED );
++    return 0;
++}
++#endif
++
+ /* read data from a process memory space */
+ int read_process_memory( struct process *process, client_ptr_t ptr, data_size_t size, char *dest )
+ {
++#ifdef __magnumopus__
++    return mo_process_access( process, MO_PROCESS_READ, ptr, size, dest, NULL );
++#else
+     struct thread *thread = get_ptrace_thread( process );
+     int ret;
+ 
+@@ -487,6 +513,7 @@
+ 
+     if ((ret = read_process_memory_vm( thread, ptr, size, dest )) != -1) return ret;
+     return read_process_memory_ptrace( thread, ptr, size, dest );
++#endif
+ }
+ 
+ /* make sure we can write to the whole address range */
+@@ -589,6 +616,9 @@
+ int write_process_memory( struct process *process, client_ptr_t ptr, data_size_t size, const char *src,
+                           data_size_t *written )
+ {
++#ifdef __magnumopus__
++    return mo_process_access( process, MO_PROCESS_WRITE, ptr, size, (char *)src, written );
++#else
+     struct thread *thread = get_ptrace_thread( process );
+     int ret;
+ 
+@@ -602,6 +632,7 @@
+ 
+     if ((ret = write_process_memory_vm( thread, ptr, size, src, written )) != -1) return ret;
+     return write_process_memory_ptrace( thread, ptr, size, src, written );
++#endif
+ }
+ 
+ 
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -79,6 +79,9 @@
+ #include "wine/server.h"
+ #include "wine/debug.h"
+ #include "unix_private.h"
++#ifdef __magnumopus__
++#include <magnumopus/process.h>
++#endif
+ #include "ddk/wdm.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(server);
+@@ -1665,6 +1668,22 @@
+ 
+     reply_pipe = init_thread_pipe();
+ 
++#ifdef __magnumopus__
++    /* MagnumOpus: serveru sve aplikace sverit vlastni pamet (procesovy fd jen
++     * s pravy pameti, PROCESS_MEMORY; jako ptrace stejneho uzivatele). Server
++     * ho vyzvedne pod pevnym cislem v init_first_thread (thread.c). */
++    {
++        int pfd = mo_self_process_fd();
++        if (pfd != -1 && pfd != 1021)
++        {
++            if (dup2( pfd, 1021 ) != -1) wine_server_send_fd( 1021 );
++            close( 1021 );
++        }
++        else if (pfd == 1021) wine_server_send_fd( pfd );
++        if (pfd != -1) close( pfd );
++    }
++#endif
++
+     SERVER_START_REQ( init_first_thread )
+     {
+         req->unix_pid    = getpid();

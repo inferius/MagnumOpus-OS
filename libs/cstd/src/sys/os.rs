@@ -157,7 +157,7 @@ pub fn fstat(fd: i32) -> R<Stat> {
         Object::Stdio(_) => Ok(Stat::stream(Kind::Stream)),
         Object::Pipe(_) => Ok(Stat::stream(Kind::Pipe)),
         Object::Socket(_) | Object::Unix(_) => Ok(Stat::stream(Kind::Socket)),
-        Object::User(_) | Object::Null => Ok(Stat::stream(Kind::Stream)),
+        Object::User(_) | Object::Null | Object::Process(_) => Ok(Stat::stream(Kind::Stream)),
         // Pametovy fd: bezny soubor s velikosti objektu pameti.
         Object::Memory(m) => {
             let mut st = Stat::stream(Kind::File);

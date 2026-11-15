@@ -12,7 +12,7 @@ in QEMU]** x86_64, later stages **[designed]** (table below).
 |---|---|---|
 | W0 | building Wine 11 (PE DLLs, tools), port of the Unix side over `libc.so` | all of Wine via `cargo xtask wine` in WSL **[implemented]**: 602 DLLs as PE, 25 Unix `.so` over `libc.so` (`ntdll.so` with `libunwind.so`), the `wine` loader and `wineserver`; `wine --version` in the system **[verified in QEMU]** ([Wine on disk](#wine-on-disk-w1)) |
 | W1 | console `.exe` (`cmd`, `hostname`, our own test): lower `ntdll`, TEB via GS, SEH, memory, files, `wineserver` as a process | **[verified in QEMU]** x86_64, release (`wine` suite): GS in the kernel and `ucontext_t` in `cstd` **[verified in QEMU]**; the exception patch `signal_x86_64.c` compiles **[implemented]**; Wine on the data disk as an application (`/apps/org.winehq.wine`), the `wine` loader from disk loads `ntdll.so` ([DL-4c](dynamic-linking.md#libraries-from-disk-and-origin-dl-4c)) **[verified in QEMU]**; a new prefix (`wineboot`), `cmd /c echo`, our own console program `user/wintest` and `hostname` ([Wine on disk](#wine-on-disk-w1)); the `wx_compat` permission (RWX, Q6) is not needed yet **[designed]** |
-| W2 | several processes of one application, registry, named objects, `winecfg` without windows | **[designed]** |
+| W2 | several processes of one application, registry, named objects, `winecfg` without windows | in progress: another process (`CreateProcess`, waiting, exit code), named events and `Read`/`WriteProcessMemory` through wineserver and [`PROCESS_MEMORY`](syscalls.md#process_memory) **[verified in QEMU]** x86_64, release ([Memory of another process](#memory-of-another-process-w2)); registry, `winecfg` **[designed]** |
 | W3 | windows: a Wine driver over the compositor (`guiproto`), GDI, `notepad`, `winecfg`, clipboard, input | **[designed]** |
 | W4 | sound over `audiod`, a simple game (GDI: `winemine`, then a game via SDL or Direct3D 9) | **[designed]** |
 | W5 | DXVK and VKD3D-Proton over Vulkan (Venus in QEMU, GPU drivers on HW) | **[designed]** |
@@ -328,6 +328,29 @@ Decisions of the user and the coordinator (15 Nov 2026):
   window driver (`nodrv`, "explorer failed to start") and no `RpcSs` -
   console programs do not mind.
 
+## Memory of another process (W2)
+
+**[verified in QEMU]** x86_64 (`wine` suite, `wintest.exe procesy`).
+
+- Wineserver does not start the client processes, so it has no handle to
+  them. The client therefore **entrusts its memory itself** when it
+  connects: `ntdll` takes a process fd (`mo_self_process_fd`,
+  [cstd](cstd.md#process-fd)) and sends it to the server
+  (`wine_server_send_fd` under the fixed number 1021 before
+  `init_first_thread`); the server stores it with the process and
+  `read_process_memory` / `write_process_memory` (`server/ptrace.c`) call
+  `mo_process_memory` instead of `process_vm_readv`/`ptrace` (patch
+  `0006`).
+- ⚠️ **Security like `ptrace` of the same user:** the fd carries only
+  memory rights (no termination or debugging), has `FD_CLOEXEC` and only
+  the server of the own application (prefix) gets it. The server can thus
+  read and overwrite the memory of each of its clients - just as on Linux,
+  where wineserver and the clients run as one user.
+- Test: `wintest.exe procesy` starts itself as a child (`CreateProcess`),
+  synchronises with it through named events (`Local\...`), reads and
+  overwrites one of its variables (`ReadProcessMemory`,
+  `WriteProcessMemory`) and checks its exit code.
+
 ## W1: server connection and processes (questions T1-T5)
 
 **Status: [designed]**, decided on 15 Nov 2026 (coordinator); T2
@@ -337,7 +360,7 @@ Decisions of the user and the coordinator (15 Nov 2026):
 |---|---|---|
 | T1 fds between processes | **A**: generic `AF_UNIX` in `cstd`/`osrt`. The socket path stays in the capability model: `bind` creates a socket-type node in fsd, `connect` needs the write right on the node; `socketpair` and `SCM_RIGHTS` = passing a handle in a channel. | scheduler thread (with `AF_UNIX` in `cstd`) |
 | T2 a signal to a thread of another process | **A**: [`THREAD_INTERRUPT`](syscalls.md#thread_interrupt) (syscall 76), the `MANAGE` right on the thread handle; generic for `kill`/`pthread_kill`, Ctrl+C and `SIGCHLD`. | Wine thread (kernel, `cstd` delivery) |
-| T3 memory of another process | **A in W2**: [`PROCESS_MEMORY`](syscalls.md#process_memory) (syscall 77), rights `READ_MEMORY`/`WRITE_MEMORY` on the process handle; kernel and libos **[verified in QEMU]** x86_64 and aarch64, wiring into wineserver **[designed]**. | Wine thread, stage W2 |
+| T3 memory of another process | **A in W2**: [`PROCESS_MEMORY`](syscalls.md#process_memory) (syscall 77), rights `READ_MEMORY`/`WRITE_MEMORY` on the process handle; kernel and libos **[verified in QEMU]** x86_64 and aarch64, wiring into wineserver with a process fd **[verified in QEMU]** x86_64 ([Memory of another process](#memory-of-another-process-w2)). | Wine thread, stage W2 |
 | T4 fd inheritance | **A**: `posix_spawn` inherits any fds without `FD_CLOEXEC` as handle duplicates in the start message. | scheduler thread |
 | T5 address reservations | **A**: `AT_MO_RESERVE`, `ld.so` reserves ranges before loading libraries. Done even earlier: `spawn` reserves before mapping the program and `ld.so` ([dynamic-linking.md](dynamic-linking.md#address-reservations-before-loading-t5)), **[verified in QEMU]**. | Wine thread |
 

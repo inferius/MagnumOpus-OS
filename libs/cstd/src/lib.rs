@@ -42,6 +42,7 @@ pub mod misc;
 pub mod mman;
 pub mod mosthread;
 pub mod poll;
+pub mod procfd;
 pub mod scanf;
 pub mod semaphore;
 pub mod setjmp;

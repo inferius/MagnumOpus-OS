@@ -21,6 +21,7 @@ pub const TESTS: &[Test] = &[
     ("wine: novy prefix a konzolovy cmd /c echo (pomaly, --release)", wine_cmd),
     ("wine: vlastni konzolovy program (printf, argv, prostredi, soubory, vlakno, kod konce)", wine_program),
     ("wine: hostname", wine_hostname),
+    ("wine: dalsi proces, pojmenovane udalosti, Read/WriteProcessMemory (W2)", wine_processes),
 ];
 
 /// Testovaci programy Windows na disku (`xtask/src/datadisk.rs`).
@@ -187,6 +188,17 @@ fn wine_hostname(s: &Startup) -> TestResult {
     check!(
         run.code == 0 && !name.is_empty() && !name.contains(' '),
         format!("kod {}; stdout: {}; stderr: {}", run.code, name, run.stderr.trim())
+    );
+    Ok(())
+}
+
+fn wine_processes(s: &Startup) -> TestResult {
+    let loader = format!("{APP}/lib/wine/x86_64-unix/wine");
+    let exe = format!("{TESTS_APP}/wintest.exe");
+    let run = launch_path(s, &loader, &[&exe, "procesy"], WINE_ENV, Duration::from_secs(600))?;
+    check!(
+        run.code == 42 && run.stdout.contains("wintest procesy: chyby 0"),
+        format!("kod {} (42 = ok, 100 + bity viz user/wintest); stdout: {}; stderr: {}", run.code, run.stdout.trim(), run.stderr.trim())
     );
     Ok(())
 }
