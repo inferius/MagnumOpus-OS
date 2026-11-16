@@ -24,8 +24,16 @@ pub trait Sectors {
     fn flush(&mut self) -> io::Result<()>;
 }
 
-/// Nejvic sektoru v pameti (ciste se pak zahodi od nejstarsiho).
-const CACHE_SECTORS: usize = 4096;
+/// Mezipamet: 1/128 velikosti media, nejmene 64 KiB, nejvys 2 MiB (ciste
+/// sektory se pak zahodi od nejstarsiho). Proces media bezi na kazde
+/// medium, staticky velka mezipamet by na male flashce jen zabirala pamet.
+const CACHE_MIN: u64 = 64 * 1024;
+const CACHE_MAX: u64 = 2 * 1024 * 1024;
+
+/// Pocet sektoru mezipameti pro medium `bytes` velke se sektory `ss`.
+pub fn cache_sectors(bytes: u64, ss: usize) -> usize {
+    ((bytes / 128).clamp(CACHE_MIN, CACHE_MAX) / ss.max(1) as u64).max(16) as usize
+}
 /// Nejvic sektoru jednoho cteni z media.
 const READ_AHEAD: u64 = 64;
 
@@ -41,6 +49,8 @@ struct Core<D: Sectors> {
     cache: BTreeMap<u64, Slot>,
     clock: u64,
     read_only: bool,
+    /// Nejvic sektoru v pameti ([`cache_sectors`]).
+    limit: usize,
 }
 
 /// Pohled na zarizeni s vlastni pozici. Klon sdili zarizeni i pamet (crate
@@ -65,6 +75,8 @@ impl<D: Sectors> Core<D> {
     fn load(&mut self, lba: u64) -> io::Result<&mut Slot> {
         self.clock += 1;
         if !self.cache.contains_key(&lba) {
+            // Uklid pred nactenim: novy sektor (ten se vraci) se nesmi zahodit.
+            self.evict();
             let ss = self.dev.sector_size();
             let mut n = 1;
             while n < READ_AHEAD && lba + n < self.dev.sectors() && !self.cache.contains_key(&(lba + n)) {
@@ -75,7 +87,6 @@ impl<D: Sectors> Core<D> {
             for (i, chunk) in buf.chunks(ss).enumerate() {
                 self.cache.insert(lba + i as u64, Slot { data: chunk.to_vec(), dirty: false, used: self.clock });
             }
-            self.evict();
         }
         let clock = self.clock;
         let s = self.cache.get_mut(&lba).ok_or_else(|| io::Error::other("cache"))?;
@@ -85,12 +96,12 @@ impl<D: Sectors> Core<D> {
 
     /// Zahodi nejstarsi ciste sektory nad limitem.
     fn evict(&mut self) {
-        if self.cache.len() <= CACHE_SECTORS {
+        if self.cache.len() <= self.limit {
             return;
         }
         let mut clean: Vec<(u64, u64)> = self.cache.iter().filter(|(_, s)| !s.dirty).map(|(&l, s)| (s.used, l)).collect();
         clean.sort_unstable();
-        let drop = self.cache.len() - CACHE_SECTORS / 2;
+        let drop = self.cache.len() - self.limit / 2;
         for (_, l) in clean.into_iter().take(drop) {
             self.cache.remove(&l);
         }
@@ -122,7 +133,18 @@ impl<D: Sectors> Core<D> {
 
 impl<D: Sectors> Cached<D> {
     pub fn new(dev: D, read_only: bool) -> Self {
-        Self { core: Rc::new(RefCell::new(Core { dev, cache: BTreeMap::new(), clock: 0, read_only })), pos: 0 }
+        let limit = cache_sectors(dev.sectors() * dev.sector_size() as u64, dev.sector_size());
+        Self { core: Rc::new(RefCell::new(Core { dev, cache: BTreeMap::new(), clock: 0, read_only, limit })), pos: 0 }
+    }
+
+    /// Nejvic sektoru v mezipameti (testy).
+    pub fn cache_limit(&self) -> usize {
+        self.core.borrow().limit
+    }
+
+    /// Sektoru v mezipameti ted (testy).
+    pub fn cached(&self) -> usize {
+        self.core.borrow().cache.len()
     }
 
     pub fn len(&self) -> u64 {

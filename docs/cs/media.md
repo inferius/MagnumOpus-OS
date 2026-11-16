@@ -141,6 +141,12 @@ testy proto ověřují jen soubory s daty.
 
 ## Zápis a vyrovnávací paměť
 
+Každý proces média běží ve vlastním jobu s limitem 16 MiB (a 2 MiB paměti
+jádra): poškozený obraz ani chyba parseru nevyčerpá paměť systému
+a po vytažení se paměť vrátí **[implementováno]**. Mezipaměť sektorů je
+1/128 velikosti média, nejméně 64 KiB a nejvýš 2 MiB (`dev::cache_sectors`)
+**[implementováno]** (host `cache_scales_with_medium`).
+
 `volfs` drží sektory v paměti a na médium je zapíše na konci **každé**
 měnící operace; po odpovědi fsd jsou data na médiu. Vytažení flash disku
 po dokončené kopii je bezpečné, během kopie ne (FS může zůstat nekonzistentní
@@ -207,7 +213,9 @@ Relace vidí `/media`, jen když ho má v připojených cestách
   s MBR (příprava vlastní implementací), NTFS z obrazu `testfs1`
   a superfloppy FAT pro zasunutí za běhu (QMP `device_add`, `device_del`).
   Test čte, zapisuje (dočasné jméno a přejmenování), ověří NTFS jen pro
-  čtení, odpojí, zasune a vytáhne médium; xtask pak na hostiteli ověří, že
+  čtení, odpojí, zasune a vytáhne médium a nakonec vytáhne i flashky ze
+  startu (ovladače a procesy médií skončí, paměť se vrátí dalším sadám:
+  vypíše ji, 14 MiB za tři flashky); xtask pak na hostiteli ověří, že
   zápis na FAT přečte `fatfs` a zápis na exFAT nezávislý `exfat-fs`
   **[ověřeno v QEMU]** (x86_64).
 - `cargo test -p volfs`, `cargo test -p diskguard --test media`,

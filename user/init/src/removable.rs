@@ -27,6 +27,10 @@ struct Offer {
 }
 
 static PENDING: spin::Mutex<Vec<Offer>> = spin::Mutex::new(Vec::new());
+/// Limit pameti procesu media (kod ~1 MiB, mezipamet sektoru do 2 MiB,
+/// slozky a bitmapa exFAT).
+const VOLFS_MEMORY: u64 = 16 * 1024 * 1024;
+const VOLFS_KERNEL_MEMORY: u64 = 2 * 1024 * 1024;
 /// Bezici procesy media (drzet handle = proces zije; init je neuklizi,
 /// skonci samy po odpojeni nebo vytazeni).
 static RUNNING: spin::Mutex<Vec<libos::Process>> = spin::Mutex::new(Vec::new());
@@ -73,7 +77,12 @@ fn try_attach(d: &Devices, o: Offer) -> Result<()> {
         fds: Vec::new(),
     };
     let handles = vec![params.start_handle()?, StartHandle::user(o.ch.into_handle()), StartHandle::user(theirs.into_handle())];
-    let (process, _bootstrap) = libos::spawn("volfs", image, handles)?;
+    // Vlastni job s limitem: cizi FS z media nesmi vycerpat pamet systemu
+    // (poskozeny obraz, chyba parseru); po vytazeni pamet vrati.
+    let job = libos::job::Job::create(&libos::job::current()?)?;
+    job.set_limit(libos::abi::job::pool::USER, VOLFS_MEMORY)?;
+    job.set_limit(libos::abi::job::pool::KERNEL, VOLFS_KERNEL_MEMORY)?;
+    let (process, _bootstrap) = libos::spawn::spawn_with(&job, "volfs", image, handles, libos::spawn::Options::default())?;
     RUNNING.lock().retain(|p| p.wait_exit(Some(0)).is_err());
     RUNNING.lock().push(process);
     let name = if o.model.is_empty() { "USB disk" } else { o.model.as_str() };
