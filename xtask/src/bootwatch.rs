@@ -29,6 +29,33 @@ pub fn starts(log: &str, resets: bool) -> (usize, usize) {
     (expected, log.matches(LOADER_LINE).count())
 }
 
+/// Zaseknuti firmwaru v tomto behu xtask (hlaseni a cesta k ulozenemu
+/// logu); vypisou se v zaverecnem souhrnu (`summary`).
+static STUCK: std::sync::Mutex<Vec<(String, std::path::PathBuf)>> = std::sync::Mutex::new(Vec::new());
+
+/// Zapise zaseknuti a ulozi log zaseknuteho behu vedle (`<log>.firmware-
+/// zaseknuti-<n>.log`, nemaze se); vrati cestu k nemu.
+pub fn record(serial_log: &Path, message: &str) -> std::path::PathBuf {
+    let mut stuck = STUCK.lock().unwrap_or_else(|e| e.into_inner());
+    let kept = serial_log.with_extension(format!("firmware-zaseknuti-{}.log", stuck.len() + 1));
+    if std::fs::rename(serial_log, &kept).is_err() {
+        let _ = std::fs::copy(serial_log, &kept);
+    }
+    stuck.push((message.to_string(), kept.clone()));
+    kept
+}
+
+/// Zaverecny souhrn (konec `main`, i po chybe): prazdny bez zaseknuti.
+pub fn summary() -> Vec<String> {
+    let stuck = STUCK.lock().unwrap_or_else(|e| e.into_inner());
+    if stuck.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec![format!("xtask: souhrn: !!! FIRMWARE/QEMU NENABEHL {}x (krok opakovan, neni to selhani testu)", stuck.len())];
+    out.extend(stuck.iter().map(|(m, p)| format!("xtask: souhrn:   {m}; log {}", p.display())));
+    out
+}
+
 pub struct Watch {
     /// Sleduje restarty (test padu); jinak jen prvni start.
     resets: bool,

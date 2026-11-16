@@ -118,12 +118,14 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
             // zaseknuti uz je chyba behu, porad oznacena jako firmware.
             Err(TestError::FirmwareStuck(e)) if !firmware_retried => {
                 firmware_retried = true;
-                let kept = serial_log.with_extension("firmware-zaseknuti.log");
-                let _ = std::fs::rename(&serial_log, &kept);
+                let kept = crate::bootwatch::record(&serial_log, &e);
                 println!("xtask: !!! FIRMWARE/QEMU NENABEHL: {e}");
                 println!("xtask: !!! log zaseknuteho behu: {}; krok opakuji jednou", kept.display());
             }
-            Err(TestError::FirmwareStuck(e)) => break Err(format!("FIRMWARE/QEMU NENABEHL (i po opakovani): {e}").into()),
+            Err(TestError::FirmwareStuck(e)) => {
+                let kept = crate::bootwatch::record(&serial_log, &e);
+                break Err(format!("FIRMWARE/QEMU NENABEHL (i po opakovani): {e}; log {}", kept.display()).into());
+            }
             Err(TestError::Other(e)) => break Err(e),
             Ok(()) => break crate::audio::check(&run.wav, &serial_log, opts).and_then(|()| media_check(&run, &serial_log)),
         }

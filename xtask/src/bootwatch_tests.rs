@@ -45,3 +45,20 @@ fn starts_counts_resets_only_when_asked() {
     assert_eq!(starts(log, true), (2, 2));
     assert_eq!(starts(log, false), (1, 2));
 }
+
+#[test]
+fn stuck_log_is_kept_and_counted_in_summary() {
+    let dir = std::env::temp_dir().join(format!("bootwatch-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("serial-test-x.log");
+    std::fs::write(&log, FW).unwrap();
+    let kept = record(&log, "zaseknuti 1");
+    std::fs::write(&log, FW).unwrap();
+    let kept2 = record(&log, "zaseknuti 2");
+    assert_ne!(kept, kept2, "druhe zaseknuti neprepise prvni log");
+    assert_eq!(std::fs::read_to_string(&kept).unwrap(), FW);
+    let s = summary();
+    assert!(s[0].contains("2x"), "{s:?}");
+    assert!(s.iter().any(|l| l.contains("zaseknuti 2")), "{s:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

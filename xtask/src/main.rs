@@ -237,6 +237,9 @@ fn main() -> ExitCode {
     console_utf8();
     let result = run_cli();
     remove_run_files();
+    for line in bootwatch::summary() {
+        println!("{line}");
+    }
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
