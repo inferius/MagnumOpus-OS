@@ -29,6 +29,11 @@ impl Buf {
         Ok((Self { id, w, h, vmo, map, busy: false }, ClientMsg::BufferCreate { buffer: id, w, h, stride: w }, ro))
     }
 
+    /// Handle VMO pro kompozitor (jen cteni; obnova po padu).
+    pub fn readonly(&self) -> Result<Handle> {
+        self.vmo.handle().duplicate(Some(Rights::READ | Rights::MAP | Rights::BASIC))
+    }
+
     /// Zkopiruje snimek (B G R A, krok `pitch`) do bufferu.
     pub fn fill(&mut self, src: &[u8], pitch: u32, sw: u32, sh: u32) -> bool {
         // SAFETY: mapovani `w * h` pixelu (cteni a zapis) zije s bufferem;

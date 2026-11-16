@@ -92,3 +92,21 @@ fn registry_first_wins() {
     assert!(!crate::is_bare_name("/system/bin/rg"));
     assert!(!crate::is_bare_name("./rg"));
 }
+
+/// Vsechny jedinecne role a nejvic fd v jedne zprave: projde kodovanim
+/// i dekodovanim a vejde se do limitu handlu kanalu.
+#[test]
+fn all_roles_fit() {
+    let unique: alloc::vec::Vec<Role> = (1..=255u8).filter_map(Role::from_u8).filter(|r| *r != Role::Fd).collect();
+    assert_eq!(unique.len(), 10, "MAX_ROLES pocita s deseti jedinecnymi rolemi");
+    assert!(unique.contains(&Role::Audio) && unique.contains(&Role::AudioLease));
+    let mut roles = unique.clone();
+    roles.extend(core::iter::repeat_n(Role::Fd, abi::params::MAX_FDS));
+    assert_eq!(roles.len(), crate::MAX_ROLES);
+    assert!(crate::MAX_ROLES <= abi::syscall::CHANNEL_MAX_HANDLES);
+    let l = Launch { program: String::from("x"), flags: 0, roles, params: vec![] };
+    let b = l.encode(3).unwrap();
+    let mut r = Reader::new(&b);
+    request_head(&mut r).unwrap();
+    assert_eq!(Launch::decode(&mut r).unwrap(), l);
+}

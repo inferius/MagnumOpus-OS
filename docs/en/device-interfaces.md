@@ -225,6 +225,22 @@ the `compd` service with its own identity.
   connections of the identity).
 - **A child without GUI:** a child environment without `MO_GUI`.
 
+### Sound session for children: risk
+
+**[verified in QEMU]** x86_64. Like a window, an application may pass its
+children a sound session at `audiod` (role `Audio`,
+[Audio](audio.md#sound-session-for-children-role-audio)); it gets no
+capability to the sound card driver.
+
+- ⚠️ **What a child can do with it:** play **under the parent's
+  identity**. Record only if the parent recipe allows it (`Capture::Ask`
+  from the manifest), and always only after the user's decision in the
+  microphone permission dialog; the bar shows an indicator while recording.
+- **What it cannot do:** widen the recipe (the narrowing is empty only),
+  get around the session and stream limits (per identity) or survive
+  revocation (`audio::revoke`).
+- **A child without sound:** a child environment without `MO_AUDIO`.
+
 ## Next step
 
 A detailed protocol design for layer 1 (header, capabilities, buffers,

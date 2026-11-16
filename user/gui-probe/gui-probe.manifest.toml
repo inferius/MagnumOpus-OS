@@ -1,7 +1,8 @@
-# Test role Gui (user/init/src/tests/gui_role.rs): okno ze zdedene relace.
+# Test roli Gui a Audio (user/init/src/tests/gui_role.rs, audio_role.rs):
+# okno a zvuk ze zdedene relace.
 [app]
 id = "org.magnumopus.gui-probe"
-name = "Test role Gui"
+name = "Test roli Gui a Audio"
 
 [limits]
 memory = "32M"

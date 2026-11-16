@@ -28,7 +28,7 @@ pub mod cxx;
 pub(crate) mod fetch;
 mod meson;
 mod sources;
-mod tools;
+pub(crate) mod tools;
 
 use std::path::{Path, PathBuf};
 

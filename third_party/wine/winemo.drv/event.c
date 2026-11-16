@@ -315,8 +315,20 @@ static void clipboard_to_host(void)
     struct get_clipboard_params params = { .data_only = TRUE, .size = 1024 };
     char *utf8 = NULL;
     DWORD len = 0;
+    int tries;
 
-    if (!NtUserOpenClipboard(clipboard_hwnd, 0)) return;
+    /* Schranku muze mit chvili otevrenou jine okno (aplikace po zmene):
+     * zkouset az 0,5 s. */
+    for (tries = 0; !NtUserOpenClipboard(clipboard_hwnd, 0); tries++)
+    {
+        LARGE_INTEGER delay = { .QuadPart = -10 * 10000 };
+        if (tries == 50)
+        {
+            WARN("OpenClipboard failed\n");
+            return;
+        }
+        NtDelayExecution(FALSE, &delay);
+    }
     for (;;)
     {
         if (!(params.data = malloc(params.size))) break;
@@ -370,9 +382,20 @@ LRESULT MO_ClipboardWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         NtUserAddClipboardFormatListener(hwnd);
         return TRUE;
     case WM_CLIPBOARDUPDATE:
-        if (NtUserGetClipboardOwner() == clipboard_hwnd) break;
+    {
+        HWND owner = NtUserGetClipboardOwner();
+        DWORD pid = 0;
+
+        if (owner == clipboard_hwnd) break;
+        /* Nabizi jen proces, ktery schranku zmenil (jeho okno ma fokus
+         * a gesto); okna schranky ostatnich procesu Wine (explorer) by
+         * jen soupezila o OpenClipboard a kompozitor by je odmitl. */
+        if (!owner || !NtUserGetWindowThread(owner, &pid) ||
+            pid != HandleToULong(NtCurrentTeb()->ClientId.UniqueProcess))
+            break;
         clipboard_to_host();
         break;
+    }
     case WM_RENDERFORMAT:
         render_format(wp);
         break;

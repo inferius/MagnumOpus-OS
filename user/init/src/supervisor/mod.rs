@@ -345,6 +345,9 @@ impl Supervisor {
             .min();
         let observed = match self.waits.as_mut().map(|w| w.wait(&items, wake)) {
             Some(Ok((_, o))) => o,
+            // Termin vyprsel: bezny konec kola (testy ridi kola s kratkym
+            // terminem), ne chyba.
+            Some(Err(libos::Error::TimedOut)) => Vec::new(),
             Some(Err(e)) => {
                 println!("init: cekani supervisoru: {e}");
                 Vec::new()

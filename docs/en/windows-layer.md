@@ -14,7 +14,7 @@ in QEMU]** x86_64, later stages **[designed]** (table below).
 | W1 | console `.exe` (`cmd`, `hostname`, our own test): lower `ntdll`, TEB via GS, SEH, memory, files, `wineserver` as a process | **[verified in QEMU]** x86_64, release (`wine` suite): GS in the kernel and `ucontext_t` in `cstd` **[verified in QEMU]**; the exception patch `signal_x86_64.c` compiles **[implemented]**; Wine on the data disk as an application (`/apps/org.winehq.wine`), the `wine` loader from disk loads `ntdll.so` ([DL-4c](dynamic-linking.md#libraries-from-disk-and-origin-dl-4c)) **[verified in QEMU]**; a new prefix (`wineboot`), `cmd /c echo`, our own console program `user/wintest` and `hostname` ([Wine on disk](#wine-on-disk-w1)); the `wx_compat` permission (RWX, Q6) is not needed yet **[designed]** |
 | W2 | several processes of one application, registry, named objects, `winecfg` without windows | in progress: another process (`CreateProcess`, waiting, exit code), named events and `Read`/`WriteProcessMemory` through wineserver and [`PROCESS_MEMORY`](syscalls.md#process_memory) **[verified in QEMU]** x86_64, release ([Memory of another process](#memory-of-another-process-w2)); shared sections over a file between processes, the registry (`reg add`/`reg query` in another process) **[verified in QEMU]** ([Sections and the registry](#sections-and-the-registry-w2)); server signals to clients, `winecfg` **[designed]** |
 | W3 | windows: a Wine driver over the compositor (`guiproto`), GDI, `notepad`, `winecfg`, clipboard, input | **[designed]** |
-| W4 | sound over `audiod`, a simple game (GDI: `winemine`, then a game via SDL or Direct3D 9) | **[designed]** |
+| W4 | sound over `audiod` (role `Audio`, `winemoaudio.drv`), clipboard our app -> Wine, window recovery after a compositor crash, PuTTY (window and configuration) | **[verified in QEMU]** x86_64 ([W4](#sound-clipboard-and-window-recovery-w4)), generic parts (role `Audio`, `moaudio`) also aarch64; network from Wine programs (W4b) **[designed]** |
 | W5 | DXVK and VKD3D-Proton over Vulkan (Venus in QEMU, GPU drivers on HW) | **[designed]** |
 | W6 | 32-bit applications (the new WoW64) | **[designed]** |
 | W7 | fast synchronization (an ntsync analogue), game performance | **[designed]** |
@@ -431,8 +431,8 @@ patch). It talks to the compositor through our `mowin` library (C API in
 | Notepad (physical click and typing from QEMU, the typed text is visible, Ctrl+S, the Save As dialog as an owned window with focus, the file on disk, Alt+F4, the process ends), winecfg (dialog of a sensible size) | **[verified in QEMU]** x86_64 (`wine` suite, release) |
 | GDI fonts through FreeType 2.15.0 (`/system/lib/libfreetype.so`) | **[verified in QEMU]** x86_64 (text in Notepad, size of the winecfg dialog); the FreeType port x86_64 and aarch64 (`cstd porty` suite) |
 | Keys: `WM_KEYDOWN` with a VK also for letters without a modifier, the character once | **[verified in QEMU]** x86_64 (`wintest klavesy`, keys `a` and `z` from QEMU) |
-| Clipboard Wine -> compositor -> another app (Ctrl+A, Ctrl+C in Notepad, paste in `gui-probe`) | **[verified in QEMU]** x86_64; the other direction **[implemented]** without a test |
-| Recovery of Wine windows after a compositor crash | **[designed]** (`mowin` cannot do it yet, a lost connection ends the Wine process) |
+| Clipboard Wine -> compositor -> another app (Ctrl+A, Ctrl+C in Notepad, paste in `gui-probe`) | **[verified in QEMU]** x86_64; the other direction in [W4](#sound-clipboard-and-window-recovery-w4) |
+| Recovery of Wine windows after a compositor crash | in [W4](#sound-clipboard-and-window-recovery-w4) |
 
 Decisions:
 
@@ -481,6 +481,95 @@ Decisions:
   `sfnt2fon` tool turns them into `.fon` bitmap fonts at build time (host
   FreeType in WSL). Our system font (`libs/font`) is not used by Wine yet;
   font substitution (fontconfig and the like) comes later.
+
+## Sound, clipboard and window recovery (W4)
+
+**Status:** decided 16 Nov 2026 (coordinator: 3D moved to W5, 5A, 6A, 7A,
+8 yes, 9 PuTTY as variant B: window and configuration, network in W4b). ⚠️ Verified on x86_64 only (the Windows layer is x86_64
+only, Q11 A); the generic parts (role `Audio`, `moaudio`) also on aarch64
+in the `sdl` suite.
+
+| Part | Status |
+|---|---|
+| Role `Audio` for Wine processes (narrowed session with the same identity, opt-out without `MO_AUDIO`, revocation of the whole tree, limits per identity; capture only through the microphone permission dialog) | **[verified in QEMU]** x86_64 ([Audio](audio.md#sound-session-for-children-role-audio)) |
+| `moaudio` (`libs/mowin/src/os/audio.rs`): shared sound core for Wine and SDL (`mosdl_audio_*` are only wrappers) | **[verified in QEMU]** x86_64 (suite `sdl`: SDL sound and role Audio) |
+| `winemoaudio.drv` (`third_party/wine/winemoaudio.drv`, patch `0009`): `mmdevapi` driver over `moaudio`, default driver list `moaudio,pulse,...` | **[verified in QEMU]** x86_64: a tone from a WAV (`PlaySound` -> `winmm` -> `mmdevapi` -> `audiod`, test `wintest ton`: playback takes the length of the recording, `audiod` has an extra stream meanwhile) |
+| Clipboard our app -> Wine (`gui-probe kopiruj`, paste in Notepad, save and file contents) | **[verified in QEMU]** x86_64 (suite `wine`) |
+| Recovery of Wine windows after a compositor crash (`mowin`: state record, new session through the Gui role lease, window owners, popups, focus, `EXPOSE`) | **[verified in QEMU]** x86_64 (test `wine: okna Wine po padu kompozitoru (W4)`, `wintest obnova`: owner, owned dialog centred over it with focus, dialog popup, the same pixels before the crash and after recovery, Wine repaints the windows, the program keeps running) |
+| PuTTY 0.85 (pinned source, SHA-256 and signature in `THIRD-PARTY.md`, built in `xtask wine` with clang over the Wine SDK): window and configuration dialog | **[verified in QEMU]** x86_64 (test `wine: PuTTY - dialog konfigurace (W4)`) |
+| ⚠️ **No network from Wine programs yet** (`ws2_32`): Wine creates the socket in wineserver and sends the fd to the client over `SCM_RIGHTS`, but a socket cannot move between processes (`osrt`, `inherit.rs`) and wineserver has no network session. The PuTTY connection (raw/telnet) and transferable sockets are stage W4b | **[designed]** |
+
+**Sound.** The `winemoaudio.drv` driver is a separate DLL (mmdevapi loads
+`wine<name>.drv` and every DLL has one Unix call table, hence not in
+`winemo.drv`). Application data goes to a local buffer (like
+`wineoss.drv`); the `mmdevapi` timer thread moves it every period to the
+shared `audiod` ring with a lead of three periods. **The stream lock covers
+memory work only** (`moaudio_put`, `moaudio_read` do not wait and do not
+call the service); service calls (start, stop, volume) are made by the
+timer thread after unlocking, and closing the stream after the thread
+ends. A blocking call thus never holds a lock that application and
+`mmdevapi` threads wait on (the bug we fixed in SDL). Formats: PCM 8, 16
+and 32 bit and float 32, 1-8 channels, 8-192 kHz (`audiod` converts); mix
+format 48 kHz stereo float; shared mode only (`EXCLUSIVE` =
+`AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED`). Stream volume is the channel
+average (the service has one volume per stream). There are no MIDI or aux
+devices. Without a sound session (a process without role `Audio`) the
+driver is unavailable and Wine runs without sound. Opening input may wait
+for the user's decision in the microphone permission dialog (the
+application's `Initialize` call blocks until then).
+
+**Window recovery.** `mowin` records everything sent to the compositor
+(`guiproto::replay`). When the channel dies it takes a new session through
+the Gui role lease (`osrt::gui::reconnect`, at most 10 s, three attempts)
+and sends the last confirmed state: windows, owners (`WINDOW_OWNER`),
+buffers (`mowin` holds the VMO handles, the compositor gets read-only
+copies), content and popup layers and titles. It commits shown windows at
+once (they are visible with the old content), marks the buffer on screen
+as held by the new instance and sends the driver `MOWIN_EV_EXPOSE` for
+every window (Wine repaints them). The dialog is centred over its owner
+again and takes the focus (the compositor rule for an owned window of the
+focused window). The compositor draws popups (`POPOVER` layers) only for the
+focused window (menus of the active window); a popup of an owner whose
+dialog took the focus shows again when the focus returns. Without a lease (a process without role Gui) or after GUI
+revocation a lost connection is the end (`SERVICE_UNAVAILABLE`).
+
+**PuTTY.** Built on the host (no extra tools: CMake, Ninja and LLVM as for
+C ports): clang for `x86_64-pc-windows-msvc` without host headers and
+libraries, with Wine headers and PE import libraries as `<dll>.lib`
+(`target/wine/<arch>/sdk`, exported by `build_wine.sh`), linked by
+`lld-link` with the Wine CRT (`ucrtbase`, `mainCRTStartup`). The `WinMain`
+start and TLS support (`__declspec(thread)`) come from our
+`xtask/src/wine/wincrt.c`; resources (`.rc`) from `llvm-rc`. `cargo xtask
+wine-putty` builds only PuTTY over a ready SDK.
+
+## 3D: Vulkan, OpenGL and Direct3D (W5)
+
+**Status: [designed]**, decided on 16 Nov 2026 (coordinator). A separate
+stage W5; in W3 and W4 Wine windows draw with GDI only.
+
+- **Vulkan for C programs (1A):** a port of Mesa (MIT) with the Venus
+  driver and our own renderer backend over the render node
+  (`renderproto`: a context with the Venus capset, blobs, submission with
+  fences) and the Khronos Vulkan-Loader (Apache-2.0) as a generic C port in
+  `/system/lib` (`libvulkan.so`, ICD from JSON): used by native programs and
+  Wine alike (`winevulkan` loads `libvulkan.so.1`). Today's own Venus in
+  Rust (`libs/venus`, [Venus](venus.md)) stays for the compositor.
+- **Presentation into a window (2A):** a swapchain in the ICD from images
+  in `HOST_VISIBLE` memory (blob = VMO); the compositor gets them as a
+  `bufdesc` buffer (`BUFFER_CREATE_DESC`, `LINEAR`, BGRA) with
+  `SYNC_POINTS` fences (acquire = rendering done, release = `RELEASED`) and
+  reads them without a copy. Neither the window protocol nor `bufdesc`
+  changes; `mowin` gets presentation of a described buffer with fences.
+- **OpenGL (3A):** Mesa zink (GL over Vulkan) from the same port; WGL
+  through the Wine driver.
+- **Direct3D 9-11 (4A):** DXVK (zlib, PE DLLs over Vulkan).
+- ⚠️ **Limitations:** Venus only with a QEMU that has virtio-gpu
+  `venus=on` and a host renderer (virglrenderer). **Neither Windows QEMU
+  (the default) nor VMware has 3D.** In WSL the renderer is the software
+  lavapipe (llvmpipe): very slow (demos like vkcube yes, games no).
+  Presentation without a copy (dmabuf) cannot be verified in WSL
+  ([Venus](venus.md)). 3D tests run only with `--qemu-wsl --gpu venus`,
+  elsewhere they are skipped.
 
 ## W1: server connection and processes (questions T1-T5)
 

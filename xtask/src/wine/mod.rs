@@ -9,6 +9,7 @@
 //!
 //! Jen x86_64 (rozhodnuti Q11 A, aarch64 = zdokumentovane omezeni).
 
+mod putty;
 mod wsl;
 
 #[cfg(test)]
@@ -37,6 +38,7 @@ pub const WINE: CPort = CPort {
         "0006-process-memory-magnumopus.patch",
         "0007-server-signals-magnumopus.patch",
         "0008-winemo-drv-magnumopus.patch",
+        "0009-winemoaudio-drv-magnumopus.patch",
     ],
     build: Build::Sources { lib: &[], defines: &[], programs: &[] },
     data: &[],
@@ -62,8 +64,8 @@ pub fn source_key(sha256: &str, patches: &[(String, Vec<u8>)]) -> String {
     format!("{:016x}", h.finish())
 }
 
-/// Zaplaty Wine (obsah meni otisk zdroje). Zdrojaky ovladace
-/// `third_party/wine/winemo.drv` do otisku nepatri: `build_wine.sh` je
+/// Zaplaty Wine (obsah meni otisk zdroje). Zdrojaky ovladacu
+/// `third_party/wine/winemo.drv` a `winemoaudio.drv` do otisku nepatri: `build_wine.sh` je
 /// kopiruje pri kazdem behu a make prelozi jen zmenene.
 fn read_patches() -> Result<Vec<(String, Vec<u8>)>> {
     WINE.patches
@@ -74,6 +76,11 @@ fn read_patches() -> Result<Vec<(String, Vec<u8>)>> {
 
 fn wsl_path(p: &Path) -> String {
     crate::qemu::to_wsl_paths(&p.display().to_string())
+}
+
+/// Jen PuTTY nad SDK z posledniho `cargo xtask wine` (W4).
+pub fn build_putty(arch: &Arch) -> Result<PathBuf> {
+    putty::build(&out_dir(arch))
 }
 
 /// Sestavi Wine pro architekturu (predpoklad: `cargo xtask build`, ktery
@@ -112,5 +119,7 @@ pub fn build(arch: &Arch, keep_going: bool) -> Result<PathBuf> {
     ];
     println!("xtask: Wine {} ve WSL ({distro}), vystup {}", WINE.top, out.display());
     wsl::run_script(&distro, &script, &env)?;
+    // Testovaci PuTTY (W4) nad SDK, ktere prave pripravil build_wine.sh.
+    putty::build(&out)?;
     Ok(out)
 }

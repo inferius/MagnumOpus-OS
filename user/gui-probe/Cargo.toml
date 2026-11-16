@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "Test role Gui: relace okna zdedena od rodice, opt-out, odvolani"
+description = "Test roli Gui a Audio: relace okna a zvuku zdedene od rodice, opt-out, odvolani"
 
 [[bin]]
 name = "gui-probe"
@@ -15,3 +15,5 @@ bench = false
 [dependencies]
 guiproto = { path = "../../libs/guiproto" }
 clipproto = { path = "../../libs/clipproto" }
+# Zvuk (role Audio) pres spolecne jadro moaudio.
+mowin = { path = "../../libs/mowin" }

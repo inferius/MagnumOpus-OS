@@ -212,6 +212,21 @@ dostane jen relaci ke službě `compd` se svou identitou.
   zavře všechna spojení identity).
 - **Jak dítě bez GUI:** prostředí potomka bez `MO_GUI`.
 
+### Relace zvuku pro potomky: riziko
+
+**[ověřeno v QEMU]** x86_64. Stejně jako okno smí aplikace potomkům předat
+relaci zvuku u `audiod` (role `Audio`,
+[Zvuk](zvuk.md#relace-zvuku-pro-potomky-role-audio)); capability
+k ovladači zvukové karty nedostane.
+
+- ⚠️ **Co tím potomek může:** přehrávat **pod identitou rodiče**.
+  Nahrávat jen tehdy, když to rodičovský recept dovoluje (`Capture::Ask`
+  z manifestu), a vždy až po rozhodnutí uživatele v dialogu povolení
+  mikrofonu; během nahrávání je v liště indikátor.
+- **Co nemůže:** rozšířit recept (zúžení je jen prázdné), obejít limity
+  relací a streamů (na identitu) ani přežít odvolání (`audio::revoke`).
+- **Jak dítě bez zvuku:** prostředí potomka bez `MO_AUDIO`.
+
 ## Další krok
 
 Podrobný návrh protokolu vrstvy 1 (hlavička, schopnosti, buffery,

@@ -154,6 +154,7 @@ const STARTS: &[&str] = &[
     wine::KEYS_CLICK,
     wine::CLICK,
     wine::PASTE_CLICK,
+    wine::OFFER_CLICK,
 ];
 
 /// Konec testovaciho behu userspace (dal uz zadny usek neprijde).
@@ -356,6 +357,18 @@ fn wine_steps(s: &mut Vec<Step>) {
     // Vlozeni do naseho okna (gui-probe vloz): klik a Ctrl+V.
     s.push(Step::ClickAt(wine::PASTE_CLICK));
     press(s, &["ctrl", "v"]);
+    // W4: nase aplikace nabidne text (klik a stisk klavesy = gesto),
+    // poznamkovy blok ho vlozi a ulozi jako u.txt.
+    s.push(Step::ClickAt(wine::OFFER_CLICK));
+    press(s, &["ctrl", "c"]);
+    s.push(Step::ClickAt(wine::PASTE_WINE_CLICK));
+    press(s, &["ctrl", "v"]);
+    s.push(Step::WaitFor(wine::SAVE2_KEYS));
+    press(s, &["ctrl", "s"]);
+    s.push(Step::WaitFor(wine::SAVE2_NAME));
+    for k in ["u", "dot", "t", "x", "t", "ret"] {
+        press(s, &[k]);
+    }
 }
 
 /// Znacky testu W3 (musi sedet s `user/init/src/tests/wine_gui.rs`).
@@ -368,6 +381,10 @@ mod wine {
     pub const COPY: &str = "init: test wine: kopiruj text";
     pub const CLOSE: &str = "init: test wine: zavri poznamkovy blok";
     pub const PASTE_CLICK: &str = "init: test wine: klik do vkladaciho okna na ";
+    pub const OFFER_CLICK: &str = "init: test wine: klik do nabidky textu na ";
+    pub const PASTE_WINE_CLICK: &str = "init: test wine: klik pro vlozeni ve Wine na ";
+    pub const SAVE2_KEYS: &str = "init: test wine: uloz vlozeny text";
+    pub const SAVE2_NAME: &str = "init: test wine: nazev vlozeneho souboru";
 }
 
 /// Znacky testu SDL (musi sedet s `user/init/src/tests/sdl.rs`).

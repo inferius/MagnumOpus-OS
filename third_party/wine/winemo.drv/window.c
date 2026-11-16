@@ -274,7 +274,12 @@ static void update_popup(struct modrv_win *data, struct modrv_win *od, int w, in
     }
     if (!data->popup)
     {
-        if (mowin_popup_create(od->win, x, y, w, h, &data->popup) < 0) data->popup = 0;
+        int r = mowin_popup_create(od->win, x, y, w, h, &data->popup);
+        if (r < 0)
+        {
+            ERR("hwnd %p: mowin_popup_create (owner %p, %d,%d %dx%d) failed %d\n", data->hwnd, od->hwnd, x, y, w, h, r);
+            data->popup = 0;
+        }
         data->owner = od->hwnd;
     }
     else mowin_popup_move(data->popup, x, y, w, h);
@@ -288,8 +293,22 @@ void MO_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UINT swp
 {
     BOOL managed = is_window_managed(hwnd, swp_flags, swp_flags & WINE_SWP_FULLSCREEN);
     DWORD style = NtUserGetWindowLongW(hwnd, GWL_STYLE);
-    HWND owner = managed ? 0 : (owner_hint ? owner_hint : NtUserGetWindowRelative(hwnd, GW_OWNER));
+    DWORD ex_style = NtUserGetWindowLongW(hwnd, GWL_EXSTYLE);
+    HWND owner, popup_owner = 0;
     struct modrv_win *data, *od;
+
+    /* Popup zustava popupem: zmena poradi oken (aktivace dialogu, zvednuti
+     * vlastnika) prijde i bez SWP_NOACTIVATE a is_window_managed by z nej
+     * udelal samostatne okno. Okno se zmeni jen kdyz dostane titulek,
+     * ram nebo WS_EX_APPWINDOW. */
+    if (managed && (data = modrv_win_get(hwnd)))
+    {
+        if (data->popup) popup_owner = data->owner;
+        modrv_win_release(data);
+    }
+    if (popup_owner && (style & WS_CAPTION) != WS_CAPTION && !(style & WS_THICKFRAME) && !(ex_style & WS_EX_APPWINDOW))
+        managed = FALSE;
+    owner = managed ? 0 : (owner_hint ? owner_hint : popup_owner ? popup_owner : NtUserGetWindowRelative(hwnd, GW_OWNER));
     int w, h;
 
     TRACE("hwnd %p rects %s after %p flags %08x managed %d\n", hwnd, debugstr_window_rects(new_rects),
@@ -506,7 +525,8 @@ static BOOL mo_surface_flush(struct window_surface *surface, const RECT *rect, c
     if (popup) r = mowin_popup_present(popup, color_bits, w * 4, w, h);
     else if (win) r = mowin_window_present(win, color_bits, w * 4, w, h);
     else return FALSE; /* okno jeste neni u kompozitoru: zustane poskozene */
-    if (r < 0) WARN("hwnd %p: present failed %d\n", surface->hwnd, r);
+    if (r < 0 && popup) ERR("hwnd %p: popup present failed %d\n", surface->hwnd, r);
+    else if (r < 0) WARN("hwnd %p: present failed %d\n", surface->hwnd, r);
     return r >= 0;
 }
 
