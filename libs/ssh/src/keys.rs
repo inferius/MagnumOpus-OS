@@ -200,6 +200,12 @@ impl PublicKey {
     }
 }
 
+/// Verejny klic ed25519 ze soukromeho (32 B semeno; klic hostitele).
+pub fn ed25519_public(seed: &[u8; 32]) -> PublicKey {
+    let pk = ed25519_dalek::SigningKey::from_bytes(seed).verifying_key().to_bytes();
+    PublicKey { algo: Algo::Ed25519, key: pk, comment: String::new() }
+}
+
 /// Otisk blobu klice (`SHA256:...`).
 pub fn fingerprint(blob: &[u8]) -> String {
     alloc::format!("SHA256:{}", Base64Unpadded::encode_string(&Sha256::digest(blob)))

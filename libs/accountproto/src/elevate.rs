@@ -29,6 +29,10 @@ pub mod action {
     /// [`super::SystemFile`]). Sluzba ukonu je init (prikaz shellu
     /// `system`); `/system/accounts` nejde nikdy.
     pub const SYSTEM_FILE: u32 = 6;
+    /// Vzdaleny pristup SSH pro cely pocitac: parametry = `enable <otisk
+    /// klice hostitele>` nebo `disable`. Sluzba ukonu je init (prikaz
+    /// `sshd enable` / `sshd disable`).
+    pub const SSHD: u32 = 7;
     pub const LAST: u32 = 15;
 }
 

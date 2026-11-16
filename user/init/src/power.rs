@@ -180,6 +180,19 @@ pub fn request_from_shell(data: &[u8], chan: Channel, session: Option<u64>) -> O
             Ok(text) => Reply::Text(text),
             Err(e) => Reply::Failed(e),
         },
+        // Vzdaleny pristup SSH (`sshd`, `ssh-key`, `remote-access`).
+        Ok(Request::Ssh { op, arg, mut password }) => {
+            let r = crate::sshd::from_shell(session, &op, &arg, &password);
+            zeroize::Zeroize::zeroize(&mut password);
+            match r {
+                Ok(Some(ch)) => {
+                    let _ = chan.write(&Reply::Ok.encode(), alloc::vec![ch.into_handle()]);
+                    return Some(chan);
+                }
+                Ok(None) => Reply::Ok,
+                Err(r) => r,
+            }
+        }
         // Povoleni aplikaci uzivatele relace (prikaz `permissions`).
         Ok(Request::Permissions { app, perm }) => match crate::perms::shell(session, &app, &perm) {
             Ok(text) => Reply::Text(text),

@@ -99,8 +99,7 @@ impl ServerConn {
 
     /// Verejny klic hostitele (blob protokolu) a jeho otisk.
     pub fn host_public(seed: &[u8; 32]) -> (Vec<u8>, String) {
-        let pk = ed25519_dalek::SigningKey::from_bytes(seed).verifying_key().to_bytes();
-        let k = crate::keys::PublicKey { algo: crate::keys::Algo::Ed25519, key: pk, comment: String::new() };
+        let k = crate::keys::ed25519_public(seed);
         (k.blob(), k.fingerprint())
     }
 

@@ -81,6 +81,7 @@ members = [
     "libs/powerproto",
     "libs/tls",
     "libs/ssh",
+    "user/sshd",
     "libs/tz",
     "libs/shlang",
     "libs/sizeclass",

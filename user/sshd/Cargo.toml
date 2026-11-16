@@ -1,0 +1,28 @@
+[package]
+name = "sshd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# Naslouchani a spousteni procesu spojeni.
+[[bin]]
+name = "sshd"
+path = "src/main.rs"
+test = false
+bench = false
+
+# Jedno spojeni SSH (neduveryhodny vstup ze site; vlastni proces).
+[[bin]]
+name = "sshd-conn"
+path = "src/conn.rs"
+test = false
+bench = false
+
+[dependencies]
+libos = { path = "../../libs/libos" }
+netproto = { path = "../../libs/netproto", features = ["client"] }
+accountproto = { path = "../../libs/accountproto", features = ["client"] }
+ssh = { path = "../../libs/ssh" }
+term = { path = "../../libs/term" }
+wire = { path = "../../libs/wire" }

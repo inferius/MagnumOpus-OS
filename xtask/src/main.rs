@@ -896,6 +896,10 @@ pub struct Artifacts {
 
 /// Programy v userspace, ktere se pribali do initfs (jmeno crate = jmeno
 /// souboru v initfs).
+/// Dalsi programy z balicku s vice binarkami (balicek je v
+/// [`USER_PROGRAMS`]): sshd -> proces spojeni `sshd-conn`.
+const EXTRA_BINS: &[&str] = &["sshd-conn"];
+
 const USER_PROGRAMS: &[&str] = &[
     "init",
     "libd",
@@ -953,6 +957,7 @@ const USER_PROGRAMS: &[&str] = &[
     "fwd",
     "netprobe",
     "ntpd",
+    "sshd",
     "fetch",
     "revocd",
     "accountd",
@@ -973,6 +978,7 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("gui-komponenty.manifest.toml", "user/gui-komponenty/gui-komponenty.manifest.toml"),
     ("gui-term.manifest.toml", "user/gui-term/gui-term.manifest.toml"),
     ("ntpd.manifest.toml", "user/ntpd/ntpd.manifest.toml"),
+    ("sshd.manifest.toml", "user/sshd/sshd.manifest.toml"),
     ("ntpd.toml", "user/ntpd/ntpd.toml"),
     ("fetch.manifest.toml", "user/fetch/fetch.manifest.toml"),
     ("revocd.manifest.toml", "user/revocd/revocd.manifest.toml"),
@@ -1164,6 +1170,10 @@ fn build(opts: &Options) -> Result<Artifacts> {
     for name in &programs {
         let data = std::fs::read(user_bin.join(name))
             .map_err(|e| format!("nelze cist program {name}: {e}"))?;
+        files.push((name.to_string(), loadable_only(&data)));
+    }
+    for name in EXTRA_BINS {
+        let data = std::fs::read(user_bin.join(name)).map_err(|e| format!("nelze cist program {name}: {e}"))?;
         files.push((name.to_string(), loadable_only(&data)));
     }
     // Prevzate aplikace (ripgrep, ...) bez uprav: overeni std v praxi.

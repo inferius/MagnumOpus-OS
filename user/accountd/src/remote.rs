@@ -75,6 +75,23 @@ impl Service {
         Ok((id, ticket))
     }
 
+    /// Kanal `account-admin` (jen init, jmenem uzivatele relace shellu):
+    /// `u64` uid LE + pozadavek nad klici SSH nebo vzdalenym pristupem.
+    pub fn account_admin(&mut self, data: &[u8]) -> Vec<u8> {
+        let Some((uid, rest)) = data.split_first_chunk::<8>() else { return reply_err(Error::InvalidArgs) };
+        let uid = u64::from_le_bytes(*uid);
+        match Request::decode(rest) {
+            Ok(r @ (Request::SshKeyAdd { .. } | Request::SshKeyList | Request::SshKeyRemove { .. } | Request::SetRemote { .. })) => {
+                match self.own_ssh(uid, r) {
+                    Ok(b) => reply_ok(&b),
+                    Err(e) => reply_err(e),
+                }
+            }
+            Ok(_) => reply_err(Error::AccessDenied),
+            Err(e) => reply_err(e),
+        }
+    }
+
     /// Vlastni operace nad klici SSH a vzdalenym pristupem (kanal self).
     pub fn own_ssh(&mut self, uid: u64, req: Request) -> Result<Vec<u8>> {
         let now = now();

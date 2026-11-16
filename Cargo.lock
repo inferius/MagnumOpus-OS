@@ -1870,6 +1870,7 @@ dependencies = [
  "renderproto",
  "shlang",
  "spin 0.12.3",
+ "ssh",
  "svcclient",
  "taskproto",
  "term",
@@ -3373,6 +3374,18 @@ dependencies = [
  "ssh-cipher",
  "ssh-encoding",
  "zeroize",
+]
+
+[[package]]
+name = "sshd"
+version = "0.1.0"
+dependencies = [
+ "accountproto",
+ "libos",
+ "netproto",
+ "ssh",
+ "term",
+ "wire",
 ]
 
 [[package]]

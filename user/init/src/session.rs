@@ -90,6 +90,17 @@ impl Event {
     }
 }
 
+/// Duplikat kanalu k accountd pro udalosti initu (konec relace, kterou
+/// neukoncila sluzba uctu: vzdalena relace po konci spojeni).
+static TO_ACCOUNTD: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
+
+/// Ohlasi sluzbe uctu konec relace `session` (`SESSION_CLOSED`).
+pub fn notify_closed(session: u64) {
+    if let Some(c) = TO_ACCOUNTD.lock().as_ref() {
+        let _ = c.write(&accountproto::encode_session_closed(session), Vec::new());
+    }
+}
+
 /// Kanal udalosti relaci: (zapis = vlakno sezeni, cteni = supervisor).
 pub static EVENTS: spin::Once<(Channel, Channel)> = spin::Once::new();
 
@@ -307,6 +318,9 @@ pub(crate) fn handle(fs: &FsClient, m: ToInit, handles: Vec<Handle>) -> Result<V
 /// Smycka vlakna: pozadavky accountd na kanalu `ch`, `fs` = ridici
 /// relace FS (system).
 pub fn serve(ch: Channel, fs: FsClient) {
+    if let Ok(h) = ch.handle().duplicate(None) {
+        *TO_ACCOUNTD.lock() = Some(Channel::from_handle(h));
+    }
     loop {
         let mut msg = match ch.read(None) {
             Ok(m) => m,
