@@ -146,6 +146,11 @@ pub trait Env {
     fn dev_mode(&mut self, _set: u8) -> Result<bool, abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Vzdaleny pristup SSH (`shlang::host::Host::ssh`); vychozi = relace
+    /// ho nema.
+    fn ssh(&mut self, _op: &str, _arg: &str, _password: &str) -> Result<alloc::string::String, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Ucty lidi pro jmena v prikazu `acl`; vychozi = relace je nema
     /// (`acl` pak zna jen `everyone`, `users` a cisla).
     fn accounts(&mut self) -> Result<alloc::vec::Vec<shlang::acl::Account>, abi::Error> {
@@ -603,6 +608,10 @@ impl Host for SessionHost<'_> {
 
     fn accounts(&mut self) -> Result<Vec<shlang::acl::Account>, abi::Error> {
         self.env.accounts()
+    }
+
+    fn ssh(&mut self, op: &str, arg: &str, password: &str) -> Result<String, abi::Error> {
+        self.env.ssh(op, arg, password)
     }
 
     fn open_path(&mut self, path: &str, app_only: bool) -> Result<Opened, abi::Error> {

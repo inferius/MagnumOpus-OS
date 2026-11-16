@@ -370,6 +370,30 @@ impl Env for SysEnv {
         }
     }
 
+    /// `sshd`, `ssh-key`, `remote-access`: pres init (ten mluvi se sluzbou
+    /// uctu a sshd). Zapnuti a vypnuti sshd ceka na potvrzeni spravce:
+    /// init odpovi kanalem, vysledek prijde na nej (nejdele 2 minuty).
+    fn ssh(&mut self, op: &str, arg: &str, password: &str) -> Result<String, Error> {
+        let guard = POWER.lock();
+        let chan = guard.as_ref().ok_or(Error::NotSupported)?;
+        let req = powerproto::Request::Ssh { op: String::from(op), arg: String::from(arg), password: String::from(password) };
+        let mut data = req.encode();
+        let w = chan.write(&data, Vec::new());
+        data.iter_mut().for_each(|b| *b = 0);
+        w?;
+        let mut m = chan.read(Some(time::deadline_after(Duration::from_secs(30))))?;
+        if let Ok(powerproto::Reply::Ok) = powerproto::Reply::decode(&m.data) {
+            let h = m.handles.pop().ok_or(Error::Corrupted)?;
+            drop(guard);
+            m = Channel::from_handle(h).read(Some(time::deadline_after(Duration::from_secs(120))))?;
+        }
+        match powerproto::Reply::decode(&m.data)? {
+            powerproto::Reply::Text(t) => Ok(t),
+            powerproto::Reply::Failed(e) => Err(e),
+            _ => Err(Error::Corrupted),
+        }
+    }
+
     /// `theme`: volba vzhledu pres init. Systemova zmena ceka na
     /// potvrzeni spravce v dialogu: init odpovi kanalem, vysledek prijde
     /// na nej (nejdele 2 minuty).
