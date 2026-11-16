@@ -28,6 +28,7 @@ mod docs_check;
 mod highlight;
 mod image;
 mod mediadisks;
+mod usbports;
 mod qemu;
 mod nethelper;
 mod dnshelper;
