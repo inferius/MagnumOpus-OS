@@ -1,5 +1,6 @@
 //! Volba vzhledu (`appearance`): plynuly prechod barev na obrazovce,
-//! okamzita zmena s Omezit pohyb, aplikace se prekresli, ulozeni volby.
+//! okamzita zmena s Omezit pohyb, aplikace se prekresli, aplikace
+//! spustena v tmavem rezimu je tmava od prvniho snimku, ulozeni volby.
 
 use alloc::vec::Vec;
 use core::time::Duration;
@@ -78,6 +79,45 @@ pub fn fade(_: &Startup) -> TestResult {
         // Zpet jako na zacatku sady (dalsi testy ocekavaji svetly).
         cmd(s, "appearance system svetly ne ano")?;
         Ok(())
+    })
+}
+
+/// Aplikace spustena az v tmavem rezimu (jako po startu systemu s ulozenou
+/// tmavou volbou): rezim prijde v pozdravu kompozitoru (`THEME` hned po
+/// `WELCOME`) a obsah okna je tmavy od prvniho snimku, bez dalsi zmeny.
+pub fn start_dark(startup: &Startup) -> TestResult {
+    with(|s| {
+        cmd(s, "appearance system tmavy ne ano")?;
+        settle(&s.inspect)?;
+        let app = s.gui.launch(startup, "gui-demo").map_err(|e| super::fail("spusteni gui-demo", e))?;
+        let r = (|| -> TestResult {
+            let end = time::deadline_after(Duration::from_secs(20));
+            let w = loop {
+                if let Some(w) = windows(&s.inspect)?.into_iter().find(|w| w.app == "org.magnumopus.demo" && w.id != s.demo) {
+                    break w;
+                }
+                check!(time::now() < end, "druhe okno ukazky se neobjevilo");
+                time::sleep(Duration::from_millis(50));
+            };
+            wait_tree(&s.inspect, w.id, "strom noveho okna", |t| t.iter().any(|n| n.role == Role::Button && n.name == "Přičíst"))?;
+            settle(&s.inspect)?;
+            let dark = Theme::builtin(Mode::Dark);
+            let (ax, ay) = (w.rect.x + w.rect.w as i32 / 2, w.rect.y + w.rect.h as i32 - 4);
+            let p = pixel(&s.inspect, ax, ay)?;
+            check!(p == dark.color.surface, alloc::format!("obsah noveho okna v tmavem rezimu: {p:08x}, cekano {:08x}", dark.color.surface));
+            Ok(())
+        })();
+        if let Some(a) = s.gui.apps.get(app) {
+            let _ = a.process.kill();
+            let _ = a.process.wait_exit(Some(time::deadline_after(Duration::from_secs(5))));
+        }
+        if app + 1 == s.gui.apps.len() {
+            drop(s.gui.apps.pop());
+        }
+        // Zpet jako na zacatku sady (dalsi testy ocekavaji svetly).
+        cmd(s, "appearance system svetly ne ano")?;
+        settle(&s.inspect)?;
+        r
     })
 }
 

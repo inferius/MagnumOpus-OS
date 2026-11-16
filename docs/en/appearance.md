@@ -263,7 +263,7 @@ Tests: `libs/theme` (`pref_text_roundtrip_and_resolve`), `libs/comp`
 mixing in linear light, an application redraw during the transition, Reduce motion, the system and user choice, the bar card,
 deferral while typing), `libs/shlang` (`tests/appearance.rs`), QEMU suite
 `gui` ("appearance choice: smooth color transition": the badge passes
-through intermediate colors, the application window redraws dark; storage
+through intermediate colors, the application window redraws dark; "an application started in dark mode is dark from the first frame": the mode is part of the compositor's greeting, not only of later changes; storage
 only for the system). Screenshots of all applications in light, dark and
 contrast mode come from the "look by design" test (`target/shots/`).
 

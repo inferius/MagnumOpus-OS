@@ -115,6 +115,9 @@ struct Greeting {
     app: String,
     size: (u32, u32, u32),
     context: Option<WinContext>,
+    /// Rezim barev z pozdravu (`THEME` hned po `WELCOME`, pripadne
+    /// novejsi zmena pred prvnim `CONFIGURE`).
+    mode: Option<theme::Mode>,
 }
 
 /// Kanal okna a listek k jeho obnove ze startovni zpravy aplikace.
@@ -209,6 +212,11 @@ pub struct Window {
     clip_formats: Vec<String>,
     /// Kontext okna (posledni `WINDOW_CONTEXT`).
     pub context: Option<WinContext>,
+    /// Rezim barev: z pozdravu kompozitoru (skutecny stav pri otevreni
+    /// okna, i po obnove), pak posledni `THEME`. `None` = kompozitor ho
+    /// neposlal. Aplikace ho pouzije pred prvnim kreslenim; dalsi zmeny
+    /// prijdou jako [`Event::Theme`].
+    pub mode: Option<theme::Mode>,
     /// Vrstva popoveru je videt.
     popover_shown: bool,
     /// Vrstva kurzoru: nakresleny obdelnik a barva, viditelnost.
@@ -246,10 +254,14 @@ fn read(ch: &Channel, deadline: Option<u64>) -> Result<ServerMsg> {
 /// `CONFIGURE` (pred nim kontext okna).
 fn handshake(ch: &Channel, rest: &[(ClientMsg, Vec<Handle>)], deadline: Option<u64>) -> Result<Greeting> {
     ch.write(&ClientMsg::Hello { version: guiproto::VERSION }.encode(), Vec::new())?;
+    // Rezim barev je soucast pozdravu: nesmi se zahodit, jinak aplikace
+    // zacne ve vychozim svetlem a zmeni se az pri dalsi zmene rezimu.
+    let mut mode = None;
     let (screen, app) = loop {
         match read(ch, deadline)? {
             ServerMsg::Welcome { w, h, app, .. } => break ((w, h), app),
             ServerMsg::Error { code, .. } => return Err(code),
+            ServerMsg::Theme { mode: m } => mode = Some(mode_of(m)),
             _ => {}
         }
     };
@@ -260,8 +272,9 @@ fn handshake(ch: &Channel, rest: &[(ClientMsg, Vec<Handle>)], deadline: Option<u
     let mut context = None;
     loop {
         match read(ch, deadline)? {
-            ServerMsg::Configure { w, h, serial, .. } => return Ok(Greeting { screen, app, size: (w, h, serial), context }),
+            ServerMsg::Configure { w, h, serial, .. } => return Ok(Greeting { screen, app, size: (w, h, serial), context, mode }),
             ServerMsg::Error { code, .. } => return Err(code),
+            ServerMsg::Theme { mode: m } => mode = Some(mode_of(m)),
             m => {
                 if let Some(c) = WinContext::from_msg(&m) {
                     context = Some(c);
@@ -278,7 +291,7 @@ impl Window {
         let link = link.into();
         let create = ClientMsg::WindowCreate { window: 1, mode, w, h, title: title.into() };
         let g = handshake(&link.window, &[(create.clone(), Vec::new())], None)?;
-        let (screen, app, (cw, ch, serial), context) = (g.screen, g.app, g.size, g.context);
+        let (screen, app, (cw, ch, serial), context, theme_mode) = (g.screen, g.app, g.size, g.context, g.mode);
         let mut replay = Replay::new();
         replay.record(&create);
         replay.configured(1, cw, ch);
@@ -307,6 +320,7 @@ impl Window {
             app_paste: 0,
             clip_formats: Vec::new(),
             context,
+            mode: theme_mode,
             popover_shown: false,
             caret: None,
             caret_shown: false,
@@ -424,7 +438,11 @@ impl Window {
                 first
             }
             ServerMsg::Close { .. } => Some(Event::Close),
-            ServerMsg::Theme { mode } => Some(Event::Theme(mode_of(mode))),
+            ServerMsg::Theme { mode } => {
+                let m = mode_of(mode);
+                self.mode = Some(m);
+                Some(Event::Theme(m))
+            }
             ServerMsg::A11yAction { node, action, value, .. } => Some(Event::A11yAction { node, action, value }),
             ServerMsg::Clipboard { data } => clipproto::ServerMsg::decode(&data).ok().map(Event::Clipboard),
             ServerMsg::WindowPlace { rect, .. } => Some(Event::Place(rect)),
@@ -778,6 +796,11 @@ pub fn run_video<A: App>(link: impl Into<Link>, mut app: A, mode: Mode, w: u32, 
         win.request_size(sw, sh, fw, fh)?;
     }
     let mut ui: Ui<A::Msg> = Ui::new(crate::Look::ui_fonts(), win.w, win.h);
+    // Rezim z pozdravu pred prvnim kreslenim (bez svetleho snimku).
+    if let Some(m) = win.mode {
+        ui.look.set_mode(m);
+        ui.cx.mode = m;
+    }
     ui.use_overlay_layer(true);
     ui.use_caret_layer(true);
     set_context(&win, &mut ui);

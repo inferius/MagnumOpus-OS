@@ -254,7 +254,7 @@ snímků v lineárním světle, překreslení aplikace během přechodu,
 Omezit pohyb, systémová a uživatelská volba, karta v liště, odklad při
 psaní), `libs/shlang` (`tests/appearance.rs`), QEMU sada `gui`
 („volba vzhledu: plynulý přechod barev“: odznak projde mezibarvami,
-okno aplikace se překreslí tmavě; uložení jen pro systém). Snímky
+okno aplikace se překreslí tmavě; „aplikace spuštěná v tmavém režimu je tmavá od prvního snímku“: režim je součást pozdravu kompozitoru, ne až další změny; uložení jen pro systém). Snímky
 obrazovky všech aplikací ve světlém, tmavém a kontrastním režimu dělá
 test „vzhled podle návrhu“ (`target/shots/`).
 
