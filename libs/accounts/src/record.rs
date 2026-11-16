@@ -18,7 +18,10 @@ use crate::wrap::Wrap;
 
 const MAGIC: &[u8; 4] = b"MOAC";
 const META_MAGIC: &[u8; 4] = b"MOAM";
-pub const FORMAT: u32 = 1;
+/// Verze 2 = klice SSH na konci zaznamu (verze 1 se cte bez nich).
+pub const FORMAT: u32 = 2;
+/// Verze metadat DB (`/db/meta`).
+pub const META_FORMAT: u32 = 1;
 
 /// Registrovany bezpecnostni klic.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +37,17 @@ pub struct KeyRec {
     pub uv: bool,
     /// Klic umi hmac-secret (obal klice domova).
     pub hmac_secret: bool,
+}
+
+/// Verejny klic SSH (vzdaleny pristup, `crate::remote`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SshKeyRec {
+    pub id: u32,
+    /// Blob protokolu SSH (`ssh::keys::PublicKey::blob`).
+    pub blob: Vec<u8>,
+    /// Komentar z radku klice (napr. `alice@notebook`).
+    pub comment: String,
+    pub added: i64,
 }
 
 /// PIN uctu.
@@ -73,6 +87,9 @@ pub struct Account {
     pub crypt: Option<Crypt>,
     pub created: i64,
     pub last_login: i64,
+    /// Klice SSH (prihlaseni na dalku; plati jen s `flags::REMOTE`).
+    pub ssh_keys: Vec<SshKeyRec>,
+    pub next_ssh_id: u32,
 }
 
 impl Account {
@@ -95,6 +112,8 @@ impl Account {
             crypt: None,
             created: now,
             last_login: 0,
+            ssh_keys: Vec::new(),
+            next_ssh_id: 1,
         }
     }
 
@@ -135,8 +154,14 @@ impl Account {
     }
 
     pub fn encode(&self) -> Vec<u8> {
+        self.encode_format(FORMAT)
+    }
+
+    /// Zaznam ve verzi `format` (1 = bez klicu SSH; testy cteni starych
+    /// zaznamu).
+    pub(crate) fn encode_format(&self, format: u32) -> Vec<u8> {
         let mut w = Writer::new();
-        w.bytes(MAGIC).u32(FORMAT);
+        w.bytes(MAGIC).u32(format);
         w.u64(self.uid).str(&self.name).str(&self.display);
         put_u64s(&mut w, &self.groups);
         w.u32(self.flags).str(&self.phrase);
@@ -180,13 +205,24 @@ impl Account {
             }
         }
         w.u64(self.created as u64).u64(self.last_login as u64);
+        if format < 2 {
+            return seal(w.finish());
+        }
+        w.u32(self.ssh_keys.len() as u32);
+        for k in &self.ssh_keys {
+            w.u32(k.id);
+            put_blob(&mut w, &k.blob);
+            w.str(&k.comment).u64(k.added as u64);
+        }
+        w.u32(self.next_ssh_id);
         seal(w.finish())
     }
 
     pub fn decode(b: &[u8]) -> Result<Self> {
         let body = unseal(b, MAGIC)?;
         let mut r = Reader::new(body);
-        if r.u32()? != FORMAT {
+        let format = r.u32()?;
+        if format != 1 && format != FORMAT {
             return Err(Error::NotSupported);
         }
         let uid = r.u64()?;
@@ -236,6 +272,17 @@ impl Account {
         };
         let created = r.u64()? as i64;
         let last_login = r.u64()? as i64;
+        let (mut ssh_keys, mut next_ssh_id) = (Vec::new(), 1);
+        if format >= 2 {
+            let n = r.u32()? as usize;
+            if n > crate::remote::MAX_SSH_KEYS {
+                return Err(Error::Corrupted);
+            }
+            for _ in 0..n {
+                ssh_keys.push(SshKeyRec { id: r.u32()?, blob: get_blob(&mut r)?, comment: r.str()?, added: r.u64()? as i64 });
+            }
+            next_ssh_id = r.u32()?;
+        }
         if !r.is_empty() || !accountproto::valid_name(&name) {
             return Err(Error::Corrupted);
         }
@@ -257,6 +304,8 @@ impl Account {
             crypt,
             created,
             last_login,
+            ssh_keys,
+            next_ssh_id,
         })
     }
 }
@@ -278,13 +327,13 @@ impl Default for Meta {
 impl Meta {
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::new();
-        w.bytes(META_MAGIC).u32(FORMAT).u64(self.next_uid).u64(self.next_gid);
+        w.bytes(META_MAGIC).u32(META_FORMAT).u64(self.next_uid).u64(self.next_gid);
         seal(w.finish())
     }
 
     pub fn decode(b: &[u8]) -> Result<Self> {
         let mut r = Reader::new(unseal(b, META_MAGIC)?);
-        if r.u32()? != FORMAT {
+        if r.u32()? != META_FORMAT {
             return Err(Error::NotSupported);
         }
         let m = Meta { next_uid: r.u64()?, next_gid: r.u64()? };

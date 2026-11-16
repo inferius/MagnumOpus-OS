@@ -169,6 +169,8 @@ pub mod flags {
     pub const ENCRYPTED: u32 = 8;
     /// PIN bez hardwaroveho klice zarizeni (TPM) - nastaveni varuje.
     pub const PIN_WEAK: u32 = 16;
+    /// Ucet povolil vzdaleny pristup (SSH klicem); vychozi ne.
+    pub const REMOTE: u32 = 32;
 }
 
 /// Tajemstvi (heslo, PIN, klic). Pri zahozeni se vynuluje; `Debug`
