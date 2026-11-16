@@ -64,6 +64,7 @@ Code:
 | dragging selected items onto a folder = move (a rename within a dataset) | **[implemented]** (host `drop_on_folder_moves`); between windows and apps **[designed]** |
 | the "open a path" service reply in the status line (second window channel) | **[implemented]** (host `context_menu_and_open_reply`) |
 | a folder without the list right (someone else's home in `/home`): a lock icon, kind "Folder without access" (Czech UI text "Složka bez přístupu"); opening it shows "You do not have access to folder X." instead of the contents (another error: "Folder X cannot be opened: reason."). A refused listing is never shown as "The folder is empty" | **[implemented]** (host `foreign_folder_has_lock`, `denied_listing_is_not_empty_folder`) |
+| "Download from address…" (File menu, palette): address check, download into `~/Stažené` via the session fetch, progress in Tasks ([Downloads](downloads.md)) | **[implemented]** (host `download_from_address`), downloading **[verified in QEMU]** |
 | icon view (grid), thumbnails | **[designed]** |
 | the Properties panel (context menu, Alt+Enter, action `files.properties`): the General tab and the Permissions tab (owner, shares with a level, inherited rows with their origin, inheritance into a folder's contents, turning inheritance off) | **[verified in QEMU]** (test `gui: compd: spravce souboru...`: an inherited grant from fsd, adding a share, saving); levels, read-only, confirmation host `props_tests.rs` |
 | "Try aside", taking over changes, Compare versions | **[designed]** (prototype `design/soubory.html`) |

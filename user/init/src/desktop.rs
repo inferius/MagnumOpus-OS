@@ -73,6 +73,7 @@ fn closed(session: u64) {
     }
     crate::terminal::TERMINALS.lock().close_session(session);
     crate::files::close(session);
+    crate::downloads::close(session);
     crate::open::close_session(session);
     println!("init: procesy relace {session} ukonceny");
     crate::gui::session_event(&format!("close {session}"));

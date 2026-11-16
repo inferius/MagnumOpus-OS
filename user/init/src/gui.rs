@@ -630,7 +630,12 @@ pub fn launch_app(gui: &mut Gui, startup: &Startup, sup: &mut Supervisor, progra
         // initem, stejne jako ikona v liste), ridit smi jen sve.
         "gui-tasks" => vec![StartHandle::user(crate::tasks::client_view_all("uzivatel")?.into_handle())],
         // Spravce souboru: relace FS uzivatele, kanal k files-copy, domov.
-        "gui-files" => crate::files::window_handles(session)?,
+        "gui-files" => {
+            let mut v = crate::files::window_handles(session)?;
+            // Stahovani z adresy (fetch relace, spusti se pri prvnim okne).
+            v.push(crate::files::download_handle(startup, session)?);
+            v
+        }
         // Instalator: kanal k installd (spusti ho init, jen zive USB);
         // v testu GUI instalace navic soubor odpovedi (autopilot).
         INSTALLER_APP => crate::install::app_handles()?,

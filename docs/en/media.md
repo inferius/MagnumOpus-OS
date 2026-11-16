@@ -89,9 +89,10 @@ their own data); exact mapping of owners and permissions is in the
 deviations in [Architecture](architecture.md#current-deviations-from-the-design).
 
 The read-only attribute of a file is reported in `Stat`; extended
-attributes (e.g. `system.origin` of downloaded files) are not kept by FAT,
-exFAT or NTFS **[designed]**: a copy from home to the medium loses them
-and logs that.
+attributes (e.g. the `sys.origin` of downloaded files,
+[Downloads](downloads.md#the-sysorigin-file-origin)) are not kept by FAT,
+exFAT or NTFS: a copy from home to the medium loses the origin and
+files-copy logs that **[implemented]**.
 
 ## File systems
 

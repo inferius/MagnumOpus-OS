@@ -57,7 +57,13 @@ impl Vfs for FsVfs<'_> {
     }
 
     fn clone_path(&mut self, src: &str, dst: &str) -> Result<()> {
-        self.0.clone_path(src, dst).map(|_| ())
+        let r = self.0.clone_path(src, dst).map(|_| ());
+        // Kopie ctenim a zapisem (cil na vymennem mediu: FAT, exFAT, NTFS
+        // rozsirene atributy nemaji): puvod stazeneho souboru se ztrati.
+        if r == Err(Error::NotSupported) && self.0.get_xattr(src, fsproto::perm::ORIGIN_XATTR).is_ok() {
+            libos::println!("files-copy: {src}: puvod souboru (sys.origin) se do {dst} neprenese, cil atributy nema");
+        }
+        r
     }
 
     fn rename(&mut self, from: &str, to: &str) -> Result<()> {

@@ -54,6 +54,9 @@ pub trait Backend {
     fn names(&mut self) -> Vec<(u64, String)>;
     /// Cislo uctu uzivatele okna (vlastnik domova); `None` = nezname.
     fn uid(&mut self) -> Option<u64>;
+    /// Stahnout adresu do `~/Stazene` (fetch od initu, `save-bg`); necheka
+    /// se (vysledek v Ulohach a oznameni). `false` = stahovani neni.
+    fn download(&mut self, url: &str) -> bool;
 }
 
 /// Backend pro testy na hostiteli: FS v pameti (`fileops::mem`), masky
@@ -71,6 +74,8 @@ pub struct TestBackend {
     pub sent: Vec<ClientMsg>,
     /// Cesty poslane sluzbe "otevri cestu".
     pub opened: Vec<String>,
+    /// Adresy predane ke stazeni.
+    pub downloads: Vec<String>,
     pub now: Option<WallTime>,
     /// Kos: (dataset, polozka, obsah).
     pub trash: Vec<(String, TrashEntry, Vec<(String, Node)>)>,
@@ -182,6 +187,11 @@ pub fn oid(path: &str) -> u64 {
 }
 
 impl Backend for TestBackend {
+    fn download(&mut self, url: &str) -> bool {
+        self.downloads.push(String::from(url));
+        true
+    }
+
     fn home(&self) -> String {
         self.home.clone()
     }

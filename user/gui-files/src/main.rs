@@ -9,7 +9,8 @@
 //! prava rozhoduji), 4. kanal k `files-copy` (bez procesu zavreny: jde
 //! vse krome kopirovani a presunu mezi slozkami), 5. kanal sluzby
 //! "otevri cestu" (init, `libs/openwith`), 6. kanal jmen uctu (`accountd`
-//! `names`, karta Opravneni). Chybejici sluzba = zavreny kanal. Pracovni
+//! `names`, karta Opravneni), 7. kanal stahovani (`fetch` relace od initu,
+//! prikaz `save-bg`, docs/cs/stahovani.md). Chybejici sluzba = zavreny kanal. Pracovni
 //! adresar v bloku parametru = domov uzivatele.
 
 #![no_std]
@@ -44,9 +45,18 @@ struct OsBackend {
     zone: Option<Zone>,
     /// Kanal jmen uctu (jen cteni zobrazovanych jmen).
     names: Option<accountproto::client::Names>,
+    /// Kanal stahovani (fetch relace od initu, `save-bg`).
+    downloads: Option<Channel>,
 }
 
 impl Backend for OsBackend {
+    fn download(&mut self, url: &str) -> bool {
+        match &self.downloads {
+            Some(c) => c.write(alloc::format!("save-bg {url}").as_bytes(), Vec::new()).is_ok(),
+            None => false,
+        }
+    }
+
     fn home(&self) -> String {
         self.home.clone()
     }
@@ -263,6 +273,7 @@ fn main(startup: Startup) -> i64 {
     let copier = handles.next().map(Channel::from_handle);
     let opener = handles.next().map(Channel::from_handle);
     let names = handles.next().map(|h| accountproto::client::Names(Channel::from_handle(h)));
+    let downloads = handles.next().map(Channel::from_handle);
     // Zapis pres druhy handle stejneho kanalu (cteni zustane run_with).
     let writer = match copier.as_ref().map(|c| c.handle().duplicate(None)) {
         Some(Ok(d)) => Some(Channel::from_handle(d)),
@@ -282,7 +293,7 @@ fn main(startup: Startup) -> i64 {
         (Some(_), Ok((rx, tx))) => (Some(rx), Some(tx)),
         _ => (None, None),
     };
-    let app = Timed(FileManager::new(OsBackend { fs, home, copier: writer, opener, replies, zone, names }));
+    let app = Timed(FileManager::new(OsBackend { fs, home, copier: writer, opener, replies, zone, names, downloads }));
     // Kanal 0 = files-copy, 1 = odpovedi sluzby (prazdny kanal, kdyz neni).
     let mut extras = Vec::new();
     for c in [copier, reply_rx] {

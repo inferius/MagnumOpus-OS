@@ -461,14 +461,31 @@ impl Service {
                 let path = sess.map(&r.str()?, false)?;
                 w.bytes(&fs.get_xattr(&path, &r.str()?)?);
             }
-            op::XATTR_SET => {
-                let path = sess.map(&r.str()?, true)?;
+            op::XATTR_SET | op::XATTR_REMOVE => {
+                let raw = r.str()?;
+                let path = sess.map(&raw, true)?;
                 let name = r.str()?;
-                fs.set_xattr(&path, &name, r.rest())?;
-            }
-            op::XATTR_REMOVE => {
-                let path = sess.map(&r.str()?, true)?;
-                fs.remove_xattr(&path, &r.str()?)?;
+                let value = (opcode == op::XATTR_SET).then(|| r.rest());
+                // Puvod stazeneho souboru: relace s pripojenim ORIGIN (fetch)
+                // ho zapise jako system, ale jen kde smi psat. Ostatni `sys.*`
+                // odmitne FS relacim s identitou.
+                if name == fsproto::perm::ORIGIN_XATTR && origin_allowed(sess, &raw)? {
+                    if fs.stat(&path)?.rights & fs::rights::WRITE == 0 {
+                        return Err(Error::AccessDenied);
+                    }
+                    fs.set_principal(None);
+                    let res = match value {
+                        Some(v) => fs.set_xattr(&path, &name, v),
+                        None => fs.remove_xattr(&path, &name),
+                    };
+                    fs.set_principal(sess.identity.clone());
+                    res?;
+                } else {
+                    match value {
+                        Some(v) => fs.set_xattr(&path, &name, v)?,
+                        None => fs.remove_xattr(&path, &name)?,
+                    }
+                }
             }
             op::XATTR_LIST => {
                 let path = sess.map(&r.str()?, false)?;
@@ -527,4 +544,11 @@ impl Service {
             Err(e) => Some(Err(e)),
         }
     }
+}
+
+/// Smi relace pod cestou `path` zapsat puvod souboru? (pripojeni
+/// s priznakem `ORIGIN`; ridici relace a system to smi i bez nej, tam FS
+/// nekontroluje identitu.)
+fn origin_allowed(sess: &Session, path: &str) -> Result<bool> {
+    Ok(fsproto::perm::mount_flags_of(&sess.mounts, path)? & fsproto::perm::mount_flags::ORIGIN != 0)
 }

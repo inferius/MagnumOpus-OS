@@ -84,8 +84,9 @@ přesné mapování vlastníků a práv je v odchylkách v
 [Architektura](architektura.md#aktuální-odchylky-od-návrhu).
 
 Atribut „jen pro čtení“ souboru se hlásí v `Stat`, rozšířené atributy
-(např. `system.origin` stažených souborů) FAT, exFAT ani NTFS neuchovají
-**[navrženo]**: kopie z domova na médium je ztratí a zapíše to do logu.
+(např. původ `sys.origin` stažených souborů, [Stahování](stahovani.md#původ-souboru-sysorigin))
+FAT, exFAT ani NTFS neuchovají: kopie z domova na médium původ ztratí
+a files-copy to zapíše do logu **[implementováno]**.
 
 ## Souborové systémy
 

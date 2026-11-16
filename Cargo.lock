@@ -1286,6 +1286,8 @@ dependencies = [
  "httpc",
  "libos",
  "netproto",
+ "notifyproto",
+ "taskproto",
  "tls",
  "web",
 ]

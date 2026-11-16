@@ -27,6 +27,7 @@ mod files;
 mod open;
 mod splash;
 mod dns;
+mod downloads;
 mod fsd;
 mod gui;
 mod input;

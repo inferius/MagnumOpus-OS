@@ -7,12 +7,19 @@
 //!    `https` (zadna duveryhodna CA).
 //! 3. kanal ke sluzbe `revocd` (kontrola odvolani: CRL, OneCRL); bez nej
 //!    se kontroluje jen OCSP stapling.
+//! 4. (stahovani do souboru, docs/cs/stahovani.md) relace FS jen se slozkou
+//!    `/Stazene` (priznak `ORIGIN`),
+//! 5. kanal producenta do prehledu uloh (`taskd`); oznameni = handle se
+//!    stitkem `abi::params::tag::NOTIFY`.
 //!
 //! Prikazy na bootstrap kanalu (odpoved `ok:...` nebo `err:<JMENO> <popis>`):
 //! - `get <url>`, `head <url>`, `post <url> <telo>` -
 //!   `ok:<stav> <verze> <delka tela> <FNV-1a 64 tela hex> <konecna adresa>`,
 //! - `body <url>` - `ok:<telo>` (text, do 4 KiB; pro testy a ladeni),
-//! - `roots` - `ok:<pocet CA> rejected=<n> distrusted=<n>`.
+//! - `roots` - `ok:<pocet CA> rejected=<n> distrusted=<n>`,
+//! - `save <url> [jmeno]` - stahne do `/Stazene` (jen s relaci 4):
+//!   `ok:<jmeno> <bajtu>` nebo `err:<JMENO> <popis pro uzivatele>`;
+//!   `save-bg <url>` totez bez odpovedi (vysledek v ulohach a oznameni).
 //!
 //! Konec kanalu u rodice = konec procesu.
 
@@ -35,6 +42,8 @@ use tls::revocation::{ChannelSource, RevocationSource};
 use tls::roots::Roots;
 use web::Web;
 
+mod save;
+
 libos::entry!(main);
 
 /// FNV-1a 64 (kontrolni soucet tela pro testy).
@@ -42,7 +51,8 @@ fn fnv(data: &[u8]) -> u64 {
     data.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3))
 }
 
-fn main(startup: Startup) -> i64 {
+fn main(mut startup: Startup) -> i64 {
+    let notify = startup.take_tagged(libos::abi::params::tag::NOTIFY).map(Channel::from_handle);
     let ch = startup.bootstrap;
     let mut handles = startup.handles.into_iter();
     let Some(net) = handles.next().map(|h| Net::new(Channel::from_handle(h))) else {
@@ -62,6 +72,12 @@ fn main(startup: Startup) -> i64 {
             return 2;
         }
     };
+    // Stahovani do souboru: relace FS se slozkou Stazene a prehled uloh.
+    let mut downloads = handles.next().map(|h| {
+        let fs = FsClient::new(Channel::from_handle(h));
+        let tasks = handles.next().map(Channel::from_handle);
+        save::Downloads::new(fs, tasks, notify)
+    });
     let mut client = Client::new(Web::new(&net, &tls), httpc::Limits::default());
     loop {
         let msg = match ch.read(None) {
@@ -73,6 +89,25 @@ fn main(startup: Startup) -> i64 {
             }
         };
         let cmd = core::str::from_utf8(&msg.data).unwrap_or("");
+        // `save-bg`: bez odpovedi (Soubory; vysledek v ulohach a oznameni).
+        let quiet = cmd.starts_with("save-bg ");
+        if let Some(rest) = cmd.strip_prefix("save ").or_else(|| cmd.strip_prefix("save-bg ")) {
+            let (url, name) = match rest.split_once(' ') {
+                Some((u, n)) => (u, Some(n)),
+                None => (rest, None),
+            };
+            let reply = match downloads.as_mut() {
+                None => String::from("err:NOT_SUPPORTED stahovani do souboru neni povolene"),
+                Some(d) => match save::save(&mut client, d, url, name) {
+                    Ok((n, b)) => format!("ok:{n} {b}"),
+                    Err((e, m)) => format!("err:{} {m}", e.name()),
+                },
+            };
+            if !quiet && ch.write(reply.as_bytes(), Vec::new()).is_err() {
+                return 4;
+            }
+            continue;
+        }
         let reply = match run(&mut client, &roots, cmd) {
             Ok(s) => format!("ok:{s}"),
             Err(e) => format!("err:{} {e}", e.code().name()),

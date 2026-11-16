@@ -15,6 +15,7 @@ pub mod diag;
 mod dns;
 mod clock_sync;
 mod disks;
+mod download;
 mod notify;
 mod removable;
 mod display;
@@ -127,6 +128,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("disky", disks::TESTS),
     ("vymenna media", removable::TESTS),
     ("oznameni", notify::TESTS),
+    ("stahovani", download::TESTS),
     ("sitove karty", nic::TESTS),
     ("acpi", power::TESTS),
     ("diagnostika", diag::TESTS),

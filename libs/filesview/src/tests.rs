@@ -574,3 +574,28 @@ fn theme_modes_redraw_window() {
         let _ = std::fs::write(dir.join(alloc::format!("soubory-{name}.png")), gfx::png::encode(&px, w, h, w));
     }
 }
+
+#[test]
+fn download_from_address() {
+    let mut m = fm();
+    m.update(Msg::Download);
+    assert!(m.edit.as_ref().is_some_and(|e| e.url && e.value == "https://"));
+    let mut u = ui_for(&m, 1200);
+    // Spatna adresa: chyba u pole, nic se neposle.
+    m.update(Msg::NameValue("ftp://server/soubor".into()));
+    m.update(Msg::NameOk);
+    assert!(m.edit.as_ref().unwrap().error.contains("https://"));
+    m.update(Msg::NameValue("https://".into()));
+    m.update(Msg::NameOk);
+    assert!(m.edit.as_ref().unwrap().error.contains("server"));
+    assert!(m.b.downloads.is_empty());
+    // Dobra adresa: stahovani predano, pole zavrene, zprava v liste.
+    m.update(Msg::NameValue("https://example.org/obraz.iso".into()));
+    u = ui_for(&m, 1200);
+    press(&mut m, &mut u, "Stáhnout");
+    assert_eq!(m.b.downloads, vec![String::from("https://example.org/obraz.iso")]);
+    assert!(m.edit.is_none());
+    assert!(m.status.contains("Úlohách"));
+    // Prikaz je v menu (paleta Ctrl+K).
+    assert!(crate::app_menu(false)[0].children.iter().any(|i| i.action == "files.download"));
+}
