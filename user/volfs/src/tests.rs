@@ -324,3 +324,12 @@ fn ntfs_damaged_does_not_hang() {
         });
     }
 }
+
+#[test]
+fn cache_scales_with_medium() {
+    use crate::dev::cache_sectors;
+    assert_eq!(cache_sectors(3 << 20, 512), 128, "male medium: 64 KiB");
+    assert_eq!(cache_sectors(64 << 20, 512), 1024, "64 MiB: 512 KiB");
+    assert_eq!(cache_sectors(64 << 30, 512), 4096, "velke medium: nejvys 2 MiB");
+    assert_eq!(cache_sectors(64 << 30, 4096), 512);
+}

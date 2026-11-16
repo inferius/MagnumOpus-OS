@@ -19,6 +19,7 @@ mod disks;
 mod download;
 mod notify;
 mod removable;
+pub(crate) mod restore;
 mod removable_copy;
 mod display;
 mod drivers;

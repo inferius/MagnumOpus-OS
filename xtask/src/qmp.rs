@@ -562,6 +562,12 @@ fn media_steps(s: &mut Vec<Step>) {
     )));
     s.push(Step::WaitFor(media::UNPLUG));
     s.push(Step::Qmp(device_del("usbmediahot")));
+    // Konec testu: flash disky ze startu pryc (ovladace a procesy medii
+    // skonci, pamet se vrati dalsim sadam).
+    s.push(Step::WaitFor(media::UNPLUG_ALL));
+    for id in ["usbmediafat", "usbmediaexfat", "usbmediantfs"] {
+        s.push(Step::Qmp(device_del(id)));
+    }
 }
 
 fn usb_steps(s: &mut Vec<Step>) {
@@ -637,6 +643,7 @@ fn usb_steps(s: &mut Vec<Step>) {
 mod media {
     pub const PLUG: &str = "init: test media: zasun flashku";
     pub const UNPLUG: &str = "init: test media: vytahni flashku";
+    pub const UNPLUG_ALL: &str = "init: test media: vytahni vsechny flashky";
 }
 
 mod usb {

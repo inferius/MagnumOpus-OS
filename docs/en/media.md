@@ -149,6 +149,13 @@ so the tests verify only files with data.
 
 ## Writes and caching
 
+Every media process runs in its own job limited to 16 MiB (and 2 MiB of
+kernel memory): a damaged image or a parser bug cannot exhaust the
+system's memory and the memory comes back after pulling the medium out
+**[implemented]**. The sector cache is 1/128 of the medium size, at least
+64 KiB and at most 2 MiB (`dev::cache_sectors`) **[implemented]** (host
+`cache_scales_with_medium`).
+
 `volfs` keeps sectors in memory and writes them to the medium at the end
 of **every** changing operation; after fsd's reply the data is on the
 medium. Pulling a flash drive out after a finished copy is safe, during a
@@ -217,7 +224,10 @@ A session sees `/media` only when it has it among its mounted paths
   with MBR (prepared by our implementation), NTFS from the `testfs1` image
   and a superfloppy FAT for inserting while running (QMP `device_add`,
   `device_del`). The test reads, writes (temporary name and rename),
-  checks NTFS is read only, ejects, inserts and pulls out a medium; then
+  checks NTFS is read only, ejects, inserts and pulls out a medium and at
+  the end pulls out the boot-time drives too (drivers and media processes
+  end, the memory returns to the next suites: it is printed, 14 MiB for
+  three drives); then
   xtask checks on the host that the FAT write is read by `fatfs` and the
   exFAT write by the independent `exfat-fs` **[verified in QEMU]**
   (x86_64).

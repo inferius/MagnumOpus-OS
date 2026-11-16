@@ -18,6 +18,7 @@ use libos::params::Params;
 use libos::spawn::StartHandle;
 use libos::{Channel, Startup, time};
 
+use super::restore::Restore;
 use super::{TestResult, fail};
 use crate::check;
 
@@ -108,12 +109,12 @@ impl Copier {
 /// Domov testovaciho uzivatele (dataset s pravy jen pro nej). Prechod
 /// pres `/` a `/home` uzivatel potrebuje; puvodni popis opravneni se vrati
 /// na konci testu ([`run`]), jinak by ho videly dalsi sady (ucty).
-fn prepare(f: &FsClient) -> TestResult {
+fn prepare(f: &FsClient, g: &mut Restore) -> TestResult {
     let _ = f.create("/home", kind::DIR);
     let _ = f.delete_dataset(HOME);
     let walk = Acl { flags: 0, grants: vec![Grant { who: EVERYONE, rights: rights::TRAVERSE, flags: grant::THIS }] };
-    f.set_acl("/", Some(&walk)).map_err(|e| fail("acl /", e))?;
-    f.set_acl("/home", Some(&walk)).map_err(|e| fail("acl /home", e))?;
+    g.set_acl("/", Some(&walk))?;
+    g.set_acl("/home", Some(&walk))?;
     f.create_dataset(HOME).map_err(|e| fail("domov", e))?;
     f.set_owner(HOME, USER).map_err(|e| fail("vlastnik", e))?;
     let own = Acl { flags: 0, grants: vec![Grant { who: USER, rights: rights::ALL, flags: grant::BOTH }] };
@@ -123,22 +124,17 @@ fn prepare(f: &FsClient) -> TestResult {
 /// `medium` = jmeno media FAT v `/media`. Popis opravneni `/` a `/home`
 /// vrati i po chybe.
 pub fn run(s: &Startup, f: &FsClient, medium: &str) -> TestResult {
-    let saved: Vec<(&str, Option<Acl>)> = ["/", "/home"].iter().map(|p| (*p, f.permissions(p).ok().and_then(|x| x.acl))).collect();
-    let r = run_inner(s, f, medium);
+    let mut g = Restore::new(f);
+    let r = run_inner(s, f, medium, &mut g);
     let _ = f.delete_dataset(HOME);
-    for (p, acl) in &saved {
-        if let Err(e) = f.set_acl(p, acl.as_ref()) {
-            return Err(fail(&format!("vraceni opravneni {p}"), e));
-        }
-    }
     r
 }
 
 const BIG: usize = 3 << 20;
 const HUGE: usize = 8 << 20;
 
-fn run_inner(s: &Startup, f: &FsClient, medium: &str) -> TestResult {
-    prepare(f)?;
+fn run_inner(s: &Startup, f: &FsClient, medium: &str, g: &mut Restore) -> TestResult {
+    prepare(f, g)?;
     for (name, n, seed) in [("velky.bin", BIG, 3), ("obrovsky.bin", HUGE, 7)] {
         let p = format!("{HOME}/{name}");
         write_file(f, &p, n, seed)?;

@@ -64,13 +64,13 @@ fn fs() -> Result<&'static FsClient, String> {
 
 /// Domov testovaciho uzivatele: dataset s pravy jen pro nej, soubor,
 /// dataset Projekty a slozka s `BIG` polozkami.
-fn prepare(f: &FsClient) -> TestResult {
+fn prepare(f: &FsClient, g: &mut super::restore::Restore) -> TestResult {
     let _ = f.create("/home", kind::DIR);
     let _ = f.delete_dataset(&alloc::format!("{HOME}/Projekty"));
     let _ = f.delete_dataset(HOME);
     let walk = Acl { flags: 0, grants: vec![Grant { who: EVERYONE, rights: rights::TRAVERSE, flags: grant::THIS }] };
-    f.set_acl("/", Some(&walk)).map_err(|e| fail("acl /", e))?;
-    f.set_acl("/home", Some(&walk)).map_err(|e| fail("acl /home", e))?;
+    g.set_acl("/", Some(&walk))?;
+    g.set_acl("/home", Some(&walk))?;
     f.create_dataset(HOME).map_err(|e| fail("domov", e))?;
     f.set_owner(HOME, UID).map_err(|e| fail("vlastnik domova", e))?;
     let own = Acl { flags: 0, grants: vec![Grant { who: UID, rights: rights::ALL, flags: grant::BOTH }] };
@@ -131,7 +131,8 @@ fn select(s: &super::gui::State, w: u32, name: &str) -> TestResult {
 
 pub fn files_window(startup: &Startup) -> TestResult {
     let f = fs()?;
-    prepare(f)?;
+    let mut g = super::restore::Restore::new(f);
+    prepare(f, &mut g)?;
     with(|s| {
         // files-copy jako v relaci (bez prehledu uloh) a okno spravce.
         let (ctl, theirs) = Channel::create().map_err(|e| fail("kanal", e))?;
@@ -289,12 +290,13 @@ pub fn copier_resume(startup: &Startup) -> TestResult {
     use fileops::job::{Phase, Resolution};
     use fileops::proto::{ClientMsg, ServerMsg};
     let f = fs()?;
+    let mut g = super::restore::Restore::new(f);
     let home = "/home/souborytr";
     let _ = f.create("/home", kind::DIR);
     let _ = f.delete_dataset(home);
     let walk = Acl { flags: 0, grants: vec![Grant { who: EVERYONE, rights: rights::TRAVERSE, flags: grant::THIS }] };
-    f.set_acl("/", Some(&walk)).map_err(|e| fail("acl /", e))?;
-    f.set_acl("/home", Some(&walk)).map_err(|e| fail("acl /home", e))?;
+    g.set_acl("/", Some(&walk))?;
+    g.set_acl("/home", Some(&walk))?;
     f.create_dataset(home).map_err(|e| fail("domov", e))?;
     f.set_owner(home, UID).map_err(|e| fail("vlastnik", e))?;
     let own = Acl { flags: 0, grants: vec![Grant { who: UID, rights: rights::ALL, flags: grant::BOTH }] };

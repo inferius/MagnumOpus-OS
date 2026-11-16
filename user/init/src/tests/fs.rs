@@ -485,9 +485,9 @@ fn v2_many_sessions(_: &Startup) -> TestResult {
     Ok(())
 }
 
-fn perm_setup(f: &FsClient) -> TestResult {
+fn perm_setup(f: &FsClient, g: &mut super::restore::Restore) -> TestResult {
     let traverse = Acl { flags: 0, grants: alloc::vec![Grant { who: EVERYONE, rights: rights::TRAVERSE, flags: grant::THIS }] };
-    f.set_acl("/", Some(&traverse)).map_err(|e| fail("acl /", e))?;
+    g.set_acl("/", Some(&traverse))?;
     let _ = f.create("/perm", kind::DIR);
     f.set_acl("/perm", Some(&traverse)).map_err(|e| fail("acl /perm", e))?;
     let _ = f.create("/perm/alice", kind::DIR);
@@ -497,7 +497,8 @@ fn perm_setup(f: &FsClient) -> TestResult {
 
 fn perm_sessions(_: &Startup) -> TestResult {
     let f = fs()?;
-    perm_setup(f)?;
+    let mut g = super::restore::Restore::new(f);
+    perm_setup(f, &mut g)?;
     // Relace uzivatele: cely FS, prava podle opravneni.
     let (_, alice) = f.connect_as(ALICE, &[], &Profile::Standard.user_mounts()).map_err(|e| fail("connect_as", e))?;
     let _ = alice.create("/perm/alice/apps", kind::DIR);
@@ -541,7 +542,8 @@ fn perm_sessions(_: &Startup) -> TestResult {
 
 fn perm_noexec_and_sharing(_: &Startup) -> TestResult {
     let f = fs()?;
-    perm_setup(f)?;
+    let mut g = super::restore::Restore::new(f);
+    perm_setup(f, &mut g)?;
     let (_, alice) = f.connect_as(ALICE, &[], &Profile::Standard.user_mounts()).map_err(|e| fail("alice", e))?;
     let (_, bob) = f.connect_as(BOB, &[], &Profile::Standard.user_mounts()).map_err(|e| fail("bob", e))?;
     let _ = alice.create("/perm/alice/sdilene", kind::DIR);
@@ -560,10 +562,10 @@ fn perm_noexec_and_sharing(_: &Startup) -> TestResult {
     // Zakaz spousteni (na korenovem datasetu jen docasne).
     let h = f.open("/vitejte.txt", access::EXECUTE, share::ALL, 0).map_err(|e| fail("spusteni", e))?;
     f.close(h.handle).map_err(|e| fail("close", e))?;
-    f.set_noexec("/", true).map_err(|e| fail("noexec", e))?;
+    g.set_noexec("/", true)?;
     check!(f.noexec("/").map_err(|e| fail("noexec?", e))?, "zakaz nastaveny");
     let denied = f.open("/vitejte.txt", access::EXECUTE, share::ALL, 0).err();
-    f.set_noexec("/", false).map_err(|e| fail("noexec vypnout", e))?;
+    g.set_noexec("/", false)?;
     check_eq!(denied, Some(Error::AccessDenied), "spusteni se zakazem");
     Ok(())
 }

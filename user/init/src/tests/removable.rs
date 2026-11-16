@@ -40,10 +40,16 @@ const GUEST_MARK: &str = "media: zapsano a odpojeno";
 /// Znacky pro QMP (`xtask/src/qmp.rs`, modul `media`).
 const PLUG: &str = "init: test media: zasun flashku";
 const UNPLUG: &str = "init: test media: vytahni flashku";
+const UNPLUG_ALL: &str = "init: test media: vytahni vsechny flashky";
 
 /// Testovaci uzivatel (relace se standardnim profilem = s `/media`).
 const USER: u64 = 1000;
 const WAIT: Duration = Duration::from_secs(30);
+
+/// Pouzita uzivatelska pamet systemu (job initu).
+fn used() -> u64 {
+    libos::job::current().and_then(|j| j.info()).map_or(0, |i| i.user.used)
+}
 
 /// Pocka, az `want(seznam)` plati. Zpravy devmgr (medium pripojene za
 /// behu) zpracuje jako supervisor, ktery v testovacim behu nebezi.
@@ -138,5 +144,20 @@ fn media(startup: &Startup) -> TestResult {
     println!("{UNPLUG}");
     wait_list(sys, "vytazeny flash disk", |l| !l.iter().any(|m| m.name == HOT))?;
     check_eq!(user.stat(&format!("/media/{HOT}/hot.txt")).err(), Some(Error::NotFound), "vytazene medium");
+
+    // Konec: flash disky ze startu pryc, procesy medii a ovladace skonci
+    // a pamet se vrati (dalsi sady, napr. 70 relaci termd).
+    let before = used();
+    println!("{UNPLUG_ALL}");
+    wait_list(sys, "vytazene vsechny flashky", |l| l.is_empty())?;
+    // Ovladace usb-storage konci s odpojenim zarizeni (chvili po medii).
+    let until = time::deadline_after(Duration::from_secs(10));
+    let mut after = used();
+    while time::now() < until && before.saturating_sub(after) < 4 << 20 {
+        time::sleep(Duration::from_millis(200));
+        after = used();
+    }
+    println!("init: test media: pamet uzivatel {} MiB se zasunutymi flashkami, {} MiB po vytazeni", before >> 20, after >> 20);
+    check!(before.saturating_sub(after) >= 4 << 20, "vytazeni flashek vratilo pamet");
     Ok(())
 }
