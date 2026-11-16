@@ -17,6 +17,7 @@ systém (doporučeno na zkoušení), `--arch aarch64` = ARM.
 | bez akcelerace (pomalé, ale vždy funguje) | `cargo xtask run --release` |
 | 4K | `cargo xtask run --release --accel whpx --res 3840x2160` |
 | bez okna, jen výpis do terminálu | `cargo xtask run --release --headless` |
+| s přístupem SSH z hostitele (port 2222 -> 22, `docs/cs/ssh.md`) | `cargo xtask run --ssh` |
 | grafika virtio-gpu 2D (pak v okně View -> virtio-gpu-pci) | `cargo xtask run --release --gpu 2d` |
 | Vulkan (Venus) ve WSL | `cargo xtask run --release --qemu-wsl --gpu venus` |
 | disk NVMe / AHCI / USB místo virtio | `cargo xtask run --release --data-disk nvme` (`nvme4k`, `ahci`, `usb`) |

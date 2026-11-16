@@ -746,6 +746,15 @@ match login.auth(1000, Method::Password, Secret::from("heslo"))? {
 }
 ```
 
+## Vzdálený přístup (SSH)
+
+Účet může mít klíče SSH (záznam formátu 2: `ssh_keys`, nejvýš 32) a příznak
+`REMOTE` (vzdálený přístup povolen). Přidání klíče a zapnutí přístupu chtějí
+heslo. Ověření podpisu, zpomalení pokusů podle adresy a jména a jednorázové
+použití identifikátoru relace dělá `accountd` (`SSH_PROBE`, `SSH_AUTH`);
+vzdálenou relaci pak založí init (`OPEN_REMOTE`). Podrobnosti, stav a testy:
+[Vzdálený přístup (SSH)](ssh.md).
+
 ## Povolení aplikací
 
 **[ověřeno v QEMU]** x86_64 i aarch64 (test `sdl: zvuk - prehravani,

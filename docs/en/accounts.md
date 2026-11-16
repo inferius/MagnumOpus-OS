@@ -799,6 +799,16 @@ match login.auth(1000, Method::Password, Secret::from("password"))? {
 }
 ```
 
+## Remote access (SSH)
+
+An account can have SSH keys (record format 2: `ssh_keys`, at most 32) and
+the `REMOTE` flag (remote access enabled). Adding a key and enabling access
+ask for the password. `accountd` checks the signature, throttles attempts
+per address and name and allows each session identifier only once
+(`SSH_PROBE`, `SSH_AUTH`); init then creates the remote session
+(`OPEN_REMOTE`). Details, status and tests:
+[Remote access (SSH)](ssh.md).
+
 ## Application permissions
 
 **[verified in QEMU]** x86_64 and aarch64 (test `sdl: zvuk - prehravani,
