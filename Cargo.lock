@@ -616,6 +616,7 @@ dependencies = [
  "guiproto",
  "inputproto",
  "libm",
+ "notifyproto",
  "theme",
  "ui",
  "vkcomp",
@@ -636,6 +637,7 @@ dependencies = [
  "inputproto",
  "libos",
  "netproto",
+ "notifyproto",
  "theme",
  "venus",
  "vkcomp",
@@ -1880,6 +1882,7 @@ dependencies = [
  "manifest",
  "mediaproto",
  "netproto",
+ "notifyproto",
  "openwith",
  "powerproto",
  "renderproto",
@@ -2343,6 +2346,30 @@ dependencies = [
  "libos",
  "netproto",
  "pci",
+]
+
+[[package]]
+name = "notifycore"
+version = "0.1.0"
+dependencies = [
+ "notifyproto",
+]
+
+[[package]]
+name = "notifyd"
+version = "0.1.0"
+dependencies = [
+ "libos",
+ "notifycore",
+ "notifyproto",
+]
+
+[[package]]
+name = "notifyproto"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "wire",
 ]
 
 [[package]]

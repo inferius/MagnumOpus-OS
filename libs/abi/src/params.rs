@@ -73,6 +73,9 @@ pub mod tag {
     /// Listek k relaci `GUI` (obnova po padu kompozitoru, relace pro dalsi
     /// potomky pres `NARROW`).
     pub const GUI_LEASE: u32 = 0x7FFF_000B;
+    /// Kanal odesilatele oznameni (`notifyproto::Send`) s identitou
+    /// aplikace z manifestu (`docs/cs/oznameni.md`).
+    pub const NOTIFY: u32 = 0x7FFF_000C;
 }
 
 /// Nejvic zdedenych fd v jednom bloku (handly jdou ve startovni zprave

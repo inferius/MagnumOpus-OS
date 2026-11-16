@@ -12,6 +12,7 @@ default = []
 dev-mode = ["guiproto/dev-mode"]
 
 [dependencies]
+notifyproto = { path = "../notifyproto" }
 guiproto = { path = "../guiproto" }
 clipproto = { path = "../clipproto" }
 inputproto = { path = "../inputproto" }

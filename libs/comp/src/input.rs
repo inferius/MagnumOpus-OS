@@ -875,6 +875,12 @@ impl Comp {
         if pressed && self.max_menu.is_some() && self.max_menu_click(px, py, now) {
             return;
         }
+        // Vyskakovaci oznameni: jen fyzicky klik (akce oznameni neprovede
+        // umely vstup).
+        if pressed && !syn && button == Button::Left && self.toast_click(px, py, now) {
+            self.trace(time, format_args!("{button:?} {act} na {px},{py}: oznameni"));
+            return;
+        }
         // Cela obrazovka: tlacitko navratu vedle odznaku.
         if pressed
             && let Some(g) = self.focus

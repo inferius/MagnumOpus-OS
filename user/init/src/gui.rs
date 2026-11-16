@@ -248,6 +248,7 @@ fn give_accounts(s: &Compd) {
     let list: Vec<(u64, u64, String, bool)> = crate::session::SESSIONS.lock().iter().map(|u| (u.id, u.uid, u.name.clone(), u.locked)).collect();
     for (id, uid, name, locked) in list {
         let _ = s.command(alloc::format!("{} open {id} {uid} {name}", control::SESSION).as_bytes(), Vec::new(), REPLY_TIMEOUT);
+        give_notify(s, uid);
         if locked {
             let _ = s.command(alloc::format!("{} lock {id}", control::SESSION).as_bytes(), Vec::new(), REPLY_TIMEOUT);
         }
@@ -268,6 +269,15 @@ fn give_accounts(s: &Compd) {
     }
 }
 
+/// Prohlizec oznameni uzivatele pro kompozitor (vyskakovaci oznameni).
+fn give_notify(s: &Compd, uid: u64) {
+    if let Some(h) = crate::notify::viewer_handle(uid)
+        && let Err(e) = s.command(alloc::format!("{} {uid}", control::NOTIFY).as_bytes(), vec![h], REPLY_TIMEOUT)
+    {
+        println!("init: oznameni pro kompozitor: {e}");
+    }
+}
+
 /// Plocha s ucty bezi (bezny beh): kompozitor dostava relace a `login`.
 static ACCOUNTS_UI: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
@@ -277,6 +287,16 @@ pub fn session_event(text: &str) {
         && let Err(e) = g.command(alloc::format!("{} {text}", control::SESSION).as_bytes(), Vec::new())
     {
         println!("init: relace pro kompozitor: {e}");
+    }
+}
+
+/// Prohlizec oznameni nove relace pro bezici kompozitor.
+pub fn session_notify(uid: u64) {
+    if let Some(g) = GUI.lock().as_ref()
+        && let Some(h) = crate::notify::viewer_handle(uid)
+        && let Err(e) = g.command(alloc::format!("{} {uid}", control::NOTIFY).as_bytes(), vec![h])
+    {
+        println!("init: oznameni pro kompozitor: {e}");
     }
 }
 
@@ -461,7 +481,10 @@ impl Gui {
         let job = crate::session::job(session)?;
         let (ch, lease) = sup.session(NAME, info.encode())?;
         // Zvuk s pravy aplikace (bez zvukove sluzby aplikace bezi bez zvuku).
-        extra.extend(audio_handles(startup, name, sup, crate::session::uid(session).unwrap_or(0)));
+        let uid = crate::session::uid(session).unwrap_or(0);
+        extra.extend(audio_handles(startup, name, sup, uid));
+        // Oznameni s identitou z manifestu.
+        extra.extend(crate::notify::app_handles(startup, name, uid));
         let i = self.launch_in(startup, name, ch, lease, extra, Some(&job))?;
         self.session_apps.push((session, i));
         Ok(i)

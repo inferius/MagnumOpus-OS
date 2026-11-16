@@ -35,6 +35,7 @@ mod launch;
 mod libd;
 mod logd;
 mod media;
+mod notify;
 mod ntp;
 mod perms;
 mod power;
@@ -93,6 +94,15 @@ fn main(startup: Startup) -> i64 {
             }
         }
         Err(e) => println!("init: sluzbu uloh (taskd) nelze spustit: {e}"),
+    }
+    // Oznameni: jen initfs; aplikace a kompozitor dostanou kanaly pozdeji.
+    match notify::start(&startup) {
+        Ok(()) => {
+            if let Some(n) = notify::NOTIFY.lock().as_ref() {
+                sup.watch("notifyd", &n.process, None);
+            }
+        }
+        Err(e) => println!("init: sluzbu oznameni (notifyd) nelze spustit: {e}"),
     }
     // Spousteci sluzba pro aplikace (std::process): jen initfs, nic dalsiho
     // nepotrebuje.

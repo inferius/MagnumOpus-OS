@@ -64,6 +64,9 @@ pub const LAUNCHER: &str = "launcher";
 /// `dnd-fullscreen on|off`: Nerusit automaticky pri cele obrazovce
 /// (vychozi zapnuto).
 pub const DND_FULLSCREEN: &str = "dnd-fullscreen";
+/// `notify <uid>` + kanal prohlizece oznameni (`notifyproto::View`) pro
+/// relaci uzivatele: vyskakovaci oznameni (`docs/cs/oznameni.md`).
+pub const NOTIFY: &str = "notify";
 /// `snapshot`: udelat diagnosticky snimek hned (prikaz shellu pres init).
 pub const SNAPSHOT: &str = "snapshot";
 pub const INPUT: &str = "input";

@@ -17,6 +17,7 @@ default = []
 dev-mode = ["comp/dev-mode"]
 
 [dependencies]
+notifyproto = { path = "../../libs/notifyproto" }
 libos = { path = "../../libs/libos" }
 guiproto = { path = "../../libs/guiproto" }
 inputproto = { path = "../../libs/inputproto" }

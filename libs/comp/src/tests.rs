@@ -34,6 +34,7 @@ mod devmode;
 mod popover;
 mod secure;
 mod shots;
+mod toast;
 mod winsize;
 
 const W: u32 = 800;
