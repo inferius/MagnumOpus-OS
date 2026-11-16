@@ -574,7 +574,7 @@ for f in (ls ~/Photos | where ext == "jpg") {
 <rect class="ok" x="560" y="20" width="190" height="56" rx="6"/><text class="t b" x="655" y="42" text-anchor="middle">≤ N: VIEW + APPLY</text><text class="m" x="655" y="60" text-anchor="middle">view for undo, apply</text>
 <rect class="warn" x="560" y="145" width="190" height="56" rx="6"/><text class="t b" x="655" y="167" text-anchor="middle">&gt; N or preview</text><text class="m" x="655" y="185" text-anchor="middle">diff, confirm / DISCARD</text>
 <path class="ln dash" d="M655 145 L655 78" marker-end="url(#sh2)"/>
-<text class="m" x="10" y="236">A reading line creates no clone and costs nothing. Clones live in /tmp/.aside/&lt;session&gt;-&lt;n&gt;; nested datasets are</text>
+<text class="m" x="10" y="236">A reading line creates no clone and costs nothing. Clones live in /tmp/&lt;uid&gt;/.aside/&lt;session&gt;-&lt;n&gt;; nested datasets are</text>
 <text class="m" x="10" y="254">boundaries there and a write into one gets its own clone. Applying is three-way: a foreign change = SH_CONFLICT, not an overwrite.</text>
 </svg>
 <figcaption>A line's changes go to a clone of the dataset in the file system; at the end of the line they are applied with a view for undo.</figcaption>
@@ -654,8 +654,9 @@ undo
 
 ⚠️ **Limits:**
 
-- A clone cannot be created where the file system has no writable
-  `/tmp`. The write then ends with an error and a hint (`NOT_SUPPORTED`).
+- A clone cannot be created where the user has no private temporary
+  directory `/tmp/<uid>` (init creates it when a session opens,
+  [Accounts](accounts.md)). The write then ends with an error and a hint.
 - Undo of a program with full rights guards the datasets of `/`, home and
   the working directory. It does not revert a change in another nested
   dataset.
@@ -727,7 +728,8 @@ undo
   (`Attach`) with block replay. Without a registry the sessions finish and
   end.
 - **Clones aside** carry the session's tag in their name
-  (`/tmp/.aside/<tag>-<n>`). A new termd discards clones of sessions that
+  (`/tmp/<uid>/.aside/<tag>-<n>`, system sessions `/tmp/.aside/<tag>-<n>`).
+  A new termd discards clones of sessions that
   no longer run (a crash in the middle of a line). That is why only one
   termd (one registry) may run in the system.
 

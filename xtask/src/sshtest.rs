@@ -243,6 +243,13 @@ impl Client {
         if code != 0 || !out.contains("prenos.bin") {
             return Err(format!("sftp: kod {code}, vystup {out:?} ({err:?})"));
         }
+        // 9. Zapis a cteni shellem bezneho uzivatele (klon bokem v /tmp).
+        let mut c = self.cmd(&self.key, &batch);
+        c.arg(&host).arg("echo zapis-shellem | save ~/zapis.txt; open ~/zapis.txt");
+        let (code, out, err) = self.run(c, b"")?;
+        if code != 0 || !out.contains("zapis-shellem") {
+            return Err(format!("zapis shellem: kod {code}, vystup {out:?} ({err:?})"));
+        }
         Ok(())
     }
 

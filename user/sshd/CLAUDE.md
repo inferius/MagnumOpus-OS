@@ -30,5 +30,3 @@ na 22, žádné spojení ven) a `sshd-conn` (proces na spojení ve vlastním job
 
 - Hostitelský klíč drží `sshd-conn` (podpis výměny klíčů); přesun do
   samostatné služby je dluh.
-- Zápisy shellu ne-systémového uživatele (odklad `/tmp/.aside`) zatím
-  selhávají ACCESS_DENIED, test SSH se zápisům přes shell vyhýbá.

@@ -338,9 +338,14 @@ methods; the PIN additionally has its own 5 attempts):
   screen).
 - **Basic FS rights of people:** the `uzivatele` group may list the root
   and `/home` (it sees only entries it has a right to - its own home in
-  `/home`) and create in `/tmp` and `/tmp/.aside` (shell clones); the grant applies to
-  the directory only and is not inherited, so other people's files in
-  `/tmp` stay invisible.
+  `/home`) and only list and traverse `/tmp`. Nobody but the system writes
+  into the shared `/tmp`: each account has a **private temporary
+  directory** `/tmp/<uid>` (owned by the user, `PROTECTED` description
+  without grants), which init creates when a session opens (local or
+  remote). The shell keeps its clones "aside" there (`/tmp/<uid>/.aside`)
+  **[verified in QEMU]** (test `ucty: shell uzivatele zapisuje (soukromy
+  /tmp)`). The older layout let the group create in `/tmp`; init removes
+  that at start.
 - The session recipe in a lease (recovery after an fsd crash),
   applications with narrower sessions by manifest (`app_mounts`) and a
   taskd channel with the session identity **[designed]**.

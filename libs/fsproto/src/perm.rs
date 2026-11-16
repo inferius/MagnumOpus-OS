@@ -348,6 +348,16 @@ impl Profile {
     }
 }
 
+/// Spolecna docasna slozka; lide v ni jen prochazeji do sve [`user_tmp`].
+pub const TMP_DIR: &str = "/tmp";
+
+/// Soukroma docasna slozka uzivatele `uid` (`/tmp/<uid>`): zaklada ji init
+/// pri otevreni relace, patri jen uzivateli (zadne granty). Do spolecneho
+/// `/tmp` lide zapisovat nesmi.
+pub fn user_tmp(uid: u64) -> String {
+    alloc::format!("{TMP_DIR}/{uid}")
+}
+
 impl FsClient {
     /// (Ridici relace) Nova relace uzivatele `user` se skupinami `groups`
     /// a pripojenymi cestami `mounts`. Vraci cislo relace (pro `grant`)

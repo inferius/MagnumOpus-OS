@@ -84,14 +84,23 @@ fn remote(startup: &Startup) -> TestResult {
     };
     let (uid, name, pw) = user()?;
     // Klic a povoleni vzdaleneho pristupu (jako prikazy ssh-key add
-    // a remote-access on; heslo chtene).
-    match crate::sshd::account_admin(uid, Request::SshKeyAdd { password: Secret::from("spatne heslo!"), line: key.clone() }) {
+    // a remote-access on; heslo chtene). Ucet muze byt po predchozich
+    // sadach (`ucty`: spatna hesla) zpomaleny: pockat (ShouldWait), pak
+    // spravne heslo (vynuluje pocitadlo) a az potom spatne.
+    let end = time::deadline_after(Duration::from_secs(180));
+    loop {
+        match crate::sshd::account_admin(uid, Request::SshKeyAdd { password: Secret::from(pw), line: key.clone() }) {
+            Ok(_) | Err(libos::Error::AlreadyExists) => break,
+            Err(libos::Error::ShouldWait) if time::now() < end => {
+                crate::terminal::TERMINALS.lock().poll(startup);
+                time::sleep(Duration::from_millis(500));
+            }
+            Err(e) => return Err(fail("ssh-key add", e)),
+        }
+    }
+    match crate::sshd::account_admin(uid, Request::SshKeyAdd { password: Secret::from("spatne heslo!"), line: key }) {
         Err(libos::Error::AccessDenied) => {}
         other => return Err(format!("klic bez spravneho hesla: {other:?}")),
-    }
-    match crate::sshd::account_admin(uid, Request::SshKeyAdd { password: Secret::from(pw), line: key }) {
-        Ok(_) | Err(libos::Error::AlreadyExists) => {}
-        Err(e) => return Err(fail("ssh-key add", e)),
     }
     crate::sshd::account_admin(uid, Request::SetRemote { password: Secret::from(pw), on: true }).map_err(|e| fail("remote-access on", e))?;
     // Verejna sit (vychozi v QEMU) prichozi spojeni zahodi: SSH jen

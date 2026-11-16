@@ -321,9 +321,13 @@ dohromady, PIN navíc svých 5 pokusů):
   přihlašovací obrazovku).
 - **Základní práva lidí na FS:** skupina `uzivatele` smí vypsat kořen
   a `/home` (vidí jen položky, ke kterým má právo - v `/home` svůj
-  domov), v `/tmp`
-  a `/tmp/.aside` (klony shellu) zakládat; grant platí jen pro adresář
-  a nedědí se, takže cizí soubory v `/tmp` nevidí.
+  domov) a `/tmp` jen vypsat a projít. Do společného `/tmp` nikdo kromě
+  systému nezapisuje: každý účet má **soukromou dočasnou složku**
+  `/tmp/<uid>` (vlastník uživatel, popis `PROTECTED` bez grantů), kterou
+  init založí při otevření relace (místní i vzdálené). Shell v ní má klony
+  „bokem“ (`/tmp/<uid>/.aside`) **[ověřeno v QEMU]** (test `ucty: shell
+  uzivatele zapisuje (soukromy /tmp)`). Starší rozložení dávalo skupině
+  v `/tmp` právo zakládat; init ho při startu odebere.
 - Recept relace v lístku (obnova po pádu fsd), aplikace s užšími relacemi
   podle manifestu (`app_mounts`) a kanál taskd s identitou relace
   **[navrženo]**.

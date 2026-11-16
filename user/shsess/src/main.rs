@@ -238,7 +238,7 @@ impl Env for SysEnv {
         }
         let c = self.spawner.as_ref().and_then(|s| s.connect().ok());
         let mut f: Box<dyn Fs> = match c {
-            Some(c) => Box::new(fs::FsdFs::new(c, alloc::format!("{}-ai", self.tag))),
+            Some(c) => Box::new(fs::FsdFs::new(c, alloc::format!("{}-ai", self.tag), &self.home)),
             None => Box::new(fs::NoFs),
         };
         let home = self.home.clone();
@@ -257,7 +257,7 @@ impl Env for SysEnv {
 
     fn task_fs(&mut self, task: u64) -> Option<Box<dyn Fs + Send>> {
         let c = self.spawner.as_ref()?.connect().ok()?;
-        Some(Box::new(fs::FsdFs::new(c, alloc::format!("{}-t{task}", self.tag))))
+        Some(Box::new(fs::FsdFs::new(c, alloc::format!("{}-t{task}", self.tag), &self.home)))
     }
 
     fn notifier(&mut self) -> Option<Arc<dyn Notify>> {
@@ -528,7 +528,7 @@ fn main(startup: Startup) -> i64 {
     };
     let mut hs = first.handles.into_iter();
     let mut spare = hs.next().map(Channel::from_handle);
-    let mut fsd = hs.next().map(|h| fs::FsdFs::new(FsClient::new(Channel::from_handle(h)), tag.clone()));
+    let mut fsd = hs.next().map(|h| fs::FsdFs::new(FsClient::new(Channel::from_handle(h)), tag.clone(), &home));
     let agent_gate = hs.next().map(Channel::from_handle);
     let mut nofs = fs::NoFs;
     let mut svc = Service::single(&home, session);

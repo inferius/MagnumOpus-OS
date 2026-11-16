@@ -177,7 +177,7 @@ scp -P 2222 file.txt user@127.0.0.1:
 |---|---|
 | `cargo test -p ssh` | server against the sunset client (exec, PTY, foreign key, password refused, large transfer), SFTP, keys (OpenSSH 9.7 vectors), fuzzing |
 | `cargo test -p accounts remote` | keys in the account, signature check, throttling, repeated session identifier |
-| `cargo xtask test --only ssh` | OpenSSH client from the host: key login, command and exit code, PTY, foreign key and password refused, scp there and back (70 KB), sftp, disabled server refuses the connection **[verified in QEMU]** |
+| `cargo xtask test --only ssh` | OpenSSH client from the host: key login, command and exit code, PTY, foreign key and password refused, scp there and back (70 KB), sftp, writing and reading a file with the shell, disabled server refuses the connection **[verified in QEMU]** |
 
 Deviation from the brief: the host test uses the OpenSSH client (system
 `ssh.exe`), not the russh library - russh would bring tokio and

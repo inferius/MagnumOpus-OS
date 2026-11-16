@@ -51,6 +51,22 @@ fn allow(fs: &FsClient, path: &str, who: u64, r: u8) -> Result<()> {
     fs.set_acl(path, Some(&acl))
 }
 
+/// Nastavi `who` presne prava `r` k adresari `path` (jen k nemu); `0` =
+/// grant odebrat. Na rozdil od [`allow`] i prava ubere (starsi rozlozeni).
+fn grant_exact(fs: &FsClient, path: &str, who: u64, r: u8) -> Result<()> {
+    let mut acl = fs.permissions(path)?.acl.unwrap_or_default();
+    let mut want = acl.grants.clone();
+    want.retain(|g| !(g.who == who && g.flags == grant::THIS));
+    if r != 0 {
+        want.push(Grant { who, rights: r, flags: grant::THIS });
+    }
+    if want == acl.grants {
+        return Ok(());
+    }
+    acl.grants = want;
+    fs.set_acl(path, Some(&acl))
+}
+
 fn traverse(fs: &FsClient, path: &str, who: u64) -> Result<()> {
     allow(fs, path, who, rights::TRAVERSE)
 }
@@ -75,16 +91,18 @@ fn layout(fs: &FsClient) -> Result<()> {
     traverse(fs, "/", ids::ACCOUNTD)?;
     traverse(fs, "/system", ids::ACCOUNTD)?;
     mkdir(fs, HOME_DIR)?;
-    // Lide: koren a `/home` vypsat (vidi jen polozky, ke kterym maji
-    // nejake pravo), v `/tmp` zakladat (zalozene patri jim; grant se nededi,
-    // takze cizi soubory v `/tmp` nevidi). `/tmp/.aside` = klony shellu.
+    // Lide: koren, `/home` a `/tmp` vypsat (vidi jen polozky, ke kterym
+    // maji nejake pravo). Zapisuji jen do sve soukrome `/tmp/<uid>`
+    // (zaklada ji `session::create_tmp`), ne do spolecneho `/tmp`.
+    // `/tmp/.aside` = klony shellu systemu (jen system). Starsi rozlozeni
+    // davalo skupine v `/tmp` a `/tmp/.aside` pravo zakladat: odebrat.
     let list = rights::LIST | rights::TRAVERSE;
     allow(fs, "/", ids::GROUP_USERS, list)?;
     allow(fs, HOME_DIR, ids::GROUP_USERS, list)?;
-    mkdir(fs, "/tmp")?;
+    mkdir(fs, fsproto::perm::TMP_DIR)?;
     mkdir(fs, "/tmp/.aside")?;
-    allow(fs, "/tmp", ids::GROUP_USERS, list | rights::CREATE)?;
-    allow(fs, "/tmp/.aside", ids::GROUP_USERS, list | rights::CREATE)?;
+    grant_exact(fs, fsproto::perm::TMP_DIR, ids::GROUP_USERS, list)?;
+    grant_exact(fs, "/tmp/.aside", ids::GROUP_USERS, 0)?;
     Ok(())
 }
 

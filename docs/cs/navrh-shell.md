@@ -556,7 +556,7 @@ for f in (ls ~/Fotky | where ext == "jpg") {
 <rect class="ok" x="560" y="20" width="190" height="56" rx="6"/><text class="t b" x="655" y="42" text-anchor="middle">≤ N: VIEW + APPLY</text><text class="m" x="655" y="60" text-anchor="middle">pohled pro undo, převzetí</text>
 <rect class="warn" x="560" y="145" width="190" height="56" rx="6"/><text class="t b" x="655" y="167" text-anchor="middle">&gt; N nebo preview</text><text class="m" x="655" y="185" text-anchor="middle">diff, potvrdit / DISCARD</text>
 <path class="ln dash" d="M655 145 L655 78" marker-end="url(#sh2)"/>
-<text class="m" x="10" y="236">Čtecí řádek klon nezakládá a nic nestojí. Klon leží v /tmp/.aside/&lt;relace&gt;-&lt;n&gt;; vnořené datasety jsou v něm hranice</text>
+<text class="m" x="10" y="236">Čtecí řádek klon nezakládá a nic nestojí. Klon leží v /tmp/&lt;uid&gt;/.aside/&lt;relace&gt;-&lt;n&gt;; vnořené datasety jsou v něm hranice</text>
 <text class="m" x="10" y="254">a zápis do nich dostane vlastní klon. Převzetí je trojcestné: cizí změna mezitím = SH_CONFLICT, ne přepsání.</text>
 </svg>
 <figcaption>Změny řádku jdou do klonu datasetu ve FS; na konci řádku se převezmou s pohledem pro undo.</figcaption>
@@ -627,8 +627,9 @@ undo
 
 ⚠️ **Omezení:**
 
-- Klon nejde založit tam, kde FS nemá zapisovatelný `/tmp`. Zápis pak
-  skončí chybou s radou (`NOT_SUPPORTED`).
+- Klon nejde založit tam, kde uživatel nemá soukromou dočasnou složku
+  `/tmp/<uid>` (zakládá ji init při otevření relace,
+  [Účty](ucty.md)). Zápis pak skončí chybou s radou.
 - Undo programu s plnými právy hlídá datasety `/`, domova a pracovní
   složky. Změnu v jiném vnořeném datasetu nevrátí.
 - Pohled zachytí i změny jiných relací ve stejných složkách během běhu
@@ -692,7 +693,8 @@ undo
   vyzvedne náhradní konce (`Claim`), pošle na ně `Adopt` a relace přejdou
   na nový termd. Okno se pak připojí (`Attach`) s přehráním bloků. Bez
   registru relace doběhnou a skončí.
-- **Klony bokem** mají ve jméně značku relace (`/tmp/.aside/<značka>-<n>`).
+- **Klony bokem** mají ve jméně značku relace (`/tmp/<uid>/.aside/<značka>-<n>`,
+  relace systému `/tmp/.aside/<značka>-<n>`).
   Nový termd zahodí klony relací, které už neběží (pád uprostřed řádku).
   Proto smí v systému běžet jen jeden termd (jeden registr).
 

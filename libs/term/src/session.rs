@@ -1221,7 +1221,7 @@ impl Service {
         // Klony, ktere ulohy prave odlozily, zahodit hned (ne az pri dalsi
         // volne chvili): mezitim muze relaci prevzit novy termd a hned
         // poslat prikazy - dalsi volna chvile by pak neprisla a klon by
-        // zustal v /tmp/.aside.
+        // zustal ve slozce klonu (`/tmp/<uid>/.aside`).
         self.flush(fs, env);
     }
 }

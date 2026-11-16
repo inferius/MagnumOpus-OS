@@ -174,7 +174,7 @@ součástí systému). Firewall hosta musí být v profilu „domácí“.
 |---|---|
 | `cargo test -p ssh` | server proti klientovi sunset (exec, PTY, cizí klíč, heslo odmítnuto, velký přenos), SFTP, klíče (vektory OpenSSH 9.7), fuzz |
 | `cargo test -p accounts remote` | klíče v účtu, ověření podpisu, zpomalení, opakovaný identifikátor relace |
-| `cargo xtask test --only ssh` | klient OpenSSH z hostitele: přihlášení klíčem, příkaz a kód, PTY, cizí klíč a heslo odmítnuty, scp tam a zpět (70 KB), sftp, vypnutý server odmítne spojení **[ověřeno v QEMU]** |
+| `cargo xtask test --only ssh` | klient OpenSSH z hostitele: přihlášení klíčem, příkaz a kód, PTY, cizí klíč a heslo odmítnuty, scp tam a zpět (70 KB), sftp, zápis a čtení souboru shellem, vypnutý server odmítne spojení **[ověřeno v QEMU]** |
 
 Odchylka od zadání: test z hostitele používá klienta OpenSSH (systémový
 `ssh.exe`), ne knihovnu russh - russh by do xtask přinesl tokio

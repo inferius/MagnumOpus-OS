@@ -8,6 +8,7 @@ mod media;
 mod media_ffmpeg;
 mod audio_recovery;
 mod accounts;
+mod accounts_shell;
 mod agent;
 mod agent_shell;
 mod basic;

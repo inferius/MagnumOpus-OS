@@ -228,6 +228,33 @@ fn create_home(fs: &FsClient, uid: u64, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Soukroma docasna slozka uzivatele (`fsproto::perm::user_tmp`): klony
+/// "bokem" shellu a docasne soubory. Zaklada se pri kazdem otevreni
+/// relace (po startu systemu ji nic nemusi zalozit drive); existujici
+/// cizi polozka stejneho jmena (nemelo by nastat: cislo uzivatele se
+/// znovu nepouziva) = chyba, nikdy predani cizich souboru.
+fn create_tmp(fs: &FsClient, uid: u64) -> Result<()> {
+    let path = fsproto::perm::user_tmp(uid);
+    match fs.create(&path, fsproto::kind::DIR) {
+        Ok(()) => {}
+        Err(Error::AlreadyExists) => {
+            if fs.stat(&path)?.owner != uid {
+                println!("init: {path} patri jinemu uzivateli");
+                return Err(Error::AlreadyExists);
+            }
+        }
+        Err(e) => return Err(e),
+    }
+    if fs.stat(&path)?.owner != uid {
+        fs.set_owner(&path, uid)?;
+    }
+    let acl = private_acl();
+    if fs.permissions(&path)?.acl.as_ref() != Some(&acl) {
+        fs.set_acl(&path, Some(&acl))?;
+    }
+    Ok(())
+}
+
 fn delete_home(fs: &FsClient, uid: u64, name: &str) -> Result<()> {
     if !is_person(uid) || !valid_name(name) {
         return Err(Error::InvalidArgs);
@@ -248,6 +275,7 @@ pub(crate) fn handle(fs: &FsClient, m: ToInit, handles: Vec<Handle>) -> Result<V
             }
             let name = home.strip_prefix("/home/").filter(|n| valid_name(n)).ok_or(Error::InvalidArgs)?;
             let name = String::from(name);
+            create_tmp(fs, uid)?;
             let (_, user_fs) = fs.connect_as(uid, &groups, &Profile::Standard.user_mounts())?;
             let job = Job::create(&libos::job::current()?)?;
             // Procesy relace samy JIT nesmi; aplikacim ho udeli manifest.
@@ -265,6 +293,7 @@ pub(crate) fn handle(fs: &FsClient, m: ToInit, handles: Vec<Handle>) -> Result<V
             }
             let name = home.strip_prefix("/home/").filter(|n| valid_name(n)).ok_or(Error::InvalidArgs)?;
             let name = String::from(name);
+            create_tmp(fs, uid)?;
             let (_, user_fs) = fs.connect_as(uid, &groups, &Profile::Standard.user_mounts())?;
             let job = Job::create(&libos::job::current()?)?;
             job.set_jit(libos::abi::job::jit::GRANT)?;
