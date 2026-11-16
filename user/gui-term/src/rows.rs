@@ -9,6 +9,7 @@ use alloc::vec::Vec;
 
 use gfx::{Canvas, Rect};
 use term::ui::draw::{Line, Mark, PromptRow, Role};
+use term::ui::pill::{Pill, PillMetrics};
 
 use crate::Look;
 
@@ -28,7 +29,9 @@ pub struct Grid {
     /// Okraj nad a pod textem radku (px).
     pads: Vec<(u32, u32)>,
     /// Odsazeni textu radku vpravo (px; text v ramecku nahledu, chyby).
-    indents: Vec<u32>,
+    /// Radek vstupu muze mit zaporne: text za pilulkou slozky zacina hned
+    /// za ni (`set_indent`, `cwd_pill`), bunky pod pilulkou se nekresli.
+    indents: Vec<i32>,
     /// Nad touto hranou se radky obsahu nekresli (pod stavovym radkem).
     pub clip_top: i32,
     /// Spodni hrana posledniho radku.
@@ -99,7 +102,7 @@ impl Grid {
         for k in 0..rows {
             let (pre, post, ind) = pads(lines, k, (cw, ch), s);
             g.pads[k] = (pre, post);
-            g.indents[k] = ind;
+            g.indents[k] = ind as i32;
         }
         let pinned = matches!(lines.first().map(|l| &l.role), Some(Role::Status));
         let mut y = bottom;
@@ -152,7 +155,14 @@ impl Grid {
 
     /// Levy okraj textu radku.
     pub fn text_x(&self, row: usize) -> i32 {
-        self.x + self.indents.get(row).copied().unwrap_or(0) as i32
+        self.x + self.indents.get(row).copied().unwrap_or(0)
+    }
+
+    /// Odsazeni textu radku `row` (px, i zaporne).
+    pub fn set_indent(&mut self, row: usize, px: i32) {
+        if let Some(i) = self.indents.get_mut(row) {
+            *i = px;
+        }
     }
 
     /// Bunka `col` radku `row`.
@@ -305,28 +315,24 @@ pub fn under(c: &mut Canvas<'_>, look: &mut Look, lines: &[Line], g: &Grid) {
                 }
                 continue;
             }
-            Role::Input { prefix, cwd } => {
+            Role::Input { cwd, .. } => {
                 let y = g.row_y(row);
                 // Paticka (`.input-wrap`): linka pres celou sirku mrizky
                 // i s okraji.
                 c.fill(Rect::new(0, g.span(row).0, (g.right() + g.x).max(0) as u32, 1), col.border);
-                if let Some(&(_, end)) = lines[row].part_cols().get(prefix.saturating_sub(1)) {
-                    // Pilulka `.cwd`: vyska `control_h_compact`, okraj s3,
-                    // ikona, mezera s1, jmeno, okraj s3; sirka podle textu,
-                    // nejvys k mezere s3 pred textem radku (bunka `end`).
-                    let pad = sp[3];
+                if let Some(pill) = cwd_pill(look, &lines[row], g.cw) {
+                    let m = pill_metrics(look);
+                    let pad = m.pad;
                     let s = t.text.small;
                     let f = look.ui.face(t.text.body_strong.weight);
                     let h = t.size.control_h_compact;
-                    let is = t.size.icon_s;
-                    let max = (end as u32 * g.cw).saturating_sub(sp[3]);
-                    let w = (2 * pad + is + sp[1] + f.width(cwd, s.size)).min(max);
-                    let r = Rect::new(g.x, y + (g.ch as i32 - h as i32) / 2, w, h);
+                    let is = m.icon;
+                    let r = Rect::new(g.x, y + (g.ch as i32 - h as i32) / 2, pill.width, h);
                     c.round_fill(r, h / 2, col.accent_soft);
                     look.icons.draw(c, "folder", r.x + pad as i32, r.y + (r.h - is) as i32 / 2, is, t.icon_stroke, col.accent_ink);
-                    let tx = r.x + (pad + is + sp[1]) as i32;
+                    let tx = r.x + (pad + is + m.icon_gap) as i32;
                     let base = r.y + f.baseline_in(s.size, r.h);
-                    let room = (r.x + r.w as i32 - pad as i32 - tx).max(0) as u32;
+                    let room = term::ui::pill::name_room(pill.width, &m);
                     f.draw_ellipsized(c, tx, base, cwd, s.size, col.accent_ink, room);
                 }
             }
@@ -334,6 +340,27 @@ pub fn under(c: &mut Canvas<'_>, look: &mut Look, lines: &[Line], g: &Grid) {
         }
         row += 1;
     }
+}
+
+/// Tokeny pilulky slozky (`.cwd`): okraj s3, ikona, mezera s1 k jmenu,
+/// mezera s3 k textu radku.
+pub fn pill_metrics(look: &Look) -> PillMetrics {
+    let sp = &look.t.space;
+    PillMetrics { pad: sp[3], icon: look.t.size.icon_s, icon_gap: sp[1], text_gap: sp[3] }
+}
+
+/// Pilulka slozky radku vstupu: jmeno se meri pismem, kterym se kresli
+/// (`small`, vaha `body_strong`), geometrie z `term::ui::pill::cwd_pill`.
+/// Stejnou funkci bere kresleni (`under`) i rozvrzeni (`Look::grid`
+/// posune radek o `indent`), takze text radku zacina mezerou s3 za
+/// skutecne nakreslenou pilulkou pro libovolne dlouhou cestu. `None` =
+/// radek pilulku nema.
+pub fn cwd_pill(look: &Look, line: &Line, cw: u32) -> Option<Pill> {
+    let Role::Input { prefix, cwd } = &line.role else { return None };
+    let &(_, end) = line.part_cols().get(prefix.saturating_sub(1))?;
+    let t = &look.t;
+    let name_w = look.ui.face_ref(t.text.body_strong.weight).width(cwd, t.text.small.size);
+    Some(term::ui::pill::cwd_pill(name_w, end, cw, &pill_metrics(look)))
 }
 
 /// Klavesy jedne napovedy: kombinace s modifikatorem ("Ctrl-C",

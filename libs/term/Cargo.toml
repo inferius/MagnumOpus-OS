@@ -19,5 +19,9 @@ taskproto = { path = "../taskproto" }
 noto-sans-mono-bitmap = { version = "0.4", default-features = false, features = ["regular", "size_16", "size_24", "unicode-basic-latin", "unicode-latin-1-supplement", "unicode-latin-extended-a", "unicode-specials"] }
 
 [dev-dependencies]
+# Test pilulky slozky (`tests_pill.rs`): skutecne pismo UI, jako okno GUI.
+gfx = { path = "../gfx" }
+ui = { path = "../ui" }
+theme = { path = "../theme" }
 taskcore = { path = "../taskcore" }
 installplan = { path = "../installplan" }

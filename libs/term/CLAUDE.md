@@ -10,6 +10,7 @@ Chytrý terminál (milník 6b), `no_std` + `alloc`. Moduly: `proto` (nativní pr
 - Protokol je nativní a typovaný; escape sekvence jen v adaptéru `vt`.
 - Dotaz na text (`ServerMsg::Ask`, odpověď `ClientMsg::Text`, `Host::ask`): `secret = true` okno maskuje a do výpisu bloku jde jen `***` (heslo v průvodci `install`). Řádek ve vlákně jde přes `fg.rs` (`LinePrompt.text`, `Answer::Text`, `answer_of`); `ClientMsg::Text` má tag 14.
 - Nabídka doplňování: položky a výběr drží vždy `App::menu`. Okno GUI nastaví `float_menu` (snímek pak nabídku nekreslí) a kreslí ji komponentou `ui::complete` (`user/gui-term/src/compl.rs`); výběr, přijetí a zavření hlásí `menu_select` / `menu_accept` / `menu_close`, kotvu dá `menu_col` (`input_col`). Konzole kreslí nabídku řádky jako dřív.
+- Pilulka složky v okně GUI (`ui/pill.rs`): šířku i posun řádku vstupu počítá jen `pill::cwd_pill` ze jména změřeného písmem, kterým se kreslí; text začíná `s3` za pilulkou (ne na buňce za výzvou). `gui-term` ji volá pro kreslení i rozvržení (`rows::cwd_pill`, `Grid::set_indent`). Test `tests_pill.rs` (skutečné písmo UI).
 - Výzva: `App::cwd_lead` = buňky před složkou, do kterých okno GUI kreslí ikonu a okraj pilulky (počítá je z tokenů, `Look::cwd_lead`); konzole `0`. `input_col` i `Role::Input` s nimi počítají. Složku zkracuje `short_path` zprostředka po celých složkách.
 - Instalátor přes `Env::installer_send` / `installer_recv` (krátké čekání): řádek ve vlákně volá hlavní vlákno opakovaně, to mezi voláními obsluhuje okno.
 

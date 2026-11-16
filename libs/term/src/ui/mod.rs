@@ -10,6 +10,7 @@
 pub mod draw;
 pub mod editor;
 pub mod menu;
+pub mod pill;
 mod pointer;
 pub use pointer::PASTE_MAX;
 pub mod preview;

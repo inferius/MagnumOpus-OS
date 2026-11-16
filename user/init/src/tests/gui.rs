@@ -558,8 +558,15 @@ fn terminal_shot(startup: &Startup, s: &mut State) -> TestResult {
         t.iter().any(|n| n.role == Role::Terminal && n.value.contains("Napište help"))
     })?;
     let term = t.iter().find(|n| n.role == Role::Terminal).unwrap();
-    // Slozka ve vyzve (pilulka) jina nez koren: cela cesta.
-    for line in ["cd /tmp", "ls /", "open /neni-tu.txt", "range 0 5 | each x => x * x"] {
+    // Slozka ve vyzve (pilulka) jina nez koren: dlouha cesta s diakritikou
+    // (kurzor ma byt mezeru s3 za pilulkou, ne dal; `term::ui::pill`).
+    for line in [
+        "mkdir -p /tmp/org.magnumopus.files/Úlohy",
+        "cd /tmp/org.magnumopus.files/Úlohy",
+        "ls /",
+        "open /neni-tu.txt",
+        "range 0 5 | each x => x * x",
+    ] {
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: line.into() })?;
     }
     wait_tree(&s.inspect, w.id, "scena terminalu", |t| {
