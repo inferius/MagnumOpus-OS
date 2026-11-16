@@ -22,6 +22,7 @@ bench = false
 [dependencies]
 libos = { path = "../../libs/libos" }
 netproto = { path = "../../libs/netproto", features = ["client"] }
+fsproto = { path = "../../libs/fsproto" }
 accountproto = { path = "../../libs/accountproto", features = ["client"] }
 ssh = { path = "../../libs/ssh" }
 term = { path = "../../libs/term" }

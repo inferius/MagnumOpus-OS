@@ -12,7 +12,8 @@
 //! - Test v hostu se pripoji k pomocnemu serveru (10.0.2.2) a posle radek:
 //!   `positive <uzivatel>` = prihlaseni klicem, prikaz s vystupem a kodem
 //!   ukonceni, chyba prikazu, interaktivni terminal (PTY), cizi klic
-//!   a samotne heslo odmitnute, relace v domove uctu; `negative` = vypnuty server spojeni
+//!   a samotne heslo odmitnute, relace v domove uctu, scp tam a zpet
+//!   a sftp (vypis, smazani); `negative` = vypnuty server spojeni
 //!   neprijme. Odpoved `ok` nebo `err <duvod>`.
 
 use std::io::{BufRead, BufReader, Write};
@@ -62,6 +63,8 @@ fn keygen(keygen: &Path, file: &Path) -> Result<String, String> {
 pub fn start(dir: &Path) -> Result<SshTest, String> {
     let ssh = tool("ssh").ok_or("chybi klient OpenSSH (ssh): ve Windows Volitelne funkce -> Klient OpenSSH, v Linuxu balik openssh-client")?;
     let kg = tool("ssh-keygen").ok_or("chybi ssh-keygen (OpenSSH)")?;
+    let scp = tool("scp").ok_or("chybi scp (OpenSSH)")?;
+    let sftp = tool("sftp").ok_or("chybi sftp (OpenSSH)")?;
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let key = dir.join("klic");
     let other = dir.join("cizi");
@@ -81,7 +84,7 @@ pub fn start(dir: &Path) -> Result<SshTest, String> {
             if r.read_line(&mut line).is_err() {
                 continue;
             }
-            let c = Client { ssh: ssh.clone(), port: fwd, key: key.clone(), other: other.clone(), known: known.clone() };
+            let c = Client { ssh: ssh.clone(), scp: scp.clone(), sftp: sftp.clone(), port: fwd, key: key.clone(), other: other.clone(), known: known.clone() };
             let res = match line.split_whitespace().collect::<Vec<_>>().as_slice() {
                 ["positive", user] => c.positive(user),
                 ["negative"] => c.negative(),
@@ -104,6 +107,8 @@ pub fn start(dir: &Path) -> Result<SshTest, String> {
 
 struct Client {
     ssh: PathBuf,
+    scp: PathBuf,
+    sftp: PathBuf,
     port: u16,
     key: PathBuf,
     other: PathBuf,
@@ -202,6 +207,41 @@ impl Client {
         let (code, out, err) = self.run(c, b"")?;
         if code != 0 || out.trim() != format!("/home/{user}") {
             return Err(format!("pwd: kod {code}, vystup {out:?} ({err:?})"));
+        }
+        // 7. scp tam a zpet (OpenSSH 9+ pres SFTP), obsah s diakritikou
+        // a binarni bajty.
+        let dir = self.known.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let up = dir.join("nahoru.bin");
+        let down = dir.join("dolu.bin");
+        let mut data: Vec<u8> = "Zkouška přenosu přes SSH\n".as_bytes().to_vec();
+        data.extend((0..=255u8).cycle().take(70_000));
+        std::fs::write(&up, &data).map_err(|e| format!("soubor: {e}"))?;
+        let _ = std::fs::remove_file(&down);
+        let scp = |args: &[&std::ffi::OsStr]| -> Result<(), String> {
+            let mut c = Command::new(&self.scp);
+            c.arg("-P").arg(self.port.to_string()).arg("-i").arg(&self.key);
+            c.args(["-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes"]);
+            c.arg("-o").arg(format!("UserKnownHostsFile={}", self.known.display()));
+            c.args(args);
+            let (code, _, err) = self.run(c, b"")?;
+            if code != 0 { Err(format!("scp: kod {code} ({err:?})")) } else { Ok(()) }
+        };
+        let remote = format!("{user}@127.0.0.1:prenos.bin");
+        scp(&[up.as_os_str(), std::ffi::OsStr::new(&remote)])?;
+        scp(&[std::ffi::OsStr::new(&remote), down.as_os_str()])?;
+        let back = std::fs::read(&down).map_err(|e| format!("stazeny soubor: {e}"))?;
+        if back != data {
+            return Err(format!("scp: obsah se lisi ({} B tam, {} B zpet)", data.len(), back.len()));
+        }
+        // 8. sftp: vypis a smazani.
+        let mut c = Command::new(&self.sftp);
+        c.arg("-P").arg(self.port.to_string()).arg("-i").arg(&self.key);
+        c.args(["-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-b", "-"]);
+        c.arg("-o").arg(format!("UserKnownHostsFile={}", self.known.display()));
+        c.arg(format!("{user}@127.0.0.1"));
+        let (code, out, err) = self.run(c, b"ls -l\nrm prenos.bin\nls\n")?;
+        if code != 0 || !out.contains("prenos.bin") {
+            return Err(format!("sftp: kod {code}, vystup {out:?} ({err:?})"));
         }
         Ok(())
     }

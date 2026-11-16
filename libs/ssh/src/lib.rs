@@ -8,6 +8,7 @@
 extern crate alloc;
 
 pub mod keys;
+pub mod sftp;
 
 #[cfg(feature = "proto")]
 pub mod server;
@@ -16,5 +17,7 @@ pub use sunset;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_sftp;
 #[cfg(all(test, feature = "proto"))]
 mod tests_server;

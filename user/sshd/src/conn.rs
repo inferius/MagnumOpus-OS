@@ -12,7 +12,8 @@
 //!   `exit` nebo Ctrl+D na prazdnem radku kanal ukonci.
 //! - shell bez PTY nebo exec: radek v relaci, vystup jako text
 //!   (`term::vt::item`), kod ukonceni 0 / 1.
-//! - subsystem (sftp): zatim ne [navrzeno].
+//! - subsystem sftp (i scp z OpenSSH 9+): `ssh::sftp` nad relaci FS uctu
+//!   (prava vynucuje fsd podle identity uctu).
 
 #![no_std]
 #![no_main]
@@ -28,7 +29,9 @@ use core::time::Duration;
 
 use libos::{Channel, Error, Handle, Signals, Startup, println, time};
 use netproto::{Deadline, TcpStream};
+use fsproto::FsClient;
 use ssh::server::{Auth, Backend, Pty, ServerConn, Start, State};
+use ssh::sftp::{Attrs, Sftp, SftpFs};
 use term::proto::{ClientMsg, ServerMsg};
 use term::theme::Theme;
 use term::ui::{App, Key};
@@ -64,8 +67,7 @@ impl Backend for Back<'_> {
         }
     }
     fn start(&mut self, chan: u32, start: Start) -> bool {
-        if matches!(start, Start::Subsystem { .. }) {
-            // sftp [navrzeno].
+        if matches!(&start, Start::Subsystem { name } if name != "sftp") {
             return false;
         }
         self.starts.push((chan, start));
@@ -103,6 +105,56 @@ struct Line {
 enum Kind {
     Shell(Shell),
     Line(Line),
+    /// Subsystem sftp (i scp): FS uctu; `_peer` = druhy konec prazdneho
+    /// kanalu `termd` (zije, at cekani nebudi zavrena protistrana).
+    Sftp { sftp: Sftp, _peer: Channel },
+}
+
+/// FS uctu (relace od initu) pro SFTP.
+struct AccountFs(FsClient);
+
+fn attrs(s: &fsproto::Stat) -> Attrs {
+    let dir = matches!(s.kind, fsproto::kind::DIR | fsproto::kind::DATASET);
+    let mode = (s.known & fsproto::avail::MODE != 0).then_some(s.mode);
+    Attrs { dir, size: if dir { 0 } else { s.size }, mode, mtime: s.mtime.secs.clamp(0, u32::MAX as i64) as u32 }
+}
+
+impl SftpFs for AccountFs {
+    fn stat(&mut self, p: &str) -> Result<Attrs, Error> {
+        self.0.stat(p).map(|s| attrs(&s))
+    }
+    fn list(&mut self, p: &str) -> Result<Vec<(String, Attrs)>, Error> {
+        Ok(self
+            .0
+            .list_stat(p)?
+            .into_iter()
+            .map(|e| {
+                let dir = matches!(e.kind, fsproto::kind::DIR | fsproto::kind::DATASET);
+                (e.name, Attrs { dir, size: if dir { 0 } else { e.size }, mode: None, mtime: e.mtime.secs.clamp(0, u32::MAX as i64) as u32 })
+            })
+            .collect())
+    }
+    fn read(&mut self, p: &str, off: u64, len: usize) -> Result<Vec<u8>, Error> {
+        self.0.read(p, off, len)
+    }
+    fn write(&mut self, p: &str, off: u64, data: &[u8]) -> Result<(), Error> {
+        self.0.write(p, off, data)
+    }
+    fn create(&mut self, p: &str) -> Result<(), Error> {
+        self.0.create(p, fsproto::kind::FILE)
+    }
+    fn truncate(&mut self, p: &str, size: u64) -> Result<(), Error> {
+        self.0.truncate(p, size)
+    }
+    fn mkdir(&mut self, p: &str) -> Result<(), Error> {
+        self.0.create(p, fsproto::kind::DIR)
+    }
+    fn remove(&mut self, p: &str) -> Result<(), Error> {
+        self.0.remove(p)
+    }
+    fn rename(&mut self, a: &str, b: &str) -> Result<(), Error> {
+        self.0.rename(a, b)
+    }
 }
 
 /// Kanal relace a jeho spojeni s termd.
@@ -155,6 +207,9 @@ struct Worker {
     parent: Channel,
     /// Kanal okna terminalu od initu (po vyzvednuti relace).
     win: Option<Channel>,
+    /// Relace FS uctu a jeho domov (sftp).
+    fs: Option<AccountFs>,
+    home: String,
     chans: Vec<Chan>,
     tcp_in: Vec<u8>,
     tcp_out: Vec<u8>,
@@ -172,15 +227,26 @@ impl Worker {
             println!("sshd-conn: relace: {}", String::from_utf8_lossy(&m.data));
             return Err(Error::AccessDenied);
         }
+        // `ok <relace> <domov>` + [okno terminalu, relace FS uctu].
+        let text = String::from_utf8_lossy(&m.data).into_owned();
+        self.home = String::from(text.split_whitespace().nth(2).unwrap_or("/"));
         let mut hs = m.handles.into_iter();
         self.win = hs.next().map(Channel::from_handle);
-        // Relace FS uctu (sftp [navrzeno]).
-        drop(hs);
+        self.fs = hs.next().map(|h| AccountFs(FsClient::new(Channel::from_handle(h))));
         Ok(())
     }
 
     fn open(&mut self, num: u32, start: Start) -> Result<(), Error> {
         self.claim()?;
+        if let Start::Subsystem { .. } = start {
+            if self.fs.is_none() {
+                return Err(Error::NotFound);
+            }
+            let (termd, peer) = Channel::create()?;
+            let kind = Kind::Sftp { sftp: Sftp::new(&self.home), _peer: peer };
+            self.chans.push(Chan { num, kind, termd, session: 0, out: Vec::new(), exit: None });
+            return Ok(());
+        }
         let termd = connect_termd(self.win.as_ref().ok_or(Error::BadState)?)?;
         let kind = match start {
             Start::Shell { pty: Some(Pty { cols, rows, .. }) } => {
@@ -199,7 +265,7 @@ impl Worker {
                 send(&termd, vec![ClientMsg::Attach { session: 0 }]);
                 Kind::Line(Line { line: command, block: None, input: None })
             }
-            Start::Subsystem { .. } => return Err(Error::NotSupported),
+            Start::Subsystem { .. } => return Err(Error::BadState),
         };
         let mut c = Chan { num, kind, termd, session: 0, out: Vec::new(), exit: None };
         if let Kind::Shell(_) = c.kind {
@@ -220,10 +286,11 @@ impl Worker {
                     // Pripojeno: vstup, ktery prisel driv.
                     if s.app.session != 0 && !s.early.is_empty() {
                         let early = core::mem::take(&mut s.early);
-                        Self::input(c, &early);
+                        Self::input(c, &early, None);
                         return;
                     }
                 }
+                Kind::Sftp { .. } => {}
                 Kind::Line(l) => match sm {
                     ServerMsg::Attached { session, .. } => {
                         c.session = session;
@@ -250,8 +317,16 @@ impl Worker {
     }
 
     /// Data od klienta pro kanal.
-    fn input(c: &mut Chan, data: &[u8]) {
+    fn input(c: &mut Chan, data: &[u8], fs: Option<&mut AccountFs>) {
         match &mut c.kind {
+            Kind::Sftp { sftp, .. } => {
+                let Some(fs) = fs else { return };
+                match sftp.input(data, fs) {
+                    Ok(out) => c.out.extend(out),
+                    // Poruseny protokol: kanal zavrit.
+                    Err(_) => c.exit = Some(1),
+                }
+            }
             Kind::Shell(s) => {
                 if s.app.session == 0 {
                     s.early.extend_from_slice(data);
@@ -299,7 +374,7 @@ impl Worker {
         let mut buf = [0u8; 4096];
         while let Ok(Some((num, n))) = self.conn.read(&mut buf) {
             if let Some(c) = self.chans.iter_mut().find(|c| c.num == num) {
-                Self::input(c, &buf[..n]);
+                Self::input(c, &buf[..n], self.fs.as_mut());
             }
         }
         let now = time::now();
@@ -324,6 +399,12 @@ impl Worker {
                     s.dirty = false;
                     s.drawn_at = now;
                 }
+            }
+        }
+        // Klient ukoncil SFTP (EOF): kanal zavrit (klient ceka na CLOSE).
+        for c in &mut self.chans {
+            if matches!(c.kind, Kind::Sftp { .. }) && c.exit.is_none() && self.conn.eof(c.num) {
+                c.exit = Some(0);
             }
         }
         // Data a konce kanalu ke klientovi.
@@ -424,6 +505,8 @@ fn main(mut startup: Startup) -> i64 {
         stream,
         parent: Channel::from_handle(parent),
         win: None,
+        fs: None,
+        home: String::new(),
         chans: Vec::new(),
         tcp_in: Vec::new(),
         tcp_out: Vec::new(),
@@ -475,7 +558,10 @@ fn main(mut startup: Startup) -> i64 {
         for c in &w.chans {
             items.push((c.termd.handle(), rd));
         }
-        let _ = libos::wait_many(&items, Some(time::deadline_after(TICK)));
+        // Data uz pripravena (v sunset nebo z TCP): necekat.
+        let busy = !w.tcp_in.is_empty() || w.conn.has_channel_data();
+        let deadline = if busy { time::now() } else { time::deadline_after(TICK) };
+        let _ = libos::wait_many(&items, Some(deadline));
     }
     0
 }

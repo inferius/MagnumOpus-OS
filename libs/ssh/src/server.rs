@@ -265,6 +265,11 @@ impl ServerConn {
         Ok((n > 0).then_some((num.0, n)))
     }
 
+    /// Cekaji data od klienta na precteni (`read`)?
+    pub fn has_channel_data(&self) -> bool {
+        self.runner.read_channel_ready().is_some()
+    }
+
     /// Klient poslal EOF na kanale?
     pub fn eof(&self, chan: u32) -> bool {
         self.chan(chan).is_none_or(|h| self.runner.is_channel_eof(h))

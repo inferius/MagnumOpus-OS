@@ -189,7 +189,8 @@ fn serve(control: Channel) {
                 let id = crate::remote::claim(ticket)?;
                 let win = crate::terminal::TERMINALS.lock().client_for("ssh", Some(id))?;
                 let fs = crate::session::connect(id)?;
-                return Ok((format!("ok {id}"), vec![win.into_handle(), fs.into_channel().into_handle()]));
+                let home = crate::session::user_name(id).map(|n| format!("/home/{n}")).unwrap_or_else(|| String::from("/"));
+                return Ok((format!("ok {id} {home}"), vec![win.into_handle(), fs.into_channel().into_handle()]));
             }
             if let Some(id) = m.data.strip_prefix(b"end ") {
                 let id: u64 = core::str::from_utf8(id).ok().and_then(|s| s.trim().parse().ok()).ok_or(Error::InvalidArgs)?;

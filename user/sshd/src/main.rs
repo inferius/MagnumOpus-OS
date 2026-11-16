@@ -118,7 +118,7 @@ fn request(c: &mut Conn, auth: &SshAuth, init: &Channel, data: &[u8]) -> (Vec<u8
             let r = init.write(&msg, Vec::new()).and_then(|_| init.read(Some(time::deadline_after(Duration::from_secs(10)))));
             match r {
                 Ok(m) if m.data.starts_with(b"ok ") => {
-                    c.session = core::str::from_utf8(&m.data[3..]).ok().and_then(|s| s.trim().parse().ok());
+                    c.session = core::str::from_utf8(&m.data[3..]).ok().and_then(|s| s.split_whitespace().next()?.parse().ok());
                     (m.data, m.handles)
                 }
                 Ok(m) => (m.data, Vec::new()),

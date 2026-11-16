@@ -254,3 +254,32 @@ fn otisk_klice_hostitele() {
     assert_eq!(crate::keys::fingerprint(&blob), fp);
     assert!(PublicKey::from_blob(&blob).is_ok());
 }
+
+#[test]
+fn velky_prenos_dat_v_kanalu() {
+    let mut b = TestBackend { alice: pubkey(5), probes: 0, started: Vec::new(), winch: Vec::new(), data: Vec::new() };
+    let mut s = ServerConn::new(&HOST).unwrap();
+    let mut c = Cli::new(5, Plan::Exec);
+    pump(&mut c, &mut s, &mut b, 20);
+    let (chan, _) = b.started[0].clone();
+    // 100 KB od klienta (vic nez okno i paket kanalu); klient zapisuje,
+    // kolik okno pusti.
+    let total = 100 * 1024;
+    let data: Vec<u8> = (0..total).map(|i| (i % 251) as u8).collect();
+    let mut sent = 0;
+    for _ in 0..2000 {
+        if sent < total {
+            let h = c.chan.as_ref().unwrap();
+            if let Ok(n) = c.runner.write_channel(h, ChanData::Normal, &data[sent..]) {
+                sent += n;
+            }
+        }
+        pump(&mut c, &mut s, &mut b, 1);
+        if b.data.len() == total {
+            break;
+        }
+    }
+    let got: Vec<u8> = b.data.iter().filter(|d| d.0 == chan).map(|d| d.1).collect();
+    assert_eq!(got.len(), total, "odeslano {sent}");
+    assert!(got == data);
+}

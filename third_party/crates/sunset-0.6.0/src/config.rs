@@ -1,6 +1,14 @@
 // TODO
+#[cfg(not(feature = "alloc"))]
 pub const DEFAULT_WINDOW: usize = 1000;
+#[cfg(not(feature = "alloc"))]
 pub const DEFAULT_MAX_PACKET: usize = 1000;
+// MagnumOpus: s vlastnimi buffery (`alloc`, buffer paketu SSH_MAX_PACKET)
+// vetsi okno a pakety kanalu; s 1000 B byl prenos souboru ~10 kB/s.
+#[cfg(feature = "alloc")]
+pub const DEFAULT_WINDOW: usize = 256 * 1024;
+#[cfg(feature = "alloc")]
+pub const DEFAULT_MAX_PACKET: usize = 32 * 1024;
 
 /// Maximum SSH packet size, from RFC4253.
 ///
