@@ -451,7 +451,10 @@ impl Service {
         let Some(c) = self.comp.as_mut() else { return };
         if let Some(s) = self.net_src.as_mut() {
             match s.read(status::net_state) {
-                Ok(Some(v)) => c.set_net(Some(v)),
+                Ok(Some((v, addr))) => {
+                    c.set_net(Some(v));
+                    c.set_net_addr(addr);
+                }
                 Ok(None) => {}
                 Err(()) => {
                     self.net_src = None;
@@ -482,6 +485,8 @@ impl Service {
     /// Hodiny v liste: mistni cas v pasmu od initu. Vraci, kdy se zmeni
     /// minuta (probuzeni), `None` = hodiny se neukazuji.
     fn update_clock(&mut self, now: u64) -> Option<u64> {
+        /// Svetovy cas v panelu hodin (pasmo, jmeno mesta).
+        const WORLD: &[(&str, &str)] = &[("Europe/London", "Londýn"), ("America/New_York", "New York"), ("Asia/Tokyo", "Tokio")];
         let zone = self.zone?;
         let c = self.comp.as_mut()?;
         let Some(utc) = libos::time::wall() else {
@@ -498,6 +503,19 @@ impl Service {
             format!("{}:{:02}", civil.hour, civil.minute),
             format!("{wd} {}. {}.", civil.day, civil.month),
         )));
+        // Panel hodin: dnesni datum a svetovy cas (mesta jineho pasma).
+        let mut world = Vec::new();
+        for (name, city) in WORLD {
+            let Some(z) = libos::time::zone::Zone::by_name(name) else { continue };
+            let o = z.to_local(utc);
+            if o.offset.secs == l.offset.secs {
+                continue;
+            }
+            let diff = (o.offset.secs - l.offset.secs) / 60;
+            let d = if diff % 60 == 0 { format!("{:+} h", diff / 60) } else { format!("{:+} h {} min", diff / 60, (diff % 60).abs()) };
+            world.push((String::from(*city), format!("{}:{:02}", o.civil.hour, o.civil.minute), d));
+        }
+        c.set_calendar(Some(comp::calendar::CalendarInfo { year: civil.year as i32, month: civil.month as u8, day: civil.day as u8, world }));
         // Vzhled podle denni doby: misto pasma a den/noc (kazdou minutu).
         c.set_sun_place(zone.place().map(|p| (p.lat, p.lon)));
         c.sun_tick(utc.secs, l.offset.secs, now);

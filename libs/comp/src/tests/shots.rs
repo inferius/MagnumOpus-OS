@@ -176,3 +176,27 @@ fn shot_launcher_sections_and_empty() {
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
+
+/// Panel hodin (O5): kalendar listopadu 2026 s dneskem a svetovy cas.
+#[test]
+fn shot_clock_panel() {
+    let mut errors = Vec::new();
+    for (mode, mname) in [(theme::Mode::Light, "svetly"), (theme::Mode::Dark, "tmavy")] {
+        let mut t = T::new();
+        t.c.set_mode(mode);
+        t.c.set_clock(Some((String::from("14:05"), String::from("čt 12. 11."))));
+        t.c.set_calendar(Some(crate::calendar::CalendarInfo {
+            year: 2026,
+            month: 11,
+            day: 12,
+            world: alloc::vec![(String::from("Londýn"), String::from("13:05"), String::from("-1 h")), (String::from("New York"), String::from("8:05"), String::from("-6 h"))],
+        }));
+        t.frame();
+        assert!(t.c.open_panel("clock"));
+        t.frame();
+        let r = t.c.bar_panel_rect().unwrap();
+        let (px, w, h) = crop(&t, r);
+        errors.extend(compare(&format!("panel-hodiny-{mname}"), &px, w, h));
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}

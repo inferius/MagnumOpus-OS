@@ -122,3 +122,54 @@ fn app_shortcut_menu_is_ui_menu() {
         assert!(out.contains(&Out::Client(c, ServerMsg::Close { window: 1 })), "CLOSE pro {c:?}: {out:?}");
     }
 }
+
+/// O5: kalendar (dny v mesici, den v tydnu, posun mesicu) a panel hodin
+/// s dneskem, listovanim a svetovym casem.
+#[test]
+fn clock_panel_calendar_and_world_time() {
+    use crate::calendar::{CalendarInfo, days_in_month, first_weekday, shift_month};
+    // 1. 11. 2026 je nedele, 1. 1. 2024 pondeli; unor 2024 prestupny.
+    assert_eq!(first_weekday(2026, 11), 6);
+    assert_eq!(first_weekday(2024, 1), 0);
+    assert_eq!((days_in_month(2024, 2), days_in_month(2026, 2), days_in_month(2000, 2), days_in_month(1900, 2)), (29, 28, 29, 28));
+    assert_eq!(shift_month(2026, 12, 1), (2027, 1));
+    assert_eq!(shift_month(2026, 1, -1), (2025, 12));
+    let mut t = T::new();
+    t.frame();
+    t.c.set_clock(Some((String::from("14:05"), String::from("čt 12. 11."))));
+    t.c.set_calendar(Some(CalendarInfo { year: 2026, month: 11, day: 12, world: alloc::vec![(String::from("Londýn"), String::from("13:05"), String::from("-1 h"))] }));
+    t.frame();
+    let clock = t.c.bar_layout().clock.expect("hodiny v liste");
+    t.click(clock.x + 4, clock.y + 4);
+    assert_eq!(t.c.flyout, Some(crate::flyout::Flyout::Clock));
+    let n = tree(&t);
+    let has = |n: &[guiproto::a11y::Node], name: &str| n.iter().any(|x| x.name == name);
+    assert!(has(&n, "listopad 2026") && has(&n, "Londýn") && has(&n, "13:05") && has(&n, "Po"), "{:?}", n.iter().map(|x| &x.name).collect::<Vec<_>>());
+    let next = n.iter().find(|x| x.role == Role::Button && x.name == "Další měsíc").cloned().unwrap();
+    let r = t.c.bar_panel_rect().unwrap();
+    t.click(r.x + next.bounds.x + next.bounds.w as i32 / 2, r.y + next.bounds.y + next.bounds.h as i32 / 2);
+    assert!(has(&tree(&t), "prosinec 2026"), "listovani");
+    // Znovu otevreny panel zacina na dnesnim mesici.
+    t.c.set_flyout(None);
+    t.click(clock.x + 4, clock.y + 4);
+    assert!(has(&tree(&t), "listopad 2026"));
+}
+
+/// O9: okno otevrene na pozadi hned po otevreni relace (automaticky
+/// spustena aplikace) o pozornost nezada; pozdeji ano.
+#[test]
+fn background_windows_quiet_after_session_start() {
+    let mut t = T::new();
+    t.c.session_opened(1, 1000, "alice", t.now);
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    let b = t.client("b");
+    t.window(b, Mode::Standard, BLUE);
+    let gb = t.c.clients[&b].windows[&1];
+    assert!(!t.c.windows[&gb].attention, "tichy start");
+    t.now += crate::launch::STARTUP_QUIET + 1;
+    let c = t.client("c");
+    t.window(c, Mode::Standard, GREEN);
+    let gc = t.c.clients[&c].windows[&1];
+    assert!(t.c.windows[&gc].attention, "pozdeji okno na pozadi zada o pozornost");
+}

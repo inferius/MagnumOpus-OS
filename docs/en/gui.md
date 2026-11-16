@@ -951,7 +951,13 @@ The Appearance, Network, Sound, Notifications and Developer mode panels
 are `ui` views over the [panel component](components.md)
 (`libs/comp/src/barpanel.rs`): width `size.panel_w`, height by content,
 centred above the icon, rounding `radius.window`, shadow
-`shadow.popover`. The app shortcut menu in the bar (right button, or a click with several
+`shadow.popover`. A click on the clock opens a panel with the month calendar (today
+highlighted, paging with arrows) and world time; `compd` computes the
+date and the times of other zones from `libs/tz` every minute
+(`Comp::set_calendar`, `libs/comp/src/calendar.rs`). The Network panel
+shows the state and the interface address from `netd`. **[implemented]**
+(host `clock_panel_calendar_and_world_time`, screenshot `panel-hodiny-*`)
+The app shortcut menu in the bar (right button, or a click with several
 windows) is a `ui` menu (`Ui::open_menu`): the application's windows
 (the active one with a check mark), New window, Pin to the bar (disabled,
 "not yet"), Close all windows. **[implemented]** (host

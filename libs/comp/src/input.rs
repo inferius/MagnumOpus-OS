@@ -979,6 +979,7 @@ impl Comp {
                 (bar.volume, crate::flyout::Flyout::Volume),
                 (Some(bar.bell), crate::flyout::Flyout::Bell),
                 (Some(bar.look), crate::flyout::Flyout::Look),
+                (bar.clock, crate::flyout::Flyout::Clock),
                 #[cfg(feature = "dev-mode")]
                 (bar.dev, crate::flyout::Flyout::Dev),
             ]

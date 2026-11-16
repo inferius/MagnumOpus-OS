@@ -158,6 +158,8 @@ pub struct BarStatus {
     pub capturing: Vec<String>,
     /// Zarizeni a aplikace pro panel Zvuk (`None` = sluzba je neposlala).
     pub audio: Option<AudioInfo>,
+    /// Adresa rozhrani s prefixem (`10.0.2.15/24`), kdyz ji netd hlasi.
+    pub net_addr: Option<String>,
 }
 
 /// Zvukove zarizeni v panelu Zvuk.
@@ -314,6 +316,14 @@ impl Comp {
         if self.status.volume != volume {
             self.status.volume = volume;
             self.damage_panel();
+            self.bar_panel_changed();
+        }
+    }
+
+    /// Adresa rozhrani pro panel Sit (`None` = bez adresy).
+    pub fn set_net_addr(&mut self, addr: Option<String>) {
+        if self.status.net_addr != addr {
+            self.status.net_addr = addr;
             self.bar_panel_changed();
         }
     }
@@ -724,9 +734,11 @@ fn frame_width(t: &theme::Theme) -> u32 {
     if t.mode == theme::Mode::Contrast { 2 } else { 1 }
 }
 
-/// Jmeno v odznaku: u systemove aplikace "Systém".
+/// Jmeno v odznaku: jmeno aplikace z manifestu (preda ho init, ne
+/// aplikace). Systemovou aplikaci oznaci stit s fajfkou (okna.html,
+/// soubory.html), ne slovo "Systém" (O15).
 fn badge_name(cl: &Client) -> &str {
-    if cl.info.system { "Systém" } else { &cl.info.name }
+    &cl.info.name
 }
 
 /// Ikona opravneni v odznaku (`size.icon_xs`).

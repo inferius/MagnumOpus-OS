@@ -902,6 +902,12 @@ Panely Vzhled, Síť, Zvuk, Oznámení a Režim vývojáře jsou pohledy
 knihovny `ui` nad [komponentou panel](komponenty.md)
 (`libs/comp/src/barpanel.rs`): šířka `size.panel_w`, výška podle obsahu,
 střed nad ikonou, zaoblení `radius.window`, stín `shadow.popover`.
+Klik na hodiny otevře panel s kalendářem měsíce (dnešek zvýrazněný,
+listování šipkami) a světovým časem; datum a časy jiných pásem počítá
+`compd` z `libs/tz` každou minutu (`Comp::set_calendar`,
+`libs/comp/src/calendar.rs`). Panel Síť ukazuje stav a adresu rozhraní
+z `netd`. **[implementováno]** (host `clock_panel_calendar_and_world_time`,
+snímek `panel-hodiny-*`)
 Nabídka zástupce aplikace v liště (pravé tlačítko, nebo klik při víc
 oknech) je nabídka knihovny `ui` (`Ui::open_menu`): okna aplikace
 (aktivní s fajfkou), Nové okno, Připnout na lištu (vypnuté, „zatím

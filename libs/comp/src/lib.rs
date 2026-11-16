@@ -23,6 +23,7 @@ extern crate alloc;
 
 pub mod appearance;
 pub mod barpanel;
+pub mod calendar;
 pub mod clipboard;
 pub mod diag;
 pub mod dialog;
@@ -214,6 +215,11 @@ pub struct Comp {
     /// Aplikace spustene uzivatelem (id, cas): jejich nove okno dostane
     /// fokus (`launch.rs`).
     pub(crate) expect_focus: Vec<(alloc::string::String, u64)>,
+    /// Kdy se otevrela posledni relace (tichy start znacek, `STARTUP_QUIET`).
+    pub(crate) session_since: Option<u64>,
+    /// Panel hodin: dnesni datum a svetovy cas, posun zobrazeneho mesice.
+    pub(crate) calendar: Option<calendar::CalendarInfo>,
+    pub(crate) calendar_offset: i32,
     /// Aplikace s vice okny (`multi` z manifestu).
     pub(crate) multi: Vec<alloc::string::String>,
     /// Od kdy je drzeny Esc pri cele obrazovce (`fullscreen.rs`).
@@ -288,6 +294,9 @@ impl Comp {
             max_menu: None,
             max_hover_since: None,
             expect_focus: Vec::new(),
+            session_since: None,
+            calendar: None,
+            calendar_offset: 0,
             multi: Vec::new(),
             palette_ctrl: false,
             esc_since: None,

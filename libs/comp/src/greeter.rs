@@ -249,6 +249,7 @@ impl Comp {
     pub fn session_opened(&mut self, id: u64, uid: u64, name: &str, now: u64) {
         self.greeter.sessions.retain(|s| s.id != id);
         self.greeter.sessions.push(Session { id, uid, name: String::from(name), locked: false });
+        self.session_since = Some(now);
         self.greeter_changed(now);
     }
 
