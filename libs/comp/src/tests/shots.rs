@@ -232,3 +232,30 @@ fn shot_bar_tooltip() {
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
+
+/// Bezpecna obrazovka a potvrzeni vypnuti (O26): dlazdice zavaznosti
+/// u nadpisu, vychozi (bezpecna) volba jako primarni tlacitko.
+#[test]
+fn shot_system_dialogs() {
+    let mut errors = Vec::new();
+    for (mode, mname) in [(theme::Mode::Light, "svetly"), (theme::Mode::Dark, "tmavy")] {
+        for (name, power) in [("bezpecna", false), ("vypnout", true)] {
+            let mut t = T::new();
+            t.c.set_mode(mode);
+            if power {
+                t.c.confirm_power(false);
+            } else {
+                t.c.secure_attention(t.now);
+            }
+            t.frame();
+            let d = t.c.dialogs.active().unwrap();
+            assert_eq!(d.primary, d.sel, "vychozi volba je primarni");
+            let l = t.c.dialog_layout().unwrap();
+            let b = l.buttons[d.primary];
+            assert_eq!(t.px(b.x + b.w as i32 / 2, b.y + 3), t.c.style.theme.color.accent, "primarni tlacitko accent");
+            let (px, w, h) = crop(&t, l.frame);
+            errors.extend(compare(&format!("dialog-{name}-{mname}"), &px, w, h));
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}

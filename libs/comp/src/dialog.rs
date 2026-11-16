@@ -49,6 +49,9 @@ pub struct Dialog {
     pub text: String,
     pub options: Vec<String>,
     pub sel: usize,
+    /// Vychozi volba (primarni tlacitko): bezpecna volba, na ktere dialog
+    /// zacina; nastavi `open_dialog` z `sel`.
+    pub primary: usize,
     pub password: String,
     /// Zaskrtavatko (jen `Elevate`: dalsich 5 minut nepotvrzovat).
     pub flag: Option<bool>,
@@ -133,6 +136,28 @@ fn heading(d: &Dialog) -> String {
     })
 }
 
+/// Zavaznost dialogu: dlazdice ikony u nadpisu (`.sev` v dialogy.html).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Sev {
+    Info,
+    Warn,
+    Danger,
+}
+
+/// Ikona a zavaznost dialogu.
+fn severity(d: &Dialog) -> (&'static str, Sev) {
+    match (d.owner, d.kind) {
+        (Owner::Secure, _) => ("shieldcheck", Sev::Info),
+        (Owner::Power(_), _) => ("power", Sev::Warn),
+        (Owner::Device(_), _) => ("keyboard", Sev::Danger),
+        (Owner::Action(_), _) => ("agent", Sev::Warn),
+        (_, DialogKind::Permission) => ("shield", Sev::Info),
+        (_, DialogKind::Password) => ("key", Sev::Info),
+        (_, DialogKind::Elevate) => ("settings", Sev::Warn),
+        (_, DialogKind::Confirm) => ("alert", Sev::Warn),
+    }
+}
+
 /// Popisek zaskrtavatka rezimu spravy.
 const ADMIN_MODE: &str = "Dalších 5 minut úkony správy nepotvrzovat";
 
@@ -188,7 +213,8 @@ impl Dialogs {
         // Svisle: pruh, obsah (nadpis, aplikace, text, pole), upozorneni, tlacitka.
         let mut y = band_h + sp[6];
         let title_y = y as i32;
-        y += t.text.title.line + sp[3];
+        // Nadpis vedle dlazdice zavaznosti (vyska `bar_icon`).
+        y += t.text.title.line.max(t.size.bar_icon) + sp[3];
         let who_y = if d.app.is_empty() {
             None
         } else {
@@ -289,11 +315,22 @@ impl Dialogs {
         st.icons.draw(c, "key", px - (is + sp[2]) as i32, icon_y, is, t.icon_stroke, col.trust_ink);
         px = st.face(ps).draw(c, px, base, label, ps.size, col.trust_ink);
         st.face(pb).draw(c, px, base, &phrase, pb.size, col.trust_ink);
-        // Nadpis.
+        // Dlazdice zavaznosti a nadpis vedle ni.
+        let (icon, sev) = severity(d);
+        let (bg, ink) = match sev {
+            Sev::Info => (col.accent_soft, col.accent_ink),
+            Sev::Warn => (col.warn_soft, col.warn),
+            Sev::Danger => (col.danger_soft, col.danger),
+        };
+        let tile_s = t.size.bar_icon;
+        let tile = Rect::new(f.x + sp[6] as i32, l.title_y, tile_s, tile_s);
+        c.round_fill(tile, t.radius.control, bg);
+        let il = t.size.icon_l;
+        st.icons.draw(c, icon, tile.x + (tile_s - il) as i32 / 2, tile.y + (tile_s - il) as i32 / 2, il, t.icon_stroke, ink);
         let ts = t.text.title;
         let face = st.face(ts);
-        let base = l.title_y + face.baseline_in(ts.size, ts.line);
-        face.draw(c, f.x + sp[6] as i32, base, &heading(d), ts.size, col.ink);
+        let base = l.title_y + (tile_s as i32 - ts.line as i32) / 2 + face.baseline_in(ts.size, ts.line);
+        face.draw(c, tile.right() as i32 + sp[4] as i32, base, &heading(d), ts.size, col.ink);
         // Aplikace, ktera se pta.
         if let Some(w) = l.who {
             c.round_fill(w, t.radius.control, col.surface_2);
@@ -351,18 +388,24 @@ impl Dialogs {
             face.draw(c, f.x + (sp[6] + is + sp[2]) as i32, y + face.baseline_in(cs.size, cs.line), g, cs.size, col.ink_muted);
             y += cs.line as i32;
         }
-        // Tlacitka: pilulky; vybrane ma ramecek fokusu.
+        // Tlacitka: pilulky; vychozi (bezpecna volba) primarni `accent`,
+        // vybrane ma ramecek fokusu.
         for (i, (b, o)) in l.buttons.iter().zip(&d.options).enumerate() {
-            c.round_fill_bordered(*b, b.h / 2, col.surface, col.border_strong, 1);
+            let primary = i == d.primary;
+            if primary {
+                c.round_fill(*b, b.h / 2, col.accent);
+            } else {
+                c.round_fill_bordered(*b, b.h / 2, col.surface, col.border_strong, 1);
+            }
             if i == d.sel {
                 let (fr, off) = (t.size.focus_ring, t.size.focus_offset);
                 let ring = Rect::new(b.x - (fr + off) as i32, b.y - (fr + off) as i32, b.w + 2 * (fr + off), b.h + 2 * (fr + off));
                 c.round_stroke(ring, ring.h / 2, fr, col.focus);
             }
-            let s = t.text.body;
+            let s = if primary { t.text.body_strong } else { t.text.body };
             let face = st.face(s);
             let tw = face.width(o, s.size) as i32;
-            face.draw(c, b.x + (b.w as i32 - tw) / 2, b.y + face.baseline_in(s.size, b.h), o, s.size, col.ink);
+            face.draw(c, b.x + (b.w as i32 - tw) / 2, b.y + face.baseline_in(s.size, b.h), o, s.size, if primary { col.on_accent } else { col.ink });
         }
     }
 }
@@ -432,6 +475,7 @@ impl Comp {
                     flag: (kind == DialogKind::Elevate).then_some(false),
                     options,
                     sel: 0,
+                    primary: 0,
                     password: String::new(),
                 });
             }
@@ -458,7 +502,8 @@ impl Comp {
         }
     }
 
-    pub(crate) fn open_dialog(&mut self, d: Dialog) {
+    pub(crate) fn open_dialog(&mut self, mut d: Dialog) {
+        d.primary = d.sel;
         let first = self.dialogs.queue.is_empty();
         let front_changes = first || d.owner == Owner::Secure;
         if d.owner == Owner::Secure {
@@ -528,6 +573,7 @@ impl Comp {
                 alloc::vec![String::from("Zpět")]
             },
             sel: 0,
+            primary: 0,
             password: String::new(),
             flag: None,
         });
@@ -575,6 +621,7 @@ impl Comp {
             text: alloc::format!("Opravdu {what} počítač? Neuložená práce v aplikacích se může ztratit."),
             options: alloc::vec![String::from(button), String::from("Zrušit")],
             sel: 1,
+            primary: 1,
             password: String::new(),
             flag: None,
         });
@@ -600,6 +647,7 @@ impl Comp {
                     ),
                     options: alloc::vec![String::from("Povolit zařízení"), String::from("Odmítnout")],
                     sel: 1,
+                    primary: 1,
                     password: String::new(),
                     flag: None,
                 });

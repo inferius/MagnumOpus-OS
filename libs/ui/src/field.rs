@@ -800,11 +800,14 @@ impl<M: Clone> Ui<M> {
         if self.drag_field.is_some_and(|k| !keep.contains(&k)) {
             self.drag_field = None;
         }
-        // Jednoradkove pole: kurzor videt i po zmene sirky; viceradkove jen
-        // posun v mezich (kolecko nesmi kazde prekresleni vratit ke kurzoru).
+        // Jednoradkove pole s fokusem: kurzor videt i po zmene sirky; bez
+        // fokusu zustava posun, jaky byl (nove pole od zacatku textu, ne od
+        // kurzoru na konci, O23). Viceradkove jen posun v mezich (kolecko
+        // nesmi kazde prekresleni vratit ke kurzoru).
         for i in 0..self.elems.len() {
             match self.field_kind(i) {
-                Some((false, _)) => self.field_reveal(i),
+                Some((false, _)) if self.focus == Some(i) || self.tscroll.contains_key(&self.elems[i].key) => self.field_reveal(i),
+                Some((false, _)) => {}
                 Some((true, _)) => {
                     let key = self.elems[i].key;
                     let lh = self.look.body().line as i32;

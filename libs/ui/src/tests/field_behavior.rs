@@ -546,3 +546,23 @@ fn trailing_slot_key_icon_text() {
     assert!(inner_w("abc", Some(Trailing::Icon("check"))).1 > 0);
     assert!(inner_w("abc", Some(Trailing::Text(String::from("3 výsledky")))).1 > 0);
 }
+
+/// Dlouhy text v uzkem poli bez fokusu (jen pro cteni) zacina od zacatku,
+/// ne od konce (O23); s fokusem a kurzorem na konci se posune ke kurzoru.
+#[test]
+fn unfocused_long_field_shows_start() {
+    let long = "Jen pro čtení: jde vybrat a kopírovat, text je delší než pole";
+    let mut u: Ui<M> = Ui::new(crate::Look::ui_fonts(), 160, 60);
+    // Prvni pole dostane vychozi fokus, pole jen pro cteni je druhe.
+    u.rebuild(String::new(), column([text_input("").key("prvni"), text_input(long).read_only().key("cteni")]));
+    let i = u.elems.iter().rposition(|e| matches!(e.kind, crate::layout::ElemKind::TextInput { .. })).unwrap();
+    assert_ne!(u.focus, Some(i));
+    let key = u.elems[i].key;
+    assert_eq!(u.tscroll.get(&key).copied().unwrap_or((0, 0)), (0, 0), "bez fokusu od zacatku");
+    // Fokus a konec textu: posun ke kurzoru.
+    u.focus = Some(i);
+    for action in [1, 0] {
+        u.event_at(InputEvent::Key { code: KEY_END, action, ch: None }, 0, None);
+    }
+    assert!(u.tscroll.get(&key).is_some_and(|s| s.0 > 0), "s fokusem ke kurzoru");
+}

@@ -423,6 +423,14 @@ impl Comp {
         }
         let method = g.current_method();
         if g.field.is_empty() && method != Method::Key {
+            // Prazdne pole: rict proc se nic nestalo (O25), bez pokusu
+            // u sluzby (prazdny pokus se nepocita do zpomaleni).
+            g.msg = Some((String::from(match method {
+                Method::Pin => "Zadejte PIN.",
+                Method::Recovery => "Zadejte obnovovací klíč.",
+                _ => "Zadejte heslo.",
+            }), true));
+            self.damage_all();
             return;
         }
         let secret = core::mem::take(&mut g.field);
