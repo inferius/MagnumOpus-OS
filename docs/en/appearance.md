@@ -1225,3 +1225,4 @@ services outside the GUI (`taskd`, clones in `fsproto`, configuration).
 | v1.8 | 2026-11-13 | designs: tablet mode (window tiling, pen, 2-in-1), TV mode with a foundations review; compact file picker; launcher variant D |
 | v1.9 | 2026-11-13 | decisions: tablet switches automatically, stacked tiles in portrait, TV mode not developed further, content above the rating hidden from children; points 3, 5 and 6 into the foundations as a design; permission infographic and severity colours for icons |
 | v1.10 | 2026-11-14 | component library ([components.md](components.md), `design/komponenty.html`): states, keyboard, densities, spec for `libs/ui`, gaps and proposed new tokens |
+| v1.11 | 2026-11-16 | comparison of the real GUI with the design ([appearance-deviations.md](appearance-deviations.md)); Appearance panel with state and Developer mode panel added to the prototype |

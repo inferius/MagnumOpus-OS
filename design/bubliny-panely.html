@@ -27,6 +27,13 @@
 .sbar .b.open { box-shadow: inset 0 -2px 0 var(--c-accent); }
 .sbar .sep { width: 1px; height: 22px; background: var(--c-border); margin: 0 4px; }
 .sbar .clock { font-size: 13px; font-weight: 600; line-height: 1.15; text-align: right; font-variant-numeric: tabular-nums; }
+.sbar .devpill { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 10px; border-radius: 14px; border: 1px solid var(--c-border-strong); font-size: 12px; font-weight: 600; }
+.sbar .devpill.on { background: var(--c-danger); border-color: var(--c-danger); color: var(--c-on-danger); }
+.pnl .row.opt[aria-checked="true"] { font-weight: 600; }
+.pnl .row.opt:focus-visible { outline: var(--size-focus-ring) solid var(--c-focus); outline-offset: -2px; border-radius: 10px; }
+.pnl .state { display: flex; gap: 8px; align-items: flex-start; margin: 4px 16px; padding: 8px 10px; border-radius: 10px; background: var(--c-surface-3); color: var(--c-ink-muted); font-size: 12px; }
+.pnl .state.warn { background: var(--c-danger-soft); color: var(--c-danger); }
+.pnl .state .ic { flex: none; margin-top: 1px; }
 .sbar .clock small { display: block; font-weight: 400; font-size: 11px; color: var(--c-ink-muted); }
 .ring { position: absolute; inset: 4px; pointer-events: none; }
 .cnt { position: absolute; right: 2px; top: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; font-size: 10px; font-weight: 700; line-height: 16px; background: var(--c-accent); color: var(--c-on-accent); }
@@ -113,6 +120,8 @@
       <tr><td>Síť</td><td>„Ethernet, připojeno, 1 Gb/s“</td><td>stav, přepínače (Wi-Fi, režim letadlo, VPN), seznam sítí, <i>Nastavení sítě</i></td><td>-</td><td>pevná</td></tr>
       <tr><td>Zvuk</td><td>„Hlasitost 60 % &middot; Reproduktory“</td><td>posuvník, výstup a vstup, ztlumit, hlasitost aplikací</td><td>prostřední: ztlumit; kolečko: &plusmn;5 %</td><td>pevná</td></tr>
       <tr><td>Baterie</td><td>„82 %, zbývá 4 h 10 min“</td><td>stav, profil napájení, <i>Nastavení napájení</i></td><td>-</td><td>pevná, jen když baterie je</td></tr>
+      <tr><td>Vzhled (doplněno 16. 11.)</td><td>„Vzhled: automaticky (teď světlý)“ + kdy se přepne</td><td>volba Světlý / Tmavý / Automaticky jako radio s ikonami a fajfkou, řádek stavu „Teď světlý, podle východu a západu slunce. Tmavý od 16:21“, přepínač Vysoký kontrast, <i>Nastavení vzhledu</i></td><td>-</td><td>pevná</td></tr>
+      <tr><td>Vývojář (doplněno 16. 11.)</td><td>„Režim vývojáře“ nebo „... je zapnutý, systém není chráněný“</td><td>přepínač s popisem, při zapnutí varovný řádek <code>danger_soft</code>; pilulka v liště je pak <code>danger</code></td><td>-</td><td>podmíněná: jen vývojové sestavení</td></tr>
       <tr><td>Oznámení</td><td>„2 nová“ nebo „Nerušit do 18:00“</td><td>seznam oznámení, Nerušit, Vymazat vše</td><td>prostřední: zapnout / vypnout Nerušit</td><td>pevná</td></tr>
       <tr><td>Hodiny</td><td>celé datum + čas v dalších pásmech</td><td>kalendář na měsíc, světový čas, události (<i>připravujeme</i>), <i>Nastavení času</i></td><td>kolečko nad kalendářem: měsíce</td><td>pevná</td></tr>
       <tr><td>Aplikační</td><td>text od aplikace (nejvýš 80 znaků)</td><td>malý panel z deklarace aplikace (stejné prvky jako systémové panely)</td><td>-</td><td>jen s povolením, nejvýš 2 viditelné, zbytek pod &lsaquo;</td></tr>
@@ -154,7 +163,15 @@
 </main>
 <script>
 document.addEventListener('mo-ready', function () {
-  var st = { open: null, vol: 60, muted: false, dnd: false, tip: 'mat', arrow: false, net: { wifi: false, plane: false, vpn: false } };
+  var st = { open: null, vol: 60, muted: false, dnd: false, tip: 'mat', arrow: false, net: { wifi: false, plane: false, vpn: false },
+    look: 'auto', contrast: false, dev: false };
+  // Vzhled: ukazka bezi ve 14:05, automaticky rezim je tedy ted svetly.
+  var LOOK = [['light', 'sun', 'Světlý', ''], ['dark', 'moon', 'Tmavý', ''], ['auto', 'clock', 'Automaticky', 'podle východu a západu slunce']];
+  function lookNow() { return st.look === 'dark' ? 'tmavý' : 'světlý'; }
+  function lookTip() {
+    var name = LOOK.filter(function (l) { return l[0] === st.look; })[0][2].toLowerCase();
+    return ['Vzhled: ' + name + (st.look === 'auto' ? ' (teď ' + lookNow() + ')' : ''), st.look === 'auto' ? 'tmavý od 16:21 (západ slunce)' : 'klik: změnit vzhled'];
+  }
   var stage = document.getElementById('stage'), bar = document.getElementById('sbar');
   function I(n, s) { return '<svg class="ic" style="width:' + (s || 20) + 'px;height:' + (s || 20) + 'px" aria-hidden="true"><use href="#ic-' + n + '"/></svg>'; }
   var TASKS = [['Kopírování Fotky do záloh', 'Soubory', 62, '2 min'], ['cargo xtask test', 'Terminál', 35, '4 min'], ['Úklid ~/Stažené', 'agent', 80, 'čeká na kontrolu', 1]];
@@ -162,6 +179,7 @@ document.addEventListener('mo-ready', function () {
   function icons() {
     var v = st.muted ? 'volume-off' : st.vol < 35 ? 'volume-low' : 'volume';
     return [
+      ['dev', '', 'podmíněná', st.dev ? ['Režim vývojáře je zapnutý', 'úkony správy se potvrdí samy; systém není chráněný'] : ['Režim vývojáře', 'jen vývojové sestavení; klik: zapnout nebo vypnout']],
       ['tasks', 'tasks', 'podmíněná', ['3 úlohy na pozadí', 'Kopírování dokončeno asi za 2 min &middot; 1 úloha agenta']],
       ['priv', '', 'podmíněná', ['Právě se používá', 'Kamera a mikrofon: Hovory &middot; Poloha: Mapy']],
       ['upd', 'update', 'podmíněná', ['Připravena aktualizace 0.7', 'Dokončí se při restartu']],
@@ -171,6 +189,7 @@ document.addEventListener('mo-ready', function () {
       ['net', 'ethernet', 'pevná', ['Ethernet, připojeno', '1 Gb/s &middot; IP 10.0.2.15']],
       ['vol', v, 'pevná', ['Hlasitost ' + (st.muted ? 'ztlumeno' : st.vol + ' %'), 'Reproduktory &middot; kolečko mění, prostřední tlačítko ztlumí']],
       ['bat', 'battery-half', 'pevná', ['Baterie 82 %', 'zbývá asi 4 h 10 min &middot; profil Vyvážený']],
+      ['look', st.look === 'dark' ? 'moon' : st.look === 'light' ? 'sun' : 'moon', 'pevná', lookTip()],
       ['bell', st.dnd ? 'bell-off' : 'bell', 'pevná', [st.dnd ? 'Nerušit do 18:00' : '2 nová oznámení', 'prostřední tlačítko: Nerušit', 'Super+N']],
       'sep',
       ['clock', '', 'pevná', ['čtvrtek 12. listopadu 2026', 'Praha 14:05 &middot; Londýn 13:05 &middot; New York 08:05']]
@@ -186,6 +205,7 @@ document.addEventListener('mo-ready', function () {
         if (x === 'sep') return '<span class="sep"></span>';
         var inner = x[0] === 'priv' ? '<span class="hstack" style="gap:3px"><span class="pdot pd-cam"></span><span class="pdot pd-mic"></span><span class="pdot pd-loc"></span></span>'
           : x[0] === 'clock' ? '<span class="clock">14:05<small>čt 12. 11.</small></span>'
+          : x[0] === 'dev' ? '<span class="devpill' + (st.dev ? ' on' : '') + '">' + I(st.dev ? 'shield-alert' : 'code', 16) + (st.dev ? 'Režim vývojáře' : 'Vývojář') + '</span>'
           : x[0] === 'tasks' ? ringSvg() + I('tasks', 18) + '<span class="cnt">3</span><span class="cnt ai" style="right:auto;left:0">1</span>'
           : x[0] === 'more' ? I('left', 16) : I(x[1]);
         return '<button class="b' + (st.open === x[0] ? ' open' : '') + '" data-id="' + x[0] + '" aria-label="' + x[3][0] + (x[3][1] ? '. ' + x[3][1] : '') + '"' + (x[0] === 'tasks' ? ' style="min-width:44px"' : '') + '>' + inner + '<span class="tag-cond">' + x[2] + '</span></button>';
@@ -262,6 +282,22 @@ document.addEventListener('mo-ready', function () {
         '<div class="sec">Události</div><div class="row"><small>Kalendář událostí <i>připravujeme</i>.</small></div>' +
         '<div class="foot"><button class="btn small">' + I('time-sync', 16) + 'Nastavení času</button></div>';
     }
+    // Vzhled: volba je radio skupina (sipky, Mezernik), zvolena ma fajfku vpravo;
+    // pod ni stav ("Ted svetly..."), kontrast z Pristupnosti a odkaz do Nastaveni.
+    if (id === 'look') return '<header>' + I(st.look === 'light' ? 'sun' : 'moon') + 'Vzhled<span class="sub">teď ' + lookNow() + '</span></header>' +
+      '<div role="radiogroup" aria-label="Vzhled">' + LOOK.map(function (l) {
+        var on = st.look === l[0];
+        return '<div class="row btnrow opt" role="radio" tabindex="' + (on ? 0 : -1) + '" aria-checked="' + on + '" data-look="' + l[0] + '">' + I(l[1]) +
+          '<span class="grow">' + l[2] + (l[3] ? '<small>' + l[3] + '</small>' : '') + '</span>' + (on ? '<span class="chip accent">' + I('check', 12) + '</span>' : '') + '</div>';
+      }).join('') + '</div>' +
+      '<div class="state">' + I('info', 16) + '<span>' + (st.look === 'auto' ? 'Teď světlý, podle východu a západu slunce. Tmavý od 16:21 (západ slunce v Praze).' :
+        'Teď ' + lookNow() + ', nastaveno ručně. Automaticky přepíná podle slunce.') + '</span></div>' +
+      row('contrast', 'Vysoký kontrast', 'z Přístupnosti; přebíjí světlý i tmavý', sw(st.contrast, 'contrast')) +
+      '<div class="foot"><button class="btn small">' + I('palette', 16) + 'Nastavení vzhledu</button></div>';
+    if (id === 'dev') return '<header>' + I('code') + 'Režim vývojáře<span class="sub">vývojové sestavení</span></header>' +
+      row('shield-alert', 'Režim vývojáře', 'Úkony správy se potvrdí samy, bez dialogu.', sw(st.dev, 'dev')) +
+      (st.dev ? '<div class="state warn">' + I('alert', 16) + '<span>Systém teď není chráněný: aplikace se správou můžou měnit systém bez potvrzení. Vypněte, až nebudete ladit.</span></div>' : '') +
+      '<div class="foot"><small class="muted">Jen vývojové sestavení; vydání tuto volbu nemá.</small></div>';
     if (id === 'priv') return '<header>' + I('shieldcheck') + 'Právě se používá</header>' +
       row('camera', 'Hovory', '<span class="pdot pd-cam"></span> kamera &middot; <span class="pdot pd-mic"></span> mikrofon od 14:02', '<button class="btn small">Odpojit</button>') +
       row('globe', 'Mapy', '<span class="pdot pd-loc"></span> poloha (přesná) od 13:40', '<button class="btn small">Odpojit</button>') +
@@ -281,7 +317,17 @@ document.addEventListener('mo-ready', function () {
       var b = bar.querySelector('[data-id="' + st.open + '"]'), rs = stage.getBoundingClientRect(), rb = b.getBoundingClientRect();
       var p = document.createElement('div'); p.className = 'pnl mat'; p.setAttribute('role', 'dialog'); p.innerHTML = panel(st.open); stage.appendChild(p);
       var cx = rb.left - rs.left + rb.width / 2; p.style.left = Math.max(8, Math.min(rs.width - p.offsetWidth - 8, cx - p.offsetWidth / 2)) + 'px';
-      p.querySelectorAll('[data-sw]').forEach(function (s) { window.MO_SWITCH(s, function (on) { if (s.dataset.sw === 'dnd') { st.dnd = on; render(); } }); });
+      p.querySelectorAll('[data-sw]').forEach(function (s) { window.MO_SWITCH(s, function (on) { if (s.dataset.sw === 'dnd' || s.dataset.sw === 'contrast' || s.dataset.sw === 'dev') { st[s.dataset.sw] = on; render(); } }); });
+      var opts = Array.prototype.slice.call(p.querySelectorAll('[data-look]'));
+      function pickLook(o) { st.look = o.dataset.look; render(); var f = stage.querySelector('[data-look="' + st.look + '"]'); if (f) f.focus(); }
+      opts.forEach(function (o, i) {
+        o.onclick = function () { pickLook(o); };
+        o.onkeydown = function (e) {
+          var d = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
+          if (d) { e.preventDefault(); pickLook(opts[(i + d + opts.length) % opts.length]); }
+          if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); pickLook(o); }
+        };
+      });
       p.querySelectorAll('[data-tile]').forEach(function (t) { t.onclick = function () { st.net[t.dataset.tile] = !st.net[t.dataset.tile]; render(); }; });
       var vs = p.querySelector('[data-vol]'); if (vs) vs.oninput = function () { st.vol = +vs.value; st.muted = false; vs.style.setProperty('--v', st.vol + '%'); renderBar(); p.querySelector('header .sub').textContent = st.vol + ' %'; };
       var m = p.querySelector('[data-mute]'); if (m) m.onclick = function () { st.muted = !st.muted; render(); };
