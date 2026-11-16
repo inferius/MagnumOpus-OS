@@ -40,4 +40,5 @@
 - `git apply` záplat portů běží v `target/` uvnitř repozitáře: bez `GIT_CEILING_DIRECTORIES` by git našel náš repozitář a záplatu tiše přeskočil (`cports/fetch.rs`).
 - Běžící `cargo xtask run` zamyká `xtask.exe`; jiný xtask se nepřeloží, nejdřív zavři QEMU.
 - Restart v okně QEMU s WHPX se zasekne (chyba QEMU/WHPX).
+- Porty USB na `xhci.0` přiděluje jen `src/usbports.rs` (řadič 8 portů: 1..4 test usb a klávesnice, 5..8 média); nové zařízení testu dostane pevný port odtud, jinak zabere port, který test připojuje za běhu (`usb port N not found`). Po `device_del` injektor čeká na `DEVICE_DELETED`; chyba QMP v úseku přeskočí jen ten úsek.
 - QMP (`qmp.rs`): značky testů se v logu hledají jen za poslední nalezenou (`Log::pos`), jinak by `--repeat` v dalších kolech spouštěl úseky hned nebo vůbec. Nová značka začátku úseku patří do `STARTS` a nesmí být podřetězcem jiné (test `qmp_tests.rs`); chybějící značka uvnitř úseku úsek vzdá, ne celé vkládání.

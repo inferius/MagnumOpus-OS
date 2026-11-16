@@ -8,6 +8,7 @@ Pomocný proces správce souborů: kopírování a přesun jako úlohy relace (s
 - Stav se ukládá po položce a nejpozději po `SAVE_EVERY`; zápis přes dočasný soubor a `RENAME_REPLACE`. `Vfs::sync` je prázdné, protože FS commituje atomicky v pořadí (stav nepředběhne data).
 - Složku stavu tvoří jen pod existujícím domovem (relace uživatele nesmí tvořit v `/` ani `/home`).
 - Mezi kroky nejvýš `SLICE_NS` práce, pak zprávy.
+- Kopie čtením a zápisem (cíl na médiu) původ `sys.origin` nepřenese: `FsVfs::clone_path` to zaloguje.
 
 ## Testy
 

@@ -566,6 +566,8 @@ They slide in at the top right (24 px offset + cross-fade, 240 ms) and after
 notification has a left strip in the `ai` color and the agent icon. For the
 screen reader they are in a `status` region (announced but not
 interrupting). Muting until a given time is in the notification center.
+The service, protocol and implementation state:
+[Notifications](notifications.md).
 
 ### System dialogs
 

@@ -194,7 +194,8 @@ zprávě jako `kind::USER` se štítky z `abi::params::tag` (`STDIN`,
 launchd, `AUDIO` a `AUDIO_LEASE` = relace zvukové služby s právy aplikace
 a její lístek, [Zvuk](zvuk.md#relace-aplikací-a-nahrávání), `GUI`
 a `GUI_LEASE` = relace okna zděděná od rodiče a její lístek,
-[GUI](gui.md#relace-okna-pro-potomky-role-gui), `TTY` = řídicí
+[GUI](gui.md#relace-okna-pro-potomky-role-gui), `NOTIFY` = kanál odesílatele
+[oznámení](oznameni.md) s identitou z manifestu, `TTY` = řídicí
 kanál terminálu, protokol `ttyproto`, [termios](cstd.md#termios)). Štítky, které
 runtime std sám nepoužije, si nechá pro knihovny
 (`osrt::start::take_tagged`). Formát v2 má pole příznaků (`abi::params::flags`:

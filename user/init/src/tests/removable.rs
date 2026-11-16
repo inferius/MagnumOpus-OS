@@ -67,7 +67,7 @@ fn wait_list(fs: &FsClient, what: &str, want: impl Fn(&[MediaEntry]) -> bool) ->
     }
 }
 
-fn media(_: &Startup) -> TestResult {
+fn media(startup: &Startup) -> TestResult {
     let sys = devices().and_then(|d| d.fs.as_ref()).ok_or("sluzba fsd nebezi")?;
     let list = wait_list(sys, "media pri startu", |l| [FAT, NTFS, EXFAT].iter().all(|n| l.iter().any(|m| m.name == *n)))?;
     let fat = list.iter().find(|m| m.name == FAT).ok_or("FAT")?;
@@ -121,6 +121,9 @@ fn media(_: &Startup) -> TestResult {
     check_eq!(user.read(&edst, 150_000, 100).map_err(|e| fail("cteni zpet z exFAT", e))?, data[150_000..150_100].to_vec(), "exFAT: obsah zpet");
     user.media_remove(EXFAT).map_err(|e| fail("odpojeni exFAT", e))?;
     println!("init: {EXFAT_MARK}");
+
+    // Kopie, konflikt, presun a preruseni pres files-copy (Soubory).
+    super::removable_copy::run(startup, sys, FAT)?;
 
     // Bezpecne odpojeni (Odpojit v Souborech = uzivatelska relace).
     user.media_remove(FAT).map_err(|e| fail("odpojeni FAT", e))?;

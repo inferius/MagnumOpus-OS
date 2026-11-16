@@ -574,3 +574,50 @@ fn theme_modes_redraw_window() {
         let _ = std::fs::write(dir.join(alloc::format!("soubory-{name}.png")), gfx::png::encode(&px, w, h, w));
     }
 }
+
+#[test]
+fn download_from_address() {
+    let mut m = fm();
+    m.update(Msg::Download);
+    assert!(m.edit.as_ref().is_some_and(|e| e.url && e.value == "https://"));
+    let mut u = ui_for(&m, 1200);
+    // Spatna adresa: chyba u pole, nic se neposle.
+    m.update(Msg::NameValue("ftp://server/soubor".into()));
+    m.update(Msg::NameOk);
+    assert!(m.edit.as_ref().unwrap().error.contains("https://"));
+    m.update(Msg::NameValue("https://".into()));
+    m.update(Msg::NameOk);
+    assert!(m.edit.as_ref().unwrap().error.contains("server"));
+    assert!(m.b.downloads.is_empty());
+    // Dobra adresa: stahovani predano, pole zavrene, zprava v liste.
+    m.update(Msg::NameValue("https://example.org/obraz.iso".into()));
+    u = ui_for(&m, 1200);
+    press(&mut m, &mut u, "Stáhnout");
+    assert_eq!(m.b.downloads, vec![String::from("https://example.org/obraz.iso")]);
+    assert!(m.edit.is_none());
+    assert!(m.status.contains("Úlohách"));
+    // Prikaz je v menu (paleta Ctrl+K).
+    assert!(crate::app_menu(false)[0].children.iter().any(|i| i.action == "files.download"));
+}
+
+#[test]
+fn media_places_and_eject() {
+    let mut m = fm();
+    m.b.fs.dir("/media").dir("/media/MOTEST").file("/media/MOTEST/foto.jpg", b"jpg");
+    let medium = |name: &str, ro: bool| fsproto::v2::MediaEntry { name: name.into(), label: name.into(), fs: "fat".into(), read_only: ro, total_bytes: 64 << 20, free_bytes: 32 << 20 };
+    m.b.media = vec![medium("MOTEST", false), medium("mylabel", true)];
+    m.update(Msg::Refresh);
+    let labels: Vec<&str> = m.places.iter().map(|p| p.label.as_str()).collect();
+    assert!(labels.contains(&"MOTEST") && labels.contains(&"mylabel (jen čtení)"), "{labels:?}");
+    let i = m.places.iter().position(|p| p.label == "MOTEST").unwrap();
+    m.update(Msg::Place(i));
+    assert_eq!(m.nav.cur, "/media/MOTEST");
+    // Odpojit: tlacitko jen ve slozce media.
+    let mut u = ui_for(&m, 1200);
+    press(&mut m, &mut u, "Odpojit");
+    assert!(m.status.contains("můžete ho vytáhnout"), "{}", m.status);
+    assert_eq!(m.nav.cur, "/home/jana");
+    assert!(!m.places.iter().any(|p| p.label == "MOTEST"));
+    let u = ui_for(&m, 1200);
+    assert!(!names(&u, Role::Button).iter().any(|n| n == "Odpojit"), "doma tlacitko neni");
+}

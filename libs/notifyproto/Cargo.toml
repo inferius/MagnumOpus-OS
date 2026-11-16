@@ -1,0 +1,10 @@
+[package]
+name = "notifyproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protokol sluzby oznameni notifyd: odesilatel (oznameni, nahrazeni, akce) a prohlizec (odber, Nerusit)"
+
+[dependencies]
+abi = { workspace = true }
+wire = { path = "../wire" }

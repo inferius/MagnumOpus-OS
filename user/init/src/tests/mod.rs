@@ -16,7 +16,10 @@ pub mod diag;
 mod dns;
 mod clock_sync;
 mod disks;
+mod download;
+mod notify;
 mod removable;
+mod removable_copy;
 mod display;
 mod drivers;
 mod driverkit;
@@ -127,6 +130,8 @@ const SUITES: &[(&str, &[Test])] = &[
     ("ovladace z manifestu", driverkit::TESTS),
     ("disky", disks::TESTS),
     ("vymenna media", removable::TESTS),
+    ("oznameni", notify::TESTS),
+    ("stahovani", download::TESTS),
     ("sitove karty", nic::TESTS),
     ("acpi", power::TESTS),
     ("diagnostika", diag::TESTS),

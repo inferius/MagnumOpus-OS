@@ -44,6 +44,7 @@ pub mod output;
 mod owner;
 pub mod render;
 pub mod scene;
+pub mod toast;
 pub mod tooltip;
 pub mod winsize;
 pub mod services;
@@ -224,6 +225,8 @@ pub struct Comp {
     pub(crate) tip_hover: Option<(tooltip::Tip, u64)>,
     pub(crate) tip_shown: Option<tooltip::Tip>,
     pub(crate) tip_hidden_at: u64,
+    /// Oznameni od notifyd a vyskakovaci karty (`toast.rs`).
+    pub(crate) notices: toast::Notices,
     /// Drzeny Ctrl pri otevrene palete (Ctrl+Enter).
     pub(crate) palette_ctrl: bool,
     /// Volba vzhledu a prolnuti rezimu (`appearance.rs`).
@@ -295,6 +298,7 @@ impl Comp {
             tip_hover: None,
             tip_shown: None,
             tip_hidden_at: 0,
+            notices: toast::Notices::default(),
             appearance: appearance::Appearance::default(),
             fade_lut: None,
         };

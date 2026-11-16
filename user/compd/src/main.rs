@@ -16,6 +16,7 @@ extern crate alloc;
 
 mod gpu;
 mod login;
+mod notify;
 mod status;
 mod peers;
 mod screen;
@@ -64,6 +65,8 @@ struct Service {
     snapshots: Option<Channel>,
     /// Kanal k initu pro spousteni aplikaci (`launcher`).
     launcher: Option<Channel>,
+    /// Prohlizece oznameni relaci (`notify.rs`).
+    notify: notify::Viewers,
     /// Kanal `login` ke sluzbe uctu (prihlasovaci obrazovka).
     login: Option<login::Login>,
     /// Prechod ze startovni obrazovky (`splash.rs`): bezici a ohlaseny
@@ -133,6 +136,7 @@ fn main(startup: Startup) -> i64 {
         audio_src: None,
         snapshots: None,
         launcher: None,
+        notify: notify::Viewers::default(),
         login: None,
         splash: None,
         splash_pending: None,
@@ -199,6 +203,9 @@ impl Service {
         if let Some(s) = &self.snapshots {
             items.push((s.handle(), rd));
         }
+        for (_, ch) in &self.notify.list {
+            items.push((ch.handle(), rd));
+        }
         self.peers.wait_items(&mut items);
         let r = self.waits.wait(&items, deadline);
         drop(items);
@@ -230,6 +237,7 @@ impl Service {
         }
         let login = if self.login.is_some() { next(&obs) } else { Signals(0) };
         let snap = if self.snapshots.is_some() { next(&obs) } else { Signals(0) };
+        let notify_obs: Vec<Signals> = (0..self.notify.list.len()).map(|_| next(&obs)).collect();
         let peer_obs: Vec<Signals> = obs.get(i..).map(|s| s.to_vec()).unwrap_or_default();
         // 1. Vstup ma prednost.
         if foc.intersects(Signals::READABLE) {
@@ -307,6 +315,11 @@ impl Service {
             && let Some(why) = c.take_snapshot_request()
         {
             snapshot::take(c, &why, self.peers.frame, self.snapshots.as_ref());
+        }
+        // Oznameni: zmeny od notifyd do karet, pozadavky karet zpet.
+        if let Some(c) = self.comp.as_mut() {
+            self.notify.read(&notify_obs, c, now);
+            self.notify.send(c.take_notify_requests());
         }
         // Pozadavky prihlasovaci obrazovky na sluzbu uctu.
         if let Some(c) = self.comp.as_mut() {
@@ -601,6 +614,13 @@ impl Service {
                     Ok((String::new(), Vec::new()))
                 }
                 None => Err(Error::BadState),
+            },
+            control::NOTIFY => match (words.next().and_then(|u| u.parse::<u64>().ok()), handles.into_iter().next()) {
+                (Some(uid), Some(h)) => {
+                    self.notify.add(uid, Channel::from_handle(h));
+                    Ok((String::new(), Vec::new()))
+                }
+                _ => Err(Error::InvalidArgs),
             },
             control::LAUNCHER => handles.into_iter().next().ok_or(Error::InvalidArgs).map(|h| {
                 self.launcher = Some(Channel::from_handle(h));

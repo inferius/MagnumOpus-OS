@@ -28,6 +28,7 @@ mod docs_check;
 mod highlight;
 mod image;
 mod mediadisks;
+mod usbports;
 mod qemu;
 mod nethelper;
 mod dnshelper;
@@ -816,6 +817,10 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "volfs",
             "--package",
+            "notifyproto",
+            "--package",
+            "notifycore",
+            "--package",
             "crashrec",
             "--package",
             "qr",
@@ -949,6 +954,7 @@ const USER_PROGRAMS: &[&str] = &[
     "termd",
     "shsess",
     "taskd",
+    "notifyd",
     "launchd",
     "console",
     "virtio-net",

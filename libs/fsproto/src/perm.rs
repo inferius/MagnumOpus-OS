@@ -50,7 +50,17 @@ pub mod op {
 pub mod mount_flags {
     /// Jen cteni: zapisy, vytvareni a mazani pres tuto cestu se odmitnou.
     pub const READ_ONLY: u8 = 1;
+    /// Relace smi pod touto cestou zapsat puvod souboru ([`super::ORIGIN_XATTR`]:
+    /// odkud a kdy byl stazen). Dostane ho jen `fetch` pro `~/Stazene`
+    /// (docs/cs/stahovani.md); aplikace a uzivatel ne. Ostatni systemove
+    /// atributy (`sys.*`) smi dal jen system.
+    pub const ORIGIN: u8 = 2;
 }
+
+/// Puvod stazeneho souboru: `<adresa>\n<cas ns od 1970>`. Jmenny prostor
+/// `sys.` zapisuje jen system (`libs/fs`), tento atribut navic relace
+/// s [`mount_flags::ORIGIN`].
+pub const ORIGIN_XATTR: &str = "sys.origin";
 
 /// Prava a priznaky grantu (stejne bity jako `fs::rights`, `fs::grant`).
 pub mod rights {
@@ -236,6 +246,22 @@ pub fn check_path(path: &str) -> Result<()> {
 /// Prelozi cestu relace na cestu ve FS podle pripojenych cest (nejdelsi
 /// shoda na hranici slozky). Vraci (cesta ve FS, pripojeni jen pro cteni).
 /// Cesta mimo vsechna pripojeni = `NOT_FOUND`.
+/// Priznaky pripojeni, pod kterym cesta `path` relace lezi.
+pub fn mount_flags_of(mounts: &[Mount], path: &str) -> Result<u8> {
+    check_path(path)?;
+    let p = path.trim_end_matches('/');
+    let p = if p.is_empty() { "/" } else { p };
+    mounts
+        .iter()
+        .filter(|m| {
+            let name = m.name.trim_end_matches('/');
+            name.is_empty() || p == name || p.strip_prefix(name).is_some_and(|r| r.starts_with('/'))
+        })
+        .max_by_key(|m| m.name.trim_end_matches('/').len())
+        .map(|m| m.flags)
+        .ok_or(Error::NotFound)
+}
+
 pub fn map_path(mounts: &[Mount], path: &str) -> Result<(String, bool)> {
     check_path(path)?;
     let p = path.trim_end_matches('/');

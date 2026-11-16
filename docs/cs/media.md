@@ -84,8 +84,9 @@ přesné mapování vlastníků a práv je v odchylkách v
 [Architektura](architektura.md#aktuální-odchylky-od-návrhu).
 
 Atribut „jen pro čtení“ souboru se hlásí v `Stat`, rozšířené atributy
-(např. `system.origin` stažených souborů) FAT, exFAT ani NTFS neuchovají
-**[navrženo]**: kopie z domova na médium je ztratí a zapíše to do logu.
+(např. původ `sys.origin` stažených souborů, [Stahování](stahovani.md#původ-souboru-sysorigin))
+FAT, exFAT ani NTFS neuchovají: kopie z domova na médium původ ztratí
+a files-copy to zapíše do logu **[implementováno]**.
 
 ## Souborové systémy
 
@@ -220,8 +221,34 @@ Relace vidí `/media`, jen když ho má v připojených cestách
   tisíce souborů v jedné složce zpomalí kopírování **[implementováno]**.
 - Čas FAT je bez pásma a bere se jako UTC (Windows píše místní čas);
   exFAT pásmo ukládá a čte.
-- **[navrženo]** Média v Místech Souborů, Odpojit z GUI, oznámení
-  o připojení.
+- Seznam médií v Souborech se obnoví při Znovu načíst (F5), kliknutí na
+  místo a po Odpojit; živá aktualizace při zasunutí (událost od fsd)
+  **[navrženo]**.
+
+## Média v Souborech
+
+- **Místa:** každé médium je v postranním panelu pod svou jmenovkou
+  (médium jen pro čtení se značkou „(jen čtení)“), cesta
+  `/media/<jméno>` **[implementováno]** (host `media_places_and_eject`).
+- **Odpojit:** tlačítko ve složce média (a akce `files.eject`): bezpečné
+  odpojení, návrat domů a zpráva „Médium X je odpojené, můžete ho
+  vytáhnout.“ **[implementováno]** (host `media_places_and_eject`;
+  odpojení samo **[ověřeno v QEMU]**).
+- **Oznámení:** po připojení pošle init systémové oznámení „Připojeno
+  médium (FAT/exFAT/NTFS…)“ ([Oznámení](oznameni.md)) **[implementováno]**.
+- **Kopírování a přesun** domov <-> médium jdou přes `files-copy`
+  (úloha s průběhem v Úlohách): médium nemá okamžitou kopii, kopíruje se
+  čtením a zápisem; konflikt jmen (Ponechat obě = „jméno (2)“), přesun
+  z média domů (zdroj na médiu zmizí) i přerušení (pád procesu, nový
+  proces úlohu dokončí, dočasné soubory nezůstanou) **[ověřeno v QEMU]**
+  (`user/init/src/tests/removable_copy.rs` v sadě `vymenna media`).
+  Tažení na složku používá stejný přesun. Koš na médiu není (fsd vrací
+  pro `TRASH` na médiu `NOT_SUPPORTED`): zdroj přesunu z média a přepsaný
+  cíl na médiu files-copy smaže trvale **[ověřeno v QEMU]**; Do koše na
+  médiu v Souborech skončí chybou **[implementováno]**, trvalé smazání
+  s potvrzením **[navrženo]**. Okamžitá kopie (`CLONE`) s médiem
+  a přejmenování do média z vlastního FS vrací `NOT_SUPPORTED` (kopie
+  čtením a zápisem), `DATASET_OF` cesty na médiu je `/media/<jméno>`.
 
 ## Složka hostitele jako flash disk
 

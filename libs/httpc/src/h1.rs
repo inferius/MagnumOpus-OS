@@ -12,7 +12,11 @@ use alloc::vec::Vec;
 use netproto::io::{Read, Write};
 
 use crate::buf::Input;
+use crate::sink::{Sink, VecSink};
 use crate::{Error, Header, Limits, Method, Request, Response, Result, Version, protocol};
+
+/// Nejvic bajtu tela predanych [`Sink`] naraz.
+const CHUNK: usize = 64 * 1024;
 
 /// Zapise pozadavek (hlavicky a telo) do jednoho bufferu.
 pub fn encode_request(req: &Request) -> Vec<u8> {
@@ -141,25 +145,29 @@ fn framing(method: Method, status: u16, headers: &[Header], limits: &Limits) -> 
         let last = te.rsplit(',').next().unwrap_or("").trim();
         return Ok(if last.eq_ignore_ascii_case("chunked") { Framing::Chunked } else { Framing::Close });
     }
+    // Limit velikosti tela hlida prijemce (`Sink::head`).
+    let _ = limits;
     match length {
-        Some(n) if n > limits.max_body => Err(Error::TooLarge("telo odpovedi")),
         Some(n) => Ok(Framing::Length(n)),
         None => Ok(Framing::Close),
     }
 }
 
-fn read_exact_body<S: Read>(input: &mut Input<S>, body: &mut Vec<u8>, mut n: usize) -> Result<()> {
+fn read_exact_body<S: Read>(input: &mut Input<S>, sink: &mut dyn Sink, mut n: usize) -> Result<()> {
+    let mut tmp = Vec::new();
     while n > 0 {
-        let got = input.read_into(body, n)?;
+        tmp.clear();
+        let got = input.read_into(&mut tmp, n.min(CHUNK))?;
         if got == 0 {
             return Err(protocol("spojeni skoncilo pred koncem tela"));
         }
+        sink.data(&tmp)?;
         n -= got;
     }
     Ok(())
 }
 
-fn read_chunked<S: Read>(input: &mut Input<S>, limits: &Limits, used: &mut usize, body: &mut Vec<u8>) -> Result<()> {
+fn read_chunked<S: Read>(input: &mut Input<S>, limits: &Limits, used: &mut usize, sink: &mut dyn Sink) -> Result<()> {
     loop {
         let line = input.line(1024)?.ok_or_else(|| protocol("spojeni skoncilo v chunked"))?;
         let line = core::str::from_utf8(&line).map_err(|_| protocol("neplatna velikost chunku"))?;
@@ -173,10 +181,7 @@ fn read_chunked<S: Read>(input: &mut Input<S>, limits: &Limits, used: &mut usize
             let mut trailers = Vec::new();
             return read_headers(input, limits, used, &mut trailers);
         }
-        if body.len().saturating_add(size) > limits.max_body {
-            return Err(Error::TooLarge("telo odpovedi"));
-        }
-        read_exact_body(input, body, size)?;
+        read_exact_body(input, sink, size)?;
         match input.line(2)? {
             Some(l) if l.is_empty() => {}
             _ => return Err(protocol("chunk bez CRLF")),
@@ -184,8 +189,17 @@ fn read_chunked<S: Read>(input: &mut Input<S>, limits: &Limits, used: &mut usize
     }
 }
 
-/// Posle pozadavek a precte odpoved.
-pub fn send<S: Read + Write>(mut stream: S, req: &Request, limits: &Limits) -> Result<Response> {
+/// Posle pozadavek a precte odpoved (cele telo v pameti).
+pub fn send<S: Read + Write>(stream: S, req: &Request, limits: &Limits) -> Result<Response> {
+    let mut sink = VecSink::new(limits.max_body);
+    let mut resp = send_to(stream, req, limits, &mut sink)?;
+    resp.body = sink.body;
+    Ok(resp)
+}
+
+/// Posle pozadavek, telo odpovedi preda `sink` po castech (`Response::body`
+/// zustane prazdne).
+pub fn send_to<S: Read + Write>(mut stream: S, req: &Request, limits: &Limits, sink: &mut dyn Sink) -> Result<Response> {
     stream.write_all(&encode_request(req)).map_err(Error::Io)?;
     stream.flush().map_err(Error::Io)?;
     let mut input = Input::new(stream);
@@ -207,27 +221,34 @@ pub fn send<S: Read + Write>(mut stream: S, req: &Request, limits: &Limits) -> R
         }
         break (status, headers);
     };
-    let mut body = Vec::new();
-    match framing(req.method, status, &headers, limits)? {
+    let fr = framing(req.method, status, &headers, limits)?;
+    let len = match fr {
+        Framing::None => Some(0),
+        Framing::Length(n) => Some(n as u64),
+        _ => None,
+    };
+    sink.head(status, &headers, len)?;
+    match fr {
         Framing::None => {}
-        Framing::Length(n) => read_exact_body(&mut input, &mut body, n)?,
-        Framing::Chunked => read_chunked(&mut input, limits, &mut used, &mut body)?,
-        Framing::Close => loop {
-            let room = limits.max_body - body.len();
-            if input.read_into(&mut body, room.max(1))? == 0 {
-                break;
+        Framing::Length(n) => read_exact_body(&mut input, sink, n)?,
+        Framing::Chunked => read_chunked(&mut input, limits, &mut used, sink)?,
+        Framing::Close => {
+            let mut tmp = Vec::new();
+            loop {
+                tmp.clear();
+                if input.read_into(&mut tmp, CHUNK)? == 0 {
+                    break;
+                }
+                sink.data(&tmp)?;
             }
-            if body.len() > limits.max_body {
-                return Err(Error::TooLarge("telo odpovedi"));
-            }
-        },
+        }
     }
     headers.shrink_to_fit();
     Ok(Response {
         status,
         version: Version::Http11,
         headers,
-        body,
+        body: Vec::new(),
         url: None,
     })
 }

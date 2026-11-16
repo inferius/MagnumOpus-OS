@@ -541,7 +541,8 @@ Náhledy jsou vrstvy, které kompozitor už má (nic se nepřekresluje).
 Vyjíždějí vpravo nahoře (posun 24 px + prolnutí, 240 ms), po 6 s zmizí do
 centra oznámení (zvonek v liště). Oznámení agenta má levý pruh v barvě `ai`
 a ikonu agenta. Pro čtečku jsou v oblasti `status` (oznámí se, ale nepřeruší).
-Ztišení do určitého času je v centru oznámení.
+Ztišení do určitého času je v centru oznámení. Služba, protokol a stav
+implementace: [Oznámení](oznameni.md).
 
 ### Systémové dialogy
 

@@ -694,9 +694,10 @@ the screen size and the `FULLSCREEN` flag and needs to support nothing.
 - **Do not disturb:** turned on automatically in fullscreen (approved by
   the user); the bell in the bar is crossed out and its panel says so.
   Turned off by the compositor command `dnd-fullscreen off`.
-  **[implemented]** There is no notification system yet: silently queuing
-  notifications and showing them on return, the exceptions (calls,
-  battery, security) and a config key in Settings **[designed]**.
+  **[implemented]** In full screen the compositor does not pop up
+  notifications (they go to the centre), except the `Urgent` priority
+  ([Notifications](notifications.md#limits-and-do-not-disturb))
+  **[implemented]**; a config key in Settings **[designed]**.
 
 ### Cursor and pointer lock
 

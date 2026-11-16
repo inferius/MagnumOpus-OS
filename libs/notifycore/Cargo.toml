@@ -1,0 +1,9 @@
+[package]
+name = "notifycore"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Jadro sluzby oznameni notifyd: identity, limity, Nerusit, odber prohlizecu"
+
+[dependencies]
+notifyproto = { path = "../notifyproto" }

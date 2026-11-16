@@ -150,6 +150,9 @@ impl Comp {
         if let Some(d) = self.tip_due() {
             at(d);
         }
+        if let Some(d) = self.toast_due(now) {
+            at(d);
+        }
         if let Some(d) = self.pointer_notice_due() {
             at(d);
         }
@@ -204,6 +207,7 @@ impl Comp {
         self.fs_esc_timer(now);
         self.appearance_timer(now);
         self.tip_timer(now);
+        self.toast_timer(now);
         self.pointer_notice_timer(now);
         self.input_now = now;
         let (late, keep): (Vec<_>, Vec<_>) = core::mem::take(&mut self.frame.groups).into_iter().partition(|g| g.deadline <= now);

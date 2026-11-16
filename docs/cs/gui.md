@@ -659,10 +659,10 @@ s velikostí obrazovky a příznakem `FULLSCREEN`, nic nemusí umět.
   zkratka a systémové dialogy fungují vždy (kreslí se nad vším).
 - **Nerušit:** při celé obrazovce automaticky zapnuto (schválil
   uživatel); zvonek v liště je přeškrtnutý a jeho panel to říká. Vypnutí
-  příkazem kompozitoru `dnd-fullscreen off`. **[implementováno]** Systém
-  oznámení zatím není: tiché ukládání oznámení a jejich ukázání po návratu,
-  výjimky (hovory, baterie, bezpečnost) a konfigurační klíč v Nastavení
-  **[navrženo]**.
+  příkazem kompozitoru `dnd-fullscreen off`. **[implementováno]** Při celé
+  obrazovce kompozitor oznámení nevyskakuje (jdou do centra), výjimka je
+  priorita `Urgent` ([Oznámení](oznameni.md#limity-a-nerušit))
+  **[implementováno]**; konfigurační klíč v Nastavení **[navrženo]**.
 
 ### Kurzor a zámek ukazatele
 

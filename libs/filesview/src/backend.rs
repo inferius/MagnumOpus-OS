@@ -54,6 +54,13 @@ pub trait Backend {
     fn names(&mut self) -> Vec<(u64, String)>;
     /// Cislo uctu uzivatele okna (vlastnik domova); `None` = nezname.
     fn uid(&mut self) -> Option<u64>;
+    /// Stahnout adresu do `~/Stazene` (fetch od initu, `save-bg`); necheka
+    /// se (vysledek v Ulohach a oznameni). `false` = stahovani neni.
+    fn download(&mut self, url: &str) -> bool;
+    /// Pripojena vymenna media (`/media/<jmeno>`, docs/cs/media.md).
+    fn media(&mut self) -> Vec<fsproto::v2::MediaEntry>;
+    /// Bezpecne odpojit medium (zapise data, oznaci FS jako cisty).
+    fn eject(&mut self, name: &str) -> Result<()>;
 }
 
 /// Backend pro testy na hostiteli: FS v pameti (`fileops::mem`), masky
@@ -71,6 +78,10 @@ pub struct TestBackend {
     pub sent: Vec<ClientMsg>,
     /// Cesty poslane sluzbe "otevri cestu".
     pub opened: Vec<String>,
+    /// Adresy predane ke stazeni.
+    pub downloads: Vec<String>,
+    /// Pripojena media (testy).
+    pub media: Vec<fsproto::v2::MediaEntry>,
     pub now: Option<WallTime>,
     /// Kos: (dataset, polozka, obsah).
     pub trash: Vec<(String, TrashEntry, Vec<(String, Node)>)>,
@@ -182,6 +193,21 @@ pub fn oid(path: &str) -> u64 {
 }
 
 impl Backend for TestBackend {
+    fn media(&mut self) -> Vec<fsproto::v2::MediaEntry> {
+        self.media.clone()
+    }
+
+    fn eject(&mut self, name: &str) -> Result<()> {
+        let n = self.media.len();
+        self.media.retain(|m| m.name != name);
+        if self.media.len() == n { Err(abi::Error::NotFound) } else { Ok(()) }
+    }
+
+    fn download(&mut self, url: &str) -> bool {
+        self.downloads.push(String::from(url));
+        true
+    }
+
     fn home(&self) -> String {
         self.home.clone()
     }

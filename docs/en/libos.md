@@ -202,7 +202,8 @@ channel to the launchd launcher service, `AUDIO` and `AUDIO_LEASE` = a
 session of the sound service with application rights and its lease,
 [Sound](audio.md#application-sessions-and-capture), `GUI` and
 `GUI_LEASE` = a window session inherited from the parent and its lease,
-[GUI](gui.md#window-session-for-child-processes-the-gui-role), `TTY` = the terminal
+[GUI](gui.md#window-session-for-child-processes-the-gui-role), `NOTIFY` = the
+[notification](notifications.md) sender channel with the identity from the manifest, `TTY` = the terminal
 control channel, protocol `ttyproto`, [termios](cstd.md#termios)). Tags the std runtime
 does not use itself are kept for libraries (`osrt::start::take_tagged`). Format v2 has a flags field
 (`abi::params::flags`: `STDOUT_NULL`, `STDERR_NULL` = discard the output,

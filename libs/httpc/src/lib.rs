@@ -13,7 +13,8 @@
 //!
 //! Zamerne jednoduche: jeden pozadavek na spojeni (HTTP/1.1
 //! `Connection: close`, HTTP/2 jeden proud), cele telo v pameti (do
-//! [`Limits::max_body`]), bez komprese (`Accept-Encoding: identity`), bez
+//! [`Limits::max_body`]; stahovani do souboru po castech pres [`Sink`]
+//! a [`Client::request_to`]), bez komprese (`Accept-Encoding: identity`), bez
 //! cookies a bez cache.
 
 #![no_std]
@@ -24,6 +25,7 @@ extern crate std;
 
 mod buf;
 pub mod h1;
+pub mod sink;
 pub mod h2;
 pub mod url;
 
@@ -35,6 +37,7 @@ use alloc::vec::Vec;
 
 use netproto::io::{Read, Write};
 
+pub use sink::{Sink, VecSink};
 pub use url::{Scheme, Url};
 
 /// Chyba pozadavku.
@@ -281,10 +284,18 @@ pub(crate) const USER_AGENT: &str = "MagnumOpus-httpc/0.1";
 
 /// Posle pozadavek po uz otevrenem spojeni a precte odpoved.
 pub fn send<S: Read + Write>(stream: S, version: Version, req: &Request, limits: &Limits) -> Result<Response> {
+    let mut sink = VecSink::new(limits.max_body);
+    let mut resp = send_to(stream, version, req, limits, &mut sink)?;
+    resp.body = sink.body;
+    Ok(resp)
+}
+
+/// Jako [`send`], telo odpovedi preda `sink` po castech.
+pub fn send_to<S: Read + Write>(stream: S, version: Version, req: &Request, limits: &Limits, sink: &mut dyn Sink) -> Result<Response> {
     check_headers(&req.headers)?;
     match version {
-        Version::Http11 => h1::send(stream, req, limits),
-        Version::Http2 => h2::send(stream, req, limits),
+        Version::Http11 => h1::send_to(stream, req, limits, sink),
+        Version::Http2 => h2::send_to(stream, req, limits, sink),
     }
 }
 
@@ -313,9 +324,17 @@ impl<C: Connector> Client<C> {
 
     /// Jeden pozadavek bez presmerovani.
     pub fn send(&mut self, req: &Request) -> Result<Response> {
+        let mut sink = VecSink::new(self.limits.max_body);
+        let mut resp = self.send_to(req, &mut sink)?;
+        resp.body = sink.body;
+        Ok(resp)
+    }
+
+    /// Jeden pozadavek bez presmerovani, telo do `sink`.
+    pub fn send_to(&mut self, req: &Request, sink: &mut dyn Sink) -> Result<Response> {
         check_headers(&req.headers)?;
         let (stream, version) = self.connector.connect(&req.url)?;
-        let mut resp = send(stream, version, req, &self.limits)?;
+        let mut resp = send_to(stream, version, req, &self.limits, sink)?;
         resp.url = Some(req.url.clone());
         Ok(resp)
     }
@@ -328,10 +347,20 @@ impl<C: Connector> Client<C> {
     /// - Na jiny server (schema, jmeno, port) se neposilaji prihlasovaci
     ///   hlavicky (`Authorization`, `Cookie`).
     pub fn request(&mut self, req: Request) -> Result<Response> {
+        let mut sink = VecSink::new(self.limits.max_body);
+        let mut resp = self.request_to(req, &mut sink)?;
+        resp.body = sink.body;
+        Ok(resp)
+    }
+
+    /// Jako [`Client::request`], telo konecne odpovedi do `sink` (tela
+    /// presmerovani se zahodi a `sink` je nevidi).
+    pub fn request_to(&mut self, req: Request, sink: &mut dyn Sink) -> Result<Response> {
         let mut req = req;
         let mut redirects = 0u8;
         loop {
-            let resp = self.send(&req)?;
+            let mut gate = sink::Redirecting { inner: &mut *sink, pass: true };
+            let resp = self.send_to(&req, &mut gate)?;
             let Some(location) = (match resp.status {
                 301 | 302 | 303 | 307 | 308 => resp.header("location"),
                 _ => None,

@@ -601,6 +601,7 @@ impl Comp {
         // Nabidka u maximalizace i se stinem.
         v.extend(self.max_menu_rect().map(|r| Rect::new(r.x - 24, r.y - 24, r.w + 48, r.h + 48)));
         v.extend(self.tip_rect());
+        v.extend(self.toasts_visual());
         v
     }
 
@@ -680,6 +681,10 @@ impl Comp {
             self.draw_max_menu(canvas);
             self.draw_palette(canvas);
         }
+        // Oznameni (vrstva `notification` nad panely, pod systemovym dialogem).
+        let t0 = self.prof.start();
+        self.draw_toasts(canvas);
+        self.prof.add(Part::Bar, t0);
         if dialog_active {
             // Ztlumeni vseho pod dialogem (jen system kresli nad nim).
             let t0 = self.prof.start();

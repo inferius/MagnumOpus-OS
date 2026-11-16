@@ -101,3 +101,15 @@ pub fn window_handles(session: u64) -> Result<Vec<StartHandle>> {
     }
     Ok(hs)
 }
+
+/// Kanal stahovani relace pro okno Soubory (posledni handle; fetch se
+/// spusti pri prvnim okne). Bez site prazdny kanal.
+pub fn download_handle(startup: &Startup, session: u64) -> Result<StartHandle> {
+    Ok(match crate::downloads::client(startup, session) {
+        Ok(c) => StartHandle::user(c.into_handle()),
+        Err(e) => {
+            println!("init: spravce souboru bez stahovani: {e}");
+            StartHandle::user(Channel::create()?.1.into_handle())
+        }
+    })
+}

@@ -331,15 +331,18 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
         // Vymenna media (docs/cs/media.md): flash disky FAT32 a NTFS pri
         // startu, superfloppy FAT jen jako disk bez zarizeni - test ho
         // pripoji za behu (QMP `device_add`, `qmp.rs`).
+        // Pevne porty USB 3 (`usbports.rs`): porty USB 2, ktere test usb
+        // pripojuje za behu, zustanou volne.
+        use crate::usbports::{MEDIA_EXFAT, MEDIA_FAT, MEDIA_NTFS};
         cmd.arg("-drive")
             .arg(drive("mediafat", &crate::mediadisks::fat(&run.media_fat)?))
-            .args(["-device", "usb-storage,bus=xhci.0,drive=mediafat,removable=on,id=usbmediafat"])
+            .args(["-device", &format!("usb-storage,bus=xhci.0,port={MEDIA_FAT},drive=mediafat,removable=on,id=usbmediafat")])
             .arg("-drive")
             .arg(drive("mediaexfat", &crate::mediadisks::exfat(&run.media_exfat)?))
-            .args(["-device", "usb-storage,bus=xhci.0,drive=mediaexfat,removable=on,id=usbmediaexfat"])
+            .args(["-device", &format!("usb-storage,bus=xhci.0,port={MEDIA_EXFAT},drive=mediaexfat,removable=on,id=usbmediaexfat")])
             .arg("-drive")
             .arg(drive("mediantfs", &crate::mediadisks::ntfs(&run.media_ntfs)?))
-            .args(["-device", "usb-storage,bus=xhci.0,drive=mediantfs,removable=on,id=usbmediantfs"])
+            .args(["-device", &format!("usb-storage,bus=xhci.0,port={MEDIA_NTFS},drive=mediantfs,removable=on,id=usbmediantfs")])
             .arg("-drive")
             .arg(drive("mediahot", &crate::mediadisks::hot(&run.media_hot)?));
     }
@@ -364,7 +367,8 @@ fn share_drive(cmd: &mut Command, dir: &Path, rw: bool) {
     } else {
         cmd.arg("-drive").arg(format!("if=none,id=share,format=raw,readonly=on,file.driver=vvfat,file.dir={d}"));
     }
-    cmd.args(["-device", "usb-storage,bus=xhci.0,drive=share,removable=on,id=usbshare"]);
+    let port = crate::usbports::MEDIA_SHARE;
+    cmd.args(["-device", &format!("usb-storage,bus=xhci.0,port={port},drive=share,removable=on,id=usbshare")]);
 }
 
 /// Ukazatel: pri behu s oknem tablet (absolutni poloha, sedi i po
@@ -418,7 +422,7 @@ fn machine_x86_64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
         // oslovit zvlast (`device=video1`). Mys USB nema vlastnost
         // `display` a brala by udalosti PS/2 - test ji pripoji az za behu.
         .args(["-device", "secondary-vga,id=video1"])
-        .args(["-device", "qemu-xhci,id=xhci"])
+        .args(["-device", &crate::usbports::xhci_device()])
         .args(["-device", "usb-kbd,id=usbkbd0,bus=xhci.0,display=video1"]);
     gpu_device(cmd, opts);
     // Pod AMD-Vi firmware OVMF z disku s prekladem DMA nenabootuje, proto
@@ -452,7 +456,7 @@ fn machine_aarch64(cmd: &mut Command, accel: &str, opts: &Options) -> bool {
         .args(["-device", "bochs-display,id=video1"])
         .args(["-device", "virtio-keyboard-pci,iommu_platform=on,display=video0"])
         .args(["-device", pointer_device(opts)])
-        .args(["-device", "qemu-xhci,id=xhci"])
+        .args(["-device", &crate::usbports::xhci_device()])
         .args(["-device", "usb-kbd,id=usbkbd0,bus=xhci.0,display=video1"]);
     gpu_device(cmd, opts);
     if opts.test {
