@@ -1170,3 +1170,4 @@ budou jen služby mimo GUI (`taskd`, klony v `fsproto`, konfigurace).
 | v1.8 | 13. 11. 2026 | návrhy: tabletový režim (rozdělení oken, pero, 2v1), televizní režim s rozborem základů; kompaktní výběr souboru; spouštěč varianta D |
 | v1.9 | 13. 11. 2026 | rozhodnutí: tablet přepíná automaticky, na výšku dlaždice nad sebou, televize se dál nerozpracovává, dětem se obsah nad hodnocení skrývá; body 3, 5 a 6 do základů jako návrh; infografika oprávnění a barva ikon podle závažnosti |
 | v1.10 | 14. 11. 2026 | knihovna komponent ([komponenty.md](komponenty.md), `design/komponenty.html`): stavy, klávesnice, hustoty, specifikace pro `libs/ui`, rozdíly a návrh nových tokenů |
+| v1.11 | 16. 11. 2026 | porovnání skutečného GUI s návrhem ([vzhled-odchylky.md](vzhled-odchylky.md)); v prototypu doplněn panel Vzhled se stavem a panel Režim vývojáře |
