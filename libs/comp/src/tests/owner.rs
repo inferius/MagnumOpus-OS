@@ -131,3 +131,50 @@ fn popover_clipped_to_work_area() {
         assert!(pr.y as i64 + pr.h as i64 <= work.y as i64 + work.h as i64, "popover nevyjede pod pracovni plochu");
     }
 }
+
+/// Popover vlastnika zustane videt, kdyz fokus vezme jeho dialog (Wine:
+/// bublina nebo nabidka okna pod dialogem): kresli se hned nad
+/// vlastnikem, dialog ho prekryje, mimo dialog je videt.
+#[test]
+fn owner_popover_stays_under_its_dialog() {
+    let mut t = T::new();
+    let a = t.client("wine");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    let r = t.rect_of(a);
+    // Popover vlastnika pod oknem (mimo jeho obdelnik) a pres stred okna.
+    let below = Rect::new(0, r.h as i32 + 10, 120, 40);
+    t.msg(a, ClientMsg::LayerCreate { layer: 5, window: 1, parent: 0, kind: LayerKind::Solid });
+    t.msg(a, ClientMsg::LayerSet { layer: 5, props: LayerProps { mask: prop::RECT | prop::COLOR | prop::POPOVER, rect: below, color: BLUE, popover: true, ..Default::default() } });
+    let mid = Rect::new(r.w as i32 / 2 - 10, r.h as i32 / 2 - 10, 20, 20);
+    t.msg(a, ClientMsg::LayerCreate { layer: 6, window: 1, parent: 0, kind: LayerKind::Solid });
+    t.msg(a, ClientMsg::LayerSet { layer: 6, props: LayerProps { mask: prop::RECT | prop::COLOR | prop::POPOVER, rect: mid, color: BLUE, popover: true, ..Default::default() } });
+    t.commit(a, 2, 0, 0, 0);
+    t.frame();
+    let (bx, by) = (r.x + below.x + 60, r.y + below.y + 20);
+    let (mx, my) = (r.x + r.w as i32 / 2, r.y + r.h as i32 / 2);
+    assert_eq!(t.px(bx, by), BLUE);
+    // Dialog nad stredem vlastnika vezme fokus.
+    second_window(&mut t, a, 80, 40);
+    t.msg(a, ClientMsg::WindowOwner { window: 2, owner: 1 });
+    commit2(&mut t, a, 3);
+    t.frame();
+    let g2 = t.c.clients[&a].windows[&2];
+    assert_eq!(t.c.focus, Some(g2));
+    assert_eq!(t.px(bx, by), BLUE, "popover vlastnika mimo dialog zustane videt");
+    assert_eq!(t.px(mx, my), GREEN, "dialog je nad popoverem vlastnika");
+    // Jen poskozeni oblasti popoveru mimo okno: popover se prekresli.
+    t.c.damage(Rect::new(bx - 5, by - 5, 10, 10));
+    t.frame();
+    assert_eq!(t.px(bx, by), BLUE, "prekresleni jen popoveru");
+    // Jine okno s fokusem (ne dialog vlastnika): popover zmizi.
+    let b = t.client("b");
+    t.window(b, Mode::Standard, RED);
+    t.frame();
+    let gb = t.c.clients[&b].windows[&1];
+    t.c.set_focus(Some(gb));
+    t.frame();
+    if !t.c.windows[&gb].visual().contains(bx, by) {
+        assert_ne!(t.px(bx, by), BLUE, "popover cizi aplikace bez fokusu se neukazuje");
+    }
+}

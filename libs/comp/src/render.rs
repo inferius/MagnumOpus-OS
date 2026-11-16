@@ -482,9 +482,13 @@ impl Comp {
         // kazdy poskozeny obdelnik). Pod prihlasovaci obrazovkou zadna okna.
         let mut trees: Vec<(u32, Kids)> = Vec::new();
         let hidden = self.greeter_visible();
+        let owners = self.owner_popovers(hidden);
         for &gid in self.z.iter().filter(|_| !hidden) {
             let Some(w) = self.windows.get(&gid) else { continue };
-            if !w.mapped || w.minimized || !rects.iter().any(|r| !w.visual().intersect(r).is_empty()) {
+            // Okno i s popovery vlastnika (presahuji okno).
+            let hit = |a: &Rect| rects.iter().any(|r| !a.intersect(r).is_empty());
+            let pops = owners.iter().find(|o| o.0 == gid).is_some_and(|o| o.2.iter().any(hit));
+            if !w.mapped || w.minimized || !(hit(&w.visual()) || pops) {
                 continue;
             }
             let Some(cl) = self.clients.get(&w.client) else { continue };
@@ -521,6 +525,17 @@ impl Comp {
                     let t0 = self.prof.start();
                     draw_window_unshadowed(canvas, &mut self.style, w, cl, kids, focused, now, hover.and_then(|h| button_of(h, *gid)));
                     self.prof.add(Part::Window, t0);
+                }
+                // Popovery vlastnika okna s fokusem: hned nad nim (okna
+                // vys, i jeho dialog, je prekresli svymi castmi).
+                if let Some((_, okids, orects)) = owners.iter().find(|o| o.0 == *gid) {
+                    for pr in orects {
+                        let clip = r.intersect(pr);
+                        if !clip.is_empty() {
+                            canvas.set_clip(clip);
+                            draw_children(canvas, cl, okids, 0, (w.rect.x, w.rect.y), clip, 255, 0);
+                        }
+                    }
                 }
             }
             canvas.set_clip(*r);
@@ -582,6 +597,29 @@ impl Comp {
         }
         let cl = self.clients.get(&w.client)?;
         Some((g, popover_children(cl, w.local), rects))
+    }
+
+    /// Popovery vlastniku okna s fokusem (retezec `owner`, bez okna
+    /// s fokusem): dialog, ktery vlastnikovi vzal fokus, nema schovat jeho
+    /// popupy (Wine: bublina, rozbalena nabidka vlastnika). Kresli se hned
+    /// nad vlastnikem, tedy pod jeho dialogem a okny nad nim.
+    pub(crate) fn owner_popovers(&self, hidden: bool) -> Vec<(u32, Kids, Vec<Rect>)> {
+        let mut out = Vec::new();
+        let Some(f) = self.focus.filter(|_| !hidden) else { return out };
+        let mut g = self.windows.get(&f).and_then(|w| w.owner);
+        // Ochrana proti cyklu (owner.rs ho nedovoli, ale nepocitat s tim).
+        for _ in 0..16 {
+            let Some(o) = g.filter(|&o| o != f) else { break };
+            let Some(w) = self.windows.get(&o) else { break };
+            if w.mapped && !w.minimized {
+                let rects = self.popover_rects(o);
+                if let (false, Some(cl)) = (rects.is_empty(), self.clients.get(&w.client)) {
+                    out.push((o, popover_children(cl, w.local), rects));
+                }
+            }
+            g = w.owner;
+        }
+        out
     }
 
     /// Obdelniky popoveru okna `g` na obrazovce (viditelne korenove vrstvy
