@@ -336,6 +336,13 @@ impl Comp {
         self.greeter.sessions.iter().any(|s| !s.locked)
     }
 
+    /// Zobrazovane jmeno uzivatele aktivni relace (pata spoustece):
+    /// ze seznamu uctu, jinak prihlasovaci jmeno.
+    pub(crate) fn session_display(&self) -> Option<String> {
+        let s = self.greeter.sessions.iter().find(|s| !s.locked)?;
+        Some(self.greeter.accounts.iter().find(|a| a.uid == s.uid).map_or_else(|| s.name.clone(), |a| a.display.clone()))
+    }
+
     /// Pozadavky pro sluzbu uctu (vyprazdni frontu).
     pub fn take_login_requests(&mut self) -> Vec<Request> {
         core::mem::take(&mut self.greeter.requests)
@@ -646,7 +653,12 @@ impl Comp {
             let clip = c.clip();
             c.draw_image(&img, clip, clip, 255, true);
         }
-        c.blend(self.screen(), col.scrim);
+        // Ztmaveni jen v tmavem rezimu a kontrastu: ve svetlem by `scrim`
+        // udelal stredne tmave pozadi, na kterem `ink` ani `ink_muted` nejsou
+        // citelne (prototyp prihlaseni.html ma zamek primo na plose).
+        if t.mode != theme::Mode::Light {
+            c.blend(self.screen(), col.scrim);
+        }
         let st = &mut self.style;
         let g = &self.greeter;
         let center = |st: &mut Style, c: &mut Canvas<'_>, y: i32, s: &str, ts: TextStyle, color: u32, w: u32| {

@@ -114,17 +114,28 @@ impl<M: Clone> Ui<M> {
                     c.set_clip(old);
                 }
                 ElemKind::Button { text, icon, .. } => {
-                    let bg = if (pressed || hover) && !dim { col.surface_3 } else { col.surface };
+                    use crate::node::Variant;
+                    let hot = (pressed || hover) && !dim;
+                    // Najeti u plnych variant: vypln ztmavena k `ink` (88 %).
+                    let hot_of = |c: u32| fade(c, col.ink, 225);
+                    let (bg, edge, ink) = match e.variant {
+                        Variant::Secondary => (if hot { col.surface_3 } else { col.surface }, col.border_strong, col.ink),
+                        Variant::Primary => (if hot { hot_of(col.accent) } else { col.accent }, col.accent, col.on_accent),
+                        Variant::Danger => (if hot { hot_of(col.danger) } else { col.danger }, col.danger, col.on_danger),
+                        Variant::Ghost => (if hot { col.surface_3 } else { 0 }, 0, col.ink),
+                    };
                     // Nedostupne: stejne tlacitko s kryti `opacity.disabled`.
                     let k = if dim { th.opacity.disabled } else { 255 };
-                    c.round_fill_bordered(r, r.h / 2, fade(bg, col.surface, k), fade(col.border_strong, col.surface, k), 1);
+                    if bg != 0 {
+                        c.round_fill_bordered(r, r.h / 2, fade(bg, col.surface, k), fade(if edge == 0 { bg } else { edge }, col.surface, k), 1);
+                    }
                     if focused && !dim {
                         focus_ring(c, r, r.h / 2, ring, ring_off, col.focus);
                     }
                     let s = self.look.button();
                     let f = self.look.face(s);
                     let tw = f.width(text, s.size) as i32;
-                    let fg = fade(col.ink, col.surface, k);
+                    let fg = fade(ink, col.surface, k);
                     let b = r.y + f.baseline_in(s.size, r.h);
                     // Ikona pred textem (bez textu na stred).
                     let is = th.size.icon_m;

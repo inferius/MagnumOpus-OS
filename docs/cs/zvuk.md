@@ -120,6 +120,9 @@ a jedno čekání na periodu, žádná zpráva na blok dat.
 | `STATUS`, `STREAM_INFO` | stav zařízení a služby, stav streamu |
 | `CONNECT` | nový kanál ke službě |
 | `DEVICES`, `SELECT` | seznam zvukových karet, přepnutí (streamy hrají dál na nové) |
+| `APPS`, `APP_VOLUME` | aplikace s proudy podle identity z manifestu (proudy jedné aplikace z víc procesů, např. Wine, jsou jedna položka) a jejich hlasitost; hlasitost aplikace se násobí s hlasitostí proudu, platí i pro proudy otevřené později, nahrávání neovlivní **[ověřeno v QEMU]** (test „aplikace podle identity“) |
+| `OVERVIEW` | stav, zařízení, aplikace a zařízení pro nahrávání v jedné odpovědi; kompozitor se na něj ptá místo `STATUS` (panel Zvuk v liště) **[ověřeno v QEMU]** |
+| `SELECT_INPUT` | zařízení pro nahrávání (255 = automaticky: vstup aktivní karty, jinak první se vstupem); za běhu nahrávání platí od dalšího otevření vstupu **[ověřeno v QEMU]** |
 
 Hlasitost 50 % je asi -18 dB, 10 % -60 dB (kubická křivka se blíží
 vnímání hlasitosti lépe než lineární).
@@ -270,7 +273,7 @@ systémová relace (lišta, shell, init) jako dosud.
 
 | Smí relace aplikace | Ne |
 |---|---|
-| `OPEN`, `START`, `STOP`, `CLOSE`, `DRAIN` vlastních streamů, `STREAM_VOLUME`, `STREAM_INFO`, `STATUS`, `DEVICES` | `MASTER_VOLUME`, `MUTE`, `SELECT`, `CONNECT` (`ACCESS_DENIED`; mění zvuk celého systému, patří liště a nastavení) |
+| `OPEN`, `START`, `STOP`, `CLOSE`, `DRAIN` vlastních streamů, `STREAM_VOLUME`, `STREAM_INFO`, `STATUS`, `DEVICES` | `MASTER_VOLUME`, `MUTE`, `SELECT`, `CONNECT`, `APPS`, `APP_VOLUME`, `OVERVIEW`, `SELECT_INPUT` (`ACCESS_DENIED`; mění zvuk celého systému nebo ukazují cizí aplikace, patří liště a nastavení) |
 
 **Nahrávání** (`OPEN` vstupu):
 

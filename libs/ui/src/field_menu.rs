@@ -36,8 +36,18 @@ impl<M: Clone> Ui<M> {
             separator: false,
             act: Some(PAct::Field(cmd)),
             mnemonic: None,
+            icon: Some(match cmd {
+                'z' => "undo",
+                'y' => "redo",
+                'x' => "cut",
+                'c' => "copy",
+                'v' => "paste",
+                'd' => "trash",
+                _ => "select-all",
+            }),
+            header: false,
         };
-        let sep = || PItem { label: String::new(), shortcut: String::new(), disabled: String::new(), checked: None, separator: true, act: None, mnemonic: None };
+        let sep = || PItem { label: String::new(), shortcut: String::new(), disabled: String::new(), checked: None, separator: true, act: None, mnemonic: None, icon: None, header: false };
         let copy_why = if secure {
             String::from("heslo nejde kopírovat")
         } else {

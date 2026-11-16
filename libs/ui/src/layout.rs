@@ -63,6 +63,7 @@ pub struct Element<M> {
     pub deco: Option<alloc::boxed::Box<crate::panel::Deco>>,
     pub tone: crate::panel::TextTone,
     pub row: Option<alloc::boxed::Box<crate::panel::RowLook>>,
+    pub variant: crate::node::Variant,
 }
 
 impl<M> Element<M> {
@@ -318,7 +319,7 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
     let mut menu = n.menu;
     let mut tooltip = n.tooltip;
     let (focus_group, default_focus) = (n.focus_group, n.default_focus);
-    let (mut deco, tone, mut row) = (n.deco, n.tone, n.row);
+    let (mut deco, tone, mut row, variant) = (n.deco, n.tone, n.row, n.variant);
     let [pt, pr, pb, pl] = n.pad;
     let gap = n.gap.unwrap_or(t.gap());
     // Obsah kontejneru uvnitr odsazeni.
@@ -341,6 +342,7 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
             deco: deco.take(),
             tone,
             row: row.take(),
+            variant,
         });
         out.len()
     };
@@ -380,6 +382,7 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
                     deco: None,
                     tone: crate::panel::TextTone::Normal,
                     row: None,
+                    variant: crate::node::Variant::Secondary,
                 });
             }
         }

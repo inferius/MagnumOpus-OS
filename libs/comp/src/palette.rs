@@ -304,11 +304,16 @@ impl Comp {
             v.into_iter().map(|x| x.3).collect()
         };
         if q.is_empty() && p.launcher {
+            // Spoustec (spoustec.html, varianta d): Bezi, Aplikace, Nedavne;
+            // napajeni a ucet jsou v pate, ne v seznamu.
             let running: Vec<Item> = apps.iter().filter(|i| matches!(i, Item::App(id, _) if !self.app_windows(id).is_empty())).cloned().collect();
             let rest: Vec<Item> = apps.iter().filter(|i| !running.contains(i)).cloned().collect();
+            let all: Vec<Item> = apps.iter().chain(&windows).cloned().collect();
+            // Nedavne: co neni vyse (okna, akce), at se radky neopakuji.
+            let recent: Vec<Item> = self.palette_recent.iter().filter_map(|k| all.iter().find(|i| &i.key(self) == k).cloned()).filter(|i| !matches!(i, Item::App(..))).take(3).collect();
             sections.push((Row::Header(String::from("Běží"), "window", false), running));
             sections.push((Row::Header(String::from("Aplikace"), "apps", false), rest));
-            sections.push((sys_head.clone(), system.clone()));
+            sections.push((Row::Header(String::from("Nedávné"), "history", false), recent));
         } else if q.is_empty() {
             match scope {
                 Scope::All => {
@@ -352,9 +357,11 @@ impl Comp {
             }
             rows.push(head);
             let n = items.len();
-            rows.extend(items.into_iter().take(SECTION).map(Row::Item));
-            if n > SECTION {
-                rows.push(Row::More(n - SECTION));
+            // Spoustec ukaze cele sekce ("dalsi..." v nem nema kam vest).
+            let cap = if p.launcher { ROWS } else { SECTION };
+            rows.extend(items.into_iter().take(cap).map(Row::Item));
+            if n > cap {
+                rows.push(Row::More(n - cap));
             }
         }
         rows.truncate(ROWS);
@@ -388,9 +395,18 @@ impl Comp {
         self.palette.as_ref()?;
         let t = &self.style.theme;
         let w = t.size.dialog_w.max(520).min(self.w.saturating_sub(2 * t.space[5]));
-        let rows = self.palette_rows().len().clamp(1, ROWS) as u32;
+        let n = self.palette_rows().len();
+        let rows = n.clamp(1, ROWS) as u32;
+        // Nic nenalezeno: misto na prazdny stav (`ui::empty_state`: kruh
+        // s ikonou, nadpis, popis, odsazeni).
+        let list_h = if n == 0 && self.palette_query_set() {
+            let xl = t.size.icon_xl;
+            (2 * xl + xl / 4) + t.text.title.line + t.text.body.line + 2 * t.space[3] + 2 * t.space[6]
+        } else {
+            rows * self.palette_row_h()
+        };
         // Okraje pohledu knihovny ui (pad) a mezery mezi polem a seznamem.
-        let h = self.palette_input_h() + rows * self.palette_row_h() + 3 * t.space[3] + 2 * t.space[5];
+        let h = self.palette_input_h() + list_h + 3 * t.space[3] + 2 * t.space[5];
         if self.palette.as_ref().is_some_and(|p| p.launcher) {
             // Spoustec: vlevo nad listou (u tlacitka mrizky), sirka podle
             // tokenu `size.launcher_w`; pata (ucet, napajeni) navic.
@@ -401,6 +417,11 @@ impl Comp {
             return Some(Rect::new(self.panel_rect().x, bottom - h as i32, w, h));
         }
         Some(Rect::new((self.w as i32 - w as i32) / 2, (self.h / 8) as i32, w, h))
+    }
+
+    /// Je v palete napsany dotaz?
+    pub(crate) fn palette_query_set(&self) -> bool {
+        self.palette.as_ref().is_some_and(|p| !p.query.trim().is_empty())
     }
 
     fn palette_input_h(&self) -> u32 {

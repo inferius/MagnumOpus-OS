@@ -125,6 +125,9 @@ into the buffer and one wait per period, no message per block of data.
 | `STATUS`, `STREAM_INFO` | device and service state, stream state |
 | `CONNECT` | new channel to the service |
 | `DEVICES`, `SELECT` | list of sound cards, switching (streams keep playing on the new one) |
+| `APPS`, `APP_VOLUME` | applications with streams by the manifest identity (streams of one application from several processes, e.g. Wine, are one entry) and their volume; the application volume multiplies the stream volume, applies to streams opened later too, does not affect recording **[verified in QEMU]** (test "aplikace podle identity") |
+| `OVERVIEW` | state, devices, applications and the recording device in one reply; the compositor asks for it instead of `STATUS` (the Sound panel in the bar) **[verified in QEMU]** |
+| `SELECT_INPUT` | the recording device (255 = automatic: the active card's input, otherwise the first with an input); while recording it applies from the next input open **[verified in QEMU]** |
 
 Volume 50 % is about -18 dB, 10 % -60 dB (a cubic curve follows perceived
 loudness better than a linear one).
@@ -283,7 +286,7 @@ before.
 
 | An application session may | Not |
 |---|---|
-| `OPEN`, `START`, `STOP`, `CLOSE`, `DRAIN` of its own streams, `STREAM_VOLUME`, `STREAM_INFO`, `STATUS`, `DEVICES` | `MASTER_VOLUME`, `MUTE`, `SELECT`, `CONNECT` (`ACCESS_DENIED`; they change the sound of the whole system and belong to the bar and settings) |
+| `OPEN`, `START`, `STOP`, `CLOSE`, `DRAIN` of its own streams, `STREAM_VOLUME`, `STREAM_INFO`, `STATUS`, `DEVICES` | `MASTER_VOLUME`, `MUTE`, `SELECT`, `CONNECT`, `APPS`, `APP_VOLUME`, `OVERVIEW`, `SELECT_INPUT` (`ACCESS_DENIED`; they change the sound of the whole system or show other applications, they belong to the bar and settings) |
 
 **Capture** (`OPEN` of input):
 

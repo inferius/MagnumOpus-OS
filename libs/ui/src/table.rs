@@ -580,7 +580,10 @@ impl<M: Clone> Ui<M> {
         let g = self.geo(i);
         let key = self.elems[i].key;
         let ts = self.tables.get(&key).cloned().unwrap_or_default();
-        c.round_fill_bordered(g.rect, th.radius.card, col.surface, col.border, 1);
+        let plain = self.spec(i).is_some_and(|s| s.plain);
+        if !plain {
+            c.round_fill_bordered(g.rect, th.radius.card, col.surface, col.border, 1);
+        }
         if st.focus_visible {
             crate::draw::focus_ring(c, g.rect, th.radius.card, th.size.focus_ring, th.size.focus_offset, col.focus);
         }
@@ -642,16 +645,20 @@ impl<M: Clone> Ui<M> {
                 f.draw_ellipsized(c, rr.x + sp[3] as i32, base, &text, hs.size, col.ink_muted, rr.w.saturating_sub(2 * sp[3]));
                 continue;
             }
+            // Seznam (`plain`): zaoblene pozadi bez car, jinak radek tabulky.
+            let rad = if plain { th.radius.control } else { 0 };
             if selection.contains(&id) {
-                c.fill(rr, col.accent_soft);
+                c.round_fill(rr, rad, col.accent_soft);
             } else if hover_row == Some(k) {
-                c.fill(rr, col.surface_3);
+                c.round_fill(rr, rad, col.surface_3);
             }
             // Cil pusteni: ram akcentu kolem radku pod ukazatelem.
             if dropping && hover_row == Some(k) && !self.dragging.as_ref().is_some_and(|d| d.1.contains(&id)) {
                 c.round_stroke(rr, th.radius.control, 2, col.accent);
             }
-            c.fill(Rect::new(rr.x, rr.bottom() as i32 - 1, rr.w, 1), col.border);
+            if !plain {
+                c.fill(Rect::new(rr.x, rr.bottom() as i32 - 1, rr.w, 1), col.border);
+            }
             for (ci, &(x, w)) in cols.iter().enumerate() {
                 let mut tx = x + sp[3] as i32;
                 let mut room = w.saturating_sub(2 * sp[3]);

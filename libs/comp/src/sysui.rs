@@ -12,7 +12,10 @@ use alloc::vec::Vec;
 
 use gfx::{Canvas, Image, Rect};
 use guiproto::window::InputEvent;
-use ui::{Cells, Node, Ui, button, col, column, label, menu_item, menu_separator, row, spacer, table, text_input};
+use ui::{Cells, Node, Ui, button, col, column, label, menu_item, menu_separator, row, spacer, table};
+
+/// Duvod vypnutych tlacitek Nastaveni (aplikace zatim neni).
+const NO_SETTINGS: &str = "Nastavení zatím nejsou";
 
 use crate::Comp;
 use crate::palette::Row;
@@ -89,20 +92,25 @@ impl Comp {
         let right_w = if p.launcher { lw / 3 } else { lw * 3 / 5 };
         let data = alloc::rc::Rc::new(rows);
         let d2 = alloc::rc::Rc::clone(&data);
-        column([
-            text_input(&p.query).placeholder(if p.launcher { "Hledat" } else { "Hledat příkazy, okna a aplikace... (Tab: rozsah, > akce)" }).on_change(SysMsg::Query).key("hledat"),
+        // Pole hledani s lupou (`.q`), ve spousteci napoveda Super.
+        let field = ui::search_input(&p.query).placeholder(if p.launcher { "Hledat" } else { "Hledat příkazy, okna a aplikace... (Tab: rozsah, > akce)" }).on_change(SysMsg::Query).key("hledat");
+        let list: Node<SysMsg> = if n == 0 && self.palette_query_set() {
+            // Prazdny vysledek: prazdny stav misto prazdneho ramecku (K8).
+            ui::empty_state(t, "search", "Nic nenalezeno", "Zkuste jiné slovo; Tab přepne rozsah hledání.", None).height(table_h)
+        } else {
             table(alloc::vec![col("", 0), col("", right_w).numeric()], n, |i| i as u64, move |i| match d2.get(i) {
                 Some(r) if r.header => Cells::header(&r.label),
                 Some(r) => Cells::new([r.label.clone(), r.right.clone()]).icon(r.icon),
                 None => Cells::default(),
             })
             .header(false)
+            .plain()
             .selection(sel_row.into_iter().collect())
             .on_selection(|ids: Vec<u64>| SysMsg::Pick(ids.first().copied().unwrap_or(0)))
             .key("radky")
-            .height(table_h),
-            self.launcher_footer(p.launcher),
-        ])
+            .height(table_h)
+        };
+        column([field, list, self.launcher_footer(p.launcher)])
     }
 
     /// Pata spoustece (varianta D): ucet a napajeni s nabidkou. V palete
@@ -112,15 +120,28 @@ impl Comp {
             return column([]);
         }
         let session = self.has_active_session();
-        let lock = menu_item("Zamknout", SysMsg::Lock);
+        let lock = menu_item("Zamknout", SysMsg::Lock).icon("lock");
         let lock = if session { lock } else { lock.disabled("nikdo není přihlášený") };
+        // Ucet: kolecko s pocatecnim pismenem a jmeno (spoustec.html, `.foot`).
+        let name = self.session_display().unwrap_or_else(|| String::from("Bez přihlášení"));
+        let initial: String = name.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default();
+        let t = &self.style.theme;
+        let av = t.size.icon_l;
+        let avatar = row([spacer(), label(&initial).tone(ui::TextTone::Strong), spacer()])
+            .gap(0)
+            .width(av)
+            .height(av)
+            .deco(ui::Deco { fill: Some(ui::Fill::Surface3), radius: av / 2, top_border: false });
         row([
-            label(if session { "Přihlášený uživatel" } else { "Bez přihlášení" }),
+            avatar,
+            label(&name).tone(ui::TextTone::Strong),
             spacer(),
+            button("").icon("settings").ghost().tooltip(NO_SETTINGS).disabled(true).key("nastaveni"),
             button("")
                 .icon("power")
+                .ghost()
                 .tooltip("Napájení")
-                .context_menu(alloc::vec![lock, menu_item("Odhlásit", SysMsg::Lock).disabled("zatím není"), menu_separator(), menu_item("Restartovat", SysMsg::Reboot), menu_item("Vypnout", SysMsg::Shutdown)])
+                .context_menu(alloc::vec![lock, menu_item("Odhlásit", SysMsg::Lock).icon("logout").disabled("zatím není"), menu_separator(), menu_item("Restartovat", SysMsg::Reboot).icon("restart"), menu_item("Vypnout", SysMsg::Shutdown).icon("power")])
                 .key("napajeni"),
         ])
     }

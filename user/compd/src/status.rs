@@ -28,6 +28,14 @@ impl Source {
         Self { ch, request, next: 0, pending: None }
     }
 
+    /// Posle zpravu sluzbe (zadost panelu) a stav precte co nejdriv.
+    pub fn send(&mut self, msg: &[u8]) -> bool {
+        let ok = self.ch.write(msg, Vec::new()).is_ok();
+        self.pending = None;
+        self.next = 0;
+        ok
+    }
+
     /// Posle dotaz, kdyz je cas; vraci, kdy se probudit.
     pub fn poll(&mut self, now: u64) -> Option<u64> {
         if let Some(sent) = self.pending {
@@ -73,8 +81,9 @@ pub fn net_request() -> Vec<u8> {
     netproto::msg::request(h, &[])
 }
 
+/// Prehled pro listu a panel Zvuk (`OVERVIEW`: stav, zarizeni, aplikace).
 pub fn audio_request() -> Vec<u8> {
-    audioproto::client::Request::Status.encode()
+    audioproto::client::Request::Overview.encode()
 }
 
 pub fn net_state(data: &[u8]) -> Option<comp::render::NetState> {
@@ -93,8 +102,38 @@ pub fn net_state(data: &[u8]) -> Option<comp::render::NetState> {
 }
 
 /// Hlasitost, ztlumeni a nahravajici aplikace ze stavu `audiod`.
-pub fn volume(data: &[u8]) -> Option<((u8, bool), alloc::vec::Vec<alloc::string::String>)> {
+/// Hlasitost, kdo nahrava a co ukazat v panelu Zvuk. Odpovedi na zadosti
+/// panelu (bez tela) a jine zpravy vrati `None`.
+pub fn volume(data: &[u8]) -> Option<AudioState> {
     let body = audioproto::decode_reply(data).ok()?;
-    let s = audioproto::client::Status::decode(body).ok()?;
-    Some(((s.master, s.muted), s.capturing))
+    let o = audioproto::client::Overview::decode(body).ok()?;
+    let info = comp::render::AudioInfo {
+        devices: o
+            .devices
+            .into_iter()
+            .map(|d| comp::render::AudioDev { index: d.index, name: d.name, outputs: d.outputs, input: d.input, active: d.active })
+            .collect(),
+        apps: o
+            .apps
+            .into_iter()
+            .map(|a| comp::render::AudioApp { id: a.app_id, name: a.name, volume: a.volume, playing: a.playing, capturing: a.capturing })
+            .collect(),
+        input: o.input,
+    };
+    Some(((o.status.master, o.status.muted), o.status.capturing, info))
+}
+
+pub type AudioState = ((u8, bool), alloc::vec::Vec<alloc::string::String>, comp::render::AudioInfo);
+
+/// Zadost panelu Zvuk jako zprava sluzbe zvuku.
+pub fn audio_control(req: &comp::AudioReq) -> Vec<u8> {
+    use audioproto::client::Request;
+    match req {
+        comp::AudioReq::Master(p) => Request::MasterVolume { percent: *p },
+        comp::AudioReq::Mute(on) => Request::Mute { on: *on },
+        comp::AudioReq::Output(i) => Request::Select { index: *i },
+        comp::AudioReq::Input(i) => Request::SelectInput { index: *i },
+        comp::AudioReq::App(app, p) => Request::AppVolume { app: app.clone(), percent: *p },
+    }
+    .encode()
 }
