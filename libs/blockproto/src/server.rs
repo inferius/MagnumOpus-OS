@@ -20,7 +20,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use diskguard::Decision;
+use diskguard::{Decision, Kind};
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::hw::Resource;
 use libos::{Channel, Error, Mapping, Result, Signals, Vmo, println};
@@ -44,6 +44,11 @@ pub trait Disks {
     fn sector_size(&self, d: usize) -> usize;
     /// Vlastnosti zarizeni (bity [`feature`]).
     fn features(&self, d: usize) -> u64;
+    /// Vymenne medium (USB mass storage s bitem RMB): jen na nem smi byt
+    /// oddil media zapisovatelny ([`diskguard::media`]). Vychozi ne.
+    fn removable(&self, _d: usize) -> bool {
+        false
+    }
     /// Precte `out.len() / sector_size` sektoru.
     fn read(&mut self, d: usize, lba: u64, out: &mut [u8]) -> Result<()>;
     /// Zapise `data.len() / sector_size` sektoru.
@@ -182,6 +187,20 @@ fn log_view(disks: &mut impl Disks, d: usize) -> Option<Decision> {
     })
 }
 
+/// Oddily media na disku `d` (`diskguard::media_partitions`); zapis jen
+/// na vymennem zarizeni bez ochrany proti zapisu.
+fn media_views(disks: &mut impl Disks, d: usize) -> Vec<Decision> {
+    let sectors = disks.sectors(d);
+    let ss = disks.sector_size(d);
+    if ss > IO_MAX || !diskguard::valid_sector_size(ss) {
+        return Vec::new();
+    }
+    let removable = disks.removable(d) && disks.features(d) & feature::READ_ONLY == 0;
+    diskguard::media_partitions(sectors, ss, removable, |lba, buf| {
+        lba.checked_add((buf.len() / ss) as u64).is_some_and(|end| end <= sectors) && read_dev(disks, d, lba, buf).is_ok()
+    })
+}
+
 /// Klient jednoho disku.
 pub struct Client {
     pub disk: usize,
@@ -214,6 +233,28 @@ pub fn report_disks(name: &str, disks: &mut impl Disks, bootstrap: &Channel) -> 
             clients.push(Client {
                 disk: d,
                 view: log,
+                channel: mine,
+                raw_table: None,
+            });
+        }
+        // Oddily vymenneho media (FAT, exFAT, NTFS): kanal na kazdy oddil,
+        // init pro nej spusti proces media (docs/cs/media.md). Zprava:
+        // `block-media <fs> <index> <model>`.
+        for v in media_views(disks, d) {
+            let Kind::Media { index, fs } = v.kind else { continue };
+            println!(
+                "{name}: disk {d}: medium {} oddil {}, {} MiB, {}",
+                fs.name(),
+                index,
+                v.sectors * v.sector_size as u64 >> 20,
+                if v.writable { "zapis povolen" } else { "JEN PRO CTENI" }
+            );
+            let (mine, theirs) = Channel::create()?;
+            let text = alloc::format!("block-media {} {} {}", fs.name(), index, disks.model(d));
+            bootstrap.write(text.as_bytes(), vec![theirs.into_handle()])?;
+            clients.push(Client {
+                disk: d,
+                view: v,
                 channel: mine,
                 raw_table: None,
             });

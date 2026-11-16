@@ -54,6 +54,8 @@ struct Lun {
     sectors: u64,
     sector_size: usize,
     read_only: bool,
+    /// Bit RMB z INQUIRY: vymenne medium (flash disk, ctecka karet).
+    removable: bool,
     /// SYNCHRONIZE CACHE funguje (po ILLEGAL REQUEST uz se nezkousi).
     flush: bool,
 }
@@ -206,6 +208,7 @@ impl Storage {
             sectors: last + 1,
             sector_size,
             read_only,
+            removable: inq.removable,
             flush: true,
         }))
     }
@@ -314,6 +317,10 @@ impl Disks for Storage {
 
     fn sector_size(&self, d: usize) -> usize {
         self.luns[d].sector_size
+    }
+
+    fn removable(&self, d: usize) -> bool {
+        self.luns[d].removable
     }
 
     fn features(&self, d: usize) -> u64 {
