@@ -303,6 +303,11 @@ impl Storage {
 }
 
 impl Disks for Storage {
+    /// Vytazeni flash disku: kanal USB zarizeni se zavre.
+    fn gone(&self) -> Option<&libos::Handle> {
+        Some(self.bot.usb.channel.handle())
+    }
+
     fn model(&self, d: usize) -> alloc::string::String {
         self.luns[d].model.clone()
     }

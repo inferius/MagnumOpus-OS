@@ -332,8 +332,10 @@ impl Profile {
 
     /// Pripojene cesty relace uzivatele (pruzkumnik, shell): cely FS, prava
     /// urcuji opravneni.
+    /// Vymenna media v `/media` (`v2::MEDIA_ROOT`) vidi vsechny aplikace
+    /// uzivatele - docasne do Pracovnich slozek (docs/cs/media.md).
     pub fn user_mounts(self) -> Vec<Mount> {
-        alloc::vec![Mount::new("/", "/", 0)]
+        alloc::vec![Mount::new("/", "/", 0), Mount::new(crate::v2::MEDIA_ROOT, crate::v2::MEDIA_ROOT, 0)]
     }
 
     /// Maji datasety s daty (stazene soubory, dokumenty) zakaz spousteni?

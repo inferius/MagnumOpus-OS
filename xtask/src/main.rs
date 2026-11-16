@@ -27,6 +27,7 @@ mod docs_books;
 mod docs_check;
 mod highlight;
 mod image;
+mod mediadisks;
 mod qemu;
 mod nethelper;
 mod dnshelper;

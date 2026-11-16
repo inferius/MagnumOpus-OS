@@ -1,7 +1,7 @@
 //! Obsluha jedne zpravy `volproto` nad svazkem (bez kanalu: testy na
 //! hostiteli volaji primo [`handle`]).
 
-use volproto::{Error, MAX_IO, Result, Writer, kind, normalize, op, parse_request, reply};
+use volproto::{Error, MAX_IO, Result, Writer, kind, normalize, op, open_flags, parse_request, reply};
 
 use crate::Volume;
 
@@ -61,6 +61,21 @@ pub fn handle(vol: &mut dyn Volume, msg: &[u8]) -> Outcome {
             op::SET_LEN => {
                 let path = normalize(&r.str()?)?;
                 vol.set_len(&path, r.u64()?)?;
+            }
+            op::OPEN => {
+                let path = normalize(&r.str()?)?;
+                let f = r.u8()?;
+                if f & open_flags::CREATE != 0 {
+                    let k = if f & open_flags::DIR != 0 { kind::DIR } else { kind::FILE };
+                    vol.create(&path, k, f & open_flags::EXCL != 0)?;
+                }
+                let st = vol.stat(&path)?;
+                if f & open_flags::TRUNCATE != 0 && st.kind == kind::FILE && st.size != 0 {
+                    vol.set_len(&path, 0)?;
+                    vol.stat(&path)?.put(&mut w);
+                } else {
+                    st.put(&mut w);
+                }
             }
             op::SYNC => vol.sync()?,
             op::UNMOUNT => {

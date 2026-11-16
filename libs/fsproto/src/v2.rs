@@ -136,6 +136,44 @@ pub mod op {
     /// jako zapis toho klienta (do velikosti souboru); obsahu VMO neveri vic
     /// nez zapisu klienta.
     pub const ADOPT_VMO: u32 = 133;
+    /// Vymenne medium (jen ridici relace, init): jmeno str, jen pro cteni
+    /// u8 + kanal k procesu media (`volproto`) -> (). Medium se objevi
+    /// v `/media/<jmeno>` relaci s pripojenim `/media`, jakmile proces
+    /// media odpovi na `INFO` (docs/cs/media.md).
+    pub const MEDIA_ADD: u32 = 134;
+    /// Bezpecne odpojeni media (jen ridici relace): jmeno -> (). Odpovi az
+    /// po zapsani a odpojeni (`volproto` `UNMOUNT`); otevrene handly pak
+    /// vraci `NOT_FOUND`.
+    pub const MEDIA_REMOVE: u32 = 135;
+    /// Pripojena media (relace s pripojenim `/media` nebo ridici): ->
+    /// pocet u32 + `MediaEntry`...
+    pub const MEDIA_LIST: u32 = 136;
+}
+
+/// Cesta, kde relace vidi vymenna media (pripojeni s timto jmenem).
+pub const MEDIA_ROOT: &str = "/media";
+
+/// Pripojene medium (`MEDIA_LIST`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaEntry {
+    /// Jmeno v `/media` (jmenovka svazku, pripadne s poradim).
+    pub name: String,
+    pub label: String,
+    /// Souborovy system (`fat`, `ntfs`, ...).
+    pub fs: String,
+    pub read_only: bool,
+    pub total_bytes: u64,
+    pub free_bytes: u64,
+}
+
+impl MediaEntry {
+    pub fn put(&self, w: &mut Writer) {
+        w.str(&self.name).str(&self.label).str(&self.fs).u8(self.read_only as u8).u64(self.total_bytes).u64(self.free_bytes);
+    }
+
+    pub fn get(r: &mut Reader) -> Result<Self> {
+        Ok(Self { name: r.str()?, label: r.str()?, fs: r.str()?, read_only: r.u8()? != 0, total_bytes: r.u64()?, free_bytes: r.u64()? })
+    }
 }
 
 /// Velikost okna souboru pro `MAP_VMO` (zarovnani i kapacita objektu okna).
@@ -699,6 +737,28 @@ impl FsClient {
         let dup = old.handle().duplicate(None)?;
         let (body, _) = self.call_sending(Kind::Effect, &w.finish(), alloc::vec![dup])?;
         Reader::new(&body).u32()
+    }
+
+    /// Prida vymenne medium (`MEDIA_ADD`, jen ridici relace).
+    pub fn media_add(&self, name: &str, read_only: bool, volume: Channel) -> Result<()> {
+        let mut w = Self::req(op::MEDIA_ADD);
+        w.str(name).u8(read_only as u8);
+        self.call_sending(Kind::Effect, &w.finish(), alloc::vec![volume.into_handle()]).map(|_| ())
+    }
+
+    /// Bezpecne odpoji medium (`MEDIA_REMOVE`, jen ridici relace).
+    pub fn media_remove(&self, name: &str) -> Result<()> {
+        let mut w = Self::req(op::MEDIA_REMOVE);
+        w.str(name);
+        self.call_sending(Kind::Effect, &w.finish(), Vec::new()).map(|_| ())
+    }
+
+    /// Pripojena media (`MEDIA_LIST`).
+    pub fn media_list(&self) -> Result<Vec<MediaEntry>> {
+        let body = self.call_as(Kind::Idempotent, Self::req(op::MEDIA_LIST))?;
+        let mut r = Reader::new(&body);
+        let n = r.u32()?;
+        (0..n).map(|_| MediaEntry::get(&mut r)).collect()
     }
 
     /// Zapis zmen namapovaneho souboru zpet (`SYNC_VMO`); `durable` = i

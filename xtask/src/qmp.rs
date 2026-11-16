@@ -142,6 +142,7 @@ const STARTS: &[&str] = &[
     MARKER,
     MARKER_PS2,
     usb::KEYS,
+    media::PLUG,
     gui::DIALOG,
     gui::SECURE,
     gui::TERM_DRAG,
@@ -285,6 +286,7 @@ fn script(ps2: bool) -> Vec<Step> {
         ps2_steps(&mut s);
     }
     usb_steps(&mut s);
+    media_steps(&mut s);
     gui_steps(&mut s);
     sdl_steps(&mut s);
     wine_steps(&mut s);
@@ -514,6 +516,17 @@ fn ps2_steps(s: &mut Vec<Step>) {
     s.push(Step::SendPs2(vec![btn("wheel-up", false)]));
 }
 
+/// Vymenna media (`user/init/src/tests/removable.rs`): flash disk za behu
+/// (disk `mediahot` definuje `qemu.rs` bez zarizeni) a jeho vytazeni.
+fn media_steps(s: &mut Vec<Step>) {
+    s.push(Step::WaitFor(media::PLUG));
+    s.push(Step::Qmp(String::from(
+        r#"{"execute":"device_add","arguments":{"driver":"usb-storage","id":"usbmediahot","bus":"xhci.0","drive":"mediahot","removable":true}}"#,
+    )));
+    s.push(Step::WaitFor(media::UNPLUG));
+    s.push(Step::Qmp(device_del("usbmediahot")));
+}
+
 fn usb_steps(s: &mut Vec<Step>) {
     // USB (`user/init/src/tests/usb.rs`): klavesnice ze startu, hotplug mysi
     // a overeni nove klavesnice.
@@ -583,6 +596,11 @@ fn usb_steps(s: &mut Vec<Step>) {
 }
 
 /// Znacky testu USB (musi sedet s `user/init/src/tests/usb.rs`).
+mod media {
+    pub const PLUG: &str = "init: test media: zasun flashku";
+    pub const UNPLUG: &str = "init: test media: vytahni flashku";
+}
+
 mod usb {
     pub const KEYS: &str = "init: test usb: stisky na video1";
     pub const MOUSE_PLUG: &str = "init: test usb: pripoj mys";

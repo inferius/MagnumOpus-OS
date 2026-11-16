@@ -60,6 +60,13 @@ pub trait Disks {
     /// Test ochrany DMA (`op::TEST_DMA_PROTECTION`).
     fn test_dma_protection(&mut self, d: usize) -> Result<u64>;
     /// Model disku pro instalator (z identifikace zarizeni).
+    /// Handle, jehoz zavreni (`PEER_CLOSED`) znamena odpojene zarizeni
+    /// (kanal USB): [`serve`] pak skonci a zavre kanaly klientu, proces
+    /// media vi, ze medium zmizelo.
+    fn gone(&self) -> Option<&libos::Handle> {
+        None
+    }
+
     fn model(&self, _d: usize) -> alloc::string::String {
         alloc::string::String::new()
     }
@@ -242,10 +249,10 @@ pub fn report_disks(name: &str, disks: &mut impl Disks, bootstrap: &Channel) -> 
         // `block-media <fs> <index> <model>`.
         for v in media_views(disks, d) {
             let Kind::Media { index, fs } = v.kind else { continue };
+            let part = if index == diskguard::media::WHOLE { alloc::string::String::from("cely disk") } else { alloc::format!("oddil {index}") };
             println!(
-                "{name}: disk {d}: medium {} oddil {}, {} MiB, {}",
+                "{name}: disk {d}: medium {} {part}, {} MiB, {}",
                 fs.name(),
-                index,
                 v.sectors * v.sector_size as u64 >> 20,
                 if v.writable { "zapis povolen" } else { "JEN PRO CTENI" }
             );
@@ -292,11 +299,14 @@ pub fn report_disks(name: &str, disks: &mut impl Disks, bootstrap: &Channel) -> 
 /// jednim volanim (`read_batch`).
 pub fn serve(name: &str, disks: &mut impl Disks, mut clients: Vec<Client>) {
     while !clients.is_empty() {
-        let items: Vec<_> = clients
+        let mut items: Vec<_> = clients
             .iter()
             .map(|c| (c.channel.handle(), Signals::READABLE | Signals::PEER_CLOSED))
             .collect();
-        let observed = match libos::wait_many(&items, None) {
+        if let Some(g) = disks.gone() {
+            items.push((g, Signals::PEER_CLOSED));
+        }
+        let mut observed = match libos::wait_many(&items, None) {
             Ok((_, o)) => o,
             Err(e) => {
                 println!("{name}: cekani na klienty selhalo: {e}");
@@ -304,6 +314,13 @@ pub fn serve(name: &str, disks: &mut impl Disks, mut clients: Vec<Client>) {
             }
         };
         drop(items);
+        if observed.len() > clients.len() {
+            if observed[clients.len()].intersects(Signals::PEER_CLOSED) {
+                println!("{name}: zarizeni odpojeno, koncim");
+                return;
+            }
+            observed.truncate(clients.len());
+        }
         let mut closed = Vec::new();
         for (i, s) in observed.iter().enumerate() {
             let c = &mut clients[i];

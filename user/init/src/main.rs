@@ -39,6 +39,7 @@ mod ntp;
 mod perms;
 mod power;
 mod render;
+mod removable;
 mod rescue;
 mod revocation;
 mod session;
@@ -138,6 +139,10 @@ fn main(startup: Startup) -> i64 {
                     match sup.session("fsd", fsd::Recipe::System.encode()) {
                         Ok((ch, lease)) => devices.fs = Some(fsproto::FsClient::with_lease(ch, lease)),
                         Err(e) => println!("init: relace FS nelze vytvorit: {e}"),
+                    }
+                    // Media nahlasena pri startu (flashka zasunuta pred zapnutim).
+                    if devices.fs.is_some() {
+                        removable::attach_pending(&devices);
                     }
                     // Trvaly log a zaznamy padu co nejdriv po FS.
                     if devices.fs.is_some() {

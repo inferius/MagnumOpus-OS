@@ -134,6 +134,11 @@ impl<D: Sectors> Cached<D> {
         self.core.borrow_mut().flush_dirty()
     }
 
+    /// Prepne na jen pro cteni (svazek zjistil poskozeni pri pripojeni).
+    pub fn set_read_only(&self) {
+        self.core.borrow_mut().read_only = true;
+    }
+
     /// Zahodi neulozene zmeny (chyba uprostred operace).
     pub fn discard_dirty(&self) {
         self.core.borrow_mut().cache.retain(|_, s| !s.dirty);

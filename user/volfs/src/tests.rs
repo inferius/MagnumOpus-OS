@@ -157,6 +157,25 @@ fn fat_long_names_write_read_rename_remove() {
 }
 
 #[test]
+fn fat_open_create_truncate() {
+    let mut vol = mount(fat_image(16 * MIB, b"OPEN       "), false);
+    let open = |vol: &mut FatVolume<MemDisk>, p: &str, f: u8| {
+        call(vol, op::OPEN, |w| {
+            w.str(p).u8(f);
+        })
+        .map(|b| Stat::get(&mut Reader::new(&b)).unwrap())
+    };
+    use volproto::open_flags::*;
+    assert_eq!(open(&mut vol, "/n.txt", 0), Err(Error::NotFound));
+    assert_eq!(open(&mut vol, "/n.txt", CREATE).map(|s| s.kind), Ok(kind::FILE));
+    vol.write("/n.txt", 0, b"obsah").unwrap();
+    assert_eq!(open(&mut vol, "/n.txt", CREATE | EXCL), Err(Error::AlreadyExists));
+    assert_eq!(open(&mut vol, "/n.txt", 0).map(|s| s.size), Ok(5));
+    assert_eq!(open(&mut vol, "/n.txt", TRUNCATE).map(|s| s.size), Ok(0));
+    assert_eq!(open(&mut vol, "/d", CREATE | DIR).map(|s| s.kind), Ok(kind::DIR));
+}
+
+#[test]
 fn fat_errors_and_read_only() {
     let mut vol = mount(fat_image(16 * MIB, b"NO NAME    "), false);
     assert_eq!(stat(&mut vol, "/neni"), Err(Error::NotFound));

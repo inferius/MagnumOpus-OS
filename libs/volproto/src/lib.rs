@@ -61,6 +61,18 @@ pub mod op {
     pub const SYNC: u32 = 10;
     /// -> (). Zapsat, oznacit FS jako ciste a skoncit (bezpecne odpojeni).
     pub const UNMOUNT: u32 = 11;
+    /// cesta, priznaky u8 (`open_flags`) -> `Stat`. Otevreni pro fsd:
+    /// pripadne vytvoreni (exkluzivne), zkraceni na 0, pak stav.
+    pub const OPEN: u32 = 12;
+}
+
+/// Priznaky `OPEN`.
+pub mod open_flags {
+    pub const CREATE: u8 = 1;
+    pub const EXCL: u8 = 2;
+    pub const TRUNCATE: u8 = 4;
+    /// Vytvorit slozku (s `CREATE`).
+    pub const DIR: u8 = 8;
 }
 
 /// Druh polozky (stejne hodnoty jako `fsproto::kind`).

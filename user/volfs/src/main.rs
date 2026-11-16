@@ -85,6 +85,11 @@ mod os {
                 return 3;
             }
         };
+        // Ovladac rozhodl o zapisu (diskguard::media): pohled jen pro cteni
+        // = medium jen pro cteni, i kdyz init chce zapis.
+        let read_only = read_only || c.features().is_ok_and(|f| f & blockproto::feature::READ_ONLY != 0);
+        // Kopie handlu kanalu oddilu: zavreny = medium vytazeno.
+        let gone = c.handle().duplicate(None).ok();
         let dev = Block { sectors: c.sectors(), c };
         let mut vol: Box<dyn Volume> = match fs.as_str() {
             "fat" => match volfs::fat::FatVolume::new(dev, read_only) {
@@ -108,6 +113,17 @@ mod os {
         };
         // Pripraveno: fsd ceka na prvni odpoved (INFO) az po pripojeni.
         loop {
+            // Pozadavek fsd, nebo vytazene medium (ovladac skoncil).
+            if let Some(g) = &gone {
+                let items = [(fsd.handle(), libos::Signals::READABLE | libos::Signals::PEER_CLOSED), (g, libos::Signals::PEER_CLOSED)];
+                if let Ok((_, obs)) = libos::wait_many(&items, None)
+                    && obs[1].intersects(libos::Signals::PEER_CLOSED)
+                    && !obs[0].intersects(libos::Signals::READABLE)
+                {
+                    eprintln!("volfs: medium vytazeno");
+                    return 4;
+                }
+            }
             let msg = match fsd.read(None) {
                 Ok(m) => m,
                 Err(_) => {
