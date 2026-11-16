@@ -941,6 +941,24 @@ number and the Task manager use the same `taskd` view (all tasks; the Task
 manager controls only the user's tasks: client `own`). **[implemented]**
 (tests `bar_icons_open_flyouts`, `tasks_icon_tooltip` in `libs/comp`)
 
+The Appearance, Network, Sound, Notifications and Developer mode panels
+are `ui` views over the [panel component](components.md)
+(`libs/comp/src/barpanel.rs`): width `size.panel_w`, height by content,
+centred above the icon, rounding `radius.window`, shadow
+`shadow.popover`. Keys (Tab, arrows in options, Space), hover and
+accessibility are as in applications; Esc or a click outside closes the
+panel. The icon with an open panel has `surface_3` and an `accent`
+underline. Material: the blurred scene under the panel (once on opening,
+again only after damage under it) with `surface` at `opacity.bar`; if the
+computation takes longer than `COMPOSE_BUDGET`, the panel switches to a
+solid background and `compd` logs it once; high contrast is solid.
+Measured in the frame breakdown as "material panelu". The Settings
+buttons in the footer are disabled with the reason "Nastavení zatím
+nejsou" (Settings do not exist yet). The compositor command
+`panel <name>` opens a panel (tests, screenshots). **[verified in QEMU]**
+(test "panely listy nad komponentou panel", screenshots
+`target/shots/panel-*.png`; host `bar_look_card_chooses_scheme_and_reports_it`)
+
 Network icon: wired (`ethernet`); without a network card (netd reports an
 all-zero MAC, e.g. the VMware e1000 we do not support yet) a crossed
 `network` icon; an unplugged cable a crossed `ethernet`. No Wi-Fi yet:
@@ -1291,6 +1309,7 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 | `sources [net] [audio]` | network session (`INFO`), audio channel | `ok` (bar state) |
 | `apps` + lines `<id>\t<name>\t<single\|multi>` | - | empty (launchable apps in the bar) |
 | `dnd-fullscreen on\|off` | - | empty (Do not disturb in fullscreen) |
+| `panel look\|net\|volume\|bell\|dev\|none` | - | empty (opens a bar panel like a click on its icon; tests and look screenshots) |
 | `launcher` | channel to init | empty (`launch <id>` requests) |
 | `snapshots` | channel to `logd` | empty (images of the [diagnostic snapshot](#diagnostic-snapshot-print-screen)) |
 

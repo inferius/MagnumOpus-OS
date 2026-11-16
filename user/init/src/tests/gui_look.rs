@@ -156,6 +156,36 @@ pub fn start_dark(startup: &Startup) -> TestResult {
     })
 }
 
+/// Znacky snimku panelu listy (xtask `qmp.rs`, `gui::PANEL_SHOT`): jmeno
+/// panelu pro kompozitor a jmeno souboru. Zvuk a sit sada `gui` nema
+/// (bez sluzeb neni ikona v liste, panel se neotevre).
+pub const PANEL_SHOTS: [(&str, &str); 2] = [("look", "panel-vzhled"), ("bell", "panel-oznameni")];
+pub const QEMU_SHOT_PANEL: &str = "init: test gui: snimek panelu ";
+
+/// Panely listy nad komponentou panel (tmavy rezim jako snimky odchylek):
+/// prikaz `panel <jmeno>` je otevre jako klik na ikonu, xtask udela snimek.
+pub fn panel_shots(_: &Startup) -> TestResult {
+    with(|s| {
+        cmd(s, "appearance system tmavy ne ano")?;
+        settle(&s.inspect)?;
+        let r = (|| -> TestResult {
+            for (name, file) in PANEL_SHOTS {
+                cmd(s, &alloc::format!("panel {name}"))?;
+                settle(&s.inspect)?;
+                libos::println!("{QEMU_SHOT_PANEL}{file}");
+                // xtask porizuje snimek; pockat, nez skonci.
+                time::sleep(Duration::from_millis(1500));
+            }
+            check!(s.gui.command(b"panel neznamy", Vec::new()).is_err(), "neznamy panel");
+            Ok(())
+        })();
+        let _ = cmd(s, "panel none");
+        cmd(s, "appearance system svetly ne ano")?;
+        settle(&s.inspect)?;
+        r
+    })
+}
+
 /// Ulozeni volby do `/system/config/vzhled` a zpet (format, prava).
 pub fn store(_: &Startup) -> TestResult {
     let p = Pref { scheme: Scheme::Dark, contrast: false, reduce_motion: true };

@@ -892,6 +892,22 @@ i Správce úloh berou stejný pohled `taskd` (všechny úlohy, Správce úloh
 řídí jen úlohy uživatele: klient `own`). **[implementováno]** (testy
 `bar_icons_open_flyouts`, `tasks_icon_tooltip` v `libs/comp`)
 
+Panely Vzhled, Síť, Zvuk, Oznámení a Režim vývojáře jsou pohledy
+knihovny `ui` nad [komponentou panel](komponenty.md)
+(`libs/comp/src/barpanel.rs`): šířka `size.panel_w`, výška podle obsahu,
+střed nad ikonou, zaoblení `radius.window`, stín `shadow.popover`.
+Klávesy (Tab, šipky ve volbách, mezerník), najetí a přístupnost jsou jako
+v aplikacích; Esc nebo klik mimo panel zavře. Ikona s otevřeným panelem
+má `surface_3` a podtržení `accent`. Materiál: rozmazaná scéna pod
+panelem (jednou při otevření, znovu jen po poškození pod ním) se
+`surface` v krytí `opacity.bar`; trvá-li výpočet déle než
+`COMPOSE_BUDGET`, panel přejde na plné pozadí a `compd` to jednou
+zaloguje; vysoký kontrast je plný. Měření v rozpadu snímku „materiál
+panelu“. Tlačítka Nastavení v patě jsou vypnutá s důvodem „Nastavení
+zatím nejsou“. Příkaz kompozitoru `panel <jméno>` panel otevře (testy,
+snímky). **[ověřeno v QEMU]** (test „panely lišty nad komponentou panel“,
+snímky `target/shots/panel-*.png`; host `bar_look_card_chooses_scheme_and_reports_it`)
+
 Ikona sítě: pevná síť (`ethernet`), bez síťové karty (netd hlásí nulovou
 MAC, např. e1000 ve VMware, kterou zatím neumíme) přeškrtnutá ikona
 `network`, odpojený kabel přeškrtnutý `ethernet`. Wi-Fi zatím není:
@@ -1236,6 +1252,7 @@ Init mluví s `compd` po bootstrap kanálu textovými příkazy (jako s
 | `sources [net] [audio]` | relace sítě (`INFO`), kanál zvuku | `ok` (stav v liště) |
 | `apps` + řádky `<id>\t<jméno>\t<single\|multi>` | - | prázdná (spustitelné aplikace v liště) |
 | `dnd-fullscreen on\|off` | - | prázdná (Nerušit při celé obrazovce) |
+| `panel look\|net\|volume\|bell\|dev\|none` | - | prázdná (otevře panel lišty jako klik na ikonu; testy a snímky vzhledu) |
 | `launcher` | kanál k initu | prázdná (žádosti `launch <id>`) |
 | `snapshots` | kanál na `logd` | prázdná (obrázky [diagnostického snímku](#diagnostický-snímek-print-screen)) |
 

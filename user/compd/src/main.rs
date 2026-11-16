@@ -518,6 +518,8 @@ impl Service {
                     }
                     None => println!("compd: volbu vzhledu nejde ulozit: init nedal kanal launcher"),
                 },
+                // Kanal ke sluzbe zvuku zatim neni (`audio_ctl` vypnute).
+                Out::Audio(req) => println!("compd: zadost o zvuk bez kanalu ke sluzbe zvuku: {req:?}"),
                 Out::Device { source, trust } => {
                     if let Some(s) = &self.secure {
                         let cmd = if trust { inputproto::control::TRUST } else { inputproto::control::REJECT };
@@ -592,6 +594,17 @@ impl Service {
                 self.launcher = Some(Channel::from_handle(h));
                 (String::new(), Vec::new())
             }),
+            control::PANEL => match (self.comp.as_mut(), words.next()) {
+                (Some(c), Some(name)) => {
+                    if c.open_panel(name) {
+                        Ok((String::new(), Vec::new()))
+                    } else {
+                        Err(Error::InvalidArgs)
+                    }
+                }
+                (None, _) => Err(Error::BadState),
+                _ => Err(Error::InvalidArgs),
+            },
             control::DND_FULLSCREEN => match (self.comp.as_mut(), words.next()) {
                 (Some(c), Some(v @ ("on" | "off"))) => {
                     c.set_dnd_fullscreen(v == "on");

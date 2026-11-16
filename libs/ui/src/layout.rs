@@ -231,6 +231,11 @@ fn measure<M>(n: &Node<M>, t: &Look, avail: u32) -> (u32, u32) {
     (if n.width > 0 { n.width } else { w + pl + pr }, if n.height > 0 { n.height } else { h + pt + pb })
 }
 
+/// Prirozena vyska uzlu pri sirce `w` (vyska okna podle obsahu).
+pub fn natural_height<M>(n: &Node<M>, t: &Look, w: u32) -> u32 {
+    measure(n, t, w).1
+}
+
 /// Natahne se dite radku na jeho vysku? Kontejnery ano, pokud aplikace
 /// nedala pevnou vysku (`Node::height` ma prednost).
 fn stretches<M>(n: &Node<M>) -> bool {

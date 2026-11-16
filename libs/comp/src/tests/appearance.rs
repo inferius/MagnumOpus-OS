@@ -143,13 +143,30 @@ fn bar_look_card_chooses_scheme_and_reports_it() {
     t.click(look.x + 4, look.y + 4);
     assert_eq!(t.c.flyout, Some(crate::flyout::Flyout::Look));
     assert!(t.c.look_lines().iter().any(|l| l.starts_with("Teď světlý")));
-    // Druhy radek = Tmavy.
+    // Panel nad ui (komponenta panel): sirka z tokenu, volby radio,
+    // prepinac kontrastu, vypnute Nastaveni s duvodem.
     let r = t.c.flyout_rect().unwrap();
     let th = t.c.style.theme.clone();
-    let top = r.y + th.space[4] as i32 + (th.text.body_strong.line + th.space[2]) as i32;
-    let row = (th.text.body.line + th.space[2]) as i32;
-    t.click(r.x + 10, top + row + row / 2);
+    assert_eq!(r.w, th.size.panel_w);
+    // Vyska podle obsahu (ne do horniho okraje), nad listou.
+    assert!(r.y > th.space[5] as i32 && r.bottom() as i32 <= t.c.panel_rect().y, "panel {r:?}");
+    let tree = t.c.barpanel.as_ref().unwrap().ui.a11y();
+    let find = |role: guiproto::a11y::Role, name: &str| tree.iter().find(|n| n.role == role && n.name == name).cloned().unwrap_or_else(|| panic!("{role:?} {name}"));
+    let auto = find(guiproto::a11y::Role::Radio, "Automaticky");
+    assert_ne!(auto.state & guiproto::a11y::state::CHECKED, 0, "vychozi volba Automaticky");
+    assert!(auto.bounds.h >= th.size.panel_row);
+    find(guiproto::a11y::Role::Switch, "Vysoký kontrast");
+    let set = find(guiproto::a11y::Role::Button, "Nastavení vzhledu");
+    assert_ne!(set.state & guiproto::a11y::state::DISABLED, 0);
+    assert!(tree.iter().any(|n| n.role == guiproto::a11y::Role::Label && n.name.starts_with("Teď světlý")), "radek stavu");
+    // Klik na volbu Tmavy (souradnice pohledu + poloha panelu).
+    let tm = find(guiproto::a11y::Role::Radio, "Tmavý").bounds;
+    t.click(r.x + tm.x + tm.w as i32 / 2, r.y + tm.y + tm.h as i32 / 2);
     assert_eq!(t.c.mode(), theme::Mode::Dark);
+    // Panel zustane otevreny s novym stavem.
+    assert_eq!(t.c.flyout, Some(crate::flyout::Flyout::Look));
+    let tree = t.c.barpanel.as_ref().unwrap().ui.a11y();
+    assert!(tree.iter().any(|n| n.role == guiproto::a11y::Role::Radio && n.name == "Tmavý" && n.state & guiproto::a11y::state::CHECKED != 0));
     let out = t.out();
     assert!(out.contains(&Out::Appearance { uid: 1000, pref: Pref { reduce_motion: true, ..dark() } }), "{out:?}");
     assert_eq!(t.c.look_icon(), "moon");

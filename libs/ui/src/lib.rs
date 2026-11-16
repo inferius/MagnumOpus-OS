@@ -559,6 +559,13 @@ impl<M: Clone> Ui<M> {
     }
 
     /// Index prvku s klicem `k` (po poslednim rozvrzeni).
+    /// Prirozena vyska pohledu `view` pri sirce okna (bez natazeni):
+    /// vyska okna podle obsahu (panel listy).
+    pub fn natural_height(&self, view: &Node<M>) -> u32 {
+        let pad = if self.window_pad { self.look.pad() } else { 0 };
+        layout::natural_height(view, &self.look, self.w.saturating_sub(2 * pad)) + 2 * pad
+    }
+
     pub fn index_of(&self, k: Key) -> Option<usize> {
         self.by_key.get(&k).copied()
     }
