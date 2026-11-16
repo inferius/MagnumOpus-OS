@@ -40,6 +40,10 @@ pub(crate) enum PanelMsg {
     Input(u8),
     /// Hlasitost aplikace (index v `AudioInfo::apps`).
     AppVolume(usize, i32),
+    /// Nabidka zastupce aplikace (O7): okno, nove okno, zavrit vsechna.
+    Window(u32),
+    NewWindow,
+    CloseAll,
 }
 
 /// Otevreny panel listy.
@@ -64,7 +68,7 @@ impl Comp {
     /// Kresli panel `f` knihovna ui (ostatni karty jsou ve `flyout.rs`)?
     pub(crate) fn is_ui_panel(f: Flyout) -> bool {
         match f {
-            Flyout::Look | Flyout::Net | Flyout::Volume | Flyout::Bell => true,
+            Flyout::Look | Flyout::Net | Flyout::Volume | Flyout::Bell | Flyout::AppWindows(_) => true,
             #[cfg(feature = "dev-mode")]
             Flyout::Dev => true,
             _ => false,
@@ -256,6 +260,57 @@ impl Comp {
         }
     }
 
+    /// Polozky nabidky zastupce aplikace `g` (kontextove-nabidky.html,
+    /// "Ikona v liste"): okna (aktivni s fajfkou), Nove okno, Zavrit
+    /// vsechna okna; co jeste neni, je vypnute s duvodem.
+    fn app_menu_items(&self, g: u32) -> Vec<ui::MenuEntry<PanelMsg>> {
+        let id = self.app_of(g).unwrap_or_default();
+        let mut v: Vec<ui::MenuEntry<PanelMsg>> = self
+            .app_windows(&id)
+            .into_iter()
+            .filter_map(|w| self.windows.get(&w).map(|win| ui::menu_item(&win.title, PanelMsg::Window(w)).checked(self.focus == Some(w))))
+            .collect();
+        v.push(ui::menu_separator());
+        let new = ui::menu_item("Nové okno", PanelMsg::NewWindow).shortcut("Ctrl+Shift+N");
+        v.push(if self.is_launchable(&id) { new } else { new.disabled("aplikace jiné okno neotevře") });
+        v.push(ui::menu_item("Připnout na lištu", PanelMsg::NewWindow).disabled("zatím není"));
+        v.push(ui::menu_separator());
+        v.push(ui::menu_item("Zavřít všechna okna", PanelMsg::CloseAll));
+        v
+    }
+
+    /// Nabidka zastupce: pohled `ui` jen s nabidkou, velky jako ona.
+    fn app_menu_rebuild(&mut self, g: u32) {
+        let Some(anchor) = self.flyout_anchor(Flyout::AppWindows(g)) else {
+            self.barpanel = None;
+            return;
+        };
+        let items = self.app_menu_items(g);
+        let t = self.style.theme.clone();
+        let edge = t.size.bar_inset;
+        let mode = self.style.mode();
+        let max_h = self.panel_rect().y.saturating_sub((t.space[3] + edge) as i32).max(1) as u32;
+        let mut ui = Ui::new(ui::Look::ui_fonts(), self.w.max(1), max_h);
+        ui.window_pad = false;
+        ui.transparent = true;
+        ui.look.set_mode(mode);
+        ui.rebuild(String::from("Nabídka aplikace"), column([]));
+        // Nabidka pod kotvou nad okrajem: v pocatku pohledu.
+        let at = Rect::new(0, -3, 1, 1);
+        ui.open_menu(items.clone(), at);
+        let Some(m) = ui.popup_rect() else { return };
+        ui.resize(m.w.max(1), m.h.max(1));
+        ui.rebuild(String::from("Nabídka aplikace"), column([]));
+        ui.open_menu(items, at);
+        let x = anchor.x.clamp(edge as i32, (self.w.saturating_sub(m.w + edge)) as i32);
+        let rect = Rect::new(x, self.panel_rect().y - t.space[3] as i32 - m.h as i32, m.w, m.h);
+        if let Some(old) = self.barpanel.take() {
+            self.damage_top(self.panel_shadow_area(old.rect));
+        }
+        self.barpanel = Some(BarPanel { kind: Flyout::AppWindows(g), ui, rect, blur: None, blur_dirty: false, pressed: false, hover: false });
+        self.damage_top(self.panel_shadow_area(rect));
+    }
+
     /// Znovu sestavi pohled otevreneho panelu (po zmene stavu, rezimu).
     pub(crate) fn bar_panel_rebuild(&mut self) {
         let f = match self.flyout {
@@ -267,6 +322,13 @@ impl Comp {
                 return;
             }
         };
+        if let Flyout::AppWindows(g) = f {
+            // Nabidka se po otevreni nesklada znovu (vyber v ni by se ztratil).
+            if self.barpanel.as_ref().is_none_or(|b| b.kind != f) {
+                self.app_menu_rebuild(g);
+            }
+            return;
+        }
         let Some(anchor) = self.flyout_anchor(f) else {
             self.barpanel = None;
             return;
@@ -330,6 +392,8 @@ impl Comp {
     /// Udalost pro pohled panelu (souradnice obrazovky). Vraci, zda ji
     /// panel vzal.
     pub(crate) fn bar_panel_event(&mut self, ev: InputEvent, mods: u16, time: u64, now: u64) -> bool {
+        let Some(r) = self.bar_panel_rect() else { return false };
+        let area = self.panel_shadow_area(r);
         let Some(bp) = self.barpanel.as_mut() else { return false };
         let r = bp.rect;
         let ev = match ev {
@@ -340,16 +404,25 @@ impl Comp {
         bp.ui.set_input_class(self.input.class);
         let resp = bp.ui.event_at(ev, mods, Some(time));
         let redraw = resp.redraw || !resp.msgs.is_empty();
+        let menu = matches!(bp.kind, Flyout::AppWindows(_));
+        let closed = menu && !bp.ui.popup_open();
         for m in resp.msgs {
-            self.bar_panel_msg(m, now);
+            self.bar_panel_msg(m, time, now);
         }
-        if redraw {
+        if closed {
+            // Nabidka se zavrela (vyber, Esc v ni): panel pryc.
+            self.set_flyout(None);
+        } else if menu {
+            if redraw {
+                self.damage_top(area);
+            }
+        } else if redraw {
             self.bar_panel_rebuild();
         }
         true
     }
 
-    fn bar_panel_msg(&mut self, m: PanelMsg, now: u64) {
+    fn bar_panel_msg(&mut self, m: PanelMsg, time: u64, now: u64) {
         match m {
             PanelMsg::Scheme(s) => self.choose_scheme(s, now),
             PanelMsg::Contrast(on) => self.choose_contrast(on, now),
@@ -368,6 +441,29 @@ impl Comp {
             }
             PanelMsg::Output(i) => self.out.push(crate::Out::Audio(crate::AudioReq::Output(i))),
             PanelMsg::Input(i) => self.out.push(crate::Out::Audio(crate::AudioReq::Input(i))),
+            PanelMsg::Window(w) => {
+                self.set_flyout(None);
+                self.activate_window(w);
+            }
+            PanelMsg::NewWindow => {
+                if let Some(Flyout::AppWindows(g)) = self.flyout {
+                    let id = self.app_of(g).unwrap_or_default();
+                    self.set_flyout(None);
+                    self.launch_new(&id, time);
+                }
+            }
+            PanelMsg::CloseAll => {
+                if let Some(Flyout::AppWindows(g)) = self.flyout {
+                    let id = self.app_of(g).unwrap_or_default();
+                    self.set_flyout(None);
+                    for w in self.app_windows(&id) {
+                        if let Some(win) = self.windows.get(&w) {
+                            let (c, l) = (win.client, win.local);
+                            self.send(c, guiproto::window::ServerMsg::Close { window: l });
+                        }
+                    }
+                }
+            }
             PanelMsg::AppVolume(k, v) => {
                 if let Some(a) = self.status.audio.as_ref().and_then(|i| i.apps.get(k)) {
                     let id = a.id.clone();
@@ -382,6 +478,10 @@ impl Comp {
     fn ensure_panel_blur(&mut self, now: u64) {
         let solid = self.style.theme.opacity.bar >= 255 || self.panel_material_off;
         let Some(bp) = self.barpanel.as_ref() else { return };
+        // Nabidka zastupce ma vlastni plne pozadi (ui).
+        if matches!(bp.kind, Flyout::AppWindows(_)) {
+            return;
+        }
         if solid {
             if bp.blur.is_some() {
                 self.barpanel.as_mut().unwrap().blur = None;
@@ -420,6 +520,17 @@ impl Comp {
         let Some(bp) = self.barpanel.as_mut() else { return };
         let r = bp.rect;
         let n = (r.w * r.h) as usize;
+        if matches!(bp.kind, Flyout::AppWindows(_)) {
+            // Nabidka kresli sve pozadi, ram i stin sama (ui); okolo pruhledne.
+            let mut px = vec![0u32; n];
+            if let Some(mut pc) = Canvas::new(&mut px, r.w, r.h, r.w) {
+                bp.ui.draw(&mut pc, 0);
+            }
+            if let Some(img) = gfx::Image::new(&px, r.w, r.h, r.w) {
+                c.draw_image(&img, Rect::new(0, 0, r.w, r.h), r, 255, false);
+            }
+            return;
+        }
         // Pozadi: material (rozmazana scena + surface s kryti listy) nebo plne.
         let mut px = match &bp.blur {
             Some(b) if b.len() == n => {

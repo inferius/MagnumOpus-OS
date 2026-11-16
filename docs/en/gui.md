@@ -945,7 +945,12 @@ The Appearance, Network, Sound, Notifications and Developer mode panels
 are `ui` views over the [panel component](components.md)
 (`libs/comp/src/barpanel.rs`): width `size.panel_w`, height by content,
 centred above the icon, rounding `radius.window`, shadow
-`shadow.popover`. The Sound panel: volume and mute, output and input (radio groups), a
+`shadow.popover`. The app shortcut menu in the bar (right button, or a click with several
+windows) is a `ui` menu (`Ui::open_menu`): the application's windows
+(the active one with a check mark), New window, Pin to the bar (disabled,
+"not yet"), Close all windows. **[implemented]** (host
+`app_shortcut_menu_is_ui_menu`, screenshot `nabidka-zastupce-*.png`)
+The Sound panel: volume and mute, output and input (radio groups), a
 "Nahrává: ..." (recording) row and application volume by the manifest
 identity; data from `audiod` (`OVERVIEW`, a channel from init, the
 compositor asks for it instead of `STATUS`), changes go through the same

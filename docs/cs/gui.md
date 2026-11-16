@@ -896,6 +896,11 @@ Panely Vzhled, Síť, Zvuk, Oznámení a Režim vývojáře jsou pohledy
 knihovny `ui` nad [komponentou panel](komponenty.md)
 (`libs/comp/src/barpanel.rs`): šířka `size.panel_w`, výška podle obsahu,
 střed nad ikonou, zaoblení `radius.window`, stín `shadow.popover`.
+Nabídka zástupce aplikace v liště (pravé tlačítko, nebo klik při víc
+oknech) je nabídka knihovny `ui` (`Ui::open_menu`): okna aplikace
+(aktivní s fajfkou), Nové okno, Připnout na lištu (vypnuté, „zatím
+není“), Zavřít všechna okna. **[implementováno]** (host
+`app_shortcut_menu_is_ui_menu`, snímek `nabidka-zastupce-*.png`)
 Panel Zvuk: hlasitost a ztlumení, výstup a vstup (skupiny radio), řádek
 „Nahrává: ...“ a hlasitost aplikací podle identity z manifestu; data
 z `audiod` (`OVERVIEW`, kanál od initu, kompozitor se ptá místo `STATUS`),

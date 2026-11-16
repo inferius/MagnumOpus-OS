@@ -112,3 +112,30 @@ fn shot_bar_panels() {
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
+
+/// Nabidka zastupce aplikace v liste (O7) ve svetlem a tmavem rezimu.
+#[test]
+fn shot_app_shortcut_menu() {
+    let mut errors = Vec::new();
+    for (mode, mname) in [(theme::Mode::Light, "svetly"), (theme::Mode::Dark, "tmavy")] {
+        let mut t = T::new();
+        t.c.set_mode(mode);
+        t.c.set_launchable(alloc::vec![(String::from("org.term"), String::from("Terminál"))]);
+        t.c.set_multi(alloc::vec![String::from("org.term")]);
+        for c in [RED, BLUE] {
+            let a = t.client("org.term");
+            t.window(a, Mode::Standard, c);
+        }
+        t.frame();
+        let r = t.c.bar_layout().apps[0].1;
+        t.click(r.x + 4, r.y + 4);
+        t.frame();
+        let Some(m) = t.c.bar_panel_rect() else {
+            errors.push(String::from("nabidka se neotevrela"));
+            continue;
+        };
+        let (px, w, h) = crop(&t, m);
+        errors.extend(compare(&format!("nabidka-zastupce-{mname}"), &px, w, h));
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}

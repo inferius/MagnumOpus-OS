@@ -741,6 +741,20 @@ impl<M: Clone> Ui<M> {
     }
 
     /// Je otevrena nabidka (vyber, kontextova)?
+    /// Otevre nabidku `items` u obdelniku `anchor` (souradnice okna) bez
+    /// prvku, ke kteremu by patrila: nabidka zastupce v liste kompozitoru.
+    /// Vlastnikem je koren pohledu; vyber polozky vrati jeji zpravu.
+    pub fn open_menu(&mut self, items: Vec<crate::MenuEntry<M>>, anchor: Rect) {
+        let items = Self::items_from(&items);
+        let owner = self.elems.first().map_or(crate::Key::ROOT, |e| e.key);
+        self.open_popup(owner, false, items, anchor, 0, None);
+    }
+
+    /// Obdelnik otevrene nabidky (souradnice okna).
+    pub fn popup_rect(&self) -> Option<Rect> {
+        self.popup.as_ref().map(|p| p.rect)
+    }
+
     pub fn popup_open(&self) -> bool {
         self.popup.is_some()
     }

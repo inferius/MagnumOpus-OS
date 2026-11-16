@@ -26,6 +26,7 @@ Nativní knihovna UI (milník 6c): jedna pro všechny aplikace. Aplikace popíš
 - Aplikace UI vykresluje do vlastního bufferu; kompozitor mu nevěří (viz `libs/comp/CLAUDE.md`), ale i klient musí ošetřit nesmyslné rozměry od kompozitoru.
 - `client/mod.rs` má ~730 řádků; při dalším růstu dělit (obnova po pádu je v `restore.rs`, schránka v `clip.rs`).
 - Seznam návrhů u pole: jádro bez stromu `complete.rs` (`Completion`, používá ho i gui-term samostatně), napojení na pole `suggest.rs`. Klávesy, které seznam nevezme, musí jít do pole (`Outcome::Ignored`); heslo seznam nikdy nemá.
+- `Ui::open_menu(items, kotva)` otevře nabídku bez prvku (vlastník = kořen pohledu; nabídka zástupce v liště kompozitoru), `Ui::popup_rect` její obdélník.
 - Nabídky: `Ui::popup` je vždy nejhlubší úroveň, rodiče podnabídek drží `Ui::popup_stack` (`submenu.rs`); kdo nabídku zavírá, volá `close_popup` (vyprázdní i zásobník), ne `popup = None`.
 - Skupina radio = sourozenci se stejným rodičem (`groups.rs`, `tab_stop`): pořadí Tab musí jít přes `tab_stop`, ne přímo přes `focusable`.
 - `client/pointer.rs`: kurzor okna, zámek ukazatele a celá obrazovka pro okna, která kreslí sama (SDL); `Event::PointerLock` a `Event::State` (stav z `CONFIGURE` bez fokusu) běhová smyčka `run` ignoruje.
