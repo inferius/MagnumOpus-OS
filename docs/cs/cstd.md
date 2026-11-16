@@ -184,7 +184,10 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 
 - Socket je objekt v tabulce fd (`osrt::sock`): po `socket()` ještě nemá
   spojení u netd, `connect`/`listen`/`bind` ho převedou na spojení TCP,
-  naslouchání nebo socket UDP. `read`, `write`, `fdopen` a `close` fungují
+  naslouchání nebo socket UDP. `bind` TCP obsadí port u netd hned
+  ([navázaný socket](sit.md#navázaný-socket-tcp)): `getsockname` po `bind`
+  na port 0 zná port, obsazený port = `EADDRINUSE` z `bind` a `connect`
+  po `bind` jde z navázaného portu. `read`, `write`, `fdopen` a `close` fungují
   i nad socketem.
 - Co program smí (cíle, porty, naslouchání), určuje relace sítě
   z manifestu: zakázaný cíl nebo port = `EACCES`. `SO_REUSEADDR`,

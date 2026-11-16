@@ -192,7 +192,11 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 
 - A socket is an object in the fd table (`osrt::sock`): after `socket()` it
   has no connection at netd yet; `connect`/`listen`/`bind` turn it into a
-  TCP connection, a listener or a UDP socket. `read`, `write`, `fdopen` and
+  TCP connection, a listener or a UDP socket. A TCP `bind` takes the port
+  at netd right away ([bound socket](network.md#bound-tcp-socket)):
+  `getsockname` after `bind` to port 0 knows the port, a taken port =
+  `EADDRINUSE` from `bind` and `connect` after `bind` goes from the bound
+  port. `read`, `write`, `fdopen` and
   `close` also work on a socket.
 - What a program may do (targets, ports, listening) is decided by the
   network session from the manifest: a forbidden target or port = `EACCES`.

@@ -63,6 +63,7 @@ mod memory_seal;
 mod memory_cow;
 mod memory_wx;
 pub mod net;
+mod net_bind;
 mod net_lo;
 mod net_ready;
 mod net_v2;

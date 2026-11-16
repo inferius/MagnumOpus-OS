@@ -558,6 +558,8 @@ passed sockets; loopback in netd). ⚠️ Windows programs on x86_64 only
 | `MSG_PEEK` on TCP connections (wineserver uses it on `POLLIN` to detect the end of a connection) | **[verified in QEMU]** x86_64 (suites `sit loopback`, `wine`) |
 | Winsock (`wintest tcp`): connection, data in both directions over loopback and to the host echo server (the way out through slirp) | **[verified in QEMU]** x86_64 (tests `wine: Winsock TCP ... (W4b)`) |
 | PuTTY raw and telnet against the test echo server on loopback: the server greeting shows in the terminal, text typed from QEMU reaches the server, its echo shows | **[verified in QEMU]** x86_64 (tests `wine: PuTTY raw/telnet ... (W4b)`) |
+| Windows programs listen on loopback only (`listen_from = "loopback"`), network `WSAEACCES` | **[verified in QEMU]** x86_64 (test `wine: Winsock naslouchani ... (W4b)`) |
+| Accepting connections from the network after a user prompt | **[designed]** |
 
 **How a socket travels.** Wine creates sockets in wineserver and sends
 the fd to the client over `SCM_RIGHTS`. A TCP/UDP socket is one object at
@@ -571,9 +573,20 @@ launchd narrows it by the `[network]` section of the Wine manifest.
 **Wine manifest (`[network]`).** Rights `info`, `tcp`, `listen`, `udp`,
 `dns`; no user prompt (`ask = false`), connections to any target
 (`to = "*"`), listening on ports 1024-65535; 256 sockets and 64 MiB of
-buffers per identity. ⚠️ Windows programs thus get the network as a
-whole (no prompt per target); finer per-application rules for Windows
-programs belong to point 3 (installing Windows programs).
+buffers per identity; incoming connections only from loopback
+(`listen_from = "loopback"`, [Permissions](network.md#permissions)). ⚠️
+Windows programs thus get outgoing network as a whole (no prompt per
+target); finer per-application rules for Windows programs belong to
+point 3 (installing Windows programs).
+
+⚠️ **Wine programs cannot accept connections from the network yet.**
+Listening on `0.0.0.0` or an interface address fails with `WSAEACCES`
+(no silent narrowing to loopback); on loopback it works (test `wine:
+Winsock naslouchani ... (W4b)`). An open port is a different class of
+risk than an outgoing connection: it will be allowed by a general user
+prompt "Program X wants to accept connections from the network" (a
+permission through the permission dialog like the microphone, also for
+`sshd` and native applications) **[designed]**.
 
 **Two fixes for Wine.**
 

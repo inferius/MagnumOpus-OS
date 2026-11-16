@@ -36,6 +36,12 @@ pub const TESTS: &[Test] = &[
     ("200 socketu najednou (driv limit 63)", many_sockets),
     ("opravneni: prava a omezeni cilu relace", restricted),
     ("opravneni: pravidlo se jmenem hostitele", host_rule),
+    ("bind: port 0 - adresa hned, listen ho necha", super::net_bind::port_zero),
+    ("bind: stejny port dvakrat -> ADDRESS_IN_USE", super::net_bind::in_use),
+    ("bind: spojeni z pevneho portu (loopback i sit)", super::net_bind::connect_from_port),
+    ("bind: listen a connect na miste, druhy kanal po DUP to vidi", super::net_bind::convert_in_place),
+    ("bind: prijem jen z loopbacku - sit ACCESS_DENIED", super::net_bind::scope),
+    ("bind: UDP port hned, stejny port -> ADDRESS_IN_USE", super::net_bind::udp),
     ("DNS: resolver hostitele pres slirp (jen --net-online)", online_dns),
 ];
 

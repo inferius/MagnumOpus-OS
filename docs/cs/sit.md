@@ -248,6 +248,14 @@ znamená bez omezení:
   samotného `example.com`).
 - `bind`: rozsahy místních portů pro naslouchání a pro socket UDP na
   zvoleném portu. Port 0 (přidělí služba) je povolený vždy.
+- `bind_scope` (`BindScope`): odkud smí relace přijímat. `Any` (výchozí)
+  = síť i loopback, `Loopback` = jen 127.0.0.0/8 a `::1`. Naslouchání TCP
+  na síti (`0.0.0.0`, adresa rozhraní, i na portu 0) a socket UDP na
+  zvoleném portu sítě potřebují `Any` ve všech vrstvách, jinak
+  `ACCESS_DENIED` (nikdy tiché zúžení na loopback); UDP na portu 0
+  (klient) smí vždy. V manifestu `listen_from = "loopback"` v `[network]`
+  **[ověřeno v QEMU]** x86_64 (sada `sit loopback`, test
+  `loopback: prijem jen z loopbacku`).
 
 <figure class="diagram">
 <svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vrstvy omezeni relace">
@@ -516,6 +524,39 @@ datagramy UDP jdou rovnou do fronty cílového socketu.
 - Velikost fronty spojení = buffer příjmu přijímající strany (`Buffers`).
 - Funguje i před DHCP (nepotřebuje adresu rozhraní).
 
+## Navázaný socket TCP
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (sady „sit“ a „cstd sit“).
+`TCP_BIND` (op 12, relace) obsadí port **hned při navázání** jako `bind`
+v Linuxu (`user/netd/src/bound.rs`): kanál navázaného socketu zná svou
+adresu (`LOCAL_ADDR`, C `getsockname` hned po `bind` na port 0) a druhé
+navázání na obsazený port je `ADDRESS_IN_USE` (C `EADDRINUSE`) už
+z `bind`, ne až z `listen`.
+
+- **Převedení na místě:** `LISTEN` (op 32) udělá z kanálu naslouchání,
+  `CONNECT` (op 33) spojení z portu navázání. Stav se změní u objektu
+  v netd, takže totéž vidí všechny kanály po `DUP` (wineserver navazuje
+  a naslouchá na svém kanálu, program Wine má kanál vlastní). Klient
+  nový kanál nedostane; port přechází na naslouchání / spojení.
+- **Oprávnění:** při navázání právo `TCP_CONNECT` nebo `TCP_LISTEN`,
+  `allows_bind` (port 0 vždy) a příjem ze sítě pro zvolený port na síti
+  (`bind_scope`); při `LISTEN` právo `TCP_LISTEN` a příjem ze sítě
+  i pro port 0; při `CONNECT` právo `TCP_CONNECT` a pravidla cíle (dotaz
+  uživateli jako u `TCP_CONNECT`). Rozpočet: navázání stojí socket bez
+  bajtů, buffery se připočtou při `LISTEN`/`CONNECT` (`Usage::grow`).
+- **Cíl z adresy navázání:** loopback jen s navázáním, které loopback
+  zahrnuje (`0.0.0.0`, 127.x), síť jen s `0.0.0.0` nebo adresou
+  rozhraní (jinak `ADDRESS_NOT_AVAILABLE`); jiná rodina `INVALID_ARGS`.
+- **Chyba spojení** nechá socket použitý: další `LISTEN`/`CONNECT` =
+  `BAD_STATE`, port drží do zavření (jako socket po neúspěšném `connect`
+  v Linuxu). Souběžný `LISTEN`/`CONNECT` během navazování = `BAD_STATE`.
+- **UDP** port přiděluje už při `UDP_BIND` (byl tak vždy).
+- `osrt` (`sock.rs`, stav `Bound`) dělá `bind` TCP takhle; dědění
+  a `SCM_RIGHTS` předají navázaný socket jako `DUP` (druh 4). Jiný proces
+  se stejným socketem ho mohl mezitím převést (wineserver navazuje
+  spojení, program Wine dostal fd ještě navázaný): `osrt` se ve stavu
+  `Bound` před operací zeptá `KIND` a stav převezme (`TcpBound::current`).
+
 ## Předání socketu, limity identity a odvolání
 
 **[ověřeno v QEMU]** x86_64 i aarch64 (sady „sit loopback“ a „cstd sit“).
@@ -587,15 +628,19 @@ Kanál mezi `fwd` a agentem uživatele má vlastní formát odpovědi
 | relace | `SET_DNS` (9) | počet u8, servery → () |
 | relace | `AUDIT` (10) | od u64, nejvíc u16 → další u64, počet u16, záznamy |
 | relace | `STATS` (11) | → profil, počet u16, provoz aplikací |
+| relace | `TCP_BIND` (12) | místní adresa → místní adresa + kanál navázaného socketu (viz [Navázaný socket TCP](#navázaný-socket-tcp)) |
 | spojení | `SEND` (20) | data → přijato u32 |
 | spojení | `RECV` (21) | nejvýš u32 [příznaky u8: `RECV_PEEK` = 1, data zůstanou ve frontě, C `MSG_PEEK`] → data (prázdná = konec proudu) |
 | spojení | `SHUTDOWN` (22) | → () (FIN, čtení pokračuje) |
 | spojení | `ADDRS` (23) | → místní, vzdálená adresa |
 | naslouchání | `ACCEPT` (30) | → vzdálená adresa, místní adresa + kanál spojení |
-| naslouchání, UDP | `LOCAL_ADDR` (31) | → místní adresa (podle aktuální adresy rozhraní) |
+| naslouchání, UDP, navázaný | `LOCAL_ADDR` (31) | → místní adresa (podle aktuální adresy rozhraní) |
+| navázaný | `LISTEN` (32) | fronta u16, Buffers → místní adresa (kanál je dál naslouchání) |
+| navázaný | `CONNECT` (33) | cíl, Buffers → místní adresa (kanál je dál spojení) |
 | UDP | `SEND_TO` (40) | cíl, data → () (na místo ve frontě nejvýš 5 s) |
 | každý socket | `READINESS` (50) | → () + event připravenosti v handlech (viz [Připravenost socketů](#připravenost-socketů)) |
 | každý socket | `DUP` (51) | → () + nový kanál ke stejnému socketu v handlech (viz [Předání socketu](#předání-socketu-limity-identity-a-odvolání)) |
+| každý kanál | `KIND` (52) | → druh u8 (0 relace, 1 spojení, 2 naslouchání, 3 UDP, 4 navázaný) |
 | UDP | `RECV_FROM` (41) | nejvýš u32 → odesílatel, data |
 
 **Info:** MAC (6 B), MTU u16, příznaky u8 (bit 0 linka, bit 1 nastaveno),
@@ -611,7 +656,7 @@ má adresu u8 [adresa, prefix u8], má bránu u8 [brána], počet DNS u8
 1024; init dává 32).
 
 **Policy:** má connect u8 [počet u32, pravidla], má bind u8 [počet u32,
-(od u16, do u16)...]. Pravidlo = protokoly u8, druh cíle u8
+(od u16, do u16)...], bind_scope u8 (0 síť i loopback, 1 jen loopback). Pravidlo = protokoly u8, druh cíle u8
 (0 libovolný, 1 síť: adresa + prefix u8, 2 jméno: řetězec), port od u16,
 port do u16. Služba odmítne (`INVALID_ARGS`) prázdné protokoly, prefix
 delší než adresa, neplatné jméno a víc než 256 pravidel nebo 16 vrstev.
@@ -784,6 +829,7 @@ překládá adresu 10.0.2.2 na 127.0.0.1 hostitele.
 | šifrované DNS | sada „sifrovane DNS“: ověřené A, CNAME, wildcard, AAAA; NXDOMAIN (NSEC i NSEC3), NODATA; nepodepsaná a podvržená zóna; přechod z nefunkčního resolveru, DoT, mezipaměť; pravidlo profilu |
 | souběh (sada „sit soubeh“) | čtení a zápis jednoho spojení ze dvou vláken (zápis nečeká za čtením), dva čtenáři jednoho spojení (fronta FIFO), „jen zkusit“ = `SHOULD_WAIT` a termín 300 ms, zrušení čtení z jiného vlákna a token zrušený předem, místní adresa naslouchání a UDP (`ADDRESS_NOT_AVAILABLE` pro cizí adresu) |
 | loopback (sada „sit loopback“) | TCP přes 127.0.0.1 a `::1` (256 KiB oběma směry, konec zápisu, zavření = konec proudu, adresy), naslouchání na 0.0.0.0 přijímá z 127.0.0.1, `CONNECTION_REFUSED` bez naslouchání, UDP přes 127.0.0.1 a `::1` (adresa odesílatele), omezená relace bez pravidla pro loopback = `ACCESS_DENIED` |
+| navázaný socket TCP (sada „sit“, `net_bind.rs`; „cstd sit“ krok `bind`) | port hned po navázání na port 0 a stejný po `listen`, druhé navázání na obsazený port `ADDRESS_IN_USE` (i `listen`), po zavření volno, spojení z pevného portu (loopback i síť k echo serveru hostitele, protějšek vidí port), `LISTEN` na místě vidí i kanál po `DUP`, příjem jen z loopbacku: `listen` na síti a zvolený port sítě `ACCESS_DENIED`, UDP port hned a obsazený `ADDRESS_IN_USE` |
 | plný limit relace (sada „firewall“) | relace s `ops = 1`: druhý dotaz se odloží (nečeká chybou), jeho zrušení přijde do 2 s, i když první dotaz dál čeká na uživatele |
 | zrušení connectu (sada „firewall“) | connect čeká na dotaz uživatele, relace mezitím odpovídá na `INFO`, `CancelToken` ho zruší do 2 s (`CANCELED`), pozdní odpověď uživatele nic nezmění |
 | NTP | `ntpd` proti serveru hostitele (sada „synchronizace casu“, viz [cas.md](cas.md#synchronizace-podle-sítě-ntpd)) |

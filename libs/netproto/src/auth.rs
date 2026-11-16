@@ -127,6 +127,18 @@ impl Budget {
         true
     }
 
+    /// Vejde se jeste `bytes` bajtu (bez dalsiho socketu)?
+    fn fits_bytes(&self, bytes: u64) -> bool {
+        let mut node = Some(self);
+        while let Some(b) = node {
+            if b.bytes.get().saturating_add(bytes) > b.quota.bytes {
+                return false;
+            }
+            node = b.parent.as_deref();
+        }
+        true
+    }
+
     fn add(&self, sockets: i64, bytes: i64) {
         let mut node = Some(self);
         while let Some(b) = node {
@@ -161,6 +173,23 @@ pub struct Usage {
     budget: Rc<Budget>,
     identity: Option<Rc<Budget>>,
     bytes: u64,
+}
+
+impl Usage {
+    /// Navysi strzeni o `bytes` (stale jeden socket): navazany socket
+    /// TCP pri `LISTEN` nebo `CONNECT` dostane buffery. `NO_RESOURCES` nad
+    /// rozpocet, strzeni pak zustava beze zmeny.
+    pub fn grow(&mut self, bytes: u64) -> Result<()> {
+        if !self.budget.fits_bytes(bytes) || self.identity.as_ref().is_some_and(|i| !i.fits_bytes(bytes)) {
+            return Err(Error::NoResources);
+        }
+        self.budget.add(0, bytes as i64);
+        if let Some(i) = &self.identity {
+            i.add(0, bytes as i64);
+        }
+        self.bytes += bytes;
+        Ok(())
+    }
 }
 
 impl Drop for Usage {

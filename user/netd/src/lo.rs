@@ -201,7 +201,9 @@ pub fn accept(a: &AcceptRef, app: &str, usage: Usage) -> Option<(Writer, Kind)> 
 // --- spojeni ---
 
 /// `TCP_CONNECT` na loopback (po kontrole cile a strzeni z rozpoctu).
-pub fn connect(stack: &mut Stack, target: SocketAddr, rx: usize, app: String, usage: Usage) -> Result<Step> {
+/// Spojeni na loopbacku; `local_port` = port navazaneho socketu (jinak
+/// docasny).
+pub fn connect(stack: &mut Stack, target: SocketAddr, rx: usize, app: String, usage: Usage, local_port: Option<u16>) -> Result<Step> {
     let v6 = target.is_ipv6();
     let Some(a) = stack.lo.listeners.get(&(v6, target.port())).cloned() else {
         return Err(Error::ConnectionRefused);
@@ -209,7 +211,10 @@ pub fn connect(stack: &mut Stack, target: SocketAddr, rx: usize, app: String, us
     if !matches(a.borrow().bound, target.ip()) || a.borrow().queue.len() >= a.borrow().backlog {
         return Err(Error::ConnectionRefused);
     }
-    let port = stack.take_port(PortProto::Tcp, 0)?;
+    let port = match local_port {
+        Some(p) => p,
+        None => stack.take_port(PortProto::Tcp, 0)?,
+    };
     let srv_rx = a.borrow().rx;
     // pipes[0] = klient -> server (prijem serveru), pipes[1] = opacne.
     let conn = Rc::new(RefCell::new(Conn { pipes: [Pipe::new(srv_rx), Pipe::new(rx)], gone: [false; 2], reset: false }));

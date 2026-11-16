@@ -135,14 +135,14 @@ fn ctest_net(s: &Startup) -> TestResult {
         Rule::port(proto::TCP, target.clone(), p.callback),
         Rule::port(proto::UDP, target, p.udp_echo),
     ]);
-    // Loopback (predani socketu, krok share): spojeni a naslouchani na 47100.
-    policy.connect.get_or_insert_with(Vec::new).push(Rule::port(
+    // Loopback (predani socketu, krok share; navazani, krok bind):
+    // spojeni na libovolny port loopbacku, navazani na 47100-47103.
+    policy.connect.get_or_insert_with(Vec::new).push(Rule::any_port(
         proto::TCP,
         Target::Net { addr: core::net::IpAddr::V4(core::net::Ipv4Addr::LOCALHOST), prefix: 8 },
-        47100,
     ));
-    // Naslouchat smi jen na portu presmerovanem z hostitele (a 47100).
-    policy.bind = Some(vec![(p.forwarded, p.forwarded), (47100, 47100)]);
+    // Naslouchat smi jen na portu presmerovanem z hostitele (a 47100-47103).
+    policy.bind = Some(vec![(p.forwarded, p.forwarded), (47100, 47103)]);
     let session = root
         .restrict(rights::CLIENT | rights::TCP_LISTEN, &policy)
         .map_err(|e| fail("restrict", e))?;
@@ -174,7 +174,7 @@ fn ctest_net(s: &Startup) -> TestResult {
         ],
         Duration::from_secs(120),
     )?;
-    run.expect("ctest", &["tcp", "udp", "dns", "refused", "accept", "share", "netrole"])
+    run.expect("ctest", &["tcp", "udp", "dns", "refused", "accept", "share", "netrole", "bind"])
 }
 
 /// Dva procesy `ctest lock` nad jednim souborem (zamky drzi fsd).

@@ -6,7 +6,8 @@
  * serveru, ktery se pripoji zpet). Vypisuje "ok <krok>". Krok "share":
  * socket TCP na loopbacku zdedeny v posix_spawn a poslany pres AF_UNIX
  * (SCM_RIGHTS) jinemu procesu. Krok "netrole": potomek s MO_NET ma vlastni
- * relaci site (role Net), bez ni zadnou.
+ * relaci site (role Net), bez ni zadnou. Krok "bind": port je obsazeny
+ * uz pri bind (getsockname, EADDRINUSE, connect z pevneho portu, UDP).
  */
 #include <arpa/inet.h>
 #include <errno.h>
@@ -427,6 +428,73 @@ static int netrole(void) {
     return 0;
 }
 
+/* --- bind pred listen/connect: port hned jako Linux (W4b) --- */
+
+static void lo_addr(struct sockaddr_in *a, uint16_t port) {
+    memset(a, 0, sizeof *a);
+    a->sin_family = AF_INET;
+    a->sin_port = htons(port);
+    a->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+}
+
+static int bind_early(void) {
+    struct sockaddr_in a, got, after, peer;
+    socklen_t len;
+    char ch;
+    /* bind na port 0: getsockname hned zna port, listen ho necha. */
+    int l = socket(AF_INET, SOCK_STREAM, 0);
+    lo_addr(&a, 0);
+    if (l < 0 || bind(l, (struct sockaddr *)&a, sizeof a) != 0) return 1;
+    len = sizeof got;
+    if (getsockname(l, (struct sockaddr *)&got, &len) != 0 || got.sin_port == 0 ||
+        got.sin_addr.s_addr != htonl(INADDR_LOOPBACK))
+        return 2;
+    if (listen(l, 4) != 0) return 3;
+    len = sizeof after;
+    if (getsockname(l, (struct sockaddr *)&after, &len) != 0 || after.sin_port != got.sin_port) return 4;
+    int c = socket(AF_INET, SOCK_STREAM, 0);
+    if (c < 0 || connect(c, (struct sockaddr *)&got, sizeof got) != 0) return 5;
+    int s = accept(l, NULL, NULL);
+    if (s < 0) return 6;
+    close(s);
+    close(c);
+    /* Dva bind na stejny port: druhy EADDRINUSE (bez listen), po zavreni volno. */
+    int b1 = socket(AF_INET, SOCK_STREAM, 0), b2 = socket(AF_INET, SOCK_STREAM, 0);
+    lo_addr(&a, 47101);
+    if (bind(b1, (struct sockaddr *)&a, sizeof a) != 0) return 7;
+    if (bind(b2, (struct sockaddr *)&a, sizeof a) == 0 || errno != EADDRINUSE) return 8;
+    close(b1);
+    if (bind(b2, (struct sockaddr *)&a, sizeof a) != 0) return 9;
+    close(b2);
+    /* bind na pevny port a connect z nej: protejsek vidi ten port. */
+    int k = socket(AF_INET, SOCK_STREAM, 0);
+    lo_addr(&a, 47102);
+    if (bind(k, (struct sockaddr *)&a, sizeof a) != 0) return 10;
+    if (connect(k, (struct sockaddr *)&got, sizeof got) != 0) return 11;
+    len = sizeof peer;
+    s = accept(l, (struct sockaddr *)&peer, &len);
+    if (s < 0 || peer.sin_port != htons(47102)) return 12;
+    len = sizeof after;
+    if (getsockname(k, (struct sockaddr *)&after, &len) != 0 || after.sin_port != htons(47102)) return 13;
+    if (write_all(k, "x", 1) != 0 || read(s, &ch, 1) != 1 || ch != 'x') return 14;
+    close(s);
+    close(k);
+    /* UDP: port hned po bind na 0, stejny pevny port dvakrat EADDRINUSE. */
+    int u1 = socket(AF_INET, SOCK_DGRAM, 0), u2 = socket(AF_INET, SOCK_DGRAM, 0);
+    lo_addr(&a, 0);
+    if (bind(u1, (struct sockaddr *)&a, sizeof a) != 0) return 15;
+    len = sizeof after;
+    if (getsockname(u1, (struct sockaddr *)&after, &len) != 0 || after.sin_port == 0) return 16;
+    close(u1);
+    u1 = socket(AF_INET, SOCK_DGRAM, 0);
+    lo_addr(&a, 47103);
+    if (bind(u1, (struct sockaddr *)&a, sizeof a) != 0) return 17;
+    if (bind(u2, (struct sockaddr *)&a, sizeof a) == 0 || errno != EADDRINUSE) return 18;
+    close(u1);
+    close(u2);
+    return close(l);
+}
+
 int net_main(void) {
     STEP("tcp", tcp_echo());
     STEP("udp", udp_echo());
@@ -435,6 +503,7 @@ int net_main(void) {
     STEP("accept", listen_accept());
     STEP("share", share());
     STEP("netrole", netrole());
+    STEP("bind", bind_early());
     if (fails == 0) puts("ctest: hotovo");
     fflush(stdout);
     return fails == 0 ? 0 : 1;

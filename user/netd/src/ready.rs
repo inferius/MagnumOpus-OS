@@ -98,7 +98,9 @@ fn compute(stack: &mut Stack, o: &mut Obj) -> Signals {
                 bits = bits | ready::ERROR;
             }
         }
-        Kind::Session(_) => {}
+        // Navazany socket: zadne udalosti (klient ho jako nespojeny necha
+        // v `poll` hned pripraveny k zapisu s koncem, jako Linux).
+        Kind::Session(_) | Kind::Bound(_) => {}
     }
     bits
 }

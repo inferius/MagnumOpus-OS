@@ -32,6 +32,7 @@ pub fn request(stack: &mut Stack, auth: &AuthRef, code: u32, until: u64, r: &mut
         }
         op::TCP_CONNECT => tcp::connect(stack, auth, until, r),
         op::TCP_LISTEN => tcp::listen(stack, auth, r),
+        op::TCP_BIND => crate::bound::bind(stack, auth, r),
         op::UDP_BIND => udp::bind(stack, auth, r),
         op::RESOLVE => resolve::start(stack, auth, until, r),
         op::PING => ping::start(stack, auth, until, r),
@@ -126,7 +127,7 @@ pub fn progress(stack: &mut Stack, auth: &AuthRef, p: Pending, now: u64) -> Step
         Pending::Ask(a) => match ask_progress(stack, a, now) {
             Ok((granted, then)) => {
                 let r = match then {
-                    Deferred::Connect(req) => tcp::connect_start(stack, auth, req, granted),
+                    Deferred::Connect(req) => tcp::connect_start(stack, auth, req, granted, None),
                     Deferred::Ping(req) => ping::start_checked(stack, auth, req, granted),
                     Deferred::Resolve(req) => resolve::start_server(stack, auth, req, granted),
                     Deferred::SendTo { .. } => Err(Error::BadState),

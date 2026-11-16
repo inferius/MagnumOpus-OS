@@ -526,6 +526,8 @@ obecné části (předání socketu, role Net, loopback, `MSG_PEEK`) i aarch64.
 | `MSG_PEEK` u spojení TCP (wineserver jím při `POLLIN` pozná konec spojení) | **[ověřeno v QEMU]** x86_64 (sada `sit loopback`, sada `wine`) |
 | Winsock (`wintest tcp`): spojení, data oběma směry přes loopback a k echo serveru hostitele (cesta ven přes slirp) | **[ověřeno v QEMU]** x86_64 (testy `wine: Winsock TCP ... (W4b)`) |
 | PuTTY raw a telnet proti echo serveru testu na loopbacku: pozdrav serveru vidět v terminálu, text psaný z QEMU dojde na server, jeho ozvěna je vidět | **[ověřeno v QEMU]** x86_64 (testy `wine: PuTTY raw/telnet ... (W4b)`) |
+| Naslouchání programů Windows jen na loopbacku (`listen_from = "loopback"`), síť `WSAEACCES` | **[ověřeno v QEMU]** x86_64 (test `wine: Winsock naslouchani ... (W4b)`) |
+| Přijímání spojení ze sítě po dotazu uživateli | **[navrženo]** |
 
 **Jak socket putuje.** Wine vytváří sockety ve wineserveru a klientovi
 posílá fd přes `SCM_RIGHTS`. Socket TCP/UDP je u netd jeden objekt, ke
@@ -538,9 +540,19 @@ kanály). Relaci sítě dostane wineserver i každý program Wine rolí Net
 **Manifest Wine (`[network]`).** Práva `info`, `tcp`, `listen`, `udp`,
 `dns`; dotaz uživatele vypnutý (`ask = false`), spojení na libovolný cíl
 (`to = "*"`), naslouchání na portech 1024-65535; 256 socketů a 64 MiB
-bufferů na identitu. ⚠️ Programy Windows tak mají síť jako celek (bez
-dotazu na cíl); jemnější pravidla po aplikacích Windows patří do bodu 3
-(instalace programů Windows).
+bufferů na identitu; přijímat spojení jen z loopbacku
+(`listen_from = "loopback"`, [Oprávnění](sit.md#oprávnění)). ⚠️ Programy
+Windows tak mají odchozí síť jako celek (bez dotazu na cíl); jemnější
+pravidla po aplikacích Windows patří do bodu 3 (instalace programů
+Windows).
+
+⚠️ **Programy Wine zatím nemůžou přijímat spojení ze sítě.** Naslouchání
+na `0.0.0.0` nebo na adrese rozhraní skončí `WSAEACCES` (žádné tiché
+zúžení na loopback); na loopbacku funguje (test `wine: Winsock
+naslouchani ... (W4b)`). Otevřený port je jiná třída rizika než odchozí
+spojení: povolí ho až obecný dotaz uživateli „Program X chce přijímat
+spojení ze sítě“ (povolení přes dialog povolení jako mikrofon, i pro
+`sshd` a nativní aplikace) **[navrženo]**.
 
 **Dvě opravy pro Wine.**
 

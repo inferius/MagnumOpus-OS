@@ -240,6 +240,12 @@ pub fn on_message(stack: &mut Stack, o: &mut Obj, data: Vec<u8>, created: &mut V
         dup(o, h.id, created);
         return;
     }
+    if h.op == op::KIND {
+        let mut w = Writer::new();
+        w.u8(obj::sock_kind(&o.kind.borrow()));
+        let _ = o.ch.write(&msg::reply(h.id, Ok(w)), Vec::new());
+        return;
+    }
     let backlogged = o.backlog.iter().any(|d| header_of(d).is_some_and(|x| x.id == h.id));
     if backlogged || o.ops.iter().any(|x| x.id == h.id) {
         // Cislo uz patri rozpracovanemu dotazu: odpoved by se nedala

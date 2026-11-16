@@ -85,6 +85,7 @@ whole system, so they go first.
 |---|---|---|---|---|---|
 | O15 | **Trust badge** on Files and the Task manager says "System". The prototype shows the app name and its permission icon (Files + home). | [okna.html](../../design/okna.html) (Trust badge), [soubory.html](../../design/soubory.html) | comp | P2 | S |
 | O16 | **Window buttons with a custom title** (Terminal) are grey as in an inactive window, even when the window has focus. Screenshot [08](../../design/snimky/odchylky/08-terminal.png). | [okna.html](../../design/okna.html) (Window modes) | comp | P3 | S |
+| O27 | **Owner popup behind a dialog**: while an owned dialog holds the focus (e.g. after Wine windows are recovered after a compositor crash), the owner's popup (menu) is not drawn; it shows again when the focus returns to the owner. The compositor draws `POPOVER` layers only for the focused window ([Windows layer, W4](windows-layer.md#sound-clipboard-and-window-recovery-w4)). | [okna.html](../../design/okna.html) (Window modes) | comp | P3 | S |
 
 ## Files
 

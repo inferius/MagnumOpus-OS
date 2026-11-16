@@ -314,6 +314,17 @@ impl Net {
         Err(last)
     }
 
+    /// Navazani socketu TCP na mistni adresu: port je obsazeny hned
+    /// (`0` = prideli sluzba, adresa z `TcpBound::local_addr`), pak
+    /// `listen` nebo `connect` z nej. `ADDRESS_IN_USE`, kdyz port drzi
+    /// jiny socket.
+    pub fn tcp_bind_addr(&self, addr: SocketAddr) -> Result<TcpBound> {
+        let mut w = Writer::new();
+        w.socket_addr(addr);
+        let (_, ch) = one_channel(call(&self.mux, op::TCP_BIND, w, Deadline::NONE, Wait::Immediate, None)?)?;
+        Ok(TcpBound { mux: Mux::new(ch) })
+    }
+
     /// Naslouchani TCP na mistnim portu (`0` = prideli sluzba); `backlog`
     /// = kolik spojeni muze cekat na `accept`.
     pub fn tcp_listen(&self, port: u16, backlog: u16) -> Result<TcpListener> {
@@ -464,8 +475,12 @@ pub struct TcpStream {
 
 impl TcpStream {
     fn new(ch: Channel, local: SocketAddr, remote: SocketAddr) -> Self {
+        Self::with_mux(Mux::new(ch), local, remote)
+    }
+
+    fn with_mux(mux: Arc<Mux>, local: SocketAddr, remote: SocketAddr) -> Self {
         Self {
-            mux: Mux::new(ch),
+            mux,
             shared: Arc::new(StreamShared {
                 read_timeout: Timeout::new(),
                 write_timeout: Timeout::new(),
@@ -628,6 +643,83 @@ impl crate::io::Write for &TcpStream {
 fn local_addr_of(m: &Arc<Mux>) -> Result<SocketAddr> {
     let b = call_now(m, op::LOCAL_ADDR, Writer::new())?;
     Reader::new(&b).socket_addr()
+}
+
+/// Navazany socket TCP (`bind` bez `listen`/`connect`): drzi port. `listen`
+/// a `connect` kanal prevedou na naslouchani / spojeni (sdileji ho).
+pub struct TcpBound {
+    mux: Arc<Mux>,
+}
+
+/// Stav navazaneho socketu u sluzby ([`TcpBound::current`]).
+pub enum BoundNow {
+    /// Porad navazany.
+    Bound,
+    /// Jiny kanal po `DUP` ho prevedl na naslouchani.
+    Listener(TcpListener),
+    /// ... nebo na spojeni.
+    Stream(TcpStream),
+}
+
+impl TcpBound {
+    /// Co je socket ted (jiny kanal po `DUP`, napr. wineserver, ho mohl
+    /// prevest); naslouchani a spojeni sdileji kanal tohoto objektu.
+    pub fn current(&self) -> Result<BoundNow> {
+        let b = call_now(&self.mux, op::KIND, Writer::new())?;
+        match Reader::new(&b).u8()? {
+            crate::sock_kind::BOUND => Ok(BoundNow::Bound),
+            crate::sock_kind::LISTENER => Ok(BoundNow::Listener(TcpListener { mux: self.mux.clone() })),
+            crate::sock_kind::STREAM => {
+                let a = call_now(&self.mux, op::ADDRS, Writer::new())?;
+                let mut r = Reader::new(&a);
+                let local = r.socket_addr()?;
+                let remote = r.socket_addr()?;
+                Ok(BoundNow::Stream(TcpStream::with_mux(self.mux.clone(), local, remote)))
+            }
+            _ => Err(Error::BadState),
+        }
+    }
+
+    /// Mistni adresa (port pridelen uz pri navazani).
+    pub fn local_addr(&self) -> Result<SocketAddr> {
+        local_addr_of(&self.mux)
+    }
+
+    /// Novy kanal ke stejnemu socketu (`DUP`, pro jiny proces).
+    pub fn dup(&self) -> Result<Channel> {
+        dup_of(&self.mux)
+    }
+
+    /// Navazany socket z kanalu od jineho procesu.
+    pub fn from_channel(ch: Channel) -> Self {
+        Self { mux: Mux::new(ch) }
+    }
+
+    /// Naslouchani na portu navazani.
+    pub fn listen(&self, backlog: u16, buffers: Buffers) -> Result<TcpListener> {
+        let mut w = Writer::new();
+        w.u16(backlog);
+        buffers.put(&mut w);
+        call_now(&self.mux, op::LISTEN, w)?;
+        Ok(TcpListener { mux: self.mux.clone() })
+    }
+
+    /// Spojeni z portu navazani (termin a zruseni jako
+    /// [`Net::tcp_connect_ctx`]).
+    pub fn connect_ctx(
+        &self,
+        addr: SocketAddr,
+        deadline: Deadline,
+        buffers: Buffers,
+        cancel: Option<&CancelToken>,
+    ) -> Result<TcpStream> {
+        let mut w = Writer::new();
+        w.socket_addr(addr);
+        buffers.put(&mut w);
+        let (b, _) = call(&self.mux, op::CONNECT, w, deadline, Wait::Gated, cancel)?;
+        let local = Reader::new(&b).socket_addr()?;
+        Ok(TcpStream::with_mux(self.mux.clone(), local, addr))
+    }
 }
 
 /// Naslouchani TCP.

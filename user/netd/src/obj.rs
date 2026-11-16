@@ -118,6 +118,8 @@ pub enum Kind {
     Udp(Udp),
     /// Spojeni na loopbacku (`lo.rs`).
     LoStream(lo::LoStream),
+    /// Navazany socket TCP pred `LISTEN`/`CONNECT` (`bound.rs`).
+    Bound(crate::bound::Bound),
 }
 
 pub struct Stream {
@@ -369,16 +371,35 @@ pub fn request(stack: &mut Stack, kind: &mut Kind, code: u32, until: u64, r: &mu
         Kind::Listener(l) => tcp::listener_request(stack, l, code, until, r),
         Kind::Udp(u) => udp::request(stack, u, code, until, r),
         Kind::LoStream(s) => lo::stream_request(stack, s, code, until, r),
+        Kind::Bound(b) => crate::bound::request(stack, b, code, until, r),
     };
-    match step {
+    let step = match step {
         Ok(s) => s,
         Err(e) => Step::err(e),
+    };
+    convert(kind, step)
+}
+
+/// Navazany socket po `LISTEN`/`CONNECT`: novy stav na miste (vidi ho
+/// vsechny kanaly po `DUP`), klient zadny novy kanal nedostane. Port
+/// prechazi na naslouchani / spojeni.
+fn convert(kind: &mut Kind, step: Step) -> Step {
+    match step {
+        Step::Done(Ok(w), Some(new)) if matches!(kind, Kind::Bound(_)) => {
+            *kind = new;
+            Step::Done(Ok(w), None)
+        }
+        s => s,
     }
 }
 
 /// Posun rozpracovaneho pozadavku (po zpracovani site nebo vyprseni).
 pub fn progress(stack: &mut Stack, kind: &mut Kind, p: Pending) -> Step {
     let now = now_ns();
+    if let Kind::Bound(b) = kind {
+        let step = crate::bound::progress(stack, b, p, now);
+        return convert(kind, step);
+    }
     match (kind, p) {
         (Kind::Session(auth), p) => session::progress(stack, auth, p, now),
         (Kind::Stream(s), p) => tcp::stream_progress(stack, s, p, now),
@@ -413,6 +434,18 @@ pub fn cancel_pending(stack: &mut Stack, p: Pending) -> Result<Writer> {
     Err(Error::Canceled)
 }
 
+/// Druh objektu pro `op::KIND` (navazany socket mohl prevest jiny kanal).
+pub fn sock_kind(kind: &Kind) -> u8 {
+    use netproto::sock_kind as k;
+    match kind {
+        Kind::Session(_) => k::SESSION,
+        Kind::Stream(_) | Kind::LoStream(_) => k::STREAM,
+        Kind::Listener(_) => k::LISTENER,
+        Kind::Udp(_) => k::UDP,
+        Kind::Bound(_) => k::BOUND,
+    }
+}
+
 /// Identita aplikace objektu (relace podle vrstev, socket podle relace,
 /// ktera ho vytvorila; systemove = "system").
 pub fn identity(kind: &Kind) -> String {
@@ -422,6 +455,7 @@ pub fn identity(kind: &Kind) -> String {
         Kind::Listener(l) => l.app.clone(),
         Kind::Udp(u) => u.app.clone(),
         Kind::LoStream(s) => s.app.clone(),
+        Kind::Bound(b) => b.app.clone(),
     }
 }
 
@@ -451,5 +485,6 @@ pub fn close(stack: &mut Stack, kind: Kind, ops: Vec<Op>) {
         Kind::Listener(l) => tcp::close_listener(stack, l),
         Kind::Udp(u) => udp::close(stack, u),
         Kind::LoStream(s) => lo::close_stream(stack, s),
+        Kind::Bound(b) => crate::bound::close(stack, b),
     }
 }

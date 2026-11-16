@@ -2,6 +2,8 @@
 //!
 //! Socket z `socket()` jeste nema spojeni u netd: `bind`, `listen`,
 //! `connect` ho prevedou na naslouchani, spojeni TCP nebo socket UDP.
+//! `bind` TCP obsadi port u netd hned (navazany socket, `TCP_BIND`):
+//! `getsockname` zna port a kolize je `ADDRESS_IN_USE` uz z `bind`.
 //! Objekty netproto jsou `Send + Sync` s `&self`, proto stav drzi jen
 //! zamek prechodu a I/O bezi bez nej (cteni a zapis z ruznych vlaken).
 //! Neblokujici rezim = termin `Deadline::TRY` (`ShouldWait` -> `EAGAIN`).
@@ -12,7 +14,7 @@ use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use core::time::Duration;
 
 use libos::sync::Mutex;
-use netproto::{Buffers, Deadline, Readiness, TcpListener, TcpStream, UdpSocket};
+use netproto::{BoundNow, Buffers, Deadline, Readiness, TcpBound, TcpListener, TcpStream, UdpSocket};
 
 use crate::{Error, Result};
 
@@ -24,8 +26,10 @@ pub enum Kind {
 }
 
 enum State {
-    /// Po `socket()` (pripadne s adresou z `bind` u TCP).
-    New { bound: Option<SocketAddr> },
+    /// Po `socket()`.
+    New,
+    /// TCP po `bind` (port obsazeny u netd).
+    Bound(Arc<TcpBound>),
     Stream(Arc<TcpStream>),
     Listener(Arc<TcpListener>),
     /// UDP s cilem po `connect` (filtr prijmu a vychozi cil odeslani).
@@ -61,7 +65,7 @@ impl Socket {
         Socket {
             kind,
             v6,
-            state: Mutex::new(State::New { bound: None }),
+            state: Mutex::new(State::New),
             timeouts: Mutex::new((None, None)),
             ready: Mutex::new(None),
         }
@@ -76,17 +80,13 @@ impl Socket {
         w.u8(if self.kind == Kind::Stream { 1 } else { 2 }).u8(u8::from(self.v6));
         let st = self.state.lock();
         let (kind, ch) = match &*st {
-            State::New { bound } => {
-                match bound {
-                    Some(a) => {
-                        w.u8(1);
-                        netproto::WriteAddr::socket_addr(&mut w, *a);
-                    }
-                    None => {
-                        w.u8(0);
-                    }
-                }
+            State::New => {
+                w.u8(0);
                 (fd_kind::SOCKET_NEW, None)
+            }
+            State::Bound(b) => {
+                w.u8(4);
+                (fd_kind::SOCKET, Some(b.dup()?))
             }
             State::Stream(s) => {
                 w.u8(1);
@@ -122,12 +122,18 @@ impl Socket {
         let v6 = r.u8()? != 0;
         let me = Socket::new(k, v6);
         let st = match kind {
-            fd_kind::SOCKET_NEW => State::New { bound: if r.u8()? != 0 { Some(r.socket_addr()?) } else { None } },
+            fd_kind::SOCKET_NEW => {
+                if r.u8()? != 0 {
+                    return Err(Error::Corrupted);
+                }
+                State::New
+            }
             fd_kind::SOCKET => {
                 let ch = libos::Channel::from_handle(handle.ok_or(Error::Corrupted)?);
                 match r.u8()? {
                     1 => State::Stream(Arc::new(TcpStream::from_channel(ch)?)),
                     2 => State::Listener(Arc::new(TcpListener::from_channel(ch))),
+                    4 => State::Bound(Arc::new(TcpBound::from_channel(ch))),
                     3 => {
                         let peer = if r.u8()? != 0 { Some(r.socket_addr()?) } else { None };
                         State::Udp(Arc::new(UdpSocket::from_channel(ch)), peer)
@@ -148,30 +154,43 @@ impl Socket {
         me
     }
 
-    pub fn bind(&self, addr: SocketAddr) -> Result<()> {
+    /// Navazany socket mohl jiny proces se stejnym socketem (po `DUP`,
+    /// napr. wineserver) prevest na naslouchani nebo spojeni: stav podle
+    /// netd. Mimo stav `Bound` nic nestoji.
+    fn settle(&self) -> Result<()> {
         let mut st = self.state.lock();
-        let State::New { bound } = &mut *st else { return Err(Error::InvalidArgs) };
-        if bound.is_some() {
-            return Err(Error::InvalidArgs);
-        }
-        match self.kind {
-            // TCP: adresu si pamatuje, kanal vznikne az pri listen/connect.
-            Kind::Stream => *bound = Some(addr),
-            Kind::Datagram => {
-                let u = net()?.udp_bind_addr(addr, Buffers::DEFAULT)?;
-                *st = State::Udp(Arc::new(u), None);
+        if let State::Bound(b) = &*st {
+            match b.current()? {
+                BoundNow::Bound => {}
+                BoundNow::Listener(l) => *st = State::Listener(Arc::new(l)),
+                BoundNow::Stream(s) => *st = State::Stream(Arc::new(s)),
             }
         }
         Ok(())
     }
 
+    pub fn bind(&self, addr: SocketAddr) -> Result<()> {
+        let mut st = self.state.lock();
+        let State::New = &*st else { return Err(Error::InvalidArgs) };
+        *st = match self.kind {
+            // TCP: port obsazeny hned (navazany socket u netd).
+            Kind::Stream => State::Bound(Arc::new(net()?.tcp_bind_addr(addr)?)),
+            Kind::Datagram => State::Udp(Arc::new(net()?.udp_bind_addr(addr, Buffers::DEFAULT)?), None),
+        };
+        Ok(())
+    }
+
     pub fn listen(&self, backlog: u16) -> Result<()> {
+        self.settle()?;
         let mut st = self.state.lock();
         match &*st {
             State::Listener(_) => return Ok(()),
-            State::New { bound } if self.kind == Kind::Stream => {
-                let addr = bound.unwrap_or_else(|| any(self.v6));
-                let l = net()?.tcp_listen_addr(addr, backlog.max(1), Buffers::DEFAULT)?;
+            State::New if self.kind == Kind::Stream => {
+                let l = net()?.tcp_listen_addr(any(self.v6), backlog.max(1), Buffers::DEFAULT)?;
+                *st = State::Listener(Arc::new(l));
+            }
+            State::Bound(b) => {
+                let l = b.listen(backlog.max(1), Buffers::DEFAULT)?;
                 *st = State::Listener(Arc::new(l));
             }
             _ => return Err(Error::InvalidArgs),
@@ -179,13 +198,14 @@ impl Socket {
         Ok(())
     }
 
-    /// `connect`: TCP spojeni (blokuje i v neblokujicim rezimu - POSIX
-    /// dovoluje dokonceni hned), UDP jen zapamatuje cil.
+    /// `connect`: TCP spojeni (i z portu navazaneho socketu; ceka na
+    /// navazani i v neblokujicim rezimu, `cstd` pak hlasi `EINPROGRESS`),
+    /// UDP jen zapamatuje cil.
     pub fn connect(&self, to: SocketAddr, nonblock: bool) -> Result<()> {
         let _ = nonblock;
         if self.kind == Kind::Datagram {
             let mut st = self.state.lock();
-            if let State::New { .. } = &*st {
+            if let State::New = &*st {
                 let u = net()?.udp_bind_addr(any(self.v6), Buffers::DEFAULT)?;
                 *st = State::Udp(Arc::new(u), None);
             }
@@ -194,21 +214,28 @@ impl Socket {
             }
             return Ok(());
         }
-        {
+        self.settle()?;
+        // Navazovani bezi bez zamku stavu (muze cekat na sit a dotaz).
+        let bound = {
             let st = self.state.lock();
             match &*st {
-                State::New { .. } => {}
+                State::New => None,
+                State::Bound(b) => Some(b.clone()),
                 State::Stream(_) => return Err(Error::AlreadyExists),
                 _ => return Err(Error::InvalidArgs),
             }
-        }
-        let t = self.timeouts.lock().1;
-        let s = net()?.tcp_connect_ctx(to, Deadline::after(t), Buffers::DEFAULT, None)?;
+        };
+        let d = Deadline::after(self.timeouts.lock().1);
+        let s = match &bound {
+            Some(b) => b.connect_ctx(to, d, Buffers::DEFAULT, None)?,
+            None => net()?.tcp_connect_ctx(to, d, Buffers::DEFAULT, None)?,
+        };
         *self.state.lock() = State::Stream(Arc::new(s));
         Ok(())
     }
 
     pub fn accept(&self, nonblock: bool) -> Result<(Socket, SocketAddr)> {
+        self.settle()?;
         let l = match &*self.state.lock() {
             State::Listener(l) => l.clone(),
             _ => return Err(Error::InvalidArgs),
@@ -218,6 +245,7 @@ impl Socket {
     }
 
     fn stream(&self) -> Result<Arc<TcpStream>> {
+        self.settle()?;
         match &*self.state.lock() {
             State::Stream(s) => Ok(s.clone()),
             _ => Err(Error::BadState),
@@ -294,7 +322,7 @@ impl Socket {
         // UDP bez bind: automaticky na libovolny port (jako POSIX).
         {
             let mut st = self.state.lock();
-            if let State::New { .. } = &*st {
+            if let State::New = &*st {
                 let u = net()?.udp_bind_addr(any(self.v6), Buffers::DEFAULT)?;
                 *st = State::Udp(Arc::new(u), None);
             }
@@ -307,8 +335,10 @@ impl Socket {
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr> {
+        self.settle()?;
         match &*self.state.lock() {
-            State::New { bound } => Ok(bound.unwrap_or_else(|| any(self.v6))),
+            State::New => Ok(any(self.v6)),
+            State::Bound(b) => b.local_addr(),
             State::Stream(s) => Ok(s.local_addr()),
             State::Listener(l) => l.local_addr(),
             State::Udp(u, _) => u.local_addr(),
@@ -316,6 +346,7 @@ impl Socket {
     }
 
     pub fn peer_addr(&self) -> Result<SocketAddr> {
+        self.settle()?;
         match &*self.state.lock() {
             State::Stream(s) => Ok(s.peer_addr()),
             State::Udp(_, Some(p)) => Ok(*p),
@@ -344,18 +375,21 @@ impl Socket {
     }
 
     pub fn is_listening(&self) -> bool {
+        let _ = self.settle();
         matches!(&*self.state.lock(), State::Listener(_))
     }
 
     /// Event pripravenosti (bity `netproto::ready`); `None` = socket jeste
     /// nema kanal (po `socket()` bez `connect`/`listen`/`bind`).
     pub fn readiness(&self) -> Result<Option<Arc<Readiness>>> {
+        self.settle()?;
         let mut r = self.ready.lock();
         if let Some(x) = r.as_ref() {
             return Ok(Some(x.clone()));
         }
         let new = match &*self.state.lock() {
-            State::New { .. } => return Ok(None),
+            // Bez spojeni: zadna udalost netd (`poll` jako Linux).
+            State::New | State::Bound(_) => return Ok(None),
             State::Stream(s) => s.readiness()?,
             State::Listener(l) => l.readiness()?,
             State::Udp(u, _) => u.readiness()?,
