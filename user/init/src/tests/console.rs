@@ -54,12 +54,16 @@ pub(super) fn console(s: &Startup) -> TestResult {
         StartHandle::new(libos::abi::bootstrap::kind::INITFS, 0, vmo.handle().duplicate(None).map_err(|e| fail("initfs", e))?),
     ];
     let image = initfs.find("termd").ok_or("termd neni v initfs")?;
-    let (_termd, window) = libos::spawn("termd", image, handles).map_err(|e| fail("spusteni termd", e))?;
+    let (termd, window) = libos::spawn("termd", image, handles).map_err(|e| fail("spusteni termd", e))?;
+    // termd a konzole skonci i po chybe testu (jinak bezi do konce behu
+    // i s relaci shsess).
+    let mut reap = super::restore::Reap(alloc::vec![termd]);
     let image = initfs.find("console").ok_or("console neni v initfs")?;
     // Kanal pripojeni (v beznem behu ho obsluhuje init, `terminal.rs`).
     let (conn, conn_there) = Channel::create().map_err(|e| fail("kanal pripojeni", e))?;
-    let (_console, ctl) = libos::spawn("console", image, alloc::vec![StartHandle::user(conn_there.into_handle())])
+    let (console, ctl) = libos::spawn("console", image, alloc::vec![StartHandle::user(conn_there.into_handle())])
         .map_err(|e| fail("spusteni console", e))?;
+    reap.0.push(console);
     let m = conn.read(Some(time::deadline_after(Duration::from_secs(10)))).map_err(|e| fail("connect od konzole", e))?;
     if m.data != b"connect" {
         return Err("konzole neposlala connect".into());

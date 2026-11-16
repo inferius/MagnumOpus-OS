@@ -39,6 +39,7 @@ fn dataset_again(_: &Startup) -> TestResult {
     let _ = f.create("/f2-znovu/po.txt", kind::FILE);
     f.write("/f2-znovu/po.txt", 0, b"po kolizi").map_err(|e| fail("zapis po kolizi", e))?;
     f.commit().map_err(|e| fail("commit po kolizi", e))?;
+    f.delete_dataset("/f2-znovu").map_err(|e| fail("uklid datasetu", e))?;
     Ok(())
 }
 

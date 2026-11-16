@@ -75,11 +75,32 @@ impl Drop for Restore<'_> {
     }
 }
 
-fn remove_tree(fs: &FsClient, path: &str) -> libos::Result<()> {
-    if fs.stat(path)?.kind == fsproto::kind::DIR {
+/// Smaze strom `path` (soubory, slozky, datasety i s vnorenymi).
+pub(super) fn remove_tree(fs: &FsClient, path: &str) -> libos::Result<()> {
+    let kind = fs.stat(path)?.kind;
+    if kind == fsproto::kind::DIR || kind == fsproto::kind::DATASET {
         for e in fs.list(path)? {
             remove_tree(fs, &alloc::format!("{path}/{}", e.name))?;
         }
     }
-    fs.remove(path)
+    // STAT na koreni datasetu muze vratit DIR (koren je slozka datasetu);
+    // `remove` pak vrati WRONG_TYPE a dataset se maze jako dataset.
+    match fs.remove(path) {
+        Err(libos::Error::WrongType) => fs.delete_dataset(path),
+        r => r,
+    }
+}
+
+/// Procesy spustene testem: pri dropu (i po chybe testu) je ukonci a pocka
+/// na konec, aby po sade nezustaly bezet (`state.rs` hlasi `procesy`).
+pub struct Reap(pub Vec<libos::Process>);
+
+impl Drop for Reap {
+    fn drop(&mut self) {
+        // Pozpatku: nejdriv posledni spusteny (napr. konzole pred termd).
+        for p in self.0.iter().rev() {
+            let _ = p.kill();
+            let _ = p.wait_exit(Some(libos::time::deadline_after(core::time::Duration::from_secs(5))));
+        }
+    }
 }

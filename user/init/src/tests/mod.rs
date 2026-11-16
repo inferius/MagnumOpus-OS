@@ -23,6 +23,7 @@ mod download;
 mod notify;
 mod removable;
 pub(crate) mod restore;
+mod state;
 mod removable_copy;
 mod display;
 mod drivers;
@@ -254,6 +255,7 @@ pub fn run_all(startup: &Startup) -> usize {
             if only.is_empty() && ON_REQUEST.contains(suite) {
                 continue;
             }
+            let before = state::take();
             for (name, test) in *tests {
                 let start = libos::time::now();
                 match test(startup) {
@@ -270,6 +272,16 @@ pub fn run_all(startup: &Startup) -> usize {
                 if ms > 20_000 {
                     println!("[pomaly] {suite}: {name}: {ms} ms");
                 }
+            }
+            // Co sada nechala (soubory, opravneni, procesy, media).
+            let after = state::settled(&before);
+            let left = state::diff(&before, &after);
+            if !left.is_empty() {
+                println!("init: stav po sade {suite}: {}", left.join("; "));
+            }
+            let removed = state::cleanup(&before, &after);
+            if !removed.is_empty() {
+                println!("init: uklid po sade {suite}: smazano {removed:?}");
             }
             // Pamet po sade (job initu = cely system): unik se pozna podle
             // toho, ktera sada pamet nevrati.

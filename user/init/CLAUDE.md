@@ -45,6 +45,7 @@ První proces v userspace: spouští služby (`timed`, `acpid`, `devmgr`, `fsd`,
 
 - Test delší než 20 s se v logu označí `[pomaly]`; každé další kolo `--repeat` přidá 60 s k limitu.
 - Globální stav FS (popis oprávnění `/`, `/home`, zákaz spouštění) mění test jen přes `tests/restore.rs` (`Restore`: vrátí původní hodnoty při dropu, i po chybě); jinak změna prosákne do dalších sad (`ucty`: výpis `/home`). Velká data v testech generovat a ověřovat po částech: heap initu se nezmenšuje.
-- Žádné pevné časování bez termínu: testy čekají s deadlinem, jinak visí celý běh.
+- Po každé sadě `tests/state.rs` porovná stav (`/`, `/tmp`, ACL `/` a `/home`, běžící procesy, média) a vypíše `init: stav po sade <sada>: ...`; soubory a datasety, které sada založila v `/` a `/tmp`, smaže (`init: uklid po sade ...`). Úklid je pojistka, ne náhrada `Restore` - sada má uklízet sama; procesy a ACL se jen hlásí.
+- Žádné pevné časování bez termínu: testy čekají s deadlinem, jinak visí celý běh. Souběh/pořadí ověřovat stavem (překryv intervalů, pořadí událostí), ne celkovou dobou běhu - pod zatíženým TCG se doba natáhne (shell `await all`).
 - Sada, která si vezme ovladač z `display_native::NATIVES`, ho musí na konci vrátit (běžná instance, ne obnova), jinak další kolo `--repeat` ani další sady ovladač nenajdou. Kompozitoru v testu dávat duplikát konce klienta, ne jediný konec (jeho konec by ukončil ovladač).
 - `src/tests/` je velké (přes 17 000 řádků celého crate): nové testy do nových souborů, ne do existujících nad ~1500 řádků.
