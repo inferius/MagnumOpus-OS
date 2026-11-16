@@ -1,4 +1,4 @@
-//! Vymenna media (docs/cs/media.md): flash disky USB s FAT32 a NTFS
+//! Vymenna media (docs/cs/media.md): flash disky USB s FAT32, exFAT a NTFS
 //! (xtask `mediadisks.rs`, `removable=on`) se pri startu pripoji do
 //! `/media/<jmenovka>`, uzivatelska relace je cte a na FAT zapisuje, NTFS je
 //! jen pro cteni, bezpecne odpojeni media zmizi. Pak flash disk zasunuty
@@ -18,11 +18,18 @@ use libos::{Error, Startup, println, time};
 use super::{Test, TestResult, devices, fail};
 use crate::{check, check_eq};
 
-pub const TESTS: &[Test] = &[("flash disky FAT32 a NTFS, zapis, odpojeni, zasunuti za behu", media)];
+pub const TESTS: &[Test] = &[("flash disky FAT32, exFAT a NTFS, zapis, odpojeni, zasunuti za behu", media)];
 
 /// Musi sedet s `xtask/src/mediadisks.rs`.
 const FAT: &str = "MOTEST";
 const NTFS: &str = "mylabel";
+const EXFAT: &str = "EXTEST";
+const EXFAT_FILE: &str = "Dokumenty/Žluťoučký kůň - exFAT.txt";
+const EXFAT_TEXT: &str = "ahoj z hostitele na exFAT\n";
+const EXFAT_GUEST_DIR: &str = "Zapsáno v systému";
+const EXFAT_GUEST: &str = "Velmi dlouhé jméno souboru zapsaného systémem MagnumOpus.bin";
+const EXFAT_GUEST_LEN: usize = 200_000;
+const EXFAT_MARK: &str = "media: exfat zapsano a odpojeno";
 const HOT: &str = "HOTPLUG";
 const FAT_FILE: &str = "Přílišžluťoučký kůň.txt";
 const FAT_TEXT: &str = "ahoj z hostitele\n";
@@ -62,12 +69,14 @@ fn wait_list(fs: &FsClient, what: &str, want: impl Fn(&[MediaEntry]) -> bool) ->
 
 fn media(_: &Startup) -> TestResult {
     let sys = devices().and_then(|d| d.fs.as_ref()).ok_or("sluzba fsd nebezi")?;
-    let list = wait_list(sys, "media pri startu", |l| l.iter().any(|m| m.name == FAT) && l.iter().any(|m| m.name == NTFS))?;
+    let list = wait_list(sys, "media pri startu", |l| [FAT, NTFS, EXFAT].iter().all(|n| l.iter().any(|m| m.name == *n)))?;
     let fat = list.iter().find(|m| m.name == FAT).ok_or("FAT")?;
     let ntfs = list.iter().find(|m| m.name == NTFS).ok_or("NTFS")?;
     check_eq!((fat.fs.as_str(), fat.read_only), ("fat", false), "FAT na vymennem USB zapisovatelny");
     check!(fat.total_bytes > 50 << 20 && fat.free_bytes > 0, "velikost FAT");
     check_eq!((ntfs.fs.as_str(), ntfs.read_only), ("ntfs", true), "NTFS jen pro cteni");
+    let exfat = list.iter().find(|m| m.name == EXFAT).ok_or("exFAT")?;
+    check_eq!((exfat.fs.as_str(), exfat.read_only), ("exfat", false), "exFAT na vymennem USB zapisovatelny");
 
     // Uzivatelska relace (Soubory, aplikace) vidi /media.
     let (_, user) = sys.connect_as(USER, &[], &Profile::Standard.user_mounts()).map_err(|e| fail("relace uzivatele", e))?;
@@ -95,6 +104,23 @@ fn media(_: &Startup) -> TestResult {
     check_eq!(user.read(&format!("{nroot}/file-with-12345"), 0, 100).map_err(|e| fail("cteni NTFS", e))?, b"12345".to_vec(), "NTFS cteni");
     check_eq!(user.list(&format!("{nroot}/many_subdirs")).map(|l| l.len()), Ok(512), "NTFS slozka s indexem");
     check_eq!(user.write(&format!("{nroot}/file-with-12345"), 0, b"x").err(), Some(Error::ReadOnly), "NTFS zapis odmitnut");
+
+    // exFAT: cteni z hostitele, zapis vetsiho souboru s dlouhym jmenem
+    // (vic clusteru, pres docasne jmeno), odpojeni; overi xtask.
+    let eroot = format!("/media/{EXFAT}");
+    let host = user.read(&format!("{eroot}/{EXFAT_FILE}"), 0, 4096).map_err(|e| fail("cteni exFAT", e))?;
+    check_eq!(host, EXFAT_TEXT.as_bytes().to_vec(), "exFAT: soubor z hostitele");
+    user.create(&format!("{eroot}/{EXFAT_GUEST_DIR}"), fsproto::kind::DIR).map_err(|e| fail("slozka na exFAT", e))?;
+    let etmp = format!("{eroot}/{EXFAT_GUEST_DIR}/.docasny");
+    let edst = format!("{eroot}/{EXFAT_GUEST_DIR}/{EXFAT_GUEST}");
+    user.create(&etmp, fsproto::kind::FILE).map_err(|e| fail("soubor na exFAT", e))?;
+    let data: Vec<u8> = (0..EXFAT_GUEST_LEN).map(|i| (i * 31 % 251) as u8).collect();
+    user.write(&etmp, 0, &data).map_err(|e| fail("zapis na exFAT", e))?;
+    user.rename(&etmp, &edst).map_err(|e| fail("prejmenovani na exFAT", e))?;
+    check_eq!(user.stat(&edst).map(|s| s.size), Ok(EXFAT_GUEST_LEN as u64), "exFAT: velikost");
+    check_eq!(user.read(&edst, 150_000, 100).map_err(|e| fail("cteni zpet z exFAT", e))?, data[150_000..150_100].to_vec(), "exFAT: obsah zpet");
+    user.media_remove(EXFAT).map_err(|e| fail("odpojeni exFAT", e))?;
+    println!("init: {EXFAT_MARK}");
 
     // Bezpecne odpojeni (Odpojit v Souborech = uzivatelska relace).
     user.media_remove(FAT).map_err(|e| fail("odpojeni FAT", e))?;

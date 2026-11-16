@@ -297,7 +297,10 @@ pub fn report_disks(name: &str, disks: &mut impl Disks, bootstrap: &Channel) -> 
 /// Cteni, ktera klient poslal bez cekani (`BlockClient::read`) a ktera na
 /// sebe navazuji, server u ovladace s vetsim [`Disks::max_read`] precte
 /// jednim volanim (`read_batch`).
-pub fn serve(name: &str, disks: &mut impl Disks, mut clients: Vec<Client>) {
+///
+/// Vraci `true`, kdyz skoncil kvuli odpojenemu zarizeni ([`Disks::gone`]):
+/// pak uz nema smysl zapisovat mezipamet.
+pub fn serve(name: &str, disks: &mut impl Disks, mut clients: Vec<Client>) -> bool {
     while !clients.is_empty() {
         let mut items: Vec<_> = clients
             .iter()
@@ -310,14 +313,14 @@ pub fn serve(name: &str, disks: &mut impl Disks, mut clients: Vec<Client>) {
             Ok((_, o)) => o,
             Err(e) => {
                 println!("{name}: cekani na klienty selhalo: {e}");
-                return;
+                return false;
             }
         };
         drop(items);
         if observed.len() > clients.len() {
             if observed[clients.len()].intersects(Signals::PEER_CLOSED) {
                 println!("{name}: zarizeni odpojeno, koncim");
-                return;
+                return true;
             }
             observed.truncate(clients.len());
         }
@@ -355,6 +358,7 @@ pub fn serve(name: &str, disks: &mut impl Disks, mut clients: Vec<Client>) {
             clients.remove(i);
         }
     }
+    false
 }
 
 /// Jeden pozadavek klienta a odpoved; `false` = kanal je zavreny.

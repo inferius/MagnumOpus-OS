@@ -1,5 +1,5 @@
 //! Proces vymenneho media (docs/cs/media.md): cizi souborovy system
-//! (FAT, NTFS jen pro cteni; exFAT pozdeji) nad kanalem oddilu media,
+//! (FAT a exFAT cteni i zapis, NTFS jen pro cteni) nad kanalem oddilu media,
 //! obsluha protokolu `volproto` pro fsd.
 //!
 //! Knihovna je nezavisla na systemu (testy na hostiteli nad obrazem
@@ -8,6 +8,7 @@
 //! nikdy nic mimo tento proces.
 
 pub mod dev;
+pub mod exfat;
 pub mod fat;
 pub mod ntfs;
 pub mod serve;

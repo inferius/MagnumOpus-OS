@@ -167,11 +167,20 @@ foreign FS code runs only there, never in `fsd`.
 |---|---|---|---|---|---|
 | crate `fatfs` | 0.3.6 | https://github.com/rafalh/rust-fatfs | MIT | závislost `user/volfs` (feature `std`) | FAT12/16/32 s dlouhými jmény, čtení i zápis / read and write |
 | crate `ntfs` | 0.4.0 | https://github.com/ColinFinck/ntfs | MIT OR Apache-2.0 | závislost `user/volfs` | NTFS jen pro čtení / read only |
+| crate `exfat-fs` | 0.1.3 | https://github.com/hannahfluch/exfat-fs | MIT | jen testy: `[dev-dependencies]` `user/volfs` a `xtask` | formátování testovacích obrazů exFAT a nezávislé čtení po zápisu (ověření na hostiteli); do systému se nedostane / test only: formats exFAT test images and reads them back independently |
 | obraz `testfs1` z crate `ntfs` | 0.4.0 | https://github.com/ColinFinck/ntfs/tree/master/testdata | MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE` vedle) | `third_party/test-images/ntfs/` | testovací obraz NTFS 2 MiB beze změny; vytvořen nástrojem `mkntfs` (ntfs-3g, GPL - jen nástroj, nelinkuje se) skriptem `create-testfs1.sh` / unchanged 2 MiB NTFS test image made with `mkntfs` by the script |
 
-exFAT zatím ne: patenty Microsoftu (licence OIN jen pro „Linux System“),
-rozhodnutí uživatele čeká. / exFAT not yet: Microsoft patents (the OIN
-licence covers only the "Linux System"), the user's decision is pending.
+exFAT je vlastní implementace (`user/volfs/src/exfat/`, čtení i zápis), ne
+převzatý kód. **Patenty:** specifikaci exFAT Microsoft zveřejnil (2019)
+a patenty dal do Open Invention Network, licence OIN ale kryje jen
+„Linux System“, ne jiné systémy. Odhad vypršení základních patentů exFAT
+je 2029-2030. Podporovat exFAT hned (čtení i zápis) rozhodl uživatel
+2026-11-16. / exFAT is our own implementation (read and write), not
+imported code. **Patents:** Microsoft published the exFAT specification
+(2019) and contributed the patents to the Open Invention Network, but the
+OIN licence covers only the "Linux System", not other systems. The core
+exFAT patents are estimated to expire in 2029-2030. Supporting exFAT now
+(read and write) was the user's decision on 2026-11-16.
 
 ## Testovací vektory AV1 a VP9 / AV1 and VP9 test vectors
 

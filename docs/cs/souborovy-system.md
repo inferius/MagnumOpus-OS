@@ -1928,6 +1928,7 @@ zůstávají. Z receptu systému se nezužuje. Jinak `ACCESS_DENIED`.
 | 131 | `UNMAP_VMO` | dataset u64, oid u64, okno u64 | - (relace okno uvolní, soubor se zapíše zpět) |
 | 132 | `SYNC_VMO` | dataset u64, oid u64, trvale u8 | - (zápis zpět, `trvale` = i `FSYNC`); relace bez okna souboru `SERVICE_RESTARTED` |
 | 133 | `ADOPT_VMO` | handle u64 (se zápisem), okno u64 + handle VMO staré instance (`WRITE`) | zapsaných stránek u32 (obnova po pádu fsd, [Soubory jako paměť](#soubory-jako-paměť)) |
+| 134-136 | `MEDIA_ADD`, `MEDIA_REMOVE`, `MEDIA_LIST` | vyměnitelná média v `/media` | viz [Vyměnitelná média](media.md#operace-fsd) **[ověřeno v QEMU]** |
 
 **`OPEN_STREAM`** **[ověřeno v QEMU]** (sada `cstd`, krok `posix2`:
 výstup potomka `posix_spawn` do souboru a 200 000 bajtů souboru na jeho
@@ -2018,7 +2019,7 @@ sezení přes `fsproto::perm::Profile`:
 | relace aplikace (`app_mounts`) | `/app` + vybrané položky | `/app` + vybrané položky | celý domov + `/app` |
 | zapamatovat výběr (`remember_picks`) | ano | ne (vždy dialog) | ano |
 | zákaz spouštění na datech (`noexec_on_data`) | ano | ano | ne |
-| relace uživatele (`user_mounts`) | `/ -> /`, rozhodují oprávnění | stejně | stejně |
+| relace uživatele (`user_mounts`) | `/ -> /` a `/media` ([vyměnitelná média](media.md)), rozhodují oprávnění | stejně | stejně |
 
 ```rust
 use fsproto::perm::{Mount, Profile, mount_flags};

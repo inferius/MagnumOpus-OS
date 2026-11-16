@@ -1999,6 +1999,7 @@ groups stay. A system recipe cannot be narrowed. Otherwise `ACCESS_DENIED`.
 | 131 | `UNMAP_VMO` | dataset u64, oid u64, window u64 | - (the session releases the window, the file is written back) |
 | 132 | `SYNC_VMO` | dataset u64, oid u64, durable u8 | - (write-back, `durable` = also `FSYNC`); a session without a window of the file `SERVICE_RESTARTED` |
 | 133 | `ADOPT_VMO` | handle u64 (with writing), window u64 + an old instance's VMO handle (`WRITE`) | pages written u32 (recovery after an fsd crash, [Files as memory](#files-as-memory)) |
+| 134-136 | `MEDIA_ADD`, `MEDIA_REMOVE`, `MEDIA_LIST` | removable media in `/media` | see [Removable media](media.md#fsd-operations) **[verified in QEMU]** |
 
 **`OPEN_STREAM`** **[verified in QEMU]** (suite `cstd`, step `posix2`: the
 output of a `posix_spawn` child into a file and 200 000 bytes of a file on
@@ -2098,7 +2099,7 @@ are outside). The session manager uses it through `fsproto::perm::Profile`:
 | application session (`app_mounts`) | `/app` + picked items | `/app` + picked items | whole home + `/app` |
 | remember picks (`remember_picks`) | yes | no (always the dialog) | yes |
 | no execution on data (`noexec_on_data`) | yes | yes | no |
-| user session (`user_mounts`) | `/ -> /`, permissions decide | same | same |
+| user session (`user_mounts`) | `/ -> /` and `/media` ([removable media](media.md)), permissions decide | same | same |
 
 ```rust
 use fsproto::perm::{Mount, Profile, mount_flags};

@@ -1,7 +1,7 @@
 //! volfs: proces jednoho vymenneho media (docs/cs/media.md).
 //!
 //! Spousti ho init pro kazdy oddil media (`block-media` od ovladace).
-//! Argumenty: `volfs <fs> <ro|rw>` (`fat`, `ntfs`). Netagovane handly
+//! Argumenty: `volfs <fs> <ro|rw>` (`fat`, `exfat`, `ntfs`). Netagovane handly
 //! startovni zpravy v tomto poradi:
 //!
 //! 1. kanal oddilu media (`blockproto`; ochranu rozsahu a zapisu dela
@@ -96,6 +96,13 @@ mod os {
                 Ok(v) => Box::new(v),
                 Err(e) => {
                     eprintln!("volfs: FAT nejde pripojit: {e}");
+                    return 3;
+                }
+            },
+            "exfat" => match volfs::exfat::ExFatVolume::new(dev, read_only) {
+                Ok(v) => Box::new(v),
+                Err(e) => {
+                    eprintln!("volfs: exFAT nejde pripojit: {e}");
                     return 3;
                 }
             },

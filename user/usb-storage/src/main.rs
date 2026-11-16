@@ -128,10 +128,12 @@ fn main(startup: Startup) -> i64 {
             return 4;
         }
     };
-    server::serve("usb-storage", &mut dev, clients);
-    // Konec: zapsat mezipamet (vytazeni flash disku po vypnuti systemu).
-    for i in 0..dev.luns.len() {
-        let _ = dev.flush(i);
+    // Konec: zapsat mezipamet (vytazeni flash disku po vypnuti systemu);
+    // vytazene zarizeni uz ne.
+    if !server::serve("usb-storage", &mut dev, clients) {
+        for i in 0..dev.luns.len() {
+            let _ = dev.flush(i);
+        }
     }
     0
 }
