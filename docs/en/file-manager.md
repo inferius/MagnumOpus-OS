@@ -46,7 +46,9 @@ Code:
 
 | Feature | Status |
 |---|---|
-| sidebar: Home, datasets (`DATASETS`), Volume, Trash | **[verified in QEMU]** (test `gui: compd: spravce souboru...`) |
+| frameless sidebar with icons and groups Places (Home, Downloads, datasets `DATASETS`), Media, More (Volume, Trash) | **[verified in QEMU]** (test `gui: compd: spravce souboru...`), groups and Downloads host `downloads_place_origin_and_media_group` |
+| one-row toolbar: Back, Forward, Up icons, breadcrumbs (home with an icon, current folder bold), search with a magnifier (result count in the trailing slot), Reload; selection actions (New folder, icons Rename, To trash, Copy, Cut, Paste, Eject for a medium) in a row below the list; the preview only when the table keeps enough room | **[implemented]** (host tests `filesview`), QEMU **[verified in QEMU]** (test `gui: compd: spravce souboru...`) |
+| preview: a large icon, the name, wrapped key - value pairs (Size, Modified, Allowed, Storage), for a downloaded file "Downloaded from" and the time (`sys.origin`); times in the system zone (`TZ` from init) | **[implemented]** (host `downloads_place_origin_and_media_group`, `preview_shows_three_states_and_versions`) |
 | breadcrumbs, Back, Forward, Up (after going up the folder you came from is selected) | **[implemented]** (host `navigate_into_and_up_reselects`) |
 | table Name, Modified, Size, Kind; sort by clicking the header, folders always first, natural name order (`2` before `10`) | **[verified in QEMU]** |
 | search in the current folder (case-insensitive) | **[implemented]** (host `natural_sort_dirs_first_and_unknown_last`) |

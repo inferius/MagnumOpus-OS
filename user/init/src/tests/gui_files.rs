@@ -167,7 +167,7 @@ fn run(startup: &Startup, s: &mut super::gui::State, f: &FsClient) -> TestResult
     let w = wait_window(&s.inspect, "org.magnumopus.files")?.id;
     // Domov: polozky, mista a nahled vybraneho souboru.
     let t = wait_tree(&s.inspect, w, "vypis domova", |t| row(t, "a.txt").is_some() && row(t, "Projekty").is_some())?;
-    check!(has(&t, Role::ListItem, "Projekty") && has(&t, Role::ListItem, "Koš"), "mista v postrannim panelu");
+    check!(has(&t, Role::Row, "Projekty") && has(&t, Role::Row, "Koš"), "mista v postrannim panelu");
     check!(t.iter().any(|n| n.role == Role::ColumnHeader && n.name.starts_with("Velikost")), "zahlavi Velikost");
     select(s, w, "a.txt")?;
     wait_tree(&s.inspect, w, "nahled textu", |t| has(t, Role::Label, "obsah souboru"))?;
@@ -187,8 +187,8 @@ fn run(startup: &Startup, s: &mut super::gui::State, f: &FsClient) -> TestResult
     settle(&s.inspect)?;
     println!("{QEMU_COPY}");
     wait_tree(&s.inspect, w, "Ctrl+C do schranky", |t| has(t, Role::Label, "Kopírovat: 1 položka ve schránce."))?;
-    let t = wait_tree(&s.inspect, w, "misto Projekty", |t| has(t, Role::ListItem, "Projekty"))?;
-    act(s, w, node(&t, Role::ListItem, "Projekty")?)?;
+    let t = wait_tree(&s.inspect, w, "misto Projekty", |t| has(t, Role::Row, "Projekty"))?;
+    act(s, w, node(&t, Role::Row, "Projekty")?)?;
     wait_tree(&s.inspect, w, "vypis Projektu", |t| row(t, "plan.md").is_some())?;
     settle(&s.inspect)?;
     println!("{QEMU_PASTE}");

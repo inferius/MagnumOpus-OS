@@ -1012,6 +1012,12 @@ impl Comp {
                 }
                 return;
             }
+            // Prostredni klik na ikonu uloh: rovnou Spravce uloh (O8).
+            if button == Button::Middle && self.tasks_icon().is_some_and(|r| r.contains(px, py)) {
+                self.set_flyout(None);
+                self.launch_or_activate(crate::render::TASKS_APP, time);
+                return;
+            }
             if button != Button::Left {
                 return;
             }
@@ -1031,10 +1037,15 @@ impl Comp {
                 self.set_flyout(None);
                 self.panel_click(g);
             } else if self.tasks_icon().is_some_and(|r| r.contains(px, py)) {
-                // Spravce uloh: bezi = do popredi (i z minimalizace), jinak ho
-                // spusti init. Pocet uloh ukazuje bublina pri najeti.
-                self.set_flyout(None);
-                self.launch_or_activate(crate::render::TASKS_APP, time);
+                // Panel Ulohy na pozadi jako ostatni ikony listy (O8);
+                // Super+klik rovnou Spravce uloh.
+                let direct = mods & inputproto::mods::META != 0;
+                if direct {
+                    self.set_flyout(None);
+                    self.launch_or_activate(crate::render::TASKS_APP, time);
+                } else {
+                    self.toggle_flyout(crate::flyout::Flyout::Tasks);
+                }
             } else {
                 self.set_flyout(None);
             }

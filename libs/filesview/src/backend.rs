@@ -61,6 +61,17 @@ pub trait Backend {
     fn media(&mut self) -> Vec<fsproto::v2::MediaEntry>;
     /// Bezpecne odpojit medium (zapise data, oznaci FS jako cisty).
     fn eject(&mut self, name: &str) -> Result<()>;
+    /// Puvod stazeneho souboru (`sys.origin`: adresa a cas stazeni);
+    /// `None` = soubor neni stazeny nebo atribut nejde precist.
+    fn origin(&mut self, path: &str) -> Option<(String, WallTime)>;
+}
+
+/// Hodnota `sys.origin`: `<adresa>\n<cas ns od 1970>` (fsproto::perm).
+pub fn parse_origin(v: &[u8]) -> Option<(String, WallTime)> {
+    let s = core::str::from_utf8(v).ok()?;
+    let (url, ns) = s.split_once('\n')?;
+    let ns: u64 = ns.trim().parse().ok()?;
+    (!url.is_empty()).then(|| (String::from(url), WallTime { secs: (ns / 1_000_000_000) as i64, nanos: (ns % 1_000_000_000) as u32 }))
 }
 
 /// Backend pro testy na hostiteli: FS v pameti (`fileops::mem`), masky
@@ -82,6 +93,8 @@ pub struct TestBackend {
     pub downloads: Vec<String>,
     /// Pripojena media (testy).
     pub media: Vec<fsproto::v2::MediaEntry>,
+    /// Puvod stazenych souboru podle cesty (`sys.origin`).
+    pub origins: BTreeMap<String, Vec<u8>>,
     pub now: Option<WallTime>,
     /// Kos: (dataset, polozka, obsah).
     pub trash: Vec<(String, TrashEntry, Vec<(String, Node)>)>,
@@ -195,6 +208,10 @@ pub fn oid(path: &str) -> u64 {
 impl Backend for TestBackend {
     fn media(&mut self) -> Vec<fsproto::v2::MediaEntry> {
         self.media.clone()
+    }
+
+    fn origin(&mut self, path: &str) -> Option<(String, WallTime)> {
+        self.origins.get(path).and_then(|v| parse_origin(v))
     }
 
     fn eject(&mut self, name: &str) -> Result<()> {

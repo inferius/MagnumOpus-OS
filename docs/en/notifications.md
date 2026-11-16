@@ -108,6 +108,15 @@ API for the notification centre (bell panel, GUI): `Comp::notifications`,
 `unseen_count_and_mark_seen`). notifyd keeps the `seen` flag, so it
 survives a compositor restart.
 
+**Notification centre** under the bell in the bar (`comp/src/notifypanel.rs`)
+**[implemented]** (host `bell_center_lists_marks_seen_and_acts`, screenshot
+`panel-oznameni-centrum-*`): a Do not disturb switch (`SET_DND`, until
+turned off), the session user's notifications newest first (at most 8;
+unread in bold) with the sender's actions and a close button, "Clear all".
+Opening the centre marks them read (`notify_mark_seen`); until then the
+bell has a badge with the unseen count (`accent`), in Do not disturb a
+crossed-out bell without a badge.
+
 ## Limitations
 
 - notifyd state is only in memory: a crash of the service loses

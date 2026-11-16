@@ -18,6 +18,7 @@ mod gpu;
 mod login;
 mod notify;
 mod status;
+mod tasks;
 mod peers;
 mod screen;
 mod snapshot;
@@ -61,6 +62,8 @@ struct Service {
     /// Zdroje stavu v liste: sit a zvuk.
     net_src: Option<status::Source>,
     audio_src: Option<status::Source>,
+    /// Odber uloh od taskd pro panel Ulohy (`sources tasks`).
+    task_feed: Option<tasks::TaskFeed>,
     /// Kanal na logd pro obrazky diagnostickeho snimku (`snapshots`).
     snapshots: Option<Channel>,
     /// Kanal k initu pro spousteni aplikaci (`launcher`).
@@ -134,6 +137,7 @@ fn main(startup: Startup) -> i64 {
         frame_stats: (0, 0, 0),
         net_src: None,
         audio_src: None,
+        task_feed: None,
         snapshots: None,
         launcher: None,
         notify: notify::Viewers::default(),
@@ -197,6 +201,9 @@ impl Service {
         for src in [&self.net_src, &self.audio_src].into_iter().flatten() {
             items.push((src.ch.handle(), rd));
         }
+        if let Some(f) = &self.task_feed {
+            items.push((f.ch.handle(), rd));
+        }
         if let Some(l) = &self.login {
             items.push((l.handle(), rd));
         }
@@ -233,6 +240,9 @@ impl Service {
         // by cekala, az se ozve jiny klient: start okna desitky sekund,
         // ztracene odpovedi na ping = "nereaguje" navzdy).
         for _ in [&self.net_src, &self.audio_src].into_iter().flatten() {
+            next(&obs);
+        }
+        if self.task_feed.is_some() {
             next(&obs);
         }
         let login = if self.login.is_some() { next(&obs) } else { Signals(0) };
@@ -475,6 +485,16 @@ impl Service {
                 }
             }
         }
+        if let Some(f) = self.task_feed.as_mut() {
+            match f.read() {
+                Ok(true) => c.set_task_rows(Some(f.rows())),
+                Ok(false) => {}
+                Err(()) => {
+                    self.task_feed = None;
+                    c.set_task_rows(None);
+                }
+            }
+        }
         if let Some(s) = self.audio_src.as_mut() {
             match s.read(status::volume) {
                 Ok(Some((v, rec, info))) => {
@@ -562,6 +582,15 @@ impl Service {
                         }
                     }
                     None => println!("compd: zadost o zvuk bez kanalu ke sluzbe zvuku"),
+                },
+                // Akce z panelu Ulohy: kanal na taskd (rozhodne taskd).
+                Out::Task(a) => match self.task_feed.as_mut() {
+                    Some(f) => {
+                        if !f.act(a) {
+                            println!("compd: akce ulohy se nepodarila poslat");
+                        }
+                    }
+                    None => println!("compd: akce ulohy bez kanalu k taskd"),
                 },
                 Out::Device { source, trust } => {
                     if let Some(s) = &self.secure {
@@ -678,6 +707,7 @@ impl Service {
                     match w {
                         "net" => self.net_src = Some(status::Source::new(ch, status::net_request())),
                         "audio" => self.audio_src = Some(status::Source::new(ch, status::audio_request())),
+                        "tasks" => self.task_feed = Some(tasks::TaskFeed::new(ch)),
                         _ => {}
                     }
                 }

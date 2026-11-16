@@ -181,3 +181,51 @@ fn unseen_count_and_mark_seen() {
     assert_eq!(t.c.take_notify_requests(), vec![(UID, View::Seen { id: 2 })]);
     assert_eq!(t.c.notify_unseen(UID + 1), 0);
 }
+
+/// Centrum oznameni pod zvonkem: odznak nevidenych, otevreni oznaci vse
+/// jako videne, zavreni, akce, Nerusit a Vymazat vse jdou do notifyd.
+#[test]
+fn bell_center_lists_marks_seen_and_acts() {
+    use guiproto::a11y::Role;
+    let mut t = T::new();
+    t.c.set_appearance_system(theme::Pref { reduce_motion: true, ..Default::default() }, t.now);
+    t.c.session_opened(1, UID, "jana", t.now);
+    t.frame();
+    let mut a = n(1, Priority::Low, &[("open", "Otevřít složku")]);
+    a.popup = false;
+    let mut b = n(2, Priority::Low, &[]);
+    b.popup = false;
+    b.title = "Aktualizace".into();
+    t.c.notify_event(UID, ViewReply::Snapshot { list: vec![a, b], last: true }, t.now);
+    assert_eq!(t.c.bell_unseen(), 2);
+    t.frame();
+    // Odznak u zvonku (accent).
+    let bell = t.c.bar_layout().bell;
+    let acc = t.c.style.theme.color.accent;
+    assert!((bell.x..bell.right() as i32).any(|x| (bell.y..bell.y + 6).any(|y| t.px(x, y) == acc)), "odznak nevidenych");
+    t.c.take_notify_requests();
+    t.click(bell.x + 4, bell.y + bell.h as i32 - 4);
+    assert_eq!(t.c.flyout, Some(crate::flyout::Flyout::Bell));
+    assert_eq!(t.c.bell_unseen(), 0, "otevreni = videno");
+    assert_eq!(t.c.take_notify_requests().len(), 2, "SEEN pro obe");
+    let nodes = t.c.barpanel.as_ref().unwrap().ui.a11y();
+    let find = |name: &str| nodes.iter().find(|x| x.name == name).cloned().unwrap_or_else(|| panic!("{name}: {:?}", nodes.iter().map(|x| &x.name).collect::<Vec<_>>()));
+    find("Aktualizace");
+    let p = t.c.flyout_rect().unwrap();
+    let click = |t: &mut T, name: &str| {
+        let nodes = t.c.barpanel.as_ref().unwrap().ui.a11y();
+        let b = nodes.iter().find(|x| x.role == Role::Button && x.name == name).unwrap().bounds;
+        t.click(p.x + b.x + b.w as i32 / 2, p.y + b.y + b.h as i32 / 2);
+    };
+    click(&mut t, "Zavřít: Aktualizace");
+    assert_eq!(t.c.take_notify_requests(), vec![(UID, View::Dismiss { id: 2 })]);
+    let _ = find("Nerušit");
+    let sw = nodes.iter().find(|x| x.name == "Nerušit" && x.role == Role::Switch).unwrap().bounds;
+    t.click(p.x + sw.x + sw.w as i32 / 2, p.y + sw.y + sw.h as i32 / 2);
+    assert_eq!(t.c.take_notify_requests(), vec![(UID, View::SetDnd { until: u64::MAX })]);
+    click(&mut t, "Vymazat vše");
+    assert_eq!(t.c.take_notify_requests(), vec![(UID, View::DismissAll)]);
+    click(&mut t, "Otevřít složku");
+    assert_eq!(t.c.take_notify_requests(), vec![(UID, View::Invoke { id: 1, action: "open".into() })]);
+    assert_eq!(t.c.flyout, None, "akce panel zavre");
+}

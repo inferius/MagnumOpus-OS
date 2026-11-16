@@ -189,6 +189,12 @@ impl Comp {
         if f == Some(Flyout::Clock) {
             self.calendar_offset = 0;
         }
+        // Centrum oznameni otevrene = uzivatel je videl (odznak zmizi).
+        if f == Some(Flyout::Bell)
+            && let Some(uid) = self.active_uid()
+        {
+            self.notify_mark_seen(uid);
+        }
         self.bar_panel_rebuild();
         if let Some(r) = self.flyout_rect() {
             self.damage_top(self.panel_shadow_area(r));

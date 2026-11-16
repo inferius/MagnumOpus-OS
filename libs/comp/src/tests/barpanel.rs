@@ -173,3 +173,44 @@ fn background_windows_quiet_after_session_start() {
     let gc = t.c.clients[&c].windows[&1];
     assert!(t.c.windows[&gc].attention, "pozdeji okno na pozadi zada o pozornost");
 }
+
+/// Panel Ulohy (O8): radky s prubehem a stitkem agenta, akce podle prav
+/// od `taskd` jdou sluzbe (`Out::Task`), "Otevrit Spravce uloh" ho spusti.
+#[test]
+fn tasks_panel_rows_actions_and_manager() {
+    use crate::{TaskAct, TaskRow};
+    let mut t = T::new();
+    t.c.set_tasks(2, 1);
+    let row = |id: u64, name: &str, agent: bool, paused: bool, can: bool| TaskRow {
+        id,
+        name: String::from(name),
+        who: String::from("Soubory"),
+        state: String::from(if paused { "pozastaveno" } else { "běží" }),
+        agent,
+        progress: Some(40),
+        paused,
+        can_pause: can && !paused,
+        can_resume: can && paused,
+        can_cancel: can,
+    };
+    t.c.set_task_rows(Some(alloc::vec![row(7, "Kopírování", false, false, true), row(9, "Úklid", true, true, true), row(3, "Scrub", false, false, false)]));
+    t.frame();
+    t.out();
+    let r = t.c.tasks_icon().unwrap();
+    t.click(r.x + 4, r.y + 4);
+    assert_eq!(t.c.flyout, Some(crate::flyout::Flyout::Tasks));
+    let n = tree(&t);
+    let btn = |name: &str| n.iter().find(|x| x.role == Role::Button && x.name == name).cloned().unwrap_or_else(|| panic!("{name}: {:?}", n.iter().map(|x| &x.name).collect::<Vec<_>>()));
+    assert!(n.iter().any(|x| x.role == Role::Label && x.name.starts_with("agent")), "stitek agenta");
+    assert_ne!(btn("Zrušit: Scrub").state & state::DISABLED, 0, "bez prava neaktivni");
+    btn("Pokračovat: Úklid");
+    let p = t.c.flyout_rect().unwrap();
+    let b = btn("Pozastavit: Kopírování").bounds;
+    t.click(p.x + b.x + b.w as i32 / 2, p.y + b.y + b.h as i32 / 2);
+    assert!(t.out().contains(&Out::Task(TaskAct::Pause(7))));
+    let n = tree(&t);
+    let b = n.iter().find(|x| x.role == Role::Button && x.name == "Otevřít Správce úloh").unwrap().bounds;
+    t.click(p.x + b.x + b.w as i32 / 2, p.y + b.y + b.h as i32 / 2);
+    assert_eq!(t.c.take_launch_requests(), alloc::vec![String::from(crate::render::TASKS_APP)]);
+    assert_eq!(t.c.flyout, None);
+}

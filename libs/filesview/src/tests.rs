@@ -162,13 +162,15 @@ fn opens_home_with_places_and_table() {
     assert_eq!(m.places.iter().map(|p| p.label.as_str()).collect::<Vec<_>>(), ["Domov", "Projekty", "Svazek", "Koš"]);
     assert_eq!(m.b.sent[..2], [ClientMsg::Hello { version: fileops::proto::VERSION }, ClientMsg::Subscribe]);
     let u = ui_for(&m, 1200);
-    let items = names(&u, Role::ListItem);
-    assert!(items.contains(&String::from("Koš")), "{items:?}");
+    // Mista: seznam s ikonami a skupinami (O20), bez velkych nadpisu.
+    let items = names(&u, Role::Row);
+    assert!(items.contains(&String::from("Koš")) && items.contains(&String::from("Domov")), "{items:?}");
+    assert!(names(&u, Role::Label).iter().any(|l| l == "Místa"), "nadpis skupiny");
     assert!(!names(&u, Role::Row).is_empty(), "radky tabulky v pristupnosti");
     assert!(names(&u, Role::ColumnHeader).contains(&String::from("Velikost")));
-    assert!(names(&u, Role::Label).iter().any(|l| l == "Náhled"), "siroke okno ma nahled");
+    assert!(names(&u, Role::Label).iter().any(|l| l.starts_with("4 položky")), "siroke okno ma nahled");
     let narrow = ui_for(&m, 400);
-    assert!(!names(&narrow, Role::Label).iter().any(|l| l == "Náhled" || l == "Místa"), "uzke okno bez panelu");
+    assert!(!names(&narrow, Role::Label).iter().any(|l| l.starts_with("4 položky") || l == "Místa"), "uzke okno bez panelu");
 }
 
 #[test]
@@ -207,11 +209,13 @@ fn preview_shows_three_states_and_versions() {
     select(&mut m, "Dokumenty");
     let u = ui_for(&m, 1200);
     let labels = names(&u, Role::Label);
-    assert!(labels.iter().any(|l| l == "Velikost: \u{2014} (skryto: chybí právo Spravovat)"), "{labels:?}");
-    assert!(labels.iter().any(|l| l.starts_with("Obsah: \u{2014}")));
+    // Dvojice klic - hodnota (`.kv`, O19).
+    let pair = |labels: &[String], k: &str, v: &str| labels.windows(2).any(|w| w[0] == k && w[1] == v);
+    assert!(pair(&labels, "Velikost", "\u{2014} (skryto: chybí právo Spravovat)"), "{labels:?}");
+    assert!(labels.windows(2).any(|w| w[0] == "Obsah" && w[1].starts_with("\u{2014}")));
     select(&mut m, "Projekty");
     let labels = names(&ui_for(&m, 1200), Role::Label);
-    assert!(labels.iter().any(|l| l == "Obsah: 1 soubor, 0 složek"), "{labels:?}");
+    assert!(pair(&labels, "Obsah", "1 soubor, 0 složek"), "{labels:?}");
     assert!(labels.iter().any(|l| l.starts_with("Dataset:")));
     select(&mut m, "zprava.txt");
     let mut u = ui_for(&m, 1200);
@@ -551,8 +555,12 @@ fn denied_listing_is_not_empty_folder() {
 /// kontrast). Snimky do `target/shots/soubory-*.png`.
 #[test]
 fn theme_modes_redraw_window() {
-    let m = fm();
-    let (w, h) = (900u32, 700u32);
+    // Siroke okno s vybranou slozkou: nahled s dlouhou hodnotou (O19).
+    let mut b = TestBackend::sample();
+    b.hidden_tree.push(String::from("/home/jana/Dokumenty"));
+    let mut m = FileManager::new(b);
+    select(&mut m, "Dokumenty");
+    let (w, h) = (1200u32, 700u32);
     let mut last = None;
     for (name, th) in [
         ("svetly", theme::Theme::builtin(theme::Mode::Light)),
@@ -620,4 +628,42 @@ fn media_places_and_eject() {
     assert!(!m.places.iter().any(|p| p.label == "MOTEST"));
     let u = ui_for(&m, 1200);
     assert!(!names(&u, Role::Button).iter().any(|n| n == "Odpojit"), "doma tlacitko neni");
+}
+
+/// Stazene mezi misty (ikona stahovani) a puvod stazeneho souboru
+/// v nahledu (`sys.origin`, zapsal ho fetch); media ve vlastni skupine.
+#[test]
+fn downloads_place_origin_and_media_group() {
+    let mut m = fm();
+    m.b.fs.dir("/home/jana/Stazene").file("/home/jana/Stazene/data.bin", b"abc");
+    m.b.origins.insert(String::from("/home/jana/Stazene/data.bin"), b"https://example.org/data.bin\n1794571200000000000".to_vec());
+    m.b.fs.dir("/media").dir("/media/USB");
+    m.b.media = vec![fsproto::v2::MediaEntry { name: "USB".into(), label: "USB".into(), fs: "fat".into(), read_only: false, total_bytes: 1 << 20, free_bytes: 1 << 19 }];
+    m.update(Msg::Refresh);
+    let p = m.places.iter().find(|p| p.label == "Stažené").expect("misto Stazene");
+    assert_eq!((p.icon, p.path.as_str()), ("download", "/home/jana/Stazene"));
+    let u = ui_for(&m, 1200);
+    let labels = names(&u, Role::Label);
+    assert!(labels.iter().any(|l| l == "Média"), "skupina medii: {labels:?}");
+    let i = m.places.iter().position(|p| p.label == "Stažené").unwrap();
+    m.update(Msg::Place(i));
+    select(&mut m, "data.bin");
+    let labels = names(&ui_for(&m, 1200), Role::Label);
+    assert!(labels.windows(2).any(|w| w[0] == "Staženo z" && w[1] == "https://example.org/data.bin"), "{labels:?}");
+    assert!(crate::backend::parse_origin(b"bez casu").is_none());
+}
+
+/// Misto vybrane pres pristupnost (akce `activate` na radku, jako agent
+/// nebo test v QEMU) otevre slozku.
+#[test]
+fn place_row_activates_by_a11y() {
+    let mut m = fm();
+    let mut u = ui_for(&m, 1200);
+    let n = u.a11y().into_iter().find(|n| n.role == Role::Row && n.name == "Projekty").unwrap();
+    let r = u.a11y_action(n.id, a11y_actions::ACTIVATE, "");
+    for msg in r.msgs {
+        m.update(msg);
+    }
+    u.refresh(&m);
+    assert_eq!(m.nav.cur, "/home/jana/Projekty");
 }

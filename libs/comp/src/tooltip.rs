@@ -106,7 +106,8 @@ impl Comp {
         }
     }
 
-    /// Text bubliny jednim radkem (titulek - popis; testy, pristupnost).
+    /// Text bubliny jednim radkem (titulek - popis; testy).
+    #[cfg(test)]
     pub(crate) fn tip_text(&self, tip: Tip) -> String {
         let p = self.tip_parts(tip);
         if p.desc.is_empty() { p.title } else { format!("{} - {}", p.title, p.desc) }

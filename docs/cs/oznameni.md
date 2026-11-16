@@ -97,6 +97,14 @@ API pro centrum oznámení (panel zvonku, GUI): `Comp::notifications`,
 `unseen_count_and_mark_seen`). Příznak `seen` drží notifyd, takže přežije
 restart kompozitoru.
 
+**Centrum oznámení** pod zvonkem v liště (`comp/src/notifypanel.rs`)
+**[implementováno]** (host `bell_center_lists_marks_seen_and_acts`, snímek
+`panel-oznameni-centrum-*`): přepínač Nerušit (`SET_DND`, do vypnutí),
+oznámení uživatele relace od nejnovějšího (nejvýš 8; nepřečtená tučně) s akcemi
+odesílatele a zavřením, „Vymazat vše“. Otevření centra je přečte
+(`notify_mark_seen`); zvonek má do té doby odznak s počtem neviděných
+(`accent`), v Nerušit přeškrtnutý zvonek bez odznaku.
+
 ## Omezení
 
 - Stav notifyd je jen v paměti: pád služby oznámení ztratí (supervisor ji

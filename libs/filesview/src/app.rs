@@ -38,6 +38,9 @@ pub struct Place {
     pub icon: &'static str,
 }
 
+/// Slozka stazenych souboru v domove (init `downloads.rs`).
+pub const DOWNLOADS_DIR: &str = "Stazene";
+
 /// Nahled vybrane polozky.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preview {
@@ -48,6 +51,8 @@ pub struct Preview {
     /// Obrazek BMP (sirka, vyska, pixely 0xAARRGGBB) pro uzel `image`.
     pub image: Option<(u32, u32, Rc<[u32]>)>,
     pub versions: Result<Vec<FileVersion>, abi::Error>,
+    /// Stazeny soubor: adresa a cas (`sys.origin`).
+    pub origin: Option<(String, abi::time::WallTime)>,
 }
 
 /// Polozka kose (dataset, polozka).
@@ -207,6 +212,11 @@ impl<B: Backend> FileManager<B> {
     /// Postranni panel: domov, datasety (nejdriv pod domovem), svazek, kos.
     pub fn load_places(&mut self) {
         let mut v = alloc::vec![Place { label: String::from("Domov"), path: self.home.clone(), icon: "home" }];
+        // Stazene (fetch uklada do `~/Stazene`), kdyz slozka je.
+        let dl = format!("{}/{}", self.home.trim_end_matches('/'), DOWNLOADS_DIR);
+        if self.b.stat(&dl).is_ok_and(|s| s.kind == kind::DIR) {
+            v.push(Place { label: String::from("Stažené"), path: dl, icon: "download" });
+        }
         let mut ds = self.b.datasets().unwrap_or_default();
         ds.sort_by_key(|d| (!is_within(&d.path, &self.home), d.path.clone()));
         for d in ds {
@@ -308,7 +318,8 @@ impl<B: Backend> FileManager<B> {
             }
             _ => None,
         };
-        self.preview = Some(Preview { path, stat, dataset, content, image, versions });
+        let origin = if is_file { self.b.origin(&path) } else { None };
+        self.preview = Some(Preview { path, stat, dataset, content, image, versions, origin });
     }
 
     fn go(&mut self, path: String) {

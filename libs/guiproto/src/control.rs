@@ -51,8 +51,9 @@ pub const APPEARANCE: &str = "appearance";
 /// `remote [uzivatel@adresa ...]`: vzdalene relace SSH (pilulka v liste;
 /// bez slov = zadna). Posila init pri kazde zmene (`docs/cs/ssh.md`).
 pub const REMOTE: &str = "remote";
-/// `sources [net] [audio]`: kanaly pro stav v liste (handly ve stejnem
-/// poradi): relace site jen s pravem `INFO`, kanal zvukove sluzby.
+/// `sources [net] [audio] [tasks]`: kanaly pro stav v liste (handly ve
+/// stejnem poradi): relace site jen s pravem `INFO`, kanal zvukove sluzby,
+/// klient `taskd` pro panel Ulohy (vidi vse, ridi co taskd povoli).
 pub const SOURCES: &str = "sources";
 /// `snapshots`: kanal na logd pro obrazky diagnostickeho snimku (handle;
 /// zprava `snimek <id> <delka>` + VMO s BMP).

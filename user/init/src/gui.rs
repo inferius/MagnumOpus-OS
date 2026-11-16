@@ -159,7 +159,7 @@ impl Service for CompdService {
         // Odpoved na `display` = potvrzeni startu (compd se synchronizuje
         // s ovladacem a pripoji snimek).
         // Pasmo pro hodiny v liste ze stejneho nastaveni jako sluzba casu.
-        let zone = libos::time::zone::Settings::parse(crate::system::TIME_SETTINGS).map(|s| s.zone.name).ok().filter(|n| !n.is_empty()).unwrap_or("UTC");
+        let zone = crate::system::zone_name();
         // Prvni start po startovnim obrazu: kompozitor na nej navaze.
         let mut splash = SPLASH_HANDOFF.lock().take().filter(|_| !ctx.restart).map(|p| alloc::format!(" {}{p}", control::SPLASH_ARG)).unwrap_or_default();
         // Bez otevrene relace bude prihlasovaci obrazovka: znak miri do avataru.
@@ -603,6 +603,12 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>, sup: &mut Supervi
     if let Ok(a) = crate::audio::connect() {
         names.push("audio");
         hs.push(a.into_handle());
+    }
+    // Panel Ulohy: odber taskd se stejnou identitou jako Spravce uloh
+    // (vidi vse, ridi jen co taskd povoli).
+    if let Ok(t) = crate::tasks::client_view_all("uzivatel") {
+        names.push("tasks");
+        hs.push(t.into_handle());
     }
     if !hs.is_empty()
         && let Err(e) = gui.command(format!("{} {}", control::SOURCES, names.join(" ")).as_bytes(), hs)

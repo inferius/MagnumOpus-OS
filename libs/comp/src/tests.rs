@@ -1063,7 +1063,14 @@ fn tasks_icon_shows_count_and_focuses_task_manager() {
     assert!((r.x..r.right() as i32).any(|x| t.px(x, r.y + r.h as i32 / 2) == ai), "stitek agenta");
     let ga = t.c.clients[&a].windows[&1];
     t.c.minimize(ga);
+    // Levy klik = panel Ulohy (O8); prostredni = rovnou Spravce uloh.
     t.click(r.x + 4, r.y + 4);
+    assert_eq!(t.c.flyout, Some(crate::flyout::Flyout::Tasks));
+    assert!(t.c.windows[&ga].minimized);
+    t.c.set_flyout(None);
+    t.move_to(r.x + 4, r.y + 4);
+    t.input(Event::Button { button: inputproto::Button::Middle, action: Action::Press }, false);
+    t.input(Event::Button { button: inputproto::Button::Middle, action: Action::Release }, false);
     assert_eq!(t.c.focus, Some(ga));
     assert!(!t.c.windows[&ga].minimized);
     t.c.set_tasks(0, 0);
@@ -1312,10 +1319,10 @@ fn tasks_icon_tooltip() {
     // Odjeti mimo listu: zmizi; klik ji skryje.
     t.move_to(5, 5);
     assert_eq!(t.c.tooltip_shown(), None);
-    // Klik na ikonu uloh: Spravce uloh (spusteni / aktivace), zadny panel.
+    // Klik na ikonu uloh: panel Ulohy (O8), nic se nespousti.
     t.click(r.x + 4, r.y + 4);
-    assert_eq!(t.c.take_launch_requests(), vec![alloc::string::String::from(crate::render::TASKS_APP)]);
-    assert_eq!(t.c.flyout, None);
+    assert!(t.c.take_launch_requests().is_empty());
+    assert_eq!(t.c.flyout, Some(crate::flyout::Flyout::Tasks));
 }
 
 #[test]

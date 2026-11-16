@@ -54,6 +54,10 @@ impl Backend for OsBackend {
         self.fs.media_list().unwrap_or_default()
     }
 
+    fn origin(&mut self, path: &str) -> Option<(String, libos::time::WallTime)> {
+        self.fs.get_xattr(path, fsproto::perm::ORIGIN_XATTR).ok().and_then(|v| filesview::backend::parse_origin(&v))
+    }
+
     fn eject(&mut self, name: &str) -> Result<()> {
         self.fs.media_remove(name)
     }
@@ -257,8 +261,12 @@ impl ui::App for Timed {
     }
 }
 
-/// Pasmo z nastaveni systemu (zapsal instalator); bez nej UTC.
-fn zone(fs: &FsClient) -> Option<Zone> {
+/// Pasmo: `TZ` od initu (stejne jako hodiny v liste), jinak nastaveni
+/// systemu (zapsal instalator); bez obojiho UTC.
+fn zone(tz: Option<&str>, fs: &FsClient) -> Option<Zone> {
+    if let Some(z) = tz.and_then(|n| Zone::by_name(n).or_else(|| Zone::parse(n))) {
+        return Some(z);
+    }
     let path = installplan::config::PATH;
     let st = fs.stat(path).ok()?;
     let data = fs.read(path, 0, st.size.min(16 << 10) as usize).ok()?;
@@ -267,7 +275,9 @@ fn zone(fs: &FsClient) -> Option<Zone> {
 }
 
 fn main(startup: Startup) -> i64 {
-    let home = startup.params.as_ref().and_then(|v| libos::params::Params::read(v).ok()).map(|p| String::from_utf8_lossy(&p.cwd).into_owned()).unwrap_or_default();
+    let params = startup.params.as_ref().and_then(|v| libos::params::Params::read(v).ok());
+    let home = params.as_ref().map(|p| String::from_utf8_lossy(&p.cwd).into_owned()).unwrap_or_default();
+    let tz: Option<String> = params.as_ref().and_then(|p| p.env.iter().find_map(|e| e.strip_prefix(b"TZ=").map(|v| String::from_utf8_lossy(v).into_owned())));
     let mut handles = startup.handles.into_iter();
     let Some(link) = ui::client::Link::from_handles(&mut handles) else {
         println!("gui-files: chybi kanal okna");
@@ -294,7 +304,7 @@ fn main(startup: Startup) -> i64 {
             None
         }
     };
-    let zone = zone(&fs);
+    let zone = zone(tz.as_deref(), &fs);
     let home = if home.is_empty() { String::from("/") } else { home };
     // Kanal odpovedi sluzby "otevri cestu": nas konec cte smycka okna.
     let (reply_rx, replies) = match (&opener, Channel::create()) {

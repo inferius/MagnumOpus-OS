@@ -24,6 +24,8 @@ extern crate alloc;
 pub mod appearance;
 pub mod barpanel;
 pub mod calendar;
+pub mod taskpanel;
+pub(crate) mod notifypanel;
 pub mod clipboard;
 pub mod diag;
 pub mod dialog;
@@ -113,7 +115,11 @@ pub enum Out {
     Device { source: u16, trust: bool },
     /// Ovladani zvuku z panelu listy (kanal ke sluzbe zvuku od initu).
     Audio(AudioReq),
+    /// Akce nad ulohou z panelu Ulohy (sluzba ji posle `taskd`).
+    Task(TaskAct),
 }
+
+pub use taskpanel::{TaskAct, TaskRow};
 
 /// Zadost panelu Zvuk sluzbe zvuku.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,6 +180,8 @@ pub struct Comp {
     pub(crate) input_now: u64,
     /// Bezici ulohy a z toho ulohy agenta AI (ikona v panelu).
     pub(crate) tasks: (u32, u32),
+    /// Bezici ulohy pro panel Ulohy (`None` = sluzba seznam nedava).
+    pub(crate) task_rows: Option<Vec<TaskRow>>,
     /// Radky trasovani vstupu (sluzba je vypise, `take_trace`).
     pub(crate) trace: Vec<alloc::string::String>,
     /// Radky do logu sluzby (vzdy, ne jen pri trasovani): odmitnuta
@@ -275,6 +283,7 @@ impl Comp {
             token_source,
             input_now: 0,
             tasks: (0, 0),
+            task_rows: None,
             trace: Vec::new(),
             logs: Vec::new(),
             recent_input: alloc::collections::VecDeque::new(),

@@ -4,7 +4,7 @@ Kompozitor (milník 6c) jako služba. Logika je v knihovně `libs/comp` (host te
 
 ## Klíčové soubory
 
-- `src/main.rs` - smyčka; `screen.rs` (displej, režimy), `gpu.rs` (GPU backend přes `libs/vkcomp`), `peers.rs` (klienti), `video.rs` (buffery s popisem `bufdesc`, převod YUV, ploty commitu), `login.rs` (přihlášení), `snapshot.rs` (obnova po pádu), `splash.rs`, `status.rs`, `notify.rs` (prohlížeče oznámení `notifyd` pro každou relaci, příkaz `notify <uid>`).
+- `src/main.rs` - smyčka; `screen.rs` (displej, režimy), `gpu.rs` (GPU backend přes `libs/vkcomp`), `peers.rs` (klienti), `video.rs` (buffery s popisem `bufdesc`, převod YUV, ploty commitu), `login.rs` (přihlášení), `snapshot.rs` (obnova po pádu), `splash.rs`, `status.rs`, `tasks.rs` (odběr `taskd` pro panel Úlohy, `sources tasks`), `notify.rs` (prohlížeče oznámení `notifyd` pro každou relaci, příkaz `notify <uid>`).
 
 ## Invarianty
 

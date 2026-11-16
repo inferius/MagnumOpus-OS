@@ -98,7 +98,7 @@ fn properties_open_with_general_and_owner() {
     assert!(has_label(&u, "Druh: Soubor"));
     assert!(has_label(&u, "Umístění: /home/jana"));
     // Tabulka vypisu ani nahled nejsou videt.
-    assert!(nodes(&u, Role::Table).is_empty());
+    assert!(nodes(&u, Role::ColumnHeader).is_empty());
     m.update(Msg::Props(PropsMsg::Tab(1)));
     u.refresh(&m);
     assert!(has_label(&u, "Vlastník: Jana Nováková (vy)"), "{:?}", nodes(&u, Role::Label));

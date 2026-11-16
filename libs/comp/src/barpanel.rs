@@ -46,6 +46,14 @@ pub(crate) enum PanelMsg {
     CloseAll,
     /// Panel hodin: o mesic zpet nebo dopredu.
     Month(i32),
+    /// Panel uloh: akce nad ulohou, otevrit Spravce uloh.
+    Task(crate::TaskAct),
+    OpenTasks,
+    /// Centrum oznameni: Nerusit, zavrit, akce, vymazat vse.
+    Dnd(bool),
+    NotifyDismiss(u64),
+    NotifyInvoke(u64, String),
+    NotifyClearAll,
 }
 
 /// Otevreny panel listy.
@@ -70,7 +78,7 @@ impl Comp {
     /// Kresli panel `f` knihovna ui (ostatni karty jsou ve `flyout.rs`)?
     pub(crate) fn is_ui_panel(f: Flyout) -> bool {
         match f {
-            Flyout::Look | Flyout::Net | Flyout::Volume | Flyout::Bell | Flyout::AppWindows(_) | Flyout::Clock => true,
+            Flyout::Look | Flyout::Net | Flyout::Volume | Flyout::Bell | Flyout::AppWindows(_) | Flyout::Clock | Flyout::Tasks => true,
             #[cfg(feature = "dev-mode")]
             Flyout::Dev => true,
             _ => false,
@@ -202,18 +210,6 @@ impl Comp {
         panel(items)
     }
 
-    fn bell_view(&self, s: &PanelSize) -> Node<PanelMsg> {
-        let dnd = self.do_not_disturb();
-        let mut items = vec![panel_header(s, if dnd { "bell-off" } else { "bell" }, "Oznámení", if dnd { "Nerušit" } else { "žádná nová" })];
-        if dnd {
-            items.push(label("Nerušit").panel_row(Some("bell-off"), "zapnuto při celé obrazovce; oznámení se ukážou po návratu"));
-        } else {
-            items.push(label("Žádná oznámení").panel_row(Some("bell"), ""));
-        }
-        items.push(panel_footer(s, vec![button("Nastavení oznámení").icon("settings").disabled(true).tooltip(NO_SETTINGS).grow()]));
-        panel(items)
-    }
-
     #[cfg(feature = "dev-mode")]
     fn dev_view(&self, s: &PanelSize) -> Node<PanelMsg> {
         let on = self.dev_mode.on;
@@ -236,6 +232,7 @@ impl Comp {
             Flyout::Volume => self.volume_view(&s),
             Flyout::Bell => self.bell_view(&s),
             Flyout::Clock => self.clock_view(&s),
+            Flyout::Tasks => self.tasks_view(&s),
             #[cfg(feature = "dev-mode")]
             Flyout::Dev => self.dev_view(&s),
             _ => return None,
@@ -251,6 +248,7 @@ impl Comp {
             "volume" => Flyout::Volume,
             "bell" => Flyout::Bell,
             "clock" => Flyout::Clock,
+            "tasks" => Flyout::Tasks,
             #[cfg(feature = "dev-mode")]
             "dev" => Flyout::Dev,
             "none" => {
@@ -271,6 +269,7 @@ impl Comp {
             Flyout::Volume => "Zvuk",
             Flyout::Bell => "Oznámení",
             Flyout::Clock => "Kalendář",
+            Flyout::Tasks => "Úlohy na pozadí",
             _ => "Panel",
         }
     }
@@ -459,6 +458,26 @@ impl Comp {
             }
             PanelMsg::Output(i) => self.out.push(crate::Out::Audio(crate::AudioReq::Output(i))),
             PanelMsg::Input(i) => self.out.push(crate::Out::Audio(crate::AudioReq::Input(i))),
+            PanelMsg::Task(a) => self.out.push(crate::Out::Task(a)),
+            PanelMsg::Dnd(on) => {
+                if let Some(uid) = self.active_uid() {
+                    self.notify_set_dnd(uid, if on { u64::MAX } else { 0 });
+                }
+            }
+            PanelMsg::NotifyDismiss(id) => self.notify_dismiss(id, now),
+            PanelMsg::NotifyInvoke(id, a) => {
+                self.set_flyout(None);
+                self.notify_invoke(id, &a, now);
+            }
+            PanelMsg::NotifyClearAll => {
+                if let Some(uid) = self.active_uid() {
+                    self.notify_dismiss_all(uid, now);
+                }
+            }
+            PanelMsg::OpenTasks => {
+                self.set_flyout(None);
+                self.launch_or_activate(crate::render::TASKS_APP, time);
+            }
             PanelMsg::Month(d) => self.calendar_offset = self.calendar_offset.saturating_add(d).clamp(-1200, 1200),
             PanelMsg::Window(w) => {
                 self.set_flyout(None);

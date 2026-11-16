@@ -259,3 +259,41 @@ fn shot_system_dialogs() {
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
+
+/// Centrum oznameni pod zvonkem: Nerusit, oznameni s akci, Vymazat vse.
+#[test]
+fn shot_bell_center() {
+    use notifyproto::{Action, Notification, Priority, ViewReply};
+    let mut errors = Vec::new();
+    for (mode, mname) in [(theme::Mode::Light, "svetly"), (theme::Mode::Dark, "tmavy")] {
+        let mut t = T::new();
+        t.c.set_appearance_system(theme::Pref { reduce_motion: true, ..Default::default() }, t.now);
+        t.c.set_mode(mode);
+        t.c.session_opened(1, 1000, "jana", t.now);
+        let n = |id: u64, title: &str, body: &str, app: &str, acts: &[(&str, &str)]| Notification {
+            id,
+            app_id: "org.test".into(),
+            app_name: app.into(),
+            title: title.into(),
+            body: body.into(),
+            priority: Priority::Low,
+            actions: acts.iter().map(|(i, l)| Action { id: (*i).into(), label: (*l).into() }).collect(),
+            time: id,
+            popup: false,
+            replaced: false,
+            seen: false,
+        };
+        let list = alloc::vec![
+            n(1, "Stahování dokončeno", "obraz-disku.img je ve složce Stažené.", "Stahování", &[("open", "Otevřít složku")]),
+            n(2, "Médium připojeno", "MOTEST (FAT32, 64 MB)", "Systém", &[]),
+        ];
+        t.c.notify_event(1000, ViewReply::Snapshot { list, last: true }, t.now);
+        t.frame();
+        assert!(t.c.open_panel("bell"));
+        t.frame();
+        let r = t.c.bar_panel_rect().unwrap();
+        let (px, w, h) = crop(&t, r);
+        errors.extend(compare(&format!("panel-oznameni-centrum-{mname}"), &px, w, h));
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}

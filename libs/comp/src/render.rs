@@ -739,7 +739,8 @@ impl Comp {
             blur: self.bar_blur.as_deref(),
             hover: self.input.hover,
             launchable: &self.launchable,
-            dnd: self.do_not_disturb(),
+            dnd: self.do_not_disturb() || self.user_dnd(),
+            unseen: self.bell_unseen(),
             look_icon: self.look_icon(),
             pressed: self.input.sys_press.map(|(k, ..)| k).filter(|&k| self.sys_pressed(k)),
             open: match self.flyout {
@@ -1157,6 +1158,8 @@ struct BarInfo<'a> {
     launchable: &'a [(String, String)],
     /// Nerusit (zvonek preskrtnuty).
     dnd: bool,
+    /// Nevidena oznameni (odznak u zvonku).
+    unseen: usize,
     /// Ikona vzhledu (slunce, mesic, kontrast).
     look_icon: &'static str,
     /// Drzeny prvek listy (stav "stisknuto", akce az pri pusteni).
@@ -1312,6 +1315,17 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
         };
         let (x, y) = (r.x + (r.w - im) as i32 / 2, r.y + (r.h - im) as i32 / 2);
         st.icons.draw(c, name, x, y, im, t.icon_stroke, ink);
+        // Zvonek: odznak poctu nevidenych (`accent`, cislo `on_accent`).
+        if k == 2 && info.unseen > 0 && !info.dnd {
+            let cs = t.text.caption;
+            let txt = if info.unseen > 9 { String::from("9+") } else { format!("{}", info.unseen) };
+            let h = cs.line;
+            let w = (st.width(&txt, cs) + 2 * t.space[1]).max(h);
+            let b = Rect::new(r.right() as i32 - w as i32, r.y, w, h);
+            c.round_fill(b, h / 2, col.accent);
+            let face = st.face(cs);
+            face.draw(c, b.x + (w as i32 - face.width(&txt, cs.size) as i32) / 2, b.y + face.baseline_in(cs.size, h), &txt, cs.size, col.on_accent);
+        }
         if off {
             // Preskrtnuti (stav nese i barva, ne jen barva).
             for d in 0..im as i32 {
