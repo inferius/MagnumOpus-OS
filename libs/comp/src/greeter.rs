@@ -658,17 +658,19 @@ impl Comp {
         if matches!(g.mode(), Mode::Locked(_))
             && let Some((tm, date)) = self.clock.as_ref()
         {
-            center(st, c, l.clock_y, tm, t.text.clock, col.on_accent, w);
-            center(st, c, l.clock_y + t.text.clock.line as i32, date, t.text.title, col.on_accent, w);
+            // Text na ztlumene plose (scrim), ne na akcentu: `ink` a
+            // `ink_muted` jako v prototypu (prihlaseni.html, `.lock`).
+            center(st, c, l.clock_y, tm, t.text.clock, col.ink, w);
+            center(st, c, l.clock_y + t.text.clock.line as i32, date, t.text.title, col.ink_muted, w);
         }
         let target = g.target().cloned();
         // Bez uctu: zprava a Vypnout / Restartovat, zadny formular ani
         // avatar. Dokud seznam uctu neprisel, jen pozadi.
         if !l.form {
             if g.no_account() {
-                center(st, c, l.name_y, "Přihlášení", t.text.title, col.on_accent, w);
+                center(st, c, l.name_y, "Přihlášení", t.text.title, col.ink, w);
                 for (k, line) in NO_ACCOUNT.iter().enumerate() {
-                    center(st, c, l.field.y + k as i32 * t.text.body.line as i32, line, t.text.body, col.on_accent, w);
+                    center(st, c, l.field.y + k as i32 * t.text.body.line as i32, line, t.text.body, col.ink_muted, w);
                 }
                 for (i, (_, r)) in l.power.iter().enumerate() {
                     c.round_fill_bordered(*r, r.h / 2, col.surface, col.border_strong, 1);
@@ -708,11 +710,11 @@ impl Comp {
             f.draw(c, dot.x + (36 - cw) / 2, dot.y + f.baseline_in(ss.size, 36), &ch, ss.size, col.accent_ink);
             let cs = t.text.caption;
             let f = st.face(cs);
-            let ink = if *i == g.sel { col.ink } else { col.on_accent };
+            let ink = if *i == g.sel { col.ink } else { col.ink_muted };
             let nw = f.width(&a.display, cs.size).min(r.w - 8) as i32;
             f.draw_ellipsized(c, r.x + (r.w as i32 - nw) / 2, r.y + 44 + f.baseline_in(cs.size, cs.line), &a.display, cs.size, ink, r.w - 8);
         }
-        center(st, c, l.name_y, &display, t.text.title, col.on_accent, w);
+        center(st, c, l.name_y, &display, t.text.title, col.ink, w);
         // Pole: pilulka s tecky a tlacitkem.
         let fr = l.field;
         c.round_fill_bordered(fr, fr.h / 2, col.surface, col.border_strong, 1);

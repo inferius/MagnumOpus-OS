@@ -33,6 +33,8 @@ struct F {
     sel: Vec<u64>,
     sort: Option<(usize, bool)>,
     multi: bool,
+    /// Kontextova nabidka zavisla na vyberu (jako Soubory).
+    menu: bool,
     calls: Rc<Cell<usize>>,
     msgs: Vec<M>,
     ui: Ui<M>,
@@ -41,7 +43,7 @@ struct F {
 impl F {
     fn new(n: usize) -> Self {
         let names = Rc::new((0..n).map(|i| alloc::format!("soubor {i:05}")).collect());
-        let mut f = F { names, sel: Vec::new(), sort: None, multi: true, calls: Rc::new(Cell::new(0)), msgs: Vec::new(), ui: Ui::new(crate::Look::ui_fonts(), 500, 400) };
+        let mut f = F { names, sel: Vec::new(), sort: None, multi: true, menu: false, calls: Rc::new(Cell::new(0)), msgs: Vec::new(), ui: Ui::new(crate::Look::ui_fonts(), 500, 400) };
         f.rebuild();
         f
     }
@@ -63,6 +65,10 @@ impl F {
         .key("soubory");
         if let Some((c, a)) = self.sort {
             t = t.sorted(c, a);
+        }
+        if self.menu {
+            let open = menu_item("Otevřít", M::Open(0));
+            t = t.context_menu(vec![if self.sel.is_empty() { open.disabled("Nic není vybráno") } else { open }]);
         }
         column([t.height(300)])
     }
@@ -376,4 +382,20 @@ fn section_headers_are_skipped() {
     }
     let r = u.event(InputEvent::Key { code: KEY_HOME, action: 1, ch: None }, 0);
     assert_eq!(r.msgs, vec![S(vec![1])]);
+}
+
+/// Pravy klik na radek bez vyberu: nabidka ukazuje stav po vyberu radku
+/// (aplikace zpracuje vyber az po otevreni nabidky; pohled se prestavi a
+/// otevrena nabidka prevezme nove polozky).
+#[test]
+fn context_menu_reflects_selection_made_by_right_click() {
+    let mut f = F::new(20);
+    f.menu = true;
+    f.rebuild();
+    let (x, y) = f.row_pt(4);
+    f.ev(InputEvent::Button { code: BTN_RIGHT, pressed: true, x, y }, 0, None);
+    assert_eq!(f.sel, vec![1004]);
+    assert!(f.ui.popup_open());
+    let item = f.ui.a11y().into_iter().find(|n| n.role == Role::MenuItem && n.name == "Otevřít").expect("polozka Otevrit");
+    assert_eq!(item.state & state::DISABLED, 0, "nabidka ze stavu pred vyberem");
 }

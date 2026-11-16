@@ -500,6 +500,7 @@ impl<M: Clone> Ui<M> {
             self.popup = None;
             self.popup_stack.clear();
         }
+        self.refresh_context();
         if self.tip.is_some_and(|(k, _)| self.index_of(k).is_none()) {
             self.tip = None;
             self.tip_shown = None;
