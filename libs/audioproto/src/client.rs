@@ -38,6 +38,14 @@ pub mod op {
     pub const STREAM_INFO: u32 = 11;
     pub const DEVICES: u32 = 12;
     pub const SELECT: u32 = 13;
+    /// Aplikace s proudy (identita z manifestu) a jejich hlasitost.
+    pub const APPS: u32 = 14;
+    /// Hlasitost aplikace (vsech jejich proudu, i z vic procesu).
+    pub const APP_VOLUME: u32 = 15;
+    /// Stav, zarizeni a aplikace v jedne odpovedi (panel Zvuk v liste).
+    pub const OVERVIEW: u32 = 16;
+    /// Zarizeni pro nahravani (jinak vstup aktivniho nebo prvni se vstupem).
+    pub const SELECT_INPUT: u32 = 17;
 }
 
 /// Nejmensi a nejvetsi pozadovana latence bufferu klienta (us).
@@ -65,6 +73,15 @@ pub enum Request {
     Devices,
     /// Prepnout na zarizeni `index` (bezici streamy hraji dal na novem).
     Select { index: u8 },
+    /// Seznam aplikaci s proudy ([`AppEntry`]).
+    Apps,
+    /// Hlasitost aplikace `app` (identita z manifestu) v procentech.
+    AppVolume { app: String, percent: u8 },
+    /// [`Overview`]: stav, zarizeni a aplikace.
+    Overview,
+    /// Nahravat ze zarizeni `index`; 255 = automaticky (vstup aktivniho
+    /// zarizeni, jinak prvni se vstupem).
+    SelectInput { index: u8 },
 }
 
 impl Request {
@@ -101,6 +118,16 @@ impl Request {
                 w = Writer::op(op::SELECT);
                 w.u8(*index);
             }
+            Request::Apps => w = Writer::op(op::APPS),
+            Request::AppVolume { app, percent } => {
+                w = Writer::op(op::APP_VOLUME);
+                w.str(app).u8(*percent);
+            }
+            Request::Overview => w = Writer::op(op::OVERVIEW),
+            Request::SelectInput { index } => {
+                w = Writer::op(op::SELECT_INPUT);
+                w.u8(*index);
+            }
         }
         w.finish()
     }
@@ -125,6 +152,16 @@ impl Request {
             op::CONNECT => Request::Connect,
             op::DEVICES => Request::Devices,
             op::SELECT => Request::Select { index: r.u8()? },
+            op::APPS => Request::Apps,
+            op::APP_VOLUME => {
+                let app = r.str()?;
+                if app.is_empty() || app.len() > MAX_APP_ID {
+                    return Err(Error::InvalidArgs);
+                }
+                Request::AppVolume { app, percent: percent(r.u8()?)? }
+            }
+            op::OVERVIEW => Request::Overview,
+            op::SELECT_INPUT => Request::SelectInput { index: r.u8()? },
             _ => return Err(Error::NotSupported),
         };
         Ok(req)
@@ -212,8 +249,17 @@ pub struct Status {
 impl Status {
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::new();
+        self.put(&mut w);
+        w.finish()
+    }
+
+    pub fn decode(m: &[u8]) -> Result<Self> {
+        Self::get(&mut Reader::new(m))
+    }
+
+    pub fn put(&self, w: &mut Writer) {
         w.str(&self.device).str(&self.outputs);
-        self.format.encode(&mut w);
+        self.format.encode(w);
         w.u8(self.master).u8(self.muted as u8).u32(self.streams).u32(self.running);
         w.u64(self.hw_pos).u64(self.irqs).u64(self.device_underruns).u32(self.latency_us).u32(self.period);
         w.u8(self.input as u8).u8(self.device_index);
@@ -221,15 +267,13 @@ impl Status {
         for a in &self.capturing {
             w.str(a);
         }
-        w.finish()
     }
 
-    pub fn decode(m: &[u8]) -> Result<Self> {
-        let mut r = Reader::new(m);
+    pub fn get(r: &mut Reader) -> Result<Self> {
         Ok(Self {
             device: r.str()?,
             outputs: r.str()?,
-            format: Format::decode(&mut r)?,
+            format: Format::decode(r)?,
             master: r.u8()?,
             muted: r.u8()? != 0,
             streams: r.u32()?,
@@ -316,5 +360,100 @@ impl DeviceEntry {
             });
         }
         Ok(v)
+    }
+}
+
+/// Nejdelsi identita aplikace (`AppVolume`, [`AppEntry`]).
+pub const MAX_APP_ID: usize = 128;
+/// Nejvic aplikaci a zarizeni v [`Overview`].
+pub const MAX_LIST: usize = 64;
+
+/// Aplikace s proudy (`APPS`): identita z manifestu, jmeno, hlasitost
+/// aplikace (pro vsechny jeji proudy, i z vic procesu: proud Wine je jedna
+/// polozka `org.winehq.wine`), zda hraje a zda nahrava.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppEntry {
+    pub app_id: String,
+    pub name: String,
+    pub volume: u8,
+    pub playing: bool,
+    pub capturing: bool,
+}
+
+impl AppEntry {
+    pub fn put(&self, w: &mut Writer) {
+        w.str(&self.app_id).str(&self.name).u8(self.volume).u8(self.playing as u8).u8(self.capturing as u8);
+    }
+
+    pub fn get(r: &mut Reader) -> Result<Self> {
+        Ok(Self { app_id: r.str()?, name: r.str()?, volume: r.u8()?, playing: r.u8()? != 0, capturing: r.u8()? != 0 })
+    }
+
+    pub fn encode_list(list: &[AppEntry]) -> Vec<u8> {
+        let mut w = Writer::new();
+        put_apps(&mut w, list);
+        w.finish()
+    }
+
+    pub fn decode_list(m: &[u8]) -> Result<Vec<AppEntry>> {
+        get_apps(&mut Reader::new(m))
+    }
+}
+
+fn put_apps(w: &mut Writer, list: &[AppEntry]) {
+    let n = list.len().min(MAX_LIST);
+    w.u8(n as u8);
+    for a in &list[..n] {
+        a.put(w);
+    }
+}
+
+fn get_apps(r: &mut Reader) -> Result<Vec<AppEntry>> {
+    let n = r.u8()? as usize;
+    if n > MAX_LIST {
+        return Err(Error::InvalidArgs);
+    }
+    (0..n).map(|_| AppEntry::get(r)).collect()
+}
+
+/// Odpoved `OVERVIEW`: vse pro panel Zvuk v jedne zprave (kompozitor se
+/// pta pravidelne a nesmi na sluzbu cekat).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Overview {
+    pub status: Status,
+    pub devices: Vec<DeviceEntry>,
+    pub apps: Vec<AppEntry>,
+    /// Zarizeni, ze ktereho se nahrava (`None` = zadny vstup).
+    pub input: Option<u8>,
+}
+
+impl Overview {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut w = Writer::new();
+        self.status.put(&mut w);
+        let n = self.devices.len().min(MAX_LIST);
+        w.u8(n as u8);
+        for d in &self.devices[..n] {
+            w.u8(d.index).str(&d.name).str(&d.outputs).u8(d.input as u8).u8(d.active as u8);
+        }
+        put_apps(&mut w, &self.apps);
+        w.u8(self.input.unwrap_or(u8::MAX));
+        w.finish()
+    }
+
+    pub fn decode(m: &[u8]) -> Result<Self> {
+        let mut r = Reader::new(m);
+        let status = Status::get(&mut r)?;
+        let n = r.u8()? as usize;
+        if n > MAX_LIST {
+            return Err(Error::InvalidArgs);
+        }
+        let mut devices = Vec::with_capacity(n);
+        for _ in 0..n {
+            devices.push(DeviceEntry { index: r.u8()?, name: r.str()?, outputs: r.str()?, input: r.u8()? != 0, active: r.u8()? != 0 });
+        }
+        let apps = get_apps(&mut r)?;
+        let input = Some(r.u8()?).filter(|&i| i != u8::MAX);
+        Ok(Self { status, devices, apps, input })
     }
 }

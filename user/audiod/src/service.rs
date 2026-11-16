@@ -6,7 +6,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
-use audioproto::client::{DeviceEntry, Request, Status};
+use audioproto::client::{AppEntry, DeviceEntry, Overview, Request, Status};
 use audioproto::device::Info;
 use audioproto::{Direction, Error, Format, Result, encode_reply, volume_gain};
 use audiomix::Frame;
@@ -68,6 +68,11 @@ pub struct Service {
     pub pending: Vec<crate::perm::PendingOpen>,
     pub client_seq: u64,
     pub ask_seq: u32,
+    /// Hlasitost aplikaci podle identity z manifestu (`APP_VOLUME`); proudy
+    /// aplikace z vic procesu (Wine) maji jednu hodnotu.
+    pub app_volumes: alloc::collections::BTreeMap<String, u8>,
+    /// Zvolene zarizeni pro nahravani (`SELECT_INPUT`); `None` = automaticky.
+    pub input_pref: Option<usize>,
 }
 
 impl Service {
@@ -429,6 +434,21 @@ impl Service {
                 (Ok(Vec::new()), none())
             }
             Request::Status => (Ok(self.status().encode()), none()),
+            Request::Apps => (Ok(AppEntry::encode_list(&self.app_list())), none()),
+            Request::AppVolume { app, percent } => {
+                self.app_volumes.insert(app.clone(), percent);
+                let owners: Vec<usize> = (0..self.clients.len()).filter(|&c| self.app_of(c) == Some(app.as_str())).collect();
+                for s in self.streams.iter_mut().filter(|s| owners.contains(&s.owner)) {
+                    s.app_volume = percent;
+                }
+                println!("audiod: hlasitost aplikace {app} {percent} %");
+                (Ok(Vec::new()), none())
+            }
+            Request::Overview => {
+                let o = Overview { status: self.status(), devices: self.device_list(), apps: self.app_list(), input: self.input_index().map(|i| i as u8) };
+                (Ok(o.encode()), none())
+            }
+            Request::SelectInput { index } => ok(self.select_input(index)),
             Request::StreamInfo { stream } => (self.stream_mut(client, stream).map(|s| s.info().encode()), none()),
             Request::Devices => (Ok(DeviceEntry::encode_list(&self.device_list())), none()),
             Request::Select { index } => {
@@ -468,8 +488,38 @@ impl Service {
         let id = self.next_id;
         let (s, reply, hs) = Stream::open(id, client, clock, dir, format, latency_us)?;
         self.next_id = self.next_id.wrapping_add(1).max(1);
+        let mut s = s;
+        s.app_volume = self.app_of(client).and_then(|a| self.app_volumes.get(a).copied()).unwrap_or(100);
         self.streams.push(s);
         Ok((reply, hs))
+    }
+
+    /// Identita aplikace klienta (`None` = systemova relace).
+    pub fn app_of(&self, client: usize) -> Option<&str> {
+        self.clients.get(client).and_then(|c| c.app.as_ref()).map(|a| a.app_id.as_str())
+    }
+
+    /// Aplikace s proudy (`APPS`): jedna polozka na identitu.
+    fn app_list(&self) -> Vec<AppEntry> {
+        let mut v: Vec<AppEntry> = Vec::new();
+        for s in &self.streams {
+            let Some(a) = self.clients.get(s.owner).and_then(|c| c.app.as_ref()) else { continue };
+            let i = match v.iter().position(|e| e.app_id == a.app_id) {
+                Some(i) => i,
+                None => {
+                    let volume = self.app_volumes.get(&a.app_id).copied().unwrap_or(100);
+                    v.push(AppEntry { app_id: a.app_id.clone(), name: a.app_name.clone(), volume, playing: false, capturing: false });
+                    v.len() - 1
+                }
+            };
+            if s.active() {
+                match s.dir {
+                    Direction::Output => v[i].playing = true,
+                    Direction::Input => v[i].capturing = true,
+                }
+            }
+        }
+        v
     }
 
     fn device_list(&self) -> Vec<DeviceEntry> {

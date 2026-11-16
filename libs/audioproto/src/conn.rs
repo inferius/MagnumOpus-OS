@@ -76,6 +76,26 @@ impl AudioClient {
         DeviceEntry::decode_list(&self.call(&Request::Devices)?.0)
     }
 
+    /// Aplikace s proudy (identita z manifestu) a jejich hlasitost.
+    pub fn apps(&self) -> Result<Vec<crate::client::AppEntry>> {
+        crate::client::AppEntry::decode_list(&self.call(&Request::Apps)?.0)
+    }
+
+    /// Hlasitost aplikace `app` (vsech jejich proudu).
+    pub fn app_volume(&self, app: &str, percent: u8) -> Result<()> {
+        self.call(&Request::AppVolume { app: app.into(), percent }).map(|_| ())
+    }
+
+    /// Stav, zarizeni a aplikace najednou (panel Zvuk).
+    pub fn overview(&self) -> Result<crate::client::Overview> {
+        crate::client::Overview::decode(&self.call(&Request::Overview)?.0)
+    }
+
+    /// Zarizeni pro nahravani (`u8::MAX` = automaticky).
+    pub fn select_input(&self, index: u8) -> Result<()> {
+        self.call(&Request::SelectInput { index }).map(|_| ())
+    }
+
     /// Prepne vystup (a vstup) na zarizeni `index` ze seznamu.
     pub fn select(&self, index: u8) -> Result<()> {
         self.call(&Request::Select { index }).map(|_| ())

@@ -119,6 +119,12 @@ pub enum AudioReq {
     /// Hlavni hlasitost (procenta).
     Master(u8),
     Mute(bool),
+    /// Vystup: zarizeni podle indexu sluzby.
+    Output(u8),
+    /// Vstup (nahravani): zarizeni podle indexu sluzby.
+    Input(u8),
+    /// Hlasitost aplikace (identita z manifestu, procenta).
+    App(String, u8),
 }
 
 /// Kompozitor.

@@ -36,6 +36,10 @@ pub(crate) enum PanelMsg {
     Dev(bool),
     Volume(i32),
     Mute,
+    Output(u8),
+    Input(u8),
+    /// Hlasitost aplikace (index v `AudioInfo::apps`).
+    AppVolume(usize, i32),
 }
 
 /// Otevreny panel listy.
@@ -130,9 +134,53 @@ impl Comp {
                 ],
             ),
         ];
+        let info = self.status.audio.clone().unwrap_or_default();
+        // Vystup a vstup: dve skupiny radio (zvoleny s fajfkou).
+        let outs: Vec<Node<PanelMsg>> = info
+            .devices
+            .iter()
+            .filter(|d| !d.outputs.is_empty() || d.active)
+            .map(|d| radio(&d.name, d.active).on_click(PanelMsg::Output(d.index)).panel_row(Some(if d.outputs.contains("headphone") { "headphones" } else { "audio-output" }), &d.outputs).disabled(off))
+            .collect();
+        if !outs.is_empty() {
+            items.push(ui::panel_section(s, "Výstup"));
+            items.push(column(outs).gap(0).key("vystup"));
+        }
+        let ins: Vec<Node<PanelMsg>> = info
+            .devices
+            .iter()
+            .filter(|d| d.input)
+            .map(|d| radio(&d.name, info.input == Some(d.index)).on_click(PanelMsg::Input(d.index)).panel_row(Some("mic"), "").disabled(off))
+            .collect();
+        if !ins.is_empty() {
+            items.push(ui::panel_section(s, "Vstup"));
+            items.push(column(ins).gap(0).key("vstup"));
+        }
+        // Indikator nahravani (soukromi: vzdy videt, kdo nahrava).
         if !self.status.capturing.is_empty() {
             let who = self.status.capturing.join(", ");
             items.push(panel_state(s, "mic", &alloc::format!("Nahrává: {who}"), true));
+        }
+        if !info.apps.is_empty() {
+            items.push(ui::panel_section(s, "Aplikace"));
+            let rows: Vec<Node<PanelMsg>> = info
+                .apps
+                .iter()
+                .enumerate()
+                .map(|(k, a)| {
+                    let state = if a.capturing { "nahrává" } else if a.playing { "hraje" } else { "ticho" };
+                    panel_line(
+                        s,
+                        vec![
+                            ui::icon("app-player"),
+                            column([label(&a.name), label(state).tone(ui::TextTone::Small)]).gap(0).grow(),
+                            // Posuvnik pres polovinu radku (jmeno se vejde vedle).
+                            slider(a.volume as i32, 0, 100).step(5).on_value(move |v| PanelMsg::AppVolume(k, v)).disabled(off).width(s.width / 2 - s.side).tooltip(&alloc::format!("Hlasitost {}", a.name)),
+                        ],
+                    )
+                })
+                .collect();
+            items.push(column(rows).gap(0).key("aplikace"));
         }
         items.push(panel_footer(s, vec![button("Nastavení zvuku").icon("settings").disabled(true).tooltip(NO_SETTINGS).grow()]));
         panel(items)
@@ -317,6 +365,14 @@ impl Comp {
             PanelMsg::Mute => {
                 let muted = self.status.volume.is_some_and(|(_, m)| m);
                 self.out.push(crate::Out::Audio(crate::AudioReq::Mute(!muted)));
+            }
+            PanelMsg::Output(i) => self.out.push(crate::Out::Audio(crate::AudioReq::Output(i))),
+            PanelMsg::Input(i) => self.out.push(crate::Out::Audio(crate::AudioReq::Input(i))),
+            PanelMsg::AppVolume(k, v) => {
+                if let Some(a) = self.status.audio.as_ref().and_then(|i| i.apps.get(k)) {
+                    let id = a.id.clone();
+                    self.out.push(crate::Out::Audio(crate::AudioReq::App(id, v.clamp(0, 100) as u8)));
+                }
             }
         }
     }

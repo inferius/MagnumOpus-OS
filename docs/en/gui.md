@@ -945,7 +945,14 @@ The Appearance, Network, Sound, Notifications and Developer mode panels
 are `ui` views over the [panel component](components.md)
 (`libs/comp/src/barpanel.rs`): width `size.panel_w`, height by content,
 centred above the icon, rounding `radius.window`, shadow
-`shadow.popover`. Keys (Tab, arrows in options, Space), hover and
+`shadow.popover`. The Sound panel: volume and mute, output and input (radio groups), a
+"Nahrává: ..." (recording) row and application volume by the manifest
+identity; data from `audiod` (`OVERVIEW`, a channel from init, the
+compositor asks for it instead of `STATUS`), changes go through the same
+channel (`MASTER_VOLUME`, `MUTE`, `SELECT`, `SELECT_INPUT`,
+`APP_VOLUME`); without the channel the controls are disabled.
+Screenshots `libs/comp/tests/shots/panel-zvuk-*.png`.
+Keys (Tab, arrows in options, Space), hover and
 accessibility are as in applications; Esc or a click outside closes the
 panel. The icon with an open panel has `surface_3` and an `accent`
 underline. Material: the blurred scene under the panel (once on opening,

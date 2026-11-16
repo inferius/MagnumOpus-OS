@@ -896,6 +896,12 @@ Panely Vzhled, Síť, Zvuk, Oznámení a Režim vývojáře jsou pohledy
 knihovny `ui` nad [komponentou panel](komponenty.md)
 (`libs/comp/src/barpanel.rs`): šířka `size.panel_w`, výška podle obsahu,
 střed nad ikonou, zaoblení `radius.window`, stín `shadow.popover`.
+Panel Zvuk: hlasitost a ztlumení, výstup a vstup (skupiny radio), řádek
+„Nahrává: ...“ a hlasitost aplikací podle identity z manifestu; data
+z `audiod` (`OVERVIEW`, kanál od initu, kompozitor se ptá místo `STATUS`),
+změny jdou stejným kanálem (`MASTER_VOLUME`, `MUTE`, `SELECT`,
+`SELECT_INPUT`, `APP_VOLUME`); bez kanálu je ovládání vypnuté. Snímky
+`libs/comp/tests/shots/panel-zvuk-*.png`.
 Klávesy (Tab, šipky ve volbách, mezerník), najetí a přístupnost jsou jako
 v aplikacích; Esc nebo klik mimo panel zavře. Ikona s otevřeným panelem
 má `surface_3` a podtržení `accent`. Materiál: rozmazaná scéna pod

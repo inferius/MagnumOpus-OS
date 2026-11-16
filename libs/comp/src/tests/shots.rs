@@ -72,3 +72,43 @@ fn shot_palette_and_launcher() {
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
+
+/// Panely listy nad komponentou panel (Vzhled, Zvuk s vystupem, vstupem,
+/// nahravanim a aplikacemi) ve svetlem, tmavem a kontrastnim rezimu.
+#[test]
+fn shot_bar_panels() {
+    use crate::render::{AudioApp, AudioDev, AudioInfo};
+    let mut errors = Vec::new();
+    for (mode, mname) in [(theme::Mode::Light, "svetly"), (theme::Mode::Dark, "tmavy"), (theme::Mode::Contrast, "kontrast")] {
+        for (panel, pname) in [("look", "vzhled"), ("volume", "zvuk")] {
+            let mut t = T::new();
+            t.c.set_mode(mode);
+            t.c.set_volume(Some((60, false)));
+            t.c.set_capturing(alloc::vec![String::from("Hovory")]);
+            t.c.audio_ctl = true;
+            t.c.set_audio_info(Some(AudioInfo {
+                devices: alloc::vec![
+                    AudioDev { index: 0, name: String::from("Reproduktory"), outputs: String::from("line-out"), input: true, active: true },
+                    AudioDev { index: 1, name: String::from("Sluchátka USB"), outputs: String::from("headphone"), input: false, active: false },
+                ],
+                apps: alloc::vec![
+                    AudioApp { id: String::from("org.magnumopus.calls"), name: String::from("Hovory"), volume: 80, playing: true, capturing: true },
+                    AudioApp { id: String::from("org.magnumopus.player"), name: String::from("Přehrávač"), volume: 45, playing: true, capturing: false },
+                ],
+                input: Some(0),
+            }));
+            let a = t.client("a");
+            t.window(a, Mode::Standard, RED);
+            t.frame();
+            assert!(t.c.open_panel(panel));
+            t.frame();
+            let Some(r) = t.c.bar_panel_rect() else {
+                errors.push(format!("panel {panel} se neotevrel"));
+                continue;
+            };
+            let (px, w, h) = crop(&t, r);
+            errors.extend(compare(&format!("panel-{pname}-{mname}"), &px, w, h));
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}

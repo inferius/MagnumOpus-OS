@@ -156,6 +156,39 @@ pub struct BarStatus {
     /// Aplikace, ktere prave nahravaji zvuk (indikator mikrofonu v liste;
     /// soukromi: uzivatel vzdy vidi, ze se nahrava).
     pub capturing: Vec<String>,
+    /// Zarizeni a aplikace pro panel Zvuk (`None` = sluzba je neposlala).
+    pub audio: Option<AudioInfo>,
+}
+
+/// Zvukove zarizeni v panelu Zvuk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioDev {
+    pub index: u8,
+    pub name: String,
+    /// Aktivni vystupy (`line-out,headphone`), prazdne = zadny.
+    pub outputs: String,
+    pub input: bool,
+    /// Prave pouzivany vystup.
+    pub active: bool,
+}
+
+/// Aplikace s proudy v panelu Zvuk (identita z manifestu).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioApp {
+    pub id: String,
+    pub name: String,
+    pub volume: u8,
+    pub playing: bool,
+    pub capturing: bool,
+}
+
+/// Co panel Zvuk ukazuje krome hlasitosti.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AudioInfo {
+    pub devices: Vec<AudioDev>,
+    pub apps: Vec<AudioApp>,
+    /// Zarizeni, ze ktereho se nahrava.
+    pub input: Option<u8>,
 }
 
 /// Na co ukazuje mys (zvyrazneni pri najeti).
@@ -281,6 +314,14 @@ impl Comp {
         if self.status.volume != volume {
             self.status.volume = volume;
             self.damage_panel();
+            self.bar_panel_changed();
+        }
+    }
+
+    /// Zarizeni a aplikace pro panel Zvuk (`OVERVIEW` sluzby zvuku).
+    pub fn set_audio_info(&mut self, info: Option<AudioInfo>) {
+        if self.status.audio != info {
+            self.status.audio = info;
             self.bar_panel_changed();
         }
     }

@@ -461,15 +461,19 @@ impl Service {
         }
         if let Some(s) = self.audio_src.as_mut() {
             match s.read(status::volume) {
-                Ok(Some((v, rec))) => {
+                Ok(Some((v, rec, info))) => {
                     c.set_volume(Some(v));
                     c.set_capturing(rec);
+                    c.set_audio_info(Some(info));
+                    c.audio_ctl = true;
                 }
                 Ok(None) => {}
                 Err(()) => {
                     self.audio_src = None;
                     c.set_volume(None);
                     c.set_capturing(alloc::vec::Vec::new());
+                    c.set_audio_info(None);
+                    c.audio_ctl = false;
                 }
             }
         }
@@ -518,8 +522,16 @@ impl Service {
                     }
                     None => println!("compd: volbu vzhledu nejde ulozit: init nedal kanal launcher"),
                 },
-                // Kanal ke sluzbe zvuku zatim neni (`audio_ctl` vypnute).
-                Out::Audio(req) => println!("compd: zadost o zvuk bez kanalu ke sluzbe zvuku: {req:?}"),
+                // Zadost panelu Zvuk: stejnym kanalem jako stav (systemova
+                // relace od initu); stav se pak precte hned.
+                Out::Audio(req) => match self.audio_src.as_mut() {
+                    Some(s) => {
+                        if !s.send(&status::audio_control(&req)) {
+                            println!("compd: zadost o zvuk se nepodarila poslat");
+                        }
+                    }
+                    None => println!("compd: zadost o zvuk bez kanalu ke sluzbe zvuku"),
+                },
                 Out::Device { source, trust } => {
                     if let Some(s) = &self.secure {
                         let cmd = if trust { inputproto::control::TRUST } else { inputproto::control::REJECT };
