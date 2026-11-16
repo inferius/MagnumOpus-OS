@@ -116,21 +116,18 @@ fn dns() -> Check {
     Ok(())
 }
 
-/// Znamy limit (docs/cs/rust-std.md, Sit): netproto nema cislo dotazu
-/// a netd ma na spojeni jen jeden rozpracovany dotaz, osrt proto spojeni
-/// zamyka. Vlakno blokovane ve `read` (klon pres `try_clone`) zdrzi zapis
-/// na stejnem spojeni, dokud cteni neskonci (tady vyprsenim za 2 s).
-/// Az bude netproto v2 (soubezne RECV/SEND), zapis projde hned a tento
-/// test je treba otocit: ma pak overit, ze zapis na cteni neceka.
-fn shared_stream_serialized() -> Check {
+/// Plny duplex (docs/cs/rust-std.md, Sit): vlakno blokovane ve `read`
+/// (klon pres `try_clone`) nezdrzi zapis na stejnem spojeni (netproto v2,
+/// osrt socket nezamyka). Cteni dostane echo zapisu.
+fn shared_stream_duplex() -> Check {
     let echo = addr("ECHO")?;
     let s = connect(echo)?;
     let mut reader = s.try_clone().map_err(|e| format!("try_clone: {e}"))?;
     reader.set_read_timeout(Some(Duration::from_secs(2))).map_err(|e| e.to_string())?;
     let t = thread::spawn(move || {
         let mut b = [0u8; 4];
-        // Echo nic neposle, dokud nezapiseme: cteni vyprsi.
-        reader.read(&mut b).map(|_| ()).map_err(|e| e.kind())
+        // Echo nic neposle, dokud nezapiseme: cteni ceka na zapis.
+        reader.read(&mut b).map(|n| b[..n].to_vec()).map_err(|e| e.kind())
     });
     // Cteni nejdriv zabere spojeni.
     thread::sleep(Duration::from_millis(300));
@@ -138,12 +135,9 @@ fn shared_stream_serialized() -> Check {
     (&s).write_all(b"x").map_err(|e| format!("zapis: {e}"))?;
     let waited = start.elapsed();
     let r = t.join().map_err(|_| "vlakno cteni spadlo")?;
-    ensure(r == Err(ErrorKind::TimedOut), format!("cteni: {r:?} (cekano TimedOut)"))?;
-    ensure(
-        waited >= Duration::from_millis(1200),
-        format!("zapis cekal jen {waited:?}: soubezne RECV/SEND uz funguje, otocit test"),
-    )?;
-    println!("sdilene spojeni: zapis cekal na cteni {} ms (znamy limit)", waited.as_millis());
+    ensure(r == Ok(b"x".to_vec()), format!("cteni: {r:?} (cekano echo x)"))?;
+    ensure(waited < Duration::from_millis(1200), format!("zapis cekal na cteni {waited:?}"))?;
+    println!("sdilene spojeni: zapis za {} ms, cteni dostalo echo", waited.as_millis());
     Ok(())
 }
 
@@ -164,7 +158,7 @@ fn main() {
         ("udp_echo", udp_echo),
         ("dns", dns),
         ("listen_denied", listen_denied),
-        ("shared_stream_serialized", shared_stream_serialized),
+        ("shared_stream_duplex", shared_stream_duplex),
     ];
     let mut failed = 0;
     for (name, check) in checks {

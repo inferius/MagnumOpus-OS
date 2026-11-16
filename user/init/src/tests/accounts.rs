@@ -22,6 +22,8 @@ pub const TESTS: &[(&str, fn(&Startup) -> TestResult)] = &[
     ("prihlaseni heslem", password_login),
     ("prihlaseni PINem", pin_login),
     ("relace vidi jen svuj domov", own_home_only),
+    ("shell uzivatele zapisuje (soukromy /tmp)", super::accounts_shell::shell_writes),
+    ("programy ze shellu (sit podle manifestu)", super::exec::programs),
     ("init nevyrazi systemovou identitu", no_system_identity),
     ("zamceni a odhlaseni", lock_and_logout),
     ("udalosti a job relace", session_events),
@@ -36,13 +38,13 @@ fn login() -> Result<Login, String> {
     crate::accounts::channel("login").map(Login).map_err(|e| fail("kanal login", e))
 }
 
-fn alice_uid() -> Result<u64, String> {
+pub(super) fn alice_uid() -> Result<u64, String> {
     let l = login()?;
     let list = l.list().map_err(|e| fail("list", e))?;
     list.iter().find(|a| a.name == "alice").map(|a| a.uid).ok_or_else(|| String::from("ucet alice neni ve vypisu"))
 }
 
-fn sign_in(uid: u64) -> Result<u64, String> {
+pub(super) fn sign_in(uid: u64) -> Result<u64, String> {
     let r = login()?.auth(uid, Method::Password, Secret::from(PW)).map_err(|e| fail("auth", e))?;
     session_of(r).map_err(|e| fail("prihlaseni heslem", e))
 }

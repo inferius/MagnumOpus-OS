@@ -10,15 +10,25 @@ use libos::Error;
 use shlang::host::{Applied, Aside, DirEntry, Fs, FsChange, FsChangeKind, FsResult, Meta, NodeKind, ViewRef, hidden};
 use shlang::vfs::path::{join, rebase};
 
-/// Kde lezi klony bokem (skryta slozka). Zbytky po padu uklidi init pri
-/// startu systemu, nez vznikne prvni relace (`user/init/src/terminal.rs`);
-/// termd je nemaze - nevi, ktere patri zivym relacim jinych oken a uloh.
+/// Kde lezi klony bokem relaci systemu (bez prihlaseni). Relace uzivatele
+/// je maji v soukrome `/tmp/<uid>/.aside` (`fsproto::perm::user_tmp`,
+/// zaklada init pri otevreni relace): do spolecneho `/tmp` lide nezapisuji.
+/// Zbytky po padu uklidi init pri startu systemu, nez vznikne prvni relace
+/// (`user/init/src/terminal.rs`); termd je nemaze - nevi, ktere patri
+/// zivym relacim jinych oken a uloh.
 pub const ASIDE_DIR: &str = "/tmp/.aside";
+
+/// Jmeno slozky klonu uvnitr soukrome docasne slozky uzivatele.
+pub const ASIDE_NAME: &str = ".aside";
 
 pub struct FsdFs {
     pub client: FsClient,
-    /// Jedinecna znacka relace ve jmenech klonu (`/tmp/.aside/<tag>-<n>`).
+    /// Jedinecna znacka relace ve jmenech klonu (`<slozka>/<tag>-<n>`).
     tag: String,
+    /// Domov relace (`/home/<jmeno>` = uzivatel, jinak system).
+    home: String,
+    /// Slozka klonu, jakmile je zjistena a zalozena.
+    aside_dir: Option<String>,
     next: u64,
 }
 
@@ -85,8 +95,27 @@ fn meta(s: &Stat) -> Meta {
 }
 
 impl FsdFs {
-    pub fn new(client: FsClient, tag: String) -> Self {
-        Self { client, tag, next: 0 }
+    pub fn new(client: FsClient, tag: String, home: &str) -> Self {
+        Self { client, tag, home: String::from(home), aside_dir: None, next: 0 }
+    }
+
+    /// Slozka klonu bokem: u uzivatele v jeho soukrome `/tmp/<uid>` (cislo
+    /// = vlastnik domova), u systemu `/tmp/.aside`. Zaklada jen samotnou
+    /// `.aside`; soukromou slozku zaklada init.
+    fn aside_dir(&mut self) -> FsResult<String> {
+        if let Some(d) = &self.aside_dir {
+            return Ok(d.clone());
+        }
+        let d = if self.home.starts_with("/home/") {
+            let uid = self.client.stat(&self.home)?.owner;
+            join(&fsproto::perm::user_tmp(uid), ASIDE_NAME)
+        } else {
+            self.ensure_dir(fsproto::perm::TMP_DIR)?;
+            String::from(ASIDE_DIR)
+        };
+        self.ensure_dir(&d)?;
+        self.aside_dir = Some(d.clone());
+        Ok(d)
     }
 
     /// Cesta uvnitr datasetu `ds` (protokol pro snapshoty a zmeny).
@@ -250,10 +279,9 @@ impl Fs for FsdFs {
     }
 
     fn aside_begin(&mut self, dataset: &str) -> FsResult<Aside> {
-        self.ensure_dir("/tmp")?;
-        self.ensure_dir(ASIDE_DIR)?;
+        let dir = self.aside_dir()?;
         self.next += 1;
-        let root = join(ASIDE_DIR, &alloc::format!("{}-{}", self.tag, self.next));
+        let root = join(&dir, &alloc::format!("{}-{}", self.tag, self.next));
         self.client.aside_begin(dataset, &root)?;
         Ok(Aside { dataset: dataset.into(), root })
     }

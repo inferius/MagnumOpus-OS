@@ -14,7 +14,7 @@ v QEMU]** x86_64, další etapy **[navrženo]** (tabulka níže).
 | W1 | konzolové `.exe` (`cmd`, `hostname`, vlastní test): spodní `ntdll`, TEB přes GS, SEH, paměť, soubory, `wineserver` jako proces | **[ověřeno v QEMU]** x86_64, release (sada `wine`): GS v jádře a `ucontext_t` v `cstd` **[ověřeno v QEMU]**; záplata výjimek `signal_x86_64.c` se přeloží **[implementováno]**; Wine na datovém disku jako aplikace (`/apps/org.winehq.wine`), zavaděč `wine` z disku nahraje `ntdll.so` ([DL-4c](dynamicke-linkovani.md#knihovny-z-disku-a-origin-dl-4c)) **[ověřeno v QEMU]**; nový prefix (`wineboot`), `cmd /c echo`, vlastní konzolový program `user/wintest` a `hostname` ([Wine na disku](#wine-na-disku-w1)); oprávnění `wx_compat` (RWX, Q6) zatím není potřeba **[navrženo]** |
 | W2 | víc procesů jedné aplikace, registry, pojmenované objekty, `winecfg` v režimu bez oken | rozpracováno: další proces (`CreateProcess`, čekání, kód konce), pojmenované události a `Read`/`WriteProcessMemory` přes wineserver a [`PROCESS_MEMORY`](syscally.md#process_memory) **[ověřeno v QEMU]** x86_64, release ([Paměť jiného procesu](#paměť-jiného-procesu-w2)); sdílené sekce nad souborem mezi procesy, registr (`reg add`/`reg query` v dalším procesu) **[ověřeno v QEMU]** ([Sekce a registr](#sekce-a-registr-w2)); signály serveru klientům, `winecfg` **[navrženo]** |
 | W3 | okna: ovladač Wine nad kompozitorem (`guiproto`), GDI, `notepad`, `winecfg`, schránka, vstup | **[navrženo]** |
-| W4 | zvuk nad `audiod` (role `Audio`, `winemoaudio.drv`), schránka naše aplikace -> Wine, obnova oken po pádu kompozitoru, PuTTY (okno a konfigurace) | **[ověřeno v QEMU]** x86_64 ([W4](#zvuk-schránka-a-obnova-oken-w4)), obecné části (role `Audio`, `moaudio`) i aarch64; síť z programů Wine (W4b) **[navrženo]** |
+| W4 | zvuk nad `audiod` (role `Audio`, `winemoaudio.drv`), schránka naše aplikace -> Wine, obnova oken po pádu kompozitoru, PuTTY (okno a konfigurace) | **[ověřeno v QEMU]** x86_64 ([W4](#zvuk-schránka-a-obnova-oken-w4)), obecné části (role `Audio`, `moaudio`) i aarch64; síť z programů Wine ([W4b](#síť-z-programů-windows-w4b)): Winsock, PuTTY raw a telnet **[ověřeno v QEMU]** x86_64 |
 | W5 | DXVK a VKD3D-Proton nad Vulkanem (Venus v QEMU, ovladače GPU na HW) | **[navrženo]** |
 | W6 | 32bitové aplikace (nový WoW64) | **[navrženo]** |
 | W7 | rychlá synchronizace (obdoba ntsync), výkon her | **[navrženo]** |
@@ -468,7 +468,7 @@ v sadě `sdl`.
 | Schránka naše aplikace -> Wine (`gui-probe kopiruj`, vložení v poznámkovém bloku, uložení a obsah souboru) | **[ověřeno v QEMU]** x86_64 (sada `wine`) |
 | Obnova oken Wine po pádu kompozitoru (`mowin`: záznam stavu, nová relace přes lístek role Gui, vlastníci oken, popupy, fokus, `EXPOSE`) | **[ověřeno v QEMU]** x86_64 (test `wine: okna Wine po padu kompozitoru (W4)`, `wintest obnova`: vlastník, vlastněný dialog vystředěný nad ním s fokusem, popup dialogu, stejné pixely před pádem a po obnově, Wine okna překreslí, program běží dál) |
 | PuTTY 0.85 (pinnutý zdroj, SHA-256 a podpis v `THIRD-PARTY.md`, překlad v `xtask wine` clangem nad SDK Wine): okno a dialog konfigurace | **[ověřeno v QEMU]** x86_64 (test `wine: PuTTY - dialog konfigurace (W4)`) |
-| ⚠️ **Síť z programů Wine zatím ne** (`ws2_32`): Wine vytváří socket ve wineserveru a fd posílá klientovi přes `SCM_RIGHTS`, socket ale mezi procesy předat nejde (`osrt`, `inherit.rs`) a wineserver relaci sítě nemá. Spojení PuTTY (raw/telnet) a přenositelné sockety jsou etapa W4b | **[navrženo]** |
+| Síť z programů Wine (`ws2_32`), spojení PuTTY raw/telnet | v [W4b](#síť-z-programů-windows-w4b) |
 
 **Zvuk.** Ovladač `winemoaudio.drv` je samostatné DLL (mmdevapi načítá
 `wine<jméno>.drv` a každé DLL má jednu tabulku unixových volání, proto ne
@@ -513,6 +513,64 @@ a knihoven hostitele, s hlavičkami Wine a importními knihovnami PE jako
 a podporu TLS (`__declspec(thread)`) dává náš `xtask/src/wine/wincrt.c`;
 prostředky (`.rc`) `llvm-rc`. `cargo xtask wine-putty` přeloží jen PuTTY
 nad hotovým SDK.
+
+## Síť z programů Windows (W4b)
+
+**Stav:** rozhodnuto 16. 11. 2026 (koordinátor: 1A přenositelný socket,
+2A vlastnictví a limity na identitu, 3A odvolání sítě zavře i předané
+sockety; loopback v netd). ⚠️ Programy Windows jen na x86_64 (Q11 A);
+obecné části (předání socketu, role Net, loopback, `MSG_PEEK`) i aarch64.
+
+| Část | Stav |
+|---|---|
+| Loopback v netd (127.0.0.0/8 a `::1` bez linky, stejná oprávnění relace) | **[ověřeno v QEMU]** x86_64 i aarch64 ([Loopback](sit.md#loopback)) |
+| Přenositelný socket (dědění `posix_spawn`, `SCM_RIGHTS`; netd `DUP`), limity na identitu, odvolání sítě zavře i předané sockety | **[ověřeno v QEMU]** x86_64 i aarch64 ([Předání socketu](sit.md#předání-socketu-limity-identity-a-odvolání)) |
+| Role Net pro procesy Wine (relace podle manifestu Wine, `MO_NET`, opt-out jako Gui/Audio) | **[ověřeno v QEMU]** x86_64 (sada `wine`) |
+| `MSG_PEEK` u spojení TCP (wineserver jím při `POLLIN` pozná konec spojení) | **[ověřeno v QEMU]** x86_64 (sada `sit loopback`, sada `wine`) |
+| Winsock (`wintest tcp`): spojení, data oběma směry přes loopback a k echo serveru hostitele (cesta ven přes slirp) | **[ověřeno v QEMU]** x86_64 (testy `wine: Winsock TCP ... (W4b)`) |
+| PuTTY raw a telnet proti echo serveru testu na loopbacku: pozdrav serveru vidět v terminálu, text psaný z QEMU dojde na server, jeho ozvěna je vidět | **[ověřeno v QEMU]** x86_64 (testy `wine: PuTTY raw/telnet ... (W4b)`) |
+| Naslouchání programů Windows jen na loopbacku (`listen_from = "loopback"`), síť `WSAEACCES` | **[ověřeno v QEMU]** x86_64 (test `wine: Winsock naslouchani ... (W4b)`) |
+| Přijímání spojení ze sítě po dotazu uživateli | **[navrženo]** |
+
+**Jak socket putuje.** Wine vytváří sockety ve wineserveru a klientovi
+posílá fd přes `SCM_RIGHTS`. Socket TCP/UDP je u netd jeden objekt, ke
+kterému může vést víc kanálů (`DUP`); `osrt` ho při `SCM_RIGHTS` i dědění
+předá jako nový kanál. Socket dál patří identitě, která ho vytvořila
+(limity počtu a bufferů, odvolání sítě aplikace zavře všechny jeho
+kanály). Relaci sítě dostane wineserver i každý program Wine rolí Net
+(`MO_NET=1`): launchd ji zúží podle sekce `[network]` manifestu Wine.
+
+**Manifest Wine (`[network]`).** Práva `info`, `tcp`, `listen`, `udp`,
+`dns`; dotaz uživatele vypnutý (`ask = false`), spojení na libovolný cíl
+(`to = "*"`), naslouchání na portech 1024-65535; 256 socketů a 64 MiB
+bufferů na identitu; přijímat spojení jen z loopbacku
+(`listen_from = "loopback"`, [Oprávnění](sit.md#oprávnění)). ⚠️ Programy
+Windows tak mají odchozí síť jako celek (bez dotazu na cíl); jemnější
+pravidla po aplikacích Windows patří do bodu 3 (instalace programů
+Windows).
+
+⚠️ **Programy Wine zatím nemůžou přijímat spojení ze sítě.** Naslouchání
+na `0.0.0.0` nebo na adrese rozhraní skončí `WSAEACCES` (žádné tiché
+zúžení na loopback); na loopbacku funguje (test `wine: Winsock
+naslouchani ... (W4b)`). Otevřený port je jiná třída rizika než odchozí
+spojení: povolí ho až obecný dotaz uživateli „Program X chce přijímat
+spojení ze sítě“ (povolení přes dialog povolení jako mikrofon, i pro
+`sshd` a nativní aplikace) **[navrženo]**.
+
+**Dvě opravy pro Wine.**
+
+- Neblokující `connect` vrací `EINPROGRESS` jako Linux (`cstd`). Spojení
+  hotové hned (náš dřívější stav) wineserver vezme jako připojené, ale
+  socket k čekání nepřihlásí: program pak nedostane `FD_READ` dřív, než
+  sám něco pošle (PuTTY raw čekal na pozdrav serveru věčně).
+- `ToUnicodeEx` při puštění klávesy (`KF_UP` ve scan kódu) znak nevrací
+  (`winemo.drv`, jako `winex11`): PuTTY se ptá i při `WM_KEYUP` a každý
+  znak by poslal dvakrát.
+
+⚠️ Neblokující `connect` u netd stále čeká, než se spojení naváže (nebo
+selže); u vzdáleného cíle tak volání stojí po dobu navazování. Pro
+programy Wine to nevadí (spojení navazuje wineserver), skutečně
+asynchronní `connect` v netd je samostatná práce.
 
 ## 3D: Vulkan, OpenGL a Direct3D (W5)
 

@@ -158,6 +158,17 @@ fn external_program_gets_needs_and_undo() {
     assert!(h.fs.exists("/home/tool.out"));
     it.run_line(&mut h, "undo").result.unwrap();
     assert!(!h.fs.exists("/home/tool.out"), "undo vrati i zmeny programu");
+    // Program `~` nezna: shell ho rozvine (jen na zacatku argumentu).
+    it.run_line(&mut h, "tool ~/a.txt ~ x~ --out=~/b").result.unwrap();
+    assert_eq!(h.execs[1].1, vec!["/home/a.txt", "/home", "x~", "/home/b"]);
+}
+
+#[test]
+fn program_args_keep_order() {
+    let mut h = TestHost::new();
+    let mut it = interp();
+    it.run_line(&mut h, "tool 10.0.2.2 --count 2 x --size=8").result.unwrap();
+    assert_eq!(h.execs[0].1, vec!["10.0.2.2", "true", "2", "x", "8"]);
 }
 
 #[test]

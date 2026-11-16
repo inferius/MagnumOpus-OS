@@ -22,6 +22,7 @@ mod apps;
 mod audio;
 mod certs;
 mod desktop;
+mod exec;
 mod display_native;
 mod files;
 mod open;
@@ -40,11 +41,13 @@ mod notify;
 mod ntp;
 mod perms;
 mod power;
+mod remote;
 mod render;
 mod removable;
 mod rescue;
 mod revocation;
 mod session;
+mod sshd;
 mod supervisor;
 mod system;
 mod sysfiles;
@@ -63,6 +66,11 @@ fn main(startup: Startup) -> i64 {
     let mut sup = supervisor::SUPERVISOR.lock();
     if let Ok(f) = libos::initfs::Initfs::open(&startup) {
         install::STARTUP_INITFS.call_once(|| f);
+    }
+    if let Some(v) = startup.initfs.as_ref()
+        && let Ok(h) = v.handle().duplicate(None)
+    {
+        install::STARTUP_INITFS_VMO.call_once(|| libos::Vmo::from_handle(h));
     }
     if let Some(r) = startup.root_resource.as_ref()
         && let Ok(h) = r.handle().duplicate(Some(libos::Rights::BASIC | libos::Rights::DIAG))
@@ -258,6 +266,8 @@ fn main(startup: Startup) -> i64 {
                         }
                         Err(e) => println!("init: synchronizaci casu nelze spustit: {e}"),
                     }
+                    // Vzdaleny pristup SSH, je-li zapnuty (vychozi ne).
+                    sshd::start_if_enabled();
                 }
                 Err(e) => println!("init: sluzbu site nelze spustit: {e}"),
             }

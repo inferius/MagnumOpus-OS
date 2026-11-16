@@ -97,6 +97,14 @@ pub enum Request {
     /// `on` / `off` nebo [`Reply::Failed`].
     #[cfg(feature = "dev-mode")]
     DevMode { set: u8 },
+    /// Jen kanal shell -> init: vzdaleny pristup (SSH) jmenem uzivatele
+    /// relace. `op`: `key-add` (`arg` = radek klice), `key-list`,
+    /// `key-remove` (`arg` = cislo), `access` (stav), `access-on`,
+    /// `access-off`, `sshd-status`, `sshd-enable`, `sshd-disable`.
+    /// `password` jen u `key-add` a `access-on`. Odpoved [`Reply::Text`]
+    /// nebo [`Reply::Failed`]; `sshd-enable` / `sshd-disable` (ukon spravy)
+    /// odpovi [`Reply::Ok`] s kanalem a vysledek prijde na nej.
+    Ssh { op: String, arg: String, password: String },
 }
 
 /// Nejvetsi obsah jednoho zapisu [`Request::SystemFile`] (zprava kanalu
@@ -217,6 +225,7 @@ mod op {
     pub const PERMISSIONS: u32 = 11;
     pub const APPEARANCE: u32 = 12;
     pub const ACCOUNTS: u32 = 13;
+    pub const SSH: u32 = 16;
     pub const SYSTEM_FILE: u32 = 14;
     /// Rezim vyvojare; cislo rezervovane i ve vydani (tam neznama zprava).
     #[allow(dead_code)]
@@ -251,7 +260,11 @@ impl Request {
             Request::SystemFile { .. } => op::SYSTEM_FILE,
             #[cfg(feature = "dev-mode")]
             Request::DevMode { .. } => op::DEV_MODE,
+            Request::Ssh { .. } => op::SSH,
         });
+        if let Request::Ssh { op, arg, password } = self {
+            w.str(op).str(arg).str(password);
+        }
         if let Request::LogLevel { target, level } = self {
             w.str(target).str(level);
         }
@@ -288,6 +301,7 @@ impl Request {
             op::APPEARANCE => Request::Appearance { system: r.u8()? != 0, change: r.str()? },
             op::PERMISSIONS => Request::Permissions { app: r.str()?, perm: r.str()? },
             op::ACCOUNTS => Request::Accounts,
+            op::SSH => Request::Ssh { op: r.str()?, arg: r.str()?, password: r.str()? },
             op::SYSTEM_FILE => {
                 let (op, path) = (r.u8()?, r.str()?);
                 // Obsah = zbytek zpravy.

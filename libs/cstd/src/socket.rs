@@ -338,6 +338,12 @@ pub unsafe extern "C" fn recv(fd: c_int, buf: *mut c_void, n: size_t, flags: c_i
             .map(|(n, _, _)| n);
         return errno::ret_val(r);
     }
+    // MSG_PEEK u spojeni TCP: data zustanou ve fronte (wineserver tak
+    // rozpozna konec spojeni pri POLLIN).
+    if flags & MSG_PEEK != 0 {
+        let r = flags_ok(flags & !MSG_PEEK).and_then(|dw| unsafe { buf_mut(buf, n) }.and_then(|b| sys::sock_peek(fd, b, dw)));
+        return errno::ret_val(r);
+    }
     let r = flags_ok(flags).and_then(|dw| unsafe { buf_mut(buf, n) }.and_then(|b| sys::sock_recv(fd, b, dw)));
     errno::ret_val(r)
 }
@@ -368,6 +374,17 @@ pub unsafe extern "C" fn recvfrom(
         if !len.is_null() {
             // SAFETY: kontrakt C (spojeny socket: odesilatel bez jmena).
             unsafe { *len = 0 };
+        }
+        // SAFETY: kontrakt C.
+        return unsafe { recv(fd, buf, n, flags) };
+    }
+    // MSG_PEEK u spojeni (odesilatel = protejsek): jako `recv`.
+    if flags & MSG_PEEK != 0 {
+        if !from.is_null()
+            && let Ok(a) = sys::sock_name(fd, true)
+        {
+            // SAFETY: kontrakt C.
+            unsafe { write_addr(a, from, len) };
         }
         // SAFETY: kontrakt C.
         return unsafe { recv(fd, buf, n, flags) };

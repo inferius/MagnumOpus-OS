@@ -70,7 +70,7 @@ pub struct Doc {
 
 /// Anglicke nazvy skupin (poradi jako [`GROUPS`]).
 pub const GROUPS_EN: &[&str] =
-    &["Files", "Text and output", "Lists and tables", "Conversions and time", "Tasks", "Session and safety", "Help", "System"];
+    &["Files", "Text and output", "Lists and tables", "Conversions and time", "Tasks", "Session and safety", "Help", "Account and permissions", "System"];
 
 /// Vsechna metadata (poradi podle skupin dat).
 pub fn all() -> impl Iterator<Item = &'static Doc> {

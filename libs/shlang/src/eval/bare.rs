@@ -49,7 +49,7 @@ impl Interp {
             }
         };
         let one = |it: &mut Interp, host: &mut dyn Host, cmd: &str| -> R<Value> {
-            let a = Args { pos: alloc::vec![Value::Str(String::from(name))], named: Vec::new(), span };
+            let a = Args { pos: alloc::vec![Value::Str(String::from(name))], named: Vec::new(), span, order: Vec::new() };
             super::builtins::call(it, host, cmd, a, Value::Nothing)
         };
         match meta.kind {

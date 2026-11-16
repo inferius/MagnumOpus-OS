@@ -21,6 +21,7 @@ mod admin;
 #[cfg(feature = "dev-mode")]
 mod devmode;
 mod perms;
+mod remote;
 mod os;
 mod service;
 mod store;
@@ -97,6 +98,12 @@ enum Kind {
     Grants,
     /// Zobrazovana jmena uctu (`NAMES`, okno spravce souboru).
     Names,
+    /// Sluzba sshd: overeni klicem na dalku (`SSH_PROBE`, `SSH_AUTH`).
+    Ssh,
+    /// Init jmenem relace shellu: klice SSH a vzdaleny pristup uctu
+    /// (zprava = `u64` uid LE + pozadavek; prikazy `ssh-key`,
+    /// `remote-access`).
+    AccountAdmin,
 }
 
 fn main(startup: Startup) -> i64 {
@@ -142,7 +149,7 @@ fn main(startup: Startup) -> i64 {
     for (name, e) in &eng.broken {
         println!("accountd: poskozeny zaznam uctu {name}: {e}");
     }
-    let mut svc = Service { eng, init, sessions: Vec::new(), keys: Vec::new(), events: Vec::new(), admin: Default::default(), perms: Default::default() };
+    let mut svc = Service { eng, init, sessions: Vec::new(), keys: Vec::new(), events: Vec::new(), admin: Default::default(), perms: Default::default(), remote: Default::default() };
     if bootstrap.write(b"ok", Vec::new()).is_err() {
         return 4;
     }
@@ -236,6 +243,8 @@ fn main(startup: Startup) -> i64 {
                         (Ok(r), Kind::Login) if r.is_login() => svc.login(r),
                         (Ok(r), Kind::Setup) => svc.setup(r),
                         (Ok(Request::Names), Kind::Names) => svc.names(),
+                        (Ok(r), Kind::Ssh) if r.is_ssh() => svc.ssh(r),
+                        (_, Kind::AccountAdmin) => svc.account_admin(&msg.data),
                         (Ok(_), _) => accountproto::reply_err(Error::AccessDenied),
                         (Err(e), _) => accountproto::reply_err(e),
                     };
@@ -285,6 +294,8 @@ fn main(startup: Startup) -> i64 {
             b"setup" => Some(Kind::Setup),
             b"grants" => Some(Kind::Grants),
             b"names" => Some(Kind::Names),
+            b"ssh" => Some(Kind::Ssh),
+            b"account-admin" => Some(Kind::AccountAdmin),
             _ => None,
         };
         let reply = if let Some(k) = kind {

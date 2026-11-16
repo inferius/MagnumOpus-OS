@@ -41,6 +41,7 @@ mod stdsys;
 mod webhelper;
 mod powertest;
 mod qmp;
+mod sshtest;
 mod symbolize;
 mod testdisks;
 mod unicode;
@@ -144,6 +145,8 @@ prepinace:
                    hostiteli (simulace) a v QEMU sada ovladace z manifestu
                    jen pro nej; bez kontroly jader ostatnich architektur
                    a dokumentace (rychla smycka vyvoje ovladace)
+  --ssh            (run) port 2222 hostitele -> 22 hosta (ssh -p 2222
+                   uzivatel@127.0.0.1; sshd zapnout v hostu `sshd enable`)
   --net-online     (test) i testy proti skutecne siti hostitele (resolver
                    hostitele pres slirp); bez nej jen lokalni servery
   --no-power       (test) bez zvlastnich behu testu napajeni (vypnuti
@@ -196,6 +199,8 @@ pub struct Options {
     test_repeat: u32,
     /// `--update-shots`: prepsat referencni snimky vzhledu `libs/ui`.
     update_shots: bool,
+    /// `--ssh` (run): presmerovani 2222 hostitele na port 22 hosta.
+    ssh_forward: bool,
     /// `--net-online`: i testy proti skutecne siti hostitele.
     net_online: bool,
     /// Backend zvuku QEMU (`--audio`); prazdne = test wav, beh none.
@@ -322,6 +327,7 @@ fn run_cli() -> Result<()> {
         test_repeat: 1,
         update_shots: false,
         net_online: false,
+        ssh_forward: false,
         audio: String::new(),
         test_driver: None,
         edu: false,
@@ -389,6 +395,7 @@ fn run_cli() -> Result<()> {
                 opts.test_repeat = value.to_string_lossy().parse().map_err(|_| "--repeat ocekava cislo")?;
             }
             Some("--net-online") => opts.net_online = true,
+            Some("--ssh") => opts.ssh_forward = true,
             Some("--update-shots") => opts.update_shots = true,
             Some("--dir") => {
                 let value = args.next().ok_or("--dir ocekava slozku")?;
@@ -472,6 +479,11 @@ fn run_cli() -> Result<()> {
             // Ucty: rychly profil Argon2id pro QEMU a vyvojove automaticke
             // prihlaseni (jen `run`; `image` pro uzivatele je nema).
             opts.extra_initfs.push((String::from("accounts-qemu"), b"1".to_vec()));
+            // SSH z hostitele (docs/cs/ssh.md, Pripojeni z Windows).
+            if opts.ssh_forward {
+                opts.hostfwd = Some(String::from("tcp:127.0.0.1:2222-:22"));
+                println!("xtask: SSH: ssh -p 2222 <uzivatel>@127.0.0.1 (v hostu sshd enable, remote-access on, ssh-key add)");
+            }
             opts.extra_initfs.push((String::from("accounts-dev"), b"1".to_vec()));
             opts.edu = edu_available(&opts);
             let artifacts = build(&opts)?;
@@ -509,8 +521,17 @@ fn run_cli() -> Result<()> {
                 drivers::test_plan(&expect, opts.test_driver.as_deref(), &opts.iommu).into_bytes(),
             ));
             // Pomocne servery pro testy site bezi, dokud bezi xtask.
-            let helper = nethelper::start()?;
+            let mut helper = nethelper::start()?;
             let web = webhelper::start()?;
+            // Test SSH (sada `ssh`): klient OpenSSH hostitele na port 22
+            // hosta. Bez klienta OpenSSH test v hostu selze s duvodem.
+            match sshtest::start(&run_file("ssh-test", "d")) {
+                Ok(t) => {
+                    helper.add_forward(&t.hostfwd);
+                    opts.extra_initfs.push((String::from("ssh-test"), t.config.into_bytes()));
+                }
+                Err(e) => println!("xtask: test ssh nepujde: {e}"),
+            }
             let config = format!("{}{}", helper.config, web.config);
             opts.extra_initfs.push((String::from("net-test"), config.into_bytes()));
             opts.extra_initfs.push((String::from("accounts-qemu"), b"1".to_vec()));
@@ -807,6 +828,8 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "--package",
             "tls",
             "--package",
+            "ssh",
+            "--package",
             "httpc",
             "--package",
             "dns",
@@ -926,6 +949,10 @@ pub struct Artifacts {
 
 /// Programy v userspace, ktere se pribali do initfs (jmeno crate = jmeno
 /// souboru v initfs).
+/// Dalsi programy z balicku s vice binarkami (balicek je v
+/// [`USER_PROGRAMS`]): sshd -> proces spojeni `sshd-conn`.
+const EXTRA_BINS: &[&str] = &["sshd-conn"];
+
 const USER_PROGRAMS: &[&str] = &[
     "init",
     "libd",
@@ -984,6 +1011,7 @@ const USER_PROGRAMS: &[&str] = &[
     "fwd",
     "netprobe",
     "ntpd",
+    "sshd",
     "fetch",
     "revocd",
     "accountd",
@@ -1004,6 +1032,11 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("gui-komponenty.manifest.toml", "user/gui-komponenty/gui-komponenty.manifest.toml"),
     ("gui-term.manifest.toml", "user/gui-term/gui-term.manifest.toml"),
     ("ntpd.manifest.toml", "user/ntpd/ntpd.manifest.toml"),
+    ("sshd.manifest.toml", "user/sshd/sshd.manifest.toml"),
+    ("std-exec.manifest.toml", "user/std-exec/std-exec.manifest.toml"),
+    ("ping.manifest.toml", "user/nettools/ping.manifest.toml"),
+    ("nc.manifest.toml", "user/nettools/nc.manifest.toml"),
+    ("resolve.manifest.toml", "user/nettools/resolve.manifest.toml"),
     ("ntpd.toml", "user/ntpd/ntpd.toml"),
     ("fetch.manifest.toml", "user/fetch/fetch.manifest.toml"),
     ("revocd.manifest.toml", "user/revocd/revocd.manifest.toml"),
@@ -1197,6 +1230,10 @@ fn build(opts: &Options) -> Result<Artifacts> {
             .map_err(|e| format!("nelze cist program {name}: {e}"))?;
         files.push((name.to_string(), loadable_only(&data)));
     }
+    for name in EXTRA_BINS {
+        let data = std::fs::read(user_bin.join(name)).map_err(|e| format!("nelze cist program {name}: {e}"))?;
+        files.push((name.to_string(), loadable_only(&data)));
+    }
     // Prevzate aplikace (ripgrep, ...) bez uprav: overeni std v praxi.
     for (name, path) in ports::build(a)? {
         let data = std::fs::read(&path).map_err(|e| format!("nelze cist port {name}: {e}"))?;
@@ -1223,6 +1260,10 @@ fn build(opts: &Options) -> Result<Artifacts> {
         let data = std::fs::read(std_bin.join(name))
             .map_err(|e| format!("nelze cist aplikaci {name}: {e}"))?;
         files.push((name.to_string(), loadable_only(&data)));
+    }
+    for (alias, name) in stdsys::STD_ALIASES {
+        let data = std::fs::read(std_bin.join(name)).map_err(|e| format!("nelze cist aplikaci {name}: {e}"))?;
+        files.push((alias.to_string(), loadable_only(&data)));
     }
     // ET_DYN se do initfs dava cele (zavadec cte dynamickou cast pres
     // segmenty; `loadable_only` je jen pro ET_EXEC).

@@ -4,7 +4,7 @@ Služba uživatelských účtů; logika je v `libs/accounts`, protokol v `libs/a
 
 ## Klíčové soubory
 
-- `src/main.rs` (smyčka, konfigurace), `service.rs` (obsluha požadavků), `admin.rs` (správa: `ELEVATE`, popis úkonu v dialogu včetně `SYSTEM_FILE`, granty, audit), `devmode.rs` (režim vývojáře, jen feature `dev-mode`), `store.rs` (ukládání na FS), `os.rs` (vazba na OS), `perms.rs` (povolení aplikací: kanál `permissions` pro dotazy služby zařízení, `permissions-admin` pro init, dialog Povolit / Jen tentokrát / Nepovolit, uložení `/db/permissions/<uid>`).
+- `src/main.rs` (smyčka, konfigurace), `service.rs` (obsluha požadavků), `admin.rs` (správa: `ELEVATE`, popis úkonu v dialogu včetně `SYSTEM_FILE`, granty, audit), `devmode.rs` (režim vývojáře, jen feature `dev-mode`), `store.rs` (ukládání na FS), `os.rs` (vazba na OS), `remote.rs` (SSH: ověření podpisu klíčem účtu, `RemoteGuard`, žádost initu o vzdálenou relaci, klíče a příznak `REMOTE` přes self kanál; `docs/cs/ssh.md`), `perms.rs` (povolení aplikací: kanál `permissions` pro dotazy služby zařízení, `permissions-admin` pro init, dialog Povolit / Jen tentokrát / Nepovolit, uložení `/db/permissions/<uid>`).
 
 ## Invarianty
 

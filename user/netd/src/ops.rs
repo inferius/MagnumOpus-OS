@@ -47,7 +47,7 @@ fn drain_backlog(stack: &mut Stack, o: &mut Obj, created: &mut Vec<Obj>) {
             o.backlog.pop_front();
             continue;
         };
-        let ticket = match &o.kind {
+        let ticket = match &*o.kind.borrow() {
             Kind::Session(auth) => match auth.borrow().begin_op() {
                 Ok(t) => t,
                 Err(_) => return,
@@ -118,7 +118,7 @@ fn settle(stack: &mut Stack, o: &mut Obj, m: Meta, step: Step, created: &mut Vec
 /// Zacne dotaz ze zpravy `data` (hlavicka `h` uz overena).
 fn start(stack: &mut Stack, o: &mut Obj, h: Header, data: &[u8], m: Meta, created: &mut Vec<Obj>) -> bool {
     let step = match msg::parse_request(data) {
-        Ok((_, mut r)) => obj::request(stack, &mut o.kind, h.op, h.deadline, &mut r),
+        Ok((_, mut r)) => obj::request(stack, &mut o.kind.borrow_mut(), h.op, h.deadline, &mut r),
         Err(e) => Step::err(e),
     };
     settle(stack, o, m, step, created)
@@ -177,7 +177,7 @@ fn cancel(stack: &mut Stack, o: &mut Obj, id: u32, created: &mut Vec<Obj>) {
 /// `READINESS`: event pripravenosti socketu (zalozi se pri prvnim dotazu,
 /// dalsi dotaz vrati dalsi duplikat stejneho eventu).
 fn readiness(stack: &mut Stack, o: &mut Obj, id: u32) {
-    if matches!(o.kind, Kind::Session(_)) {
+    if matches!(*o.kind.borrow(), Kind::Session(_)) {
         let _ = o.ch.write(&msg::reply(id, Err(Error::NotSupported)), Vec::new());
         return;
     }
@@ -203,6 +203,24 @@ fn readiness(stack: &mut Stack, o: &mut Obj, id: u32) {
     }
 }
 
+/// `DUP`: dalsi kanal ke stejnemu socketu (relace ne: uzsi relaci dava
+/// `RESTRICT`).
+fn dup(o: &mut Obj, id: u32, created: &mut Vec<Obj>) {
+    if matches!(*o.kind.borrow(), Kind::Session(_)) {
+        let _ = o.ch.write(&msg::reply(id, Err(Error::NotSupported)), Vec::new());
+        return;
+    }
+    match Channel::create() {
+        Ok((client, server)) => {
+            created.push(Obj::shared(server, o.kind.clone()));
+            let _ = o.ch.write(&msg::reply(id, Ok(Writer::new())), alloc::vec![client.into_handle()]);
+        }
+        Err(e) => {
+            let _ = o.ch.write(&msg::reply(id, Err(e)), Vec::new());
+        }
+    }
+}
+
 /// Nova zprava od klienta.
 pub fn on_message(stack: &mut Stack, o: &mut Obj, data: Vec<u8>, created: &mut Vec<Obj>) {
     // Zprava bez platne hlavicky nema cislo, na ktere by slo odpovedet:
@@ -218,6 +236,16 @@ pub fn on_message(stack: &mut Stack, o: &mut Obj, data: Vec<u8>, created: &mut V
         readiness(stack, o, h.id);
         return;
     }
+    if h.op == op::DUP {
+        dup(o, h.id, created);
+        return;
+    }
+    if h.op == op::KIND {
+        let mut w = Writer::new();
+        w.u8(obj::sock_kind(&o.kind.borrow()));
+        let _ = o.ch.write(&msg::reply(h.id, Ok(w)), Vec::new());
+        return;
+    }
     let backlogged = o.backlog.iter().any(|d| header_of(d).is_some_and(|x| x.id == h.id));
     if backlogged || o.ops.iter().any(|x| x.id == h.id) {
         // Cislo uz patri rozpracovanemu dotazu: odpoved by se nedala
@@ -225,14 +253,14 @@ pub fn on_message(stack: &mut Stack, o: &mut Obj, data: Vec<u8>, created: &mut V
         reply(stack, o, h.id, Err(Error::AlreadyExists), None, created);
         return;
     }
-    let dir = obj::dir_of(&o.kind, h.op);
-    let ticket = match &o.kind {
+    let dir = obj::dir_of(&o.kind.borrow(), h.op);
+    let ticket = match &*o.kind.borrow() {
         // Za odlozenymi dotazy (poradi), nebo odlozit pri plnem limitu.
         Kind::Session(_) if !o.backlog.is_empty() => None,
         Kind::Session(auth) => auth.borrow().begin_op().ok(),
         _ => None,
     };
-    if matches!(o.kind, Kind::Session(_)) && ticket.is_none() {
+    if matches!(*o.kind.borrow(), Kind::Session(_)) && ticket.is_none() {
         if o.backlog.len() < SESSION_BACKLOG {
             o.backlog.push_back(data);
         } else {
@@ -274,7 +302,7 @@ pub fn progress(stack: &mut Stack, o: &mut Obj, created: &mut Vec<Obj>) {
     for op in old {
         match op.state {
             OpState::Active(p) => {
-                let step = obj::progress(stack, &mut o.kind, p);
+                let step = obj::progress(stack, &mut o.kind.borrow_mut(), p);
                 let dir = op.dir;
                 let m = Meta {
                     id: op.id,

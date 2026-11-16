@@ -18,8 +18,11 @@
 //! - socket `AF_UNIX`: duplikat kanalu spojeni nebo posluchace (stejny
 //!   tvar jde i v `SCM_RIGHTS`, [`crate::unix`]).
 //!
-//! Sockety TCP/UDP a objekty knihoven (`epoll`) zdedit nejde
-//! (`NotSupported`): spojeni s netd patri relaci rodice.
+//! - socket TCP/UDP: novy kanal ke stejnemu socketu u netd (`DUP`); socket
+//!   dal patri identite, ktera ho vytvorila (limity, odvolani site). Socket
+//!   bez spojeni (po `socket()`/`bind` u TCP) jen druh a adresa.
+//!
+//! Objekty knihoven (`epoll`) zdedit nejde (`NotSupported`).
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -103,7 +106,11 @@ pub fn export(child_fd: i32, desc: &Description) -> Result<Export> {
             let (data, handles) = u.export()?;
             Export { entry: entry(fd_kind::UNIX, data), handles }
         }
-        Object::Socket(_) | Object::User(_) => return Err(Error::NotSupported),
+        Object::Socket(s) => {
+            let (kind, data, h) = s.export()?;
+            Export { entry: entry(kind, data), handles: h.into_iter().collect() }
+        }
+        Object::User(_) => return Err(Error::NotSupported),
     })
 }
 
@@ -133,6 +140,7 @@ pub(crate) fn object(e: &Fd, handles: &mut dyn Iterator<Item = Handle>) -> Resul
         fd_kind::PROCESS => Ok(Object::Process(libos::Process::from_handle(handle.ok_or(Error::Corrupted)?))),
         fd_kind::THREAD => Ok(Object::Thread(libos::Thread::from_handle(handle.ok_or(Error::Corrupted)?))),
         fd_kind::UNIX => Ok(Object::Unix(crate::unix::UnixSocket::import(&e.data, handles)?)),
+        fd_kind::SOCKET | fd_kind::SOCKET_NEW => Ok(Object::Socket(crate::sock::Socket::import(e.kind, &e.data, handle)?)),
         _ => Err(Error::NotSupported),
     }
 }

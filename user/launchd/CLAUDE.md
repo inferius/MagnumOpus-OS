@@ -9,7 +9,7 @@ Spouštěcí služba pro `std::process::Command` (protokol `libs/launchproto`, p
 
 ## Invarianty
 
-- launchd nemá kořenová práva a nic nepřidává: job, relaci FS, relaci sítě a stdio dodává volající v požadavku. Potomek = podjob jobu volajícího, síť = relace volajícího zúžená manifestem (netd nikdy nerozšíří), manifest bez `[network]` = bez sítě.
+- launchd nemá kořenová práva a nic nepřidává: job, relaci FS, relaci sítě a stdio dodává volající v požadavku. Potomek = podjob jobu volajícího, síť = relace volajícího zúžená manifestem (netd nikdy nerozšíří), manifest bez `[network]` = bez sítě. S příznakem `NET_NEEDS_MANIFEST` (služba exec initu) program bez manifestu síť nedostane vůbec.
 - Role `Gui` + `GuiLease` (relace okna a lístek, jen obě spolu) předá potomkovi beze změny se štítky `tag::GUI` a `tag::GUI_LEASE`; zúžení (stejná identita) dělá rodič přes `NARROW` u supervisoru, launchd nic nepřidává. Stejně role `Audio` + `AudioLease` (štítky `tag::AUDIO`, `tag::AUDIO_LEASE`).
 - Handly zděděných fd (role `Fd`, smí se opakovat) předá potomkovi beze změny se štítkem `abi::params::tag::FD` ve stejném pořadí; položky jsou v bloku parametrů, launchd je nečte.
 - Program se čte relací FS volajícího (nikdy vlastní), takže potomek nespustí nic, co by rodič sám nepřečetl.

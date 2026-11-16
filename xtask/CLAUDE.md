@@ -15,6 +15,7 @@
 - `src/dynlink.rs` - zavaděč `ld.so`, testy dynamického linkování, `build_ffdec` (proces dekodéru médií v C nad `libav*.so`).
 - `src/image.rs` - obraz disku GPT + ESP, 256 MiB (initfs s knihovnami FFmpeg se do 128 MiB nevejde).
 - `src/wine/` - Wine ve WSL (`mod.rs`, `wsl.rs`, skript `tools/wsl/build_wine.sh`, ten exportuje i SDK `target/wine/<arch>/sdk`: hlavičky Wine a importní knihovny PE jako `<dll>.lib`); `putty.rs` PuTTY pro testy na hostiteli (clang `x86_64-pc-windows-msvc` nad SDK, `lld-link`, obálka `rc.cmd` kolem `llvm-rc`, start a TLS v `wincrt.c`), `cargo xtask wine-putty`.
+- `src/sshtest.rs` - sada `ssh`: klient OpenSSH hostitele (`ssh`, `scp`, `sftp`, klíče přes `ssh-keygen`) proti `sshd` v hostu přes hostfwd (`Helper::add_forward`); `run --ssh` přesměruje 2222 -> 22.
 - `src/drivers.rs` - `new-driver` a hledání ovladačů z manifestů; `src/usb/`, `src/venus/`, `*helper.rs` - USB obraz, generátor Venus, pomocné servery pro testy sítě.
 
 ## Invarianty

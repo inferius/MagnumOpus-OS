@@ -9,6 +9,8 @@ mod media_ffmpeg;
 mod audio_recovery;
 mod audio_role;
 mod accounts;
+mod accounts_shell;
+mod exec;
 mod agent;
 mod agent_shell;
 mod basic;
@@ -45,6 +47,7 @@ mod fs_perf;
 mod fs_recovery;
 mod gui;
 mod sdl;
+mod ssh;
 mod gui_gpu;
 mod gui_video;
 mod gui_clients;
@@ -52,6 +55,7 @@ mod gui_player;
 mod gui_recovery;
 mod gui_role;
 mod wine_gui;
+mod wine_net;
 mod wine_w4;
 mod gui_palette;
 mod gui_snapshot;
@@ -67,6 +71,8 @@ mod memory_seal;
 mod memory_cow;
 mod memory_wx;
 pub mod net;
+mod net_bind;
+mod net_lo;
 mod net_ready;
 mod net_v2;
 mod nic;
@@ -165,6 +171,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("cpp", cpp::TESTS),
     ("sit soubeh", net_v2::TESTS),
     ("sit pripravenost", net_ready::TESTS),
+    ("sit loopback", net_lo::TESTS),
     ("TLS a HTTP", web::TESTS),
     ("sifrovane DNS", dns::TESTS),
     ("supervisor", supervisor::TESTS),
@@ -181,6 +188,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("gui", gui::TESTS),
     // Port SDL: okno kompozitoru (sdili ho se sadou gui, bezi-li).
     ("sdl", sdl::TESTS),
+    ("ssh", ssh::TESTS),
     // Zvuk po padu: ridi hlavni supervisor (jako obnova fsd, pred ni).
     ("obnova zvuku", audio_recovery::TESTS),
     // Po vsech testech FS: cena radku shellu na plnem svazku.

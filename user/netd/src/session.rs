@@ -32,13 +32,37 @@ pub fn request(stack: &mut Stack, auth: &AuthRef, code: u32, until: u64, r: &mut
         }
         op::TCP_CONNECT => tcp::connect(stack, auth, until, r),
         op::TCP_LISTEN => tcp::listen(stack, auth, r),
+        op::TCP_BIND => crate::bound::bind(stack, auth, r),
         op::UDP_BIND => udp::bind(stack, auth, r),
         op::RESOLVE => resolve::start(stack, auth, until, r),
         op::PING => ping::start(stack, auth, until, r),
         op::RESTRICT => {
             let restriction = Restriction::get(r)?;
-            auth.borrow().require(rights::RESTRICT)?;
-            let child = auth.borrow().restrict_with(restriction)?;
+            // Zuzeni bez nove identity (role Net pro potomka, manifest
+            // stejne aplikace v launchd) smi kazda relace: jen ubira. Jina
+            // identita (a dotazy uzivateli) jen s pravem RESTRICT (jinak by
+            // obesla rozpocet identity).
+            let other = !restriction.app.is_empty() && restriction.app != auth.borrow().app();
+            if other || restriction.flags & netproto::layer_flags::ASK != 0 {
+                auth.borrow().require(rights::RESTRICT)?;
+            }
+            let quota = restriction.quota;
+            let mut child = auth.borrow().restrict_with(restriction)?;
+            // Nova identita: rozpocet identity z registru (sdileny vsemi
+            // jejimi relacemi); stejna identita ho zdedila od rodice.
+            let app = child.app();
+            if !app.is_empty() && app != auth.borrow().app() {
+                stack.idents.retain(|_, w| w.strong_count() > 0);
+                let b = match stack.idents.get(app).and_then(alloc::rc::Weak::upgrade) {
+                    Some(b) => b,
+                    None => {
+                        let b = netproto::auth::Budget::identity(quota);
+                        stack.idents.insert(alloc::string::String::from(app), Rc::downgrade(&b));
+                        b
+                    }
+                };
+                child.set_identity(b);
+            }
             println!(
                 "netd: nova relace{}{} s pravy {}",
                 if child.app().is_empty() { "" } else { " " },
@@ -103,7 +127,7 @@ pub fn progress(stack: &mut Stack, auth: &AuthRef, p: Pending, now: u64) -> Step
         Pending::Ask(a) => match ask_progress(stack, a, now) {
             Ok((granted, then)) => {
                 let r = match then {
-                    Deferred::Connect(req) => tcp::connect_start(stack, auth, req, granted),
+                    Deferred::Connect(req) => tcp::connect_start(stack, auth, req, granted, None),
                     Deferred::Ping(req) => ping::start_checked(stack, auth, req, granted),
                     Deferred::Resolve(req) => resolve::start_server(stack, auth, req, granted),
                     Deferred::SendTo { .. } => Err(Error::BadState),

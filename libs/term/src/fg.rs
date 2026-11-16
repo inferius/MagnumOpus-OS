@@ -241,6 +241,114 @@ impl LineHost {
     }
 }
 
+/// Za jak dlouho behu programu ukazat vyzvu pro jeho vstup.
+const STDIN_PROMPT_NS: i64 = 300_000_000;
+
+impl LineHost {
+    /// Obsluha beziciho programu az do jeho konce (viz `crate::program`).
+    fn drive(&mut self, mut p: Box<dyn crate::program::Running>, name: &str, input: Value) -> Result<Value, ShError> {
+        // Vstup z roury, jinak interaktivni: textova vyzva behem behu, ale
+        // az po `STDIN_PROMPT_NS` (rychle programy ji neukazou vubec).
+        let mut interactive = matches!(input, Value::Nothing);
+        let mut prompt_at = if interactive { (self.clock.now)().map(|t| t + STDIN_PROMPT_NS) } else { None };
+        if !interactive {
+            let data = match input {
+                Value::Bytes(b) => b,
+                Value::Str(s) => s.into_bytes(),
+                other => other.to_text().into_bytes(),
+            };
+            p.write_stdin(&data);
+            p.close_stdin();
+        }
+        let mut bufs = [Vec::new(), Vec::new()];
+        let mut killed = false;
+        let code = loop {
+            if !killed && self.interrupted() {
+                p.kill();
+                killed = true;
+            }
+            for o in p.output() {
+                let i = o.stderr as usize;
+                for line in crate::program::lines(&mut bufs[i], &o.data) {
+                    self.out_line(o.stderr, line);
+                }
+            }
+            if let Some(at) = prompt_at
+                && (self.clock.now)().is_none_or(|t| t >= at)
+            {
+                prompt_at = None;
+                self.stdin_prompt(name);
+            }
+            if interactive && prompt_at.is_none() {
+                let a = self.sh.st.lock().prompt.as_mut().and_then(|q| q.answer.take());
+                match a {
+                    None => {}
+                    Some(Answer::Text(t)) => {
+                        let mut d = t.into_bytes();
+                        d.push(b'\n');
+                        if p.write_stdin(&d) {
+                            self.stdin_prompt(name);
+                        } else {
+                            interactive = false;
+                            self.sh.st.lock().prompt = None;
+                        }
+                    }
+                    Some(_) => {
+                        // Vyzva zavrena (okno pryc, odmitnuti): konec vstupu.
+                        interactive = false;
+                        self.sh.st.lock().prompt = None;
+                        p.close_stdin();
+                    }
+                }
+            }
+            if let Some(code) = p.exit_code() {
+                break code;
+            }
+            self.nap(20_000_000);
+        };
+        if interactive {
+            self.sh.st.lock().prompt = None;
+        }
+        for (i, b) in bufs.iter_mut().enumerate() {
+            if !b.is_empty() {
+                let line = String::from_utf8_lossy(b).into_owned();
+                b.clear();
+                self.out_line(i == 1, line);
+            }
+        }
+        if killed {
+            return Err(ShError::new(code::INTERRUPTED, alloc::format!("{name}: přerušeno (Ctrl+C)")));
+        }
+        if code != 0 {
+            return Err(ShError::new(code::EXIT, alloc::format!("{name} skončil s kódem {code}")));
+        }
+        Ok(Value::Nothing)
+    }
+
+    /// Radek vystupu programu: stdout jako text, stderr jako poznamka.
+    fn out_line(&mut self, stderr: bool, line: String) {
+        if stderr {
+            self.push(Item::Note(line));
+        } else {
+            self.push(Item::Value(Value::Str(line)));
+        }
+    }
+
+    /// Textova vyzva pro dalsi radek vstupu programu.
+    fn stdin_prompt(&mut self, name: &str) {
+        let p = LinePrompt {
+            question: alloc::format!("vstup pro {name} (Ctrl+C ukončí)"),
+            detail: Item::Note(String::new()),
+            choices: Vec::new(),
+            text: Some((false, String::new())),
+            sent: None,
+            answer: None,
+        };
+        self.sh.st.lock().prompt = Some(p);
+        self.sh.main.notify();
+    }
+}
+
 impl Host for LineHost {
     fn fs(&mut self) -> &mut dyn Fs {
         &mut *self.fs
@@ -360,8 +468,15 @@ impl Host for LineHost {
     }
 
     fn exec(&mut self, name: &str, args: &[(Option<String>, Value)], input: Value, needs: &ExecNeeds) -> Option<Result<Value, ShError>> {
-        let (name, args, needs) = (String::from(name), args.to_vec(), needs.clone());
-        self.call(move |c| c.env.exec(&name, &args, input, &needs)).flatten()
+        let req = crate::program::Request::new(name, args, needs);
+        let (n, a, nd, inp) = (String::from(name), args.to_vec(), needs.clone(), input.clone());
+        if let Some(r) = self.call(move |c| c.env.exec(&n, &a, inp, &nd)).flatten() {
+            return Some(r);
+        }
+        match self.call(move |c| c.env.exec_start(&req)).flatten()? {
+            Ok(running) => Some(self.drive(running, name, input)),
+            Err(e) => Some(Err(e)),
+        }
     }
 
     fn home(&self) -> String {
@@ -407,6 +522,11 @@ impl Host for LineHost {
 
     fn accounts(&mut self) -> Result<Vec<shlang::acl::Account>, abi::Error> {
         self.call(|c| c.env.accounts()).unwrap_or(Err(abi::Error::Canceled))
+    }
+
+    fn ssh(&mut self, op: &str, arg: &str, password: &str) -> Result<String, abi::Error> {
+        let (o, a, p) = (String::from(op), String::from(arg), String::from(password));
+        self.call(move |c| c.env.ssh(&o, &a, &p)).unwrap_or(Err(abi::Error::Canceled))
     }
 
     fn task_spawn(&mut self, spec: TaskSpec) -> Option<Result<u64, ShError>> {

@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use fsproto::FsClient;
 use fsproto::v2::{access, share};
-use launchproto::{Command, Launch, Reader, Registry, Role, SYSTEM_BIN, Source, Writer, is_bare_name};
+use launchproto::{Command, Launch, Reader, Registry, Role, SYSTEM_BIN, Source, Writer, flags, is_bare_name};
 use libos::abi::bootstrap::kind;
 use libos::abi::params::{self, tag};
 use libos::initfs::Initfs;
@@ -248,6 +248,7 @@ pub fn launch(d: &mut Launchd, r: &mut Reader, handles: Vec<Handle>) -> Result<V
         // Program s manifestem dostane jen prunik site rodice a manifestu
         // (netd zuzuje relaci, nikdy nerozsiri); bez `[network]` nic.
         let ch = match manifest.as_ref().map(|m| &m.network) {
+            None if req.flags & flags::NET_NEEDS_MANIFEST != 0 => None,
             None => Some(ch),
             Some(None) => None,
             Some(Some(rule)) => Some(

@@ -38,6 +38,22 @@ fn pozadavky_tam_a_zpet() {
     roundtrip(Request::EnrollKey { password: Secret::from("a"), key_pin: Secret::from("0000"), name: String::from("YubiKey") });
     roundtrip(Request::RemoveKey { password: Secret::from("a"), id: 3 });
     roundtrip(Request::SetPhrase { phrase: String::from("modra konvice") });
+    roundtrip(Request::SshKeyAdd { password: Secret::from("a"), line: String::from("ssh-ed25519 AAAA alice@pc") });
+    roundtrip(Request::SshKeyList);
+    roundtrip(Request::SshKeyRemove { id: 2 });
+    roundtrip(Request::SetRemote { password: Secret::from("a"), on: true });
+    roundtrip(Request::SshProbe { user: String::from("alice"), addr: String::from("10.0.2.2"), key: vec![1, 2, 3] });
+    roundtrip(Request::SshAuth {
+        user: String::from("alice"),
+        addr: String::from("10.0.2.2"),
+        key: vec![1, 2, 3],
+        data: vec![4; 40],
+        sig: vec![5; 83],
+    });
+    assert!(Request::SshKeyAdd { password: Secret::default(), line: String::new() }.is_self());
+    assert!(Request::SetRemote { password: Secret::default(), on: false }.is_self());
+    assert!(Request::SshAuth { user: String::new(), addr: String::new(), key: vec![], data: vec![], sig: vec![] }.is_ssh());
+    assert!(!Request::SshAuth { user: String::new(), addr: String::new(), key: vec![], data: vec![], sig: vec![] }.is_self());
     roundtrip(Request::EncryptHome { password: Secret::from("a") });
     roundtrip(Request::Lock);
     roundtrip(Request::Logout);
@@ -502,4 +518,22 @@ fn jmena_tam_a_zpet() {
     assert_eq!(decode_names(&encode_names(&l)).unwrap(), l);
     assert!(decode_names(&encode_names(&l)[..5]).is_err());
     assert!(!Request::Names.is_login() && !Request::Names.is_self());
+}
+
+#[test]
+fn ssh_odpovedi_tam_a_zpet() {
+    use crate::ssh::{SshAuthReply, SshKey, decode_keys, encode_keys};
+    for r in [
+        SshAuthReply::Ok { uid: 1000, session: 7, ticket: vec![9; crate::ssh::TICKET] },
+        SshAuthReply::Denied { retry_after_ms: 30_000 },
+        SshAuthReply::Locked,
+    ] {
+        let b = r.encode();
+        assert_eq!(SshAuthReply::decode(&b).unwrap(), r);
+        assert!(SshAuthReply::decode(&b[..b.len() - 1]).is_err());
+    }
+    let keys = vec![SshKey { id: 1, algo: "ssh-ed25519".into(), fingerprint: "SHA256:x".into(), comment: "alice@pc".into(), added: 5 }];
+    assert_eq!(decode_keys(&encode_keys(&keys)).unwrap(), keys);
+    let m = ToInit::OpenRemote { uid: 1000, groups: vec![ids::GROUP_USERS], home: "/home/alice".into(), peer: "10.0.2.2".into() };
+    assert_eq!(ToInit::decode(&m.encode()).unwrap(), m);
 }

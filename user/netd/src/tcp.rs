@@ -16,6 +16,8 @@ use smoltcp::socket::tcp::State;
 use smoltcp::wire::{IpAddress, IpEndpoint};
 
 use crate::fw::app_name;
+use crate::lo;
+use crate::bound::Bound;
 use crate::obj::{AuthRef, Deferred, Gate, Kind, Listener, Pending, Step, Stream, ask_wait, gate};
 use crate::stack::{PortProto, Stack, expired, now_ns, v4};
 
@@ -43,6 +45,9 @@ pub fn to_sa(ep: IpEndpoint) -> SocketAddr {
 pub struct Connect {
     pub sock: SocketHandle,
     pub port: u16,
+    /// Port patri navazovani (docasny); port navazaneho socketu drzi dal
+    /// `Bound`, dokud spojeni nevznikne.
+    owns_port: bool,
     pub remote: SocketAddr,
     pub deadline: u64,
     app: String,
@@ -53,7 +58,9 @@ impl Connect {
     pub fn cancel(self, stack: &mut Stack) {
         stack.tcp(self.sock).abort();
         stack.remove(self.sock);
-        stack.release_port(PortProto::Tcp, self.port);
+        if self.owns_port {
+            stack.release_port(PortProto::Tcp, self.port);
+        }
     }
 }
 
@@ -65,6 +72,12 @@ pub struct ConnectReq {
     buffers: Buffers,
 }
 
+impl ConnectReq {
+    pub fn new(remote: SocketAddr, until: u64, buffers: Buffers) -> Self {
+        Self { remote, until, buffers }
+    }
+}
+
 /// `TCP_CONNECT` na relaci.
 pub fn connect(stack: &mut Stack, auth: &AuthRef, until: u64, r: &mut Reader) -> Result<Step> {
     let req = ConnectReq {
@@ -73,7 +86,16 @@ pub fn connect(stack: &mut Stack, auth: &AuthRef, until: u64, r: &mut Reader) ->
         buffers: Buffers::get(r)?,
     };
     auth.borrow().require(rights::TCP_CONNECT)?;
-    connect_start(stack, auth, req, Vec::new())
+    connect_start(stack, auth, req, Vec::new(), None)
+}
+
+/// Strzeni noveho spojeni: z navazaneho socketu (navysene o buffery), nebo
+/// nove z relace.
+fn connect_usage(auth: &AuthRef, bound: Option<&mut Bound>, bytes: u64) -> Result<Usage> {
+    match bound {
+        Some(b) => b.take_usage(bytes),
+        None => auth.borrow().charge(bytes),
+    }
 }
 
 /// Zahaji spojeni (po kontrole cile; `granted` = aplikace, kterym
@@ -83,8 +105,25 @@ pub fn connect_start(
     auth: &AuthRef,
     req: ConnectReq,
     granted: Vec<String>,
+    mut bound: Option<&mut Bound>,
 ) -> Result<Step> {
+    // Spojeni z navazaneho socketu jde z jeho portu.
+    let local_port = bound.as_ref().map(|b| b.port);
     let remote = req.remote;
+    // Loopback: stejna kontrola cile a rozpocet, spojeni bez site.
+    if lo::is_loopback(remote.ip()) {
+        if remote.port() == 0 {
+            return Err(Error::InvalidArgs);
+        }
+        let gated = gate(stack, &auth.borrow(), proto::TCP, remote, &granted)?;
+        if let Gate::Ask(id, app) = gated {
+            return Ok(ask_wait(id, app, proto::TCP, remote, granted, Deferred::Connect(req)));
+        }
+        let (rx, tx) = req.buffers.resolved();
+        let usage = connect_usage(auth, bound.as_deref_mut(), (rx + tx) as u64)?;
+        let app = app_name(&auth.borrow());
+        return lo::connect(stack, remote, rx, app, usage, local_port);
+    }
     let ip = v4(remote.ip())?;
     if remote.port() == 0 || ip.is_unspecified() || ip.is_broadcast() || ip.is_multicast() {
         return Err(Error::InvalidArgs);
@@ -95,8 +134,11 @@ pub fn connect_start(
     }
     stack.local_ip()?;
     let (rx, tx) = req.buffers.resolved();
-    let usage = auth.borrow().charge((rx + tx) as u64)?;
-    let port = stack.take_port(PortProto::Tcp, 0)?;
+    let usage = connect_usage(auth, bound.as_deref_mut(), (rx + tx) as u64)?;
+    let (port, owns_port) = match local_port {
+        Some(p) => (p, false),
+        None => (stack.take_port(PortProto::Tcp, 0)?, true),
+    };
     let sock = stack.new_tcp(rx, tx);
     let cx = stack.iface.context();
     let res = stack
@@ -105,7 +147,9 @@ pub fn connect_start(
         .connect(cx, (IpAddress::Ipv4(ip), remote.port()), port);
     if res.is_err() {
         stack.remove(sock);
-        stack.release_port(PortProto::Tcp, port);
+        if owns_port {
+            stack.release_port(PortProto::Tcp, port);
+        }
         return Err(Error::Unreachable);
     }
     let app = app_name(&auth.borrow());
@@ -114,6 +158,7 @@ pub fn connect_start(
     Ok(Step::Wait(Pending::Connect(Connect {
         sock,
         port,
+        owns_port,
         remote,
         deadline: req.until.min(limit),
         app,
@@ -203,7 +248,8 @@ pub fn stream_request(
         }
         op::RECV => {
             let max = (r.u32()? as usize).clamp(1, MAX_IO);
-            Ok(recv_progress(stack, s, max, until, now_ns()))
+            let peek = r.u8().unwrap_or(0) & op::RECV_PEEK != 0;
+            Ok(recv_progress(stack, s, max, until, now_ns(), peek))
         }
         op::SHUTDOWN => {
             stack.tcp(s.sock).close();
@@ -239,7 +285,7 @@ pub fn stream_progress(stack: &mut Stack, s: &mut Stream, p: Pending, now: u64) 
             }
             send_progress(stack, s, data, done, deadline)
         }
-        Pending::Recv { max, deadline } => recv_progress(stack, s, max, deadline, now),
+        Pending::Recv { max, deadline, peek } => recv_progress(stack, s, max, deadline, now, peek),
         _ => Step::err(Error::BadState),
     }
 }
@@ -287,15 +333,18 @@ fn send_progress(
     })
 }
 
-fn recv_progress(stack: &mut Stack, s: &mut Stream, max: usize, deadline: u64, now: u64) -> Step {
+fn recv_progress(stack: &mut Stack, s: &mut Stream, max: usize, deadline: u64, now: u64, peek: bool) -> Step {
     update_fin(stack, s);
     let sock = stack.tcp(s.sock);
     if sock.can_recv() {
         let mut buf = vec![0u8; max];
-        return match sock.recv_slice(&mut buf) {
+        let r = if peek { sock.peek_slice(&mut buf) } else { sock.recv_slice(&mut buf) };
+        return match r {
             Ok(n) => {
                 buf.truncate(n);
-                stack.fw.traffic(&s.app, 0, n);
+                if !peek {
+                    stack.fw.traffic(&s.app, 0, n);
+                }
                 let mut w = Writer::new();
                 w.bytes(&buf);
                 Step::reply(Ok(w))
@@ -313,7 +362,7 @@ fn recv_progress(stack: &mut Stack, s: &mut Stream, max: usize, deadline: u64, n
     if now >= deadline {
         return Step::err(expired(deadline));
     }
-    Step::Wait(Pending::Recv { max, deadline })
+    Step::Wait(Pending::Recv { max, deadline, peek })
 }
 
 /// Kanal spojeni zavren klientem: korektni ukonceni (FIN) a uklid az po
@@ -350,40 +399,78 @@ pub fn reap_closing(stack: &mut Stack) {
 
 /// `TCP_LISTEN` na relaci.
 pub fn listen(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
-    let port = stack.bind_port(r.socket_addr()?)?;
-    let backlog = (r.u16()? as usize).clamp(1, BACKLOG_MAX);
+    let bind = lo::bind_of(stack, r.socket_addr()?)?;
+    let port = bind.port;
+    let backlog = backlog_of(r.u16()?);
     let buffers = Buffers::get(r)?;
     auth.borrow().require(rights::TCP_LISTEN)?;
-    if !auth.borrow().allows_bind(port) {
+    // Naslouchani na siti (`0.0.0.0`, adresa rozhrani) jen s `BindScope::Any`
+    // ve vsech vrstvach, i pro port 0.
+    if !auth.borrow().allows_bind(port) || (bind.net && !auth.borrow().allows_bind_net()) {
         return Err(Error::AccessDenied);
     }
     let (rx, tx) = buffers.resolved();
-    let spare = backlog.min(LISTEN_SPARE);
-    let usage = auth.borrow().charge((spare * (rx + tx)) as u64)?;
+    let usage = auth.borrow().charge((spare_of(&bind, backlog) * (rx + tx)) as u64)?;
     let port = stack.take_port(PortProto::Tcp, port)?;
+    let bind = lo::Bind { port, ..bind };
+    match start_listener(stack, auth, bind, backlog, rx, tx, usage) {
+        Ok((w, kind)) => Ok(Step::Done(Ok(w), Some(kind))),
+        Err(e) => {
+            stack.release_port(PortProto::Tcp, port);
+            Err(e)
+        }
+    }
+}
+
+/// Fronta naslouchani z dotazu (1 az `BACKLOG_MAX`).
+pub fn backlog_of(v: u16) -> usize {
+    (v as usize).clamp(1, BACKLOG_MAX)
+}
+
+/// Kolik socketu smoltcp nasloucha (jen loopback: zadne).
+pub fn spare_of(bind: &lo::Bind, backlog: usize) -> usize {
+    if bind.net { backlog.min(LISTEN_SPARE) } else { 0 }
+}
+
+/// Naslouchani na uz obsazenem portu `bind.port` (port pri chybe zustava
+/// volajicimu): odpoved s mistni adresou a objekt naslouchani.
+pub fn start_listener(
+    stack: &mut Stack,
+    auth: &AuthRef,
+    bind: lo::Bind,
+    backlog: usize,
+    rx: usize,
+    tx: usize,
+    usage: Usage,
+) -> Result<(Writer, Kind)> {
+    let port = bind.port;
     let mut listening = Vec::new();
-    for _ in 0..spare {
+    for _ in 0..spare_of(&bind, backlog) {
         match listening_socket(stack, port, rx, tx) {
             Ok(h) => listening.push(h),
             Err(e) => {
                 for h in listening {
                     stack.remove(h);
                 }
-                stack.release_port(PortProto::Tcp, port);
                 return Err(e);
             }
         }
     }
-    stack.listen_started(port);
+    if bind.net {
+        stack.listen_started(port);
+    }
+    let lo_queue = bind.lo.map(|ip| lo::listen(stack, ip, port, backlog, rx));
     let app = app_name(&auth.borrow());
     stack.fw.record(audit::LISTEN, &app, proto::TCP, None, port, "");
-    let local = stack.local_addr(port);
+    let local = bind.local(stack);
     let mut w = Writer::new();
     w.socket_addr(local);
-    Ok(Step::Done(
-        Ok(w),
-        Some(Kind::Listener(Listener {
+    Ok((
+        w,
+        Kind::Listener(Listener {
             port,
+            bind,
+            lo: lo_queue,
             listening,
             ready: VecDeque::new(),
             backlog,
@@ -392,7 +479,7 @@ pub fn listen(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step>
             auth: auth.clone(),
             app,
             _usage: usage,
-        })),
+        }),
     ))
 }
 
@@ -416,7 +503,7 @@ pub fn listener_request(
         op::ACCEPT => Ok(accept_progress(stack, l, until, now_ns())),
         op::LOCAL_ADDR => {
             let mut w = Writer::new();
-            w.socket_addr(stack.local_addr(l.port));
+            w.socket_addr(l.bind.local(stack));
             Ok(Step::reply(Ok(w)))
         }
         _ => Err(Error::NotSupported),
@@ -426,7 +513,7 @@ pub fn listener_request(
 /// Ceka nejake spojeni na `accept` (pripravenost naslouchani)?
 pub fn listener_has_ready(stack: &mut Stack, l: &mut Listener) -> bool {
     refill(stack, l);
-    !l.ready.is_empty()
+    !l.ready.is_empty() || l.lo.as_ref().is_some_and(lo::has_incoming)
 }
 
 /// Presune navazana spojeni do fronty `ready` a doplni naslouchajici
@@ -448,7 +535,8 @@ fn refill(stack: &mut Stack, l: &mut Listener) {
             }
         }
     }
-    let want = LISTEN_SPARE.min(l.backlog.saturating_sub(l.ready.len()));
+    // Jen loopback: zadne sockety smoltcp.
+    let want = if l.bind.net { LISTEN_SPARE.min(l.backlog.saturating_sub(l.ready.len())) } else { 0 };
     while l.listening.len() < want {
         match listening_socket(stack, l.port, l.rx, l.tx) {
             Ok(h) => l.listening.push(h),
@@ -459,6 +547,15 @@ fn refill(stack: &mut Stack, l: &mut Listener) {
 
 pub fn accept_progress(stack: &mut Stack, l: &mut Listener, deadline: u64, now: u64) -> Step {
     refill(stack, l);
+    // Spojeni z loopbacku (vlastni strzeni jako ze site).
+    if let Some(a) = l.lo.clone()
+        && lo::has_incoming(&a)
+        && let Ok(usage) = l.auth.borrow().charge((l.rx + l.tx) as u64)
+        && let Some((w, kind)) = lo::accept(&a, &l.app, usage)
+    {
+        stack.fw.socket_opened(&l.app);
+        return Step::Done(Ok(w), Some(kind));
+    }
     while let Some(h) = l.ready.pop_front() {
         // Prijate spojeni ma vlastni strzeni (naslouchani drzi jen sve
         // sockety); bez rozpoctu se spojeni zrusi.
@@ -512,6 +609,11 @@ pub fn close_listener(stack: &mut Stack, l: Listener) {
         stack.tcp(h).abort();
         stack.remove(h);
     }
-    stack.listen_stopped(l.port);
+    if let Some(a) = &l.lo {
+        lo::unlisten(stack, l.bind.v6(), l.port, a);
+    }
+    if l.bind.net {
+        stack.listen_stopped(l.port);
+    }
     stack.release_port(PortProto::Tcp, l.port);
 }

@@ -556,7 +556,7 @@ for f in (ls ~/Fotky | where ext == "jpg") {
 <rect class="ok" x="560" y="20" width="190" height="56" rx="6"/><text class="t b" x="655" y="42" text-anchor="middle">≤ N: VIEW + APPLY</text><text class="m" x="655" y="60" text-anchor="middle">pohled pro undo, převzetí</text>
 <rect class="warn" x="560" y="145" width="190" height="56" rx="6"/><text class="t b" x="655" y="167" text-anchor="middle">&gt; N nebo preview</text><text class="m" x="655" y="185" text-anchor="middle">diff, potvrdit / DISCARD</text>
 <path class="ln dash" d="M655 145 L655 78" marker-end="url(#sh2)"/>
-<text class="m" x="10" y="236">Čtecí řádek klon nezakládá a nic nestojí. Klon leží v /tmp/.aside/&lt;relace&gt;-&lt;n&gt;; vnořené datasety jsou v něm hranice</text>
+<text class="m" x="10" y="236">Čtecí řádek klon nezakládá a nic nestojí. Klon leží v /tmp/&lt;uid&gt;/.aside/&lt;relace&gt;-&lt;n&gt;; vnořené datasety jsou v něm hranice</text>
 <text class="m" x="10" y="254">a zápis do nich dostane vlastní klon. Převzetí je trojcestné: cizí změna mezitím = SH_CONFLICT, ne přepsání.</text>
 </svg>
 <figcaption>Změny řádku jdou do klonu datasetu ve FS; na konci řádku se převezmou s pohledem pro undo.</figcaption>
@@ -599,6 +599,33 @@ for f in (ls ~/Fotky | where ext == "jpg") {
   cesta je `NOT_FOUND` s radou. Zvýraznění ukazuje holou cestu jako cestu,
   ne jako neznámý příkaz. Hostitel v OS (`shsess`) zatím programy z cesty
   nespouští: chyba `NOT_SUPPORTED` **[implementováno]**.
+- **Spouštění programů podle jména** (`ping 10.0.2.2`, `std-exec net`)
+  **[ověřeno v QEMU]** (test `ucty: programy ze shellu (sit podle
+  manifestu)`, x86_64 i aarch64):
+  - Shell (`shsess`) sám síť nemá a programy nespouští. Pošle službě
+    „exec“ initu (`user/init/src/exec.rs`, protokol `launchproto::exec`)
+    jen jméno, argumenty, pracovní složku, připojené cesty a jestli smí
+    program mít síť (`needs`). Kanál služby má každá relace uživatele
+    (místní i SSH), okno ho dostane od initu a termd ho předá relacím
+    shellu.
+  - Init spustí program přes launchd (jeden registr příkazů: `[[command]]`,
+    aplikace z disku, `/system/bin`, initfs) v jobu relace, s relací FS
+    s identitou uživatele relace (zúženou připojenými cestami) a se sítí
+    jen tehdy, když ji program má v manifestu (`[network]`, příznak
+    `NET_NEEDS_MANIFEST`). launchd síť zúží manifestem, firewall
+    rozhoduje podle id aplikace. Program bez manifestu síť nedostane.
+  - Výstup programu jde do bloku po řádcích, jak přichází (stdout jako
+    text, stderr jako poznámka). Vstup je data z roury (`"a" | prog`).
+    Bez roury se po 300 ms běhu ukáže textová výzva a každý zadaný řádek
+    jde programu (interaktivní stdin, např. `nc`). Ctrl+C program ukončí
+    (`SH_INTERRUPTED`), nenulový návratový kód je `SH_EXIT`.
+  - Argumenty dostane program v pořadí zápisu jako text (`ping x --count 2`
+    = `x`, `--count`, `2`; `--jméno=hodnota` = `--jméno`, `hodnota`).
+    `~` a `~/...` na začátku textového argumentu shell rozvine na domov
+    (i v uvozovkách: AST je od holého slova neodliší).
+  - Typovaný kanál (program vrací hodnoty shellu místo bajtů) a výstup
+    programu jako hodnota pro další příkaz roury **[navrženo]**. Spuštění
+    cestou (`./prog`, `/apps/...`) zatím `NOT_SUPPORTED` **[navrženo]**.
 - **Manifest `needs`:** `run skript` před spuštěním ukáže, co skript chce
   (`read`, `write`, `net`), a po potvrzení ho omezí: přístup mimo uvedené
   cesty je `SH_NEEDS`. Skript dostane nejvýš průsečík s právy toho, kdo ho
@@ -627,8 +654,9 @@ undo
 
 ⚠️ **Omezení:**
 
-- Klon nejde založit tam, kde FS nemá zapisovatelný `/tmp`. Zápis pak
-  skončí chybou s radou (`NOT_SUPPORTED`).
+- Klon nejde založit tam, kde uživatel nemá soukromou dočasnou složku
+  `/tmp/<uid>` (zakládá ji init při otevření relace,
+  [Účty](ucty.md)). Zápis pak skončí chybou s radou.
 - Undo programu s plnými právy hlídá datasety `/`, domova a pracovní
   složky. Změnu v jiném vnořeném datasetu nevrátí.
 - Pohled zachytí i změny jiných relací ve stejných složkách během běhu
@@ -692,7 +720,8 @@ undo
   vyzvedne náhradní konce (`Claim`), pošle na ně `Adopt` a relace přejdou
   na nový termd. Okno se pak připojí (`Attach`) s přehráním bloků. Bez
   registru relace doběhnou a skončí.
-- **Klony bokem** mají ve jméně značku relace (`/tmp/.aside/<značka>-<n>`).
+- **Klony bokem** mají ve jméně značku relace (`/tmp/<uid>/.aside/<značka>-<n>`,
+  relace systému `/tmp/.aside/<značka>-<n>`).
   Nový termd zahodí klony relací, které už neběží (pád uprostřed řádku).
   Proto smí v systému běžet jen jeden termd (jeden registr).
 
@@ -951,7 +980,7 @@ v běžném běhu rozdělí supervisor spolu s GUI 6c.
 | `async`/`await` | hotovo: úlohy ve vláknech `shsess` s vlastní relací fsd; testy `cargo test -p term` (vlákna std) a test v QEMU (souběh, undo úlohy, termín, zrušení) |
 | vstup z klávesnice | hotovo: konzole dostane fokus od `inputd` (test v initu píše umělým vstupem) |
 | kreslení do framebufferu | hotovo: `user/console`, framebuffer od jádra (`kind::FRAMEBUFFER`, `FB_CONTROL`); test v QEMU napíše `echo ahoj` a ověří obrazovku; spouštění konzole mimo testy patří do supervisoru |
-| spouštění programů s vlastní relací fsd | mapování oprávnění hotové (`term::perm`, i z klonů pro `preview`); zatím žádný program s rozhraním pro shell |
+| spouštění programů s vlastní relací fsd | hotovo: služba exec initu, programy podle jména přes launchd, síť podle manifestu, stdio a Ctrl+C (`user/init/src/tests/exec.rs`); mapování oprávnění `term::perm` (i z klonů pro `preview`) |
 
 ### Velké soubory: hodnota „soubor“
 
@@ -1278,6 +1307,15 @@ cestu“ aplikaci nespustí, aplikace do 20 s neodpoví nebo akci odmítne.
 Chybějící soubor nebo právo je `NOT_FOUND` / `ACCESS_DENIED`, ne `SH_OPEN`.
 
 **Co s tím:** zpráva říká aplikaci a důvod. Obsah souboru ukáže `open`.
+
+### `SH_EXIT` (program skončil s chybou)
+
+**Význam:** spuštěný program skončil s nenulovým návratovým kódem.
+
+**Kdy vzniká:** program ze systému (`ping`, `nc`, ...) ohlásí neúspěch
+(cíl neodpověděl, spojení odmítnuto). Kód programu je ve zprávě.
+
+**Co s tím:** výstup programu nad chybou říká důvod.
 
 ### `SH_CONFLICT` (konflikt)
 

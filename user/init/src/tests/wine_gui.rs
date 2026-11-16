@@ -76,6 +76,20 @@ pub(super) fn with<R>(s: &Startup, f: impl FnOnce(&mut W3) -> Result<R, String>)
     f(g.as_mut().unwrap())
 }
 
+/// Relace site programu Windows pro testy: identita Wine, TCP na loopback
+/// (127.0.0.0/8) a na hostitele slirp.
+fn wine_net() -> Result<Channel, String> {
+    use netproto::{Policy, Restriction, Rule, Target, proto, rights};
+    let root = super::net::net()?;
+    let lo = Target::Net { addr: core::net::IpAddr::V4(core::net::Ipv4Addr::new(127, 0, 0, 0)), prefix: 8 };
+    let host = Target::Net { addr: super::net::HOST, prefix: 32 };
+    let mut policy = Policy::only(vec![Rule::any_port(proto::TCP, lo), Rule::any_port(proto::TCP, host)]);
+    policy.bind = Some(vec![(1024, 65535)]);
+    let mut r = Restriction::new(rights::CLIENT | rights::TCP_LISTEN, policy);
+    r.app = String::from(WINE_ID);
+    root.restrict_with(&r).and_then(|n| n.into_channel()).map_err(|e| fail("relace site Wine", e))
+}
+
 /// Recept relace zvuku programu Windows (stejna identita jako okna).
 fn audio_recipe() -> audioproto::session::Recipe {
     audioproto::session::Recipe {
@@ -144,6 +158,12 @@ pub(super) fn launch(s: &Startup, w: &mut W3, args: &[&str]) -> Result<Run, Stri
     if audio.is_some() {
         roles.extend([Role::Audio, Role::AudioLease]);
     }
+    // Sit (role Net, W4b): relace identity Wine jen na loopback a echo
+    // hostitele; launchd ji zuzi manifestem Wine.
+    let net = wine_net().ok();
+    if net.is_some() {
+        roles.push(Role::Net);
+    }
     let req = Launch { program: loader.clone(), flags: 0, roles, params }.encode(1).map_err(|e| fail("pozadavek", e))?;
     let job = libos::job::current().map_err(|e| fail("job", e))?;
     let (out, out_child) = Channel::create().map_err(|e| fail("kanal stdout", e))?;
@@ -161,6 +181,7 @@ pub(super) fn launch(s: &Startup, w: &mut W3, args: &[&str]) -> Result<Run, Stri
             ]
             .into_iter()
             .chain(audio.into_iter().flat_map(|(s, l)| [s.into_handle(), l.into_handle()]))
+            .chain(net.into_iter().map(|c| c.into_handle()))
             .collect(),
         )
         .map_err(|e| fail("LAUNCH", e))?;

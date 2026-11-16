@@ -1,0 +1,17 @@
+[package]
+name = "nettools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Sitove prikazy shellu: ping, nc, resolve (jeden program, chovani podle argv[0])"
+
+[[bin]]
+name = "nettools"
+test = false
+bench = false
+
+# Jen std. Sestavuje `cargo xtask build` (stdsys::STD_PROGRAMS); do initfs
+# jako `ping`, `nc` a `resolve` (xtask STD_ALIASES), kazdy s vlastnim
+# manifestem (vlastni id aplikace pro firewall a jen potrebna prava).
+[dependencies]

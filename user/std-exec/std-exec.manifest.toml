@@ -1,0 +1,14 @@
+# Test spousteni programu ze shellu (user/init/src/tests/exec.rs): s timto
+# manifestem dostane program sit (jen UDP a stav rozhrani); stejny program
+# pod jmenem `std-exec-bez` manifest nema a sit nedostane.
+[app]
+id = "org.magnumopus.std-exec"
+name = "Test spousteni ze shellu"
+
+[limits]
+memory = "32M"
+
+[network]
+rights = ["info", "udp"]
+sockets = 4
+buffers = "256K"

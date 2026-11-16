@@ -328,6 +328,13 @@ and RTTI against libc++. No source changes.
 - **Cesta / Path:** `libs/uniprop/src/tables.rs` (odvozené tabulky, ne soubory UCD / derived tables, not the UCD files)
 - **Popis / Description:** `docs/cs/cstd.md`, `docs/en/cstd.md` (kapitola Široké znaky a locale / chapter Wide characters and locale).
 
+## SSH: sunset 0.6.0 a getrandom 0.4.3
+
+| Název / Name | Verze / Version | Zdroj / Source | Licence / License | Cesta / Path | Jak použito / How used |
+|---|---|---|---|---|---|
+| sunset (SSH, Matt Johnston) | 0.6.0 (crates.io, 2026-08-02) | https://github.com/mkj/sunset | 0BSD | `third_party/crates/sunset-0.6.0` (`[patch.crates-io]`, používá `libs/ssh`) | převzato celé; vlastní změny jsou označené komentářem `MagnumOpus:` a vypsané v `third_party/crates/README.md` / copied whole; own changes are marked with a `MagnumOpus:` comment and listed in `third_party/crates/README.md` |
+| getrandom | 0.4.3 (crates.io) | https://github.com/rust-random/getrandom | MIT OR Apache-2.0 | `third_party/crates/getrandom-0.4.3` | převzato s backendem `magnumopus` (stejná záplata jako `third_party/ports/getrandom-0.4.3.patch`) / copied with the `magnumopus` backend (same patch as `third_party/ports/getrandom-0.4.3.patch`) |
+
 ## Wine 11.0 (Windows vrstva / Windows layer)
 
 Není v repozitáři: `cargo xtask wine` stáhne `wine-11.0.tar.xz`

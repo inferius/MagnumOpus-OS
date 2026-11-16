@@ -28,6 +28,7 @@ pub mod broker;
 pub mod ctl;
 pub mod fg;
 pub mod perm;
+pub mod program;
 pub mod proto;
 pub mod render;
 pub mod screen;
@@ -38,6 +39,7 @@ pub mod tasks;
 pub mod theme;
 pub mod ui;
 pub mod vt;
+pub mod vtkeys;
 
 #[cfg(test)]
 mod tests;
@@ -58,6 +60,8 @@ mod tests_pointer;
 #[cfg(test)]
 mod tests_preview;
 #[cfg(test)]
+mod tests_program;
+#[cfg(test)]
 mod tests_select;
 #[cfg(test)]
 mod tests_render;
@@ -71,3 +75,5 @@ mod tests_tasks;
 mod tests_ui;
 #[cfg(test)]
 mod tests_wrap;
+#[cfg(test)]
+mod tests_vtkeys;

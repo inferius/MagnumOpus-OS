@@ -71,6 +71,12 @@ pub trait Env {
         -> Option<Result<Value, ShError>> {
         None
     }
+    /// Spusti program systemu (sluzba exec initu, `crate::program`).
+    /// `None` = prostredi programy nespousti nebo program neexistuje
+    /// (shell pak hlasi neznamy prikaz).
+    fn exec_start(&mut self, _req: &crate::program::Request) -> Option<Result<alloc::boxed::Box<dyn crate::program::Running>, ShError>> {
+        None
+    }
     /// Spusti vlakno.
     fn spawn(&mut self, _job: Box<dyn FnOnce() + Send>) -> Option<Box<dyn Joinable>> {
         None
@@ -144,6 +150,11 @@ pub trait Env {
     /// Rezim vyvojare (prikaz `devmode`, jen vyvojove sestaveni).
     #[cfg(feature = "dev-mode")]
     fn dev_mode(&mut self, _set: u8) -> Result<bool, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
+    /// Vzdaleny pristup SSH (`shlang::host::Host::ssh`); vychozi = relace
+    /// ho nema.
+    fn ssh(&mut self, _op: &str, _arg: &str, _password: &str) -> Result<alloc::string::String, abi::Error> {
         Err(abi::Error::NotSupported)
     }
     /// Ucty lidi pro jmena v prikazu `acl`; vychozi = relace je nema
@@ -603,6 +614,10 @@ impl Host for SessionHost<'_> {
 
     fn accounts(&mut self) -> Result<Vec<shlang::acl::Account>, abi::Error> {
         self.env.accounts()
+    }
+
+    fn ssh(&mut self, op: &str, arg: &str, password: &str) -> Result<String, abi::Error> {
+        self.env.ssh(op, arg, password)
     }
 
     fn open_path(&mut self, path: &str, app_only: bool) -> Result<Opened, abi::Error> {
@@ -1212,7 +1227,7 @@ impl Service {
         // Klony, ktere ulohy prave odlozily, zahodit hned (ne az pri dalsi
         // volne chvili): mezitim muze relaci prevzit novy termd a hned
         // poslat prikazy - dalsi volna chvile by pak neprisla a klon by
-        // zustal v /tmp/.aside.
+        // zustal ve slozce klonu (`/tmp/<uid>/.aside`).
         self.flush(fs, env);
     }
 }

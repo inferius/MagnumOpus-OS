@@ -11,7 +11,8 @@
 - **Úlohy:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Relace a bezpečnost:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Nápověda:** [`help`](#help), [`explain`](#explain)
-- **Systém:** [`audio`](#audio), [`theme`](#theme), [`permissions`](#permissions), [`acl`](#acl), [`system`](#system), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **Účet a oprávnění:** [`permissions`](#permissions), [`acl`](#acl), [`ssh-key`](#ssh-key), [`remote-access`](#remote-access)
+- **Systém:** [`audio`](#audio), [`theme`](#theme), [`sshd`](#sshd), [`system`](#system), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Soubory
 
@@ -1778,6 +1779,141 @@ explain SH_TYPE
 **Souvisí:** [`help`](#help), [`error`](#error)
 
 
+## Účet a oprávnění
+
+### `permissions`
+
+povolení aplikací (mikrofon): bez argumentu výpis, `permissions revoke <aplikace> [microphone]`
+
+Bez argumentu vypíše uložená rozhodnutí uživatele o povoleních aplikací jako tabulku (`app`, `permission`, `allowed`; dnes jen mikrofon, `microphone`). `permissions revoke <aplikace>` rozhodnutí smaže: aplikace se příště zeptá znovu.
+
+```shell
+permissions [action] [app] [permission]
+```
+
+Plné jméno `system-permissions` · vstup: nic · výstup: tabulka (app, permission, allowed)
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[action]` | text |  | revoke (odvolat), bez něj výpis |
+| `[app]` | text |  | identita aplikace z výpisu |
+| `[permission]` | text | microphone | povolení |
+
+Aplikace se znovu zeptá na mikrofon.
+
+```shell
+permissions revoke org.libsdl.testaudio
+```
+
+**Potřebuje:** přihlášená relace (rozhodnutí patří uživateli relace)
+
+**Chyby:** `SH_ARGS`, `NOT_FOUND`, `ACCESS_DENIED`, `NOT_SUPPORTED`
+
+**Souvisí:** [`audio`](#audio)
+
+
+### `acl`
+
+oprávnění souboru: `acl <cesta>` výpis, `acl add <kdo> <view|run|edit|manage> <cesta>`, `acl remove <kdo> <cesta>`
+
+Oprávnění vlastních souborů a složek. `acl <cesta>` vypíše vlastníka, vaši úroveň, zda objekt dědí od nadřazené složky (`inherits`) a granty: komu (`who`, uživatel nebo skupina), úroveň (`level` a popis `label`: Zobrazit, Spouštět, Upravovat včetně spouštění, Spravovat) a rozsah (`this` jen objekt, `this+children` i obsah složky, `inherited` zděděno od složky `from`). `acl add <kdo> <úroveň> <cesta>` přidá grant nebo změní úroveň existujícího, s `--inherit` se dědí i do obsahu složky. `acl remove <kdo> <cesta>` odebere vlastní grant (zděděný se odebírá na složce, odkud přišel). Kdo: jméno účtu, `users` (všichni lidé), `everyone` (každý) nebo číslo. Měnit smí vlastník nebo kdo má právo Spravovat. Změna platí hned (ne nanečisto) a `undo` ji nevrací.
+
+```shell
+acl path ... [-i]
+```
+
+Plné jméno `file-acl` · vstup: nic · výstup: tabulka (path, owner, your_level, your_label, inherits, grants)
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `path` | hodnota |  | cesta, nebo add / remove |
+| `...` | hodnota |  | kdo, úroveň (view, run, edit, manage) a cesta |
+| `-i, --inherit` | přepínač |  | grant se dědí i do obsahu složky |
+
+Kdo smí do složky Projekty.
+
+```shell
+acl ~/Projekty
+```
+
+Bob smí upravovat složku i její obsah.
+
+```shell
+acl add bob edit ~/Projekty --inherit
+```
+
+Bob o grant přijde.
+
+```shell
+acl remove bob ~/Projekty
+```
+
+**Potřebuje:** FS s oprávněními (fsd); pro změnu vlastnictví nebo právo Spravovat
+
+**Chyby:** `SH_ARGS`, `ACCESS_DENIED`, `NOT_FOUND`, `NOT_SUPPORTED`
+
+**Souvisí:** [`ls`](#ls)
+
+
+### `ssh-key`
+
+klíče SSH vašeho účtu: výpis, `ssh-key add <soubor.pub|->` (chce heslo), `ssh-key remove <číslo>`
+
+Veřejné klíče SSH, kterými se k účtu přihlásíte na dálku. Bez argumentu výpis (`id`, `algo`, `fingerprint`, `comment`, `added`). `ssh-key add` přidá klíč ze souboru `*.pub` (i z flashky), z textu nebo z roury (`-`); chce heslo účtu a ukáže otisk klíče. Klíče eviduje služba účtů, takže fungují i se šifrovaným domovem. Podporované jsou ed25519 a klíče FIDO `sk-ssh-ed25519` (bezpečnostní klíč u klienta); RSA a ECDSA zatím ne. `ssh-key remove <číslo>` klíč odebere (bez hesla).
+
+```shell
+ssh-key [action] ...
+```
+
+Plné jméno `remote-ssh-key` · vstup: libovolná hodnota · výstup: tabulka (id, algo, fingerprint, comment, added)
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[action]` | text | list | list, add nebo remove |
+| `...` | hodnota |  | soubor s klíčem, `-` nebo číslo klíče |
+
+Přidá klíč z flashky (zeptá se na heslo).
+
+```shell
+ssh-key add /media/flash/id_ed25519.pub
+```
+
+**Potřebuje:** přihlášená relace (klíče patří uživateli relace)
+
+**Chyby:** `SH_ARGS`, `SH_REJECTED`, `ACCESS_DENIED`, `ALREADY_EXISTS`, `NOT_SUPPORTED`, `NOT_FOUND`
+
+**Souvisí:** [`remote-access`](#remote-access), [`sshd`](#sshd)
+
+
+### `remote-access`
+
+vzdálený přístup vašeho účtu: bez argumentu stav, `remote-access on` (chce heslo) / `off`
+
+Povolí nebo zakáže vzdálený přístup vašeho účtu (SSH). Ve výchozím stavu je zakázaný. Zapnutí chce heslo účtu, vypnutí ne. Přihlásit se na dálku jde, jen když je zapnutý i server (`sshd enable`) a účet má klíč (`ssh-key add`). Vzdálená relace je oddělená od místní: nemá obrazovku, schránku ani zvuk a úkony správy z ní nejdou.
+
+```shell
+remote-access [state]
+```
+
+Plné jméno `remote-access` · vstup: nic · výstup: tabulka (remote_access)
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[state]` | text |  | on nebo off, bez argumentu stav |
+
+Povolí vzdálený přístup (zeptá se na heslo).
+
+```shell
+remote-access on
+```
+
+**Potřebuje:** přihlášená relace
+
+**Chyby:** `SH_ARGS`, `SH_REJECTED`, `ACCESS_DENIED`, `NOT_SUPPORTED`
+
+**Souvisí:** [`ssh-key`](#ssh-key), [`sshd`](#sshd)
+
+
 ## Systém
 
 ### `audio`
@@ -1853,78 +1989,33 @@ theme contrast on
 **Souvisí:** [`audio`](#audio)
 
 
-### `permissions`
+### `sshd`
 
-povolení aplikací (mikrofon): bez argumentu výpis, `permissions revoke <aplikace> [microphone]`
+vzdálený přístup SSH pro celý počítač: bez argumentu stav, `sshd enable` / `sshd disable` (potvrdí správce)
 
-Bez argumentu vypíše uložená rozhodnutí uživatele o povoleních aplikací jako tabulku (`app`, `permission`, `allowed`; dnes jen mikrofon, `microphone`). `permissions revoke <aplikace>` rozhodnutí smaže: aplikace se příště zeptá znovu.
+Server SSH pro připojení z jiného počítače (`ssh`, `scp` z Windows, Linuxu, macOS). Bez argumentu vypíše stav: zapnuto, běží, port, otisk klíče serveru a připojené relace. `sshd enable` a `sshd disable` jsou úkony správy: potvrdí je člověk s rolí správy v systémovém dialogu, který ukáže i otisk klíče serveru (při prvním připojení ho porovnejte s tím, co ukáže klient). Ve výchozím stavu je vypnuto. Server poslouchá na portu 22 na všech síťových rozhraních, firewall ale ve veřejné síti příchozí spojení zahodí (jen domácí síť nebo výjimka). Přihlásit se jde jen klíčem; účet si vzdálený přístup povolí sám (`remote-access on`) a přidá klíč (`ssh-key add`).
 
 ```shell
-permissions [action] [app] [permission]
+sshd [action]
 ```
 
-Plné jméno `system-permissions` · vstup: nic · výstup: tabulka (app, permission, allowed)
+Plné jméno `remote-sshd` · vstup: nic · výstup: tabulka (enabled, running, port, host_key, sessions, connected)
 
 | Argument | Typ | Výchozí | Popis |
 |---|---|---|---|
-| `[action]` | text |  | revoke (odvolat), bez něj výpis |
-| `[app]` | text |  | identita aplikace z výpisu |
-| `[permission]` | text | microphone | povolení |
+| `[action]` | text | status | status, enable nebo disable |
 
-Aplikace se znovu zeptá na mikrofon.
+Zapne vzdálený přístup (potvrdí správce).
 
 ```shell
-permissions revoke org.libsdl.testaudio
+sshd enable
 ```
 
-**Potřebuje:** přihlášená relace (rozhodnutí patří uživateli relace)
+**Potřebuje:** přihlášená relace u počítače (úkon správy jen místně)
 
-**Chyby:** `SH_ARGS`, `NOT_FOUND`, `ACCESS_DENIED`, `NOT_SUPPORTED`
+**Chyby:** `SH_ARGS`, `ACCESS_DENIED`, `NOT_SUPPORTED`
 
-**Souvisí:** [`audio`](#audio)
-
-
-### `acl`
-
-oprávnění souboru: `acl <cesta>` výpis, `acl add <kdo> <view|run|edit|manage> <cesta>`, `acl remove <kdo> <cesta>`
-
-Oprávnění vlastních souborů a složek. `acl <cesta>` vypíše vlastníka, vaši úroveň, zda objekt dědí od nadřazené složky (`inherits`) a granty: komu (`who`, uživatel nebo skupina), úroveň (`level` a popis `label`: Zobrazit, Spouštět, Upravovat včetně spouštění, Spravovat) a rozsah (`this` jen objekt, `this+children` i obsah složky, `inherited` zděděno od složky `from`). `acl add <kdo> <úroveň> <cesta>` přidá grant nebo změní úroveň existujícího, s `--inherit` se dědí i do obsahu složky. `acl remove <kdo> <cesta>` odebere vlastní grant (zděděný se odebírá na složce, odkud přišel). Kdo: jméno účtu, `users` (všichni lidé), `everyone` (každý) nebo číslo. Měnit smí vlastník nebo kdo má právo Spravovat. Změna platí hned (ne nanečisto) a `undo` ji nevrací.
-
-```shell
-acl path ... [-i]
-```
-
-Plné jméno `file-acl` · vstup: nic · výstup: tabulka (path, owner, your_level, your_label, inherits, grants)
-
-| Argument | Typ | Výchozí | Popis |
-|---|---|---|---|
-| `path` | hodnota |  | cesta, nebo add / remove |
-| `...` | hodnota |  | kdo, úroveň (view, run, edit, manage) a cesta |
-| `-i, --inherit` | přepínač |  | grant se dědí i do obsahu složky |
-
-Kdo smí do složky Projekty.
-
-```shell
-acl ~/Projekty
-```
-
-Bob smí upravovat složku i její obsah.
-
-```shell
-acl add bob edit ~/Projekty --inherit
-```
-
-Bob o grant přijde.
-
-```shell
-acl remove bob ~/Projekty
-```
-
-**Potřebuje:** FS s oprávněními (fsd); pro změnu vlastnictví nebo právo Spravovat
-
-**Chyby:** `SH_ARGS`, `ACCESS_DENIED`, `NOT_FOUND`, `NOT_SUPPORTED`
-
-**Souvisí:** [`ls`](#ls)
+**Souvisí:** [`ssh-key`](#ssh-key), [`remote-access`](#remote-access)
 
 
 ### `system`

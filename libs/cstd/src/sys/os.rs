@@ -430,7 +430,12 @@ pub fn sock_listen(fd: i32, backlog: u16) -> R<()> {
 }
 
 pub fn sock_connect(fd: i32, a: SocketAddr) -> R<()> {
-    sock(fd, |s, nb| s.connect(a, nb))
+    // Neblokujici spojeni TCP: jako Linux `EINPROGRESS` (i na loopbacku),
+    // dokonceni hlasi `POLLOUT` a `SO_ERROR` = 0. netd spojeni navaze uz
+    // behem volani (spojeni hotove driv, nez program zacne cekat); nektere
+    // programy (wineserver) bez `EINPROGRESS` socket k cekani neprihlasi.
+    let pending = sock(fd, |s, nb| s.connect(a, nb).map(|()| nb && s.is_stream()))?;
+    if pending { Err(errno::EINPROGRESS) } else { Ok(()) }
 }
 
 pub fn sock_accept(fd: i32, cloexec: bool, nonblock: bool) -> R<(i32, SocketAddr)> {
@@ -442,6 +447,10 @@ pub fn sock_accept(fd: i32, cloexec: bool, nonblock: bool) -> R<(i32, SocketAddr
 
 pub fn sock_recv(fd: i32, buf: &mut [u8], dontwait: bool) -> R<usize> {
     sock(fd, |s, nb| s.recv(buf, nb || dontwait))
+}
+
+pub fn sock_peek(fd: i32, buf: &mut [u8], dontwait: bool) -> R<usize> {
+    sock(fd, |s, nb| s.peek(buf, nb || dontwait))
 }
 
 pub fn sock_send(fd: i32, data: &[u8], dontwait: bool) -> R<usize> {

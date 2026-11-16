@@ -100,11 +100,52 @@ impl SelfService {
         call(&self.0, Request::Elevate { action, params })
     }
 
+    /// Prida klic SSH (radek `authorized_keys`); vraci cislo a otisk.
+    pub fn ssh_key_add(&self, password: Secret, line: &str) -> Result<(u32, String)> {
+        let b = call(&self.0, Request::SshKeyAdd { password, line: String::from(line) })?;
+        let mut r = Reader::new(&b);
+        Ok((r.u32()?, r.str()?))
+    }
+
+    pub fn ssh_keys(&self) -> Result<Vec<crate::ssh::SshKey>> {
+        crate::ssh::decode_keys(&call(&self.0, Request::SshKeyList)?)
+    }
+
+    pub fn ssh_key_remove(&self, id: u32) -> Result<()> {
+        call(&self.0, Request::SshKeyRemove { id }).map(|_| ())
+    }
+
+    /// Vzdaleny pristup uctu (zapnuti chce heslo, vypnuti ne).
+    pub fn set_remote(&self, password: Secret, on: bool) -> Result<()> {
+        call(&self.0, Request::SetRemote { password, on }).map(|_| ())
+    }
+
     /// Rezim vyvojare (jen vyvojove sestaveni): `set` = `DEV_QUERY` |
     /// `DEV_OFF` | `DEV_ON`; vraci stav.
     #[cfg(feature = "dev-mode")]
     pub fn dev_mode(&self, set: u8) -> Result<bool> {
         call(&self.0, Request::DevMode { set }).map(|b| b.first() == Some(&1))
+    }
+}
+
+/// Kanal ssh (jen sluzba sshd).
+pub struct SshAuth(pub Channel);
+
+impl SshAuth {
+    pub fn probe(&self, user: &str, addr: &str, key: &[u8]) -> Result<bool> {
+        let b = call(&self.0, Request::SshProbe { user: String::from(user), addr: String::from(addr), key: key.to_vec() })?;
+        Ok(b.first() == Some(&1))
+    }
+
+    pub fn auth(&self, user: &str, addr: &str, key: &[u8], data: &[u8], sig: &[u8]) -> Result<crate::ssh::SshAuthReply> {
+        let req = Request::SshAuth {
+            user: String::from(user),
+            addr: String::from(addr),
+            key: key.to_vec(),
+            data: data.to_vec(),
+            sig: sig.to_vec(),
+        };
+        crate::ssh::SshAuthReply::decode(&call(&self.0, req)?)
     }
 }
 

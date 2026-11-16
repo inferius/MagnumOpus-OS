@@ -73,6 +73,15 @@ pub fn tasks_label(run: u32, agent: u32) -> String {
 /// Text upozorneni na umely vstup v liste.
 pub const INJECT_LABEL: &str = "Vstup ovládá automat";
 
+/// Text pilulky vzdaleneho pristupu: prvni pripojeny a pocet dalsich.
+pub fn remote_label(who: &[String]) -> String {
+    match who {
+        [] => String::new(),
+        [one] => format!("Vzdáleně: {one}"),
+        [one, rest @ ..] => format!("Vzdáleně: {one} +{}", rest.len()),
+    }
+}
+
 /// Ikona aplikace v liste podle id (bez vlastnich ikon aplikaci zatim
 /// obecna sada).
 pub fn app_icon(id: &str) -> &'static str {
@@ -120,6 +129,8 @@ pub struct Bar {
     /// Spustitelne aplikace bez okna: (index v `launchable`, obdelnik).
     pub launch: Vec<(usize, Rect)>,
     pub agent: Option<Rect>,
+    /// Pilulka vzdaleneho pristupu (pripojena relace SSH).
+    pub remote: Option<Rect>,
     /// Pilulka rezimu vyvojare (jen vyvojove sestaveni, `devmode.rs`).
     #[cfg(feature = "dev-mode")]
     pub dev: Option<Rect>,
@@ -160,6 +171,9 @@ pub struct BarStatus {
     pub audio: Option<AudioInfo>,
     /// Adresa rozhrani s prefixem (`10.0.2.15/24`), kdyz ji netd hlasi.
     pub net_addr: Option<String>,
+    /// Vzdalene relace (`uzivatel@adresa`, SSH): pilulka v liste, at je
+    /// u pocitace videt, ze je nekdo pripojeny (`docs/cs/ssh.md`).
+    pub remote: Vec<String>,
 }
 
 /// Zvukove zarizeni v panelu Zvuk.
@@ -345,6 +359,14 @@ impl Comp {
         }
     }
 
+    /// Vzdalene relace (`uzivatel@adresa`) pro pilulku v liste.
+    pub fn set_remote(&mut self, who: Vec<String>) {
+        if self.status.remote != who {
+            self.status.remote = who;
+            self.damage_panel();
+        }
+    }
+
     /// Hodiny v liste (cas a datum; `None` = nezobrazovat).
     pub fn set_clock(&mut self, clock: Option<(String, String)>) {
         if self.clock != clock {
@@ -435,7 +457,16 @@ impl Comp {
             let w = t.space[4] + t.size.icon_s + t.space[2] + self.style.width(INJECT_LABEL, small_strong(t)) + t.space[4];
             right -= w as i32;
             bar.agent = Some(Rect::new(right, p.y + (p.h as i32 - h as i32) / 2, w, h));
+            right -= gap;
         }
+        if !self.status.remote.is_empty() {
+            let h = t.size.control_h.min(item);
+            let label = remote_label(&self.status.remote);
+            let w = t.space[4] + t.size.icon_s + t.space[2] + self.style.width(&label, small_strong(t)) + t.space[4];
+            right -= w as i32;
+            bar.remote = Some(Rect::new(right, p.y + (p.h as i32 - h as i32) / 2, w, h));
+        }
+        let _ = right;
         bar
     }
 
@@ -1299,6 +1330,17 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
         let face = st.face(s);
         let base = r.y + face.baseline_in(s.size, r.h);
         face.draw(c, r.x + (t.space[4] + is + t.space[2]) as i32, base, INJECT_LABEL, s.size, col.ai_ink);
+    }
+    // Vzdaleny pristup (SSH): pilulka v barve upozorneni s ikonou
+    // a textem (stav nese text, ne jen barva).
+    if let Some(r) = bar.remote {
+        c.round_fill_bordered(r, r.h / 2, col.warn_soft, col.warn, 1);
+        let is = t.size.icon_s;
+        st.icons.draw(c, "terminal", r.x + t.space[4] as i32, r.y + (r.h - is) as i32 / 2, is, t.icon_stroke, col.ink);
+        let s = small_strong(&t);
+        let face = st.face(s);
+        let base = r.y + face.baseline_in(s.size, r.h);
+        face.draw(c, r.x + (t.space[4] + is + t.space[2]) as i32, base, &remote_label(&info.status.remote), s.size, col.ink);
     }
     // Hodiny: cas a pod nim datum, zarovnane vpravo.
     if let (Some(r), Some((time, date))) = (bar.clock, info.clock) {

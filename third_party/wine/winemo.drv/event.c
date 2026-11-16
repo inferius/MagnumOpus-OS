@@ -211,6 +211,9 @@ INT MO_ToUnicodeEx(UINT virt, UINT scan, const BYTE *state, LPWSTR str, int size
 {
     WCHAR c;
 
+    /* Pusteni klavesy (KF_UP v scan kodu) znak neda: PuTTY se pta i pri
+     * WM_KEYUP a znak by poslal dvakrat (jako winex11). */
+    if (scan & 0x8000) return 0;
     if (virt == VK_PACKET) return -2;
     if ((state[VK_CONTROL] & 0x80) || (state[VK_MENU] & 0x80)) return -2;
     c = key_char[(scan & 0xff) | (scan & 0x100)];

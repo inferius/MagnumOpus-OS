@@ -249,6 +249,7 @@ fn program_mounts_from_needs() {
         net: false,
         all: false,
         aside: Vec::new(),
+        cwd: String::new(),
     };
     let m = mounts(&n);
     let spec = |p: &str, ro| MountSpec { name: p.into(), target: p.into(), read_only: ro };

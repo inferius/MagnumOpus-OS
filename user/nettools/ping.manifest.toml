@@ -1,0 +1,16 @@
+# ping: ICMP echo na libovolny cil (a preklad jmena).
+[app]
+id = "org.magnumopus.ping"
+name = "Ping"
+
+[limits]
+memory = "16M"
+
+[network]
+rights = ["info", "ping", "dns"]
+sockets = 2
+buffers = "64K"
+
+[[network.connect]]
+proto = ["icmp"]
+to = "*"

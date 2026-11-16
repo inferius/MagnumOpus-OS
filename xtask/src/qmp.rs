@@ -158,6 +158,8 @@ const STARTS: &[&str] = &[
     wine::CLICK,
     wine::PASTE_CLICK,
     wine::OFFER_CLICK,
+    wine::PUTTY_RAW_CLICK,
+    wine::PUTTY_TELNET_CLICK,
 ];
 
 /// Konec testovaciho behu userspace (dal uz zadny usek neprijde).
@@ -373,6 +375,14 @@ fn wine_steps(s: &mut Vec<Step>) {
     for k in ["u", "dot", "t", "x", "t", "ret"] {
         press(s, &[k]);
     }
+    // W4b: PuTTY raw (loopback) a telnet (echo hostitele): klik do okna
+    // terminalu a "ahoj" + Enter.
+    for click in [wine::PUTTY_RAW_CLICK, wine::PUTTY_TELNET_CLICK] {
+        s.push(Step::ClickAt(click));
+        for k in ["a", "h", "o", "j", "ret"] {
+            press(s, &[k]);
+        }
+    }
 }
 
 /// Znacky testu W3 (musi sedet s `user/init/src/tests/wine_gui.rs`).
@@ -389,6 +399,8 @@ mod wine {
     pub const PASTE_WINE_CLICK: &str = "init: test wine: klik pro vlozeni ve Wine na ";
     pub const SAVE2_KEYS: &str = "init: test wine: uloz vlozeny text";
     pub const SAVE2_NAME: &str = "init: test wine: nazev vlozeneho souboru";
+    pub const PUTTY_RAW_CLICK: &str = "init: test wine: klik do PuTTY raw na ";
+    pub const PUTTY_TELNET_CLICK: &str = "init: test wine: klik do PuTTY telnet na ";
 }
 
 /// Znacky testu SDL (musi sedet s `user/init/src/tests/sdl.rs`).

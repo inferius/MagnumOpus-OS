@@ -113,7 +113,7 @@ impl Interp {
         let failed = core::mem::take(&mut self.draft.aside_failed);
         r.map_err(|e| match sys(e, what) {
             Flow::Err(err) if failed => Flow::Err(
-                err.hint("změny nanečisto tu nejdou (FS nezaložil klon bokem, např. chybí zapisovatelný /tmp)"),
+                err.hint("změny nanečisto tu nejdou (FS nezaložil klon bokem, např. chybí soukromá dočasná složka /tmp/<uid>)"),
             ),
             f => f,
         })

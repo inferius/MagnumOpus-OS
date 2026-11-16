@@ -699,6 +699,13 @@ impl Service {
                     (Err(e), _) => Err(e),
                 }
             }
+            control::REMOTE => match self.comp.as_mut() {
+                Some(c) => {
+                    c.set_remote(words.map(String::from).collect());
+                    Ok((String::new(), Vec::new()))
+                }
+                None => Err(Error::NotFound),
+            },
             control::APPEARANCE => {
                 let who = words.next();
                 let rest: Vec<&str> = words.by_ref().collect();

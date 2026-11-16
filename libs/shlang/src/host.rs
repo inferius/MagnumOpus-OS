@@ -397,6 +397,13 @@ pub trait Host {
     fn dev_mode(&mut self, _set: u8) -> Result<bool, abi::Error> {
         Err(abi::Error::NotSupported)
     }
+    /// Vzdaleny pristup SSH jmenem uzivatele relace (prikazy `sshd`,
+    /// `ssh-key`, `remote-access`; `docs/cs/ssh.md`). `op` jako
+    /// `powerproto::Request::Ssh`; vraci text (radky s tabulatory).
+    /// `NOT_SUPPORTED` = hostitel ho nema (testy, konzole).
+    fn ssh(&mut self, _op: &str, _arg: &str, _password: &str) -> Result<String, abi::Error> {
+        Err(abi::Error::NotSupported)
+    }
     /// Ucty lidi (jmena pro `acl`). `NOT_SUPPORTED` = hostitel sluzbu uctu
     /// nema; `acl` pak zna jen `everyone`, `users` a cisla.
     fn accounts(&mut self) -> Result<Vec<crate::acl::Account>, abi::Error> {
@@ -446,4 +453,6 @@ pub struct ExecNeeds {
     /// jmenem). Zapis mimo klony se mu pripoji jen pro cteni - skutecny FS
     /// v nahledu menit nesmi.
     pub aside: Vec<(String, String)>,
+    /// Pracovni slozka shellu (pracovni slozka programu).
+    pub cwd: String,
 }

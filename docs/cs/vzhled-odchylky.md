@@ -78,6 +78,7 @@ jednou opraví celý systém, proto jdou první.
 |---|---|---|---|---|---|
 | O15 | **Odznak důvěry** u Souborů a Správce úloh říká „Systém“. Prototyp ukazuje jméno aplikace a ikonu oprávnění (Soubory + domov).<br>**Opraveno:** odznak ukazuje jméno aplikace, systémovou aplikaci značí štít s fajfkou (jméno i značku dává init z manifestu). | [okna.html](../../design/okna.html) (Odznak důvěry), [soubory.html](../../design/soubory.html) | comp | P2 | S |
 | O16 | **Tlačítka okna s vlastním titulkem** (Terminál) jsou šedá jako u neaktivního okna, i když okno má fokus. Snímek [08](../../design/snimky/odchylky/08-terminal.png).<br>**Nereprodukuje se na hostiteli:** CPU i referenční GPU cesta kreslí tlačítka okna s vlastním titulkem stejnou barvou `ink_muted` jako u standardního okna (ověřeno sondou v testech comp). Je potřeba snímek z QEMU nebo HW s backendem, na kterém vznikl snímek 08. | [okna.html](../../design/okna.html) (Režimy okna) | comp | P3 | S |
+| O27 | **Popup vlastníka za dialogem**: když fokus drží vlastněný dialog (např. po obnově oken Wine po pádu kompozitoru), popup (nabídka) jeho vlastníka se nekreslí, ukáže se až s návratem fokusu k vlastníkovi. Kompozitor kreslí vrstvy `POPOVER` jen u okna s fokusem ([Windows vrstva, W4](windows-vrstva.md#zvuk-schránka-a-obnova-oken-w4)).<br>**Opraveno:** popovery vlastníků okna s fokusem se kreslí hned nad vlastníkem, CPU i GPU cesta (`owner_popovers`). | [okna.html](../../design/okna.html) (Režimy okna) | comp | P3 | S |
 
 ## Soubory
 

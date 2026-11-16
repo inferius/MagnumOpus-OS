@@ -9,6 +9,12 @@
 //! kazdy kanal zamyka: soubezne volani z vic vlaken na stejnem objektu
 //! cekaji za sebou (cteni blokovane na data zdrzi zapis na stejnem
 //! spojeni). Viz docs/cs/rust-std.md, kapitola Sit.
+//!
+//! Role `Net` pro potomky (jako `MO_GUI`, `MO_AUDIO`): runtime pri startu
+//! s relaci nastavi `MO_NET=1`; potomek s neprazdnym `MO_NET` v prostredi
+//! dostane vlastni zuzenou relaci se stejnou identitou a pravidly
+//! ([`child_channel`]), bez promenne zadnou. Odvolani site identite zavre
+//! relace rodice i potomku (netd podle identity).
 
 use alloc::vec::Vec;
 use core::net::{IpAddr, SocketAddr};
@@ -16,7 +22,7 @@ use core::time::Duration;
 
 use libos::Channel;
 use libos::sync::Mutex;
-use netproto::Net;
+use netproto::{Net, Policy, Quota, Restriction, rights};
 use netproto::io::{Read as _, Write as _};
 
 use crate::start::Init;
@@ -31,7 +37,32 @@ pub(crate) unsafe fn init(channel: Option<Channel>) {
     if let Some(c) = channel {
         // SAFETY: predano volajicim.
         unsafe { SESSION.set(Mutex::new(Net::new(c))) };
+        if crate::env::var(ENV).is_none_or(|v| v.is_empty()) {
+            let _ = crate::env::set_var(ENV, b"1");
+        }
     }
+}
+
+/// Promenna prostredi: neprazdna = potomek dostane relaci site.
+pub const ENV: &[u8] = b"MO_NET";
+
+/// Ma potomek s prostredim `env` (`JMENO=HODNOTA`) dostat relaci site?
+pub fn wanted(env: &[Vec<u8>]) -> bool {
+    available() && env.iter().any(|e| e.len() > ENV.len() + 1 && e.starts_with(ENV) && e[ENV.len()] == b'=')
+}
+
+/// Relace pro potomka: `RESTRICT` bez nove identity (stejna identita,
+/// prava a pravidla jako rodic; nikdy sirsi), vlastni kanal.
+pub fn child_channel() -> Result<Channel> {
+    let net = session()?.lock().clone();
+    let r = Restriction {
+        rights: rights::ALL,
+        policy: Policy::unrestricted(),
+        app: alloc::string::String::new(),
+        flags: 0,
+        quota: Quota::UNLIMITED,
+    };
+    net.restrict_with(&r)?.into_channel()
 }
 
 fn session() -> Result<&'static Mutex<Net>> {
@@ -76,9 +107,11 @@ pub fn resolve(host: &str) -> Result<Vec<IpAddr>> {
     session()?.lock().resolve(host)
 }
 
-/// Spojeni TCP.
+/// Spojeni TCP. Klientske typy netproto jsou `Sync` a metody berou
+/// `&self`: cteni v jednom vlakne a zapis v jinem (plny duplex, std
+/// `&TcpStream`) jdou soucasne, zadny zamek kolem socketu.
 pub struct TcpStream {
-    inner: Mutex<netproto::TcpStream>,
+    inner: netproto::TcpStream,
     local: SocketAddr,
     peer: SocketAddr,
     timeouts: Mutex<(Option<Duration>, Option<Duration>)>,
@@ -87,7 +120,7 @@ pub struct TcpStream {
 impl TcpStream {
     fn wrap(s: netproto::TcpStream) -> Self {
         let (local, peer) = (s.local_addr(), s.peer_addr());
-        Self { inner: Mutex::new(s), local, peer, timeouts: Mutex::new((None, None)) }
+        Self { inner: s, local, peer, timeouts: Mutex::new((None, None)) }
     }
 
     pub fn connect(addr: SocketAddr, timeout: Option<Duration>) -> Result<TcpStream> {
@@ -96,7 +129,7 @@ impl TcpStream {
     }
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize> {
-        match self.inner.lock().read(buf) {
+        match self.inner.read(buf) {
             // Konec proudu i zavrene spojeni = 0 (jako POSIX read).
             Err(Error::PeerClosed) => Ok(0),
             r => r,
@@ -104,7 +137,7 @@ impl TcpStream {
     }
 
     pub fn write(&self, buf: &[u8]) -> Result<usize> {
-        self.inner.lock().write(buf)
+        self.inner.write(buf)
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -116,16 +149,16 @@ impl TcpStream {
     }
 
     pub fn shutdown_write(&self) -> Result<()> {
-        self.inner.lock().shutdown_write()
+        self.inner.shutdown_write()
     }
 
     pub fn set_read_timeout(&self, t: Option<Duration>) {
-        self.inner.lock().set_read_timeout(t);
+        self.inner.set_read_timeout(t);
         self.timeouts.lock().0 = t;
     }
 
     pub fn set_write_timeout(&self, t: Option<Duration>) {
-        self.inner.lock().set_write_timeout(t);
+        self.inner.set_write_timeout(t);
         self.timeouts.lock().1 = t;
     }
 
@@ -140,7 +173,7 @@ impl TcpStream {
 
 /// Naslouchani TCP.
 pub struct TcpListener {
-    inner: Mutex<netproto::TcpListener>,
+    inner: netproto::TcpListener,
 }
 
 impl TcpListener {
@@ -148,22 +181,22 @@ impl TcpListener {
     /// adresa rozhrani v `addr` se zatim nepouzije (127.0.0.1 = vsechna).
     pub fn bind(addr: SocketAddr) -> Result<TcpListener> {
         let l = session()?.lock().tcp_listen(addr.port(), 64)?;
-        Ok(TcpListener { inner: Mutex::new(l) })
+        Ok(TcpListener { inner: l })
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr> {
-        self.inner.lock().local_addr()
+        self.inner.local_addr()
     }
 
     pub fn accept(&self) -> Result<(TcpStream, SocketAddr)> {
-        let (s, from) = self.inner.lock().accept()?;
+        let (s, from) = self.inner.accept()?;
         Ok((TcpStream::wrap(s), from))
     }
 }
 
 /// Socket UDP.
 pub struct UdpSocket {
-    inner: Mutex<netproto::UdpSocket>,
+    inner: netproto::UdpSocket,
     /// Cil po `connect` (std ho emuluje: `send`/`recv` jen s timto cilem).
     peer: Mutex<Option<SocketAddr>>,
     read_timeout: Mutex<Option<Duration>>,
@@ -172,20 +205,20 @@ pub struct UdpSocket {
 impl UdpSocket {
     pub fn bind(addr: SocketAddr) -> Result<UdpSocket> {
         let s = session()?.lock().udp_bind(addr.port())?;
-        Ok(UdpSocket { inner: Mutex::new(s), peer: Mutex::new(None), read_timeout: Mutex::new(None) })
+        Ok(UdpSocket { inner: s, peer: Mutex::new(None), read_timeout: Mutex::new(None) })
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr> {
-        self.inner.lock().local_addr()
+        self.inner.local_addr()
     }
 
     pub fn send_to(&self, data: &[u8], to: SocketAddr) -> Result<usize> {
-        self.inner.lock().send_to(data, to).map(|_| data.len())
+        self.inner.send_to(data, to).map(|_| data.len())
     }
 
     pub fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
         let t = *self.read_timeout.lock();
-        self.inner.lock().recv_from(buf, t)
+        self.inner.recv_from(buf, t)
     }
 
     pub fn connect(&self, to: SocketAddr) {

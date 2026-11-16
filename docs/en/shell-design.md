@@ -574,7 +574,7 @@ for f in (ls ~/Photos | where ext == "jpg") {
 <rect class="ok" x="560" y="20" width="190" height="56" rx="6"/><text class="t b" x="655" y="42" text-anchor="middle">≤ N: VIEW + APPLY</text><text class="m" x="655" y="60" text-anchor="middle">view for undo, apply</text>
 <rect class="warn" x="560" y="145" width="190" height="56" rx="6"/><text class="t b" x="655" y="167" text-anchor="middle">&gt; N or preview</text><text class="m" x="655" y="185" text-anchor="middle">diff, confirm / DISCARD</text>
 <path class="ln dash" d="M655 145 L655 78" marker-end="url(#sh2)"/>
-<text class="m" x="10" y="236">A reading line creates no clone and costs nothing. Clones live in /tmp/.aside/&lt;session&gt;-&lt;n&gt;; nested datasets are</text>
+<text class="m" x="10" y="236">A reading line creates no clone and costs nothing. Clones live in /tmp/&lt;uid&gt;/.aside/&lt;session&gt;-&lt;n&gt;; nested datasets are</text>
 <text class="m" x="10" y="254">boundaries there and a write into one gets its own clone. Applying is three-way: a foreign change = SH_CONFLICT, not an overwrite.</text>
 </svg>
 <figcaption>A line's changes go to a clone of the dataset in the file system; at the end of the line they are applied with a view for undo.</figcaption>
@@ -623,6 +623,37 @@ for f in (ls ~/Photos | where ext == "jpg") {
   a bare path as a path, not as an unknown command. The host in the OS
   (`shsess`) does not start programs from a path yet: error `NOT_SUPPORTED`
   **[implemented]**.
+- **Starting programs by name** (`ping 10.0.2.2`, `std-exec net`)
+  **[verified in QEMU]** (test `ucty: programy ze shellu (sit podle
+  manifestu)`, x86_64 and aarch64):
+  - The shell (`shsess`) has no network itself and does not start
+    programs. It sends init's "exec" service (`user/init/src/exec.rs`,
+    protocol `launchproto::exec`) only the name, arguments, working
+    directory, mounted paths and whether the program may have network
+    (`needs`). Each user session (local and SSH) has a service channel; the
+    window gets it from init and termd passes it to the shell sessions.
+  - Init starts the program through launchd (one command registry:
+    `[[command]]`, apps on disk, `/system/bin`, initfs) in the session's
+    job, with an FS session carrying the session user's identity (narrowed
+    by the mounted paths) and with network only when the program has it in
+    its manifest (`[network]`, flag `NET_NEEDS_MANIFEST`). launchd narrows
+    the network by the manifest, the firewall decides by the application
+    id. A program without a manifest gets no network.
+  - The program's output goes into the block line by line as it arrives
+    (stdout as text, stderr as a note). Input is data from a pipe
+    (`"a" | prog`). Without a pipe a text prompt appears after 300 ms of
+    running and each entered line goes to the program (interactive stdin,
+    e.g. `nc`). Ctrl+C ends the program (`SH_INTERRUPTED`), a non-zero exit
+    code is `SH_EXIT`.
+  - The program gets its arguments as text in the order written
+    (`ping x --count 2` = `x`, `--count`, `2`; `--name=value` = `--name`,
+    `value`). `~` and `~/...` at the start of a text argument are expanded
+    to the home by the shell (also in quotes: the AST does not tell them from a
+    bare word).
+  - A typed channel (the program returns shell values instead of bytes)
+    and program output as a value for the next pipeline command
+    **[designed]**. Starting by path (`./prog`, `/apps/...`) is still
+    `NOT_SUPPORTED` **[designed]**.
 - **The `needs` manifest:** `run script` shows what the script wants
   (`read`, `write`, `net`) before it starts and, after confirmation,
   restricts it: access outside the listed paths is `SH_NEEDS`. A script gets
@@ -654,8 +685,9 @@ undo
 
 ⚠️ **Limits:**
 
-- A clone cannot be created where the file system has no writable
-  `/tmp`. The write then ends with an error and a hint (`NOT_SUPPORTED`).
+- A clone cannot be created where the user has no private temporary
+  directory `/tmp/<uid>` (init creates it when a session opens,
+  [Accounts](accounts.md)). The write then ends with an error and a hint.
 - Undo of a program with full rights guards the datasets of `/`, home and
   the working directory. It does not revert a change in another nested
   dataset.
@@ -727,7 +759,8 @@ undo
   (`Attach`) with block replay. Without a registry the sessions finish and
   end.
 - **Clones aside** carry the session's tag in their name
-  (`/tmp/.aside/<tag>-<n>`). A new termd discards clones of sessions that
+  (`/tmp/<uid>/.aside/<tag>-<n>`, system sessions `/tmp/.aside/<tag>-<n>`).
+  A new termd discards clones of sessions that
   no longer run (a crash in the middle of a line). That is why only one
   termd (one registry) may run in the system.
 
@@ -1006,7 +1039,7 @@ together with GUI 6c.
 | `async`/`await` | done: tasks in `shsess` threads with their own fsd session; tests `cargo test -p term` (std threads) and a QEMU test (concurrency, a task's undo, deadline, cancellation) |
 | keyboard input | done: the console gets the focus from `inputd` (the test in init types with synthetic input) |
 | drawing into the framebuffer | done: `user/console`, framebuffer from the kernel (`kind::FRAMEBUFFER`, `FB_CONTROL`); the QEMU test types `echo ahoj` and checks the screen; starting the console outside tests belongs in the supervisor |
-| starting programs with their own fsd session | permission mapping done (`term::perm`, also from clones for `preview`); no program with a shell interface yet |
+| starting programs with their own fsd session | done: init's exec service, programs by name through launchd, network by manifest, stdio and Ctrl+C (`user/init/src/tests/exec.rs`); permission mapping `term::perm` (also from clones for `preview`) |
 
 ### Large files: the "file" value
 
@@ -1348,6 +1381,16 @@ or refuses the action. A missing file or right is `NOT_FOUND` /
 
 **What to do:** the message names the application and the reason. `open`
 shows the file content.
+
+### `SH_EXIT` (program ended with an error)
+
+**Meaning:** a started program ended with a non-zero exit code.
+
+**When:** a system program (`ping`, `nc`, ...) reports failure (the
+target did not answer, connection refused). The program's code is in the
+message.
+
+**What to do:** the program's output above the error says why.
 
 ### `SH_CONFLICT` (conflict)
 

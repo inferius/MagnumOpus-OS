@@ -82,13 +82,16 @@ fn kill() -> Check {
     ensure(s.code() == Some(-1_000_000), format!("po kill: {s}"))
 }
 
-/// Kopie programu ve FS nema vedle sebe manifest: pomocny program, ktery
-/// dostane relaci site rodice jen s `network(true)`. (`std-proc` z initfs
-/// ma manifest bez `[network]`, ten sit nedostane nikdy.)
+/// Kopie programu ve FS nema vedle sebe manifest: pomocny program dostane
+/// relaci site rodice (role Net: `MO_NET` v prostredi nebo `network(true)`);
+/// bez `MO_NET` a bez `network(true)` zadnou. (`std-proc` z initfs ma
+/// manifest bez `[network]`, ten sit nedostane nikdy.)
 fn network() -> Check {
     let helper = || Command::new("/std-test/bin/std-proc");
-    let (_, out, _) = out_of(helper().arg("net"))?;
-    ensure(out == "bez site\n", format!("bez network(): {out:?}"))?;
+    let (_, out, _) = out_of(helper().arg("net").env_remove("MO_NET"))?;
+    ensure(out == "bez site\n", format!("bez MO_NET a bez network(): {out:?}"))?;
+    let (_, out, err) = out_of(helper().arg("net"))?;
+    ensure(out == "sit ok\n", format!("zdedene MO_NET (role Net): {out:?} {err:?}"))?;
     let (_, out, err) = out_of(helper().arg("net").network(true))?;
     ensure(out == "sit ok\n", format!("s network(true): {out:?} {err:?}"))?;
     let (_, out, _) = out_of(me().arg("net").network(true))?;

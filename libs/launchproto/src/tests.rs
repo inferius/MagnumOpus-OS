@@ -93,6 +93,32 @@ fn registry_first_wins() {
     assert!(!crate::is_bare_name("./rg"));
 }
 
+#[test]
+fn exec_roundtrip() {
+    use crate::exec::{Exec, Mount, parse_reply as exec_reply_parse, reply as exec_reply};
+    let e = Exec {
+        program: String::from("ping"),
+        cwd: String::from("/home/a"),
+        args: vec![String::from("-c"), String::from("3"), String::from("10.0.2.2")],
+        mounts: vec![Mount { name: String::from("/home/a"), target: String::from("/home/a"), read_only: true }],
+        net: true,
+    };
+    assert_eq!(Exec::decode(&e.encode().unwrap()).unwrap(), e);
+    // Zbytek za koncem, spatny priznak jen pro cteni, jina operace.
+    let mut b = e.encode().unwrap();
+    b.push(0);
+    assert_eq!(Exec::decode(&b), Err(Error::InvalidArgs));
+    let mut b = e.encode().unwrap();
+    let last = b.len() - 1;
+    b[last] = 2;
+    assert_eq!(Exec::decode(&b), Err(Error::InvalidArgs));
+    assert_eq!(Exec::decode(&[9, 0, 0, 0]), Err(Error::NotSupported));
+    let many = Exec { args: vec![String::new(); crate::exec::MAX_ARGS + 1], ..e.clone() };
+    assert_eq!(many.encode(), Err(Error::InvalidArgs));
+    assert_eq!(exec_reply_parse(&exec_reply(Ok(()))).unwrap(), Ok(()));
+    assert_eq!(exec_reply_parse(&exec_reply(Err((Error::NotFound, "ping: neni")))).unwrap(), Err((Error::NotFound, String::from("ping: neni"))));
+}
+
 /// Vsechny jedinecne role a nejvic fd v jedne zprave: projde kodovanim
 /// i dekodovanim a vejde se do limitu handlu kanalu.
 #[test]

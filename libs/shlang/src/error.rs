@@ -44,11 +44,13 @@ pub mod code {
     pub const CONFLICT: &str = "SH_CONFLICT";
     /// Aplikace cestu neotevrela (sluzba "otevri cestu").
     pub const OPEN: &str = "SH_OPEN";
+    /// Spusteny program skoncil s nenulovym navratovym kodem.
+    pub const EXIT: &str = "SH_EXIT";
 
     /// Vsechny kody shellu (test hlida, ze jsou popsane v dokumentaci).
     pub const ALL: &[&str] = &[
         PARSE, UNKNOWN, TYPE, ARGS, NO_MATCH, INTERRUPTED, NEEDS, REJECTED, NO_UNDO, ARITH, USER, FORMAT, LANG,
-        DEPTH, CONFLICT, OPEN,
+        DEPTH, CONFLICT, OPEN, EXIT,
     ];
 }
 
