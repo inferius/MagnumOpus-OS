@@ -20,7 +20,10 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
-use inputproto::control::{self, Status};
+use inputproto::control;
+#[cfg(feature = "tests")]
+use inputproto::control::Status;
+#[cfg(feature = "tests")]
 use inputproto::{Record, event};
 use libos::initfs::Initfs;
 use libos::{Channel, Error, Handle, Process, Result, Signals, Startup, println, time};
@@ -80,8 +83,10 @@ type Shared = Arc<spin::Mutex<Live>>;
 /// Klient sluzby vstupu.
 pub struct Input {
     /// Vlastnik fokusu (init): sem chodi udalosti.
+    #[cfg_attr(not(feature = "tests"), allow(dead_code))]
     pub focus: Channel,
     /// Prijemce bezpecne zkratky (init).
+    #[cfg_attr(not(feature = "tests"), allow(dead_code))]
     pub secure: Channel,
     live: Shared,
 }
@@ -222,6 +227,7 @@ impl Input {
         }
     }
 
+    #[cfg(feature = "tests")]
     pub fn status(&self) -> Result<Status> {
         let (text, _) = self.command(control::STATUS, Vec::new())?;
         Status::parse(&text).ok_or(Error::Corrupted)
@@ -230,12 +236,14 @@ impl Input {
     /// Novy zdroj umeleho vstupu (kanal protokolu `inputproto::device`).
     /// Pad sluzby ho neprezije (kanal vytvorila sluzba): zdroj dostane
     /// `PEER_CLOSED` a pozada o novy.
+    #[cfg(feature = "tests")]
     pub fn inject(&self) -> Result<Channel> {
         let (_, h) = self.command(control::INJECT, Vec::new())?;
         one(h).map_err(|_| Error::Corrupted)
     }
 
     /// Id zdroje, jehoz jmeno zacina `prefix` (fyzicka zarizeni).
+    #[cfg(feature = "tests")]
     pub fn source_id(&self, prefix: &str) -> Result<u16> {
         let (text, _) = self.command(control::SOURCES, Vec::new())?;
         control::SourceInfo::parse_list(&text)
@@ -250,6 +258,7 @@ impl Input {
         self.command(&cmd, Vec::new()).map(|_| ())
     }
 
+    #[cfg(feature = "tests")]
     pub fn set_layout(&self, name: &str) -> Result<()> {
         let cmd = alloc::format!("{} {name}", control::LAYOUT);
         self.command(&cmd, Vec::new()).map(|_| ())
@@ -405,6 +414,7 @@ pub fn drain(ch: &Channel) {
 /// Precte zaznamy z kanalu az do terminu `deadline`, dokud `done` nevrati
 /// `true` (pak vrati vse prectene). Po terminu `Err` s chybou a vsim, co do
 /// te doby prislo (pro diagnostiku testu).
+#[cfg(feature = "tests")]
 pub fn read_until(
     ch: &Channel,
     deadline: u64,

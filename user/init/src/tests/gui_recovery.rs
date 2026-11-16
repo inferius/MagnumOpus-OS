@@ -95,6 +95,8 @@ pub fn crash_mid_work(startup: &Startup) -> TestResult {
     if let Some(p) = h.sup.process(gui::NAME) {
         let _ = libos::sys::process_kill(p.raw());
     }
+    // Ovladac displeje bezi dal pro dalsi sady (sdl).
+    gui::park_display(&g.shared);
     r
 }
 

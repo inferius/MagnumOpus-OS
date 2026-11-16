@@ -30,6 +30,7 @@ pub const TESTS: &[Test] = &[
     ("opravneni: identita relace, pripojene cesty, GRANT", perm_sessions),
     ("opravneni: zakaz spousteni a sdileni mezi uzivateli", perm_noexec_and_sharing),
     ("kontrola konzistence a scrub", check_clean),
+    ("uklid: pracovni soubory sady", uklid),
 ];
 
 fn fs() -> Result<&'static FsClient, alloc::string::String> {
@@ -568,4 +569,10 @@ fn perm_noexec_and_sharing(_: &Startup) -> TestResult {
     g.set_noexec("/", false)?;
     check_eq!(denied, Some(Error::AccessDenied), "spusteni se zakazem");
     Ok(())
+}
+
+/// Posledni test sady: smaze pracovni soubory testu FS (`state.rs` jinak sadu
+/// oznaci za selhanou; bezi i po chybe drivejsich testu).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/Fotky", "/perm", "/test-roundtrip", "/trvaly", "/v2-config.toml", "/v2-db", "/v2-report.txt", "/v2-velky", "/velikosti", "/velky-adresar", "/verze.txt", "/video.bin"])
 }

@@ -228,6 +228,7 @@ pub fn dev_mode(session: Option<u64>, set: u8) -> Result<bool> {
 }
 
 /// Stav accountd (`status`).
+#[cfg(feature = "tests")]
 pub fn status() -> Result<alloc::string::String> {
     let a = ACCOUNTD.get().ok_or(Error::NotFound)?;
     let ctl = a.control.lock();

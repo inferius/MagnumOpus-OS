@@ -21,7 +21,7 @@ use libos::{Startup, println, time};
 
 use super::{Test, TestResult, devices, fail};
 
-pub const TESTS: &[Test] = &[("radek shellu se zapisem", shell_line), ("cteni velkeho souboru: po 32 KiB a pres VMO", big_read)];
+pub const TESTS: &[Test] = &[("radek shellu se zapisem", shell_line), ("cteni velkeho souboru: po 32 KiB a pres VMO", big_read), ("uklid: pracovni soubory sady", uklid)];
 
 /// Kolik radku zmerit (bere se median).
 const LINES: usize = 5;
@@ -178,4 +178,10 @@ fn big_read(_: &Startup) -> TestResult {
         mbs(t_new)
     );
     Ok(())
+}
+
+/// Posledni test sady: smaze data mereni vykonu (`state.rs` jinak sadu
+/// oznaci za selhanou; bezi i po chybe drivejsich testu).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/f-vykon"])
 }

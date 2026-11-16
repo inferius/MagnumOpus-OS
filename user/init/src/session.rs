@@ -194,6 +194,7 @@ pub fn put_self(session: u64, ch: Channel) {
 }
 
 /// Je relace zamcena?
+#[cfg(feature = "tests")]
 pub fn locked(session: u64) -> Option<bool> {
     SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.locked)
 }

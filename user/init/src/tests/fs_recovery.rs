@@ -82,6 +82,11 @@ fn wait_restart(sup: &mut Supervisor, s: &Startup) -> Result<(), String> {
 
 fn kill_fsd(s: &Startup) -> TestResult {
     let fs = devices().and_then(|d| d.fs.as_ref()).ok_or("sluzba fsd nebezi")?;
+    // Slozka a pruchod `/` pro uzivatele testu se vrati na konci (drop az
+    // po obnove relace initu niz, `sup` se dropne driv).
+    let mut restore = super::restore::Restore::new(fs);
+    restore.save_acl("/")?;
+    restore.remove_later(DIR);
     // Adresar uzivatele (relace ho vidi jako /data).
     match fs.create(DIR, fsproto::kind::DIR) {
         Ok(()) | Err(libos::Error::AlreadyExists) => {}
@@ -152,6 +157,16 @@ fn kill_fsd(s: &Startup) -> TestResult {
 
     // fsd bezi znovu: nova ridici relace a kontrola konzistence.
     let (ch, lease) = sup.session("fsd", Recipe::System.encode()).map_err(|e| fail("nova relace", e))?;
+    // Korenova relace initu (s listkem) se po padu obnovi az pres hlavni
+    // supervisor, ktery v testu ridi jen tahle sada: ridit ho, dokud relace
+    // zase neodpovida. Jinak system po sade zustane s FS `SERVICE_UNAVAILABLE`.
+    let until = time::deadline_after(TIMEOUT);
+    while let Err(e) = fs.permissions("/") {
+        sup.step(s, Some(time::deadline_after(Duration::from_millis(20))));
+        if time::now() > until {
+            return Err(format!("relace FS initu se po padu neobnovila: {e}"));
+        }
+    }
     drop(sup);
     let fresh = FsClient::with_lease(ch, lease);
     let problems = fresh.check(true).map_err(|e| fail("kontrola", e))?;

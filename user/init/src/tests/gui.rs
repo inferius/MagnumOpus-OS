@@ -51,6 +51,7 @@ pub const TESTS: &[Test] = &[
     ("role Gui: odvolani identity zavre okna i potomkum", super::gui_role::revoke_reaches_children),
     // Posledni: kompozitor sady se ukonci.
     ("compd: pad kompozitoru uprostred prace, okno se vrati", super::gui_recovery::crash_mid_work),
+    ("uklid: pracovni soubory sady", uklid),
 ];
 
 /// Znacky pro xtask (musi sedet s `xtask/src/qmp.rs`, modul `gui`).
@@ -364,6 +365,9 @@ fn terminal_window(startup: &Startup) -> TestResult {
             .launch_extra(startup, "gui-term", vec![StartHandle::user(conn.into_handle())])
             .map_err(|e| fail("spusteni gui-term", e))?;
         let pump = || crate::terminal::TERMINALS.lock().poll(startup);
+        // Telo v closure: terminal se zavre i po chybe (jinak by okno
+        // a termd zustaly a dalsi testy terminalu cekaly na uvitani marne).
+        let r = (|| -> TestResult {
         let w = wait_window(&s.inspect, "org.magnumopus.terminal")?;
         let t = wait_tree(&s.inspect, w.id, "uvitani terminalu", |t| {
             pump();
@@ -387,19 +391,17 @@ fn terminal_window(startup: &Startup) -> TestResult {
             pump();
             t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "ahoj z GUI"))
         })?;
-        // `help`: nadpis skupiny i kazdy prikaz na vlastnim radku (text
-        // s konci radku se nesmi spojit do odstavce). Vidi se konec vypisu:
-        // nadpis nektere skupiny (ktera je videt, zavisi na delce vypisu
-        // a vysce okna) a posledni prikazy kazdy na svem radku.
-        ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: "help".into() })?;
-        wait_tree(&s.inspect, w.id, "help po radcich", |t| {
+        // Text s konci radku (jako vystup `help`, ten je take `Value::Str`)
+        // se nesmi spojit do odstavce: kazdy radek na vlastnim radku.
+        // Pevny vstup, ne `help`: co z `help` je videt, zaviselo na delce
+        // vypisu a vysce okna (s prikazy SSH se nadpis skupiny nevesel).
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: r#""Radky textu\nalfa-radek\nbeta-radek""#.into() })?;
+        wait_tree(&s.inspect, w.id, "text po radcich", |t| {
             pump();
             t.iter().any(|n| {
                 n.role == Role::Terminal && {
                     let l: Vec<&str> = n.value.lines().map(str::trim).collect();
-                    l.iter().any(|x| shlang::sig::GROUPS.iter().any(|(g, _)| x == g))
-                        && l.iter().any(|x| x.starts_with("shutdown "))
-                        && l.iter().any(|x| x.starts_with("reboot "))
+                    ["Radky textu", "alfa-radek", "beta-radek"].iter().all(|r| l.contains(r))
                 }
             })
         })?;
@@ -453,7 +455,10 @@ fn terminal_window(startup: &Startup) -> TestResult {
         settle(&s.inspect)?;
         let px = pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?;
         check!(px == badge() || px == badge_inactive(), alloc::format!("odznak nad vlastnim titulkem: {px:#x}"));
-        close_terminal(startup, s, app, "gui-term (test)")
+        Ok(())
+        })();
+        let c = close_terminal(startup, s, app, "gui-term (test)");
+        r.and(c)
     })
 }
 
@@ -550,6 +555,8 @@ fn terminal_shot(startup: &Startup, s: &mut State) -> TestResult {
         .launch_extra(startup, "gui-term", vec![StartHandle::user(conn.into_handle())])
         .map_err(|e| fail("spusteni gui-term", e))?;
     let pump = || crate::terminal::TERMINALS.lock().poll(startup);
+    // Telo v closure: terminal se zavre i po chybe (viz `terminal_window`).
+    let r = (|| -> TestResult {
     // Nove okno je navrch; ceka se na uvitani (relace pripojena).
     let end = time::deadline_after(TIMEOUT);
     let w = loop {
@@ -598,7 +605,10 @@ fn terminal_shot(startup: &Startup, s: &mut State) -> TestResult {
         pump();
         t.iter().any(|n| n.role == Role::Terminal && n.value.contains("nebyly převzaty"))
     })?;
-    close_terminal(startup, s, app, "gui-term (snimek)")
+    Ok(())
+    })();
+    let c = close_terminal(startup, s, app, "gui-term (snimek)");
+    r.and(c)
 }
 
 /// Konec testu terminalu: okno zavrit, init pak ukonci jeho termd a relace
@@ -628,4 +638,10 @@ pub(super) fn close_terminal(startup: &Startup, s: &mut State, app: usize, name:
         check!(time::now() < end, "termd po zavreni okna terminalu neskoncil");
         time::sleep(Duration::from_millis(50));
     }
+}
+
+/// Posledni test sady: smaze docasne soubory aplikace Soubory (`state.rs` jinak sadu
+/// oznaci za selhanou; bezi i po chybe drivejsich testu).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/tmp/org.magnumopus.files"])
 }

@@ -181,6 +181,14 @@ Testy, které potřebují supervisor (hotplug USB, restart služby), ho řídí
 přes `Supervisor::step`. Bez příznaku (`cargo xtask run`, skutečný stroj)
 init testy nespouští.
 
+Testy jsou v initu jen s cargo feature `tests`, kterou xtask zapíná jen
+pro `cargo xtask test` **[implementováno]**. Háčky initu volané jen z testů
+(`Supervisor::kill_for_test`, `audio::register_for_tests`, ...) jsou za
+stejnou feature. Produkční init (obraz, živé USB, instalace) testy ani
+háčky nemá; hlídá to xtask ([Sestavení](sestaveni.md#testy-jen-v-testovacím-sestavení)).
+Init bez testů, který přesto dostane `TEST_RUN`, skončí chybou
+(`src/testrun.rs`).
+
 Testy sady `supervisor`:
 
 | Test | Co ověří |

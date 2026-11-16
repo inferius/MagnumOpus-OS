@@ -86,6 +86,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
     }
     let mut hostfwd = opts.hostfwd.clone();
     let mut attempt = 0;
+    let mut firmware_retried = false;
     let result = loop {
         attempt += 1;
         // Stary log nesmi obsahovat znacku testu vstupu z minuleho behu.
@@ -112,6 +113,19 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
                 }
             }
             Err(TestError::PortTaken(e)) => break Err(format!("QEMU nenastartovalo: {e}").into()),
+            // Zaseknuty firmware: jedno opakovani celeho kroku, hlasite
+            // (log zaseknuteho behu zustane vedle s priponou). Druhe
+            // zaseknuti uz je chyba behu, porad oznacena jako firmware.
+            Err(TestError::FirmwareStuck(e)) if !firmware_retried => {
+                firmware_retried = true;
+                let kept = crate::bootwatch::record(&serial_log, &e);
+                println!("xtask: !!! FIRMWARE/QEMU NENABEHL: {e}");
+                println!("xtask: !!! log zaseknuteho behu: {}; krok opakuji jednou", kept.display());
+            }
+            Err(TestError::FirmwareStuck(e)) => {
+                let kept = crate::bootwatch::record(&serial_log, &e);
+                break Err(format!("FIRMWARE/QEMU NENABEHL (i po opakovani): {e}; log {}", kept.display()).into());
+            }
             Err(TestError::Other(e)) => break Err(e),
             Ok(()) => break crate::audio::check(&run.wav, &serial_log, opts).and_then(|()| media_check(&run, &serial_log)),
         }
@@ -559,6 +573,9 @@ fn run_interactive(mut cmd: Command) -> Result<()> {
 enum TestError {
     /// QEMU skoncilo hned po startu, protoze port nekdo obsadil.
     PortTaken(String),
+    /// Firmware po startu nebo restartu nespustil loader (`bootwatch`):
+    /// chyba prostredi (firmware/QEMU), ne testu.
+    FirmwareStuck(String),
     Other(Box<dyn std::error::Error>),
 }
 
@@ -611,9 +628,15 @@ fn run_test(mut cmd: Command, opts: &Options, serial_log: &Path) -> std::result:
         })
     });
     let start = Instant::now();
+    let mut watch = crate::bootwatch::Watch::new(opts.crash_test, start);
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break status;
+        }
+        if let Some(e) = watch.poll(serial_log, Instant::now()) {
+            child.kill()?;
+            child.wait()?;
+            return Err(TestError::FirmwareStuck(e));
         }
         if start.elapsed() > timeout {
             child.kill()?;

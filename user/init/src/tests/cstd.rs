@@ -20,6 +20,7 @@ pub const TESTS: &[Test] = &[
     ("ctest: stdio, soubory, errno, getenv, atexit", ctest),
     ("ctest lock: zamky fcntl a flock mezi dvema procesy, EDEADLK", ctest_lock),
     ("ctest memfd: pametovy fd mezi dvema procesy, zvetseni, jen pro cteni", ctest_memfd),
+    ("uklid: pracovni soubory sady", uklid),
 ];
 
 /// Stitek handlu objektu pameti pro `ctest memfd` (`c/memcheck.c`).
@@ -205,4 +206,10 @@ fn ctest_lock(s: &Startup) -> TestResult {
     let ra = a.finish(Duration::from_secs(60))?;
     ra.expect("ctest", &["lock-a"])?;
     rb.expect("ctest", &["lock-b"])
+}
+
+/// Posledni test sady: smaze pracovni slozka programu C (`state.rs` jinak sadu
+/// oznaci za selhanou; bezi i po chybe drivejsich testu).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/std-test"])
 }

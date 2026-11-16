@@ -211,6 +211,7 @@ impl Supervisor {
 
     /// Samostatny supervisor pro testy: jina lhuta na potvrzeni startu
     /// a bez spravce zarizeni (zpravy devmgr zustanou hlavnimu).
+    #[cfg(feature = "tests")]
     pub const fn for_tests(start_timeout: Duration) -> Self {
         let mut s = Self::new();
         s.devmgr_open = false;
@@ -462,6 +463,7 @@ impl Supervisor {
     }
 
     /// Ceka sluzba po restartu na potvrzeni startu?
+    #[cfg(feature = "tests")]
     pub fn is_starting(&self, name: &str) -> bool {
         self.entries
             .iter()
@@ -469,6 +471,7 @@ impl Supervisor {
     }
 
     /// Bezi sluzba (proces existuje: bezi, nebo ceka na potvrzeni)?
+    #[cfg(feature = "tests")]
     pub fn is_running(&self, name: &str) -> bool {
         self.entries
             .iter()
@@ -476,11 +479,13 @@ impl Supervisor {
     }
 
     /// Generace bezici (nebo posledni) instance sluzby.
+    #[cfg(feature = "tests")]
     pub fn generation(&self, name: &str) -> Option<u64> {
         self.find(name).map(|i| self.entries[i].generation)
     }
 
     /// Handle procesu bezici instance (testy: ukonceni sluzby).
+    #[cfg(feature = "tests")]
     pub fn process(&self, name: &str) -> Option<&Handle> {
         self.find(name).and_then(|i| self.entries[i].process.as_ref())
     }
@@ -488,6 +493,7 @@ impl Supervisor {
     /// Zamerne ukonci bezici instanci sluzby (testy obnovy): restart jako
     /// po padu, ale bez zapoctu do limitu [`RESTART_MAX`] za
     /// [`RESTART_WINDOW`]. Vraci generaci ukoncene instance.
+    #[cfg(feature = "tests")]
     pub fn kill_for_test(&mut self, name: &str) -> Result<u64, libos::Error> {
         let i = self.find(name).ok_or(libos::Error::NotFound)?;
         let e = &mut self.entries[i];
@@ -513,6 +519,7 @@ impl Supervisor {
     }
 
     /// Stav jedne sluzby.
+    #[cfg(feature = "tests")]
     pub fn status_of(&self, name: &str) -> Option<ServiceStatus> {
         self.status().into_iter().find(|s| s.name == name)
     }

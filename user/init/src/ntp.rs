@@ -30,6 +30,7 @@ use crate::system::NetService;
 
 pub struct NtpService {
     pub process: Process,
+    #[cfg_attr(not(feature = "tests"), allow(dead_code))]
     pub control: Channel,
 }
 

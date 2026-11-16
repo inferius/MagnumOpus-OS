@@ -289,6 +289,7 @@ impl Supervisor {
 
     /// Sluzba, ktera to vzdala, dostane novou sanci (rucni zasah spravce
     /// systemu; testy). S ni i sluzby, ktere to vzdaly kvuli ni.
+    #[cfg(feature = "tests")]
     pub fn revive(&mut self, name: &str) -> bool {
         let Some(i) = self.find(name) else { return false };
         if self.entries[i].phase != Phase::GaveUp {

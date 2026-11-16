@@ -125,6 +125,24 @@ code is not in them at all.
   `cargo test -p shlang --features dev-mode`, `cargo test -p accountproto
   --features dev-mode`.
 
+## Tests only in the test build
+
+**[implemented]** (`xtask/src/testcode.rs`). The userspace tests
+(`user/init/src/tests`) and the init hooks for them are behind the cargo
+feature `tests` of the `init` program. Only `cargo xtask test` turns it
+on (including the special power, release and crash record runs);
+`cargo xtask image`, `run`, the live USB, `instfs.img` for installation
+and everything else are built without it.
+
+- **Safeguard:** a build without tests searches the initfs programs for
+  texts that exist only in test code (`testcode::MARKERS`: the run
+  summary, the per-suite state check, suite cleanup). A hit = **a build
+  error**, not a warning. It applies to every initfs built through
+  `build`, so also to the live USB, the installer and the update package.
+- `cargo xtask test` switches between the build with tests and without
+  them (live USB, installation): after a change to init, init is compiled
+  in both variants.
+
 ## Documentation as a website
 
 `cargo xtask docs` (and also `cargo xtask test`) builds a site with two books: the

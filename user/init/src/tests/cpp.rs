@@ -21,6 +21,7 @@ pub const TESTS: &[Test] = &[
     ("cpptest: libc++ staticky (vyjimky, RTTI, vlakna, filesystem)", cpptest_static),
     ("cpptest-dyn: libc++.so pres zavadec", cpptest_dyn),
     ("hbtest: HarfBuzz tvaruje text (diakritika, kerning)", hbtest),
+    ("uklid: pracovni soubory sady", uklid),
 ];
 
 const PARTS: &[&str] = &[
@@ -72,4 +73,10 @@ fn hbtest(s: &Startup) -> TestResult {
     fs.write(&path, 0, data).map_err(|e| fail("pismo: zapis", e))?;
     let run = run_std_app(s, "hbtest", &[&path], &[], session(fs)?, Duration::from_secs(60))?;
     run.expect("hbtest", &["verze", "tvarovani", "kerning"])
+}
+
+/// Posledni test sady: smaze pracovni slozka programu C++ (`state.rs` jinak sadu
+/// oznaci za selhanou; bezi i po chybe drivejsich testu).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/std-test"])
 }

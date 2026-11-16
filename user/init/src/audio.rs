@@ -49,6 +49,7 @@ fn connect_on(control: &Channel) -> Result<Channel> {
 }
 
 /// Test obnovy: aktivni ovladac zvukove karty skonci jako po padu.
+#[cfg(feature = "tests")]
 pub fn crash_driver() -> Result<()> {
     let st = STATE.lock();
     st.control.as_ref().ok_or(Error::ServiceUnavailable)?.write(b"crash-driver", Vec::new())
@@ -90,6 +91,7 @@ pub fn app_session(sup: &mut crate::supervisor::Supervisor, recipe: &audioproto:
 /// jeji identity u audiod i z nich odvozene (role `Audio` potomku), audiod
 /// zavre vsechny jeji relace (streamy zmlknou). Vraci (pocet listku, pocet
 /// relaci).
+#[cfg(feature = "tests")]
 pub fn revoke(sup: &mut crate::supervisor::Supervisor, app: &str) -> Result<(usize, usize)> {
     let leases = sup.revoke_leases("audiod", |r| audioproto::session::Recipe::decode(r).is_ok_and(|x| x.is_some_and(|x| x.app_id == app)));
     let st = STATE.lock();
@@ -107,6 +109,7 @@ pub fn revoke(sup: &mut crate::supervisor::Supervisor, app: &str) -> Result<(usi
 /// Bezici audiod i v supervisoru testu `sup` (relace zvuku s listky pro
 /// programy, ktere test spousti a jejichz supervisor ridi sam: testy Wine).
 /// Hlavni supervisor dal hlida restart.
+#[cfg(feature = "tests")]
 pub fn register_for_tests(sup: &mut crate::supervisor::Supervisor) -> Result<()> {
     let h = crate::supervisor::SUPERVISOR.lock().process("audiod").ok_or(Error::ServiceUnavailable)?.duplicate(None)?;
     let p = Process::from_handle(h);
@@ -115,6 +118,7 @@ pub fn register_for_tests(sup: &mut crate::supervisor::Supervisor) -> Result<()>
 }
 
 /// Relace aplikace bez listku (testy: program spousteny testem).
+#[cfg(feature = "tests")]
 pub fn app_channel(recipe: &audioproto::session::Recipe) -> Result<Channel> {
     let st = STATE.lock();
     app_session_on(st.control.as_ref().ok_or(Error::ServiceUnavailable)?, &recipe.encode())

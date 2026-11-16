@@ -38,6 +38,7 @@ pub const TESTS: &[Test] = &[
     ("shell: navrh prikazu overi parser", shell_propose),
     ("diagnostika: systemove nastroje a cizi poskytovatel", sys_and_provider),
     ("shell: prikaz ai pres branu terminalu", super::agent_shell::ai_command),
+    ("uklid: pracovni soubory sady", uklid),
 ];
 
 const ALICE: u64 = 4242;
@@ -417,4 +418,10 @@ fn sys_and_provider(_: &Startup) -> TestResult {
     let ch = open(spec(Mode::Chat, "tool test.echo {\"text\":1}\n---\nsay {result}", false), false)?;
     check!(text_of(&ask(&ch, "ozvena", None)?).contains("neplatny vstup"), "schema overeno pred volanim");
     Ok(())
+}
+
+/// Posledni test sady: smaze pracovni slozka agenta (`state.rs` jinak sadu
+/// oznaci za selhanou; bezi i po chybe drivejsich testu).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/agent-t"])
 }

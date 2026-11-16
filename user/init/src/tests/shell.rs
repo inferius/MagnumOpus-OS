@@ -341,7 +341,10 @@ fn session(s: &Startup) -> TestResult {
     );
 
     // async: ulohy ve vlaknech shsess bezi soubezne, vysledky v poradi.
-    let t0 = time::now();
+    // Soubeh se overuje prekryvem intervalu [start, konec] obou uloh, ne
+    // celkovou dobou: pod zatizenym hostitelem (TCG) muze beh trvat dele
+    // nez 2 s, i kdyz ulohy bezi soubezne (videno 2233 ms). Postupne by se
+    // intervaly neprekryly nikdy.
     crate::check_eq!(
         w.value(id, "let a = async { sleep 1s; 1 }
 let b = async { sleep 1s; 2 }
@@ -349,9 +352,22 @@ await all [a, b]")?,
         Value::List(alloc::vec![Value::Int(1), Value::Int(2)]),
         "await all"
     );
-    let took = time::now() - t0;
-    if took > 1_800_000_000 {
-        return Err(alloc::format!("ulohy nebezely soubezne ({} ms)", took / 1_000_000));
+    let spans = w.value(id, "let a = async { let s = (now); sleep 1s; [s, (now)] }
+let b = async { let s = (now); sleep 1s; [s, (now)] }
+await all [a, b]")?;
+    let span = |v: Option<&Value>| match v {
+        Some(Value::List(l)) => match (l.first(), l.get(1)) {
+            (Some(Value::Time(s)), Some(Value::Time(e))) => Some((*s, *e)),
+            _ => None,
+        },
+        _ => None,
+    };
+    let Value::List(ref l) = spans else { return Err(alloc::format!("intervaly uloh: {spans:?}")) };
+    let (Some((s1, e1)), Some((s2, e2))) = (span(l.first()), span(l.get(1))) else {
+        return Err(alloc::format!("intervaly uloh: {spans:?}"));
+    };
+    if !(s1 < e2 && s2 < e1) {
+        return Err(alloc::format!("ulohy nebezely soubezne: [{s1}, {e1}] a [{s2}, {e2}]"));
     }
     // Uloha zapisuje vlastni relaci fsd; zmenu vrati undo relace.
     w.ok(id, "let c = async { echo uloha > /shell-test/t.txt }

@@ -19,6 +19,7 @@ pub const TESTS: &[Test] = &[
     ("ripgrep: hledani ve strome souboru", ripgrep),
     ("ureq: HTTP klient, 4 vlakna soubezne", http),
     ("getrandom: backend RANDOM_GET", getrandom),
+    ("uklid: pracovni soubory sady", uklid),
 ];
 
 const DIR: &str = "/std-test/rg";
@@ -120,4 +121,10 @@ fn http(s: &Startup) -> TestResult {
 fn getrandom(s: &Startup) -> TestResult {
     let run = run_std_app(s, "getrandom-probe", &[], &[], vec![], Duration::from_secs(60))?;
     run.expect("getrandom-probe", &["fill", "fill_big", "u64"])
+}
+
+/// Posledni test sady: smaze pracovni slozka programu std (`state.rs` jinak sadu
+/// oznaci za selhanou; bezi i po chybe drivejsich testu).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/std-test"])
 }

@@ -100,6 +100,7 @@ fn get_mounts(r: &mut Reader) -> Result<Vec<Mount>> {
 
 /// Zuzeni receptu pro dite: seznam pripojenych cest (kodovani jako cesty
 /// v receptu: `u32 pocet` + `Mount`).
+#[cfg(feature = "tests")]
 pub fn narrowing(mounts: &[Mount]) -> Vec<u8> {
     let mut w = Writer::new();
     put_mounts(&mut w, mounts);

@@ -66,6 +66,7 @@ pub fn user(uid: u64) -> Pref {
 }
 
 /// Ulozeni (i pro test `gui_look::store`).
+#[cfg(feature = "tests")]
 pub fn save_for(uid: Option<u64>, p: &Pref) -> Result<()> {
     save(uid, p)
 }

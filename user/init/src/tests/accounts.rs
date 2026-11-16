@@ -30,6 +30,7 @@ pub const TESTS: &[(&str, fn(&Startup) -> TestResult)] = &[
     ("zvyseni prav dialogem", elevate),
     ("systemove soubory pres ELEVATE", system_files),
     ("spatne heslo a zpomaleni", wrong_password),
+    ("uklid: soukromy /tmp uzivatele testu", uklid),
 ];
 
 const PW: &str = "Kocka leze dirou";
@@ -413,4 +414,10 @@ fn wrong_password(_: &Startup) -> TestResult {
     // V dobe cekani neprojde ani spravne heslo (a nic se nepocita).
     check!(matches!(l.auth(uid, Method::Password, Secret::from(PW)), Ok(AuthReply::LockedOut { .. })), "spravne heslo v dobe cekani");
     Ok(())
+}
+
+/// Posledni test sady: soukromy `/tmp/<uid>` z prihlaseni testu
+/// (`session::create_tmp`); dalsi prihlaseni ho zalozi znovu.
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/tmp/1000"])
 }
