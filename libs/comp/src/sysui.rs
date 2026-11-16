@@ -112,7 +112,7 @@ impl Comp {
             return column([]);
         }
         let session = self.has_active_session();
-        let lock = menu_item("Zamknout", SysMsg::Lock);
+        let lock = menu_item("Zamknout", SysMsg::Lock).icon("lock");
         let lock = if session { lock } else { lock.disabled("nikdo není přihlášený") };
         row([
             label(if session { "Přihlášený uživatel" } else { "Bez přihlášení" }),
@@ -120,7 +120,7 @@ impl Comp {
             button("")
                 .icon("power")
                 .tooltip("Napájení")
-                .context_menu(alloc::vec![lock, menu_item("Odhlásit", SysMsg::Lock).disabled("zatím není"), menu_separator(), menu_item("Restartovat", SysMsg::Reboot), menu_item("Vypnout", SysMsg::Shutdown)])
+                .context_menu(alloc::vec![lock, menu_item("Odhlásit", SysMsg::Lock).icon("logout").disabled("zatím není"), menu_separator(), menu_item("Restartovat", SysMsg::Reboot).icon("restart"), menu_item("Vypnout", SysMsg::Shutdown).icon("power")])
                 .key("napajeni"),
         ])
     }

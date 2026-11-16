@@ -265,17 +265,18 @@ impl Comp {
     /// vsechna okna; co jeste neni, je vypnute s duvodem.
     fn app_menu_items(&self, g: u32) -> Vec<ui::MenuEntry<PanelMsg>> {
         let id = self.app_of(g).unwrap_or_default();
-        let mut v: Vec<ui::MenuEntry<PanelMsg>> = self
-            .app_windows(&id)
-            .into_iter()
-            .filter_map(|w| self.windows.get(&w).map(|win| ui::menu_item(&win.title, PanelMsg::Window(w)).checked(self.focus == Some(w))))
-            .collect();
+        let mut v: Vec<ui::MenuEntry<PanelMsg>> = alloc::vec![ui::menu_header("Okna")];
+        v.extend(
+            self.app_windows(&id)
+                .into_iter()
+                .filter_map(|w| self.windows.get(&w).map(|win| ui::menu_item(&win.title, PanelMsg::Window(w)).icon("window").checked(self.focus == Some(w)))),
+        );
         v.push(ui::menu_separator());
-        let new = ui::menu_item("Nové okno", PanelMsg::NewWindow).shortcut("Ctrl+Shift+N");
+        let new = ui::menu_item("Nové okno", PanelMsg::NewWindow).shortcut("Ctrl+Shift+N").icon("plus");
         v.push(if self.is_launchable(&id) { new } else { new.disabled("aplikace jiné okno neotevře") });
-        v.push(ui::menu_item("Připnout na lištu", PanelMsg::NewWindow).disabled("zatím není"));
+        v.push(ui::menu_item("Připnout na lištu", PanelMsg::NewWindow).icon("pin").disabled("zatím není"));
         v.push(ui::menu_separator());
-        v.push(ui::menu_item("Zavřít všechna okna", PanelMsg::CloseAll));
+        v.push(ui::menu_item("Zavřít všechna okna", PanelMsg::CloseAll).icon("close"));
         v
     }
 
@@ -295,15 +296,17 @@ impl Comp {
         ui.transparent = true;
         ui.look.set_mode(mode);
         ui.rebuild(String::from("Nabídka aplikace"), column([]));
-        // Nabidka pod kotvou nad okrajem: v pocatku pohledu.
-        let at = Rect::new(0, -3, 1, 1);
+        // Nabidka pod kotvou: v pohledu s okrajem pro stin (`shadow.popover`).
+        let mg = t.shadow.popover.iter().map(|s| (s.blur as i32 + s.spread.max(0) + s.x.abs().max(s.y.abs())) as u32).max().unwrap_or(0);
+        let at = Rect::new(mg as i32, mg as i32 - 3, 1, 1);
         ui.open_menu(items.clone(), at);
         let Some(m) = ui.popup_rect() else { return };
-        ui.resize(m.w.max(1), m.h.max(1));
+        ui.resize(m.w + 2 * mg, m.h + 2 * mg);
         ui.rebuild(String::from("Nabídka aplikace"), column([]));
         ui.open_menu(items, at);
         let x = anchor.x.clamp(edge as i32, (self.w.saturating_sub(m.w + edge)) as i32);
-        let rect = Rect::new(x, self.panel_rect().y - t.space[3] as i32 - m.h as i32, m.w, m.h);
+        let y = self.panel_rect().y - t.space[3] as i32 - m.h as i32;
+        let rect = Rect::new(x - mg as i32, y - mg as i32, m.w + 2 * mg, m.h + 2 * mg);
         if let Some(old) = self.barpanel.take() {
             self.damage_top(self.panel_shadow_area(old.rect));
         }

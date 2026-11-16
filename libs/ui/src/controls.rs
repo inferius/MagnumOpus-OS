@@ -508,19 +508,24 @@ impl<M: Clone> Ui<M> {
                 let strong = theme::TextStyle { weight: th.text.body_strong.weight, ..body };
                 let (px, py) = self.to_space(i, self.pointer.0, self.pointer.1);
                 let rad = th.radius.control;
+                // Cara pod radou zalozek (`.k-tabs`), vybrana podtrzena
+                // `accent` (`.k-tab[aria-selected]::after`, 3 px).
+                c.fill(Rect::new(r.x, r.bottom() as i32 - 1, r.w, 1), col.border);
                 for (k, p) in parts.iter().enumerate() {
                     let on = k == selected;
-                    if on {
-                        c.round_fill(*p, rad, col.surface_2);
-                        c.fill(Rect::new(p.x, p.bottom() as i32 - rad as i32, p.w, rad), col.surface_2);
-                    } else if st.hover && p.contains(px, py) {
+                    if !on && st.hover && p.contains(px, py) {
                         c.round_fill(*p, rad, col.surface_3);
+                    }
+                    if on {
+                        let lh = th.size.bar_indicator_h;
+                        let inset = sp[3] as i32;
+                        c.round_fill(Rect::new(p.x + inset, p.bottom() as i32 - lh as i32, p.w.saturating_sub(2 * sp[3]), lh), lh, fade(col.accent));
                     }
                     let s = if on { strong } else { body };
                     let room = p.w.saturating_sub(2 * sp[4] + if closable { th.size.icon_xs + sp[2] } else { 0 });
                     let f = self.look.face(s);
                     let b = p.y + f.baseline_in(s.size, p.h);
-                    f.draw_ellipsized(c, p.x + sp[4] as i32, b, &labels[k], s.size, fade(if on { col.ink } else { col.ink_muted }), room);
+                    f.draw_ellipsized(c, p.x + sp[4] as i32, b, &labels[k], s.size, fade(if on { col.accent_ink } else { col.ink_muted }), room);
                     if let Some(x) = self.tab_close(i, k) {
                         self.icons.draw(c, "close", x.x, x.y, x.w, th.icon_stroke, col.ink_muted);
                     }

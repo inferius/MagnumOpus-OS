@@ -198,22 +198,31 @@ pub struct MenuEntry<M> {
     /// Oddelovac skupin.
     pub separator: bool,
     pub act: Option<MenuAct<M>>,
+    /// Ikona vlevo (`gfx::icon`, 16 px).
+    pub icon: Option<&'static str>,
+    /// Nadpis skupiny (`label`): neda se vybrat, klavesy ho preskoci.
+    pub header: bool,
 }
 
 /// Polozka nabidky, ktera posle zpravu `m`.
 pub fn menu_item<M>(label: &str, m: M) -> MenuEntry<M> {
-    MenuEntry { label: label.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: Some(MenuAct::Msg(m)) }
+    MenuEntry { label: label.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: Some(MenuAct::Msg(m)), icon: None, header: false }
 }
 
 /// Podnabidka s polozkami `items`. `&` v textu polozky oznaci mnemoniku
 /// (`"&Soubor"`: pismeno S podtrzene, stisk S polozku vybere; `&&` = `&`).
 pub fn submenu<M>(label: &str, items: Vec<MenuEntry<M>>) -> MenuEntry<M> {
-    MenuEntry { label: label.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: Some(MenuAct::Sub(items)) }
+    MenuEntry { label: label.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: Some(MenuAct::Sub(items)), icon: None, header: false }
 }
 
 /// Oddelovac skupin v nabidce.
 pub fn menu_separator<M>() -> MenuEntry<M> {
-    MenuEntry { label: String::new(), shortcut: String::new(), disabled: String::new(), checked: None, separator: true, act: None }
+    MenuEntry { label: String::new(), shortcut: String::new(), disabled: String::new(), checked: None, separator: true, act: None, icon: None, header: false }
+}
+
+/// Nadpis skupiny v nabidce (kontextove-nabidky.html, `.sec`).
+pub fn menu_header<M>(text: &str) -> MenuEntry<M> {
+    MenuEntry { label: text.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: None, icon: None, header: true }
 }
 
 impl<M> MenuEntry<M> {
@@ -230,6 +239,12 @@ impl<M> MenuEntry<M> {
 
     pub fn checked(mut self, c: bool) -> Self {
         self.checked = Some(c);
+        self
+    }
+
+    /// Ikona polozky vlevo.
+    pub fn icon(mut self, name: &'static str) -> Self {
+        self.icon = Some(name);
         self
     }
 }
@@ -251,6 +266,8 @@ pub fn menu_from<M>(items: &[guiproto::menu::MenuItem]) -> Vec<MenuEntry<M>> {
                 checked: it.checked,
                 separator: false,
                 act: Some(MenuAct::Action(it.action.clone(), it.args.clone())),
+                icon: None,
+                header: false,
             });
         } else {
             let sub = menu_from(&it.children);

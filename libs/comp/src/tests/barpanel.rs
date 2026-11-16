@@ -95,7 +95,9 @@ fn app_shortcut_menu_is_ui_menu() {
     t.click(r.x + 4, r.y + 4);
     assert!(matches!(t.c.flyout, Some(crate::flyout::Flyout::AppWindows(_))));
     let m = t.c.bar_panel_rect().expect("nabidka");
-    assert!(m.bottom() as i32 <= t.c.panel_rect().y, "nad listou: {m:?}");
+    // Obdelnik vcetne okraje stinu; karta je nad listou.
+    let card = t.c.barpanel.as_ref().unwrap().ui.popup_rect().unwrap();
+    assert!(m.y + card.bottom() as i32 <= t.c.panel_rect().y, "nad listou: {m:?} {card:?}");
     let items: Vec<guiproto::a11y::Node> = tree(&t).into_iter().filter(|n| n.role == Role::MenuItem).collect();
     let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
     assert!(names.contains(&"Nové okno") && names.contains(&"Zavřít všechna okna"), "{names:?}");

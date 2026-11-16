@@ -192,10 +192,10 @@ fn shot_menu() {
         240,
         &|| {
             column([button::<M>("Soubor").context_menu(vec![
-                MenuEntry { label: "Kopírovat".into(), shortcut: "Ctrl+C".into(), disabled: String::new(), checked: None, separator: false, act: None },
-                MenuEntry { label: "Vložit".into(), shortcut: "Ctrl+V".into(), disabled: "Schránka je prázdná".into(), checked: None, separator: false, act: None },
+                MenuEntry { label: "Kopírovat".into(), shortcut: "Ctrl+C".into(), disabled: String::new(), checked: None, separator: false, act: None, icon: None, header: false },
+                MenuEntry { label: "Vložit".into(), shortcut: "Ctrl+V".into(), disabled: "Schránka je prázdná".into(), checked: None, separator: false, act: None, icon: None, header: false },
                 menu_separator(),
-                MenuEntry { label: "Zobrazit skryté".into(), shortcut: String::new(), disabled: String::new(), checked: Some(true), separator: false, act: None },
+                MenuEntry { label: "Zobrazit skryté".into(), shortcut: String::new(), disabled: String::new(), checked: Some(true), separator: false, act: None, icon: None, header: false },
             ])])
         },
         &|u| {

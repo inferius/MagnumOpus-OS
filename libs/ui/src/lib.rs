@@ -285,6 +285,8 @@ pub struct Ui<M> {
     /// Nekreslit pozadi `surface` (volajici dal vlastni, napr. material
     /// panelu v kompozitoru).
     pub transparent: bool,
+    /// Masky stinu nabidek (`shadow.popover`) podle polomeru a rozmazani.
+    pub(crate) shadow_masks: alloc::collections::BTreeMap<(u32, u32), gfx::shadow::ShadowMask>,
     /// Okraj okna `look.pad()` kolem obsahu (panel kompozitoru ho nema,
     /// odsazeni maji jeho radky).
     pub window_pad: bool,
@@ -381,6 +383,7 @@ impl<M: Clone> Ui<M> {
             now: 0,
             overlay: false,
             transparent: false,
+            shadow_masks: alloc::collections::BTreeMap::new(),
             window_pad: true,
             tip_shift: (0, 0),
             input_class: 0,
