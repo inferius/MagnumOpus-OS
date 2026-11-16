@@ -110,6 +110,7 @@ members = [
     "user/std-net",
     "user/std-proc",
     "user/std-exec",
+    "user/nettools",
     "user/gui-probe",
     "libs/mowin",
     "user/std-http",

@@ -164,6 +164,14 @@ fn external_program_gets_needs_and_undo() {
 }
 
 #[test]
+fn program_args_keep_order() {
+    let mut h = TestHost::new();
+    let mut it = interp();
+    it.run_line(&mut h, "tool 10.0.2.2 --count 2 x --size=8").result.unwrap();
+    assert_eq!(h.execs[0].1, vec!["10.0.2.2", "true", "2", "x", "8"]);
+}
+
+#[test]
 fn path_rules() {
     use crate::vfs::path::*;
     assert_eq!(resolve("/home/a", "/home", "../b/./c"), "/home/b/c");

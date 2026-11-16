@@ -182,7 +182,8 @@ a ring/aws-lc, OpenSSH ověří skutečnou spolupráci.
 
 ## Plán
 
-- klient `ssh` a `scp` v shellu, `ping`, `nc`, `resolve` **[navrženo]**,
+- klient `ssh` a `scp` v shellu **[navrženo]** (`ping`, `nc` a `resolve` jsou
+  hotové, [Síť](sit.md#síťové-příkazy-shellu)),
 - heslo s druhým faktorem (TOTP přes accountd) **[navrženo]**,
 - podpis výměny klíčů v samostatné službě (hostitelský klíč mimo proces
   spojení) **[navrženo]**,

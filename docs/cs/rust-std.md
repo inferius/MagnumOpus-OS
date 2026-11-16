@@ -275,15 +275,14 @@ operace `Unsupported`.
   rozhraní se zatím nepoužije.
 - `set_nonblocking(true)`, `peek`, `ttl`, `linger`, `keepalive`, multicast
   vrací `Unsupported`; `set_nodelay` jen hlásí úspěch.
-- **Omezení dnes:** odpovědi `netproto` nemají číslo dotazu a netd má na
-  spojení jen jeden rozpracovaný dotaz. osrt proto každý kanál (relace,
-  spojení, socket) zamyká: vlákno blokované ve `read` zdrží zápis na
-  stejném spojení (klon přes `try_clone`), dokud čtení neskončí, a dlouhý
-  `connect` (dotaz firewallu až 300 s) zdrží ostatní volání relace. Test
-  `shared_stream_serialized` v `std-net` to ověřuje. Opravu (`netproto` v2:
-  číslo dotazu, souběžný RECV, SEND a ACCEPT na spojení, víc dotazů na
-  relaci, termín a zrušení) dělá vlákno sítě **[navrženo]**; osrt pak
-  zámky zruší a test se otočí.
+- **Plný duplex:** sockety osrt (`TcpStream`, `TcpListener`, `UdpSocket`)
+  nezamyká (klientské typy `netproto` v2 jsou `Sync`): vlákno blokované ve
+  `read` nezdrží zápis na stejném spojení (klon přes `try_clone` nebo
+  `&TcpStream`) **[ověřeno v QEMU]** (test `std-net`, kontrola
+  `shared_stream_duplex`; používá ho `nc`, [Síť](sit.md#síťové-příkazy-shellu)).
+- **Omezení dnes:** relaci sítě osrt pořád zamyká, takže dlouhý `connect`
+  (dotaz firewallu až 300 s) zdrží ostatní volání relace (nová spojení,
+  DNS) **[implementováno]**.
 
 ### Procesy (`std::process`)
 

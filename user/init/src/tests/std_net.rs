@@ -46,5 +46,5 @@ fn std_net(s: &Startup) -> TestResult {
         vec![StartHandle::tagged(tag::NET, session.into_channel().map_err(|e| format!("predani site: {e:?}"))?.into_handle())],
         Duration::from_secs(120),
     )?;
-    run.expect("std-net", &["tcp_echo", "tcp_threads", "denied", "udp_echo", "dns", "listen_denied", "shared_stream_serialized"])
+    run.expect("std-net", &["tcp_echo", "tcp_threads", "denied", "udp_echo", "dns", "listen_denied", "shared_stream_duplex"])
 }

@@ -349,12 +349,10 @@ nečeká, a zahodí se i s handly.
 > operace budoucího IDL ([architektura](architektura.md)). Starý formát
 > zprávy se nečte: převedli se všichni klienti najednou.
 
-**Souběh:** odpovědi nemají číslo požadavku a netd má na jednom kanálu
-(relace, spojení, socket) rozpracovaný jen jeden požadavek. Dvě vlákna
-na stejném kanálu se proto musí střídat (std to zamyká, viz
-[Rust std](rust-std.md#síť-stdnet)): čtení blokované na data zdrží zápis
-na stejném spojení. `netproto` v2 s číslem požadavku a souběžným
-čtením, zápisem a přijímáním **[navrženo]**.
+**Souběh:** čtení blokované na data nezdrží zápis na stejném spojení
+(hlavička v2 s číslem dotazu, klientské typy jsou `Sync`) **[ověřeno
+v QEMU]** (test `std-net`, kontrola `shared_stream_duplex`). Relaci sítě
+std pořád zamyká, viz [Rust std](rust-std.md#síť-stdnet).
 
 ```rust
 use core::time::Duration;
@@ -694,6 +692,25 @@ program dostane jako relaci FS jen pro čtení. Vše popisuje kapitola
 > soubor; je to adresář na FS (sada Mozilla + vlastní CA + `distrust.txt`).
 > **Proč:** správce přidá firemní CA souborem, aktualizace systému jeho
 > soubory nepřepíše a práva hlídá FS jako u ostatních dat.
+
+## Síťové příkazy shellu
+
+`ping`, `resolve` a `nc` jsou programy systému (`user/nettools`, jeden
+program, chování podle jména). Shell je spouští službou exec initu
+([Návrh shellu](navrh-shell.md), kapitola Programy): shell sám síť nemá,
+každý příkaz má vlastní manifest, tedy vlastní id aplikace pro firewall
+a audit a jen potřebná práva **[ověřeno v QEMU]** (test `ucty: programy ze
+shellu (sit podle manifestu)`, x86_64 i aarch64).
+
+| Příkaz | Co dělá | Práva sítě (manifest) |
+|---|---|---|
+| `ping <cíl> [--count N] [--size B] [--timeout ms]` | ICMP echo (`Net::ping`), řádek na odpověď, souhrn ztráty a časů; `--count 0` = do Ctrl+C. Kód 1 = žádná odpověď | `info`, `ping`, `dns`; ICMP kamkoli |
+| `resolve <jméno>...` | adresy jména přes službu DNS systému | `info`, `dns` |
+| `nc <cíl> <port> [--udp] [--timeout s]` | spojení TCP (nebo UDP): vstup (roura nebo řádky z výzvy) jde do spojení, příjem na výstup; konec vstupu ukončí zápis, konec spojení program | `info`, `tcp`, `udp`, `dns`; kamkoli |
+| `nc --listen <port> [--udp]` | přijme jedno spojení (UDP: první odesílatel) na portu 1024 až 65535 | `listen`; příchozí spojení pustí jen firewall podle profilu sítě |
+
+Přepínače jsou anglicky, hlášení česky. Chyba spojení a cíl bez odpovědi
+skončí nenulovým kódem (`SH_EXIT`). IPv6 služba zatím neumí.
 
 ## Testy
 

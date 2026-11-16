@@ -619,7 +619,9 @@ for f in (ls ~/Fotky | where ext == "jpg") {
     Bez roury se po 300 ms běhu ukáže textová výzva a každý zadaný řádek
     jde programu (interaktivní stdin, např. `nc`). Ctrl+C program ukončí
     (`SH_INTERRUPTED`), nenulový návratový kód je `SH_EXIT`.
-  - `~` a `~/...` na začátku textového argumentu shell rozvine na domov
+  - Argumenty dostane program v pořadí zápisu jako text (`ping x --count 2`
+    = `x`, `--count`, `2`; `--jméno=hodnota` = `--jméno`, `hodnota`).
+    `~` a `~/...` na začátku textového argumentu shell rozvine na domov
     (i v uvozovkách: AST je od holého slova neodliší).
   - Typovaný kanál (program vrací hodnoty shellu místo bajtů) a výstup
     programu jako hodnota pro další příkaz roury **[navrženo]**. Spuštění

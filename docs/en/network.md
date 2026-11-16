@@ -372,12 +372,11 @@ together with its handles.
 > the future IDL ([architecture](architecture.md)). The old message format
 > is not read: all clients were converted at once.
 
-**Concurrency:** replies carry no request number and netd has only one
-request in progress per channel (session, connection, socket). Two
-threads on the same channel must therefore take turns (std locks it, see
-[Rust std](rust-std.md#network-stdnet)): a read blocked on data delays a
-write on the same connection. `netproto` v2 with request numbers and
-concurrent read, write and accept **[designed]**.
+**Concurrency:** a read blocked on data does not delay a write on the
+same connection (the v2 header with a request number, the client types
+are `Sync`) **[verified in QEMU]** (test `std-net`, check
+`shared_stream_duplex`). std still locks the network session, see
+[Rust std](rust-std.md#network-stdnet).
 
 ```rust
 use core::time::Duration;
@@ -730,6 +729,27 @@ in the [TLS and HTTP](tls-http.md) chapter.
 > custom CAs + `distrust.txt`). **Why:** an administrator adds a company
 > CA as a file, a system update does not overwrite their files, and the FS
 > checks permissions as for any other data.
+
+## Network commands of the shell
+
+`ping`, `resolve` and `nc` are system programs (`user/nettools`, one
+program, behaviour by name). The shell starts them through init's exec
+service ([Shell design](shell-design.md), chapter Programs): the shell has
+no network itself, each command has its own manifest, i.e. its own
+application id for the firewall and the audit and only the rights it needs
+**[verified in QEMU]** (test `ucty: programy ze shellu (sit podle
+manifestu)`, x86_64 and aarch64).
+
+| Command | What it does | Network rights (manifest) |
+|---|---|---|
+| `ping <target> [--count N] [--size B] [--timeout ms]` | ICMP echo (`Net::ping`), a line per reply, summary of loss and times; `--count 0` = until Ctrl+C. Exit code 1 = no reply | `info`, `ping`, `dns`; ICMP anywhere |
+| `resolve <name>...` | addresses of a name through the system DNS service | `info`, `dns` |
+| `nc <target> <port> [--udp] [--timeout s]` | a TCP (or UDP) connection: input (pipe or lines from the prompt) goes into the connection, received data to the output; end of input ends writing, end of the connection ends the program | `info`, `tcp`, `udp`, `dns`; anywhere |
+| `nc --listen <port> [--udp]` | accepts one connection (UDP: the first sender) on a port 1024 to 65535 | `listen`; incoming connections pass only by the firewall's network profile |
+
+Switches are English, messages Czech. A connection error and a target
+without a reply end with a non-zero exit code (`SH_EXIT`). The service
+does not support IPv6 yet.
 
 ## Tests
 

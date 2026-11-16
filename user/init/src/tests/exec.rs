@@ -99,6 +99,7 @@ fn run_in(s: &Startup, session: u64) -> TestResult {
         let (items, ok) = w.run(id, "std-exec-neni")?;
         check!(!ok && error_code(&items).as_deref() == Some("SH_UNKNOWN"), format!("neznamy program: {items:?}"));
         interactive(&w, id)?;
+        nettools(s, &w, id)?;
         w.ok(id, "rm ~/exec.txt ~/bez-site.mos")?;
         Ok(())
     })();
@@ -123,6 +124,25 @@ fn confirmed(w: &Window, id: u64, line: &str) -> Result<Vec<Item>, String> {
             _ => {}
         }
     }
+}
+
+/// Sitove prikazy `ping`, `resolve` a `nc` (`user/nettools`) proti brane
+/// QEMU a pomocnym serverum xtasku.
+fn nettools(s: &Startup, w: &Window, id: u64) -> TestResult {
+    let Some(p) = super::net::ports(s, "ping, nc, resolve")? else { return Ok(()) };
+    let host = super::net::HOST;
+    let v = texts(&w.ok(id, &format!("ping {host} --count 2"))?).0;
+    check!(v.iter().filter(|l| l.starts_with(&format!("odpověď od {host}"))).count() == 2, format!("ping: {v:?}"));
+    check!(v.iter().any(|l| l.contains("přijato 2")), format!("ping souhrn: {v:?}"));
+    let v = texts(&w.ok(id, "resolve echo.magnumopus")?).0;
+    check!(v == [format!("{host}")], format!("resolve: {v:?}"));
+    let v = texts(&w.ok(id, &format!("\"ahoj-tcp\\n\" | nc {host} {}", p.echo))?).0;
+    check!(v == ["ahoj-tcp"], format!("nc TCP: {v:?}"));
+    let v = texts(&w.ok(id, &format!("\"ahoj-udp\\n\" | nc {host} {} --udp", p.udp_echo))?).0;
+    check!(v == ["ahoj-udp"], format!("nc UDP: {v:?}"));
+    let (items, ok) = w.run(id, &format!("nc {host} {}", p.closed))?;
+    check!(!ok && error_code(&items).as_deref() == Some("SH_EXIT"), format!("nc na zavreny port: {items:?}"));
+    Ok(())
 }
 
 /// Interaktivni stdin: radek z vyzvy jde programu, Ctrl+C ho ukonci.

@@ -18,6 +18,9 @@ pub struct Args {
     pub pos: Vec<Value>,
     pub named: Vec<(String, Value)>,
     pub span: Span,
+    /// (Jen volani programu, `splat`) vsechny argumenty v poradi zapisu:
+    /// program dostane `--count 2` v tomto poradi, ne pozicni zvlast.
+    pub order: Vec<(Option<String>, Value)>,
 }
 
 impl Args {
@@ -123,8 +126,7 @@ impl Interp {
             Value::Str(s) if s == "~" || s.starts_with("~/") => Value::Str(alloc::format!("{}{}", self.home, &s[1..])),
             other => other,
         };
-        let mut flat: Vec<(Option<String>, Value)> = a.pos.into_iter().map(|v| (None, home(v))).collect();
-        flat.extend(a.named.into_iter().map(|(n, v)| (Some(n), home(v))));
+        let flat: Vec<(Option<String>, Value)> = a.order.into_iter().map(|(n, v)| (n, home(v))).collect();
         let mut needs = self.exec_needs();
         // Kam program smi zapisovat; s plnymi pravy cely FS.
         let trees = if needs.all { alloc::vec![String::from("/")] } else { needs.write.clone() };
@@ -237,12 +239,23 @@ impl Interp {
                     }
                     let v = self.eval(host, x)?;
                     match (splat, x, v) {
-                        (true, Expr::Glob(..), Value::List(items)) => out.pos.extend(items),
-                        (_, _, v) => out.pos.push(v),
+                        (true, Expr::Glob(..), Value::List(items)) => {
+                            out.order.extend(items.iter().cloned().map(|v| (None, v)));
+                            out.pos.extend(items);
+                        }
+                        (_, _, v) => {
+                            if splat {
+                                out.order.push((None, v.clone()));
+                            }
+                            out.pos.push(v);
+                        }
                     }
                 }
                 Arg::Named(n, x) => {
                     let v = self.eval(host, x)?;
+                    if splat {
+                        out.order.push((Some(n.clone()), v.clone()));
+                    }
                     out.named.push((n.clone(), v));
                 }
             }

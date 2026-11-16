@@ -645,8 +645,10 @@ for f in (ls ~/Photos | where ext == "jpg") {
     running and each entered line goes to the program (interactive stdin,
     e.g. `nc`). Ctrl+C ends the program (`SH_INTERRUPTED`), a non-zero exit
     code is `SH_EXIT`.
-  - `~` and `~/...` at the start of a text argument are expanded to the
-    home by the shell (also in quotes: the AST does not tell them from a
+  - The program gets its arguments as text in the order written
+    (`ping x --count 2` = `x`, `--count`, `2`; `--name=value` = `--name`,
+    `value`). `~` and `~/...` at the start of a text argument are expanded
+    to the home by the shell (also in quotes: the AST does not tell them from a
     bare word).
   - A typed channel (the program returns shell values instead of bytes)
     and program output as a value for the next pipeline command

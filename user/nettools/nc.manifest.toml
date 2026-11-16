@@ -1,0 +1,22 @@
+# nc: spojeni TCP nebo UDP na libovolny cil a port, naslouchani (--listen)
+# na neprivilegovanem portu. Prichozi spojeni pusti jen firewall podle
+# profilu site (docs/cs/firewall.md).
+[app]
+id = "org.magnumopus.nc"
+name = "Síťové spojení (nc)"
+
+[limits]
+memory = "16M"
+
+[network]
+rights = ["info", "tcp", "listen", "udp", "dns"]
+sockets = 4
+buffers = "1M"
+
+[[network.connect]]
+proto = ["tcp", "udp"]
+to = "*"
+ports = "*"
+
+[[network.listen]]
+ports = "1024-65535"
