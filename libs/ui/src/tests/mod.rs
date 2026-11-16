@@ -328,6 +328,7 @@ mod list_multi;
 mod hover;
 mod keys;
 mod layout;
+mod panel;
 mod popup;
 mod shots;
 mod spatial;

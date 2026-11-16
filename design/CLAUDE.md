@@ -4,7 +4,7 @@ Klikací HTML prototypy GUI a design systém jako data. `tokens.toml` je **zdroj
 
 ## Klíčové soubory
 
-- `tokens.toml` - barvy, písma, rozestupy, zaoblení, stíny, pohyb, vrstvy kompozitoru.
+- `tokens.toml` - barvy, písma, rozestupy, zaoblení, stíny, pohyb, vrstvy kompozitoru; rozměry panelu lišty `size.panel_w`, `panel_row`, `panel_gap`, `panel_edge` (komponenta panel v `libs/ui/src/panel.rs`).
 - `tools/build-tokens.mjs` - generuje CSS a JS a kontroluje kontrast WCAG; `tools/build-icons.mjs` - generuje blok `ICONS` v `assets/mo.js` (ze které čerpá i `libs/gfx`).
 - `assets/mo.css`, `mo.js` (komponenty, ikony), `assets/logo/`.
 

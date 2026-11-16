@@ -1,6 +1,6 @@
 # libs/comp
 
-Jádro kompozitoru `compd` bez závislosti na jádru OS (`no_std` + `alloc`, testy na hostiteli). Služba `user/compd` jen převádí kanály a objekty paměti na volání `Comp` a rozesílá zprávy z `Comp::take_out`. Obsah: `scene` (klienti, okna, buffery, vrstvy, transakce), `render` (skládání snímku: dekorace, odznak důvěry, lišta, kurzor), `style` (vzhled z tokenů), `input` (rozdělení vstupu, přesun a změna velikosti), `dialog` (systémové dialogy, bezpečná obrazovka), `greeter` (přihlášení a zámek), `frame` (takt, animace, skupiny transakcí), `gpu` (seznam operací pro GPU backend `libs/vkcomp`), `menu`, `flyout`, `clipboard` (schránka, protokol `libs/clipproto`), `pointer` (kurzor aplikace, celá obrazovka na žádost, zámek ukazatele s upozorněním), `sysui` (paleta a spouštěč nad `libs/ui`), `services` (akce aplikací, inspekce), `output` (změna režimu displeje). Popis: `docs/cs/gui.md`, vzhled `docs/cs/vzhled.md`.
+Jádro kompozitoru `compd` bez závislosti na jádru OS (`no_std` + `alloc`, testy na hostiteli). Služba `user/compd` jen převádí kanály a objekty paměti na volání `Comp` a rozesílá zprávy z `Comp::take_out`. Obsah: `scene` (klienti, okna, buffery, vrstvy, transakce), `render` (skládání snímku: dekorace, odznak důvěry, lišta, kurzor), `style` (vzhled z tokenů), `input` (rozdělení vstupu, přesun a změna velikosti), `dialog` (systémové dialogy, bezpečná obrazovka), `greeter` (přihlášení a zámek), `frame` (takt, animace, skupiny transakcí), `gpu` (seznam operací pro GPU backend `libs/vkcomp`), `menu`, `flyout`, `clipboard` (schránka, protokol `libs/clipproto`), `pointer` (kurzor aplikace, celá obrazovka na žádost, zámek ukazatele s upozorněním), `sysui` (paleta a spouštěč nad `libs/ui`), `barpanel` (panely lišty Vzhled, Síť, Zvuk, Oznámení, Vývojář nad komponentou panel z `libs/ui`; ostatní karty `flyout`), `services` (akce aplikací, inspekce), `output` (změna režimu displeje). Popis: `docs/cs/gui.md`, vzhled `docs/cs/vzhled.md`.
 
 ## Invarianty
 
@@ -22,6 +22,7 @@ Jádro kompozitoru `compd` bez závislosti na jádru OS (`no_std` + `alloc`, tes
 
 ## Pasti
 
+- Panel lišty (`barpanel.rs`): vstup jde pohledu dřív než ostatnímu (`input.rs`: stisk v panelu, najetí, klávesy kromě Esc); vlastní překreslení jen `damage_top` (ne `damage`, ta by označila jeho materiál za neplatný a počítal by se pořád); materiál nad `COMPOSE_BUDGET` = plné pozadí do konce běhu (`panel_material_off`). Stav, ze kterého se panel skládá, volá po změně `bar_panel_changed`.
 - Čas skládání po částech měří `prof.rs` (hodiny dodá `compd`, výpis v logu `compd: snimek cele obrazovky ...`). Novou drahou část kresli uvnitř změřené části nebo přidej vlastní `Part`.
 - `src/tests.rs` má přes 1700 řádků (nad limitem ~1500 se nesmí dál růst): nové testy dávej do `src/tests/`.
 - Poškození po transakci (`scene.rs`, `apply`): normálně celé okno; změna jen viditelnosti nebo polohy vrstvy s bufferem bez potomků v kořeni okna (kurzor pole, `small_layer_change`) poškodí jen její starý a nový obdélník (test `tests/caret.rs`). Nová vlastnost vrstvy, která mění pixely, nesmí do této výjimky spadnout.

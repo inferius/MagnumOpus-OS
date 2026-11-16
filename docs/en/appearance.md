@@ -263,7 +263,7 @@ Tests: `libs/theme` (`pref_text_roundtrip_and_resolve`), `libs/comp`
 mixing in linear light, an application redraw during the transition, Reduce motion, the system and user choice, the bar card,
 deferral while typing), `libs/shlang` (`tests/appearance.rs`), QEMU suite
 `gui` ("appearance choice: smooth color transition": the badge passes
-through intermediate colors, the application window redraws dark; storage
+through intermediate colors, the application window redraws dark; "an application started in dark mode is dark from the first frame": the mode is part of the compositor's greeting, not only of later changes; storage
 only for the system). Screenshots of all applications in light, dark and
 contrast mode come from the "look by design" test (`target/shots/`).
 
@@ -323,6 +323,8 @@ controls.
 | `badge-h` | 26 px | trust badge |
 | `bar-h` | 52 px | bar; 8 px offset from the edge |
 | `resize-edge` | 6 px | invisible edge for resizing (corner 18 px) |
+| `panel-w`, `panel-row` | 360 px, 40 px | bar panel (Appearance, Sound, Network, ...): width and smallest row height |
+| `panel-gap`, `panel-edge` | 10 px, 14 px | panel: icon-text gap and section spacing, header top edge and footer bottom edge ([panel component](components.md)) |
 
 ### Radii and shadows
 
@@ -1225,3 +1227,4 @@ services outside the GUI (`taskd`, clones in `fsproto`, configuration).
 | v1.8 | 2026-11-13 | designs: tablet mode (window tiling, pen, 2-in-1), TV mode with a foundations review; compact file picker; launcher variant D |
 | v1.9 | 2026-11-13 | decisions: tablet switches automatically, stacked tiles in portrait, TV mode not developed further, content above the rating hidden from children; points 3, 5 and 6 into the foundations as a design; permission infographic and severity colours for icons |
 | v1.10 | 2026-11-14 | component library ([components.md](components.md), `design/komponenty.html`): states, keyboard, densities, spec for `libs/ui`, gaps and proposed new tokens |
+| v1.11 | 2026-11-16 | comparison of the real GUI with the design ([appearance-deviations.md](appearance-deviations.md)); Appearance panel with state and Developer mode panel added to the prototype |

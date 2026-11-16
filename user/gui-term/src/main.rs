@@ -98,7 +98,15 @@ impl Look {
     fn grid(&self, cols: usize, rows: usize, h: u32, lines: &[term::ui::draw::Line]) -> rows::Grid {
         let pad = self.pad() as i32;
         let span = (self.title_h() as i32 + pad, h as i32 - self.foot_pad() as i32);
-        rows::Grid::layout(pad, self.cell(), cols, rows, span, lines, &self.spacing())
+        let mut g = rows::Grid::layout(pad, self.cell(), cols, rows, span, lines, &self.spacing());
+        // Text radku vstupu hned za pilulkou slozky (sirka podle pisma,
+        // ne podle poctu bunek jmena).
+        for (row, l) in lines.iter().enumerate().take(rows) {
+            if let Some(p) = rows::cwd_pill(self, l, g.cw) {
+                g.set_indent(row, p.indent);
+            }
+        }
+        g
     }
 
     /// Spodni okraj paticky (`.input-wrap`: `s3`).
@@ -253,7 +261,11 @@ fn now() -> Option<i64> {
 
 impl Term {
     fn new(win: Window, conn: Option<Channel>) -> Self {
-        let look = Look::new();
+        let mut look = Look::new();
+        // Rezim z pozdravu kompozitoru pred prvnim kreslenim.
+        if let Some(m) = win.mode {
+            look.t = theme::Theme::builtin(m);
+        }
         let (c, r) = grid(&look, win.w, win.h, panel::shown(win.screen.0, win.w));
         let th = look.term_theme();
         let mut app = App::new(th, c, r);

@@ -196,6 +196,10 @@ uints!(
     launcher_w,
     completion_w,
     completion_max_h,
+    panel_w,
+    panel_row,
+    panel_gap,
+    panel_edge,
 );
 
 /// Kryti (0..=255 pro `gfx::scale`).

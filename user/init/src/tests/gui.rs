@@ -28,6 +28,8 @@ use crate::{check, check_eq};
 pub const TESTS: &[Test] = &[
     ("compd: displej, okno ukazky, strom pristupnosti", window_and_a11y),
     ("compd: volba vzhledu: plynuly prechod barev, omezit pohyb", super::gui_look::fade),
+    ("compd: aplikace spustena v tmavem rezimu je tmava od prvniho snimku", super::gui_look::start_dark),
+    ("compd: panely listy nad komponentou panel, snimky (QMP)", super::gui_look::panel_shots),
     ("init: volba vzhledu se ulozi jen pro system", super::gui_look::store),
     ("compd: umely vstup klika v aplikaci", injected_click),
     ("compd: akce aplikace: overeni argumentu a potvrzeni", app_actions),
@@ -557,8 +559,15 @@ fn terminal_shot(startup: &Startup, s: &mut State) -> TestResult {
         t.iter().any(|n| n.role == Role::Terminal && n.value.contains("Napište help"))
     })?;
     let term = t.iter().find(|n| n.role == Role::Terminal).unwrap();
-    // Slozka ve vyzve (pilulka) jina nez koren: cela cesta.
-    for line in ["cd /tmp", "ls /", "open /neni-tu.txt", "range 0 5 | each x => x * x"] {
+    // Slozka ve vyzve (pilulka) jina nez koren: dlouha cesta s diakritikou
+    // (kurzor ma byt mezeru s3 za pilulkou, ne dal; `term::ui::pill`).
+    for line in [
+        "mkdir -p /tmp/org.magnumopus.files/Úlohy",
+        "cd /tmp/org.magnumopus.files/Úlohy",
+        "ls /",
+        "open /neni-tu.txt",
+        "range 0 5 | each x => x * x",
+    ] {
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: line.into() })?;
     }
     wait_tree(&s.inspect, w.id, "scena terminalu", |t| {

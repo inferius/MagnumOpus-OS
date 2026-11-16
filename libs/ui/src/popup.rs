@@ -255,24 +255,52 @@ impl<M: Clone> Ui<M> {
 
     /// Kontextova nabidka prvku `i` nebo jeho nejblizsiho predka, ktery ji
     /// ma; `at` = bod okna (mys) nebo `None` (klavesnice: pod prvkem).
-    pub(crate) fn open_context(&mut self, i: usize, at: Option<(i32, i32)>) -> bool {
+    /// Kontextova nabidka prvku `i` nebo nejblizsiho predka, ktery ji ma:
+    /// (index vlastnika, polozky).
+    fn context_of(&self, i: usize) -> Option<(usize, Vec<PItem<M>>)> {
         let mut k = Some(i);
         while let Some(j) = k {
-            if let Some(m) = &self.elems[j].menu {
-                let items = Self::items_from(m);
-                if items.is_empty() {
-                    return false;
-                }
-                let anchor = match at {
-                    Some((x, y)) => Rect::new(x, y - 2, 1, 1),
-                    None => self.window_rect(i),
-                };
-                self.open_popup(self.elems[j].key, false, items, anchor, 0, None);
-                return true;
+            if let Some(m) = &self.elems.get(j)?.menu {
+                return Some((j, Self::items_from(m)));
             }
             k = self.elems[j].parent.checked_sub(1);
         }
-        false
+        None
+    }
+
+    pub(crate) fn open_context(&mut self, i: usize, at: Option<(i32, i32)>) -> bool {
+        let Some((j, items)) = self.context_of(i) else { return false };
+        if items.is_empty() {
+            return false;
+        }
+        let anchor = match at {
+            Some((x, y)) => Rect::new(x, y - 2, 1, 1),
+            None => self.window_rect(i),
+        };
+        self.open_popup(self.elems[j].key, false, items, anchor, 0, None);
+        true
+    }
+
+    /// Po prestavbe pohledu: otevrena kontextova nabidka (ne vyber, ne
+    /// podnabidka) prevezme polozky z noveho pohledu. Pravy klik na radek
+    /// tabulky nabidku otevre hned, ale vyber radku zpracuje aplikace az
+    /// potom (`on_context`); bez obnovy by nabidka ukazovala stav pred
+    /// vyberem (zakazane akce). Jiny pocet polozek = jina nabidka: zustane.
+    pub(crate) fn refresh_context(&mut self) {
+        if !self.popup_stack.is_empty() {
+            return;
+        }
+        let Some(owner) = self.popup.as_ref().filter(|p| !p.select).map(|p| p.owner) else { return };
+        let Some(i) = self.index_of(owner) else { return };
+        let Some((j, items)) = self.context_of(i) else { return };
+        if self.elems[j].key != owner {
+            return;
+        }
+        if let Some(p) = self.popup.as_mut()
+            && p.items.len() == items.len()
+        {
+            p.items = items;
+        }
     }
 
     pub(crate) fn close_popup(&mut self, r: &mut Response<M>) {

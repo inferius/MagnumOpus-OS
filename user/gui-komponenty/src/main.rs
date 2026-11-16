@@ -76,7 +76,7 @@ impl Gallery {
     fn fields(&self) -> Node<Msg> {
         let short = !self.pass.is_empty() && self.pass.chars().count() < 8;
         column([
-            row([button("Primární").on_click(Msg::Button("Primární")), button("Nedostupné").disabled(true), button("").tooltip("Nastavení").on_click(Msg::Button("Ikona")), spacer()]),
+            row([button("Primární").on_click(Msg::Button("Primární")), button("Nedostupné").disabled(true), button("").icon("settings").tooltip("Nastavení").on_click(Msg::Button("Ikona")), spacer()]),
             text_input(&self.text).placeholder("Název (Ctrl+Z zpět, dvojklik vybere slovo)").on_change(Msg::Text).key("text"),
             password_input(&self.pass).placeholder("Heslo").on_change(Msg::Pass).error(if short { "Heslo je kratší než 8 znaků" } else { "" }).key("heslo"),
             row([

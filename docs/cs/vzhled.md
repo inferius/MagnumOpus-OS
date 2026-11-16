@@ -254,7 +254,7 @@ snímků v lineárním světle, překreslení aplikace během přechodu,
 Omezit pohyb, systémová a uživatelská volba, karta v liště, odklad při
 psaní), `libs/shlang` (`tests/appearance.rs`), QEMU sada `gui`
 („volba vzhledu: plynulý přechod barev“: odznak projde mezibarvami,
-okno aplikace se překreslí tmavě; uložení jen pro systém). Snímky
+okno aplikace se překreslí tmavě; „aplikace spuštěná v tmavém režimu je tmavá od prvního snímku“: režim je součást pozdravu kompozitoru, ne až další změny; uložení jen pro systém). Snímky
 obrazovky všech aplikací ve světlém, tmavém a kontrastním režimu dělá
 test „vzhled podle návrhu“ (`target/shots/`).
 
@@ -310,6 +310,8 @@ Vše leží na **mřížce 4 px**. Rozestupy: 2, 4, 8, 12, 16, 20, 24, 32, 40,
 | `badge-h` | 26 px | odznak důvěry |
 | `bar-h` | 52 px | lišta; odsazení od okraje 8 px |
 | `resize-edge` | 6 px | neviditelný okraj pro změnu velikosti (roh 18 px) |
+| `panel-w`, `panel-row` | 360 px, 40 px | panel lišty (Vzhled, Zvuk, Síť, ...): šířka a nejmenší výška řádku |
+| `panel-gap`, `panel-edge` | 10 px, 14 px | panel: mezera ikona-text a odsazení sekce, horní okraj hlavičky a dolní okraj paty ([komponenta panel](komponenty.md)) |
 
 ### Zaoblení a stíny
 
@@ -1170,3 +1172,4 @@ budou jen služby mimo GUI (`taskd`, klony v `fsproto`, konfigurace).
 | v1.8 | 13. 11. 2026 | návrhy: tabletový režim (rozdělení oken, pero, 2v1), televizní režim s rozborem základů; kompaktní výběr souboru; spouštěč varianta D |
 | v1.9 | 13. 11. 2026 | rozhodnutí: tablet přepíná automaticky, na výšku dlaždice nad sebou, televize se dál nerozpracovává, dětem se obsah nad hodnocení skrývá; body 3, 5 a 6 do základů jako návrh; infografika oprávnění a barva ikon podle závažnosti |
 | v1.10 | 14. 11. 2026 | knihovna komponent ([komponenty.md](komponenty.md), `design/komponenty.html`): stavy, klávesnice, hustoty, specifikace pro `libs/ui`, rozdíly a návrh nových tokenů |
+| v1.11 | 16. 11. 2026 | porovnání skutečného GUI s návrhem ([vzhled-odchylky.md](vzhled-odchylky.md)); v prototypu doplněn panel Vzhled se stavem a panel Režim vývojáře |

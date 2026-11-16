@@ -196,6 +196,7 @@ impl Comp {
             self.send(id, guiproto::window::ServerMsg::Theme { mode: mode_code(mode) });
         }
         self.damage_all();
+        self.bar_panel_changed();
     }
 
     /// Cilovy rezim (behem prolnuti uz ten novy).

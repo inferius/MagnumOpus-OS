@@ -52,6 +52,8 @@ mod tests_line;
 #[cfg(test)]
 mod tests_menu;
 #[cfg(test)]
+mod tests_pill;
+#[cfg(test)]
 mod tests_pointer;
 #[cfg(test)]
 mod tests_preview;

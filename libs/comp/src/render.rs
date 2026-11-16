@@ -226,7 +226,18 @@ impl Comp {
         if !self.bar_blur_dirty && self.bar_blur.is_some() {
             return;
         }
-        let src = self.blur_source();
+        let p = self.panel_rect();
+        self.bar_blur = Some(self.scene_blur(p, now));
+        self.bar_blur_dirty = false;
+    }
+
+    /// Rozmazana scena (plocha a okna) pod obdelnikem `p`: pixely `p`
+    /// (radky po `p.w`). Scena se pro okoli vykresli znovu do mezibufferu
+    /// (stejne na CPU i GPU), rozmaze a orizne.
+    pub(crate) fn scene_blur(&mut self, p: Rect, now: u64) -> Vec<u32> {
+        let e = 3 * BAR_BLUR;
+        let src = Rect::new(p.x - e as i32, p.y - e as i32, p.w + 2 * e, p.h + 2 * e).intersect(&self.screen());
+        let p = p.intersect(&src);
         let (w, h) = (self.w, self.h);
         let mut scratch = core::mem::take(&mut self.blur_scratch);
         scratch.resize((w * h) as usize, 0);
@@ -247,15 +258,13 @@ impl Comp {
             }
         }
         let blurred = gfx::blur::blurred_region(&scratch, w, src, BAR_BLUR as f32);
-        let p = self.panel_rect();
         let mut band = Vec::with_capacity((p.w * p.h) as usize);
         for y in 0..p.h {
             let row = ((p.y - src.y) as u32 + y) * src.w + (p.x - src.x) as u32;
             band.extend_from_slice(&blurred[row as usize..(row + p.w) as usize]);
         }
-        self.bar_blur = Some(band);
-        self.bar_blur_dirty = false;
         self.blur_scratch = scratch;
+        band
     }
 
     /// Stav site pro ikonu v liste (`None` = sluzba site neni).
@@ -263,6 +272,7 @@ impl Comp {
         if self.status.net != net {
             self.status.net = net;
             self.damage_panel();
+            self.bar_panel_changed();
         }
     }
 
@@ -271,6 +281,7 @@ impl Comp {
         if self.status.volume != volume {
             self.status.volume = volume;
             self.damage_panel();
+            self.bar_panel_changed();
         }
     }
 
@@ -279,6 +290,7 @@ impl Comp {
         if self.status.capturing != apps {
             self.status.capturing = apps;
             self.damage_panel();
+            self.bar_panel_changed();
         }
     }
 
@@ -609,6 +621,13 @@ impl Comp {
             dnd: self.do_not_disturb(),
             look_icon: self.look_icon(),
             pressed: self.input.sys_press.map(|(k, ..)| k).filter(|&k| self.sys_pressed(k)),
+            open: match self.flyout {
+                Some(crate::flyout::Flyout::Net) => Some(0),
+                Some(crate::flyout::Flyout::Volume) => Some(1),
+                Some(crate::flyout::Flyout::Bell) => Some(2),
+                Some(crate::flyout::Flyout::Look) => Some(3),
+                _ => None,
+            },
         };
         let t0 = self.prof.start();
         draw_bar(canvas, &mut self.style, bar, &info);
@@ -616,7 +635,7 @@ impl Comp {
         self.draw_dev_chip(canvas, bar);
         self.prof.add(Part::Bar, t0);
         if !dialog_active {
-            self.draw_flyout(canvas);
+            self.draw_flyout(canvas, self.input_now);
             self.draw_max_menu(canvas);
             self.draw_palette(canvas);
         }
@@ -1015,6 +1034,9 @@ struct BarInfo<'a> {
     look_icon: &'static str,
     /// Drzeny prvek listy (stav "stisknuto", akce az pri pusteni).
     pressed: Option<crate::input::SysKey>,
+    /// Ikona stavove oblasti s otevrenym panelem (0 sit, 1 zvuk, 2
+    /// oznameni, 3 vzhled).
+    open: Option<u8>,
 }
 
 fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
@@ -1146,6 +1168,12 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
     ];
     for (k, (r, name, off)) in icons.into_iter().enumerate() {
         let Some(r) = r else { continue };
+        if info.open == Some(k as u8) {
+            // Otevreny panel: `surface_3` a podtrzeni `accent` (k cemu panel patri).
+            c.round_fill(r, ctl, col.surface_3);
+            let lh = t.size.focus_ring;
+            c.fill(Rect::new(r.x + ctl as i32 / 2, r.bottom() as i32 - lh as i32, r.w.saturating_sub(ctl), lh), col.accent);
+        }
         state_bg(c, r, crate::input::SysKey::BarIcon(k as u8), false);
         let recording = k == 1 && !info.status.capturing.is_empty();
         let ink = if off {

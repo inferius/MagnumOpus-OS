@@ -64,6 +64,9 @@ pub const LAUNCHER: &str = "launcher";
 /// `dnd-fullscreen on|off`: Nerusit automaticky pri cele obrazovce
 /// (vychozi zapnuto).
 pub const DND_FULLSCREEN: &str = "dnd-fullscreen";
+/// `panel look|net|volume|bell|dev|none`: otevre panel listy (jako klik na
+/// ikonu; testy a snimky vzhledu), `none` ho zavre.
+pub const PANEL: &str = "panel";
 /// `snapshot`: udelat diagnosticky snimek hned (prikaz shellu pres init).
 pub const SNAPSHOT: &str = "snapshot";
 pub const INPUT: &str = "input";

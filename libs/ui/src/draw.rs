@@ -63,7 +63,9 @@ impl<M: Clone> Ui<M> {
         let col = &th.color;
         let sp = &th.space;
         let (ring, ring_off) = (th.size.focus_ring, th.size.focus_offset);
-        c.fill(c.bounds(), col.surface);
+        if !self.transparent {
+            c.fill(c.bounds(), col.surface);
+        }
         for i in 0..self.elems.len() {
             let e = &self.elems[i];
             if e.space != space {
@@ -74,9 +76,14 @@ impl<M: Clone> Ui<M> {
             // okne, stisknuto jen s ukazatelem nad prvkem.
             let st = self.state(i);
             let (focused, hover, pressed, dim) = (st.focus_visible, st.hover, st.pressed, st.disabled);
+            if e.row.is_some() {
+                self.draw_panel_row(c, i, st);
+                continue;
+            }
             match &e.kind {
                 ElemKind::Label { text, heading, warn, lines } => {
-                    let s = if *heading { self.look.heading() } else { self.look.body() };
+                    let s = if *heading { self.look.heading() } else { crate::panel::tone_style(&self.look, e.tone) };
+                    let ink = crate::panel::tone_color(col, e.tone);
                     let old = c.clip();
                     c.set_clip(old.intersect(&r));
                     if e.agent {
@@ -93,7 +100,7 @@ impl<M: Clone> Ui<M> {
                         // Jeden radek (vejde se nebo `lines(1)`: zkratit s `...`).
                         let f = self.look.face(s);
                         let b = r.y + f.baseline_in(s.size, r.h);
-                        f.draw_ellipsized(c, r.x, b, text, s.size, col.ink, r.w);
+                        f.draw_ellipsized(c, r.x, b, text, s.size, ink, r.w);
                     } else {
                         // Zalomeny: radky pod sebou, blok svisle na stredu.
                         let ls = crate::layout::label_lines(&self.look, text, s, r.w, *lines);
@@ -101,7 +108,7 @@ impl<M: Clone> Ui<M> {
                         let f = self.look.face(s);
                         let b0 = f.baseline_in(s.size, s.line);
                         for (k, l) in ls.iter().enumerate() {
-                            f.draw_ellipsized(c, r.x, top + k as i32 * s.line as i32 + b0, l, s.size, col.ink, r.w);
+                            f.draw_ellipsized(c, r.x, top + k as i32 * s.line as i32 + b0, l, s.size, ink, r.w);
                         }
                     }
                     c.set_clip(old);
@@ -208,7 +215,16 @@ impl<M: Clone> Ui<M> {
                 ElemKind::Switch { .. } | ElemKind::Radio { .. } | ElemKind::Slider { .. } | ElemKind::Segmented { .. } | ElemKind::Tabs { .. } | ElemKind::Busy | ElemKind::Segments { .. } => {
                     self.draw_control(c, i, st);
                 }
-                ElemKind::Group => {}
+                ElemKind::Group => {
+                    if let Some(d) = &e.deco {
+                        crate::panel::draw_deco(c, r, d, col);
+                    }
+                }
+                ElemKind::Icon { name, size } => {
+                    let s = if *size == 0 { th.size.icon_m } else { *size };
+                    let fg = if dim { fade(col.ink, col.surface, th.opacity.disabled) } else { col.ink };
+                    self.icons.draw(c, name, r.x + (r.w as i32 - s as i32) / 2, r.y + (r.h as i32 - s as i32) / 2, s, th.icon_stroke, fg);
+                }
                 ElemKind::Scroll { .. } => {
                     // Obsah je vlastni vrstva; tady jen ram.
                     c.round_stroke(r, th.radius.control, 1, col.border);
