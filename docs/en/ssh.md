@@ -185,8 +185,8 @@ ring/aws-lc into xtask, OpenSSH checks real interoperability.
 
 ## Plan
 
-- `ssh` and `scp` client in the shell, `ping`, `nc`, `resolve`
-  **[designed]**,
+- `ssh` and `scp` client in the shell **[designed]** (`ping`, `nc` and
+  `resolve` are done, [Network](network.md#network-commands-of-the-shell)),
 - password with a second factor (TOTP via accountd) **[designed]**,
 - key exchange signing in a separate service (host key outside the
   connection process) **[designed]**,

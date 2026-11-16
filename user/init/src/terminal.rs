@@ -426,6 +426,14 @@ impl Terminals {
                 Err(e) => println!("init: termd ({}) bez sluzby otevri cestu: {e}", c.name),
             }
         }
+        // Spousteni programu ze shellu (sluzba exec relace, i vzdalene):
+        // shell sam sit nema, programy ji dostanou podle manifestu.
+        if let Some(s) = c.session {
+            match crate::exec::endpoint(s) {
+                Ok(ch) => handles.push(StartHandle::tagged(term::ctl::tag::EXEC, ch.into_handle())),
+                Err(e) => println!("init: termd ({}) bez spousteni programu: {e}", c.name),
+            }
+        }
         // Brana agenta AI (jen zapis zadosti o relaci).
         if let Some(h) = crate::agent::terminal_gate() {
             handles.push(StartHandle::tagged(term::ctl::tag::AGENT, h));

@@ -10,6 +10,7 @@ mod audio_recovery;
 mod audio_role;
 mod accounts;
 mod accounts_shell;
+mod exec;
 mod agent;
 mod agent_shell;
 mod basic;

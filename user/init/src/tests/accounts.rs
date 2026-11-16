@@ -23,6 +23,7 @@ pub const TESTS: &[(&str, fn(&Startup) -> TestResult)] = &[
     ("prihlaseni PINem", pin_login),
     ("relace vidi jen svuj domov", own_home_only),
     ("shell uzivatele zapisuje (soukromy /tmp)", super::accounts_shell::shell_writes),
+    ("programy ze shellu (sit podle manifestu)", super::exec::programs),
     ("init nevyrazi systemovou identitu", no_system_identity),
     ("zamceni a odhlaseni", lock_and_logout),
     ("udalosti a job relace", session_events),

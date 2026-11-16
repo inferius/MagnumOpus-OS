@@ -453,4 +453,6 @@ pub struct ExecNeeds {
     /// jmenem). Zapis mimo klony se mu pripoji jen pro cteni - skutecny FS
     /// v nahledu menit nesmi.
     pub aside: Vec<(String, String)>,
+    /// Pracovni slozka shellu (pracovni slozka programu).
+    pub cwd: String,
 }

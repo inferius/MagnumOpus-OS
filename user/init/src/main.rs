@@ -22,6 +22,7 @@ mod apps;
 mod audio;
 mod certs;
 mod desktop;
+mod exec;
 mod display_native;
 mod files;
 mod open;

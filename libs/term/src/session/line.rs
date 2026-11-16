@@ -282,7 +282,10 @@ impl Service {
 
     /// Jeden radek: schranka, vyzva, pozadavek. `true` = dobehl.
     fn pump_one(&mut self, i: usize, sh: &Arc<LineShared>, link: &mut dyn Link, env: &mut dyn Env) -> bool {
-        let (outbox, call, prompt) = {
+        // `done` ve stejnem zamku jako schranka: vlakno radku mezitim muze
+        // pridat posledni polozky (chybu) a skoncit; ty se pak vyzvednou
+        // pristim kolem, ne ztrati koncem bloku.
+        let (outbox, call, prompt, done) = {
             let mut st = sh.st.lock();
             let prompt = match st.prompt.as_mut() {
                 Some(p) if p.sent.is_none() => {
@@ -298,7 +301,7 @@ impl Service {
                 }
                 _ => None,
             };
-            (core::mem::take(&mut st.outbox), st.call.take(), prompt)
+            (core::mem::take(&mut st.outbox), st.call.take(), prompt, st.done.is_some())
         };
         let keep = self.keep_blocks;
         {
@@ -343,7 +346,7 @@ impl Service {
                 apply(&mut s.blocks, self.keep_blocks, m);
             }
         }
-        sh.st.lock().done.is_some()
+        done
     }
 
     /// Konec radku: interpret relaci (v poprede), konec bloku, dalsi z fronty.

@@ -78,6 +78,9 @@ impl Window {
                 | ServerMsg::Item { .. }
                 | ServerMsg::BlockEnd { .. }
                 | ServerMsg::ItemUpdate { .. }
+                // Vyzva pro vstup beziciho programu (bez odpovedi: program
+                // dobehne sam).
+                | ServerMsg::Ask { .. }
                 // Adresar relace po kazdem bloku (vyzva okna).
                 | ServerMsg::Cwd { .. } => {}
                 other => return Err(alloc::format!("necekana zprava: {other:?}")),
@@ -185,12 +188,12 @@ fn start_termd(s: &Startup, reg: &mut Reg) -> Result<(Process, Window), String> 
 pub(super) fn start_termd_with(s: &Startup, reg: &mut Reg, audio: Option<Channel>) -> Result<(Process, Window), String> {
     let fs = devices().and_then(|d| d.fs.as_ref()).ok_or("sluzba fsd nebezi")?;
     let own = fs.connect().map_err(|e| fail("nova relace fsd", e))?;
-    start_termd_fs(s, reg, own, audio)
+    start_termd_fs(s, reg, own, audio, None)
 }
 
 /// Jako `start_termd_with`, s danou relaci FS (napr. relace prihlaseneho
 /// uzivatele; domov relaci shellu nastavi `reg.store.home`).
-pub(super) fn start_termd_fs(s: &Startup, reg: &mut Reg, own: fsproto::FsClient, audio: Option<Channel>) -> Result<(Process, Window), String> {
+pub(super) fn start_termd_fs(s: &Startup, reg: &mut Reg, own: fsproto::FsClient, audio: Option<Channel>, exec: Option<Channel>) -> Result<(Process, Window), String> {
     let initfs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
     let image = initfs.find("termd").ok_or("termd neni v initfs")?;
     let vmo = s.initfs.as_ref().ok_or("initfs chybi")?;
@@ -203,6 +206,9 @@ pub(super) fn start_termd_fs(s: &Startup, reg: &mut Reg, own: fsproto::FsClient,
     if let Some(a) = audio {
         // Zvuk je volitelny handle se stitkem (poradi nehraje roli).
         handles.push(StartHandle::tagged(term::ctl::tag::AUDIO, a.into_handle()));
+    }
+    if let Some(x) = exec {
+        handles.push(StartHandle::tagged(term::ctl::tag::EXEC, x.into_handle()));
     }
     let (proc, chan) = libos::spawn("termd", image, handles).map_err(|e| fail("spusteni termd", e))?;
     reg.chan = Some(here);

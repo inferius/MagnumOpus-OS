@@ -165,16 +165,13 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("Úlohy", &["tasks", "jobs", "fg", "wait", "kill", "cancel"]),
     ("Relace a bezpečnost", &["undo", "preview", "history", "run", "error", "exit"]),
     ("Nápověda", &["help", "explain"]),
+    ("Účet a oprávnění", &["permissions", "acl", "ssh-key", "remote-access"]),
     (
         "Systém",
         &[
             "audio",
             "theme",
-            "permissions",
-            "acl",
             "sshd",
-            "ssh-key",
-            "remote-access",
             "system",
             #[cfg(feature = "dev-mode")]
             "devmode",

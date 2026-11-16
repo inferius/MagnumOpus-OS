@@ -32,6 +32,7 @@ Běhové prostředí `std` pro cíl `*-unknown-magnumopus` (popis `docs/cs/rust-
 - `at_exit` volá funkce bez drženého zámku (smí registrovat další); `exit_now` je nevolá.
 - Cíl `*-unknown-magnumopus-dyn` (`cfg(target_env = "dyn")`, std jako PIC v `libc.so`): žádný `_start` ani vlastní blok TLS (TLS dělá `ld.so`), start je `__libc_start(main, bootstrap, sp, magic)` z `crt1.o` programu, `exit` volá `libos::loader::run_fini`. Symboly linker skriptu (`__tls_*`) jen ve statickém cíli.
 - `process::self_id` = C `getpid` (cstd ho bere přes `std::process::id`): jiné procesy ho vidí v `l_pid` a `SO_PEERCRED`, musí zůstat jedno číslo na proces.
+- Sockety v `net.rs` (`TcpStream`, `TcpListener`, `UdpSocket`) nemají zámek: klientské typy netproto jsou `Sync` s `&self`, čtení a zápis z různých vláken jdou souběžně (plný duplex, kontrola `shared_stream_duplex` v `std-net`). Zámek má jen relace (`SESSION`).
 - `thread::exit_current` (C `pthread_exit`) ukončí vlákno syscallem bez destruktorů std; zásobník a TLS uvolní až `Thread::join`.
 
 ## Testy

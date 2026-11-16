@@ -1,0 +1,12 @@
+# resolve: preklad jmena pres sluzbu DNS systemu (zadne sockety).
+[app]
+id = "org.magnumopus.resolve"
+name = "Překlad jmen"
+
+[limits]
+memory = "16M"
+
+[network]
+rights = ["info", "dns"]
+sockets = 1
+buffers = "64K"

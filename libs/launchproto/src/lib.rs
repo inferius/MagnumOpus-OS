@@ -22,6 +22,7 @@
 
 extern crate alloc;
 
+pub mod exec;
 #[cfg(test)]
 mod tests;
 
@@ -50,7 +51,13 @@ pub mod flags {
     /// launchd takovy soubor odmitne. Zatim se cizi FS nerozpoznava
     /// (docs/cs/rust-std.md).
     pub const ALLOW_FOREIGN: u32 = 1 << 0;
-    pub const ALL: u32 = ALLOW_FOREIGN;
+    /// Relaci site (role `Net`) dostane jen program s manifestem
+    /// (zuzena jeho `[network]`); program bez manifestu ji nedostane
+    /// (jinak by ji dostal, jak ji volajici predal). Pouziva init pro
+    /// programy ze shellu (`exec`): rozhoduje manifest v okamziku spusteni,
+    /// ne dotaz pred nim.
+    pub const NET_NEEDS_MANIFEST: u32 = 1 << 1;
+    pub const ALL: u32 = ALLOW_FOREIGN | NET_NEEDS_MANIFEST;
 }
 
 /// Co znamena handle v `LAUNCH`.

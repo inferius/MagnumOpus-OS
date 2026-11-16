@@ -11,7 +11,8 @@
 - **Tasks:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Session and safety:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Help:** [`help`](#help), [`explain`](#explain)
-- **System:** [`audio`](#audio), [`theme`](#theme), [`permissions`](#permissions), [`acl`](#acl), [`sshd`](#sshd), [`ssh-key`](#ssh-key), [`remote-access`](#remote-access), [`system`](#system), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **Account and permissions:** [`permissions`](#permissions), [`acl`](#acl), [`ssh-key`](#ssh-key), [`remote-access`](#remote-access)
+- **System:** [`audio`](#audio), [`theme`](#theme), [`sshd`](#sshd), [`system`](#system), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Files
 
@@ -1778,80 +1779,7 @@ explain SH_TYPE
 **Related:** [`help`](#help), [`error`](#error)
 
 
-## System
-
-### `audio`
-
-sound: tone [Hz], play file.wav, volume [%], mute, unmute, status, devices, device N
-
-Controls sound: a test tone, playing a WAV file, volume, mute, status and device selection.
-
-```shell
-audio action ... [--duration hodnota] [--level hodnota]
-```
-
-Full name `audio-control` · input: nothing · output: any value
-
-| Argument | Type | Default | Description |
-|---|---|---|---|
-| `action` | text |  | tone, play, volume, mute, unmute, status, devices or device |
-| `...` | value |  | action value (Hz, file, %, device number) |
-| `-d, --duration` | duration | 1s | tone length |
-| `-l, --level` | number | 50 | tone level in % |
-
-A short 440 Hz tone.
-
-```shell
-audio tone 440 -d 500ms
-```
-
-**Needs:** the sound service (audiod)
-
-**Errors:** `NOT_FOUND`, `NOT_SUPPORTED`
-
-
-### `theme`
-
-appearance: light, dark, auto (by the sun); contrast on|off, reduce-motion on|off; status without arguments
-
-Switches the appearance of the whole environment: light (`light`), dark (`dark`) or automatic by sunrise and sunset in the time zone (`auto`). `contrast on` turns on high contrast (Accessibility, overrides light and dark), `reduce-motion on` reduces motion (switch without animation). Without arguments it shows the state (`scheme`, `contrast`, `reduce_motion`). The choice is stored with the account and applies at once and after the next login. With `--system` it changes the login screen choice for everyone; that is an administration action confirmed by a person with the administration role in a system dialog.
-
-```shell
-theme [what] [value] [-s]
-```
-
-Full name `system-theme` · input: nothing · output: table (scheme, contrast, reduce_motion)
-
-| Argument | Type | Default | Description |
-|---|---|---|---|
-| `[what]` | text |  | light, dark, auto, contrast or reduce-motion |
-| `[value]` | text |  | on or off (for contrast and reduce-motion) |
-| `-s, --system` | switch |  | the system choice (login screen) |
-
-Dark appearance.
-
-```shell
-theme dark
-```
-
-Light by day, dark at night.
-
-```shell
-theme auto
-```
-
-High contrast.
-
-```shell
-theme contrast on
-```
-
-**Needs:** a user session (with `--system` an administrator's confirmation)
-
-**Errors:** `SH_ARGS`, `ACCESS_DENIED`, `CANCELED`, `NOT_SUPPORTED`
-
-**Related:** [`audio`](#audio)
-
+## Account and permissions
 
 ### `permissions`
 
@@ -1927,35 +1855,6 @@ acl remove bob ~/Projekty
 **Related:** [`ls`](#ls)
 
 
-### `sshd`
-
-SSH remote access for the whole computer: status without arguments, `sshd enable` / `sshd disable` (an administrator confirms)
-
-An SSH server for connecting from another computer (`ssh`, `scp` from Windows, Linux, macOS). Without arguments it shows the state: enabled, running, port, the server key fingerprint and connected sessions. `sshd enable` and `sshd disable` are administration actions: a person with the administration role confirms them in a system dialog that also shows the server key fingerprint (compare it with what the client shows on the first connection). It is off by default. The server listens on port 22 on all network interfaces, but the firewall drops incoming connections on a public network (home network only, or an exception). Login is by key only; an account enables remote access itself (`remote-access on`) and adds a key (`ssh-key add`).
-
-```shell
-sshd [action]
-```
-
-Full name `remote-sshd` · input: nothing · output: table (enabled, running, port, host_key, sessions, connected)
-
-| Argument | Type | Default | Description |
-|---|---|---|---|
-| `[action]` | text | status | status, enable or disable |
-
-Enables remote access (an administrator confirms).
-
-```shell
-sshd enable
-```
-
-**Needs:** a signed-in session at the computer (administration actions only locally)
-
-**Errors:** `SH_ARGS`, `ACCESS_DENIED`, `NOT_SUPPORTED`
-
-**Related:** [`ssh-key`](#ssh-key), [`remote-access`](#remote-access)
-
-
 ### `ssh-key`
 
 SSH keys of your account: list, `ssh-key add <file.pub|->` (asks for the password), `ssh-key remove <number>`
@@ -2013,6 +1912,110 @@ remote-access on
 **Errors:** `SH_ARGS`, `SH_REJECTED`, `ACCESS_DENIED`, `NOT_SUPPORTED`
 
 **Related:** [`ssh-key`](#ssh-key), [`sshd`](#sshd)
+
+
+## System
+
+### `audio`
+
+sound: tone [Hz], play file.wav, volume [%], mute, unmute, status, devices, device N
+
+Controls sound: a test tone, playing a WAV file, volume, mute, status and device selection.
+
+```shell
+audio action ... [--duration hodnota] [--level hodnota]
+```
+
+Full name `audio-control` · input: nothing · output: any value
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `action` | text |  | tone, play, volume, mute, unmute, status, devices or device |
+| `...` | value |  | action value (Hz, file, %, device number) |
+| `-d, --duration` | duration | 1s | tone length |
+| `-l, --level` | number | 50 | tone level in % |
+
+A short 440 Hz tone.
+
+```shell
+audio tone 440 -d 500ms
+```
+
+**Needs:** the sound service (audiod)
+
+**Errors:** `NOT_FOUND`, `NOT_SUPPORTED`
+
+
+### `theme`
+
+appearance: light, dark, auto (by the sun); contrast on|off, reduce-motion on|off; status without arguments
+
+Switches the appearance of the whole environment: light (`light`), dark (`dark`) or automatic by sunrise and sunset in the time zone (`auto`). `contrast on` turns on high contrast (Accessibility, overrides light and dark), `reduce-motion on` reduces motion (switch without animation). Without arguments it shows the state (`scheme`, `contrast`, `reduce_motion`). The choice is stored with the account and applies at once and after the next login. With `--system` it changes the login screen choice for everyone; that is an administration action confirmed by a person with the administration role in a system dialog.
+
+```shell
+theme [what] [value] [-s]
+```
+
+Full name `system-theme` · input: nothing · output: table (scheme, contrast, reduce_motion)
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `[what]` | text |  | light, dark, auto, contrast or reduce-motion |
+| `[value]` | text |  | on or off (for contrast and reduce-motion) |
+| `-s, --system` | switch |  | the system choice (login screen) |
+
+Dark appearance.
+
+```shell
+theme dark
+```
+
+Light by day, dark at night.
+
+```shell
+theme auto
+```
+
+High contrast.
+
+```shell
+theme contrast on
+```
+
+**Needs:** a user session (with `--system` an administrator's confirmation)
+
+**Errors:** `SH_ARGS`, `ACCESS_DENIED`, `CANCELED`, `NOT_SUPPORTED`
+
+**Related:** [`audio`](#audio)
+
+
+### `sshd`
+
+SSH remote access for the whole computer: status without arguments, `sshd enable` / `sshd disable` (an administrator confirms)
+
+An SSH server for connecting from another computer (`ssh`, `scp` from Windows, Linux, macOS). Without arguments it shows the state: enabled, running, port, the server key fingerprint and connected sessions. `sshd enable` and `sshd disable` are administration actions: a person with the administration role confirms them in a system dialog that also shows the server key fingerprint (compare it with what the client shows on the first connection). It is off by default. The server listens on port 22 on all network interfaces, but the firewall drops incoming connections on a public network (home network only, or an exception). Login is by key only; an account enables remote access itself (`remote-access on`) and adds a key (`ssh-key add`).
+
+```shell
+sshd [action]
+```
+
+Full name `remote-sshd` · input: nothing · output: table (enabled, running, port, host_key, sessions, connected)
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `[action]` | text | status | status, enable or disable |
+
+Enables remote access (an administrator confirms).
+
+```shell
+sshd enable
+```
+
+**Needs:** a signed-in session at the computer (administration actions only locally)
+
+**Errors:** `SH_ARGS`, `ACCESS_DENIED`, `NOT_SUPPORTED`
+
+**Related:** [`ssh-key`](#ssh-key), [`remote-access`](#remote-access)
 
 
 ### `system`

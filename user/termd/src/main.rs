@@ -60,6 +60,8 @@ struct Termd {
     /// Kanal sluzby "otevri cestu" relace uzivatele (kazda relace shellu
     /// dostane duplikat zpravou `SessMsg::Open`).
     open: Option<Channel>,
+    /// Sluzba exec relace uzivatele (duplikat pro kazdou relaci shellu).
+    exec: Option<Channel>,
     image: Option<&'static [u8]>,
     broker: Broker,
     sessions: Vec<Sess>,
@@ -150,6 +152,11 @@ impl Termd {
             && let Ok(d) = o.handle().duplicate(None)
         {
             let _ = chan.write(&SessMsg::Open.encode(), alloc::vec![d]);
+        }
+        if let Some(x) = &self.exec
+            && let Ok(d) = x.handle().duplicate(None)
+        {
+            let _ = chan.write(&SessMsg::Exec.encode(), alloc::vec![d]);
         }
         if let Some(p) = &self.power
             && let Ok((ours, theirs)) = Channel::create()
@@ -253,6 +260,7 @@ fn main(mut startup: Startup) -> i64 {
     let power = hs.next().map(Channel::from_handle);
     let agent = startup.take_tagged(term::ctl::tag::AGENT).map(Channel::from_handle);
     let open = startup.take_tagged(term::ctl::tag::OPEN).map(Channel::from_handle);
+    let exec = startup.take_tagged(term::ctl::tag::EXEC).map(Channel::from_handle);
     let audio = startup.take_tagged(term::ctl::tag::AUDIO).map(Channel::from_handle).map(|ch| {
         match startup.take_tagged(term::ctl::tag::AUDIO_LEASE) {
             Some(lease) => audioproto::conn::AudioClient::with_lease(ch, Channel::from_handle(lease)),
@@ -269,6 +277,7 @@ fn main(mut startup: Startup) -> i64 {
         power,
         agent,
         open,
+        exec,
         image,
         broker: Broker::new(nonce),
         sessions: Vec::new(),

@@ -71,6 +71,12 @@ pub trait Env {
         -> Option<Result<Value, ShError>> {
         None
     }
+    /// Spusti program systemu (sluzba exec initu, `crate::program`).
+    /// `None` = prostredi programy nespousti nebo program neexistuje
+    /// (shell pak hlasi neznamy prikaz).
+    fn exec_start(&mut self, _req: &crate::program::Request) -> Option<Result<alloc::boxed::Box<dyn crate::program::Running>, ShError>> {
+        None
+    }
     /// Spusti vlakno.
     fn spawn(&mut self, _job: Box<dyn FnOnce() + Send>) -> Option<Box<dyn Joinable>> {
         None

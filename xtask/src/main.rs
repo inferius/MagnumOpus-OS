@@ -1033,6 +1033,10 @@ const INITFS_FILES: &[(&str, &str)] = &[
     ("gui-term.manifest.toml", "user/gui-term/gui-term.manifest.toml"),
     ("ntpd.manifest.toml", "user/ntpd/ntpd.manifest.toml"),
     ("sshd.manifest.toml", "user/sshd/sshd.manifest.toml"),
+    ("std-exec.manifest.toml", "user/std-exec/std-exec.manifest.toml"),
+    ("ping.manifest.toml", "user/nettools/ping.manifest.toml"),
+    ("nc.manifest.toml", "user/nettools/nc.manifest.toml"),
+    ("resolve.manifest.toml", "user/nettools/resolve.manifest.toml"),
     ("ntpd.toml", "user/ntpd/ntpd.toml"),
     ("fetch.manifest.toml", "user/fetch/fetch.manifest.toml"),
     ("revocd.manifest.toml", "user/revocd/revocd.manifest.toml"),
@@ -1256,6 +1260,10 @@ fn build(opts: &Options) -> Result<Artifacts> {
         let data = std::fs::read(std_bin.join(name))
             .map_err(|e| format!("nelze cist aplikaci {name}: {e}"))?;
         files.push((name.to_string(), loadable_only(&data)));
+    }
+    for (alias, name) in stdsys::STD_ALIASES {
+        let data = std::fs::read(std_bin.join(name)).map_err(|e| format!("nelze cist aplikaci {name}: {e}"))?;
+        files.push((alias.to_string(), loadable_only(&data)));
     }
     // ET_DYN se do initfs dava cele (zavadec cte dynamickou cast pres
     // segmenty; `loadable_only` je jen pro ET_EXEC).

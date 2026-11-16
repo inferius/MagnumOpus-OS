@@ -287,17 +287,15 @@ operations return `Unsupported`.
   address is not used yet.
 - `set_nonblocking(true)`, `peek`, `ttl`, `linger`, `keepalive` and
   multicast return `Unsupported`; `set_nodelay` only reports success.
-- **Limitation today:** `netproto` replies carry no request number and
-  netd has only one request in progress per connection. osrt therefore
-  locks every channel (session, connection, socket): a thread blocked in
-  `read` delays a write on the same connection (a `try_clone` clone) until
-  the read ends, and a long `connect` (firewall question up to 300 s)
-  delays the other calls of the session. The `shared_stream_serialized`
-  check in `std-net` verifies this. The fix (`netproto` v2: request
-  numbers, concurrent RECV, SEND and ACCEPT per connection, several
-  requests per session, deadlines and cancellation) is being done by the
-  network thread **[designed]**; osrt then drops the locks and the test is
-  inverted.
+- **Full duplex:** osrt does not lock its sockets (`TcpStream`,
+  `TcpListener`, `UdpSocket`; the `netproto` v2 client types are `Sync`):
+  a thread blocked in `read` does not delay a write on the same connection
+  (a `try_clone` clone or `&TcpStream`) **[verified in QEMU]** (test
+  `std-net`, check `shared_stream_duplex`; `nc` relies on it,
+  [Network](network.md#network-commands-of-the-shell)).
+- **Limitation today:** osrt still locks the network session, so a long
+  `connect` (firewall question up to 300 s) delays the other calls of the
+  session (new connections, DNS) **[implemented]**.
 
 ### Processes (`std::process`)
 
@@ -371,7 +369,11 @@ manifests in initfs **[verified in QEMU]** (test `std-proc`, command
 on an unmounted volume = error `NOT_MOUNTED` naming the volume, not "not
 found". Launching directly from foreign file systems (FAT, NTFS without
 our rights) only with the explicit `ALLOW_FOREIGN` flag **[designed]**
-(foreign file systems are not recognised yet).
+(foreign file systems are not recognised yet). The `NET_NEEDS_MANIFEST`
+flag: only a program with a manifest gets the caller's network session
+(narrowed by its `[network]`), a program without one gets none. init's
+exec service uses it for programs from the shell
+([Shell design](shell-design.md)) **[verified in QEMU]**.
 
 ### File permissions
 

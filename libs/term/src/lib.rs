@@ -28,6 +28,7 @@ pub mod broker;
 pub mod ctl;
 pub mod fg;
 pub mod perm;
+pub mod program;
 pub mod proto;
 pub mod render;
 pub mod screen;
@@ -58,6 +59,8 @@ mod tests_pill;
 mod tests_pointer;
 #[cfg(test)]
 mod tests_preview;
+#[cfg(test)]
+mod tests_program;
 #[cfg(test)]
 mod tests_select;
 #[cfg(test)]

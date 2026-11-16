@@ -623,6 +623,37 @@ for f in (ls ~/Photos | where ext == "jpg") {
   a bare path as a path, not as an unknown command. The host in the OS
   (`shsess`) does not start programs from a path yet: error `NOT_SUPPORTED`
   **[implemented]**.
+- **Starting programs by name** (`ping 10.0.2.2`, `std-exec net`)
+  **[verified in QEMU]** (test `ucty: programy ze shellu (sit podle
+  manifestu)`, x86_64 and aarch64):
+  - The shell (`shsess`) has no network itself and does not start
+    programs. It sends init's "exec" service (`user/init/src/exec.rs`,
+    protocol `launchproto::exec`) only the name, arguments, working
+    directory, mounted paths and whether the program may have network
+    (`needs`). Each user session (local and SSH) has a service channel; the
+    window gets it from init and termd passes it to the shell sessions.
+  - Init starts the program through launchd (one command registry:
+    `[[command]]`, apps on disk, `/system/bin`, initfs) in the session's
+    job, with an FS session carrying the session user's identity (narrowed
+    by the mounted paths) and with network only when the program has it in
+    its manifest (`[network]`, flag `NET_NEEDS_MANIFEST`). launchd narrows
+    the network by the manifest, the firewall decides by the application
+    id. A program without a manifest gets no network.
+  - The program's output goes into the block line by line as it arrives
+    (stdout as text, stderr as a note). Input is data from a pipe
+    (`"a" | prog`). Without a pipe a text prompt appears after 300 ms of
+    running and each entered line goes to the program (interactive stdin,
+    e.g. `nc`). Ctrl+C ends the program (`SH_INTERRUPTED`), a non-zero exit
+    code is `SH_EXIT`.
+  - The program gets its arguments as text in the order written
+    (`ping x --count 2` = `x`, `--count`, `2`; `--name=value` = `--name`,
+    `value`). `~` and `~/...` at the start of a text argument are expanded
+    to the home by the shell (also in quotes: the AST does not tell them from a
+    bare word).
+  - A typed channel (the program returns shell values instead of bytes)
+    and program output as a value for the next pipeline command
+    **[designed]**. Starting by path (`./prog`, `/apps/...`) is still
+    `NOT_SUPPORTED` **[designed]**.
 - **The `needs` manifest:** `run script` shows what the script wants
   (`read`, `write`, `net`) before it starts and, after confirmation,
   restricts it: access outside the listed paths is `SH_NEEDS`. A script gets
@@ -1008,7 +1039,7 @@ together with GUI 6c.
 | `async`/`await` | done: tasks in `shsess` threads with their own fsd session; tests `cargo test -p term` (std threads) and a QEMU test (concurrency, a task's undo, deadline, cancellation) |
 | keyboard input | done: the console gets the focus from `inputd` (the test in init types with synthetic input) |
 | drawing into the framebuffer | done: `user/console`, framebuffer from the kernel (`kind::FRAMEBUFFER`, `FB_CONTROL`); the QEMU test types `echo ahoj` and checks the screen; starting the console outside tests belongs in the supervisor |
-| starting programs with their own fsd session | permission mapping done (`term::perm`, also from clones for `preview`); no program with a shell interface yet |
+| starting programs with their own fsd session | done: init's exec service, programs by name through launchd, network by manifest, stdio and Ctrl+C (`user/init/src/tests/exec.rs`); permission mapping `term::perm` (also from clones for `preview`) |
 
 ### Large files: the "file" value
 
@@ -1350,6 +1381,16 @@ or refuses the action. A missing file or right is `NOT_FOUND` /
 
 **What to do:** the message names the application and the reason. `open`
 shows the file content.
+
+### `SH_EXIT` (program ended with an error)
+
+**Meaning:** a started program ended with a non-zero exit code.
+
+**When:** a system program (`ping`, `nc`, ...) reports failure (the
+target did not answer, connection refused). The program's code is in the
+message.
+
+**What to do:** the program's output above the error says why.
 
 ### `SH_CONFLICT` (conflict)
 

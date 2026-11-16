@@ -136,6 +136,11 @@ pub fn uid(session: u64) -> Option<u64> {
     SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.uid).or_else(|| crate::remote::uid(session))
 }
 
+/// Skupiny uzivatele relace (i vzdalene).
+pub fn groups(session: u64) -> Option<Vec<u64>> {
+    SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.groups.clone()).or_else(|| crate::remote::groups(session))
+}
+
 /// Jmeno uzivatele relace (i vzdalene).
 pub fn name(session: u64) -> Option<String> {
     SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.name.clone()).or_else(|| crate::remote::name(session))
@@ -301,7 +306,7 @@ pub(crate) fn handle(fs: &FsClient, m: ToInit, handles: Vec<Handle>) -> Result<V
             let own = handles.into_iter().next().map(Channel::from_handle);
             // Bez udalosti `Opened`: kompozitor o vzdalene relaci nevi
             // (zadna plocha); indikator ma vlastni cestu.
-            crate::remote::open(id, uid, name, peer, user_fs, own, job)
+            crate::remote::open(id, uid, groups, name, peer, user_fs, own, job)
         }
         ToInit::CloseSession { session } => {
             if crate::remote::close(session) {
