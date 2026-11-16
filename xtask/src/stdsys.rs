@@ -27,7 +27,12 @@ use crate::{Options, Result, target_dir, workspace_root};
 
 /// Aplikace se std, ktere se pribali do initfs (jmeno crate = jmeno
 /// souboru).
-pub const STD_PROGRAMS: &[&str] = &["hello-std", "std-net", "std-proc", "std-http", "ctest", "gui-probe"];
+pub const STD_PROGRAMS: &[&str] = &["hello-std", "std-net", "std-proc", "std-http", "ctest", "gui-probe", "std-exec"];
+
+/// Aplikace se std pod dalsim jmenem v initfs (jmeno, puvodni): stejny
+/// program bez manifestu (`std-exec-bez`: test, ze program bez manifestu
+/// sit nedostane).
+pub const STD_ALIASES: &[(&str, &str)] = &[("std-exec-bez", "std-exec")];
 
 /// Knihovny se std pro sysroot C (`csysroot.rs`): `libc.a`.
 pub const STD_LIBS: &[&str] = &["cstd-libc"];

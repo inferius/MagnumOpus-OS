@@ -39,7 +39,7 @@ fn writes_in(s: &Startup, uid: u64, session: u64) -> TestResult {
     // Shell relace uzivatele: zapis do domova a cteni zpet.
     let mut reg = Reg { store: Default::default(), chan: None };
     reg.store.home = String::from("/home/alice");
-    let (proc, w) = start_termd_fs(s, &mut reg, fs, None)?;
+    let (proc, w) = start_termd_fs(s, &mut reg, fs, None, None)?;
     let run = (|| -> TestResult {
         w.send(ClientMsg::Attach { session: 0 })?;
         let id = match w.recv()? {

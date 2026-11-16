@@ -1,0 +1,16 @@
+[package]
+name = "std-exec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Test spousteni programu ze shellu (sluzba exec initu)"
+
+[[bin]]
+name = "std-exec"
+test = false
+bench = false
+
+# Jen std. Sestavuje `cargo xtask build` (stdsys::STD_PROGRAMS); v initfs
+# i jako `std-exec-bez` (bez manifestu, xtask STD_ALIASES).
+[dependencies]

@@ -348,7 +348,10 @@ svazku (`/svazky/<jméno>`) přidají své příkazy do stejného registru;
 aplikace na odpojeném svazku = chyba `NOT_MOUNTED` se jménem svazku, ne
 „nenalezeno“. Spouštění přímo z cizích FS (FAT, NTFS bez našich práv)
 jen s výslovným příznakem `ALLOW_FOREIGN` **[navrženo]** (cizí FS se
-zatím nerozpoznává).
+zatím nerozpoznává). Příznak `NET_NEEDS_MANIFEST`: relaci sítě od
+volajícího dostane jen program s manifestem (zúženou jeho `[network]`),
+program bez manifestu žádnou. Používá ho služba exec initu pro programy ze
+shellu ([Návrh shellu](navrh-shell.md)) **[ověřeno v QEMU]**.
 
 ### Oprávnění souborů
 

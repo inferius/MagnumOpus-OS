@@ -36,6 +36,7 @@ use term::tasks::{Clock, Joinable, Notify};
 
 mod audio;
 mod ai;
+mod exec;
 mod fs;
 mod open;
 
@@ -81,6 +82,12 @@ impl MainLink<'_> {
                 Ok(SessMsg::Open) => {
                     if let Some(h) = m.handles.into_iter().next() {
                         *open::SERVICE.lock() = Some(Channel::from_handle(h));
+                    }
+                    None
+                }
+                Ok(SessMsg::Exec) => {
+                    if let Some(h) = m.handles.into_iter().next() {
+                        *exec::SERVICE.lock() = Some(Channel::from_handle(h));
                     }
                     None
                 }
@@ -229,6 +236,10 @@ impl Env for SysEnv {
 
     fn sleep(&mut self, ns: i64) {
         sleep_ns(ns)
+    }
+
+    fn exec_start(&mut self, req: &term::program::Request) -> Option<Result<Box<dyn term::program::Running>, shlang::ShError>> {
+        exec::start(req)
     }
 
     fn exec(&mut self, name: &str, args: &[(Option<String>, shlang::Value)], _input: shlang::Value, _needs: &shlang::host::ExecNeeds)

@@ -117,8 +117,14 @@ impl Interp {
     /// nahled (klon bokem), undo.
     pub(crate) fn call_program(&mut self, host: &mut dyn Host, name: &str, args: &[Arg], input: Value, span: Span) -> R<Value> {
         let a = self.eval_args(host, self.sigs.get(name).copied().as_ref(), args, span, true)?;
-        let mut flat: Vec<(Option<String>, Value)> = a.pos.into_iter().map(|v| (None, v)).collect();
-        flat.extend(a.named.into_iter().map(|(n, v)| (Some(n), v)));
+        // `~` a `~/...` na zacatku textoveho argumentu = domov (program
+        // shell nezna; i v uvozovkach, AST je od holeho slova neodlisi).
+        let home = |v: Value| match v {
+            Value::Str(s) if s == "~" || s.starts_with("~/") => Value::Str(alloc::format!("{}{}", self.home, &s[1..])),
+            other => other,
+        };
+        let mut flat: Vec<(Option<String>, Value)> = a.pos.into_iter().map(|v| (None, home(v))).collect();
+        flat.extend(a.named.into_iter().map(|(n, v)| (Some(n), home(v))));
         let mut needs = self.exec_needs();
         // Kam program smi zapisovat; s plnymi pravy cely FS.
         let trees = if needs.all { alloc::vec![String::from("/")] } else { needs.write.clone() };
@@ -207,8 +213,8 @@ impl Interp {
 
     fn exec_needs(&self) -> ExecNeeds {
         match &self.needs {
-            None => ExecNeeds { all: true, net: true, ..Default::default() },
-            Some(n) => ExecNeeds { read: n.read.clone(), write: n.write.clone(), net: n.net, all: false, aside: Vec::new() },
+            None => ExecNeeds { all: true, net: true, cwd: self.cwd.clone(), ..Default::default() },
+            Some(n) => ExecNeeds { read: n.read.clone(), write: n.write.clone(), net: n.net, all: false, aside: Vec::new(), cwd: self.cwd.clone() },
         }
     }
 

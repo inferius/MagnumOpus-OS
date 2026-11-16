@@ -368,7 +368,11 @@ manifests in initfs **[verified in QEMU]** (test `std-proc`, command
 on an unmounted volume = error `NOT_MOUNTED` naming the volume, not "not
 found". Launching directly from foreign file systems (FAT, NTFS without
 our rights) only with the explicit `ALLOW_FOREIGN` flag **[designed]**
-(foreign file systems are not recognised yet).
+(foreign file systems are not recognised yet). The `NET_NEEDS_MANIFEST`
+flag: only a program with a manifest gets the caller's network session
+(narrowed by its `[network]`), a program without one gets none. init's
+exec service uses it for programs from the shell
+([Shell design](shell-design.md)) **[verified in QEMU]**.
 
 ### File permissions
 

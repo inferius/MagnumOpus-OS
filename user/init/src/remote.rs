@@ -19,6 +19,7 @@ use libos::{Channel, Error, Result, println};
 pub struct RemoteSession {
     pub id: u64,
     pub uid: u64,
+    pub groups: Vec<u64>,
     pub name: String,
     /// Adresa klienta (indikator, audit).
     pub peer: String,
@@ -37,13 +38,14 @@ pub static REMOTE: spin::Mutex<Vec<RemoteSession>> = spin::Mutex::new(Vec::new()
 
 /// Zalozi vzdalenou relaci; vraci telo odpovedi accountd: `u64` relace
 /// + listek.
-pub(crate) fn open(id: u64, uid: u64, name: String, peer: String, fs: FsClient, own: Option<Channel>, job: Job) -> Result<Vec<u8>> {
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn open(id: u64, uid: u64, groups: Vec<u64>, name: String, peer: String, fs: FsClient, own: Option<Channel>, job: Job) -> Result<Vec<u8>> {
     let mut ticket = [0u8; TICKET];
     libos::random::fill_seeded(&mut ticket)?;
     println!("init: vzdalena relace {id} uzivatele {uid} z {peer}");
     let mut out = id.to_le_bytes().to_vec();
     out.extend_from_slice(&ticket);
-    REMOTE.lock().push(RemoteSession { id, uid, name, peer, fs, own, job, ticket, claimed: false, started: libos::time::now() });
+    REMOTE.lock().push(RemoteSession { id, uid, groups, name, peer, fs, own, job, ticket, claimed: false, started: libos::time::now() });
     to_bar();
     Ok(out)
 }
@@ -70,6 +72,7 @@ pub fn close(session: u64) -> bool {
     let Some(i) = l.iter().position(|s| s.id == session) else { return false };
     let s = l.remove(i);
     drop(l);
+    crate::exec::close_session(s.id);
     if let Err(e) = s.job.kill(libos::abi::process::EXIT_KILLED) {
         println!("init: job vzdalene relace {}: {e}", s.id);
     }
@@ -83,6 +86,10 @@ pub fn close(session: u64) -> bool {
 /// funkce `session::*`, ktere hledaji podle cisla relace).
 pub fn uid(session: u64) -> Option<u64> {
     REMOTE.lock().iter().find(|s| s.id == session).map(|s| s.uid)
+}
+
+pub fn groups(session: u64) -> Option<Vec<u64>> {
+    REMOTE.lock().iter().find(|s| s.id == session).map(|s| s.groups.clone())
 }
 
 pub fn name(session: u64) -> Option<String> {
