@@ -464,7 +464,9 @@ fn task_manager(startup: &Startup) -> TestResult {
         let w = wait_window(&s.inspect, "org.magnumopus.tasks")?;
         let t = wait_tree(&s.inspect, w.id, "seznam uloh", |t| t.iter().any(|n| n.role == Role::Row))?;
         // Uloha agenta je vyrazne oznacena a nahore.
-        let first = t.iter().find(|n| n.role == Role::Row).unwrap();
+        // Prvni radek podle polohy (poradi uzlu ve stromu je podle id, u radku
+        // tabulky id ulohy).
+        let first = t.iter().filter(|n| n.role == Role::Row).min_by_key(|n| n.bounds.y).unwrap();
         check!(first.name.starts_with("agent: "), "uloha agenta nahore a oznacena");
         check!(t.iter().any(|n| n.role == Role::Label && n.name.starts_with("agent: Agent AI:")), "stitek agenta v zahlavi");
         // Systemova uloha bez opravneni: Zrusit neaktivni.
