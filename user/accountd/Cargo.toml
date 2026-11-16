@@ -21,6 +21,8 @@ libos = { path = "../../libs/libos" }
 fsproto = { path = "../../libs/fsproto" }
 conf = { workspace = true }
 wire = { path = "../../libs/wire" }
+# Otisk klice SSH do logu (bez protokolu).
+ssh = { path = "../../libs/ssh" }
 guiproto = { path = "../../libs/guiproto" }
 accountproto = { path = "../../libs/accountproto" }
 accounts = { path = "../../libs/accounts" }

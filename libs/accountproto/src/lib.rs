@@ -21,6 +21,7 @@ extern crate alloc;
 pub mod ctap;
 pub mod elevate;
 pub mod perm;
+pub mod ssh;
 mod msg;
 #[cfg(feature = "client")]
 pub mod client;
@@ -87,12 +88,20 @@ pub mod op {
     /// Rezim vyvojare (`Request::DevMode`, jen feature `dev-mode`); cislo
     /// rezervovane i ve vydani, kde ho accountd odmitne `NOT_SUPPORTED`.
     pub const DEV_MODE: u32 = 23;
+    /// Klice SSH a vzdaleny pristup vlastniho uctu (`ssh.rs`).
+    pub const SSH_KEY_ADD: u32 = 24;
+    pub const SSH_KEY_LIST: u32 = 25;
+    pub const SSH_KEY_REMOVE: u32 = 26;
+    pub const SET_REMOTE: u32 = 27;
     // setup
     pub const CREATE_FIRST: u32 = 30;
     // grants (sluzby ukonu)
     pub const CHECK_GRANT: u32 = 40;
     // names (jen cteni: cislo -> zobrazovane jmeno; spravce souboru)
     pub const NAMES: u32 = 41;
+    // ssh (jen sluzba sshd): overeni klicem na dalku
+    pub const SSH_PROBE: u32 = 42;
+    pub const SSH_AUTH: u32 = 43;
     // init (accountd -> init)
     pub const OPEN_SESSION: u32 = 50;
     pub const CLOSE_SESSION: u32 = 51;
@@ -102,6 +111,8 @@ pub mod op {
     pub const DELETE_HOME: u32 = 55;
     pub const LIST_SESSIONS: u32 = 56;
     pub const UNLOCK_HOME: u32 = 57;
+    /// Vzdalena relace (SSH): jako `OPEN_SESSION`, odpoved navic listek.
+    pub const OPEN_REMOTE: u32 = 58;
     // init -> accountd
     pub const SESSION_CLOSED: u32 = 60;
 }

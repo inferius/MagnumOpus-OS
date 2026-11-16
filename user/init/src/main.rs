@@ -38,6 +38,7 @@ mod media;
 mod ntp;
 mod perms;
 mod power;
+mod remote;
 mod render;
 mod rescue;
 mod revocation;
