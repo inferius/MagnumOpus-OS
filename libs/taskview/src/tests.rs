@@ -79,16 +79,18 @@ fn actions_respect_permissions_and_state() {
     let mut u = ui_for(&m);
     // Systemova uloha bez prav: vsechna tlacitka neaktivni.
     select(&mut m, &mut u, "Scrub");
-    assert!(!press(&mut m, &mut u, "Zrušit"));
+    assert!(!press(&mut m, &mut u, "Zrušit: Scrub svazku data"));
     assert!(names(&u, Role::Label).iter().any(|l| l.contains("chybí oprávnění")));
     // Uloha agenta: oznaceni v detailu, pozastavit a pokracovat.
     select(&mut m, &mut u, "Refaktorace");
     assert!(names(&u, Role::Label).iter().any(|l| l == "agent: Spustil agent AI (asistent)"));
-    assert!(press(&mut m, &mut u, "Pozastavit"));
+    let agent = "Refaktorace projektu (klon)";
+    assert!(press(&mut m, &mut u, &format!("Pozastavit: {agent}")));
     assert_eq!(m.selected().unwrap().state, State::Paused);
-    assert!(!press(&mut m, &mut u, "Pozastavit"), "pozastavena nejde pozastavit");
-    assert!(press(&mut m, &mut u, "Pokračovat"));
-    assert!(press(&mut m, &mut u, "Zrušit"));
+    // Pozastavena: v radku je misto Pozastavit tlacitko Pokracovat.
+    assert!(!names(&u, Role::Button).iter().any(|n| n == &format!("Pozastavit: {agent}")));
+    assert!(press(&mut m, &mut u, &format!("Pokračovat: {agent}")));
+    assert!(press(&mut m, &mut u, &format!("Zrušit: {agent}")));
     assert_eq!(m.selected().unwrap().state, State::Cancelled);
     assert_eq!(m.status, "Provedeno.");
     assert_eq!(m.list.running(), (3, 0));
@@ -125,7 +127,7 @@ fn channel_backend_sends_requests_and_applies_replies() {
     assert_eq!(m.list.tasks.len(), 5);
     let mut u = ui_for(&m);
     select(&mut m, &mut u, "Kopírování");
-    assert!(press(&mut m, &mut u, "Zrušit"));
+    assert!(press(&mut m, &mut u, "Zrušit: Kopírování 3 souborů do /zaloha"));
     assert!(matches!(Request::decode(sent.borrow().last().unwrap()), Ok(Request::Cancel { id: 1, .. })));
     assert_eq!(m.status, "Čekám na službu úloh...");
     // Odmitnuti od taskd.
@@ -188,4 +190,48 @@ fn theme_modes_redraw_window() {
         let _ = std::fs::create_dir_all(&dir);
         let _ = std::fs::write(dir.join(alloc::format!("ulohy-{name}.png")), gfx::png::encode(&px, w, h, w));
     }
+}
+
+/// Tlacitka v radku: klik mysi na tlacitko akci provede a vyber nezmeni;
+/// klavesnice: Sipka vpravo vstoupi na tlacitko, Enter ho stiskne.
+#[test]
+fn row_buttons_mouse_and_keyboard() {
+    use guiproto::window::InputEvent;
+    use inputproto::code::{KEY_DOWN, KEY_ENTER, KEY_RIGHT};
+    let mut m = TaskManager::new(TestBackend::default());
+    let mut u = ui_for(&m);
+    let b = u.a11y().into_iter().find(|n| n.role == Role::Button && n.name == "Pozastavit: Kopírování 3 souborů do /zaloha").unwrap().bounds;
+    let (x, y) = (b.x + b.w as i32 / 2, b.y + b.h as i32 / 2);
+    for pressed in [true, false] {
+        let r = u.event(InputEvent::Button { code: 0x110, pressed, x, y }, 0);
+        for msg in r.msgs {
+            m.update(msg);
+        }
+        u.refresh(&m);
+    }
+    assert_eq!(m.list.tasks.iter().find(|t| t.id == 1).unwrap().state, State::Paused);
+    assert!(m.selected().is_none(), "klik na tlacitko nevybira radek");
+    // Klavesnice: fokus tabulky, druhy radek (Kopirovani), vpravo, Enter.
+    let key = |u: &mut ui::Ui<Msg>, m: &mut TaskManager<TestBackend>, code: u16| {
+        for action in [1, 0] {
+            let r = u.event(InputEvent::Key { code, action, ch: None }, 0);
+            for msg in r.msgs {
+                m.update(msg);
+            }
+        }
+        u.refresh(m);
+    };
+    let row = u.a11y().into_iter().find(|n| n.role == Role::Row && n.name.starts_with("agent: ")).unwrap();
+    let r = u.a11y_action(row.id, a11y_actions::ACTIVATE, "");
+    for msg in r.msgs {
+        m.update(msg);
+    }
+    u.refresh(&m);
+    key(&mut u, &mut m, KEY_DOWN);
+    assert_eq!(m.selected().unwrap().id, 1);
+    key(&mut u, &mut m, KEY_RIGHT);
+    let focused: Vec<String> = u.a11y().into_iter().filter(|n| n.role == Role::Button && n.state & state::FOCUSED != 0).map(|n| n.name).collect();
+    assert_eq!(focused, vec![String::from("Pokračovat: Kopírování 3 souborů do /zaloha")]);
+    key(&mut u, &mut m, KEY_ENTER);
+    assert_eq!(m.list.tasks.iter().find(|t| t.id == 1).unwrap().state, State::Running);
 }

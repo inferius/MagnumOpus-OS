@@ -473,13 +473,14 @@ fn task_manager(startup: &Startup) -> TestResult {
         let scrub = t.iter().find(|n| n.role == Role::Row && n.name.contains("Scrub")).ok_or("uloha Scrub chybi")?;
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: scrub.id, action: actions::ACTIVATE, value: String::new() })?;
         let t = wait_tree(&s.inspect, w.id, "detail systemove ulohy", |t| t.iter().any(|n| n.role == Role::Label && n.name.contains("chybí oprávnění")))?;
-        let cancel = node(&t, Role::Button, "Zrušit")?;
+        let cancel = node(&t, Role::Button, "Zrušit: Scrub svazku data")?;
         check!(cancel.state & guiproto::a11y::state::DISABLED != 0, "Zrusit bez prava neaktivni");
         // Uloha agenta: pozastavit pres pristupnost.
         let agent = t.iter().find(|n| n.role == Role::Row && n.name.starts_with("agent: ")).unwrap();
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: agent.id, action: actions::ACTIVATE, value: String::new() })?;
         let t = wait_tree(&s.inspect, w.id, "detail ulohy agenta", |t| has(t, Role::Label, "agent: Spustil agent AI (asistent)"))?;
-        let pause = node(&t, Role::Button, "Pozastavit")?;
+        // Tlacitko v radku ulohy (popisek nese jmeno ulohy).
+        let pause = t.iter().find(|n| n.role == Role::Button && n.name.starts_with("Pozastavit: Refaktorace")).ok_or("tlacitko Pozastavit v radku agenta chybi")?;
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: pause.id, action: actions::ACTIVATE, value: String::new() })?;
         wait_tree(&s.inspect, w.id, "pozastaveni ulohy agenta", |t| t.iter().any(|n| n.role == Role::Label && n.name == "Stav: pozastaveno 15 %"))?;
         // Fyzicky klik mysi na segment filtru "Agent": seznam ukaze jen

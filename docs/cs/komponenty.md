@@ -113,7 +113,7 @@ tlačítko Menu = kontextová nabídka.
 | Dialog aplikace | ne | `dialog_w`, `radius.window`, `shadow.dialog`, `scrim` | past fokusu, Enter výchozí, Esc zrušit, návrat fokusu |
 | Oznámení (toast) | ne | max. 440, min. výška 48, inverzní barvy, 5 s / 8 s s akcí, nejvýš 3 | nebere fokus; F6, Esc |
 | Seznam | ano | řádek `--k-row`, `radius.control` | šipky, Ctrl+Mezerník, Shift+šipky, Ctrl+A, písmena, Enter |
-| Tabulka | ano | řádek `--k-row`, hlavička `type.caption` na `surface_2`, čísla vpravo | jako seznam, Enter v hlavičce třídí |
+| Tabulka | ano | řádek `--k-row`, hlavička `type.caption` na `surface_2`, čísla vpravo; v buňkách pruh průběhu, štítek agenta (jen systém) a ikonová tlačítka řádku (`Cells::actions`, styl ghost) | jako seznam, Enter v hlavičce třídí; Šipka vpravo / vlevo mezi tlačítky řádku, Enter / Mezerník stiskne |
 | Strom | ne | řádek `--k-row`, odsazení úrovně 20, trojúhelník otočený o 90&deg; | &rarr; rozbalí / dítě, &larr; sbalí / rodič, `*` sourozenci |
 | Průběh, kolečko, kostra | částečně | pruh 8 px; kolečko 24 / 16 / 40; kostra 12 px | není zaměřitelný; čtečce po 10 % |
 | Odznak, štítek, filtrovací štítek | částečně | odznak 18; štítek 24 `type.caption`; filtrovací `--k-h-sm` | skupina štítků: šipky, Mezerník, Delete |

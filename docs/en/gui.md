@@ -2175,7 +2175,7 @@ running" icon in the compositor panel.
 | Part | Where | What it does |
 |---|---|---|
 | protocol | `libs/taskproto` (proposal, agreed with the shell thread that builds `taskd`) | task list, change subscription with a snapshot and sequence numbers (resume after an outage), actions cancel, pause, resume, log; task registration by producers |
-| model and window | `libs/taskview` (host tests), program `gui-tasks` | table (Task, Started by, State, Progress, Memory; agent tasks first), filter segments All / Mine / Agent / System and "finished", a detail strip at the bottom with state, CPU time and actions (icon buttons) |
+| model and window | `libs/taskview` (host tests), program `gui-tasks` | table (Task, Started by, State, Progress, Memory; agent tasks first), filter segments All / Mine / Agent / System and "finished", pause / resume and cancel as icon buttons in the row, a detail strip at the bottom with state, CPU time and the log |
 | panel icon | `libs/comp` | "Úlohy: N", orange "Úlohy: N (agent M)" while an AI agent task runs; a click brings the task manager to the front |
 
 - **AI agent tasks** are clearly marked: a table row with an `ai_soft`

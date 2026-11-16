@@ -31,6 +31,8 @@ use crate::node::TableSpec;
 use crate::scrollbar::{Hit, Scrollbar};
 use crate::{Key, State, Ui};
 
+mod actions;
+
 /// Od kolika px pohybu se stisk na radku stane tazenim.
 pub const DRAG_START: i32 = 6;
 
@@ -57,6 +59,9 @@ pub(crate) struct TableState {
     pub anchor: Option<(usize, u64)>,
     /// Sirky sloupcu zmenene tazenim (prazdne = ze `Col::width`).
     pub widths: Vec<u32>,
+    /// Tlacitko v radku s kurzorem, ktere ma fokus z klavesnice
+    /// (`actions.rs`); `None` = fokus ma radek.
+    pub action: Option<usize>,
     find: String,
     find_time: u64,
     last_click: Option<(u64, u64)>,
@@ -174,6 +179,9 @@ impl<M: Clone> Ui<M> {
     pub(crate) fn table_part(&self, i: usize, sx: i32, sy: i32) -> Option<u32> {
         if self.scrollbar(i).is_some_and(|sb| sb.hit(sx, sy).is_some()) {
             return Some(u32::MAX);
+        }
+        if let Some(p) = self.action_part(i, sx, sy) {
+            return Some(p);
         }
         let g = self.geo(i);
         g.body.contains(sx, sy).then(|| self.row_at(i, sy)).flatten().map(|k| k as u32)
@@ -312,6 +320,12 @@ impl<M: Clone> Ui<M> {
                     if let Some(c) = cols.iter().position(|&(cx, cw)| sx >= cx && sx < cx + cw as i32) {
                         self.table_press = Some(Press::Header { key, col: c });
                     }
+                    return Some(r);
+                }
+                // Tlacitko v radku: akce bez zmeny vyberu.
+                if let Some((k, j)) = self.action_at(i, sx, sy) {
+                    self.tables.entry(key).or_default().action = None;
+                    self.press_action(i, k, j, &mut r);
                     return Some(r);
                 }
                 let Some(k) = self.row_at(i, sy) else { return Some(r) };
@@ -461,6 +475,9 @@ impl<M: Clone> Ui<M> {
         let (ctrl, shift) = (self.mods & mods::CTRL != 0, self.mods & mods::SHIFT != 0);
         let cur = self.tables.get(&key).and_then(|s| s.cursor).and_then(|c| self.resolve(i, c));
         let page = (self.geo(i).body.h / self.look.row_h()).max(1) as usize;
+        if self.action_key(i, cur, code, r) {
+            return true;
+        }
         let to = match code {
             KEY_UP => Some(cur.map_or(0, |c| c.saturating_sub(1))),
             KEY_DOWN => Some(cur.map_or(0, |c| (c + 1).min(n - 1))),
@@ -474,6 +491,8 @@ impl<M: Clone> Ui<M> {
         let dir = if matches!(code, KEY_UP | KEY_PAGEUP | KEY_END) { -1 } else { 1 };
         let to = to.and_then(|k| self.selectable(i, k, dir));
         if let Some(k) = to {
+            // Jiny radek: fokus tlacitka v radku konci.
+            self.tables.entry(key).or_default().action = None;
             if ctrl && multi {
                 // Jen kurzor (vyber zustane), mezernikem pak prepnout.
                 let id = (self.spec(i).unwrap().id)(k);
@@ -630,6 +649,13 @@ impl<M: Clone> Ui<M> {
             None
         };
         let bs = self.look.body();
+        let hover_part = if self.hover == Some(i) && self.table_press.is_none() {
+            let (px, py) = self.to_space(i, self.pointer.0, self.pointer.1);
+            self.action_part(i, px, py)
+        } else {
+            None
+        };
+        let ncols = cols.len();
         for k in first..last {
             let Some(spec) = self.spec(i) else { break };
             let (id, cells) = ((spec.id)(k), (spec.row)(k));
@@ -665,9 +691,14 @@ impl<M: Clone> Ui<M> {
             if !plain {
                 c.fill(Rect::new(rr.x, rr.bottom() as i32 - 1, rr.w, 1), col.border);
             }
+            // Misto tlacitek radku v poslednim sloupci.
+            let acts_w = self.action_rects(i, k, cells.actions.len()).first().map_or(0, |r| (cols[ncols - 1].0 + cols[ncols - 1].1 as i32 - r.x) as u32);
             for (ci, &(x, w)) in cols.iter().enumerate() {
                 let mut tx = x + sp[3] as i32;
                 let mut room = w.saturating_sub(2 * sp[3]);
+                if ci + 1 == ncols {
+                    room = room.saturating_sub(acts_w);
+                }
                 if ci == 0
                     && let Some(icon) = cells.icon
                 {
@@ -699,8 +730,12 @@ impl<M: Clone> Ui<M> {
                     f.draw_ellipsized(c, tx, base, text, bs.size, col.ink, room);
                 }
             }
-            // Kurzor klavesnice v aktivni tabulce.
-            if st.focus_visible && cursor == Some(k) {
+            if !cells.actions.is_empty() {
+                let fa = if cursor == Some(k) { ts.action } else { None };
+                self.draw_actions(c, i, k, &cells.actions, hover_part, st, fa);
+            }
+            // Kurzor klavesnice v aktivni tabulce (ne kdyz ma fokus tlacitko).
+            if st.focus_visible && cursor == Some(k) && ts.action.is_none() {
                 let ring = th.size.focus_ring;
                 let fr = Rect::new(rr.x + ring as i32, rr.y + ring as i32, rr.w.saturating_sub(2 * ring), rr.h.saturating_sub(2 * ring));
                 c.round_stroke(fr, th.radius.control, ring, col.focus);
@@ -763,6 +798,9 @@ impl<M: Clone> Ui<M> {
                 bounds,
                 actions: a11y::actions::ACTIVATE,
             });
+            if !cells.actions.is_empty() {
+                self.actions_a11y(i, id, virt_id(id, 2, rid), k, rid, layer, out);
+            }
         }
     }
 
@@ -780,6 +818,9 @@ impl<M: Clone> Ui<M> {
                     let asc = !matches!(t.sort, Some((s, true)) if s == c);
                     r.msgs.push(f(c, asc));
                 }
+                return true;
+            }
+            if self.actions_a11y_action(i, id, node, action, r) {
                 return true;
             }
             let mut nodes = Vec::new();

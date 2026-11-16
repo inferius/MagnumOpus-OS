@@ -26,7 +26,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use taskproto::{Applied, Reply, Request, State, Task, TaskList, actions};
-use ui::{App, Cells, Node, button, checkbox, col, column, label, row, segmented, spacer, table};
+use ui::{App, CellAction, Cells, Node, button, checkbox, col, column, label, row, segmented, spacer, table};
 
 pub use test_backend::TestBackend;
 
@@ -98,9 +98,9 @@ pub enum Msg {
     Select(Vec<u64>),
     Filter(Filter),
     ShowDone(bool),
-    Cancel,
-    Pause,
-    Resume,
+    /// Tlacitko v radku: id ulohy a akce (`taskproto::actions`).
+    Row(u64, u32),
+    /// Vypis vybrane ulohy (pruh detailu, Enter na radku).
     Log,
 }
 
@@ -258,12 +258,11 @@ impl<B: Backend> TaskManager<B> {
         self.selected.and_then(|id| self.list.tasks.iter().find(|t| t.id == id))
     }
 
-    fn act(&mut self, action: u32) {
-        let Some(t) = self.selected() else { return };
+    fn act(&mut self, id: u64, action: u32) {
+        let Some(t) = self.list.tasks.iter().find(|t| t.id == id) else { return };
         if !can(t, action) {
             return;
         }
-        let id = t.id;
         let req = self.req();
         let r = match action {
             actions::CANCEL => Request::Cancel { req, id },
@@ -296,7 +295,15 @@ impl<B: Backend> TaskManager<B> {
         if let (Some(p), true) = (t.progress, running) {
             c = c.progress(3, p as u32);
         }
-        c
+        // Akce v radku (`.btn.ghost.small.icon`): pozastavit nebo pokracovat
+        // podle stavu, zrusit; popisek nese jmeno ulohy (ctecka).
+        let pause = if t.state == State::Paused {
+            CellAction::new(actions::RESUME, "play", &format!("Pokračovat: {}", t.name)).disabled(!can(t, actions::RESUME))
+        } else {
+            CellAction::new(actions::PAUSE, "pause", &format!("Pozastavit: {}", t.name)).disabled(!can(t, actions::PAUSE))
+        };
+        let cancel = CellAction::new(actions::CANCEL, "stop", &format!("Zrušit: {}", t.name)).disabled(!can(t, actions::CANCEL));
+        c.actions(vec![pause, cancel])
     }
 
     /// Pruh detailu dole (`.tm-detail`): jmeno, kdo a stav, akce nad
@@ -315,10 +322,7 @@ impl<B: Backend> TaskManager<B> {
             label(&t.name).tone(ui::TextTone::Strong),
             who,
             spacer(),
-            button("").icon("pause").ghost().tooltip("Pozastavit").on_click(Msg::Pause).disabled(!can(t, actions::PAUSE)),
-            button("").icon("play").ghost().tooltip("Pokračovat").on_click(Msg::Resume).disabled(!can(t, actions::RESUME)),
-            button("").icon("stop").ghost().tooltip("Zrušit").on_click(Msg::Cancel).disabled(!can(t, actions::CANCEL)),
-            button("").icon("log").ghost().tooltip("Výpis").on_click(Msg::Log).disabled(!can(t, actions::LOG)),
+            button("Výpis").icon("log").ghost().on_click(Msg::Log).disabled(!can(t, actions::LOG)),
         ])];
         let mut info = vec![label(&format!("Stav: {}", state_text(t))), label(&format!("Čas CPU: {cpu}")).tone(ui::TextTone::Muted)];
         if t.actions == 0 {
@@ -366,7 +370,7 @@ impl<B: Backend> App for TaskManager<B> {
         let data = alloc::rc::Rc::new(vis);
         let d2 = alloc::rc::Rc::clone(&data);
         let tasks = table(
-            vec![col("Úloha", 0), col("Kdo spustil", 5 * w), col("Stav", 3 * w), col("Průběh", 2 * w + w / 2), col("Paměť", 2 * w).numeric()],
+            vec![col("Úloha", 0), col("Kdo spustil", 5 * w), col("Stav", 3 * w), col("Průběh", 2 * w + w / 2), col("Paměť", 2 * w).numeric(), col("", 2 * w + w / 2)],
             n,
             move |i| data.get(i).map_or(0, |t| t.id),
             move |i| d2.get(i).map_or_else(Cells::default, Self::cells),
@@ -374,6 +378,7 @@ impl<B: Backend> App for TaskManager<B> {
         .selection(sel)
         .on_selection(Msg::Select)
         .on_activate(|_| Msg::Log)
+        .on_row_action(Msg::Row)
         .key("ulohy");
         let detail = column([self.detail()]).pad(w / 4, 0, 0, 0).deco(ui::Deco { fill: None, radius: 0, top_border: true });
         column([row(tools), tasks, detail])
@@ -401,10 +406,12 @@ impl<B: Backend> App for TaskManager<B> {
             }
             Msg::Filter(f) => self.filter = f,
             Msg::ShowDone(b) => self.show_done = b,
-            Msg::Cancel => self.act(actions::CANCEL),
-            Msg::Pause => self.act(actions::PAUSE),
-            Msg::Resume => self.act(actions::RESUME),
-            Msg::Log => self.act(actions::LOG),
+            Msg::Row(id, a) => self.act(id, a),
+            Msg::Log => {
+                if let Some(id) = self.selected {
+                    self.act(id, actions::LOG);
+                }
+            }
         }
     }
 }

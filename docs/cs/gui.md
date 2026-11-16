@@ -2067,7 +2067,7 @@ v panelu kompozitoru.
 | Část | Kde | Co dělá |
 |---|---|---|
 | protokol | `libs/taskproto` (návrh, odsouhlasuje vlákno shellu, které dělá `taskd`) | seznam úloh, odběr změn se snímkem a pořadovým číslem (navázání po výpadku), akce zrušit, pozastavit, pokračovat, výpis; registrace úloh producenty |
-| model a okno | `libs/taskview` (testy na hostiteli), program `gui-tasks` | tabulka (Úloha, Kdo spustil, Stav, Průběh, Paměť; úlohy agenta nahoře), filtr segmenty Vše / Moje / Agent / Systém a „dokončené“, pruh detailu dole se stavem, časem CPU a akcemi (tlačítka s ikonou) |
+| model a okno | `libs/taskview` (testy na hostiteli), program `gui-tasks` | tabulka (Úloha, Kdo spustil, Stav, Průběh, Paměť; úlohy agenta nahoře), filtr segmenty Vše / Moje / Agent / Systém a „dokončené“, akce pozastavit / pokračovat a zrušit jako ikonová tlačítka v řádku, pruh detailu dole se stavem, časem CPU a výpisem |
 | ikona v panelu | `libs/comp` | „Úlohy: N“, oranžově „Úlohy: N (agent M)“, když běží úloha agenta AI; klik dá správce úloh do popředí |
 
 - **Úlohy agenta AI** jsou výrazně označené: řádek tabulky s podkladem
