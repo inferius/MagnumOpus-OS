@@ -83,6 +83,12 @@ pub enum Role {
     Gui = 8,
     /// Listek k relaci `Gui` (`abi::params::tag::GUI_LEASE`).
     GuiLease = 9,
+    /// Relace zvuku u `audiod` (zdedena od rodice, stejna identita
+    /// a pravidla nahravani); jen spolu s `AudioLease`. Potomek ji dostane
+    /// se stitkem `abi::params::tag::AUDIO`.
+    Audio = 10,
+    /// Listek k relaci `Audio` (`abi::params::tag::AUDIO_LEASE`).
+    AudioLease = 11,
 }
 
 impl Role {
@@ -97,14 +103,17 @@ impl Role {
             7 => Self::Fd,
             8 => Self::Gui,
             9 => Self::GuiLease,
+            10 => Self::Audio,
+            11 => Self::AudioLease,
             _ => return None,
         })
     }
 }
 
-/// Nejvic roli (handlu) v jednom `LAUNCH`: sest jedinecnych a handly
-/// zdedenych fd.
-pub const MAX_ROLES: usize = 6 + abi::params::MAX_FDS;
+/// Nejvic roli (handlu) v jednom `LAUNCH`: deset jedinecnych (vsechny
+/// role krome `Fd`) a handly zdedenych fd (vejde se do
+/// `CHANNEL_MAX_HANDLES`).
+pub const MAX_ROLES: usize = 10 + abi::params::MAX_FDS;
 
 /// Pozadavek `LAUNCH` (bez handlu; ty jdou ve zprave v poradi `roles`).
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -4,3 +4,5 @@
 # Testovaci ELF (libs/elf/tests/fixtures).
 *.so binary
 *.pie binary
+# Testovaci obrazy souborovych systemu (third_party/test-images).
+third_party/test-images/**/testfs* binary

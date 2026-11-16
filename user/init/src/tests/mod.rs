@@ -7,6 +7,7 @@ mod audio;
 mod media;
 mod media_ffmpeg;
 mod audio_recovery;
+mod audio_role;
 mod accounts;
 mod accounts_shell;
 mod exec;
@@ -17,6 +18,11 @@ pub mod diag;
 mod dns;
 mod clock_sync;
 mod disks;
+mod download;
+mod notify;
+mod removable;
+pub(crate) mod restore;
+mod removable_copy;
 mod display;
 mod drivers;
 mod driverkit;
@@ -49,6 +55,8 @@ mod gui_player;
 mod gui_recovery;
 mod gui_role;
 mod wine_gui;
+mod wine_net;
+mod wine_w4;
 mod gui_palette;
 mod gui_snapshot;
 mod gui_term;
@@ -63,6 +71,8 @@ mod memory_seal;
 mod memory_cow;
 mod memory_wx;
 pub mod net;
+mod net_bind;
+mod net_lo;
 mod net_ready;
 mod net_v2;
 mod nic;
@@ -126,6 +136,9 @@ const SUITES: &[(&str, &[Test])] = &[
     ("ovladace", drivers::TESTS),
     ("ovladace z manifestu", driverkit::TESTS),
     ("disky", disks::TESTS),
+    ("vymenna media", removable::TESTS),
+    ("oznameni", notify::TESTS),
+    ("stahovani", download::TESTS),
     ("sitove karty", nic::TESTS),
     ("acpi", power::TESTS),
     ("diagnostika", diag::TESTS),
@@ -158,6 +171,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("cpp", cpp::TESTS),
     ("sit soubeh", net_v2::TESTS),
     ("sit pripravenost", net_ready::TESTS),
+    ("sit loopback", net_lo::TESTS),
     ("TLS a HTTP", web::TESTS),
     ("sifrovane DNS", dns::TESTS),
     ("supervisor", supervisor::TESTS),

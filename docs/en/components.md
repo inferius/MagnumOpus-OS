@@ -110,11 +110,11 @@ for `libs/ui`: sizes, key behaviour and implementation status (**yes**,
 
 | Component | `libs/ui` | Sizes and tokens | Keyboard |
 |---|---|---|---|
-| Button: primary, secondary, danger, icon | partial | height `--k-h`, min width 2 &times; height, `s5`, pill; primary `accent`, danger `danger`; *busy* state (spinner, fixed width) | Enter, Space on release |
+| Button: primary, secondary, danger, icon | yes | height `--k-h`, min width 2 &times; height, `s5`, pill; primary `accent`, danger `danger`; *busy* state (spinner, fixed width) | Enter, Space on release |
 | Text field, multiline | yes | `--k-h`, `radius.control`, `s4`; label above, hint / error below | arrows, Ctrl+arrows, Shift selection, clipboard, undo; multiline Ctrl+Enter submits |
 | Number | yes | like a field, right aligned, unit, stepper buttons outside the Tab order | &uarr; &darr; step, PgUp / PgDn 10 steps, Home / End |
 | Password | yes | field + eye toggle (`aria-pressed`), Caps Lock warning | like a field, never suggestions |
-| Search | yes | magnifier on the left, clear button only with text, filtering with a 150 ms delay | Esc clears, second Esc leaves, &darr; into the results |
+| Search | yes | magnifier on the left, clear button only with text, filtering with a 150 ms delay; a trailing slot (`.trailing`: a `.kbd` key label only in an empty field, an icon, short `ink_muted` text) for every single-line field | Esc clears, second Esc leaves, &darr; into the results |
 | Checkbox | partial | box 18 / 22 / 28, `radius.xs`, 2 px border; indeterminate state | Space |
 | Switch | yes | `switch_*`; immediate effect | Space |
 | Radio | partial | circle 18 / 22 / 28; the group is one stop | arrows select directly |
@@ -128,13 +128,14 @@ for `libs/ui`: sizes, key behaviour and implementation status (**yes**,
 | Application dialog | no | `dialog_w`, `radius.window`, `shadow.dialog`, `scrim` | focus trap, Enter default, Esc cancel, focus returns |
 | Toast | no | max 440, min height 48, inverted colours, 5 s / 8 s with an action, at most 3 | does not take focus; F6, Esc |
 | List | yes | row `--k-row`, `radius.control` | arrows, Ctrl+Space, Shift+arrows, Ctrl+A, letters, Enter |
-| Table | yes | row `--k-row`, header `type.caption` on `surface_2`, numbers right aligned | like the list, Enter on a header sorts |
+| Table | yes | row `--k-row`, header `type.caption` on `surface_2`, numbers right aligned; cells can hold a progress bar, the agent chip (system only) and row icon buttons (`Cells::actions`, ghost style) | like the list, Enter on a header sorts; Right / Left arrow between the row buttons, Enter / Space presses |
 | Tree | no | row `--k-row`, 20 px per level, triangle rotated 90&deg; | &rarr; expand / child, &larr; collapse / parent, `*` siblings |
 | Progress, spinner, skeleton | partial | 8 px bar; spinner 24 / 16 / 40; skeleton 12 px | not focusable; announced every 10 % |
 | Badge, status tag, filter tag | partial | badge 18; tag 24 `type.caption`; filter tag `--k-h-sm` | tag group: arrows, Space, Delete |
 | Breadcrumbs | no | `--k-h-sm`, `/` separator in `ink_faint`, collapsed into "..." | each link is a Tab stop |
 | Disclosure (accordion) | no | header `--k-h` + 12, `radius.card`, chevron rotated 180&deg; | Enter / Space, &uarr; &darr; inside a group |
-| Empty state | no | 72 px circle with an `icon_xl` icon, `type.title` heading, one action | focus on the action |
+| Empty state | yes | 72 px circle with an `icon_xl` icon, `type.title` heading, one action | focus on the action |
+| Panel (bar, Settings) | yes | width `size.panel_w` (360), row at least `size.panel_row` (40), icon-text gap `size.panel_gap` (10), header and footer edge `size.panel_edge` (14), sides `s5`; header with an icon, a bold title (`body_strong`) and a summary (`caption`, `ink_muted`), a row with an icon, title and description (a button with `surface_3` hover, a radio option with a check mark on the right, a switch on the right, information), a section (`caption` in capitals), a state row (`surface_3` / `danger_soft`, `radius.control`), a footer with a `border` line. Built from ordinary elements (`libs/ui/src/panel.rs`: `panel_header`, `.panel_row(icon, desc)`, `panel_section`, `panel_state`, `panel_footer`); the row description is the value for a screen reader | radio options are a group (arrows select), Tab between the group, the switch and the footer; focus as an inner ring `radius.control` |
 
 When to use which:
 

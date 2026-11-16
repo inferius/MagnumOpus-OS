@@ -84,7 +84,19 @@ impl Recipe {
 /// Smi relace aplikace poslat tento pozadavek? (`OPEN` vstupu resi
 /// [`capture_rule`].)
 pub fn app_allowed(req: &Request) -> bool {
-    !matches!(req, Request::MasterVolume { .. } | Request::Mute { .. } | Request::Select { .. } | Request::Connect)
+    // Hlasitost, zarizeni a seznam cizich aplikaci jen system (lista,
+    // shell); aplikace ridi jen sve proudy.
+    !matches!(
+        req,
+        Request::MasterVolume { .. }
+            | Request::Mute { .. }
+            | Request::Select { .. }
+            | Request::Connect
+            | Request::Apps
+            | Request::AppVolume { .. }
+            | Request::Overview
+            | Request::SelectInput { .. }
+    )
 }
 
 /// Co udelat s `OPEN` vstupu podle receptu a rozhodnuti, ktere uz relace
@@ -124,5 +136,9 @@ pub fn op_of(req: &Request) -> u32 {
         Request::StreamInfo { .. } => op::STREAM_INFO,
         Request::Devices => op::DEVICES,
         Request::Select { .. } => op::SELECT,
+        Request::Apps => op::APPS,
+        Request::AppVolume { .. } => op::APP_VOLUME,
+        Request::Overview => op::OVERVIEW,
+        Request::SelectInput { .. } => op::SELECT_INPUT,
     }
 }

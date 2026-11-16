@@ -310,6 +310,8 @@ Vše leží na **mřížce 4 px**. Rozestupy: 2, 4, 8, 12, 16, 20, 24, 32, 40,
 | `badge-h` | 26 px | odznak důvěry |
 | `bar-h` | 52 px | lišta; odsazení od okraje 8 px |
 | `resize-edge` | 6 px | neviditelný okraj pro změnu velikosti (roh 18 px) |
+| `panel-w`, `panel-row` | 360 px, 40 px | panel lišty (Vzhled, Zvuk, Síť, ...): šířka a nejmenší výška řádku |
+| `panel-gap`, `panel-edge` | 10 px, 14 px | panel: mezera ikona-text a odsazení sekce, horní okraj hlavičky a dolní okraj paty ([komponenta panel](komponenty.md)) |
 
 ### Zaoblení a stíny
 
@@ -467,7 +469,8 @@ Křivky: standard `cubic-bezier(0.2, 0, 0, 1)`, enter
 - Tvar: pilulka 26 px v barvách `trust-*`, ikona štítu, jméno aplikace,
   za oddělovačem ikony právě platných oprávnění (složka, síť, kamera,
   mikrofon, snímání obrazovky). **Červená tečka** = zařízení právě běží.
-- Systémové aplikace mají místo jména slovo „Systém“ a štít s fajfkou.
+- Systémové aplikace mají jméno aplikace a štít s fajfkou (`shieldcheck`)
+  místo štítu; jméno i značku dodá init z manifestu. **[implementováno]**
 - Klik, Enter nebo mezerník otevře **přehled oprávnění** (kreslí ho
   kompozitor ve vrstvě nabídek): aplikace, podpis, seznam oprávnění
   s časem posledního použití a tlačítkem **Odebrat**. Odebrání platí
@@ -539,7 +542,8 @@ Náhledy jsou vrstvy, které kompozitor už má (nic se nepřekresluje).
 Vyjíždějí vpravo nahoře (posun 24 px + prolnutí, 240 ms), po 6 s zmizí do
 centra oznámení (zvonek v liště). Oznámení agenta má levý pruh v barvě `ai`
 a ikonu agenta. Pro čtečku jsou v oblasti `status` (oznámí se, ale nepřeruší).
-Ztišení do určitého času je v centru oznámení.
+Ztišení do určitého času je v centru oznámení. Služba, protokol a stav
+implementace: [Oznámení](oznameni.md).
 
 ### Systémové dialogy
 

@@ -99,6 +99,32 @@ impl<M: Clone> Ui<M> {
 
     /// Mista v poli vlevo a vpravo od textu: lupa hledani; krizek hledani
     /// (jen s textem), oko hesla, jednotka a krokovani cisla.
+    /// Viditelny koncovy slot pole `i` (napoveda klavesy jen u prazdneho
+    /// pole; viceradkove pole slot nema).
+    pub(crate) fn trailing_of(&self, i: usize) -> Option<crate::fieldopts::Trailing> {
+        use crate::fieldopts::Trailing;
+        let t = self.field_opts(i)?.trailing.clone()?;
+        if self.field_kind(i).is_some_and(|k| k.0) {
+            return None;
+        }
+        match t {
+            Trailing::Key(_) if !self.field_text(i).is_empty() => None,
+            t => Some(t),
+        }
+    }
+
+    /// Sirka koncoveho slotu (0 = zadny).
+    pub(crate) fn trailing_w(&self, i: usize) -> u32 {
+        use crate::fieldopts::Trailing;
+        let th = &self.look.theme;
+        match self.trailing_of(i) {
+            None => 0,
+            Some(Trailing::Key(k)) => self.look.width(&k, th.text.caption) + 2 * th.space[2],
+            Some(Trailing::Icon(_)) => th.size.icon_s,
+            Some(Trailing::Text(s)) => self.look.width(&s, th.text.caption),
+        }
+    }
+
     pub(crate) fn field_slots(&self, i: usize) -> (u32, u32) {
         let Some(o) = self.field_opts(i) else { return (0, 0) };
         let th = &self.look.theme;
@@ -124,6 +150,10 @@ impl<M: Clone> Ui<M> {
             }
             FieldKind::Text => 0,
         };
+        let tw = self.trailing_w(i);
+        if tw > 0 {
+            right += tw + th.space[2];
+        }
         (left, right)
     }
 
@@ -770,11 +800,14 @@ impl<M: Clone> Ui<M> {
         if self.drag_field.is_some_and(|k| !keep.contains(&k)) {
             self.drag_field = None;
         }
-        // Jednoradkove pole: kurzor videt i po zmene sirky; viceradkove jen
-        // posun v mezich (kolecko nesmi kazde prekresleni vratit ke kurzoru).
+        // Jednoradkove pole s fokusem: kurzor videt i po zmene sirky; bez
+        // fokusu zustava posun, jaky byl (nove pole od zacatku textu, ne od
+        // kurzoru na konci, O23). Viceradkove jen posun v mezich (kolecko
+        // nesmi kazde prekresleni vratit ke kurzoru).
         for i in 0..self.elems.len() {
             match self.field_kind(i) {
-                Some((false, _)) => self.field_reveal(i),
+                Some((false, _)) if self.focus == Some(i) || self.tscroll.contains_key(&self.elems[i].key) => self.field_reveal(i),
+                Some((false, _)) => {}
                 Some((true, _)) => {
                     let key = self.elems[i].key;
                     let lh = self.look.body().line as i32;

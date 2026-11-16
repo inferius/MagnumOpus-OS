@@ -11,8 +11,10 @@
 //! zamek na duplikatu kanalu, udalosti probuzeni a udalosti `QUEUED`
 //! (jine vlakno pri cekani na buffer precetlo zpravy a zaradilo udalosti).
 //!
-//! Obnova po padu kompozitoru zatim neni (**[navrzeno]**, jako
-//! `ui::client::restore`): ztrata spojeni = `SERVICE_UNAVAILABLE`.
+//! Obnova po padu kompozitoru (`restore.rs`): vse odeslane se zaznamenava
+//! (`guiproto::replay`); pri ztrate spojeni nova relace pres listek role
+//! Gui a znovu posledni potvrzeny stav (okna, vlastnici, buffery, vrstvy),
+//! ovladac dostane `MOWIN_EV_EXPOSE`.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{CStr, c_char};
@@ -25,8 +27,10 @@ use libos::{Channel, Error, Event, Handle, Result, Signals};
 
 use crate::event::{MoEvent, from_input, kind};
 
+pub mod audio;
 mod clip;
 mod pointer;
+mod restore;
 mod surface;
 
 use surface::{Buf, Surface};
@@ -74,6 +78,8 @@ pub(crate) struct State {
     /// Posledni cislo gesta (fyzicky stisk doruceny oknum procesu).
     gesture: u32,
     clip: clip::Clip,
+    /// Zaznam odeslaneho stavu pro obnovu po padu kompozitoru.
+    replay: guiproto::replay::Replay,
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -129,6 +135,7 @@ pub(crate) fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             queue: VecDeque::new(),
             gesture: 0,
             clip: clip::Clip::default(),
+            replay: guiproto::replay::Replay::new(),
         }
     });
     f(st)
@@ -147,13 +154,17 @@ impl State {
         self.ch.as_ref().ok_or(Error::NotFound)
     }
 
-    pub(crate) fn send(&self, m: ClientMsg) -> Result<()> {
+    pub(crate) fn send(&mut self, m: ClientMsg) -> Result<()> {
         self.send_with(m, Vec::new())
     }
 
-    fn send_with(&self, m: ClientMsg, handles: Vec<Handle>) -> Result<()> {
+    /// Posle zpravu (a zaznamena ji pro obnovu). Kompozitor spadl: obnova
+    /// (zprava je v zaznamu, rozpracovana transakce se ztrati a ovladac
+    /// okno nakresli znovu po `EXPOSE`).
+    fn send_with(&mut self, m: ClientMsg, handles: Vec<Handle>) -> Result<()> {
+        self.replay.record(&m);
         match self.ch()?.write(&m.encode(), handles) {
-            Err(Error::PeerClosed) => Err(Error::ServiceUnavailable),
+            Err(Error::PeerClosed) => self.recover(),
             r => r,
         }
     }
@@ -163,7 +174,7 @@ impl State {
         if self.hello {
             return Ok(());
         }
-        self.send(ClientMsg::Hello { version: guiproto::VERSION })?;
+        self.ch()?.write(&ClientMsg::Hello { version: guiproto::VERSION }.encode(), Vec::new()).map_err(|e| if e == Error::PeerClosed { Error::ServiceUnavailable } else { e })?;
         let deadline = libos::time::now().saturating_add(REPLY_NS);
         loop {
             let m = self.ch()?.read(Some(deadline)).map_err(|e| if e == Error::PeerClosed { Error::ServiceUnavailable } else { e })?;
@@ -208,6 +219,7 @@ impl State {
                 }
             }
             ServerMsg::Configure { window, w, h, state, serial } => {
+                self.replay.configured(window, w, h);
                 if let Some(win) = self.windows.get_mut(&window) {
                     win.ack = Some((serial, w, h));
                     win.w = w;
@@ -274,7 +286,11 @@ impl State {
                     self.handle(m)?;
                 }
                 Err(Error::ShouldWait) => return Ok(got),
-                Err(Error::PeerClosed) => return Err(Error::ServiceUnavailable),
+                // Kompozitor spadl: obnova, pak cist z nove relace.
+                Err(Error::PeerClosed) => {
+                    self.recover()?;
+                    got = true;
+                }
                 Err(e) => return Err(e),
             }
         }

@@ -1394,6 +1394,12 @@ fine for now):
   The kernel stops an older CPU at start
   ([hardware-requirements.md](hardware-requirements.md)). AMX is not
   enabled yet.
+- **Removable media without owners and permissions** **[verified in
+  QEMU]**: files on FAT, exFAT and NTFS belong to the logged-in user of
+  the session and NTFS ACLs are ignored; temporarily like the "Work
+  folders". Mapping of owners and permissions, extended attributes and
+  user-chosen writing in the strict profile are **[designed]**
+  ([media.md](media.md#owner-and-permissions)).
 - **IOMMU (Intel VT-d, AMD-Vi) only for DMA translation:** interrupt
   remapping and RMRR/IVMD regions are missing; on a machine without an
   IOMMU DMA is not restricted (the kernel logs it).

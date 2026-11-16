@@ -1,0 +1,10 @@
+[package]
+name = "volproto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protokol fsd <-> proces vymenneho media (volfs)"
+
+[dependencies]
+abi = { workspace = true }
+wire = { path = "../wire" }

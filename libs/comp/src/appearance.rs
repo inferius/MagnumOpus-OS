@@ -46,6 +46,9 @@ pub(crate) struct Appearance {
     /// Posledni stisk klavesy (ns) a od kdy ceka odlozena auto zmena.
     pub last_key: u64,
     pub held_since: Option<u64>,
+    /// Dalsi zmena dne a noci: mistni cas v sekundach od pulnoci (stav
+    /// v panelu Vzhled, "Tmavy od 16:21"); `None` = hodiny jeste neprisly.
+    pub next_local: Option<u32>,
 }
 
 impl Default for Appearance {
@@ -61,6 +64,7 @@ impl Default for Appearance {
             fade: None,
             last_key: 0,
             held_since: None,
+            next_local: None,
         }
     }
 }
@@ -102,6 +106,11 @@ impl Comp {
     /// okamzik (UTC, s) dalsi zmeny.
     pub fn sun_tick(&mut self, utc: i64, offset: i32, now: u64) -> i64 {
         let (day, next) = crate::sun::is_day(utc, offset, self.appearance.place);
+        let local = Some((next + offset as i64).rem_euclid(86_400) as u32);
+        if day != self.appearance.day || local != self.appearance.next_local {
+            self.appearance.next_local = local;
+            self.bar_panel_changed();
+        }
         if day != self.appearance.day {
             self.appearance.day = day;
             self.appearance_changed(now, true);
@@ -121,6 +130,46 @@ impl Comp {
         self.appearance.users.insert(uid, p);
         self.out.push(Out::Appearance { uid, pref: p });
         self.appearance_changed(now, false);
+        self.bar_panel_changed();
+    }
+
+    /// Vysoky kontrast z panelu Vzhled (Pristupnost): ulozi se uzivateli.
+    pub(crate) fn choose_contrast(&mut self, on: bool, now: u64) {
+        let (uid, mut p) = self.appearance();
+        let Some(uid) = uid else { return };
+        if p.contrast == on {
+            return;
+        }
+        p.contrast = on;
+        self.appearance.users.insert(uid, p);
+        self.out.push(Out::Appearance { uid, pref: p });
+        self.appearance_changed(now, false);
+        self.bar_panel_changed();
+    }
+
+    /// Radek stavu panelu Vzhled: co plati ted a proc.
+    pub(crate) fn look_state(&self) -> alloc::string::String {
+        let (_, p) = self.appearance();
+        let now = Self::mode_word(self.mode());
+        if p.contrast {
+            return alloc::string::String::from("Vysoký kontrast z Přístupnosti přebíjí světlý i tmavý vzhled.");
+        }
+        if p.scheme != Scheme::Auto {
+            return alloc::format!("Teď {now}, nastaveno ručně. Automaticky přepíná podle slunce.");
+        }
+        let src = if self.appearance.place.is_some() { "podle východu a západu slunce" } else { "světlý od 7 do 19 h" };
+        let next = if self.appearance.day { "Tmavý" } else { "Světlý" };
+        let why = if self.appearance.place.is_none() {
+            ""
+        } else if self.appearance.day {
+            " (západ slunce)"
+        } else {
+            " (východ slunce)"
+        };
+        match self.appearance.next_local {
+            Some(t) => alloc::format!("Teď {now}, {src}. {next} od {}:{:02}{why}.", t / 3600, t / 60 % 60),
+            None => alloc::format!("Teď {now}, {src}."),
+        }
     }
 
     /// Klavesa (odklad auto zmeny pri psani).

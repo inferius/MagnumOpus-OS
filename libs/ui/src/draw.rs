@@ -21,7 +21,7 @@ pub(crate) fn fade(c: u32, bg: u32, k: u32) -> u32 {
 /// Stitek agenta: pilulka `ai_soft`, ikona agenta (dve jiskry) a text
 /// `ai_ink`. Vraci sirku.
 #[allow(clippy::too_many_arguments)]
-fn agent_chip(c: &mut Canvas<'_>, look: &mut crate::Look, icons: &mut gfx::icon::Icons, x: i32, y: i32, h: u32, text: &str) -> u32 {
+pub(crate) fn agent_chip(c: &mut Canvas<'_>, look: &mut crate::Look, icons: &mut gfx::icon::Icons, x: i32, y: i32, h: u32, text: &str) -> u32 {
     let th = look.theme.clone();
     let (sp, col) = (&th.space, &th.color);
     let s = look.chip();
@@ -63,7 +63,9 @@ impl<M: Clone> Ui<M> {
         let col = &th.color;
         let sp = &th.space;
         let (ring, ring_off) = (th.size.focus_ring, th.size.focus_offset);
-        c.fill(c.bounds(), col.surface);
+        if !self.transparent {
+            c.fill(c.bounds(), col.surface);
+        }
         for i in 0..self.elems.len() {
             let e = &self.elems[i];
             if e.space != space {
@@ -74,9 +76,14 @@ impl<M: Clone> Ui<M> {
             // okne, stisknuto jen s ukazatelem nad prvkem.
             let st = self.state(i);
             let (focused, hover, pressed, dim) = (st.focus_visible, st.hover, st.pressed, st.disabled);
+            if e.row.is_some() {
+                self.draw_panel_row(c, i, st);
+                continue;
+            }
             match &e.kind {
                 ElemKind::Label { text, heading, warn, lines } => {
-                    let s = if *heading { self.look.heading() } else { self.look.body() };
+                    let s = if *heading { self.look.heading() } else { crate::panel::tone_style(&self.look, e.tone) };
+                    let ink = crate::panel::tone_color(col, e.tone);
                     let old = c.clip();
                     c.set_clip(old.intersect(&r));
                     if e.agent {
@@ -93,7 +100,7 @@ impl<M: Clone> Ui<M> {
                         // Jeden radek (vejde se nebo `lines(1)`: zkratit s `...`).
                         let f = self.look.face(s);
                         let b = r.y + f.baseline_in(s.size, r.h);
-                        f.draw_ellipsized(c, r.x, b, text, s.size, col.ink, r.w);
+                        f.draw_ellipsized(c, r.x, b, text, s.size, ink, r.w);
                     } else {
                         // Zalomeny: radky pod sebou, blok svisle na stredu.
                         let ls = crate::layout::label_lines(&self.look, text, s, r.w, *lines);
@@ -101,23 +108,34 @@ impl<M: Clone> Ui<M> {
                         let f = self.look.face(s);
                         let b0 = f.baseline_in(s.size, s.line);
                         for (k, l) in ls.iter().enumerate() {
-                            f.draw_ellipsized(c, r.x, top + k as i32 * s.line as i32 + b0, l, s.size, col.ink, r.w);
+                            f.draw_ellipsized(c, r.x, top + k as i32 * s.line as i32 + b0, l, s.size, ink, r.w);
                         }
                     }
                     c.set_clip(old);
                 }
                 ElemKind::Button { text, icon, .. } => {
-                    let bg = if (pressed || hover) && !dim { col.surface_3 } else { col.surface };
+                    use crate::node::Variant;
+                    let hot = (pressed || hover) && !dim;
+                    // Najeti u plnych variant: vypln ztmavena k `ink` (88 %).
+                    let hot_of = |c: u32| fade(c, col.ink, 225);
+                    let (bg, edge, ink) = match e.variant {
+                        Variant::Secondary => (if hot { col.surface_3 } else { col.surface }, col.border_strong, col.ink),
+                        Variant::Primary => (if hot { hot_of(col.accent) } else { col.accent }, col.accent, col.on_accent),
+                        Variant::Danger => (if hot { hot_of(col.danger) } else { col.danger }, col.danger, col.on_danger),
+                        Variant::Ghost => (if hot { col.surface_3 } else { 0 }, 0, col.ink),
+                    };
                     // Nedostupne: stejne tlacitko s kryti `opacity.disabled`.
                     let k = if dim { th.opacity.disabled } else { 255 };
-                    c.round_fill_bordered(r, r.h / 2, fade(bg, col.surface, k), fade(col.border_strong, col.surface, k), 1);
+                    if bg != 0 {
+                        c.round_fill_bordered(r, r.h / 2, fade(bg, col.surface, k), fade(if edge == 0 { bg } else { edge }, col.surface, k), 1);
+                    }
                     if focused && !dim {
                         focus_ring(c, r, r.h / 2, ring, ring_off, col.focus);
                     }
                     let s = self.look.button();
                     let f = self.look.face(s);
                     let tw = f.width(text, s.size) as i32;
-                    let fg = fade(col.ink, col.surface, k);
+                    let fg = fade(ink, col.surface, k);
                     let b = r.y + f.baseline_in(s.size, r.h);
                     // Ikona pred textem (bez textu na stred).
                     let is = th.size.icon_m;
@@ -208,7 +226,16 @@ impl<M: Clone> Ui<M> {
                 ElemKind::Switch { .. } | ElemKind::Radio { .. } | ElemKind::Slider { .. } | ElemKind::Segmented { .. } | ElemKind::Tabs { .. } | ElemKind::Busy | ElemKind::Segments { .. } => {
                     self.draw_control(c, i, st);
                 }
-                ElemKind::Group => {}
+                ElemKind::Group => {
+                    if let Some(d) = &e.deco {
+                        crate::panel::draw_deco(c, r, d, col);
+                    }
+                }
+                ElemKind::Icon { name, size } => {
+                    let s = if *size == 0 { th.size.icon_m } else { *size };
+                    let fg = if dim { fade(col.ink, col.surface, th.opacity.disabled) } else { col.ink };
+                    self.icons.draw(c, name, r.x + (r.w as i32 - s as i32) / 2, r.y + (r.h as i32 - s as i32) / 2, s, th.icon_stroke, fg);
+                }
                 ElemKind::Scroll { .. } => {
                     // Obsah je vlastni vrstva; tady jen ram.
                     c.round_stroke(r, th.radius.control, 1, col.border);

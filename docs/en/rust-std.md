@@ -302,7 +302,7 @@ operations return `Unsupported`.
 <figure class="diagram">
 <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Launching processes through launchd">
 <defs><marker id="rs3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
-<rect class="ok" x="10" y="20" width="230" height="110" rx="6"/><text class="t b" x="125" y="45" text-anchor="middle">parent (std)</text><text class="m" x="125" y="66" text-anchor="middle">Command::spawn</text><text class="m" x="125" y="84" text-anchor="middle">job, new FS session,</text><text class="m" x="125" y="102" text-anchor="middle">network only with network(true),</text><text class="m" x="125" y="120" text-anchor="middle">stdio, parameter block</text>
+<rect class="ok" x="10" y="20" width="230" height="110" rx="6"/><text class="t b" x="125" y="45" text-anchor="middle">parent (std)</text><text class="m" x="125" y="66" text-anchor="middle">Command::spawn</text><text class="m" x="125" y="84" text-anchor="middle">job, new FS session,</text><text class="m" x="125" y="102" text-anchor="middle">network by MO_NET,</text><text class="m" x="125" y="120" text-anchor="middle">stdio, parameter block</text>
 <path class="ln" d="M240 75 L298 75" marker-end="url(#rs3)"/><text class="m" x="269" y="66" text-anchor="middle">LAUNCH</text>
 <rect class="acc" x="300" y="20" width="230" height="110" rx="6"/><text class="t b" x="415" y="45" text-anchor="middle">launchd</text><text class="m" x="415" y="66" text-anchor="middle">finds the program</text><text class="m" x="415" y="84" text-anchor="middle">manifest: job limits,</text><text class="m" x="415" y="102" text-anchor="middle">network = intersection</text><text class="m" x="415" y="120" text-anchor="middle">no root rights</text>
 <path class="ln" d="M530 75 L588 75" marker-end="url(#rs3)"/>
@@ -322,8 +322,12 @@ and aarch64). They are launched by the `launchd` service
 - **The child's capabilities** come from the parent in the request: its
   job (the child gets a sub-job, never more than the parent), a new FS
   session with the same identity (files are inherited), the network
-  session **only explicitly**
-  (`std::os::magnumopus::process::CommandExt::network(true)`), stdio.
+  session by role Net: a child with a non-empty `MO_NET` in its
+  environment (the runtime sets it when the process has a network; the
+  child inherits the environment) or with
+  `std::os::magnumopus::process::CommandExt::network(true)` gets its own
+  narrowed session with the same identity, `env_remove("MO_NET")` = no
+  network ([Network](network.md#passing-sockets-identity-limits-and-revocation)), stdio.
   launchd has no root rights; it adds only what the parent cannot do
   itself: it finds the program, applies the manifest and gives the child
   its own channel to launchd.
@@ -334,9 +338,8 @@ and aarch64). They are launched by the `launchd` service
   program without a manifest (a helper) gets the network session as the
   parent passed it.
 - **Difference from `posix_spawn` in C** ([cstd](cstd.md#processes-posix_spawn-and-waitpid)):
-  `Command` passes the network only with `network(true)`, `posix_spawn`
-  always passes it when the parent has one (POSIX: the child inherits the
-  parent's environment). The manifest rule is the same for both: for an
+  `Command` and `posix_spawn` both pass the network by `MO_NET` in the
+  child's environment (role Net); `Command` also with `network(true)`. The manifest rule is the same for both: for an
   application with a manifest launchd decides about the network from the
   manifest, not the parent.
 - **Finding the program:** a bare name = the command registry

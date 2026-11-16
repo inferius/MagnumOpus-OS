@@ -69,6 +69,8 @@ impl Trashed {
 pub struct NameEdit {
     /// `Some(oid)` = prejmenovani polozky, `None` = nova slozka.
     pub item: Option<u64>,
+    /// Pole adresy pro "Stahnout z adresy" (ne jmeno).
+    pub url: bool,
     pub value: String,
     pub error: String,
 }
@@ -117,6 +119,10 @@ pub enum Msg {
     Drop(Option<u64>, Vec<u64>),
     /// Vlastnosti vybrane polozky (bez vyberu aktualni slozky).
     Properties,
+    /// Stahnout z adresy do slozky Stazene (pole adresy).
+    Download,
+    /// Bezpecne odpojit medium, na kterem je aktualni slozka.
+    Eject,
     Props(PropsMsg),
 }
 
@@ -209,6 +215,11 @@ impl<B: Backend> FileManager<B> {
             }
             let label = if is_within(&d.path, &self.home) { String::from(name(&d.path)) } else { d.path.clone() };
             v.push(Place { label, path: d.path, icon: "dataset" });
+        }
+        // Vymenna media (flash disky): jmenovka, u media jen pro cteni znacka.
+        for m in self.b.media() {
+            let label = if m.read_only { format!("{} (jen čtení)", m.name) } else { m.name.clone() };
+            v.push(Place { label, path: format!("{}/{}", fsproto::v2::MEDIA_ROOT, m.name), icon: "usb" });
         }
         v.push(Place { label: String::from("Svazek"), path: String::from("/"), icon: "disk" });
         v.push(Place { label: String::from("Koš"), path: String::new(), icon: "trash" });
@@ -328,6 +339,45 @@ impl<B: Backend> FileManager<B> {
             return String::from(base);
         }
         (2..).map(|k| numbered(base, k, true)).find(|n| !taken(n)).unwrap_or_default()
+    }
+
+    /// Medium, na kterem je aktualni slozka (`/media/<jmeno>/...`).
+    pub fn current_medium(&self) -> Option<String> {
+        let rest = self.nav.cur.strip_prefix(fsproto::v2::MEDIA_ROOT)?.strip_prefix('/')?;
+        let name = rest.split('/').next().unwrap_or("");
+        (!name.is_empty()).then(|| String::from(name))
+    }
+
+    /// Odpojit medium aktualni slozky: po uspechu domu a zprava, ze ho jde
+    /// vytahnout.
+    fn eject(&mut self) {
+        let Some(name) = self.current_medium() else { return };
+        match self.b.eject(&name) {
+            Ok(()) => {
+                self.load_places();
+                self.go(self.home.clone());
+                self.status = format!("Médium {name} je odpojené, můžete ho vytáhnout.");
+            }
+            Err(e) => self.status = format!("Médium {name} nejde odpojit: {}", crate::error_text(e)),
+        }
+    }
+
+    /// Potvrzena adresa: kontrola a predani stahovani (vysledek je
+    /// v Ulohach a v oznameni; okno na nej neceka).
+    fn download_ok(&mut self) {
+        let Some(e) = self.edit.clone() else { return };
+        let url = e.value.trim();
+        let err = match check_url(url) {
+            Err(m) => m,
+            Ok(()) if !self.b.download(url) => "Stahování není k dispozici (služba neběží).",
+            Ok(()) => "",
+        };
+        if err.is_empty() {
+            self.edit = None;
+            self.status = String::from("Stahuje se do složky Stažené, průběh je v Úlohách.");
+        } else if let Some(ed) = &mut self.edit {
+            ed.error = String::from(err);
+        }
     }
 
     fn name_ok(&mut self) {
@@ -599,14 +649,14 @@ impl<B: Backend> FileManager<B> {
             }
             Msg::NewFolder => {
                 if self.mode == Mode::Folder {
-                    self.edit = Some(NameEdit { item: None, value: self.free_name("Nová složka"), error: String::new() });
+                    self.edit = Some(NameEdit { item: None, url: false, value: self.free_name("Nová složka"), error: String::new() });
                 }
             }
             Msg::Rename => {
                 if self.sel.len() == 1
                     && let Some(i) = self.listing.by_id(self.sel[0])
                 {
-                    self.edit = Some(NameEdit { item: Some(i.e.oid), value: i.e.name.clone(), error: String::new() });
+                    self.edit = Some(NameEdit { item: Some(i.e.oid), url: false, value: i.e.name.clone(), error: String::new() });
                 }
             }
             Msg::NameValue(v) => {
@@ -615,6 +665,11 @@ impl<B: Backend> FileManager<B> {
                     e.error.clear();
                 }
             }
+            Msg::Eject => self.eject(),
+            Msg::Download => {
+                self.edit = Some(NameEdit { item: None, url: true, value: String::from("https://"), error: String::new() });
+            }
+            Msg::NameOk if self.edit.as_ref().is_some_and(|e| e.url) => self.download_ok(),
             Msg::NameOk => self.name_ok(),
             Msg::NameCancel => self.edit = None,
             Msg::Trash => self.trash_selected(),
@@ -753,4 +808,18 @@ fn ext(n: &str) -> &str {
         Some(i) if i > 0 => &n[i..],
         _ => "",
     }
+}
+
+/// Adresa ke stazeni: `http(s)://server/...`, bez mezer a ridicich znaku.
+pub fn check_url(url: &str) -> core::result::Result<(), &'static str> {
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"));
+    let Some(rest) = rest else { return Err("Adresa musí začínat https:// nebo http://.") };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if host.is_empty() || host.starts_with(':') {
+        return Err("V adrese chybí server.");
+    }
+    if url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("Adresa nesmí obsahovat mezery.");
+    }
+    Ok(())
 }

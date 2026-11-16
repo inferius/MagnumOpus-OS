@@ -167,9 +167,44 @@ pub struct BarStatus {
     /// Aplikace, ktere prave nahravaji zvuk (indikator mikrofonu v liste;
     /// soukromi: uzivatel vzdy vidi, ze se nahrava).
     pub capturing: Vec<String>,
+    /// Zarizeni a aplikace pro panel Zvuk (`None` = sluzba je neposlala).
+    pub audio: Option<AudioInfo>,
+    /// Adresa rozhrani s prefixem (`10.0.2.15/24`), kdyz ji netd hlasi.
+    pub net_addr: Option<String>,
     /// Vzdalene relace (`uzivatel@adresa`, SSH): pilulka v liste, at je
     /// u pocitace videt, ze je nekdo pripojeny (`docs/cs/ssh.md`).
     pub remote: Vec<String>,
+}
+
+/// Zvukove zarizeni v panelu Zvuk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioDev {
+    pub index: u8,
+    pub name: String,
+    /// Aktivni vystupy (`line-out,headphone`), prazdne = zadny.
+    pub outputs: String,
+    pub input: bool,
+    /// Prave pouzivany vystup.
+    pub active: bool,
+}
+
+/// Aplikace s proudy v panelu Zvuk (identita z manifestu).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioApp {
+    pub id: String,
+    pub name: String,
+    pub volume: u8,
+    pub playing: bool,
+    pub capturing: bool,
+}
+
+/// Co panel Zvuk ukazuje krome hlasitosti.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AudioInfo {
+    pub devices: Vec<AudioDev>,
+    pub apps: Vec<AudioApp>,
+    /// Zarizeni, ze ktereho se nahrava.
+    pub input: Option<u8>,
 }
 
 /// Na co ukazuje mys (zvyrazneni pri najeti).
@@ -240,7 +275,18 @@ impl Comp {
         if !self.bar_blur_dirty && self.bar_blur.is_some() {
             return;
         }
-        let src = self.blur_source();
+        let p = self.panel_rect();
+        self.bar_blur = Some(self.scene_blur(p, now));
+        self.bar_blur_dirty = false;
+    }
+
+    /// Rozmazana scena (plocha a okna) pod obdelnikem `p`: pixely `p`
+    /// (radky po `p.w`). Scena se pro okoli vykresli znovu do mezibufferu
+    /// (stejne na CPU i GPU), rozmaze a orizne.
+    pub(crate) fn scene_blur(&mut self, p: Rect, now: u64) -> Vec<u32> {
+        let e = 3 * BAR_BLUR;
+        let src = Rect::new(p.x - e as i32, p.y - e as i32, p.w + 2 * e, p.h + 2 * e).intersect(&self.screen());
+        let p = p.intersect(&src);
         let (w, h) = (self.w, self.h);
         let mut scratch = core::mem::take(&mut self.blur_scratch);
         scratch.resize((w * h) as usize, 0);
@@ -261,15 +307,13 @@ impl Comp {
             }
         }
         let blurred = gfx::blur::blurred_region(&scratch, w, src, BAR_BLUR as f32);
-        let p = self.panel_rect();
         let mut band = Vec::with_capacity((p.w * p.h) as usize);
         for y in 0..p.h {
             let row = ((p.y - src.y) as u32 + y) * src.w + (p.x - src.x) as u32;
             band.extend_from_slice(&blurred[row as usize..(row + p.w) as usize]);
         }
-        self.bar_blur = Some(band);
-        self.bar_blur_dirty = false;
         self.blur_scratch = scratch;
+        band
     }
 
     /// Stav site pro ikonu v liste (`None` = sluzba site neni).
@@ -277,6 +321,7 @@ impl Comp {
         if self.status.net != net {
             self.status.net = net;
             self.damage_panel();
+            self.bar_panel_changed();
         }
     }
 
@@ -285,6 +330,23 @@ impl Comp {
         if self.status.volume != volume {
             self.status.volume = volume;
             self.damage_panel();
+            self.bar_panel_changed();
+        }
+    }
+
+    /// Adresa rozhrani pro panel Sit (`None` = bez adresy).
+    pub fn set_net_addr(&mut self, addr: Option<String>) {
+        if self.status.net_addr != addr {
+            self.status.net_addr = addr;
+            self.bar_panel_changed();
+        }
+    }
+
+    /// Zarizeni a aplikace pro panel Zvuk (`OVERVIEW` sluzby zvuku).
+    pub fn set_audio_info(&mut self, info: Option<AudioInfo>) {
+        if self.status.audio != info {
+            self.status.audio = info;
+            self.bar_panel_changed();
         }
     }
 
@@ -293,6 +355,7 @@ impl Comp {
         if self.status.capturing != apps {
             self.status.capturing = apps;
             self.damage_panel();
+            self.bar_panel_changed();
         }
     }
 
@@ -450,9 +513,13 @@ impl Comp {
         // kazdy poskozeny obdelnik). Pod prihlasovaci obrazovkou zadna okna.
         let mut trees: Vec<(u32, Kids)> = Vec::new();
         let hidden = self.greeter_visible();
+        let owners = self.owner_popovers(hidden);
         for &gid in self.z.iter().filter(|_| !hidden) {
             let Some(w) = self.windows.get(&gid) else { continue };
-            if !w.mapped || w.minimized || !rects.iter().any(|r| !w.visual().intersect(r).is_empty()) {
+            // Okno i s popovery vlastnika (presahuji okno).
+            let hit = |a: &Rect| rects.iter().any(|r| !a.intersect(r).is_empty());
+            let pops = owners.iter().find(|o| o.0 == gid).is_some_and(|o| o.2.iter().any(hit));
+            if !w.mapped || w.minimized || !(hit(&w.visual()) || pops) {
                 continue;
             }
             let Some(cl) = self.clients.get(&w.client) else { continue };
@@ -489,6 +556,17 @@ impl Comp {
                     let t0 = self.prof.start();
                     draw_window_unshadowed(canvas, &mut self.style, w, cl, kids, focused, now, hover.and_then(|h| button_of(h, *gid)));
                     self.prof.add(Part::Window, t0);
+                }
+                // Popovery vlastnika okna s fokusem: hned nad nim (okna
+                // vys, i jeho dialog, je prekresli svymi castmi).
+                if let Some((_, okids, orects)) = owners.iter().find(|o| o.0 == *gid) {
+                    for pr in orects {
+                        let clip = r.intersect(pr);
+                        if !clip.is_empty() {
+                            canvas.set_clip(clip);
+                            draw_children(canvas, cl, okids, 0, (w.rect.x, w.rect.y), clip, 255, 0);
+                        }
+                    }
                 }
             }
             canvas.set_clip(*r);
@@ -552,6 +630,29 @@ impl Comp {
         Some((g, popover_children(cl, w.local), rects))
     }
 
+    /// Popovery vlastniku okna s fokusem (retezec `owner`, bez okna
+    /// s fokusem): dialog, ktery vlastnikovi vzal fokus, nema schovat jeho
+    /// popupy (Wine: bublina, rozbalena nabidka vlastnika). Kresli se hned
+    /// nad vlastnikem, tedy pod jeho dialogem a okny nad nim.
+    pub(crate) fn owner_popovers(&self, hidden: bool) -> Vec<(u32, Kids, Vec<Rect>)> {
+        let mut out = Vec::new();
+        let Some(f) = self.focus.filter(|_| !hidden) else { return out };
+        let mut g = self.windows.get(&f).and_then(|w| w.owner);
+        // Ochrana proti cyklu (owner.rs ho nedovoli, ale nepocitat s tim).
+        for _ in 0..16 {
+            let Some(o) = g.filter(|&o| o != f) else { break };
+            let Some(w) = self.windows.get(&o) else { break };
+            if w.mapped && !w.minimized {
+                let rects = self.popover_rects(o);
+                if let (false, Some(cl)) = (rects.is_empty(), self.clients.get(&w.client)) {
+                    out.push((o, popover_children(cl, w.local), rects));
+                }
+            }
+            g = w.owner;
+        }
+        out
+    }
+
     /// Obdelniky popoveru okna `g` na obrazovce (viditelne korenove vrstvy
     /// s `popover`), oriznute na pracovni plochu: popover nevyjede pod listu
     /// ani mimo obrazovku (systemove vrstvy, dialogy a zamek jsou nad nim).
@@ -579,6 +680,7 @@ impl Comp {
         // Nabidka u maximalizace i se stinem.
         v.extend(self.max_menu_rect().map(|r| Rect::new(r.x - 24, r.y - 24, r.w + 48, r.h + 48)));
         v.extend(self.tip_rect());
+        v.extend(self.toasts_visual());
         v
     }
 
@@ -640,6 +742,13 @@ impl Comp {
             dnd: self.do_not_disturb(),
             look_icon: self.look_icon(),
             pressed: self.input.sys_press.map(|(k, ..)| k).filter(|&k| self.sys_pressed(k)),
+            open: match self.flyout {
+                Some(crate::flyout::Flyout::Net) => Some(0),
+                Some(crate::flyout::Flyout::Volume) => Some(1),
+                Some(crate::flyout::Flyout::Bell) => Some(2),
+                Some(crate::flyout::Flyout::Look) => Some(3),
+                _ => None,
+            },
         };
         let t0 = self.prof.start();
         draw_bar(canvas, &mut self.style, bar, &info);
@@ -647,10 +756,14 @@ impl Comp {
         self.draw_dev_chip(canvas, bar);
         self.prof.add(Part::Bar, t0);
         if !dialog_active {
-            self.draw_flyout(canvas);
+            self.draw_flyout(canvas, self.input_now);
             self.draw_max_menu(canvas);
             self.draw_palette(canvas);
         }
+        // Oznameni (vrstva `notification` nad panely, pod systemovym dialogem).
+        let t0 = self.prof.start();
+        self.draw_toasts(canvas);
+        self.prof.add(Part::Bar, t0);
         if dialog_active {
             // Ztlumeni vseho pod dialogem (jen system kresli nad nim).
             let t0 = self.prof.start();
@@ -695,9 +808,11 @@ fn frame_width(t: &theme::Theme) -> u32 {
     if t.mode == theme::Mode::Contrast { 2 } else { 1 }
 }
 
-/// Jmeno v odznaku: u systemove aplikace "Systém".
+/// Jmeno v odznaku: jmeno aplikace z manifestu (preda ho init, ne
+/// aplikace). Systemovou aplikaci oznaci stit s fajfkou (okna.html,
+/// soubory.html), ne slovo "Systém" (O15).
 fn badge_name(cl: &Client) -> &str {
-    if cl.info.system { "Systém" } else { &cl.info.name }
+    &cl.info.name
 }
 
 /// Ikona opravneni v odznaku (`size.icon_xs`).
@@ -1046,6 +1161,9 @@ struct BarInfo<'a> {
     look_icon: &'static str,
     /// Drzeny prvek listy (stav "stisknuto", akce az pri pusteni).
     pressed: Option<crate::input::SysKey>,
+    /// Ikona stavove oblasti s otevrenym panelem (0 sit, 1 zvuk, 2
+    /// oznameni, 3 vzhled).
+    open: Option<u8>,
 }
 
 fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
@@ -1177,6 +1295,12 @@ fn draw_bar(c: &mut Canvas<'_>, st: &mut Style, bar: &Bar, info: &BarInfo<'_>) {
     ];
     for (k, (r, name, off)) in icons.into_iter().enumerate() {
         let Some(r) = r else { continue };
+        if info.open == Some(k as u8) {
+            // Otevreny panel: `surface_3` a podtrzeni `accent` (k cemu panel patri).
+            c.round_fill(r, ctl, col.surface_3);
+            let lh = t.size.focus_ring;
+            c.fill(Rect::new(r.x + ctl as i32 / 2, r.bottom() as i32 - lh as i32, r.w.saturating_sub(ctl), lh), col.accent);
+        }
         state_bg(c, r, crate::input::SysKey::BarIcon(k as u8), false);
         let recording = k == 1 && !info.status.capturing.is_empty();
         let ink = if off {

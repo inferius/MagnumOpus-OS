@@ -125,6 +125,9 @@ into the buffer and one wait per period, no message per block of data.
 | `STATUS`, `STREAM_INFO` | device and service state, stream state |
 | `CONNECT` | new channel to the service |
 | `DEVICES`, `SELECT` | list of sound cards, switching (streams keep playing on the new one) |
+| `APPS`, `APP_VOLUME` | applications with streams by the manifest identity (streams of one application from several processes, e.g. Wine, are one entry) and their volume; the application volume multiplies the stream volume, applies to streams opened later too, does not affect recording **[verified in QEMU]** (test "aplikace podle identity") |
+| `OVERVIEW` | state, devices, applications and the recording device in one reply; the compositor asks for it instead of `STATUS` (the Sound panel in the bar) **[verified in QEMU]** |
+| `SELECT_INPUT` | the recording device (255 = automatic: the active card's input, otherwise the first with an input); while recording it applies from the next input open **[verified in QEMU]** |
 
 Volume 50 % is about -18 dB, 10 % -60 dB (a cubic curve follows perceived
 loudness better than a linear one).
@@ -283,7 +286,7 @@ before.
 
 | An application session may | Not |
 |---|---|
-| `OPEN`, `START`, `STOP`, `CLOSE`, `DRAIN` of its own streams, `STREAM_VOLUME`, `STREAM_INFO`, `STATUS`, `DEVICES` | `MASTER_VOLUME`, `MUTE`, `SELECT`, `CONNECT` (`ACCESS_DENIED`; they change the sound of the whole system and belong to the bar and settings) |
+| `OPEN`, `START`, `STOP`, `CLOSE`, `DRAIN` of its own streams, `STREAM_VOLUME`, `STREAM_INFO`, `STATUS`, `DEVICES` | `MASTER_VOLUME`, `MUTE`, `SELECT`, `CONNECT`, `APPS`, `APP_VOLUME`, `OVERVIEW`, `SELECT_INPUT` (`ACCESS_DENIED`; they change the sound of the whole system or show other applications, they belong to the bar and settings) |
 
 **Capture** (`OPEN` of input):
 
@@ -305,6 +308,49 @@ before.
 While recording, the bar shows a **microphone in the danger colour**
 instead of the volume icon; the tooltip lists the recording applications
 (`STATUS` field `capturing`). The user always sees that recording is on.
+
+### Sound session for children (role `Audio`)
+
+**[verified in QEMU]** x86_64 and aarch64 (suite `sdl`, tests `role Audio: ...`,
+program `user/gui-probe`). An application that starts more processes with
+sound (Wine: `wine` -> `notepad`, a game from `cmd`) passes them a sound
+session with the **same identity**, like the window session
+([role `Gui`](gui.md#window-session-for-child-processes-the-gui-role)):
+
+- launchd knows the roles `Audio` and `AudioLease` (`launchproto`); the
+  child gets the session and the lease tagged `abi::params::tag::AUDIO`
+  and `AUDIO_LEASE` (the same as an application from init). The runtime
+  (`osrt::audio`) hands them to the sound library (`take_client_raw`):
+  the library uses the lease to recover after an `audiod` restart and
+  gives the runtime a hook for sessions of further children.
+- A child session comes from `NARROW` with an empty narrowing (the
+  `audiod` adapter in init refuses any other): the **same recipe**, so the
+  same identity and capture rules. The lease is bound to the parent one,
+  with the same live and rate limit as `ADOPT`.
+- **Capture is never automatic from the manifest:** even with the role
+  only `Capture::Ask` (the microphone Permission dialog, a stored
+  decision) or `Capture::No` applies; narrowing widens nothing. While
+  recording, the bar shows the microphone (indicator above).
+- **Opt-out:** the runtime sets `MO_AUDIO=1` at start; a child without
+  `MO_AUDIO` in its environment gets no session.
+- **Revocation:** `audio::revoke(id)` in init cancels the identity's leases
+  at `audiod` and the leases derived from them, and `audiod` (message
+  `revoke` on the control channel) closes all sessions of the identity:
+  streams go silent at once, recovery through a lease is refused.
+- **Limits per identity:** sessions (`MAX_IDENTITY_SESSIONS` 64) and
+  streams (`MAX_IDENTITY_STREAMS` 32) are summed over all sessions of the
+  same identity (`user/audiod/src/perm.rs`), processes cannot bypass them.
+- A session without a lease (tests) also goes to the library, but without
+  recovery and without sessions for children.
+
+**Shared core `moaudio`** (`libs/mowin/src/os/audio.rs`, header
+`include/moaudio.h`, part of `libc.a`): streams over the session from the
+runtime. `mosdl_audio_*` (SDL) are only wrappers over it and the Wine sound
+driver (`winemoaudio.drv`, [Windows layer](windows-layer.md#sound-clipboard-and-window-recovery-w4))
+calls `moaudio_*`. Writing and waiting for space run without the library
+lock; `moaudio_put` writes only what fits, without waiting and without a
+service call (for callers that write under their own lock and start the
+stream outside it).
 
 ## The `audiod` service
 

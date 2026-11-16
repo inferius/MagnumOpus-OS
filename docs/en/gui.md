@@ -694,9 +694,10 @@ the screen size and the `FULLSCREEN` flag and needs to support nothing.
 - **Do not disturb:** turned on automatically in fullscreen (approved by
   the user); the bell in the bar is crossed out and its panel says so.
   Turned off by the compositor command `dnd-fullscreen off`.
-  **[implemented]** There is no notification system yet: silently queuing
-  notifications and showing them on return, the exceptions (calls,
-  battery, security) and a config key in Settings **[designed]**.
+  **[implemented]** In full screen the compositor does not pop up
+  notifications (they go to the centre), except the `Urgent` priority
+  ([Notifications](notifications.md#limits-and-do-not-disturb))
+  **[implemented]**; a config key in Settings **[designed]**.
 
 ### Cursor and pointer lock
 
@@ -895,11 +896,17 @@ grid button in the bar or the Super key alone (press and release without
 another key, local physical keyboard only) opens it. It sits at the left
 above the bar, width token `size.launcher_w` (300). An empty query shows
 the sections Running (started apps, window count on the right),
-Applications and System; the Recent group is prepared and has no source
-yet. Typing gives the same results and ranking as the palette (Ctrl+K).
-Footer: sign-in state and a power button with the menu Lock, Sign out
-(disabled with a reason for now), Restart and Shut down (system
-confirmation).
+Applications (whole, without "more...") and Recent (recently used windows
+and palette actions, not apps from the rows above); the list has no frame
+or lines (`table(..).plain()`), the search field has a magnifier. Typing
+gives the same results and ranking as the palette (Ctrl+K); with no result
+an empty state "Nic nenalezeno" (`ui::empty_state`). Footer: a circle with
+the initial and the display name of the session user, Settings (disabled,
+"Nastavení zatím nejsou") and power with the menu Lock, Sign out (disabled
+with a reason for now), Restart and Shut down (system confirmation). Above
+the launcher, the palette and a bar panel the cursor is always an arrow
+(not the edge shape of a window below). **[implemented]** (screenshots
+`spoustec-sekce-*`, `paleta-prazdna-*`, host `launcher_hides_window_edge_cursor`)
 
 - **Budget:** opening fits into one frame; the test `palette_open_budget`
   measures opening and closing with a composed frame
@@ -940,6 +947,42 @@ Hovering the tasks icon shows "Úlohy: 20 běží, z toho agent AI 1"; the
 number and the Task manager use the same `taskd` view (all tasks; the Task
 manager controls only the user's tasks: client `own`). **[implemented]**
 (tests `bar_icons_open_flyouts`, `tasks_icon_tooltip` in `libs/comp`)
+
+The Appearance, Network, Sound, Notifications and Developer mode panels
+are `ui` views over the [panel component](components.md)
+(`libs/comp/src/barpanel.rs`): width `size.panel_w`, height by content,
+centred above the icon, rounding `radius.window`, shadow
+`shadow.popover`. A click on the clock opens a panel with the month calendar (today
+highlighted, paging with arrows) and world time; `compd` computes the
+date and the times of other zones from `libs/tz` every minute
+(`Comp::set_calendar`, `libs/comp/src/calendar.rs`). The Network panel
+shows the state and the interface address from `netd`. **[implemented]**
+(host `clock_panel_calendar_and_world_time`, screenshot `panel-hodiny-*`)
+The app shortcut menu in the bar (right button, or a click with several
+windows) is a `ui` menu (`Ui::open_menu`): the application's windows
+(the active one with a check mark), New window, Pin to the bar (disabled,
+"not yet"), Close all windows. **[implemented]** (host
+`app_shortcut_menu_is_ui_menu`, screenshot `nabidka-zastupce-*.png`)
+The Sound panel: volume and mute, output and input (radio groups), a
+"Nahrává: ..." (recording) row and application volume by the manifest
+identity; data from `audiod` (`OVERVIEW`, a channel from init, the
+compositor asks for it instead of `STATUS`), changes go through the same
+channel (`MASTER_VOLUME`, `MUTE`, `SELECT`, `SELECT_INPUT`,
+`APP_VOLUME`); without the channel the controls are disabled.
+Screenshots `libs/comp/tests/shots/panel-zvuk-*.png`.
+Keys (Tab, arrows in options, Space), hover and
+accessibility are as in applications; Esc or a click outside closes the
+panel. The icon with an open panel has `surface_3` and an `accent`
+underline. Material: the blurred scene under the panel (once on opening,
+again only after damage under it) with `surface` at `opacity.bar`; if the
+computation takes longer than `COMPOSE_BUDGET`, the panel switches to a
+solid background and `compd` logs it once; high contrast is solid.
+Measured in the frame breakdown as "material panelu". The Settings
+buttons in the footer are disabled with the reason "Nastavení zatím
+nejsou" (Settings do not exist yet). The compositor command
+`panel <name>` opens a panel (tests, screenshots). **[verified in QEMU]**
+(test "panely listy nad komponentou panel", screenshots
+`target/shots/panel-*.png`; host `bar_look_card_chooses_scheme_and_reports_it`)
 
 Network icon: wired (`ethernet`); without a network card (netd reports an
 all-zero MAC, e.g. the VMware e1000 we do not support yet) a crossed
@@ -1291,6 +1334,7 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 | `sources [net] [audio]` | network session (`INFO`), audio channel | `ok` (bar state) |
 | `apps` + lines `<id>\t<name>\t<single\|multi>` | - | empty (launchable apps in the bar) |
 | `dnd-fullscreen on\|off` | - | empty (Do not disturb in fullscreen) |
+| `panel look\|net\|volume\|bell\|dev\|none` | - | empty (opens a bar panel like a click on its icon; tests and look screenshots) |
 | `launcher` | channel to init | empty (`launch <id>` requests) |
 | `snapshots` | channel to `logd` | empty (images of the [diagnostic snapshot](#diagnostic-snapshot-print-screen)) |
 
@@ -2132,11 +2176,12 @@ running" icon in the compositor panel.
 | Part | Where | What it does |
 |---|---|---|
 | protocol | `libs/taskproto` (proposal, agreed with the shell thread that builds `taskd`) | task list, change subscription with a snapshot and sequence numbers (resume after an outage), actions cancel, pause, resume, log; task registration by producers |
-| model and window | `libs/taskview` (host tests), program `gui-tasks` | list (agent tasks first), filters "agent only" and "finished", detail with progress and job usage, action buttons |
+| model and window | `libs/taskview` (host tests), program `gui-tasks` | table (Task, Started by, State, Progress, Memory; agent tasks first), filter segments All / Mine / Agent / System and "finished", pause / resume and cancel as icon buttons in the row, a detail strip at the bottom with state, CPU time and the log |
 | panel icon | `libs/comp` | "Úlohy: N", orange "Úlohy: N (agent M)" while an AI agent task runs; a click brings the task manager to the front |
 
-- **AI agent tasks** are clearly marked: a "[AGENT AI]" tag in the list,
-  an orange "Spustil agent AI (who)" label in the detail, a count in the
+- **AI agent tasks** are clearly marked: a table row with an `ai_soft`
+  background, a left stripe and an "agent" chip (`Cells::agent`, progress
+  in `ai`), a "Spustil agent AI (who)" label in the detail, a count in the
   header and an orange panel icon.
 - **Permissions:** a button is enabled only when `taskd` allowed the action
   for the caller (the task's `actions` bits) and the task state permits
@@ -2147,6 +2192,8 @@ running" icon in the compositor panel.
   events) and init sends the icon count with the control command
   `tasks <running> <agent>`. Once `taskd` exists, init gets a channel from
   it (`connect`) for the window and the compositor (read-only).
+
+![Task manager: table, agent row, detail strip](../../design/snimky/odchylky/o22-ulohy-po.png)
 
 ## 3D: Venus and virgl (status)
 

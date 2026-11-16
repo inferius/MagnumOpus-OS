@@ -36,18 +36,18 @@ pub const TESTS: &[Test] = &[
     ("odvolani: mezilehla CA v OneCRL", revoked_onecrl),
 ];
 
-struct Ports {
-    http: u16,
-    https: u16,
-    https_h1: u16,
-    untrusted: u16,
+pub(super) struct Ports {
+    pub(super) http: u16,
+    pub(super) https: u16,
+    pub(super) https_h1: u16,
+    pub(super) untrusted: u16,
     wrong_name: u16,
     revoked: u16,
     ocsp_revoked: u16,
     onecrl: u16,
 }
 
-fn ports(s: &Startup) -> Result<Option<Ports>, String> {
+pub(super) fn ports(s: &Startup) -> Result<Option<Ports>, String> {
     let fs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
     let Some(cfg) = fs.find("net-test") else {
         libos::println!("[preskoceno] web: chybi pomocne servery (jen `cargo xtask test`)");
@@ -75,14 +75,20 @@ fn ports(s: &Startup) -> Result<Option<Ports>, String> {
 
 const HOST: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 2, 2));
 
-struct Fetch {
+pub(super) struct Fetch {
     _process: Process,
-    ch: Channel,
+    pub(super) ch: Channel,
 }
 
 static FETCH: spin::Once<Result<Fetch, String>> = spin::Once::new();
 
 fn start_fetch(s: &Startup, p: &Ports) -> Result<Fetch, String> {
+    start_fetch_with(s, p, Vec::new())
+}
+
+/// fetch s relaci site jen na pomocne servery a dalsimi handly (`extra`,
+/// napr. relace FS se slozkou Stazene pro `save`).
+pub(super) fn start_fetch_with(s: &Startup, p: &Ports, extra: Vec<StartHandle>) -> Result<Fetch, String> {
     let root = super::net::net()?;
     super::net::configured(root)?;
     let fs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
@@ -102,16 +108,13 @@ fn start_fetch(s: &Startup, p: &Ports) -> Result<Fetch, String> {
     let d = devices().ok_or("zarizeni nebezi")?;
     let certs = crate::certs::session(d).map_err(|e| fail("relace uloziste", e))?;
     let revocation = crate::revocation::client().ok_or("revocd nebezi")?;
-    let app = crate::apps::spawn(
-        s,
-        "fetch",
-        vec![
-            StartHandle::user(net.into_channel().map_err(|e| fail("kanal relace", e))?.into_handle()),
-            StartHandle::user(certs.into_channel().into_handle()),
-            StartHandle::user(revocation.into_handle()),
-        ],
-    )
-    .map_err(|e| fail("spusteni fetch", e))?;
+    let mut hs = vec![
+        StartHandle::user(net.into_channel().map_err(|e| fail("kanal relace", e))?.into_handle()),
+        StartHandle::user(certs.into_channel().into_handle()),
+        StartHandle::user(revocation.into_handle()),
+    ];
+    hs.extend(extra);
+    let app = crate::apps::spawn(s, "fetch", hs).map_err(|e| fail("spusteni fetch", e))?;
     Ok(Fetch {
         _process: app.process,
         ch: app.control,
@@ -128,7 +131,7 @@ fn fetch(s: &Startup) -> Result<Option<(&'static Fetch, Ports)>, String> {
 }
 
 impl Fetch {
-    fn run(&self, cmd: &str) -> Result<String, String> {
+    pub(super) fn run(&self, cmd: &str) -> Result<String, String> {
         self.ch.write(cmd.as_bytes(), Vec::new()).map_err(|e| fail("prikaz fetch", e))?;
         // TLS v QEMU bez akcelerace (TCG): handshake trva sekundy.
         let m = self
@@ -156,7 +159,7 @@ impl Fetch {
     }
 }
 
-fn fnv(data: impl IntoIterator<Item = u8>) -> String {
+pub(super) fn fnv(data: impl IntoIterator<Item = u8>) -> String {
     let h = data
         .into_iter()
         .fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3));
@@ -164,7 +167,7 @@ fn fnv(data: impl IntoIterator<Item = u8>) -> String {
 }
 
 /// Vzor tela `/stream` (stejny jako `xtask/src/webhelper.rs`).
-fn pattern(i: usize) -> u8 {
+pub(super) fn pattern(i: usize) -> u8 {
     (i.wrapping_mul(7) ^ (i >> 9)) as u8
 }
 

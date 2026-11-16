@@ -70,8 +70,9 @@ fn inherited(fds: &[(crate::c_int, ChildIo, bool)]) -> R<Vec<rt::inherit::Export
     Ok(out)
 }
 
-/// Spusti potomka. Relaci site dostane, ma-li ji rodic (POSIX: potomek
-/// dedi prostredi rodice); co smi, urci manifest potomka v launchd.
+/// Spusti potomka. Relaci site dostane, ma-li ji rodic a prostredi potomka
+/// `MO_NET` (role Net, POSIX: potomek dedi prostredi rodice); co smi, urci
+/// manifest potomka v launchd.
 pub fn spawn_child(r: SpawnReq) -> R<Child> {
     // Predani socketu AF_UNIX s kanalem ve fronte muze narazit na BAD_STATE
     // (druha strana mezitim poslala kanal): export se zopakuje
@@ -87,7 +88,8 @@ pub fn spawn_child(r: SpawnReq) -> R<Child> {
             stdin: spec(r.io[0], Stream::In)?,
             stdout: spec(r.io[1], Stream::Out)?,
             stderr: spec(r.io[2], Stream::Err)?,
-            network: rt::net::available(),
+            // Sit podle `MO_NET` v prostredi potomka (role Net, osrt).
+            network: false,
         };
         match rt::process::spawn_with_fds(s, fds) {
             Ok((c, _)) => return Ok(Child(c)),

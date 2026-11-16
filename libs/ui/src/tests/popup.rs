@@ -232,7 +232,11 @@ fn overlay_layer_beyond_window() {
     let mut ov = vec![0u32; (r.w * r.h) as usize];
     let mut oc = gfx::Canvas::new(&mut ov, r.w, r.h, r.w).unwrap();
     u.draw_overlay(&mut oc, r);
-    assert_eq!(oc.get(r.w / 2, r.h - 6), bg, "pozadi karty");
+    // Vrstva ma okraj pro stin; karta je uvnitr.
+    let card = u.popup_rect().unwrap();
+    assert!(r.contains(card.x, card.y) && card.w < r.w, "stin kolem karty: {r:?} {card:?}");
+    let (cx, cy) = ((card.x - r.x) as u32 + card.w / 2, (card.bottom() as i32 - r.y) as u32 - 6);
+    assert_eq!(oc.get(cx, cy), bg, "pozadi karty");
     // Klik na polozku mimo okno (y > 80) ji vybere.
     let it = u.a11y().into_iter().find(|n| n.role == Role::MenuItem && n.name == "Slovenčina").unwrap().bounds;
     assert!(it.y > 80);

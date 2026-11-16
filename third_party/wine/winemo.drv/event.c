@@ -211,6 +211,9 @@ INT MO_ToUnicodeEx(UINT virt, UINT scan, const BYTE *state, LPWSTR str, int size
 {
     WCHAR c;
 
+    /* Pusteni klavesy (KF_UP v scan kodu) znak neda: PuTTY se pta i pri
+     * WM_KEYUP a znak by poslal dvakrat (jako winex11). */
+    if (scan & 0x8000) return 0;
     if (virt == VK_PACKET) return -2;
     if ((state[VK_CONTROL] & 0x80) || (state[VK_MENU] & 0x80)) return -2;
     c = key_char[(scan & 0xff) | (scan & 0x100)];
@@ -315,8 +318,20 @@ static void clipboard_to_host(void)
     struct get_clipboard_params params = { .data_only = TRUE, .size = 1024 };
     char *utf8 = NULL;
     DWORD len = 0;
+    int tries;
 
-    if (!NtUserOpenClipboard(clipboard_hwnd, 0)) return;
+    /* Schranku muze mit chvili otevrenou jine okno (aplikace po zmene):
+     * zkouset az 0,5 s. */
+    for (tries = 0; !NtUserOpenClipboard(clipboard_hwnd, 0); tries++)
+    {
+        LARGE_INTEGER delay = { .QuadPart = -10 * 10000 };
+        if (tries == 50)
+        {
+            WARN("OpenClipboard failed\n");
+            return;
+        }
+        NtDelayExecution(FALSE, &delay);
+    }
     for (;;)
     {
         if (!(params.data = malloc(params.size))) break;
@@ -370,9 +385,20 @@ LRESULT MO_ClipboardWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         NtUserAddClipboardFormatListener(hwnd);
         return TRUE;
     case WM_CLIPBOARDUPDATE:
-        if (NtUserGetClipboardOwner() == clipboard_hwnd) break;
+    {
+        HWND owner = NtUserGetClipboardOwner();
+        DWORD pid = 0;
+
+        if (owner == clipboard_hwnd) break;
+        /* Nabizi jen proces, ktery schranku zmenil (jeho okno ma fokus
+         * a gesto); okna schranky ostatnich procesu Wine (explorer) by
+         * jen soupezila o OpenClipboard a kompozitor by je odmitl. */
+        if (!owner || !NtUserGetWindowThread(owner, &pid) ||
+            pid != HandleToULong(NtCurrentTeb()->ClientId.UniqueProcess))
+            break;
         clipboard_to_host();
         break;
+    }
     case WM_RENDERFORMAT:
         render_format(wp);
         break;

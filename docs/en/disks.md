@@ -74,6 +74,7 @@ So **before serving the client** the driver examines the disk
 | MBR (no GPT), protective MBR with damaged GPT headers | whole disk | **forbidden** |
 | empty or unknown disk, read error | whole disk | **forbidden** |
 | device reports write protection (NVMe write protect, virtio `RO`) | per the table | **forbidden** |
+| in addition: a FAT, exFAT or NTFS partition (MBR, GPT, superfloppy; not the ESP, an extended partition, an overlap, a disk with our partition) | an extra `block-media` channel to only this partition for the `volfs` media process | only removable USB (RMB) without write protection and only FAT/exFAT, otherwise **forbidden** ([Removable media](media.md#when-a-medium-may-be-written)) **[verified in QEMU]** |
 
 Details:
 

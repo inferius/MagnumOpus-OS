@@ -68,6 +68,12 @@ pub struct Stack {
     /// Spojeni zavrena klientem, ktera jeste dobihaji: (socket, termin,
     /// obsazeny docasny port).
     pub closing: Vec<(SocketHandle, u64, Option<u16>)>,
+    /// Loopback (`lo.rs`): registr naslouchani a socketu UDP.
+    pub lo: crate::lo::Loopback,
+    /// Kolo zmenilo stav loopbacku: smycka udela hned dalsi kolo.
+    pub lo_dirty: bool,
+    /// Rozpocty identit aplikaci (sockety a bajty vsech relaci identity).
+    pub idents: alloc::collections::BTreeMap<alloc::string::String, alloc::rc::Weak<netproto::auth::Budget>>,
 }
 
 /// Monotonni cas v ns.
@@ -140,6 +146,9 @@ impl Stack {
             fw,
             resolver,
             closing: Vec::new(),
+            lo: crate::lo::Loopback::default(),
+            lo_dirty: false,
+            idents: alloc::collections::BTreeMap::new(),
         }
     }
 
@@ -285,17 +294,6 @@ impl Stack {
             return Err(Error::Unreachable);
         }
         self.iface.ipv4_addr().ok_or(Error::Unreachable)
-    }
-
-    /// Port pro naslouchani nebo socket UDP na mistni adrese `addr`:
-    /// `0.0.0.0` (vsechna rozhrani) nebo adresa rozhrani, jinak
-    /// `ADDRESS_NOT_AVAILABLE` (i 127.0.0.1 - loopback sluzba zatim nema).
-    pub fn bind_port(&self, addr: SocketAddr) -> Result<u16> {
-        match addr.ip() {
-            IpAddr::V4(ip) if ip.is_unspecified() => Ok(addr.port()),
-            IpAddr::V4(ip) if self.local_ip().ok() == Some(ip) => Ok(addr.port()),
-            _ => Err(Error::AddressNotAvailable),
-        }
     }
 
     /// Mistni adresa socketu na portu `port` podle aktualniho stavu

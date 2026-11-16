@@ -116,8 +116,11 @@ impl<M: Clone> Ui<M> {
         let ElemKind::Slider { value, min, max, .. } = self.elems[i].kind else { return None };
         let r = self.elems[i].rect;
         let k = self.look.theme.size.switch_knob;
-        let th = self.look.theme.space[1];
-        let track = Rect::new(r.x + k as i32 / 2, r.y + (r.h - th) as i32 / 2, r.w.saturating_sub(k), th);
+        // Draha 4 px (`.k-sl .tr`).
+        let th = self.look.theme.space[2];
+        // Okraj na zvetseny jezdec pri najeti (`s1` na kazdou stranu).
+        let m = k / 2 + self.look.theme.space[1];
+        let track = Rect::new(r.x + m as i32, r.y + (r.h - th) as i32 / 2, r.w.saturating_sub(2 * m), th);
         let span = (max - min).max(1) as i64;
         let x = track.x + ((value - min) as i64 * track.w as i64 / span) as i32;
         Some((track, Rect::new(x - k as i32 / 2, r.y + (r.h - k) as i32 / 2, k, k)))
@@ -473,11 +476,18 @@ impl<M: Clone> Ui<M> {
             }
             ElemKind::Slider { .. } => {
                 let Some((track, knob)) = self.slider_geo(i) else { return true };
-                c.round_fill(track, track.h / 2, fade(col.surface_3));
+                // Draha `surface_3` s okrajem `border`, vypln `accent`.
+                c.round_fill_bordered(track, track.h / 2, fade(col.surface_3), fade(col.border), 1);
                 let filled = Rect::new(track.x, track.y, (knob.x + knob.w as i32 / 2 - track.x).max(0) as u32, track.h);
                 c.round_fill(filled, track.h / 2, fade(col.accent));
-                let edge = if st.pressed || st.hover { col.accent } else { col.border_strong };
-                c.round_fill_bordered(knob, knob.w / 2, col.surface, fade(edge), 2);
+                // Jezdec: `surface` s okrajem `accent` 2 px; najeti a stisk
+                // ho zvetsi (o `s1` na kazdou stranu), stisk podklad
+                // `accent_soft` (`.k-sl:active .kn`).
+                let grow = if !st.disabled && (st.pressed || st.hover) { sp[1] as i32 } else { 0 };
+                let kn = Rect::new(knob.x - grow, knob.y - grow, knob.w + 2 * grow as u32, knob.h + 2 * grow as u32);
+                let bg = if st.pressed && !st.disabled { col.accent_soft } else { col.surface };
+                c.round_fill_bordered(kn, kn.w / 2, bg, fade(col.accent), 2);
+                let knob = kn;
                 if st.focus_visible {
                     crate::draw::focus_ring(c, knob, knob.w / 2, ring, off, col.focus);
                 }
@@ -508,19 +518,24 @@ impl<M: Clone> Ui<M> {
                 let strong = theme::TextStyle { weight: th.text.body_strong.weight, ..body };
                 let (px, py) = self.to_space(i, self.pointer.0, self.pointer.1);
                 let rad = th.radius.control;
+                // Cara pod radou zalozek (`.k-tabs`), vybrana podtrzena
+                // `accent` (`.k-tab[aria-selected]::after`, 3 px).
+                c.fill(Rect::new(r.x, r.bottom() as i32 - 1, r.w, 1), col.border);
                 for (k, p) in parts.iter().enumerate() {
                     let on = k == selected;
-                    if on {
-                        c.round_fill(*p, rad, col.surface_2);
-                        c.fill(Rect::new(p.x, p.bottom() as i32 - rad as i32, p.w, rad), col.surface_2);
-                    } else if st.hover && p.contains(px, py) {
+                    if !on && st.hover && p.contains(px, py) {
                         c.round_fill(*p, rad, col.surface_3);
+                    }
+                    if on {
+                        let lh = th.size.bar_indicator_h;
+                        let inset = sp[3] as i32;
+                        c.round_fill(Rect::new(p.x + inset, p.bottom() as i32 - lh as i32, p.w.saturating_sub(2 * sp[3]), lh), lh, fade(col.accent));
                     }
                     let s = if on { strong } else { body };
                     let room = p.w.saturating_sub(2 * sp[4] + if closable { th.size.icon_xs + sp[2] } else { 0 });
                     let f = self.look.face(s);
                     let b = p.y + f.baseline_in(s.size, p.h);
-                    f.draw_ellipsized(c, p.x + sp[4] as i32, b, &labels[k], s.size, fade(if on { col.ink } else { col.ink_muted }), room);
+                    f.draw_ellipsized(c, p.x + sp[4] as i32, b, &labels[k], s.size, fade(if on { col.accent_ink } else { col.ink_muted }), room);
                     if let Some(x) = self.tab_close(i, k) {
                         self.icons.draw(c, "close", x.x, x.y, x.w, th.icon_stroke, col.ink_muted);
                     }

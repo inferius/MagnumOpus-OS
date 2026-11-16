@@ -81,6 +81,8 @@ pub struct Devices {
     /// a nasich oddilu - kontroluje ovladac) a model disku. Preda je jen
     /// instalatoru (`installd`).
     pub raw: spin::Mutex<Vec<(Channel, String)>>,
+    /// Kopie initfs: spousteni procesu media za behu (`removable.rs`).
+    pub initfs: Option<libos::Vmo>,
 }
 
 /// Kanal k ovladaci z manifestu.
@@ -144,6 +146,12 @@ pub fn devmgr_message(d: &Devices, m: libos::Message) -> usize {
             println!("init: disk pripojeny za behu zatim nepouzivam");
             0
         }
+        x if x.starts_with(b"block-media") => {
+            crate::removable::offer(Some(d), x, m.handles);
+            0
+        }
+        // Raw kanal disku pripojeneho za behu: instalator ho za behu nebere.
+        x if x.starts_with(b"block-raw") || x == b"block-logy" => 0,
         // Zvukova karta pripojena nebo jeji ovladac restartovany (devmgr).
         b"audio" => {
             let n = m.handles.len();
@@ -233,6 +241,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
                     stick = blocks.len().checked_sub(1);
                 }
             }
+            d if d.starts_with(b"block-media") => crate::removable::offer(None, d, msg.handles),
             d if d.starts_with(b"block-raw") => {
                 if let Some(h) = msg.handles.into_iter().next() {
                     let model = core::str::from_utf8(&d[9..]).unwrap_or("").trim();
@@ -274,6 +283,7 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
         logy,
         stick,
         raw,
+        initfs: crate::removable::initfs_vmo(startup),
     })
 }
 
@@ -439,7 +449,8 @@ fn time_started() -> Result<()> {
 /// jen uzsi relace (`Net::restrict`).
 pub struct NetService {
     pub process: Process,
-    pub _control: Channel,
+    /// Ridici kanal netd (`revoke\0<identita>`, [`revoke_net`]).
+    pub control: Channel,
     pub root: Net,
     /// Sluzba firewallu (proces, bootstrap kanal); `None` = nebezi.
     pub fwd: Option<(Process, Channel)>,
@@ -495,12 +506,27 @@ pub fn start_net(startup: &Startup, devices: &mut Devices, sup: &mut crate::supe
     };
     Ok(NetService {
         process,
-        _control: control,
+        control,
         root: Net::new(root),
         fwd,
         agent,
         dnsd_end: Some(dns_dnsd),
     })
+}
+
+/// Odvola sit aplikaci `app` (id z manifestu): netd zavre vsechny jeji
+/// relace a sockety (i predane jinym procesum). Vraci pocet zavrenych
+/// kanalu.
+pub fn revoke_net(app: &str) -> Result<usize> {
+    let net = NET.get().ok_or(Error::ServiceUnavailable)?;
+    while net.control.try_read().is_ok() {}
+    let mut m = Vec::from(&b"revoke\0"[..]);
+    m.extend_from_slice(app.as_bytes());
+    net.control.write(&m, Vec::new())?;
+    let r = net.control.read(Some(time::deadline_after(Duration::from_secs(5))))?;
+    let n = core::str::from_utf8(&r.data).ok().and_then(|t| t.strip_prefix("revoked ")).and_then(|t| t.parse().ok()).ok_or(Error::Corrupted)?;
+    println!("init: sit aplikace {app} odvolana ({n} kanalu)");
+    Ok(n)
 }
 
 /// Prida uctu `who` pravo pruchodu adresarem (ostatni granty zustanou).

@@ -17,3 +17,5 @@ fsproto = { path = "../../libs/fsproto" }
 tls = { path = "../../libs/tls", features = ["libos"] }
 httpc = { path = "../../libs/httpc" }
 web = { path = "../../libs/web" }
+taskproto = { path = "../../libs/taskproto" }
+notifyproto = { path = "../../libs/notifyproto" }

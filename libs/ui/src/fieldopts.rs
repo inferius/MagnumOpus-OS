@@ -31,6 +31,19 @@ impl Default for NumberSpec {
     }
 }
 
+/// Koncovy slot pole (vpravo, pred tlacitky pole), protejsek lupy na
+/// zacatku hledani: napoveda klavesy, ikona nebo kratky text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Trailing {
+    /// Stitek klavesy (`.kbd`, napr. "Super" ve spousteci). Jen u prazdneho
+    /// pole: s textem jeho misto prevezme krizek hledani.
+    Key(String),
+    /// Ikona (`ink_muted`), napr. stav overeni.
+    Icon(&'static str),
+    /// Kratky text `ink_muted` (napr. "12 výsledků").
+    Text(String),
+}
+
 /// Volby pole (spolecne pro jedno- i viceradkove, heslo, cislo, hledani).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FieldOpts {
@@ -39,6 +52,8 @@ pub struct FieldOpts {
     /// Nejvic grafemu (vlozeni se zkrati, psani navic se ignoruje).
     pub max_len: Option<usize>,
     pub kind: FieldKind,
+    /// Koncovy slot (jen jednoradkove pole).
+    pub trailing: Option<Trailing>,
 }
 
 impl NumberSpec {

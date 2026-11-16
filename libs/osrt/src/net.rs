@@ -9,6 +9,12 @@
 //! kazdy kanal zamyka: soubezne volani z vic vlaken na stejnem objektu
 //! cekaji za sebou (cteni blokovane na data zdrzi zapis na stejnem
 //! spojeni). Viz docs/cs/rust-std.md, kapitola Sit.
+//!
+//! Role `Net` pro potomky (jako `MO_GUI`, `MO_AUDIO`): runtime pri startu
+//! s relaci nastavi `MO_NET=1`; potomek s neprazdnym `MO_NET` v prostredi
+//! dostane vlastni zuzenou relaci se stejnou identitou a pravidly
+//! ([`child_channel`]), bez promenne zadnou. Odvolani site identite zavre
+//! relace rodice i potomku (netd podle identity).
 
 use alloc::vec::Vec;
 use core::net::{IpAddr, SocketAddr};
@@ -16,7 +22,7 @@ use core::time::Duration;
 
 use libos::Channel;
 use libos::sync::Mutex;
-use netproto::Net;
+use netproto::{Net, Policy, Quota, Restriction, rights};
 use netproto::io::{Read as _, Write as _};
 
 use crate::start::Init;
@@ -31,7 +37,32 @@ pub(crate) unsafe fn init(channel: Option<Channel>) {
     if let Some(c) = channel {
         // SAFETY: predano volajicim.
         unsafe { SESSION.set(Mutex::new(Net::new(c))) };
+        if crate::env::var(ENV).is_none_or(|v| v.is_empty()) {
+            let _ = crate::env::set_var(ENV, b"1");
+        }
     }
+}
+
+/// Promenna prostredi: neprazdna = potomek dostane relaci site.
+pub const ENV: &[u8] = b"MO_NET";
+
+/// Ma potomek s prostredim `env` (`JMENO=HODNOTA`) dostat relaci site?
+pub fn wanted(env: &[Vec<u8>]) -> bool {
+    available() && env.iter().any(|e| e.len() > ENV.len() + 1 && e.starts_with(ENV) && e[ENV.len()] == b'=')
+}
+
+/// Relace pro potomka: `RESTRICT` bez nove identity (stejna identita,
+/// prava a pravidla jako rodic; nikdy sirsi), vlastni kanal.
+pub fn child_channel() -> Result<Channel> {
+    let net = session()?.lock().clone();
+    let r = Restriction {
+        rights: rights::ALL,
+        policy: Policy::unrestricted(),
+        app: alloc::string::String::new(),
+        flags: 0,
+        quota: Quota::UNLIMITED,
+    };
+    net.restrict_with(&r)?.into_channel()
 }
 
 fn session() -> Result<&'static Mutex<Net>> {

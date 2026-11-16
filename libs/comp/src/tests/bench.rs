@@ -90,7 +90,7 @@ fn bench_theme_fade() {
         t.window(c, Mode::Standard, RED);
     }
     let mut px = vec![0u32; (w * h) as usize];
-    let mut tick = |t: &mut T, px: &mut [u32]| {
+    let tick = |t: &mut T, px: &mut [u32]| {
         let mut c = Canvas::new(px, w, h, w).unwrap();
         t.now += 16_000_000;
         let r = t.c.tick(t.now, &mut c);

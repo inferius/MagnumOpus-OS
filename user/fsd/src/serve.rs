@@ -109,6 +109,8 @@ pub struct Service {
     pub lock_pids: BTreeMap<u64, u32>,
     /// Objekty pameti souboru pro `mmap` (`filevmo.rs`); pamet je v rozpoctu fsd.
     pub vmos: crate::filevmo::FileVmos,
+    /// Vymenna media v `/media` (`serve_media.rs`, procesy media).
+    pub media: crate::serve_media::Media,
     /// Posluchaci uzlu socketu `AF_UNIX` (`serve_sock.rs`), jen v pameti.
     pub listeners: crate::serve_sock::Listeners,
     /// Handly prave zpracovavaneho pozadavku (bere si je operace, ktera je
@@ -172,6 +174,12 @@ impl Service {
         if opcode == op::COMMIT {
             self.commit_requested = true;
         }
+        // Media: cesty v /media a handly media (pred vsim, co cesty mapuje).
+        let mut hs = core::mem::take(&mut self.in_handles);
+        if let Some(res) = self.handle_media(sess, opcode, msg, &mut hs) {
+            return res;
+        }
+        self.in_handles = hs;
         if let Some(res) = self.handle_links(sess, opcode, &mut r) {
             return res;
         }

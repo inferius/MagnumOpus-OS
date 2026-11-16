@@ -508,3 +508,61 @@ fn compose_preedit_in_field() {
     a.ev(InputEvent::Focus(false), 0, None);
     assert!(a.ui.composing.is_none());
 }
+
+/// Koncovy slot pole: napoveda klavesy u prazdneho pole zuzi plochu textu
+/// a nakresli stitek; s textem ji nahradi krizek hledani. Ikona a text
+/// zustavaji vzdy.
+#[test]
+fn trailing_slot_key_icon_text() {
+    use crate::fieldopts::Trailing;
+    let inner_w = |value: &str, t: Option<Trailing>| {
+        let mut u: Ui<M> = Ui::new(crate::Look::ui_fonts(), 320, 80);
+        let f = search_input(value);
+        let f = match t {
+            Some(t) => f.trailing(t),
+            None => f,
+        };
+        u.rebuild(String::new(), column([f]));
+        let i = u.elems.iter().position(|e| matches!(e.kind, crate::layout::ElemKind::TextInput { .. })).unwrap();
+        (u.field_inner(i).w, u.trailing_w(i), u)
+    };
+    let (plain, _, _) = inner_w("", None);
+    let (key, kw, mut u) = inner_w("", Some(Trailing::Key(String::from("Super"))));
+    assert!(kw > 0 && key + kw <= plain, "stitek zabira misto: {plain} {key} {kw}");
+    // Stitek je nakresleny (okraj `border_strong` vpravo v poli).
+    let (w, h) = (320u32, 80u32);
+    let mut px = alloc::vec![0u32; (w * h) as usize];
+    let mut c = gfx::Canvas::new(&mut px, w, h, w).unwrap();
+    u.draw(&mut c, 0);
+    let edge = u.look.theme.color.border_strong;
+    let b = u.elems.iter().find(|e| matches!(e.kind, crate::layout::ElemKind::TextInput { .. })).unwrap().rect;
+    let mid = (b.y + b.h as i32 / 2) as u32;
+    let right = (b.right() as u32 - kw - 2 * u.look.theme.space[3])..(b.right() as u32 - 2);
+    assert!(right.clone().any(|x| px[(mid * w + x) as usize] == edge), "stitek klavesy nakresleny");
+    // S textem: napoveda zmizi, misto ma krizek.
+    let (_, kw2, _) = inner_w("abc", Some(Trailing::Key(String::from("Super"))));
+    assert_eq!(kw2, 0);
+    // Ikona a text i s textem.
+    assert!(inner_w("abc", Some(Trailing::Icon("check"))).1 > 0);
+    assert!(inner_w("abc", Some(Trailing::Text(String::from("3 výsledky")))).1 > 0);
+}
+
+/// Dlouhy text v uzkem poli bez fokusu (jen pro cteni) zacina od zacatku,
+/// ne od konce (O23); s fokusem a kurzorem na konci se posune ke kurzoru.
+#[test]
+fn unfocused_long_field_shows_start() {
+    let long = "Jen pro čtení: jde vybrat a kopírovat, text je delší než pole";
+    let mut u: Ui<M> = Ui::new(crate::Look::ui_fonts(), 160, 60);
+    // Prvni pole dostane vychozi fokus, pole jen pro cteni je druhe.
+    u.rebuild(String::new(), column([text_input("").key("prvni"), text_input(long).read_only().key("cteni")]));
+    let i = u.elems.iter().rposition(|e| matches!(e.kind, crate::layout::ElemKind::TextInput { .. })).unwrap();
+    assert_ne!(u.focus, Some(i));
+    let key = u.elems[i].key;
+    assert_eq!(u.tscroll.get(&key).copied().unwrap_or((0, 0)), (0, 0), "bez fokusu od zacatku");
+    // Fokus a konec textu: posun ke kurzoru.
+    u.focus = Some(i);
+    for action in [1, 0] {
+        u.event_at(InputEvent::Key { code: KEY_END, action, ch: None }, 0, None);
+    }
+    assert!(u.tscroll.get(&key).is_some_and(|s| s.0 > 0), "s fokusem ke kurzoru");
+}

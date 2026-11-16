@@ -177,22 +177,29 @@ hlavičky `cstd-core` přes `#include_next`; `errno.h` je jen v `cstd`.
 
 | Hlavička | Funkce | Poznámka |
 |---|---|---|
-| `sys/socket.h` | `socket` (`AF_INET`, `AF_INET6`; `SOCK_STREAM`, `SOCK_DGRAM`, `SOCK_NONBLOCK`, `SOCK_CLOEXEC`), `bind`, `listen`, `accept`, `accept4`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg` (řídicí zprávy jen `SCM_RIGHTS` na `AF_UNIX`), `socketpair`, `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt` | `AF_UNIX` jen `SOCK_STREAM` (viz [Sockety AF_UNIX](#sockety-af_unix)); `MSG_PEEK` = `ENOTSUP` |
+| `sys/socket.h` | `socket` (`AF_INET`, `AF_INET6`; `SOCK_STREAM`, `SOCK_DGRAM`, `SOCK_NONBLOCK`, `SOCK_CLOEXEC`), `bind`, `listen`, `accept`, `accept4`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg` (řídicí zprávy jen `SCM_RIGHTS` na `AF_UNIX`), `socketpair`, `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt` | `AF_UNIX` jen `SOCK_STREAM` (viz [Sockety AF_UNIX](#sockety-af_unix)); `MSG_PEEK` jen u spojení TCP (data zůstanou u netd), jinde `ENOTSUP` |
 | `netinet/in.h`, `arpa/inet.h` | `htons` ..., `inet_pton`, `inet_ntop`, `inet_addr`, `inet_ntoa`, `in6addr_any` | |
 | `netdb.h` | `getaddrinfo`, `freeaddrinfo`, `gai_strerror`, `getnameinfo` | jména přes resolver netd; `getnameinfo` jen číselně |
 | `poll.h`, `sys/select.h`, `sys/epoll.h` | `poll`, `select`, `epoll_create`, `epoll_create1`, `epoll_ctl`, `epoll_wait` | nad `osrt::poll` |
 
 - Socket je objekt v tabulce fd (`osrt::sock`): po `socket()` ještě nemá
   spojení u netd, `connect`/`listen`/`bind` ho převedou na spojení TCP,
-  naslouchání nebo socket UDP. `read`, `write`, `fdopen` a `close` fungují
+  naslouchání nebo socket UDP. `bind` TCP obsadí port u netd hned
+  ([navázaný socket](sit.md#navázaný-socket-tcp)): `getsockname` po `bind`
+  na port 0 zná port, obsazený port = `EADDRINUSE` z `bind` a `connect`
+  po `bind` jde z navázaného portu. `read`, `write`, `fdopen` a `close` fungují
   i nad socketem.
 - Co program smí (cíle, porty, naslouchání), určuje relace sítě
   z manifestu: zakázaný cíl nebo port = `EACCES`. `SO_REUSEADDR`,
   `SO_KEEPALIVE`, `TCP_NODELAY` a velikosti bufferů se přijmou bez účinku,
   `SO_RCVTIMEO`/`SO_SNDTIMEO` platí.
 - `O_NONBLOCK` (`SOCK_NONBLOCK`, `MSG_DONTWAIT`) = termín `TRY` u netd,
-  bez dat `EAGAIN`. `connect` se dokončí hned i v neblokujícím režimu
-  (POSIX to dovoluje), `SO_ERROR` je proto vždy 0.
+  bez dat `EAGAIN`. Neblokující `connect` TCP vrací jako Linux
+  `EINPROGRESS` (i na loopbacku) a dokončení ohlásí `POLLOUT`; netd ale
+  spojení naváže už během volání (čeká se na něj jako u blokujícího),
+  `SO_ERROR` je proto vždy 0 a odmítnuté spojení je chyba hned. Bez
+  `EINPROGRESS` by wineserver socket k čekání vůbec nepřihlásil (spojení
+  hotové hned u něj nevyvolá `FD_CONNECT` ani čekání na data).
 - **Čekání** (`osrt::poll`): soubory jsou vždy připravené, stdin a roury
   čekají na signál kanálu (`READABLE`, `PEER_CLOSED`), sockety na událost
   připravenosti netd (netproto v2). Kanál nemá signál „lze zapisovat“,
@@ -849,7 +856,8 @@ potomka (`osrt::inherit`) je vloží do tabulky fd ještě před `main`:
 | paměťový fd (`memfd_create`) | duplikát objektu paměti, pečetě, kopie pozice |
 | `/dev/null`, stdio rodiče bez kanálu | prázdný fd bez handlu (čtení = konec, zápis se zahodí) |
 | soubor, adresář | trvalá identita objektu (dataset, oid, generace); potomek ho otevře ve své relaci FS operací `REOPEN` - fsd znovu ověří práva a připojené cesty relace |
-| socket, `epoll` | **nedědí se** (spojení s netd patří relaci rodiče); zděděné číslo se přeskočí, `adddup2` socketu = `ENOTSUP` |
+| socket TCP/UDP | nový kanál ke stejnému socketu u netd (`DUP`, [Síť](sit.md#protokol-netproto)); socket dál patří identitě, která ho vytvořila (limity, odvolání sítě ho zavře i u potomka). Stejně v `SCM_RIGHTS` přes `AF_UNIX`. Socket bez spojení (po `socket()`/`bind`) jen druh a adresa **[ověřeno v QEMU]** x86_64 i aarch64 (`ctest net`, krok `share`) |
+| `epoll` | **nedědí se**; zděděné číslo se přeskočí |
 
 Rozdíly proti POSIX (výslovně): pozice souboru se mezi rodičem a potomkem
 **nesdílí** - potomek začíná na pozici rodiče a dál má vlastní (sdílený

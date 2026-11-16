@@ -8,6 +8,11 @@
  *   wine wintest.exe sekce              (W2: sdilena sekce nad souborem
  *                                        mezi procesy, koherence s I/O)
  *   wine wintest.exe gdi | ramy         (W3: okna, gui.c)
+ *   wine wintest.exe obnova             (W4: obnova oken po padu
+ *                                        kompozitoru, gui.c)
+ *   wine wintest.exe ton <soubor.wav>   (W4: zvuk, audio.c)
+ *   wine wintest.exe tcp <ip> <port>    (W4b: Winsock, net.c)
+ *   wine wintest.exe listen <ip>        (W4b: naslouchani, net.c)
  *
  * Kontroly: printf, argv, prostredi (getenv i GetEnvironmentVariableA),
  * soubory (fopen/fprintf/fgets v textovem rezimu, atributy, smazani),
@@ -28,6 +33,14 @@ static volatile LONG marker = 0x1234;
 int gui_gdi(void);
 int gui_frames(void);
 int gui_keys(void);
+int gui_recover(void);
+
+/* audio.c (W4) */
+int audio_tone(const char *path);
+
+/* net.c (W4b) */
+int net_tcp(const char *ip, const char *port);
+int net_listen(const char *ip);
 
 static int child(void)
 {
@@ -203,6 +216,10 @@ int main(int argc, char **argv)
     if (argc >= 2 && !strcmp(argv[1], "gdi")) return gui_gdi();
     if (argc >= 2 && !strcmp(argv[1], "ramy")) return gui_frames();
     if (argc >= 2 && !strcmp(argv[1], "klavesy")) return gui_keys();
+    if (argc >= 2 && !strcmp(argv[1], "obnova")) return gui_recover();
+    if (argc >= 3 && !strcmp(argv[1], "ton")) return audio_tone(argv[2]);
+    if (argc >= 4 && !strcmp(argv[1], "tcp")) return net_tcp(argv[2], argv[3]);
+    if (argc >= 3 && !strcmp(argv[1], "listen")) return net_listen(argv[2]);
 
     printf("wintest: start\n");
 

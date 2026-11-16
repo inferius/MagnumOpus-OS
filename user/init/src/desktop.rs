@@ -47,6 +47,7 @@ fn opened(startup: &Startup, sup: &mut Supervisor, session: u64) {
     crate::appearance::send_user(uid);
     // Kompozitor skryje prihlasovaci obrazovku.
     crate::gui::session_event(&format!("open {session} {uid} {who}"));
+    crate::gui::session_notify(uid);
     let mut g = GUI.lock();
     let Some(gui) = g.as_mut() else {
         println!("init: relace {session} bez GUI (plocha se nespousti)");
@@ -72,6 +73,7 @@ fn closed(session: u64) {
     }
     crate::terminal::TERMINALS.lock().close_session(session);
     crate::files::close(session);
+    crate::downloads::close(session);
     crate::open::close_session(session);
     crate::exec::close_session(session);
     println!("init: procesy relace {session} ukonceny");

@@ -11,11 +11,19 @@
  *                           kresli system) a okno, ktere si neklientskou
  *                           oblast zrusi (WM_NCCALCSIZE: klient = cele
  *                           okno), cele kreslene aplikaci (bez ramu)
+ *   wine wintest.exe obnova okno vlastnika (bile, cerveny ctverec), jim
+ *                           vlastneny dialog (modry) a popup dialogu
+ *                           (zeleny, bez aktivace); kazde WM_PAINT vypise
+ *                           "paint <jmeno>" (W4: obnova po padu
+ *                           kompozitoru, test overi prekresleni po EXPOSE),
+ *                           poloha popupu proti klientske oblasti
+ *                           dialogu "popup <dx> <dy>"
  *
  * Program vypise radek na stdout, kdyz ma vse nakreslene, a skonci po
  * zavreni oken nebo nejpozdeji za 120 s. */
 
 #include <stdio.h>
+#include <string.h>
 #include <windows.h>
 
 /* Barvy obdelniku (test je cte v kompozitoru jako 0xFFRRGGBB). */
@@ -164,6 +172,110 @@ int gui_keys(void)
     expected = 1;
     done_line = "wintest klavesy: nakresleno";
     if (!make_window(L"wintest-klavesy", keys_proc, L"wintest klavesy", 320, 200)) return 1;
+    return run_loop();
+}
+
+/* Rezim "obnova" (W4). */
+static HWND owner_wnd;
+
+/* Vlastneny dialog a jeho popup az po prvnim snimku vlastnika (casovac):
+ * popup okna, ktere jeste nema snimek, ovladac odmitne. Popup patri
+ * dialogu: kompozitor kresli popovery jen okna s fokusem (nabidky aktivniho
+ * okna) a fokus ma dialog. */
+static HWND dialog_wnd;
+
+static void create_dialog(void)
+{
+    RECT rc = { 0, 0, 160, 100 };
+    HINSTANCE inst = GetModuleHandleW(NULL);
+
+    /* Vlastneny dialog (s titulkem = okno kompozitoru, WINDOW_OWNER). */
+    AdjustWindowRect(&rc, WS_CAPTION | WS_SYSMENU, FALSE);
+    dialog_wnd = CreateWindowW(L"wintest-obnova", L"obnova-dialog", WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT,
+                               CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, owner_wnd, NULL, inst, NULL);
+    if (!dialog_wnd) PostQuitMessage(1);
+    ShowWindow(dialog_wnd, SW_SHOW);
+    UpdateWindow(dialog_wnd);
+}
+
+static void create_popup(void)
+{
+    POINT pt = { 10, 60 }, o = { 0, 0 };
+    RECT pr;
+    HWND pop, dlg = dialog_wnd;
+    HINSTANCE inst = GetModuleHandleW(NULL);
+
+    /* Popup dialogu (bez titulku, bez aktivace = popup mowin) dole
+     * v klientske oblasti dialogu. */
+    ClientToScreen(dlg, &pt);
+    pop = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"wintest-obnova", L"obnova-popup", WS_POPUP,
+                          pt.x, pt.y, 80, 30, dlg, NULL, inst, NULL);
+    if (!pop) PostQuitMessage(1);
+    ShowWindow(pop, SW_SHOWNOACTIVATE);
+    UpdateWindow(pop);
+    /* Posun popupu proti obsahu dialogu (jen do hlaseni testu). */
+    GetWindowRect(pop, &pr);
+    ClientToScreen(dlg, &o);
+    printf("popup %ld %ld\n", (long)(pr.left - o.x), (long)(pr.top - o.y));
+    fflush(stdout);
+}
+
+static LRESULT CALLBACK recover_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    PAINTSTRUCT ps;
+    RECT rc;
+    HDC dc;
+    char name[32];
+
+    switch (msg)
+    {
+    case WM_PAINT:
+        dc = BeginPaint(hwnd, &ps);
+        GetClientRect(hwnd, &rc);
+        GetWindowTextA(hwnd, name, sizeof(name));
+        /* Podle titulku: prvni WM_PAINT vlastnika prijde jeste uvnitr
+         * make_window, kdy owner_wnd neni nastavene. */
+        if (!strcmp(name, "obnova-vlastnik"))
+        {
+            fill(dc, 0, 0, rc.right, rc.bottom, RGB(255, 255, 255));
+            fill(dc, 10, 10, 60, 60, GDI_RED);
+        }
+        else if (!strcmp(name, "obnova-dialog")) fill(dc, 0, 0, rc.right, rc.bottom, GDI_BLUE);
+        else fill(dc, 0, 0, rc.right, rc.bottom, GDI_GREEN);
+        EndPaint(hwnd, &ps);
+        printf("paint %s\n", name);
+        fflush(stdout);
+        after_paint(hwnd);
+        return 0;
+    case WM_TIMER:
+        /* 1: dialog po snimku vlastnika, 2: popup po snimku dialogu. */
+        if (hwnd == owner_wnd && wp == 1)
+        {
+            KillTimer(hwnd, 1);
+            create_dialog();
+            SetTimer(owner_wnd, 2, 500, NULL);
+        }
+        else if (hwnd == owner_wnd && wp == 2)
+        {
+            KillTimer(hwnd, 2);
+            create_popup();
+        }
+        return 0;
+    case WM_DESTROY:
+        if (hwnd == owner_wnd) PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+int gui_recover(void)
+{
+    expected = 3;
+    done_line = "wintest obnova: nakresleno";
+    owner_wnd = make_window(L"wintest-obnova", recover_proc, L"obnova-vlastnik", 400, 300);
+    if (!owner_wnd) return 1;
+    windows_open = 0;
+    SetTimer(owner_wnd, 1, 500, NULL);
     return run_loop();
 }
 

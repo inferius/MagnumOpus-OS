@@ -40,7 +40,7 @@ impl Readiness {
 /// Aktualni bity pripravenosti objektu.
 fn compute(stack: &mut Stack, o: &mut Obj) -> Signals {
     let mut bits = Signals::NONE;
-    match &mut o.kind {
+    match &mut *o.kind.borrow_mut() {
         Kind::Stream(s) => {
             crate::tcp::update_fin(stack, s);
             let fin = s.fin_seen;
@@ -67,15 +67,40 @@ fn compute(stack: &mut Stack, o: &mut Obj) -> Signals {
             }
         }
         Kind::Udp(u) => {
-            let sock = stack.udp(u.sock);
-            if sock.can_recv() {
+            let lo_data = u.lo.as_ref().is_some_and(crate::lo::udp_has_data);
+            // Bez socketu smoltcp (jen loopback) se zapis nikdy neblokuje.
+            let (recv, send) = match u.sock {
+                Some(h) => {
+                    let sock = stack.udp(h);
+                    (sock.can_recv(), sock.can_send())
+                }
+                None => (false, true),
+            };
+            if recv || lo_data {
                 bits = bits | ready::READABLE;
             }
-            if sock.can_send() {
+            if send {
                 bits = bits | ready::WRITABLE;
             }
         }
-        Kind::Session(_) => {}
+        Kind::LoStream(s) => {
+            let (r, w, hup, err) = crate::lo::stream_ready(s);
+            if r {
+                bits = bits | ready::READABLE;
+            }
+            if w {
+                bits = bits | ready::WRITABLE;
+            }
+            if hup {
+                bits = bits | ready::HUP;
+            }
+            if err {
+                bits = bits | ready::ERROR;
+            }
+        }
+        // Navazany socket: zadne udalosti (klient ho jako nespojeny necha
+        // v `poll` hned pripraveny k zapisu s koncem, jako Linux).
+        Kind::Session(_) | Kind::Bound(_) => {}
     }
     bits
 }

@@ -19,6 +19,7 @@ use alloc::vec::Vec;
 use netproto::io::{Read, Write};
 
 use crate::buf::Input;
+use crate::sink::{Sink, VecSink};
 use crate::{Error, Header, Limits, Method, Request, Response, Result, Version, protocol};
 
 pub const PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
@@ -405,7 +406,7 @@ fn request_block(req: &Request) -> Vec<u8> {
     hpack::encode(&list)
 }
 
-fn run<S: Read + Write>(conn: &mut Conn<S>, req: &Request, limits: &Limits) -> core::result::Result<Response, ConnError> {
+fn run<S: Read + Write>(conn: &mut Conn<S>, req: &Request, limits: &Limits, sink: &mut dyn Sink) -> core::result::Result<Response, ConnError> {
     // Uvod: preface, SETTINGS, zvetseni okna spojeni.
     let mut out = Vec::from(PREFACE);
     let ours = [
@@ -449,7 +450,8 @@ fn run<S: Read + Write>(conn: &mut Conn<S>, req: &Request, limits: &Limits) -> c
     // Odpoved.
     let mut status = None;
     let mut headers = Vec::new();
-    let mut body: Vec<u8> = Vec::new();
+    // Prijato bajtu tela (kontrola content-length).
+    let mut received: u64 = 0;
     loop {
         let f = match early.take() {
             Some(f) => f,
@@ -478,6 +480,8 @@ fn run<S: Read + Write>(conn: &mut Conn<S>, req: &Request, limits: &Limits) -> c
                     }
                     status = Some(code);
                     headers = list;
+                    let len = if req.method == Method::Head || code == 304 { Some(0) } else { content_length(&headers)?.map(|n| n as u64) };
+                    sink.head(code, &headers, len)?;
                 } else {
                     // Trailery: musi koncit proud; zahodi se.
                     check_response(list, true)?;
@@ -494,11 +498,9 @@ fn run<S: Read + Write>(conn: &mut Conn<S>, req: &Request, limits: &Limits) -> c
                     return Err(conn_err(code::PROTOCOL_ERROR, "DATA pred hlavickami"));
                 }
                 let data = unpad(&f.payload, f.flags)?;
-                if req.method != Method::Head && body.len() + data.len() > limits.max_body {
-                    return Err(ConnError(code::NO_ERROR, Error::TooLarge("telo odpovedi")));
-                }
                 if req.method != Method::Head {
-                    body.extend_from_slice(data);
+                    received += data.len() as u64;
+                    sink.data(data)?;
                 }
                 let end = f.flags & flags::END_STREAM != 0;
                 // Potvrdit cely ramec (i vypln) - spojeni vzdy, proud jen
@@ -520,26 +522,31 @@ fn run<S: Read + Write>(conn: &mut Conn<S>, req: &Request, limits: &Limits) -> c
     if let Some(len) = content_length(&headers)?
         && req.method != Method::Head
         && status != 304
-        && len != body.len()
+        && len as u64 != received
     {
         return Err(conn_err(code::PROTOCOL_ERROR, "HTTP/2: content-length neodpovida datum"));
     }
-    if req.method == Method::Head {
-        // Odpoved na HEAD nema telo; nektere servery data presto poslou
-        // (hyper) - zahodi se, jako v prohlizecich.
-        body.clear();
-    }
+    // Odpoved na HEAD nema telo; nektere servery data presto poslou
+    // (hyper) - zahodi se, jako v prohlizecich.
     Ok(Response {
         status,
         version: Version::Http2,
         headers,
-        body,
+        body: Vec::new(),
         url: None,
     })
 }
 
 /// Posle pozadavek po spojeni HTTP/2 (TLS s ALPN `h2` nebo h2c).
 pub fn send<S: Read + Write>(stream: S, req: &Request, limits: &Limits) -> Result<Response> {
+    let mut sink = VecSink::new(limits.max_body);
+    let mut resp = send_to(stream, req, limits, &mut sink)?;
+    resp.body = sink.body;
+    Ok(resp)
+}
+
+/// Jako [`send`], telo odpovedi preda `sink` po castech.
+pub fn send_to<S: Read + Write>(stream: S, req: &Request, limits: &Limits, sink: &mut dyn Sink) -> Result<Response> {
     let mut conn = Conn {
         input: Input::new(stream),
         send_conn: 65_535,
@@ -548,7 +555,7 @@ pub fn send<S: Read + Write>(stream: S, req: &Request, limits: &Limits) -> Resul
         peer_max_frame: MAX_FRAME,
         decoder: hpack::Decoder::new(TABLE_SIZE),
     };
-    let result = run(&mut conn, req, limits);
+    let result = run(&mut conn, req, limits, sink);
     // Konec spojeni: GOAWAY (NO_ERROR nebo kod chyby protokolu), bez cekani.
     let code = match &result {
         Ok(_) => code::NO_ERROR,

@@ -44,10 +44,10 @@ const QEMU_COPY: &str = "init: test wine: kopiruj text";
 const QEMU_CLOSE: &str = "init: test wine: zavri poznamkovy blok";
 const QEMU_PASTE_CLICK: &str = "init: test wine: klik do vkladaciho okna na ";
 
-struct W3 {
-    gui: Gui,
-    inspect: Channel,
-    sup: Supervisor,
+pub(super) struct W3 {
+    pub(super) gui: Gui,
+    pub(super) inspect: Channel,
+    pub(super) sup: Supervisor,
 }
 
 static STATE: spin::Mutex<Option<W3>> = spin::Mutex::new(None);
@@ -58,7 +58,7 @@ fn identity() -> ConnectInfo {
 
 /// Kompozitor pro testy W3 (jednou), vstup od `inputd`, supervisor testu
 /// s kompozitorem v registru (listky role Gui).
-fn with<R>(s: &Startup, f: impl FnOnce(&mut W3) -> Result<R, String>) -> Result<R, String> {
+pub(super) fn with<R>(s: &Startup, f: impl FnOnce(&mut W3) -> Result<R, String>) -> Result<R, String> {
     let mut g = STATE.lock();
     if g.is_none() {
         let gui = gui::start(s).map_err(|e| fail("start kompozitoru", e))?;
@@ -67,22 +67,50 @@ fn with<R>(s: &Startup, f: impl FnOnce(&mut W3) -> Result<R, String>) -> Result<
         let inspect = gui.channel(INSPECT.as_bytes()).map_err(|e| fail("inspect", e))?;
         let mut sup = Supervisor::for_tests(Duration::from_secs(10));
         gui.register(&mut sup);
+        // Zvuk (role Audio, W4): bez audiod programy Wine bezi bez zvuku.
+        if let Err(e) = crate::audio::register_for_tests(&mut sup) {
+            println!("init: test wine: zvuk pro programy Wine neni ({e})");
+        }
         *g = Some(W3 { gui, inspect, sup });
     }
     f(g.as_mut().unwrap())
 }
 
+/// Relace site programu Windows pro testy: identita Wine, TCP na loopback
+/// (127.0.0.0/8) a na hostitele slirp.
+fn wine_net() -> Result<Channel, String> {
+    use netproto::{Policy, Restriction, Rule, Target, proto, rights};
+    let root = super::net::net()?;
+    let lo = Target::Net { addr: core::net::IpAddr::V4(core::net::Ipv4Addr::new(127, 0, 0, 0)), prefix: 8 };
+    let host = Target::Net { addr: super::net::HOST, prefix: 32 };
+    let mut policy = Policy::only(vec![Rule::any_port(proto::TCP, lo), Rule::any_port(proto::TCP, host)]);
+    policy.bind = Some(vec![(1024, 65535)]);
+    let mut r = Restriction::new(rights::CLIENT | rights::TCP_LISTEN, policy);
+    r.app = String::from(WINE_ID);
+    root.restrict_with(&r).and_then(|n| n.into_channel()).map_err(|e| fail("relace site Wine", e))
+}
+
+/// Recept relace zvuku programu Windows (stejna identita jako okna).
+fn audio_recipe() -> audioproto::session::Recipe {
+    audioproto::session::Recipe {
+        app_id: String::from(WINE_ID),
+        app_name: String::from("Programy Windows"),
+        uid: 0,
+        capture: audioproto::session::Capture::No,
+    }
+}
+
 /// Bezici program Wine (proces, vystup).
-struct Run {
-    process: Process,
+pub(super) struct Run {
+    pub(super) process: Process,
     out: Channel,
     err: Channel,
-    stdout: Vec<u8>,
+    pub(super) stdout: Vec<u8>,
     stderr: Vec<u8>,
 }
 
 impl Run {
-    fn drain(&mut self) {
+    pub(super) fn drain(&mut self) {
         while let Ok(m) = self.out.try_read() {
             self.stdout.extend_from_slice(&m.data);
         }
@@ -91,7 +119,7 @@ impl Run {
         }
     }
 
-    fn text(&self) -> String {
+    pub(super) fn text(&self) -> String {
         let err = String::from_utf8_lossy(&self.stderr);
         // Hlaseni fixme Wine nejsou chyby testu.
         let err: Vec<&str> = err.lines().filter(|l| !l.contains(":fixme:")).collect();
@@ -107,7 +135,7 @@ impl Drop for Run {
 
 /// Spusti `wine <args>` pres launchd s relaci okna (role Gui) od
 /// supervisoru testu.
-fn launch(s: &Startup, w: &mut W3, args: &[&str]) -> Result<Run, String> {
+pub(super) fn launch(s: &Startup, w: &mut W3, args: &[&str]) -> Result<Run, String> {
     let loader = format!("{APP}/lib/wine/x86_64-unix/wine");
     let (session, lease) = w.sup.session(gui::NAME, identity().encode()).map_err(|e| fail("relace okna", e))?;
     let fsc = fs()?.connect().map_err(|e| fail("relace FS", e))?;
@@ -123,7 +151,19 @@ fn launch(s: &Startup, w: &mut W3, args: &[&str]) -> Result<Run, String> {
     }
     .encode()
     .map_err(|e| fail("blok parametru", e))?;
-    let roles = vec![Role::Job, Role::Fs, Role::Stdout, Role::Stderr, Role::Gui, Role::GuiLease];
+    let mut roles = vec![Role::Job, Role::Fs, Role::Stdout, Role::Stderr, Role::Gui, Role::GuiLease];
+    // Relace zvuku (role Audio) se stejnou identitou; nahravani manifest
+    // Wine nechce (Capture::No).
+    let audio = w.sup.session("audiod", audio_recipe().encode()).ok();
+    if audio.is_some() {
+        roles.extend([Role::Audio, Role::AudioLease]);
+    }
+    // Sit (role Net, W4b): relace identity Wine jen na loopback a echo
+    // hostitele; launchd ji zuzi manifestem Wine.
+    let net = wine_net().ok();
+    if net.is_some() {
+        roles.push(Role::Net);
+    }
     let req = Launch { program: loader.clone(), flags: 0, roles, params }.encode(1).map_err(|e| fail("pozadavek", e))?;
     let job = libos::job::current().map_err(|e| fail("job", e))?;
     let (out, out_child) = Channel::create().map_err(|e| fail("kanal stdout", e))?;
@@ -138,7 +178,11 @@ fn launch(s: &Startup, w: &mut W3, args: &[&str]) -> Result<Run, String> {
                 err_child.into_handle(),
                 session.into_handle(),
                 lease.into_handle(),
-            ],
+            ]
+            .into_iter()
+            .chain(audio.into_iter().flat_map(|(s, l)| [s.into_handle(), l.into_handle()]))
+            .chain(net.into_iter().map(|c| c.into_handle()))
+            .collect(),
         )
         .map_err(|e| fail("LAUNCH", e))?;
     let end = time::deadline_after(Duration::from_secs(60));
@@ -163,7 +207,7 @@ fn launch(s: &Startup, w: &mut W3, args: &[&str]) -> Result<Run, String> {
 
 /// Ridi supervisor testu, dokud `f` nevrati `Some` (nebo program
 /// neskonci, nebo nevyprsi `LIMIT`).
-fn wait_for<T>(s: &Startup, w: &mut W3, run: &mut Run, what: &str, mut f: impl FnMut(&mut W3, &Run) -> Result<Option<T>, String>) -> Result<T, String> {
+pub(super) fn wait_for<T>(s: &Startup, w: &mut W3, run: &mut Run, what: &str, mut f: impl FnMut(&mut W3, &Run) -> Result<Option<T>, String>) -> Result<T, String> {
     let end = time::deadline_after(LIMIT);
     loop {
         run.drain();
@@ -182,17 +226,17 @@ fn wait_for<T>(s: &Startup, w: &mut W3, run: &mut Run, what: &str, mut f: impl F
 }
 
 /// Okna programu Windows s titulkem obsahujicim `title`.
-fn wine_windows(w: &W3, title: &str) -> Result<Vec<WindowInfo>, String> {
+pub(super) fn wine_windows(w: &W3, title: &str) -> Result<Vec<WindowInfo>, String> {
     Ok(windows(&w.inspect)?.into_iter().filter(|x| x.app == WINE_ID && x.title.contains(title)).collect())
 }
 
-fn wait_window(s: &Startup, w: &mut W3, run: &mut Run, title: &str) -> Result<WindowInfo, String> {
+pub(super) fn wait_window(s: &Startup, w: &mut W3, run: &mut Run, title: &str) -> Result<WindowInfo, String> {
     wait_for(s, w, run, &format!("okno '{title}'"), |w, _| Ok(wine_windows(w, title)?.into_iter().next()))
 }
 
 /// Pocka, az ma pixel obrazovky barvu `want` (nove okno se ukazuje
 /// animaci); vrati posledni prectenou barvu.
-fn wait_pixel(w: &W3, x: i32, y: i32, want: u32) -> Result<u32, String> {
+pub(super) fn wait_pixel(w: &W3, x: i32, y: i32, want: u32) -> Result<u32, String> {
     let end = time::deadline_after(Duration::from_secs(5));
     loop {
         let p = pixel(&w.inspect, x, y)?;
@@ -205,7 +249,7 @@ fn wait_pixel(w: &W3, x: i32, y: i32, want: u32) -> Result<u32, String> {
 
 /// Pocet nebilych pixelu v oblasti `x0..x0+w`, `y0..y0+h` (krok 3 px):
 /// text v editoru proti prazdnemu stavu.
-fn ink(w: &W3, x0: i32, y0: i32, wd: i32, ht: i32) -> Result<u32, String> {
+pub(super) fn ink(w: &W3, x0: i32, y0: i32, wd: i32, ht: i32) -> Result<u32, String> {
     let mut n = 0;
     for y in (y0..y0 + ht).step_by(3) {
         for x in (x0..x0 + wd).step_by(3) {
@@ -217,8 +261,15 @@ fn ink(w: &W3, x0: i32, y0: i32, wd: i32, ht: i32) -> Result<u32, String> {
     Ok(n)
 }
 
+/// Pocka, az okno Wine s titulkem obsahujicim `title` ma fokus, a na
+/// slozeni obrazovky.
+pub(super) fn settle_focus(s: &Startup, w: &mut W3, run: &mut Run, title: &str) -> TestResult {
+    wait_for(s, w, run, &format!("fokus okna '{title}'"), |w, _| Ok(wine_windows(w, title)?.iter().any(|x| x.focused).then_some(())))?;
+    settle(&w.inspect)
+}
+
 /// Ukonci program a pocka, az jeho okna zmizi z kompozitoru.
-fn finish(s: &Startup, w: &mut W3, run: Run, title: &str) -> TestResult {
+pub(super) fn finish(s: &Startup, w: &mut W3, run: Run, title: &str) -> TestResult {
     let _ = run.process.kill();
     let _ = run.process.wait_exit(Some(time::deadline_after(Duration::from_secs(10))));
     drop(run);
@@ -314,16 +365,7 @@ pub fn keys(s: &Startup) -> TestResult {
 
 pub fn notepad(s: &Startup) -> TestResult {
     with(s, |w| {
-        // Dialog Ulozit jako zacina ve vychozim adresari (podle verze Wine
-        // dokumenty uzivatele, nebo pracovni adresar = Z:\ = koren FS).
-        let docs: Vec<String> = fs()?
-            .list("/home/wine/.wine/drive_c/users")
-            .map(|l| l.into_iter().map(|e| format!("/home/wine/.wine/drive_c/users/{}/Documents/t.txt", e.name)).collect())
-            .unwrap_or_default();
-        let candidates: Vec<String> = ["/t.txt", "/home/wine/.wine/drive_c/t.txt"].iter().map(|s| String::from(*s)).chain(docs).collect();
-        for c in &candidates {
-            let _ = fs()?.remove(c);
-        }
+        let candidates = save_candidates("t.txt")?;
         let mut run = launch(s, w, &["notepad"])?;
         let win = wait_window(s, w, &mut run, "Notepad")?;
         settle(&w.inspect)?;
@@ -371,7 +413,12 @@ pub fn notepad(s: &Startup) -> TestResult {
         let text = String::from_utf8_lossy(&data);
         check!(text.contains("ahoj"), format!("obsah ulozeneho souboru: {text:?}"));
         // Schranka (Wine -> kompozitor): Ctrl+A, Ctrl+C; kompozitor si
-        // kopii nabidky necha i po konci poznamkoveho bloku.
+        // kopii nabidky necha i po konci poznamkoveho bloku. Kopirovat smi
+        // jen okno s fokusem: po zavreni dialogu pockat, az ho editor ma.
+        // Soubor je na disku driv, nez dialog zmizi: pockat na jeho konec.
+        wait_for(s, w, &mut run, "zavreni dialogu Ulozit jako", |w, _| Ok(wine_windows(w, "Save")?.is_empty().then_some(())))?;
+        settle_focus(s, w, &mut run, "Notepad")?;
+        time::sleep(Duration::from_millis(300));
         println!("{QEMU_COPY}");
         let end = time::deadline_after(Duration::from_secs(3));
         while time::now() < end {
@@ -391,23 +438,31 @@ pub fn notepad(s: &Startup) -> TestResult {
             }
         };
         check!(code == 0, format!("kod konce poznamkoveho bloku {code}"));
+        run.drain();
+        let notepad_out = run.text();
         finish(s, w, run, "Notepad")?;
         // Vlozeni do naseho okna (jina aplikace nez Wine).
-        let pasted = paste_into_probe(s, w)?;
+        let pasted = paste_into_probe(s, w).map_err(|e| format!("{e}; poznamkovy blok: {notepad_out}"))?;
         check!(pasted.contains("ahoj"), format!("vlozeny text ze schranky: {pasted:?}"));
         Ok(())
     })
 }
 
-/// `gui-probe vloz` s relaci okna (jina identita nez Wine): klik z QEMU do
-/// jeho okna a Ctrl+V; vrati vlozeny text.
-fn paste_into_probe(s: &Startup, w: &mut W3) -> Result<String, String> {
+/// `gui-probe <args>` s relaci okna (identita gui-probe, jina nez Wine);
+/// vrati beh a stred jeho okna na obrazovce.
+pub(super) fn launch_probe(s: &Startup, w: &mut W3, args: &[&str]) -> Result<(Run, (i32, i32)), String> {
     let info = gui::recipe(s, "gui-probe").map_err(|e| fail("identita gui-probe", e))?;
     let (session, lease) = w.sup.session(gui::NAME, info.encode()).map_err(|e| fail("relace okna", e))?;
     let launch = crate::launch::client().map_err(|e| fail("kanal k launchd", e))?;
-    let params = libos::params::Params { cwd: b"/".to_vec(), args: vec![b"gui-probe".to_vec(), b"vloz".to_vec()], env: Vec::new(), flags: 0, fds: Vec::new() }
-        .encode()
-        .map_err(|e| fail("blok parametru", e))?;
+    let params = libos::params::Params {
+        cwd: b"/".to_vec(),
+        args: core::iter::once("gui-probe").chain(args.iter().copied()).map(|a| a.as_bytes().to_vec()).collect(),
+        env: Vec::new(),
+        flags: 0,
+        fds: Vec::new(),
+    }
+    .encode()
+    .map_err(|e| fail("blok parametru", e))?;
     let req = Launch { program: String::from("gui-probe"), flags: 0, roles: vec![Role::Job, Role::Stdout, Role::Stderr, Role::Gui, Role::GuiLease], params }
         .encode(1)
         .map_err(|e| fail("pozadavek", e))?;
@@ -437,7 +492,13 @@ fn paste_into_probe(s: &Startup, w: &mut W3) -> Result<String, String> {
     if v.len() != 4 {
         return Err(format!("poloha okna gui-probe: {place}"));
     }
-    println!("{QEMU_PASTE_CLICK}{} {}", v[0] + v[2] / 2, v[1] + v[3] / 2);
+    Ok((run, (v[0] + v[2] / 2, v[1] + v[3] / 2)))
+}
+
+/// `gui-probe vloz`: klik z QEMU do jeho okna a Ctrl+V; vrati vlozeny text.
+fn paste_into_probe(s: &Startup, w: &mut W3) -> Result<String, String> {
+    let (mut run, (cx, cy)) = launch_probe(s, w, &["vloz"])?;
+    println!("{QEMU_PASTE_CLICK}{cx} {cy}");
     let text = wait_for(s, w, &mut run, "vlozeni v gui-probe", |_, r| {
         let out = String::from_utf8_lossy(&r.stdout);
         if out.contains("vlozeni odmitnuto") {
@@ -446,6 +507,21 @@ fn paste_into_probe(s: &Startup, w: &mut W3) -> Result<String, String> {
         Ok(out.lines().find_map(|l| l.strip_prefix("gui-probe: vlozeno ")).map(String::from))
     })?;
     Ok(text)
+}
+
+/// Mista, kam dialog Ulozit jako ulozi `name` bez cesty (podle verze Wine
+/// dokumenty uzivatele, nebo pracovni adresar = Z:\ = koren FS); stare
+/// soubory smaze.
+pub(super) fn save_candidates(name: &str) -> Result<Vec<String>, String> {
+    let docs: Vec<String> = fs()?
+        .list("/home/wine/.wine/drive_c/users")
+        .map(|l| l.into_iter().map(|e| format!("/home/wine/.wine/drive_c/users/{}/Documents/{name}", e.name)).collect())
+        .unwrap_or_default();
+    let v: Vec<String> = [format!("/{name}"), format!("/home/wine/.wine/drive_c/{name}")].into_iter().chain(docs).collect();
+    for c in &v {
+        let _ = fs()?.remove(c);
+    }
+    Ok(v)
 }
 
 pub fn winecfg(s: &Startup) -> TestResult {

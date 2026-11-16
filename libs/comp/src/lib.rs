@@ -22,6 +22,8 @@
 extern crate alloc;
 
 pub mod appearance;
+pub mod barpanel;
+pub mod calendar;
 pub mod clipboard;
 pub mod diag;
 pub mod dialog;
@@ -43,6 +45,7 @@ pub mod output;
 mod owner;
 pub mod render;
 pub mod scene;
+pub mod toast;
 pub mod tooltip;
 pub mod winsize;
 pub mod services;
@@ -108,6 +111,22 @@ pub enum Out {
     /// Rozhodnuti o novem vstupnim zarizeni: `trust <id>` / `reject <id>`
     /// na kanal `secure`.
     Device { source: u16, trust: bool },
+    /// Ovladani zvuku z panelu listy (kanal ke sluzbe zvuku od initu).
+    Audio(AudioReq),
+}
+
+/// Zadost panelu Zvuk sluzbe zvuku.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AudioReq {
+    /// Hlavni hlasitost (procenta).
+    Master(u8),
+    Mute(bool),
+    /// Vystup: zarizeni podle indexu sluzby.
+    Output(u8),
+    /// Vstup (nahravani): zarizeni podle indexu sluzby.
+    Input(u8),
+    /// Hlasitost aplikace (identita z manifestu, procenta).
+    App(String, u8),
 }
 
 /// Kompozitor.
@@ -169,6 +188,12 @@ pub struct Comp {
     pub(crate) last_auto_snapshot: Option<u64>,
     /// Otevreny panel nad listou (`flyout.rs`).
     pub(crate) flyout: Option<flyout::Flyout>,
+    /// Otevreny panel listy nad `ui` (`barpanel.rs`).
+    pub(crate) barpanel: Option<barpanel::BarPanel>,
+    /// Material panelu presahl rozpocet: plne pozadi (do konce behu).
+    pub(crate) panel_material_off: bool,
+    /// Sluzba posila zadosti panelu Zvuk sluzbe zvuku (`Out::Audio`).
+    pub audio_ctl: bool,
     /// Rezim vyvojare od sluzby uctu (jen vyvojove sestaveni, `devmode.rs`).
     #[cfg(feature = "dev-mode")]
     pub(crate) dev_mode: devmode::DevMode,
@@ -191,6 +216,11 @@ pub struct Comp {
     /// Aplikace spustene uzivatelem (id, cas): jejich nove okno dostane
     /// fokus (`launch.rs`).
     pub(crate) expect_focus: Vec<(alloc::string::String, u64)>,
+    /// Kdy se otevrela posledni relace (tichy start znacek, `STARTUP_QUIET`).
+    pub(crate) session_since: Option<u64>,
+    /// Panel hodin: dnesni datum a svetovy cas, posun zobrazeneho mesice.
+    pub(crate) calendar: Option<calendar::CalendarInfo>,
+    pub(crate) calendar_offset: i32,
     /// Aplikace s vice okny (`multi` z manifestu).
     pub(crate) multi: Vec<alloc::string::String>,
     /// Od kdy je drzeny Esc pri cele obrazovce (`fullscreen.rs`).
@@ -201,6 +231,8 @@ pub struct Comp {
     pub(crate) tip_hover: Option<(tooltip::Tip, u64)>,
     pub(crate) tip_shown: Option<tooltip::Tip>,
     pub(crate) tip_hidden_at: u64,
+    /// Oznameni od notifyd a vyskakovaci karty (`toast.rs`).
+    pub(crate) notices: toast::Notices,
     /// Drzeny Ctrl pri otevrene palete (Ctrl+Enter).
     pub(crate) palette_ctrl: bool,
     /// Volba vzhledu a prolnuti rezimu (`appearance.rs`).
@@ -250,6 +282,9 @@ impl Comp {
             snapshot_cfg: diag::Config::default(),
             last_auto_snapshot: None,
             flyout: None,
+            barpanel: None,
+            panel_material_off: false,
+            audio_ctl: false,
             #[cfg(feature = "dev-mode")]
             dev_mode: Default::default(),
             launchable: Vec::new(),
@@ -262,6 +297,9 @@ impl Comp {
             max_menu: None,
             max_hover_since: None,
             expect_focus: Vec::new(),
+            session_since: None,
+            calendar: None,
+            calendar_offset: 0,
             multi: Vec::new(),
             palette_ctrl: false,
             esc_since: None,
@@ -269,6 +307,7 @@ impl Comp {
             tip_hover: None,
             tip_shown: None,
             tip_hidden_at: 0,
+            notices: toast::Notices::default(),
             appearance: appearance::Appearance::default(),
             fade_lut: None,
         };
@@ -324,6 +363,14 @@ impl Comp {
             self.bar_blur_dirty = true;
             let p = self.panel_visual();
             self.dirty.add(p, s);
+        }
+        // Material panelu listy: scena pod nim se zmenila.
+        if let Some(bp) = self.barpanel.as_mut()
+            && !r.intersect(&bp.rect).is_empty()
+        {
+            bp.blur_dirty = true;
+            let pr = bp.rect;
+            self.dirty.add(pr, s);
         }
         self.dirty.add(r, s);
     }

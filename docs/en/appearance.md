@@ -323,6 +323,8 @@ controls.
 | `badge-h` | 26 px | trust badge |
 | `bar-h` | 52 px | bar; 8 px offset from the edge |
 | `resize-edge` | 6 px | invisible edge for resizing (corner 18 px) |
+| `panel-w`, `panel-row` | 360 px, 40 px | bar panel (Appearance, Sound, Network, ...): width and smallest row height |
+| `panel-gap`, `panel-edge` | 10 px, 14 px | panel: icon-text gap and section spacing, header top edge and footer bottom edge ([panel component](components.md)) |
 
 ### Radii and shadows
 
@@ -485,8 +487,9 @@ Curves: standard `cubic-bezier(0.2, 0, 0, 1)`, enter
   name, and after a separator the icons of the currently valid permissions
   (folder, network, camera, microphone, screen capture). A **red dot** =
   the device is running right now.
-- System applications have the word "System" instead of a name and a shield
-  with a check mark.
+- System applications have the application name and a shield with a check
+  mark (`shieldcheck`) instead of the shield; init supplies both from the
+  manifest. **[implemented]**
 - Click, Enter or Space opens the **permission overview** (drawn by the
   compositor in the menu layer): the application, signature, a list of
   permissions with the time of last use and a **Remove** button. Removal
@@ -564,6 +567,8 @@ They slide in at the top right (24 px offset + cross-fade, 240 ms) and after
 notification has a left strip in the `ai` color and the agent icon. For the
 screen reader they are in a `status` region (announced but not
 interrupting). Muting until a given time is in the notification center.
+The service, protocol and implementation state:
+[Notifications](notifications.md).
 
 ### System dialogs
 

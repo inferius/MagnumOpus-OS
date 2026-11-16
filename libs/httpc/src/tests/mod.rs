@@ -6,6 +6,7 @@
 //!   pres TCP na 127.0.0.1.
 
 mod interop;
+mod sink;
 mod unit;
 
 use std::vec::Vec;

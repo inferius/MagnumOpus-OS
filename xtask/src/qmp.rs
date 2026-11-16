@@ -142,6 +142,9 @@ const STARTS: &[&str] = &[
     MARKER,
     MARKER_PS2,
     usb::KEYS,
+    gui::DARK_START,
+    gui::PANEL_SHOT[0],
+    media::PLUG,
     gui::DIALOG,
     gui::SECURE,
     gui::TERM_DRAG,
@@ -154,6 +157,9 @@ const STARTS: &[&str] = &[
     wine::KEYS_CLICK,
     wine::CLICK,
     wine::PASTE_CLICK,
+    wine::OFFER_CLICK,
+    wine::PUTTY_RAW_CLICK,
+    wine::PUTTY_TELNET_CLICK,
 ];
 
 /// Konec testovaciho behu userspace (dal uz zadny usek neprijde).
@@ -285,6 +291,7 @@ fn script(ps2: bool) -> Vec<Step> {
         ps2_steps(&mut s);
     }
     usb_steps(&mut s);
+    media_steps(&mut s);
     gui_steps(&mut s);
     sdl_steps(&mut s);
     wine_steps(&mut s);
@@ -356,6 +363,26 @@ fn wine_steps(s: &mut Vec<Step>) {
     // Vlozeni do naseho okna (gui-probe vloz): klik a Ctrl+V.
     s.push(Step::ClickAt(wine::PASTE_CLICK));
     press(s, &["ctrl", "v"]);
+    // W4: nase aplikace nabidne text (klik a stisk klavesy = gesto),
+    // poznamkovy blok ho vlozi a ulozi jako u.txt.
+    s.push(Step::ClickAt(wine::OFFER_CLICK));
+    press(s, &["ctrl", "c"]);
+    s.push(Step::ClickAt(wine::PASTE_WINE_CLICK));
+    press(s, &["ctrl", "v"]);
+    s.push(Step::WaitFor(wine::SAVE2_KEYS));
+    press(s, &["ctrl", "s"]);
+    s.push(Step::WaitFor(wine::SAVE2_NAME));
+    for k in ["u", "dot", "t", "x", "t", "ret"] {
+        press(s, &[k]);
+    }
+    // W4b: PuTTY raw (loopback) a telnet (echo hostitele): klik do okna
+    // terminalu a "ahoj" + Enter.
+    for click in [wine::PUTTY_RAW_CLICK, wine::PUTTY_TELNET_CLICK] {
+        s.push(Step::ClickAt(click));
+        for k in ["a", "h", "o", "j", "ret"] {
+            press(s, &[k]);
+        }
+    }
 }
 
 /// Znacky testu W3 (musi sedet s `user/init/src/tests/wine_gui.rs`).
@@ -368,6 +395,12 @@ mod wine {
     pub const COPY: &str = "init: test wine: kopiruj text";
     pub const CLOSE: &str = "init: test wine: zavri poznamkovy blok";
     pub const PASTE_CLICK: &str = "init: test wine: klik do vkladaciho okna na ";
+    pub const OFFER_CLICK: &str = "init: test wine: klik do nabidky textu na ";
+    pub const PASTE_WINE_CLICK: &str = "init: test wine: klik pro vlozeni ve Wine na ";
+    pub const SAVE2_KEYS: &str = "init: test wine: uloz vlozeny text";
+    pub const SAVE2_NAME: &str = "init: test wine: nazev vlozeneho souboru";
+    pub const PUTTY_RAW_CLICK: &str = "init: test wine: klik do PuTTY raw na ";
+    pub const PUTTY_TELNET_CLICK: &str = "init: test wine: klik do PuTTY telnet na ";
 }
 
 /// Znacky testu SDL (musi sedet s `user/init/src/tests/sdl.rs`).
@@ -385,6 +418,18 @@ mod sdl {
 /// GUI (`user/init/src/tests/gui.rs`): fyzicka klavesnice odpovi na
 /// systemovy dialog (umely vstup ho nepotvrdi) a na bezpecnou obrazovku.
 fn gui_steps(s: &mut Vec<Step>) {
+    // Snimek aplikaci spustenych v tmavem rezimu (test `start_dark`).
+    s.push(Step::WaitFor(gui::DARK_START));
+    let shots = crate::target_dir().join("shots");
+    let _ = std::fs::create_dir_all(&shots);
+    let file = shots.join("tmavy-start.png").display().to_string().replace('\\', "/");
+    s.push(Step::Qmp(format!(r#"{{"execute":"screendump","arguments":{{"filename":"{file}","device":"gpu0","format":"png"}}}}"#)));
+    // Panely listy (test `panel_shots`).
+    for (marker, name) in gui::PANEL_SHOT.iter().zip(gui::PANEL_NAMES) {
+        s.push(Step::WaitFor(marker));
+        let file = shots.join(format!("{name}.png")).display().to_string().replace('\\', "/");
+        s.push(Step::Qmp(format!(r#"{{"execute":"screendump","arguments":{{"filename":"{file}","device":"gpu0","format":"png"}}}}"#)));
+    }
     s.push(Step::WaitFor(gui::DIALOG));
     for (k, d) in [("tab", true), ("tab", false), ("ret", true), ("ret", false)] {
         s.push(Step::Send(vec![key(k, d)]));
@@ -467,6 +512,11 @@ fn gui_steps(s: &mut Vec<Step>) {
 
 /// Znacky testu GUI (musi sedet s `user/init/src/tests/gui.rs`).
 mod gui {
+    /// `user/init/src/tests/gui_look.rs` (`QEMU_SHOT_DARK_START`).
+    pub const DARK_START: &str = "init: test gui: snimek tmavy-start";
+    /// `gui_look.rs` (`QEMU_SHOT_PANEL` + jmeno souboru, `PANEL_SHOTS`).
+    pub const PANEL_SHOT: [&str; 2] = ["init: test gui: snimek panelu panel-vzhled", "init: test gui: snimek panelu panel-oznameni"];
+    pub const PANEL_NAMES: [&str; 2] = ["panel-vzhled", "panel-oznameni"];
     pub const DIALOG: &str = "init: test gui: dialog ceka na klavesy z QEMU";
     pub const SECURE: &str = "init: test gui: cekam na zkratku z QEMU";
     pub const SECURE_ENTER: &str = "init: test gui: bezpecna obrazovka ceka na Enter";
@@ -512,6 +562,24 @@ fn ps2_steps(s: &mut Vec<Step>) {
     s.push(Step::SendPs2(vec![btn("right", false)]));
     s.push(Step::SendPs2(vec![btn("wheel-up", true)]));
     s.push(Step::SendPs2(vec![btn("wheel-up", false)]));
+}
+
+/// Vymenna media (`user/init/src/tests/removable.rs`): flash disk za behu
+/// (disk `mediahot` definuje `qemu.rs` bez zarizeni) a jeho vytazeni.
+fn media_steps(s: &mut Vec<Step>) {
+    s.push(Step::WaitFor(media::PLUG));
+    s.push(Step::Qmp(format!(
+        r#"{{"execute":"device_add","arguments":{{"driver":"usb-storage","id":"usbmediahot","bus":"xhci.0","port":"{}","drive":"mediahot","removable":true}}}}"#,
+        crate::usbports::MEDIA_HOT
+    )));
+    s.push(Step::WaitFor(media::UNPLUG));
+    s.push(Step::Qmp(device_del("usbmediahot")));
+    // Konec testu: flash disky ze startu pryc (ovladace a procesy medii
+    // skonci, pamet se vrati dalsim sadam).
+    s.push(Step::WaitFor(media::UNPLUG_ALL));
+    for id in ["usbmediafat", "usbmediaexfat", "usbmediantfs"] {
+        s.push(Step::Qmp(device_del(id)));
+    }
 }
 
 fn usb_steps(s: &mut Vec<Step>) {
@@ -562,8 +630,9 @@ fn usb_steps(s: &mut Vec<Step>) {
     s.push(Step::Qmp(device_del("usbmouse2")));
     // Externi hub na port 4 radice a klavesnice na jeho port 1.
     s.push(Step::WaitFor(usb::HUB_PLUG));
-    s.push(Step::Qmp(device_add_at("usb-hub", "usbhub1", "4")));
-    s.push(Step::Qmp(device_add_at("usb-kbd", "usbkbd3", "4.1")));
+    let hub = crate::usbports::USB_TEST_HUB;
+    s.push(Step::Qmp(device_add_at("usb-hub", "usbhub1", hub)));
+    s.push(Step::Qmp(device_add_at("usb-kbd", "usbkbd3", &format!("{hub}.1"))));
     s.push(Step::WaitFor(usb::HUB_KEYS));
     s.push(Step::SendPs2(vec![key("h", true)]));
     s.push(Step::SendPs2(vec![key("h", false)]));
@@ -583,6 +652,12 @@ fn usb_steps(s: &mut Vec<Step>) {
 }
 
 /// Znacky testu USB (musi sedet s `user/init/src/tests/usb.rs`).
+mod media {
+    pub const PLUG: &str = "init: test media: zasun flashku";
+    pub const UNPLUG: &str = "init: test media: vytahni flashku";
+    pub const UNPLUG_ALL: &str = "init: test media: vytahni vsechny flashky";
+}
+
 mod usb {
     pub const KEYS: &str = "init: test usb: stisky na video1";
     pub const MOUSE_PLUG: &str = "init: test usb: pripoj mys";
@@ -621,6 +696,12 @@ fn device_del(id: &str) -> String {
 
 /// Precte odpoved na prikaz (preskoci asynchronni udalosti QMP).
 fn reply(reader: &mut impl BufRead) -> Result<(), String> {
+    reply_events(reader, &mut Vec::new())
+}
+
+/// Jako [`reply`]; radky udalosti (`"event"`) prectene cestou da do
+/// `events`.
+fn reply_events(reader: &mut impl BufRead, events: &mut Vec<String>) -> Result<(), String> {
     loop {
         let mut line = String::new();
         if reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 {
@@ -632,7 +713,45 @@ fn reply(reader: &mut impl BufRead) -> Result<(), String> {
         if line.contains("\"error\"") {
             return Err(format!("QMP chyba: {}", line.trim()));
         }
+        if line.contains("\"event\"") {
+            events.push(line);
+        }
     }
+}
+
+/// Po `device_del` pocka na `DEVICE_DELETED` zarizeni `id`: teprve pak je
+/// port volny pro dalsi `device_add` (QEMU odebira asynchronne).
+fn wait_deleted(reader: &mut impl BufRead, id: &str, seen: &[String]) -> Result<(), String> {
+    let mark = format!("\"device\": \"{id}\"");
+    let deleted = |l: &str| l.contains("DEVICE_DELETED") && (l.contains(&mark) || l.contains(&format!("\"device\":\"{id}\"")));
+    if seen.iter().any(|l| deleted(l)) {
+        return Ok(());
+    }
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(20) {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => return Err("QMP spojeni skoncilo".into()),
+            Ok(_) if deleted(&line) => return Ok(()),
+            Ok(_) => {}
+            // Limit cteni (10 s) bez udalosti: zkusit dal do celkoveho limitu.
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err(format!("QMP: zarizeni {id} se neodebralo (chybi DEVICE_DELETED)"))
+}
+
+/// Id zarizeni z prikazu `device_del` (`None` = jiny prikaz).
+fn deleted_id(cmd: &str) -> Option<String> {
+    if !cmd.contains("\"device_del\"") {
+        return None;
+    }
+    let i = cmd.find("\"id\"")? + 4;
+    let rest = &cmd[i..];
+    let a = rest.find('"')? + 1;
+    let b = rest[a..].find('"')? + a;
+    Some(String::from(&rest[a..b]))
 }
 
 /// Projde useky od `first` (dalsi vzdy az po objeveni jeho znacky, useky
@@ -656,7 +775,12 @@ fn inject(port: u16, log: &mut Log, segs: &[(&'static str, Vec<Step>)], first: u
             .write_all(cmd.as_bytes())
             .and_then(|_| writer.write_all(b"\n"))
             .map_err(|e| e.to_string())?;
-        reply(reader)
+        let mut events = Vec::new();
+        reply_events(reader, &mut events)?;
+        if let Some(id) = deleted_id(&cmd) {
+            wait_deleted(reader, &id, &events)?;
+        }
+        Ok(())
     };
     send(r#"{"execute":"qmp_capabilities"}"#.into(), &mut reader)?;
     let mut done = 0;
@@ -664,6 +788,29 @@ fn inject(port: u16, log: &mut Log, segs: &[(&'static str, Vec<Step>)], first: u
     while let Some(i) = next {
         done += 1;
         println!("xtask: QMP: usek '{}'", segs[i].0);
+        if let Err(e) = run_segment(&mut send, &mut reader, log, &segs[i]) {
+            // Spojeni pryc = konec; jina chyba (QMP odmitl prikaz, poloha
+            // za znackou) = jen tento usek, dalsi testy dostanou vstup.
+            if e.starts_with("QMP spojeni") || !e.starts_with("QMP") && !e.starts_with("poloha") {
+                return Err(e);
+            }
+            eprintln!("xtask: QMP: usek '{}' selhal: {e}; pokracuji dalsim", segs[i].0);
+        }
+        next = next_segment(log, segs);
+    }
+    Ok(done)
+}
+
+/// Kroky jednoho useku; chyba = usek konci (volajici rozhodne, zda dal).
+fn run_segment(
+    send: &mut impl FnMut(String, &mut BufReader<TcpStream>) -> Result<(), String>,
+    reader: &mut BufReader<TcpStream>,
+    log: &mut Log,
+    seg: &(&'static str, Vec<Step>),
+) -> Result<(), String> {
+    let segs = core::slice::from_ref(seg);
+    let i = 0;
+    {
         'steps: for step in &segs[i].1 {
             let step = step.clone();
             // Cekani na znacku (i s polohou za ni); chybi-li, usek se vzda.
@@ -682,7 +829,7 @@ fn inject(port: u16, log: &mut Log, segs: &[(&'static str, Vec<Step>)], first: u
                 Step::SendPs2(e) => (e, ""),
                 Step::SendUsb(e) => (e, r#""device":"video1","#),
                 Step::Qmp(cmd) => {
-                    send(cmd, &mut reader)?;
+                    send(cmd, reader)?;
                     continue;
                 }
                 Step::WaitFor(_) => continue,
@@ -696,7 +843,7 @@ fn inject(port: u16, log: &mut Log, segs: &[(&'static str, Vec<Step>)], first: u
                         vec![btn("left", false)],
                     ] {
                         let cmd = format!(r#"{{"execute":"input-send-event","arguments":{{"device":"video0","events":[{}]}}}}"#, events.join(","));
-                        send(cmd, &mut reader)?;
+                        send(cmd, reader)?;
                     }
                     continue;
                 }
@@ -711,7 +858,7 @@ fn inject(port: u16, log: &mut Log, segs: &[(&'static str, Vec<Step>)], first: u
                         vec![btn("left", false)],
                     ] {
                         let cmd = format!(r#"{{"execute":"input-send-event","arguments":{{"device":"video0","events":[{}]}}}}"#, events.join(","));
-                        send(cmd, &mut reader)?;
+                        send(cmd, reader)?;
                     }
                     continue;
                 }
@@ -721,11 +868,10 @@ fn inject(port: u16, log: &mut Log, segs: &[(&'static str, Vec<Step>)], first: u
                 device,
                 events.join(",")
             );
-            send(cmd, &mut reader)?;
+            send(cmd, reader)?;
         }
-        next = next_segment(log, segs);
     }
-    Ok(done)
+    Ok(())
 }
 
 /// Cisla oddelena mezerami (zbytek radku za znackou).

@@ -95,11 +95,11 @@ tlačítko Menu = kontextová nabídka.
 
 | Komponenta | `libs/ui` | Rozměry a tokeny | Klávesnice |
 |---|---|---|---|
-| Tlačítko: primární, sekundární, nebezpečné, ikonové | částečně | výška `--k-h`, min. šířka 2 &times; výška, `s5`, pilulka; primární `accent`, nebezpečné `danger`; stav *probíhá* (kolečko, pevná šířka) | Enter, Mezerník při uvolnění |
+| Tlačítko: primární, sekundární, nebezpečné, ikonové | ano | výška `--k-h`, min. šířka 2 &times; výška, `s5`, pilulka; primární `accent`, nebezpečné `danger`; stav *probíhá* (kolečko, pevná šířka) | Enter, Mezerník při uvolnění |
 | Textové pole, víceřádkové | ano | `--k-h`, `radius.control`, `s4`; popisek nad, nápověda / chyba pod | šipky, Ctrl+šipky, výběr se Shift, schránka, undo; víceřádkové Ctrl+Enter odešle |
 | Číslo | ano | jako pole, zarovnání vpravo, jednotka, krokovací tlačítka mimo Tab | &uarr; &darr; krok, PgUp / PgDn 10 kroků, Home / End |
 | Heslo | ano | jako pole + oko (`aria-pressed`), varování Caps Lock | jako pole, nikdy návrhy |
-| Hledání | ano | lupa vlevo, křížek jen s textem, filtr s prodlevou 150 ms | Esc smaže, druhé Esc opustí, &darr; do výsledků |
+| Hledání | ano | lupa vlevo, křížek jen s textem, filtr s prodlevou 150 ms; koncový slot (`.trailing`: štítek klávesy `.kbd` jen u prázdného pole, ikona, krátký text `ink_muted`) pro každé jednořádkové pole | Esc smaže, druhé Esc opustí, &darr; do výsledků |
 | Zaškrtávátko | částečně | políčko 18 / 22 / 28, `radius.xs`, okraj 2 px; neurčitý stav | Mezerník |
 | Přepínač | ano | `switch_*`; okamžitý účinek | Mezerník |
 | Radio | částečně | kruh 18 / 22 / 28; skupina je jedna zastávka | šipky rovnou vybírají |
@@ -113,13 +113,14 @@ tlačítko Menu = kontextová nabídka.
 | Dialog aplikace | ne | `dialog_w`, `radius.window`, `shadow.dialog`, `scrim` | past fokusu, Enter výchozí, Esc zrušit, návrat fokusu |
 | Oznámení (toast) | ne | max. 440, min. výška 48, inverzní barvy, 5 s / 8 s s akcí, nejvýš 3 | nebere fokus; F6, Esc |
 | Seznam | ano | řádek `--k-row`, `radius.control` | šipky, Ctrl+Mezerník, Shift+šipky, Ctrl+A, písmena, Enter |
-| Tabulka | ano | řádek `--k-row`, hlavička `type.caption` na `surface_2`, čísla vpravo | jako seznam, Enter v hlavičce třídí |
+| Tabulka | ano | řádek `--k-row`, hlavička `type.caption` na `surface_2`, čísla vpravo; v buňkách pruh průběhu, štítek agenta (jen systém) a ikonová tlačítka řádku (`Cells::actions`, styl ghost) | jako seznam, Enter v hlavičce třídí; Šipka vpravo / vlevo mezi tlačítky řádku, Enter / Mezerník stiskne |
 | Strom | ne | řádek `--k-row`, odsazení úrovně 20, trojúhelník otočený o 90&deg; | &rarr; rozbalí / dítě, &larr; sbalí / rodič, `*` sourozenci |
 | Průběh, kolečko, kostra | částečně | pruh 8 px; kolečko 24 / 16 / 40; kostra 12 px | není zaměřitelný; čtečce po 10 % |
 | Odznak, štítek, filtrovací štítek | částečně | odznak 18; štítek 24 `type.caption`; filtrovací `--k-h-sm` | skupina štítků: šipky, Mezerník, Delete |
 | Drobečky | ne | `--k-h-sm`, oddělovač `/` v `ink_faint`, zkrácení na „...“ | každý odkaz zastávka Tab |
 | Rozbalovací panel | ne | hlavička `--k-h` + 12, `radius.card`, šipka otočená o 180&deg; | Enter / Mezerník, ve skupině &uarr; &darr; |
-| Prázdný stav | ne | kruh 72 s ikonou `icon_xl`, nadpis `type.title`, jedna akce | fokus na akci |
+| Prázdný stav | ano | kruh 72 s ikonou `icon_xl`, nadpis `type.title`, jedna akce | fokus na akci |
+| Panel (lišta, Nastavení) | ano | šířka `size.panel_w` (360), řádek nejméně `size.panel_row` (40), mezera ikona-text `size.panel_gap` (10), okraj hlavičky a paty `size.panel_edge` (14), boky `s5`; hlavička s ikonou, tučným názvem (`body_strong`) a souhrnem (`caption`, `ink_muted`), řádek s ikonou, názvem a popisem (tlačítko s najetím `surface_3`, volba radio s fajfkou vpravo, přepínač vpravo, informace), sekce (`caption` velkými), stavový řádek (`surface_3` / `danger_soft`, `radius.control`), pata s čarou `border`. Skládá se z běžných prvků (`libs/ui/src/panel.rs`: `panel_header`, `.panel_row(ikona, popis)`, `panel_section`, `panel_state`, `panel_footer`); popis řádku je hodnota pro čtečku | volby radio jsou skupina (šipky vyberou), Tab mezi skupinou, přepínačem a patou; fokus jako vnitřní rámeček `radius.control` |
 
 Kdy co použít:
 

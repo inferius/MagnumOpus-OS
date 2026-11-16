@@ -61,10 +61,10 @@ use abi::Result;
 pub use codec::{ReadAddr, Reader, WriteAddr, Writer};
 pub use msg::{Header, NO_DEADLINE, TRY, parse_reply, reply, reply_id};
 pub use auth::{Auth, Quota, Restriction, UserRules, Verdict, layer_flags};
-pub use policy::{Policy, Rule, Target, proto, rights, rights_names};
+pub use policy::{BindScope, Policy, Rule, Target, proto, rights, rights_names};
 
 #[cfg(feature = "client")]
-pub use client::{CancelToken, Deadline, Net, NtpSync, Readiness, TcpListener, TcpStream, UdpSocket};
+pub use client::{BoundNow, CancelToken, Deadline, Net, NtpSync, Readiness, TcpBound, TcpListener, TcpStream, UdpSocket};
 
 /// Nejvic bajtu dat v jedne zprave proudu (kousek; klient vetsi data deli,
 /// zprava kanalu ma nejvys 64 KiB).
@@ -151,12 +151,19 @@ pub mod op {
     pub const AUDIT: u32 = 10;
     /// () -> profil str, pocet u16, `fw::AppStats`; pravo `AUDIT`
     pub const STATS: u32 = 11;
+    /// mistni socket_addr -> mistni socket_addr + kanal navazaneho socketu
+    /// TCP (port je obsazeny hned, jako `bind` v Linuxu; `ADDRESS_IN_USE`).
+    /// Pravo `TCP_CONNECT` nebo `TCP_LISTEN`.
+    pub const TCP_BIND: u32 = 12;
 
     // Kanal spojeni TCP.
     /// data -> prijato u32 (vse, nebo cast pri vyprseni terminu)
     pub const SEND: u32 = 20;
-    /// nejvic u32 -> data (prazdna = druha strana ukoncila zapis)
+    /// nejvic u32 [priznaky u8: `RECV_PEEK`] -> data (prazdna = druha strana
+    /// ukoncila zapis)
     pub const RECV: u32 = 21;
+    /// Priznak `RECV`: data jen precist, ve fronte zustanou (C `MSG_PEEK`).
+    pub const RECV_PEEK: u8 = 1;
     /// () -> () - ukonci zapis (FIN), cteni pokracuje
     pub const SHUTDOWN: u32 = 22;
     /// () -> mistni socket_addr, vzdalena socket_addr
@@ -169,20 +176,45 @@ pub mod op {
     /// () -> vzdalena socket_addr, mistni socket_addr + kanal spojeni
     pub const ACCEPT: u32 = 30;
 
-    // Kanal naslouchani i socketu UDP.
+    // Kanal naslouchani i socketu UDP (a navazaneho socketu TCP).
     /// () -> mistni socket_addr (podle aktualni adresy rozhrani)
     pub const LOCAL_ADDR: u32 = 31;
+
+    // Kanal navazaneho socketu TCP (`TCP_BIND`). Kanal se prevede na
+    // misto (i pro dalsi kanaly po `DUP`): po `LISTEN` je to kanal
+    // naslouchani, po `CONNECT` kanal spojeni.
+    /// fronta u16, Buffers -> mistni socket_addr; pravo `TCP_LISTEN`
+    pub const LISTEN: u32 = 32;
+    /// cil socket_addr, Buffers -> mistni socket_addr (spojeni z portu
+    /// navazani); pravo `TCP_CONNECT`
+    pub const CONNECT: u32 = 33;
 
     // Kanal kazdeho socketu (spojeni, naslouchani, UDP).
     /// () -> () + event pripravenosti v handlech (jen pravo `WAIT`), viz
     /// [`crate::ready`]
     pub const READINESS: u32 = 50;
+    /// () -> () + novy kanal ke stejnemu socketu v handlech (predani socketu
+    /// jinemu procesu: `SCM_RIGHTS`, dedeni). Socket zanikne az se zavrenim
+    /// posledniho kanalu; fronty dotazu a pripravenost ma kazdy kanal svoje.
+    pub const DUP: u32 = 51;
+    /// () -> druh u8 ([`crate::sock_kind`]): navazany socket mohl jiny
+    /// kanal po `DUP` prevest na naslouchani nebo spojeni.
+    pub const KIND: u32 = 52;
 
     // Kanal socketu UDP.
     /// cil socket_addr, data -> ()
     pub const SEND_TO: u32 = 40;
     /// nejvic u32 -> odesilatel socket_addr, data
     pub const RECV_FROM: u32 = 41;
+}
+
+/// Druh objektu z [`op::KIND`].
+pub mod sock_kind {
+    pub const SESSION: u8 = 0;
+    pub const STREAM: u8 = 1;
+    pub const LISTENER: u8 = 2;
+    pub const UDP: u8 = 3;
+    pub const BOUND: u8 = 4;
 }
 
 /// Bity pripravenosti socketu na eventu od [`op::READINESS`] (uzivatelske

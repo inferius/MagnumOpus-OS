@@ -182,8 +182,8 @@ fn bind_addresses(s: &Startup) -> TestResult {
     drop(l);
     let u = net.udp_bind_addr(SocketAddr::from(([0, 0, 0, 0], 0)), b).map_err(|e| fail("UDP na 0.0.0.0", e))?;
     drop(u);
-    // Cizi adresa a loopback (netd ho zatim nema).
-    for a in [SocketAddr::from(([10, 0, 2, 99], 0)), SocketAddr::from(([127, 0, 0, 1], 0))] {
+    // Cizi adresa (loopback 127.x uz netd ma, testy v net_lo.rs).
+    for a in [SocketAddr::from(([10, 0, 2, 99], 0))] {
         check_eq!(net.tcp_listen_addr(a, 1, b).err(), Some(Error::AddressNotAvailable), format!("naslouchani na {a}"));
         check_eq!(net.udp_bind_addr(a, b).err(), Some(Error::AddressNotAvailable), format!("UDP na {a}"));
     }

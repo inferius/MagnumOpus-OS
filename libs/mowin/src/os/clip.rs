@@ -37,7 +37,7 @@ pub(super) struct Clip {
 }
 
 impl State {
-    fn clip_send(&self, m: CMsg) -> Result<()> {
+    fn clip_send(&mut self, m: CMsg) -> Result<()> {
         self.send(ClientMsg::Clipboard { data: m.encode() })
     }
 
@@ -45,6 +45,8 @@ impl State {
         match m {
             SMsg::Send { serial, format } => {
                 let data = if format == TEXT { self.clip.owned.clone() } else { Vec::new() };
+                // Jen delka, obsah schranky nikdy do logu.
+                println!("mowin: schranka: data na zadost kompozitoru ({} B)", data.len());
                 self.clip_send(CMsg::Data { serial, data })?;
             }
             SMsg::Deliver { serial, format, data } => {
@@ -87,6 +89,7 @@ pub unsafe extern "C" fn mowin_clipboard_set_text(text: *const c_char) -> i32 {
         s.clip.owned = t;
         s.clip.offered = true;
         let gesture = s.gesture;
+        println!("mowin: schranka: nabidka textu ({} B, gesto {gesture})", s.clip.owned.len());
         s.clip_send(CMsg::Offer { gesture, formats: vec![String::from(TEXT)] }).map_or_else(code, |_| 0)
     })
 }

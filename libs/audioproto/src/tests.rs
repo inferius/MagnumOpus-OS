@@ -244,3 +244,51 @@ fn ring_service_counters() {
     server.set_latency_us(20_000);
     assert_eq!((client.underruns(), client.played(), client.latency_us()), (1, 42, 20_000));
 }
+
+#[test]
+fn overview_apps_and_new_requests_roundtrip() {
+    use crate::client::{AppEntry, Overview, Request, Status};
+    for req in [
+        Request::Apps,
+        Request::AppVolume { app: "org.winehq.wine".into(), percent: 40 },
+        Request::Overview,
+        Request::SelectInput { index: 1 },
+        Request::SelectInput { index: 255 },
+    ] {
+        assert_eq!(Request::decode(&req.encode()).unwrap(), req);
+    }
+    // Prazdna identita a hlasitost nad 100 jsou chyba.
+    assert!(Request::decode(&Request::AppVolume { app: alloc::string::String::new(), percent: 10 }.encode()).is_err());
+    assert!(Request::decode(&Request::AppVolume { app: "x".into(), percent: 101 }.encode()).is_err());
+    let apps = alloc::vec![
+        AppEntry { app_id: "org.winehq.wine".into(), name: "Wine".into(), volume: 40, playing: true, capturing: false },
+        AppEntry { app_id: "org.magnumopus.player".into(), name: "Přehrávač".into(), volume: 100, playing: false, capturing: true },
+    ];
+    assert_eq!(AppEntry::decode_list(&AppEntry::encode_list(&apps)).unwrap(), apps);
+    let status = Status {
+        device: "HDA".into(),
+        outputs: "line-out".into(),
+        format: crate::Format::DEVICE_DEFAULT,
+        master: 60,
+        muted: true,
+        streams: 1,
+        running: 1,
+        hw_pos: 1,
+        irqs: 2,
+        device_underruns: 0,
+        latency_us: 1,
+        period: 256,
+        input: true,
+        device_index: 0,
+        capturing: alloc::vec![],
+    };
+    let devices = alloc::vec![crate::client::DeviceEntry { index: 0, name: "HDA".into(), outputs: "line-out".into(), input: true, active: true }];
+    let o = Overview { status, devices, apps, input: Some(0) };
+    assert_eq!(Overview::decode(&o.encode()).unwrap(), o);
+    let o2 = Overview { input: None, ..o };
+    assert_eq!(Overview::decode(&o2.encode()).unwrap(), o2);
+    // Aplikace (relace s receptem) je nesmi.
+    for req in [Request::Apps, Request::Overview, Request::SelectInput { index: 0 }, Request::AppVolume { app: "a".into(), percent: 1 }] {
+        assert!(!crate::session::app_allowed(&req));
+    }
+}

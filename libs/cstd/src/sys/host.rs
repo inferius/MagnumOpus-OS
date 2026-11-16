@@ -540,6 +540,9 @@ pub fn sock_recv(_fd: i32, _b: &mut [u8], _d: bool) -> R<usize> {
 pub fn sock_send(_fd: i32, _b: &[u8], _d: bool) -> R<usize> {
     Err(errno::ENOTSOCK)
 }
+pub fn sock_peek(_fd: i32, _b: &mut [u8], _d: bool) -> R<usize> {
+    Err(errno::ENOTSOCK)
+}
 pub fn sock_recv_from(_fd: i32, _b: &mut [u8], _d: bool) -> R<(usize, SocketAddr)> {
     Err(errno::ENOTSOCK)
 }

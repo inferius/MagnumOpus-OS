@@ -53,5 +53,6 @@ wire = { path = "../../libs/wire" }
 # Otisk klice hostitele SSH (bez protokolu).
 ssh = { path = "../../libs/ssh", default-features = false }
 taskproto = { path = "../../libs/taskproto" }
+notifyproto = { path = "../../libs/notifyproto" }
 fileops = { path = "../../libs/fileops" }
 openwith = { path = "../../libs/openwith" }

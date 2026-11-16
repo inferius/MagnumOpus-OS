@@ -54,8 +54,8 @@ pub fn bootstrap_channel() -> Option<&'static Channel> {
 static HANDLES: Init<alloc::vec::Vec<u32>> = Init::new();
 static HANDLES_TAKEN: AtomicBool = AtomicBool::new(false);
 
-/// Tagovane handly, ktere runtime nepouzil (napr. `tag::AUDIO` pro
-/// `mosdl`): (stitek, syrovy handle). Bere je [`take_tagged`].
+/// Tagovane handly, ktere runtime nepouzil (zvuk `tag::AUDIO` uz bere
+/// `crate::audio`): (stitek, syrovy handle). Bere je [`take_tagged`].
 static TAGGED: libos::sync::Mutex<alloc::vec::Vec<(u32, u32)>> = libos::sync::Mutex::new(alloc::vec::Vec::new());
 
 /// Vezme tagovany handle startovni zpravy, ktery runtime nepouzil
@@ -236,6 +236,8 @@ unsafe fn init(mut startup: Startup) {
     let launch = take(&mut startup, abi::params::tag::LAUNCH);
     let gui = take(&mut startup, abi::params::tag::GUI);
     let gui_lease = take(&mut startup, abi::params::tag::GUI_LEASE);
+    let audio = take(&mut startup, abi::params::tag::AUDIO);
+    let audio_lease = take(&mut startup, abi::params::tag::AUDIO_LEASE);
     let fd_handles: alloc::vec::Vec<libos::Handle> =
         core::iter::from_fn(|| startup.take_tagged(abi::params::tag::FD)).collect();
     let mut params = params.unwrap_or_default();
@@ -248,6 +250,7 @@ unsafe fn init(mut startup: Startup) {
         crate::net::init(net);
         crate::process::init(launch);
         crate::gui::init(gui, gui_lease);
+        crate::audio::init(audio, audio_lease);
         BOOTSTRAP.set(startup.bootstrap);
     }
     // Zdedene fd az nad pripravenou relaci FS (soubory = `REOPEN`).

@@ -44,6 +44,8 @@ pub struct Stream {
     pub event: Event,
     pub state: State,
     pub volume: u8,
+    /// Hlasitost aplikace (vsech jejich proudu, `APP_VOLUME`), procenta.
+    pub app_volume: u8,
     src: Resampler,
     /// Snimky klienta prectene z bufferu (prehravani) nebo zapsane do nej
     /// (nahravani) celkem.
@@ -101,6 +103,7 @@ impl Stream {
             event,
             state: State::Stopped,
             volume: 100,
+            app_volume: 100,
             flush: src.flush_frames(),
             src,
             consumed: 0,
@@ -185,7 +188,7 @@ impl Stream {
         self.ring.consume(k as u32);
         self.consumed += k as u64;
         if made > 0 {
-            mixer.add(&self.frames[..made], volume_gain(self.volume));
+            mixer.add(&self.frames[..made], volume_gain(combined(self.volume, self.app_volume)));
             self.last_data = pos + made as u64;
         }
         if made < n {
@@ -265,4 +268,9 @@ impl Stream {
     pub fn active(&self) -> bool {
         self.state != State::Stopped
     }
+}
+
+/// Hlasitost proudu a aplikace dohromady (procenta).
+pub fn combined(stream: u8, app: u8) -> u8 {
+    (stream as u32 * app as u32 / 100) as u8
 }

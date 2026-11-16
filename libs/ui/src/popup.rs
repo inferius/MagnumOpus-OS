@@ -63,11 +63,14 @@ pub(crate) struct PItem<M> {
     pub(crate) act: Option<PAct<M>>,
     /// Mnemonika: pismeno (male) a bajt v `label`, kde se podtrhne.
     pub(crate) mnemonic: Option<(char, usize)>,
+    /// Ikona vlevo a nadpis skupiny (`MenuEntry::icon`, `menu_header`).
+    pub(crate) icon: Option<&'static str>,
+    pub(crate) header: bool,
 }
 
 impl<M> PItem<M> {
     pub(crate) fn usable(&self) -> bool {
-        !self.separator && self.disabled.is_empty() && self.act.is_some()
+        !self.separator && !self.header && self.disabled.is_empty() && self.act.is_some()
     }
 }
 
@@ -100,7 +103,19 @@ pub(crate) fn virt_id(el: u32, kind: u64, n: u64) -> u32 {
 
 impl<M: Clone> Ui<M> {
     pub(crate) fn row_h(&self, it: &PItem<M>) -> u32 {
-        if it.separator { self.look.theme.space[2] + 1 } else { self.look.control_h() }
+        let th = &self.look.theme;
+        if it.separator {
+            th.space[2] + 1
+        } else if it.header {
+            th.text.caption.line + th.space[2] + th.space[1]
+        } else {
+            self.look.control_h()
+        }
+    }
+
+    /// Okraj stinu nabidky (`shadow.popover`) kolem jejiho obdelniku.
+    pub(crate) fn popup_shadow_margin(&self) -> u32 {
+        self.look.theme.shadow.popover.iter().map(|s| (s.blur as i32 + s.spread.max(0) + s.x.abs().max(s.y.abs())) as u32).max().unwrap_or(0)
     }
 
     /// Obdelnik prvku `i` v souradnicich okna (prvek v posouvane oblasti).
@@ -125,7 +140,14 @@ impl<M: Clone> Ui<M> {
         let gap = th.space[3];
         let check = th.size.icon_s + gap;
         let label_w = items.iter().map(|i| self.look.width(&i.label, body)).max().unwrap_or(0);
-        let short_w = items.iter().map(|i| self.look.width(&i.shortcut, body)).max().unwrap_or(0);
+        let cap = th.text.caption;
+        // Vpravo zkratka nebo duvod zakazani (`.k`, `.why`), za nimi fajfka.
+        let short_w = items
+            .iter()
+            .map(|i| if i.disabled.is_empty() { self.look.width(&i.shortcut, cap) } else { self.look.width(&i.disabled, cap) })
+            .max()
+            .unwrap_or(0)
+            + if items.iter().any(|i| i.checked.is_some()) { th.size.icon_s + gap } else { 0 };
         let area = self.popup_area();
         let w = (label_w + if short_w > 0 { short_w + 2 * gap } else { 0 } + check + 2 * gap + 2 * pad).max(min_w).max(th.size.hit_min * 5).min(area.w);
         let content: u32 = items.iter().map(|i| self.row_h(i)).sum::<u32>() + 2 * pad;
@@ -158,7 +180,8 @@ impl<M: Clone> Ui<M> {
     /// Obdelnik vrstvy popoveru (souradnice okna): otevrena nabidka
     /// a zobrazena bublina; `None` = nic.
     pub fn overlay_rect(&self) -> Option<Rect> {
-        let p = self.popup.iter().chain(self.popup_stack.iter()).map(|p| p.rect).reduce(|a, b| a.union(&b));
+        let m = self.popup_shadow_margin() as i32;
+        let p = self.popup.iter().chain(self.popup_stack.iter()).map(|p| Rect::new(p.rect.x - m, p.rect.y - m, p.rect.w + 2 * m as u32, p.rect.h + 2 * m as u32)).reduce(|a, b| a.union(&b));
         let t = self.tip_text().map(|t| self.tip_rect(&t));
         let s = self.suggest_rect();
         [p, t, s].into_iter().flatten().reduce(|a, b| a.union(&b))
@@ -235,6 +258,8 @@ impl<M: Clone> Ui<M> {
                         MenuAct::Sub(items) => PAct::Sub(Self::items_from(items)),
                     }),
                     mnemonic,
+                    icon: e.icon,
+                    header: e.header,
                 }
             })
             .collect()
@@ -246,7 +271,7 @@ impl<M: Clone> Ui<M> {
         let items = options
             .iter()
             .enumerate()
-            .map(|(k, o)| PItem { label: o.clone(), shortcut: String::new(), disabled: String::new(), checked: Some(k == *selected), separator: false, act: Some(PAct::Pick(k)), mnemonic: None })
+            .map(|(k, o)| PItem { label: o.clone(), shortcut: String::new(), disabled: String::new(), checked: Some(k == *selected), separator: false, act: Some(PAct::Pick(k)), mnemonic: None, icon: None, header: false })
             .collect();
         let sel = (*selected < options.len()).then_some(*selected);
         let r = self.window_rect(i);
@@ -255,24 +280,52 @@ impl<M: Clone> Ui<M> {
 
     /// Kontextova nabidka prvku `i` nebo jeho nejblizsiho predka, ktery ji
     /// ma; `at` = bod okna (mys) nebo `None` (klavesnice: pod prvkem).
-    pub(crate) fn open_context(&mut self, i: usize, at: Option<(i32, i32)>) -> bool {
+    /// Kontextova nabidka prvku `i` nebo nejblizsiho predka, ktery ji ma:
+    /// (index vlastnika, polozky).
+    fn context_of(&self, i: usize) -> Option<(usize, Vec<PItem<M>>)> {
         let mut k = Some(i);
         while let Some(j) = k {
-            if let Some(m) = &self.elems[j].menu {
-                let items = Self::items_from(m);
-                if items.is_empty() {
-                    return false;
-                }
-                let anchor = match at {
-                    Some((x, y)) => Rect::new(x, y - 2, 1, 1),
-                    None => self.window_rect(i),
-                };
-                self.open_popup(self.elems[j].key, false, items, anchor, 0, None);
-                return true;
+            if let Some(m) = &self.elems.get(j)?.menu {
+                return Some((j, Self::items_from(m)));
             }
             k = self.elems[j].parent.checked_sub(1);
         }
-        false
+        None
+    }
+
+    pub(crate) fn open_context(&mut self, i: usize, at: Option<(i32, i32)>) -> bool {
+        let Some((j, items)) = self.context_of(i) else { return false };
+        if items.is_empty() {
+            return false;
+        }
+        let anchor = match at {
+            Some((x, y)) => Rect::new(x, y - 2, 1, 1),
+            None => self.window_rect(i),
+        };
+        self.open_popup(self.elems[j].key, false, items, anchor, 0, None);
+        true
+    }
+
+    /// Po prestavbe pohledu: otevrena kontextova nabidka (ne vyber, ne
+    /// podnabidka) prevezme polozky z noveho pohledu. Pravy klik na radek
+    /// tabulky nabidku otevre hned, ale vyber radku zpracuje aplikace az
+    /// potom (`on_context`); bez obnovy by nabidka ukazovala stav pred
+    /// vyberem (zakazane akce). Jiny pocet polozek = jina nabidka: zustane.
+    pub(crate) fn refresh_context(&mut self) {
+        if !self.popup_stack.is_empty() {
+            return;
+        }
+        let Some(owner) = self.popup.as_ref().filter(|p| !p.select).map(|p| p.owner) else { return };
+        let Some(i) = self.index_of(owner) else { return };
+        let Some((j, items)) = self.context_of(i) else { return };
+        if self.elems[j].key != owner {
+            return;
+        }
+        if let Some(p) = self.popup.as_mut()
+            && p.items.len() == items.len()
+        {
+            p.items = items;
+        }
     }
 
     pub(crate) fn close_popup(&mut self, r: &mut Response<M>) {
@@ -611,7 +664,25 @@ impl<M: Clone> Ui<M> {
         let th = self.look.theme.clone();
         let col = &th.color;
         let edge = if th.mode == theme::Mode::Contrast { 2 } else { 1 };
-        c.round_fill_bordered(p.rect, th.radius.card, col.surface, col.border, edge);
+        // Stin `shadow.popover` (masky v mezipameti ui).
+        let pop = th.shadow.popover.clone();
+        let rad = th.radius.card;
+        for s in &pop {
+            let r = (rad as i32 + s.spread).max(0) as u32;
+            self.shadow_masks.entry((r, s.blur)).or_insert_with(|| gfx::shadow::ShadowMask::new(r, s.blur));
+        }
+        let layers: Vec<(&gfx::shadow::ShadowMask, Rect, u32)> = pop
+            .iter()
+            .rev()
+            .map(|s| {
+                let r = (rad as i32 + s.spread).max(0) as u32;
+                let sp = s.spread;
+                let rect = Rect::new(p.rect.x + s.x - sp, p.rect.y + s.y - sp, (p.rect.w as i32 + 2 * sp).max(0) as u32, (p.rect.h as i32 + 2 * sp).max(0) as u32);
+                (&self.shadow_masks[&(r, s.blur)], rect, s.color)
+            })
+            .collect();
+        c.shadow_layers(&layers, p.rect);
+        c.round_fill_bordered(p.rect, rad, col.surface, col.border, edge);
         let pad = th.space[2] as i32;
         let old = c.clip();
         let inner = Rect::new(p.rect.x + pad, p.rect.y + pad, p.rect.w.saturating_sub(2 * pad as u32), p.rect.h.saturating_sub(2 * pad as u32));
@@ -628,23 +699,45 @@ impl<M: Clone> Ui<M> {
                 continue;
             }
             let row = Rect::new(inner.x, y, inner.w, h as u32);
+            if it.header {
+                // Nadpis skupiny: `caption` vahy body_strong, `ink_muted`.
+                let s = theme::TextStyle { weight: th.text.body_strong.weight, ..th.text.caption };
+                let f = self.look.face(s);
+                let b = y + th.space[2] as i32 + f.baseline_in(s.size, s.line);
+                f.draw_ellipsized(c, row.x + gap, b, &it.label, s.size, col.ink_muted, row.w.saturating_sub(2 * gap as u32));
+                y += h;
+                continue;
+            }
             if p.hi == Some(k) {
                 c.round_fill(row, th.radius.xs, col.accent_soft);
             }
             let ink = if it.disabled.is_empty() { col.ink } else { col.ink_faint };
             let mut x = row.x + gap;
-            if it.checked == Some(true) {
-                self.icons.draw(c, "check", x, y + (h - is as i32) / 2, is, th.icon_stroke, ink);
+            // Ikona vlevo (sloupec je vzdy, at se texty srovnaji).
+            if let Some(n) = it.icon {
+                self.icons.draw(c, n, x, y + (h - is as i32) / 2, is, th.icon_stroke, ink);
             }
             x += (is + th.space[3]) as i32;
+            // Vpravo: fajfka zvolene polozky, pred ni zkratka nebo duvod.
+            let mut right = row.right() as i32 - gap;
+            if it.checked.is_some() {
+                if it.checked == Some(true) {
+                    self.icons.draw(c, "check", right - is as i32, y + (h - is as i32) / 2, is, th.icon_stroke, col.accent_ink);
+                }
+                right -= (is + gap as u32) as i32;
+            }
+            let cap = th.text.caption;
+            let side = if it.disabled.is_empty() { it.shortcut.clone() } else { it.disabled.clone() };
+            let fc = self.look.face(cap);
+            let sw = if side.is_empty() { 0 } else { fc.width(&side, cap.size) as i32 + 2 * gap };
+            if !side.is_empty() {
+                let w = fc.width(&side, cap.size) as i32;
+                let b = y + fc.baseline_in(cap.size, h as u32);
+                fc.draw(c, right - w, b, &side, cap.size, col.ink_muted);
+            }
             let f = self.look.face(body);
             let b = y + f.baseline_in(body.size, h as u32);
-            let sw = if it.shortcut.is_empty() { 0 } else { f.width(&it.shortcut, body.size) as i32 + 2 * gap };
-            f.draw_ellipsized(c, x, b, &it.label, body.size, ink, (row.right() as i32 - x - sw).max(0) as u32);
-            if !it.shortcut.is_empty() {
-                let w = f.width(&it.shortcut, body.size) as i32;
-                f.draw(c, row.right() as i32 - gap - w, b, &it.shortcut, body.size, col.ink_muted);
-            }
+            f.draw_ellipsized(c, x, b, &it.label, body.size, ink, (right - x - sw).max(0) as u32);
             // Mnemonika podtrzena, podnabidka sipkou vpravo.
             if let Some((_, at)) = it.mnemonic
                 && at < it.label.len()
@@ -713,6 +806,20 @@ impl<M: Clone> Ui<M> {
     }
 
     /// Je otevrena nabidka (vyber, kontextova)?
+    /// Otevre nabidku `items` u obdelniku `anchor` (souradnice okna) bez
+    /// prvku, ke kteremu by patrila: nabidka zastupce v liste kompozitoru.
+    /// Vlastnikem je koren pohledu; vyber polozky vrati jeji zpravu.
+    pub fn open_menu(&mut self, items: Vec<crate::MenuEntry<M>>, anchor: Rect) {
+        let items = Self::items_from(&items);
+        let owner = self.elems.first().map_or(crate::Key::ROOT, |e| e.key);
+        self.open_popup(owner, false, items, anchor, 0, None);
+    }
+
+    /// Obdelnik otevrene nabidky (souradnice okna).
+    pub fn popup_rect(&self) -> Option<Rect> {
+        self.popup.as_ref().map(|p| p.rect)
+    }
+
     pub fn popup_open(&self) -> bool {
         self.popup.is_some()
     }
@@ -753,7 +860,10 @@ impl<M: Clone> Ui<M> {
             let mut y = p.rect.y + pad - p.scroll;
             for (k, it) in p.items.iter().enumerate() {
                 let h = self.row_h(it) as i32;
-                if !it.separator {
+                if it.header {
+                    let bounds = Rect::new(p.rect.x + pad, y, p.rect.w.saturating_sub(2 * pad as u32), h as u32).intersect(&p.rect);
+                    out.push(A11yNode { id: virt_id(owner, 7, k as u64), parent: mid, role: Role::Label, name: it.label.clone(), value: String::new(), state: 0, layer: crate::ROOT_LAYER, bounds, actions: 0 });
+                } else if !it.separator {
                     let mut state = 0;
                     if !it.disabled.is_empty() {
                         state |= DISABLED;

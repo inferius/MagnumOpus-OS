@@ -300,3 +300,79 @@ fn cip_metody_jen_pri_vic_metodach() {
     assert_eq!(ms, vec![Method::Password, Method::Pin, Method::Key]);
     assert_eq!(t.c.secure_fields(), vec![l.field]);
 }
+
+/// Relativni jas WCAG (sRGB -> linearni).
+fn luminance(p: u32) -> f32 {
+    let lin = |c: u32| {
+        let c = c as f32 / 255.0;
+        if c <= 0.04045 { c / 12.92 } else { libm::powf((c + 0.055) / 1.055, 2.4) }
+    };
+    0.2126 * lin(p >> 16 & 0xFF) + 0.7152 * lin(p >> 8 & 0xFF) + 0.0722 * lin(p & 0xFF)
+}
+
+fn ratio(a: u32, b: u32) -> f32 {
+    let (x, y) = (luminance(a), luminance(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// Kontrast textu `text` stylu `s` vystredeneho na radku `y` proti
+/// pozadi hned vedle nej: nejkontrastnejsi pixel textu (jadro glyfu) proti
+/// prumeru pozadi vlevo a vpravo od textu.
+fn text_contrast(t: &mut T, y: i32, text: &str, s: theme::TextStyle) -> f32 {
+    let tw = t.c.style.width(text, s) as i32;
+    let x0 = (W as i32 - tw) / 2;
+    let mut best = 1.0f32;
+    for yy in y..y + s.line as i32 {
+        let bg = [t.px(x0 - 12, yy), t.px(x0 + tw + 12, yy)];
+        for x in x0..x0 + tw {
+            let p = t.px(x, yy);
+            best = best.max(ratio(p, bg[0]).min(ratio(p, bg[1])));
+        }
+    }
+    best
+}
+
+/// O24: hodiny, datum a jmeno na zamcene obrazovce jsou citelne ve
+/// svetlem, tmavem i kontrastnim rezimu (kontrast z pixelu >= 4,5 : 1).
+/// Snimky `target/comp-zamek-<rezim>.png`.
+#[test]
+fn zamek_citelny_ve_vsech_rezimech() {
+    use theme::{Pref, Scheme};
+    for (scheme, contrast, name) in [(Scheme::Light, false, "svetly"), (Scheme::Dark, false, "tmavy"), (Scheme::Dark, true, "kontrast")] {
+        let mut t = login();
+        // Volba vzhledu systemu i uzivatele, bez prechodu (Omezit pohyb).
+        let p = Pref { scheme, contrast, reduce_motion: true };
+        t.c.set_appearance_system(p, t.now);
+        t.c.set_appearance_user(1000, p, t.now);
+        t.c.set_clock(Some(("14:05".into(), "so 7. 11.".into())));
+        t.c.session_opened(3, 1000, "alice", t.now);
+        t.c.session_locked(3, true, t.now);
+        t.frame();
+        t.frame();
+        save_png(&alloc::format!("comp-zamek-{name}.png"), &t.frame, W, H);
+        let l = t.c.greeter_layout();
+        let th = t.c.style.theme.clone();
+        for (what, y, text, s) in [
+            ("hodiny", l.clock_y, "14:05", th.text.clock),
+            ("datum", l.clock_y + th.text.clock.line as i32, "so 7. 11.", th.text.title),
+            ("jmeno", l.name_y, "Alice", th.text.title),
+        ] {
+            let c = text_contrast(&mut t, y, text, s);
+            assert!(c >= 4.5, "{name}: {what} kontrast {c:.2} : 1");
+        }
+    }
+}
+
+/// Enter s prazdnym polem nic neposle, ale rekne proc (O25); psani zpravu
+/// zase smaze.
+#[test]
+fn prazdne_heslo_rekne_proc() {
+    let mut t = login();
+    t.now += dialog::INPUT_DELAY;
+    t.key(KEY_ENTER, false);
+    assert!(t.c.take_login_requests().is_empty());
+    assert_eq!(t.c.greeter.msg, Some((String::from("Zadejte PIN."), true)));
+    text(&mut t, "1");
+    t.key(KEY_ENTER, false);
+    assert_eq!(t.c.take_login_requests().len(), 1);
+}

@@ -8,6 +8,10 @@
 //!   (kanal `permissions` od initu, zprava `perm` s handlem) a odpovi
 //!   aplikaci, az prijde rozhodnuti (ulozene hned, jinak po dialogu). Bez
 //!   sluzby uctu nahravani pro aplikace neni (`ACCESS_DENIED`).
+//! - Limity relaci a streamu se pocitaji **na identitu** (`app_id`), ne na
+//!   relaci: procesy s roli `Audio` (Wine) je neobejdou.
+//! - Odvolani (`revoke\0<app_id>` od initu): vsechny relace identity se
+//!   zavrou (streamy hned zmlknou); obnovu pres listky zrusi supervisor.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -22,6 +26,13 @@ use crate::service::{Client, Service};
 
 /// Zprava initu: nova relace aplikace (za ni recept).
 pub const APP_PREFIX: &[u8] = b"app\0";
+/// Zprava initu: odvolat zvuk identite (za ni `app_id`).
+pub const REVOKE_PREFIX: &[u8] = b"revoke\0";
+
+/// Nejvic relaci jedne identity (procesy s roli Audio sdileji identitu).
+pub const MAX_IDENTITY_SESSIONS: usize = 64;
+/// Nejvic streamu jedne identity (soucet pres jeji relace).
+pub const MAX_IDENTITY_STREAMS: usize = 32;
 
 /// `OPEN` vstupu cekajici na rozhodnuti uzivatele.
 pub struct PendingOpen {
@@ -35,10 +46,37 @@ impl Service {
     /// Nova relace aplikace podle receptu (zprava initu).
     pub fn app_session(&mut self, recipe: &[u8]) -> Result<Vec<Handle>> {
         let r = Recipe::decode(recipe)?;
+        if let Some(new) = r.as_ref()
+            && self.clients.iter().filter(|c| c.open && c.app.as_ref().is_some_and(|a| a.app_id == new.app_id)).count() >= MAX_IDENTITY_SESSIONS
+        {
+            println!("audiod: {} ma prilis mnoho relaci, dalsi odmitnuta", new.app_id);
+            return Err(Error::NoResources);
+        }
         let (ours, theirs) = Channel::create()?;
         let id = self.next_client_id();
         self.clients.push(Client { chan: ours, open: true, privileged: false, id, app: r, granted: None });
         Ok(alloc::vec![theirs.into_handle()])
+    }
+
+    /// Streamy vsech relaci identity klienta `client` (0 pro systemove).
+    pub fn identity_streams(&self, client: usize) -> usize {
+        let Some(id) = self.clients.get(client).and_then(|c| c.app.as_ref()).map(|a| &a.app_id) else { return 0 };
+        self.streams
+            .iter()
+            .filter(|s| self.clients.get(s.owner).and_then(|c| c.app.as_ref()).is_some_and(|a| &a.app_id == id))
+            .count()
+    }
+
+    /// Odvola zvuk identite `app_id`: zavre vsechny jeji relace (streamy
+    /// zaniknou pri `reap`). Vraci pocet relaci.
+    pub fn revoke(&mut self, app_id: &str) -> usize {
+        let mut n = 0;
+        for c in self.clients.iter_mut().filter(|c| c.open && c.app.as_ref().is_some_and(|a| a.app_id == app_id)) {
+            c.open = false;
+            n += 1;
+        }
+        println!("audiod: zvuk {app_id} odvolan ({n} relaci zavreno)");
+        n
     }
 
     pub fn next_client_id(&mut self) -> u64 {

@@ -31,6 +31,8 @@ pub enum Flyout {
     /// Vzhled: radky Svetly, Tmavy, Automaticky (zvoleny s fajfkou),
     /// pak stav (kdy se automaticky prepne, kontrast z Pristupnosti).
     Look,
+    /// Hodiny: kalendar mesice a svetovy cas (`calendar.rs`).
+    Clock,
     /// Rezim vyvojare (jen vyvojove sestaveni, `devmode.rs`).
     #[cfg(feature = "dev-mode")]
     Dev,
@@ -89,6 +91,7 @@ impl Comp {
                 (String::from("Zvuk"), vec![line])
             }
             Flyout::Bell => (String::from("Oznámení"), self.dnd_lines()),
+            Flyout::Clock => (String::from("Kalendář"), Vec::new()),
             Flyout::Look => (String::from("Vzhled"), self.look_lines()),
             #[cfg(feature = "dev-mode")]
             Flyout::Dev => self.dev_flyout_text(),
@@ -122,13 +125,14 @@ impl Comp {
     }
 
     /// Ikona v liste, ke ktere panel patri.
-    fn flyout_anchor(&self, f: Flyout) -> Option<Rect> {
+    pub(crate) fn flyout_anchor(&self, f: Flyout) -> Option<Rect> {
         let bar = self.bar_layout();
         match f {
             Flyout::Tasks => bar.tasks,
             Flyout::Net => bar.net,
             Flyout::Volume => bar.volume,
             Flyout::Bell => Some(bar.bell),
+            Flyout::Clock => bar.clock,
             Flyout::Look => Some(bar.look),
             #[cfg(feature = "dev-mode")]
             Flyout::Dev => bar.dev,
@@ -140,6 +144,9 @@ impl Comp {
     /// Obdelnik otevreneho panelu (nad listou, zarovnany k ikone).
     pub(crate) fn flyout_rect(&self) -> Option<Rect> {
         let f = self.flyout?;
+        if Self::is_ui_panel(f) {
+            return self.bar_panel_rect();
+        }
         let a = self.flyout_anchor(f)?;
         let t = &self.style.theme;
         let (title, lines) = self.flyout_text(f);
@@ -173,17 +180,34 @@ impl Comp {
 
     pub(crate) fn set_flyout(&mut self, f: Option<Flyout>) {
         if let Some(r) = self.flyout_rect() {
-            self.damage(r);
+            self.damage_top(self.panel_shadow_area(r));
         }
+        // Ikona v liste ukazuje otevreny stav.
+        self.damage_panel();
         self.flyout = f;
+        // Kalendar se otevre na dnesnim mesici.
+        if f == Some(Flyout::Clock) {
+            self.calendar_offset = 0;
+        }
+        self.bar_panel_rebuild();
         if let Some(r) = self.flyout_rect() {
-            self.damage(r);
+            self.damage_top(self.panel_shadow_area(r));
+        }
+    }
+
+    /// Stav, ze ktereho panel sestavuje pohled, se zmenil.
+    pub(crate) fn bar_panel_changed(&mut self) {
+        if self.barpanel.is_some() {
+            self.bar_panel_rebuild();
         }
     }
 
     /// Kresli otevreny panel a popisek uloh (vrstva nad okny).
-    pub(crate) fn draw_flyout(&mut self, c: &mut Canvas<'_>) {
+    pub(crate) fn draw_flyout(&mut self, c: &mut Canvas<'_>, now: u64) {
         self.draw_tooltip(c);
+        if self.flyout.is_some_and(Self::is_ui_panel) {
+            return self.draw_bar_panel(c, now);
+        }
         let (Some(f), Some(r)) = (self.flyout, self.flyout_rect()) else { return };
         let (title, lines) = self.flyout_text(f);
         let t = self.style.theme.clone();

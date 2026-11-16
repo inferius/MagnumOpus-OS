@@ -10,6 +10,11 @@
 //! Bootstrap kanal sluzby je ridici (jen init); klienti dostavaji relace
 //! pres `CONNECT` - bez listku ([`connect`], testy) nebo s listkem pres
 //! supervisor (`session("audiod", [])`, termd), ktera prezije restart.
+//!
+//! Role `Audio` (relace zvuku pro potomky, `docs/cs/zvuk.md`): adapter
+//! prijme jen prazdne zuzeni (stejna identita a pravidla nahravani), novy
+//! listek je svazany s rodicem; [`revoke`] zrusi listky identity i z nich
+//! odvozene a audiod zavre vsechny jeji relace.
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -81,6 +86,34 @@ pub fn app_session(sup: &mut crate::supervisor::Supervisor, recipe: &audioproto:
     sup.session("audiod", recipe.encode())
 }
 
+/// Odvola zvuk aplikaci `app` (id z manifestu): supervisor zrusi listky
+/// jeji identity u audiod i z nich odvozene (role `Audio` potomku), audiod
+/// zavre vsechny jeji relace (streamy zmlknou). Vraci (pocet listku, pocet
+/// relaci).
+pub fn revoke(sup: &mut crate::supervisor::Supervisor, app: &str) -> Result<(usize, usize)> {
+    let leases = sup.revoke_leases("audiod", |r| audioproto::session::Recipe::decode(r).is_ok_and(|x| x.is_some_and(|x| x.app_id == app)));
+    let st = STATE.lock();
+    let control = st.control.as_ref().ok_or(Error::ServiceUnavailable)?;
+    while control.try_read().is_ok() {}
+    let mut m = Vec::from(&b"revoke\0"[..]);
+    m.extend_from_slice(app.as_bytes());
+    control.write(&m, Vec::new())?;
+    let r = control.read(Some(time::deadline_after(REPLY_TIMEOUT)))?;
+    let n = core::str::from_utf8(audioproto::decode_reply(&r.data)?).ok().and_then(|t| t.parse().ok()).unwrap_or(0);
+    println!("init: zvuk aplikace {app} odvolan ({leases} listku, {n} relaci)");
+    Ok((leases, n))
+}
+
+/// Bezici audiod i v supervisoru testu `sup` (relace zvuku s listky pro
+/// programy, ktere test spousti a jejichz supervisor ridi sam: testy Wine).
+/// Hlavni supervisor dal hlida restart.
+pub fn register_for_tests(sup: &mut crate::supervisor::Supervisor) -> Result<()> {
+    let h = crate::supervisor::SUPERVISOR.lock().process("audiod").ok_or(Error::ServiceUnavailable)?.duplicate(None)?;
+    let p = Process::from_handle(h);
+    sup.register(Spec { name: "audiod", deps: &[], service: Some(Box::new(Audiod)) }, Some(&p));
+    Ok(())
+}
+
 /// Relace aplikace bez listku (testy: program spousteny testem).
 pub fn app_channel(recipe: &audioproto::session::Recipe) -> Result<Channel> {
     let st = STATE.lock();
@@ -138,8 +171,17 @@ impl Service for Audiod {
         if recipe.is_empty() { connect_on(control) } else { app_session_on(control, recipe) }
     }
 
-    /// Prava relace urcuje recept (aplikace / system), zuzeni nic nemeni.
-    fn narrow(&self, parent: &[u8], _narrowing: &[u8]) -> Result<Vec<u8>> {
+    /// Prava relace urcuje recept (aplikace / system). Zuzeni jen prazdne
+    /// (role Audio pro potomka: stejny recept, nahravani dal jen pres
+    /// dialog povoleni, nikdy sirsi).
+    fn narrow(&self, parent: &[u8], narrowing: &[u8]) -> Result<Vec<u8>> {
+        if !narrowing.is_empty() {
+            return Err(Error::NotSupported);
+        }
+        // Recept aplikace overit (systemova relace = prazdny recept).
+        if !parent.is_empty() {
+            audioproto::session::Recipe::decode(parent)?;
+        }
         Ok(parent.to_vec())
     }
 

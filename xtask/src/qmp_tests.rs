@@ -56,3 +56,22 @@ fn segment_starts_are_distinct() {
         }
     }
 }
+
+#[test]
+fn device_del_id_and_ports_do_not_collide() {
+    assert_eq!(deleted_id(&device_del("usbmediahot")).as_deref(), Some("usbmediahot"));
+    assert_eq!(deleted_id(r#"{"execute":"device_add","arguments":{"id":"x"}}"#), None);
+    // Pevne porty testu se neopakuji; usb test pripojuje jen na svuj hub.
+    use crate::usbports::*;
+    for (i, a) in TEST_PORTS.iter().enumerate() {
+        assert!(TEST_PORTS[i + 1..].iter().all(|b| b != a), "port {a} dvakrat");
+    }
+    for s in script(false) {
+        if let Step::Qmp(c) = s
+            && let Some(p) = c.split("\"port\":\"").nth(1).and_then(|r| r.split('"').next())
+        {
+            let base = p.split('.').next().unwrap_or(p);
+            assert!(TEST_PORTS.contains(&base), "port {p} mimo tabulku usbports");
+        }
+    }
+}

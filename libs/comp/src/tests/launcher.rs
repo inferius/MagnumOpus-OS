@@ -80,3 +80,31 @@ fn super_alone_toggles_launcher() {
     k(&mut t, KEY_LEFTMETA, Action::Release, syn);
     assert!(t.c.palette.is_none(), "umely vstup ne");
 }
+
+/// O12: nad spoustecem je kurzor sipka, i kdyz pod nim lezi okraj okna
+/// (zmena velikosti okna pod spoustecem se neukazuje); po zavreni zase
+/// kurzor okraje.
+#[test]
+fn launcher_hides_window_edge_cursor() {
+    let mut t = T::new();
+    let a = t.client("a");
+    t.window(a, Mode::Standard, RED);
+    t.frame();
+    t.c.set_palette(Some(crate::palette::Palette { launcher: true, ..Default::default() }));
+    t.frame();
+    let p = t.c.palette_rect().unwrap();
+    // Okno presunout tak, aby jeho levy okraj lezel pod spoustecem.
+    let g = t.c.clients[&a].windows[&1];
+    let r = t.c.windows[&g].rect;
+    let (x, y) = (p.x + p.w as i32 / 2, p.y + p.h as i32 / 2);
+    t.c.windows.get_mut(&g).unwrap().rect = Rect::new(x, y - 20, r.w, r.h);
+    // Bod v zone leveho okraje okna (pod spoustecem).
+    let ex = (x - 12..x + 4).find(|&ex| matches!(t.c.hit(ex, y), Some((_, crate::input::Zone::Edge { left: true, .. })))).expect("zona okraje");
+    assert!(p.contains(ex, y));
+    t.move_to(ex, y);
+    assert_eq!(t.c.input.cursor, crate::input::Cursor::Arrow, "nad spoustecem sipka");
+    t.c.set_palette(None);
+    t.move_to(ex + 1, y);
+    t.move_to(ex, y);
+    assert_ne!(t.c.input.cursor, crate::input::Cursor::Arrow, "bez spoustece kurzor okraje okna");
+}

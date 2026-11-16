@@ -209,7 +209,7 @@ impl<S: Store, D: DeviceKey, R: CryptoRngCore> Engine<S, D, R> {
         // Role spravy (rozhodnuti 2026-11-15): ukony spravy potvrzuje
         // rezim vyvojare v accountd; plati jen s povolenym vyvojem
         // ([`Engine::is_admin`]).
-        let mut a = self.prepare(DEV_NAME, "Vyvojar", None, true, now)?;
+        let mut a = self.prepare(DEV_NAME, "Vývojář", None, true, now)?;
         a.flags |= flags::DEV;
         Ok(Some(a))
     }

@@ -10,7 +10,7 @@ use abi::Error;
 use abi::time::WallTime;
 
 use crate::auth::{Auth, Quota, Restriction, UserRules, Verdict, layer_flags};
-use crate::policy::{Policy, Rule, Target, host_matches, in_network, proto, rights};
+use crate::policy::{BindScope, Policy, Rule, Target, host_matches, in_network, proto, rights};
 use crate::{Info, ReadAddr, Reader, WriteAddr, Writer, dns, link, ntp};
 
 fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
@@ -106,6 +106,7 @@ fn restrict_rights_and_targets() {
             },
         )]),
         bind: Some(vec![(8000, 8099)]),
+        bind_scope: BindScope::Any,
     };
     let a = root.restrict(rights::CLIENT, lan).unwrap();
     assert!(a.has(rights::TCP_CONNECT));
@@ -206,6 +207,27 @@ fn session_budget_is_hierarchical() {
     assert_eq!(root.budget().used(), (1, session), "strzeni socketu se vratilo");
     drop(child);
     assert_eq!(root.budget().used(), (0, 0), "zanikla relace se vratila");
+}
+
+/// Rozpocet identity: sockety vsech relaci stejne identity dohromady
+/// (zuzena relace ho zdedi), kazda relace ma presto svuj limit.
+#[test]
+fn identity_budget_spans_sessions() {
+    let root = Auth::root();
+    let id = crate::auth::Budget::identity(Quota { sockets: 3, bytes: u64::MAX, ops: 4 });
+    let mut a = root.restrict_with(Restriction { rights: rights::ALL, ..Restriction::default() }).unwrap();
+    a.set_identity(id.clone());
+    let mut b = root.restrict_with(Restriction { rights: rights::ALL, ..Restriction::default() }).unwrap();
+    b.set_identity(id.clone());
+    // Potomek (role Net) zdedi rozpocet identity.
+    let child = a.restrict_with(Restriction { rights: rights::ALL, ..Restriction::default() }).unwrap();
+    let x = a.charge(10).unwrap();
+    let y = b.charge(10).unwrap();
+    let z = child.charge(10).unwrap();
+    assert_eq!(b.charge(0).err(), Some(Error::NoResources), "limit identity pres relace");
+    assert_eq!(id.used(), (3, 30));
+    drop((x, y, z));
+    assert_eq!(id.used(), (0, 0), "strzeni identity se vratila");
 }
 
 #[test]
@@ -314,6 +336,7 @@ fn policy_wire_roundtrip_and_validation() {
             Rule::port(proto::TCP, Target::Host(String::from("*.example.com")), 443),
         ]),
         bind: Some(vec![(1024, 2048)]),
+        bind_scope: BindScope::Loopback,
     };
     let mut w = Writer::new();
     p.put(&mut w);
@@ -677,4 +700,24 @@ fn ntp_clock_step_during_measurement_is_discarded() {
     assert!(!plausible(&Sample { offset_ns: 0, delay_ns: MAX_DELAY_NS + 1 }));
     assert_eq!(best_sample(&[bad, good]), Some(good), "zaporne zpozdeni nevyhraje");
     assert_eq!(best_sample(&[bad]), None, "jen neverohodne = zadny vzorek");
+}
+
+#[test]
+fn bind_scope_loopback_layer_blocks_network() {
+    let root = Auth::root();
+    assert!(root.allows_bind_net());
+    let mut lo = Policy::unrestricted();
+    lo.bind_scope = BindScope::Loopback;
+    let a = root.restrict(rights::CLIENT | rights::TCP_LISTEN, lo).unwrap();
+    assert!(!a.allows_bind_net());
+    assert!(a.allows_bind(8080));
+    // Dalsi vrstva bez omezeni sit nevrati.
+    let b = a.restrict(rights::CLIENT | rights::TCP_LISTEN, Policy::unrestricted()).unwrap();
+    assert!(!b.allows_bind_net());
+    // Nezname cislo rozsahu se odmitne.
+    let mut w = Writer::new();
+    Policy::unrestricted().put(&mut w);
+    let mut bytes = w.finish();
+    *bytes.last_mut().unwrap() = 9;
+    assert_eq!(Policy::get(&mut Reader::new(&bytes)).err(), Some(Error::InvalidArgs));
 }

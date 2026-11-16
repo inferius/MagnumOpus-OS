@@ -7,3 +7,22 @@ name = "Wine"
 # bez opravneni JIT jadro spusteni nezapecetene pameti odmitne
 # (docs/cs/sprava-pameti.md).
 jit = true
+
+# Sit programu Windows (W4b, role Net: wineserver a programy ji dedi pres
+# MO_NET). Jako na Windows bez dotazu na kazdy cil; plati profil firewallu
+# uzivatele a prichozi filtr. Naslouchani jen na portech nad 1023.
+[network]
+rights = ["info", "tcp", "listen", "udp", "dns"]
+ask = false
+sockets = 256
+buffers = "64M"
+# Prijimat spojeni jen z loopbacku (rozhodnuti W4b): naslouchani na siti
+# (0.0.0.0, adresa rozhrani) = EACCES, dokud nebude dotaz uzivateli
+# (povoleni "prijimat spojeni ze site" pres dialog povoleni).
+listen_from = "loopback"
+
+[[network.connect]]
+to = "*"
+
+[[network.listen]]
+ports = "1024-65535"

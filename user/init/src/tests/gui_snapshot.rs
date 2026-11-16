@@ -119,7 +119,7 @@ pub fn diag_snapshot(_: &Startup) -> TestResult {
     let text = block.as_str();
     check!(text.contains(&format!("{tag}   ")) && text.contains("] vstup: id="), "trasovani vstupu v bloku snimku");
     check!(text.contains(&format!("{tag} okno z=0")), "okna v bloku snimku");
-    check!(text.contains(&format!("{tag}   uzel")) && text.contains("checkbox 'Jen úlohy agenta'"), "strom pristupnosti v bloku snimku");
+    check!(text.contains(&format!("{tag}   uzel")) && text.contains("checkbox 'Zobrazit dokončené'"), "strom pristupnosti v bloku snimku");
     check!(text.contains(&format!("{tag} fokus okno")), "fokus v bloku snimku");
     check!(text.contains(&format!("{tag} duvod zkratka")), "duvod snimku");
     check!(text.contains("viditelny"), "viditelnost prvku v bloku snimku");

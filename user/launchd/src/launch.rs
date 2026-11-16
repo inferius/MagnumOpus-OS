@@ -189,6 +189,12 @@ pub fn launch(d: &mut Launchd, r: &mut Reader, handles: Vec<Handle>) -> Result<V
         (None, None) => None,
         _ => return Err(fail(Error::InvalidArgs, "role Gui jen s listkem GuiLease")),
     };
+    // Relace zvuku od rodice (role Audio): stejne pravidlo.
+    let audio = match (take(Role::Audio), take(Role::AudioLease)) {
+        (Some(s), Some(l)) => Some((s, l)),
+        (None, None) => None,
+        _ => return Err(fail(Error::InvalidArgs, "role Audio jen s listkem AudioLease")),
+    };
 
     let source = find(d, &req.program, fs.as_ref())?;
     let (name, image, manifest): (String, Vec<u8>, Option<Manifest>) = match &source {
@@ -229,6 +235,10 @@ pub fn launch(d: &mut Launchd, r: &mut Reader, handles: Vec<Handle>) -> Result<V
     if let Some((s, l)) = gui {
         start.push(StartHandle::tagged(tag::GUI, s));
         start.push(StartHandle::tagged(tag::GUI_LEASE, l));
+    }
+    if let Some((s, l)) = audio {
+        start.push(StartHandle::tagged(tag::AUDIO, s));
+        start.push(StartHandle::tagged(tag::AUDIO_LEASE, l));
     }
     if let Some(fs) = fs {
         start.push(StartHandle::tagged(tag::FS, fs.into_channel().into_handle()));

@@ -37,6 +37,7 @@ pub enum ElemKind<M> {
     Video { id: u32, w: u32, h: u32, alt: String },
     Group,
     Scroll { content_h: u32 },
+    Icon { name: &'static str, size: u32 },
 }
 
 pub struct Element<M> {
@@ -58,6 +59,11 @@ pub struct Element<M> {
     pub disabled: bool,
     /// Patri agentovi AI.
     pub agent: bool,
+    /// Vzhled kontejneru, ton stitku a radek panelu (`crate::panel`).
+    pub deco: Option<alloc::boxed::Box<crate::panel::Deco>>,
+    pub tone: crate::panel::TextTone,
+    pub row: Option<alloc::boxed::Box<crate::panel::RowLook>>,
+    pub variant: crate::node::Variant,
 }
 
 impl<M> Element<M> {
@@ -104,10 +110,11 @@ fn kind_tag<M>(k: &Kind<M>) -> usize {
         Kind::Select { .. } => 18,
         Kind::Image { .. } => 19,
         Kind::Video { .. } => 20,
+        Kind::Icon { .. } => 21,
     }
 }
 
-const TAGS: usize = 21;
+const TAGS: usize = 22;
 
 /// Znacky odvozenych klicu (aby se nepotkaly s vlastnimi).
 const OWN: u64 = 1;
@@ -154,9 +161,16 @@ fn measure<M>(n: &Node<M>, t: &Look, avail: u32) -> (u32, u32) {
     let th = &t.theme;
     let sp = &th.space;
     let ctl = t.control_h();
+    let [pt, pr, pb, pl] = n.pad;
+    let inner = avail.saturating_sub(pl + pr);
+    if let Some(rl) = &n.row {
+        let (w, h) = crate::panel::row_size(t, &n.kind, rl, inner);
+        return (if n.width > 0 { n.width } else { w + pl + pr }, if n.height > 0 { n.height } else { h + pt + pb });
+    }
+    let (avail, gap) = (inner, n.gap.unwrap_or(t.gap()));
     let (w, h) = match &n.kind {
         Kind::Label { text, heading, warn, lines } => {
-            let s = if *heading { t.heading() } else { t.body() };
+            let s = if *heading { t.heading() } else { crate::panel::tone_style(t, n.tone) };
             if n.agent {
                 // Stitek agenta: ikona a text v pilulce.
                 (t.width(text, t.chip()) + 2 * sp[4] + th.size.icon_xs + sp[2], s.line + 2 * sp[2])
@@ -197,21 +211,30 @@ fn measure<M>(n: &Node<M>, t: &Look, avail: u32) -> (u32, u32) {
         }
         // Pruh 44 px (`.dbar`) a radek legendy.
         Kind::Segments { legend, .. } => (th.size.hit_min * 6, ctl + sp[2] + if *legend { sp[2] + th.text.caption.line } else { 0 }),
-        Kind::Column(ch) => ch.iter().fold((0, 0), |(w, h), c| {
+        Kind::Column(ch) => ch.iter().enumerate().fold((0, 0), |(w, h), (k, c)| {
             let (cw, chh) = measure(c, t, avail);
-            (w.max(cw), h + chh + if h > 0 { t.gap() } else { 0 })
+            (w.max(cw), h + chh + if k > 0 { gap } else { 0 })
         }),
         Kind::Row(ch) => {
             // Sirka bez rozdeleni zbytku (`grow`), vyska pri sirkach po nem
             // (zalomeny stitek s `grow` ma radku mene).
-            let natural = row_sizes(ch, avail, t, false);
-            let w = natural.iter().map(|s| s.0).sum::<u32>() + t.gap() * ch.len().saturating_sub(1) as u32;
-            (w, row_sizes(ch, avail, t, true).iter().map(|s| s.1).max().unwrap_or(0))
+            let natural = row_sizes(ch, avail, t, false, gap);
+            let w = natural.iter().map(|s| s.0).sum::<u32>() + gap * ch.len().saturating_sub(1) as u32;
+            (w, row_sizes(ch, avail, t, true, gap).iter().map(|s| s.1).max().unwrap_or(0))
         }
         Kind::Scroll(c) => (measure(c, t, avail).0, th.size.hit_min * 4),
         Kind::Spacer => (0, 0),
+        Kind::Icon { size, .. } => {
+            let s = if *size == 0 { th.size.icon_m } else { *size };
+            (s, s)
+        }
     };
-    (if n.width > 0 { n.width } else { w }, if n.height > 0 { n.height } else { h })
+    (if n.width > 0 { n.width } else { w + pl + pr }, if n.height > 0 { n.height } else { h + pt + pb })
+}
+
+/// Prirozena vyska uzlu pri sirce `w` (vyska okna podle obsahu).
+pub fn natural_height<M>(n: &Node<M>, t: &Look, w: u32) -> u32 {
+    measure(n, t, w).1
 }
 
 /// Natahne se dite radku na jeho vysku? Kontejnery ano, pokud aplikace
@@ -228,9 +251,9 @@ fn wraps<M>(n: &Node<M>) -> bool {
 /// Sirky a vysky deti radku sirky `avail`. Kdyz se nevejdou, zuzi se
 /// zalamovane stitky (umerne sve sirce); s `grow` dostanou deti s `grow`
 /// zbytek sirky. Vyska zalomenych stitku je pro jejich konecnou sirku.
-fn row_sizes<M>(ch: &[Node<M>], avail: u32, t: &Look, grow: bool) -> Vec<(u32, u32)> {
+fn row_sizes<M>(ch: &[Node<M>], avail: u32, t: &Look, grow: bool, gap: u32) -> Vec<(u32, u32)> {
     let mut sizes: Vec<(u32, u32)> = ch.iter().map(|c| measure(c, t, avail)).collect();
-    let gaps = t.gap() * ch.len().saturating_sub(1) as u32;
+    let gaps = gap * ch.len().saturating_sub(1) as u32;
     let total = sizes.iter().map(|s| s.0).sum::<u32>() + gaps;
     let mut changed = alloc::vec![false; ch.len()];
     if total > avail {
@@ -296,8 +319,31 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
     let mut menu = n.menu;
     let mut tooltip = n.tooltip;
     let (focus_group, default_focus) = (n.focus_group, n.default_focus);
+    let (mut deco, tone, mut row, variant) = (n.deco, n.tone, n.row, n.variant);
+    let [pt, pr, pb, pl] = n.pad;
+    let gap = n.gap.unwrap_or(t.gap());
+    // Obsah kontejneru uvnitr odsazeni.
+    let inner = Rect::new(r.x + pl as i32, r.y + pt as i32, r.w.saturating_sub(pl + pr), r.h.saturating_sub(pt + pb));
     let mut push = |out: &mut Vec<Element<M>>, kind: ElemKind<M>, rect: Rect| {
-        out.push(Element { kind, key, error: error.take(), skip_tab, menu: menu.take(), tooltip: tooltip.take(), focus_group, default_focus, rect, space, parent, disabled, agent });
+        out.push(Element {
+            kind,
+            key,
+            error: error.take(),
+            skip_tab,
+            menu: menu.take(),
+            tooltip: tooltip.take(),
+            focus_group,
+            default_focus,
+            rect,
+            space,
+            parent,
+            disabled,
+            agent,
+            deco: deco.take(),
+            tone,
+            row: row.take(),
+            variant,
+        });
         out.len()
     };
     match n.kind {
@@ -333,6 +379,10 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
                     parent: id,
                     disabled,
                     agent: false,
+                    deco: None,
+                    tone: crate::panel::TextTone::Normal,
+                    row: None,
+                    variant: crate::node::Variant::Secondary,
                 });
             }
         }
@@ -373,26 +423,34 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
             push(out, ElemKind::Video { id, w, h, alt }, r);
         }
         Kind::Spacer => {}
+        Kind::Icon { name, size } => {
+            push(out, ElemKind::Icon { name, size }, r);
+        }
         Kind::Column(children) => {
             let id = push(out, ElemKind::Group, r);
+            let r = inner;
             let mut counts = [0; TAGS];
             let sizes: Vec<(u32, u32)> = children.iter().map(|c| measure(c, t, r.w)).collect();
-            let fixed: u32 = sizes.iter().map(|s| s.1).sum::<u32>() + t.gap() * children.len().saturating_sub(1) as u32;
+            let fixed: u32 = sizes.iter().map(|s| s.1).sum::<u32>() + gap * children.len().saturating_sub(1) as u32;
             let grow = children.iter().filter(|c| c.grow).count() as u32;
             let extra = r.h.saturating_sub(fixed);
             let mut y = r.y;
-            for (c, (_, h)) in children.into_iter().zip(sizes) {
+            for (c, (w, h)) in children.into_iter().zip(sizes) {
                 let h = if c.grow && grow > 0 { h + extra / grow } else { h };
                 let k = child_key(&c, key, &mut counts);
-                place(c, k, Rect::new(r.x, y, r.w, h), space, id, t, out);
-                y += (h + t.gap()) as i32;
+                // Segmentovy prepinac jen tak siroky jako obsah (`.seg`
+                // je inline-flex), ostatni prvky na celou sirku sloupce.
+                let w = if matches!(c.kind, Kind::Segmented { .. }) && !c.grow { w.min(r.w) } else { r.w };
+                place(c, k, Rect::new(r.x, y, w, h), space, id, t, out);
+                y += (h + gap) as i32;
             }
         }
         Kind::Row(children) => {
             let id = push(out, ElemKind::Group, r);
+            let r = inner;
             let mut counts = [0; TAGS];
             // Konecne sirky (zuzeni zalamovanych stitku, zbytek pro `grow`).
-            let sizes = row_sizes(&children, r.w, t, true);
+            let sizes = row_sizes(&children, r.w, t, true, gap);
             let mut x = r.x;
             for (c, (w, h)) in children.into_iter().zip(sizes) {
                 // Kontejnery (sloupec, posuv, tabulka, seznam) bez pevne
@@ -404,7 +462,7 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
                 let y = r.y + (r.h.saturating_sub(h) / 2) as i32;
                 let k = child_key(&c, key, &mut counts);
                 place(c, k, Rect::new(x, y, w, h.min(r.h)), space, id, t, out);
-                x += (w + t.gap()) as i32;
+                x += (w + gap) as i32;
             }
         }
         Kind::Scroll(child) => {

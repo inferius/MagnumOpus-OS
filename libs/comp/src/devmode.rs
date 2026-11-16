@@ -45,9 +45,8 @@ impl Comp {
         let next = DevMode { on, peer: Some(peer) };
         if self.dev_mode != next {
             self.dev_mode = next;
-            if self.flyout == Some(crate::flyout::Flyout::Dev) {
-                self.set_flyout(None);
-            }
+            // Otevreny panel ukaze novy stav (prepinac, varovani).
+            self.bar_panel_changed();
             self.damage_panel();
         }
     }
@@ -64,7 +63,7 @@ impl Comp {
     /// Sirka pilulky v liste.
     pub(crate) fn dev_chip_width(&self) -> u32 {
         let t = &self.style.theme;
-        t.space[4] + self.style.width(self.dev_label(), label_style(t)) + t.space[4]
+        t.space[4] + t.size.icon_s + t.space[2] + self.style.width(self.dev_label(), label_style(t)) + t.space[4]
     }
 
     /// Pilulka v liste (kresli se nad listou, `render::draw_top`).
@@ -79,10 +78,14 @@ impl Comp {
             c.round_fill_bordered(r, r.h / 2, col.surface, col.border_strong, 1);
             (col.ink_muted, OFF_LABEL)
         };
+        // Ikona pred textem: zapnuto stit s vykricnikem, jinak kod.
+        let is = t.size.icon_s;
+        let icon = if self.dev_mode.on { "shield-alert" } else { "code" };
+        self.style.icons.draw(c, icon, r.x + t.space[4] as i32, r.y + (r.h as i32 - is as i32) / 2, is, t.icon_stroke, ink);
         let s = label_style(&t);
         let face = self.style.face(s);
         let base = r.y + face.baseline_in(s.size, r.h);
-        face.draw(c, r.x + t.space[4] as i32, base, label, s.size, ink);
+        face.draw(c, r.x + (t.space[4] + is + t.space[2]) as i32, base, label, s.size, ink);
     }
 
     /// Karta nad pilulkou: prvni radek je prepinac, zbytek vysvetleni.

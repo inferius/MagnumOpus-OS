@@ -20,6 +20,7 @@
 
 extern crate alloc;
 
+pub mod audio;
 pub mod dl;
 pub mod env;
 pub mod exception;

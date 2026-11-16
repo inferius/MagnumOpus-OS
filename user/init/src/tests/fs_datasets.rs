@@ -49,7 +49,8 @@ pub fn datasets(_: &Startup) -> TestResult {
     // Uzivatel s pravem jen ke klonu: puvod je skryty, souhrn korene take
     // (bez MANAGE), puvodni dataset v seznamu neni.
     let traverse = Acl { flags: 0, grants: alloc::vec![Grant { who: EVERYONE, rights: rights::TRAVERSE, flags: grant::THIS }] };
-    f.set_acl("/", Some(&traverse)).map_err(|e| fail("acl /", e))?;
+    let mut g = super::restore::Restore::new(f);
+    g.set_acl("/", Some(&traverse))?;
     let own = Acl { flags: 0, grants: alloc::vec![Grant { who: DAVE, rights: rights::LIST | rights::TRAVERSE, flags: grant::THIS }] };
     f.set_acl("/f2-dsl-b", Some(&own)).map_err(|e| fail("acl klonu", e))?;
     let (_, dave) = f.connect_as(DAVE, &[], &Profile::Standard.user_mounts()).map_err(|e| fail("connect_as", e))?;

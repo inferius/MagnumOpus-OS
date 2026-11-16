@@ -38,15 +38,19 @@ if [ ! -f "$SRC/.hotovo" ]; then
 fi
 S=$SRC/$WINE_TOP
 
-# Ovladac grafiky pro kompozitor (W3): zdrojaky jsou ve slozce Wine
-# repozitare (third_party/wine/winemo.drv), configure ho zna ze zaplaty
-# 0008. Kopiruji se pri kazdem behu jen zmenene soubory: zmena ovladace
-# prelozi jen jeho objekty (otisk zdroje WINE_KEY je jen ze zaplat).
-mkdir -p "$S/dlls/winemo.drv"
-for f in "$WINE_PATCHES"/winemo.drv/*; do
-    d="$S/dlls/winemo.drv/$(basename "$f")"
-    tr -d '\r' < "$f" > "$d.new"
-    if cmp -s "$d.new" "$d"; then rm "$d.new"; else mv "$d.new" "$d"; fi
+# Ovladace pro MagnumOpus: grafika pro kompozitor (W3, winemo.drv,
+# configure ho zna ze zaplaty 0008) a zvuk pres audiod (W4,
+# winemoaudio.drv, zaplata 0009). Zdrojaky jsou ve slozce Wine repozitare
+# (third_party/wine/<ovladac>). Kopiruji se pri kazdem behu jen zmenene
+# soubory: zmena ovladace prelozi jen jeho objekty (otisk zdroje WINE_KEY
+# je jen ze zaplat).
+for drv in winemo.drv winemoaudio.drv; do
+    mkdir -p "$S/dlls/$drv"
+    for f in "$WINE_PATCHES/$drv"/*; do
+        d="$S/dlls/$drv/$(basename "$f")"
+        tr -d '\r' < "$f" > "$d.new"
+        if cmp -s "$d.new" "$d"; then rm "$d.new"; else mv "$d.new" "$d"; fi
+    done
 done
 
 # Nativni nastroje Wine (winebuild, widl, wrc, winegcc) pro krizove sestaveni.
@@ -101,20 +105,40 @@ WT="$WINE_OUT/tests"
 mkdir -p "$WT"
 WSRC="$MOS_TOOLS/../../user/wintest"
 TOOLS="$W/tools-$WINE_KEY/tools"
-# wintest.c (konzole) a gui.c (W3: okna, GDI): user32 a gdi32 navic.
+# wintest.c (konzole), gui.c (W3: okna, GDI), audio.c (W4: zvuk) a net.c
+# (W4b: Winsock): user32, gdi32, winmm a ws2_32 navic.
 : > "$W/logs/wintest.log"
-for c in wintest gui; do
+for c in wintest gui audio net; do
     clang -target x86_64-windows -fuse-ld=lld --no-default-config -c -o "$WT/$c.o" "$WSRC/$c.c" \
         -I"$SRC/$WINE_TOP/include" -I"$SRC/$WINE_TOP/include/msvcrt" -Iinclude -D_UCRT -O2 -Wall \
         >> "$W/logs/wintest.log" 2>&1 || { cat "$W/logs/wintest.log"; exit 1; }
 done
 "$TOOLS/winegcc/winegcc" -o "$WT/wintest.exe" --wine-objdir . --winebuild "$TOOLS/winebuild/winebuild" \
-    -b x86_64-windows -mconsole "$WT/wintest.o" "$WT/gui.o" dlls/winecrt0/x86_64-windows/libwinecrt0.a \
+    -b x86_64-windows -mconsole "$WT/wintest.o" "$WT/gui.o" "$WT/audio.o" "$WT/net.o" dlls/winecrt0/x86_64-windows/libwinecrt0.a \
     libs/compiler-rt/x86_64-windows/libcompiler-rt.a dlls/ucrtbase/x86_64-windows/libucrtbase.a \
     dlls/user32/x86_64-windows/libuser32.a dlls/gdi32/x86_64-windows/libgdi32.a \
+    dlls/winmm/x86_64-windows/libwinmm.a dlls/ws2_32/x86_64-windows/libws2_32.a \
     dlls/kernel32/x86_64-windows/libkernel32.a dlls/ntdll/x86_64-windows/libntdll.a \
     >> "$W/logs/wintest.log" 2>&1 || { cat "$W/logs/wintest.log"; exit 1; }
-rm -f "$WT/gui.o"
+rm -f "$WT/gui.o" "$WT/audio.o" "$WT/net.o"
+
+# SDK pro programy Windows prekladane na hostiteli (PuTTY,
+# xtask/src/wine/putty.rs: clang --target=x86_64-pc-windows-msvc, lld-link):
+# hlavicky Wine (zdroj a vygenerovane v build strome) a importni knihovny
+# PE jako <dll>.lib. Hlavicky jen pri zmene zdroje (otisk WINE_KEY),
+# knihovny pri kazdem behu (male).
+SDK="$WINE_OUT/sdk"
+if [ "$(cat "$SDK/.klic" 2>/dev/null)" != "$WINE_KEY" ]; then
+    rm -rf "$SDK" && mkdir -p "$SDK/include-gen" "$SDK/lib"
+    cp -r "$SRC/$WINE_TOP/include" "$SDK/include"
+    (cd include && find . -name '*.h' -exec cp --parents {} "$SDK/include-gen/" \;)
+    echo "$WINE_KEY" > "$SDK/.klic"
+fi
+for l in advapi32 comctl32 comdlg32 gdi32 imm32 kernel32 ntdll ole32 shell32 ucrtbase user32 uuid winmm ws2_32 dwmapi; do
+    [ -f "dlls/$l/x86_64-windows/lib$l.a" ] && cp "dlls/$l/x86_64-windows/lib$l.a" "$SDK/lib/$l.lib"
+done
+cp dlls/winecrt0/x86_64-windows/libwinecrt0.a "$SDK/lib/winecrt0.lib"
+cp libs/compiler-rt/x86_64-windows/libcompiler-rt.a "$SDK/lib/compiler-rt.lib"
 rm -f "$WT/wintest.o"
 
 # Vysledek do target/wine/<arch>/tree: rozlozeni adresare aplikace

@@ -73,6 +73,7 @@ a podle výsledku omezí, co klient vidí a smí:
 | MBR (bez GPT), ochranný MBR s poškozenými hlavičkami GPT | celý disk | **zakázán** |
 | prázdný nebo neznámý disk, chyba čtení | celý disk | **zakázán** |
 | zařízení hlásí ochranu proti zápisu (NVMe write protect, virtio `RO`) | podle tabulky | **zakázán** |
+| navíc: oddíl FAT, exFAT nebo NTFS (MBR, GPT, superfloppy; ne ESP, rozšířený oddíl, překryv, disk s naším oddílem) | další kanál `block-media` jen na tento oddíl pro proces média `volfs` | jen vyměnitelné USB (RMB) bez ochrany proti zápisu a jen FAT/exFAT, jinak **zakázán** ([Vyměnitelná média](media.md#kdy-se-na-médium-smí-zapisovat)) **[ověřeno v QEMU]** |
 
 Podrobnosti:
 

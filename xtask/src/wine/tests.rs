@@ -23,3 +23,12 @@ fn key_changes_with_patches() {
     assert_ne!(a, b);
     assert_eq!(a, source_key("abc", &[(String::from("p"), b"1".to_vec())]));
 }
+
+#[test]
+fn putty_is_pinned() {
+    let p = &super::putty::PUTTY;
+    assert_eq!(p.sha256.len(), 64);
+    assert!(p.sha256.chars().all(|c| c.is_ascii_hexdigit()));
+    assert!(p.url.starts_with("https://the.earth.li/~sgtatham/putty/0.85/") && p.url.ends_with(p.file));
+    assert!(p.file.starts_with(p.top));
+}

@@ -130,6 +130,8 @@ pub enum Kind<M> {
     /// Posouvany obsah: posun dela kompozitor (vlastni vrstva s orezem).
     Scroll(Box<Node<M>>),
     Spacer,
+    /// Ikona (`gfx::icon`), velikost 0 = `size.icon_m`.
+    Icon { name: &'static str, size: u32 },
 }
 
 /// Uzel stromu: prvek, jmeno pro pristupnost a pruznost v rozvrzeni.
@@ -160,6 +162,33 @@ pub struct Node<M> {
     pub focus_group: Option<crate::spatial::Axis>,
     /// Vychozi fokus obrazovky.
     pub default_focus: bool,
+    /// Mezera mezi detmi kontejneru (`None` = `space.s3`).
+    pub gap: Option<u32>,
+    /// Vnitrni odsazeni kontejneru: nahore, vpravo, dole, vlevo.
+    pub pad: [u32; 4],
+    /// Vypln a cara kontejneru ([`crate::panel::Deco`]).
+    pub deco: Option<Box<crate::panel::Deco>>,
+    /// Ton stitku ([`crate::panel::TextTone`]).
+    pub tone: crate::panel::TextTone,
+    /// Prvek jako radek panelu s ikonou a popisem.
+    pub row: Option<Box<crate::panel::RowLook>>,
+    /// Varianta tlacitka (`.btn.primary`, `.danger`, `.ghost`).
+    pub variant: Variant,
+}
+
+/// Varianta tlacitka (design/komponenty.html#tlacitka). Na obrazovce je
+/// nejvys jedno primarni; nebezpecne jen pro nevratnou akci.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Variant {
+    /// Sekundarni: ram `border_strong`, pozadi `surface`.
+    #[default]
+    Secondary,
+    /// Hlavni akce: vypln `accent`, text `on_accent`.
+    Primary,
+    /// Nevratna akce: vypln `danger`, text `on_danger`.
+    Danger,
+    /// Bez ramu a pozadi (najeti `surface_3`): pomocne akce v radku.
+    Ghost,
 }
 
 /// Co polozka nabidky udela.
@@ -186,22 +215,31 @@ pub struct MenuEntry<M> {
     /// Oddelovac skupin.
     pub separator: bool,
     pub act: Option<MenuAct<M>>,
+    /// Ikona vlevo (`gfx::icon`, 16 px).
+    pub icon: Option<&'static str>,
+    /// Nadpis skupiny (`label`): neda se vybrat, klavesy ho preskoci.
+    pub header: bool,
 }
 
 /// Polozka nabidky, ktera posle zpravu `m`.
 pub fn menu_item<M>(label: &str, m: M) -> MenuEntry<M> {
-    MenuEntry { label: label.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: Some(MenuAct::Msg(m)) }
+    MenuEntry { label: label.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: Some(MenuAct::Msg(m)), icon: None, header: false }
 }
 
 /// Podnabidka s polozkami `items`. `&` v textu polozky oznaci mnemoniku
 /// (`"&Soubor"`: pismeno S podtrzene, stisk S polozku vybere; `&&` = `&`).
 pub fn submenu<M>(label: &str, items: Vec<MenuEntry<M>>) -> MenuEntry<M> {
-    MenuEntry { label: label.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: Some(MenuAct::Sub(items)) }
+    MenuEntry { label: label.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: Some(MenuAct::Sub(items)), icon: None, header: false }
 }
 
 /// Oddelovac skupin v nabidce.
 pub fn menu_separator<M>() -> MenuEntry<M> {
-    MenuEntry { label: String::new(), shortcut: String::new(), disabled: String::new(), checked: None, separator: true, act: None }
+    MenuEntry { label: String::new(), shortcut: String::new(), disabled: String::new(), checked: None, separator: true, act: None, icon: None, header: false }
+}
+
+/// Nadpis skupiny v nabidce (kontextove-nabidky.html, `.sec`).
+pub fn menu_header<M>(text: &str) -> MenuEntry<M> {
+    MenuEntry { label: text.into(), shortcut: String::new(), disabled: String::new(), checked: None, separator: false, act: None, icon: None, header: true }
 }
 
 impl<M> MenuEntry<M> {
@@ -218,6 +256,12 @@ impl<M> MenuEntry<M> {
 
     pub fn checked(mut self, c: bool) -> Self {
         self.checked = Some(c);
+        self
+    }
+
+    /// Ikona polozky vlevo.
+    pub fn icon(mut self, name: &'static str) -> Self {
+        self.icon = Some(name);
         self
     }
 }
@@ -239,6 +283,8 @@ pub fn menu_from<M>(items: &[guiproto::menu::MenuItem]) -> Vec<MenuEntry<M>> {
                 checked: it.checked,
                 separator: false,
                 act: Some(MenuAct::Action(it.action.clone(), it.args.clone())),
+                icon: None,
+                header: false,
             });
         } else {
             let sub = menu_from(&it.children);
@@ -257,7 +303,7 @@ pub fn menu_from<M>(items: &[guiproto::menu::MenuItem]) -> Vec<MenuEntry<M>> {
     out
 }
 
-fn node<M>(kind: Kind<M>) -> Node<M> {
+pub(crate) fn node<M>(kind: Kind<M>) -> Node<M> {
     Node {
         kind,
         grow: false,
@@ -272,6 +318,12 @@ fn node<M>(kind: Kind<M>) -> Node<M> {
         tooltip: None,
         focus_group: None,
         default_focus: false,
+        gap: None,
+        pad: [0; 4],
+        deco: None,
+        tone: crate::panel::TextTone::Normal,
+        row: None,
+        variant: Variant::Secondary,
     }
 }
 
@@ -495,6 +547,24 @@ impl<M> Node<M> {
         self
     }
 
+    /// Hlavni akce obrazovky (vypln `accent`).
+    pub fn primary(mut self) -> Self {
+        self.variant = Variant::Primary;
+        self
+    }
+
+    /// Nevratna akce (vypln `danger`).
+    pub fn danger(mut self) -> Self {
+        self.variant = Variant::Danger;
+        self
+    }
+
+    /// Bez ramu a pozadi (pomocna akce).
+    pub fn ghost(mut self) -> Self {
+        self.variant = Variant::Ghost;
+        self
+    }
+
     /// Skupina fokusu: sipky podel osy zustanou v ni, pri navratu do ni
     /// dostane fokus naposledy vybrany prvek (rada dlazdic na televizi).
     pub fn focus_group(mut self, a: crate::spatial::Axis) -> Self {
@@ -644,6 +714,15 @@ impl<M> Node<M> {
         self
     }
 
+    /// Koncovy slot pole: napoveda klavesy, ikona nebo text
+    /// ([`crate::fieldopts::Trailing`]).
+    pub fn trailing(mut self, t: crate::fieldopts::Trailing) -> Self {
+        if let Kind::TextInput { opts, .. } = &mut self.kind {
+            opts.trailing = Some(t);
+        }
+        self
+    }
+
     /// Nejvic `n` znaku (grafemu); vlozeni delsiho textu se zkrati.
     pub fn max_len(mut self, n: usize) -> Self {
         if let Kind::TextInput { opts, .. } = &mut self.kind {
@@ -781,16 +860,65 @@ pub struct Cells {
     pub icon: Option<&'static str>,
     /// Nadpis sekce (`.sec` v navrhu): nejde vybrat, klavesy ho preskoci.
     pub header: bool,
+    /// Radek ulohy agenta AI: sloupec se stitkem "agent" (radek ma
+    /// podklad `ai_soft` a levy pruh `ai`, jako polozka seznamu `.agent()`).
+    /// Jen pro systemova okna (spravce uloh), barvy `ai_*` patri agentovi.
+    pub agent: Option<usize>,
+    /// Pruh prubehu (sloupec, 0-100) misto textu bunky; text bunky zustava
+    /// ve stromu pristupnosti.
+    pub progress: Option<(usize, u32)>,
+    /// Ikonova tlacitka radku v poslednim sloupci (zarovnana vpravo, styl
+    /// `ghost`); stisk posle `on_row_action` s id radku a `CellAction::id`.
+    pub actions: Vec<CellAction>,
+}
+
+/// Tlacitko v radku tabulky: ikona, popisek (bublina a pristupnost)
+/// a zda jde stisknout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CellAction {
+    pub id: u32,
+    pub icon: &'static str,
+    pub label: String,
+    pub enabled: bool,
+}
+
+impl CellAction {
+    pub fn new(id: u32, icon: &'static str, label: &str) -> Self {
+        Self { id, icon, label: label.into(), enabled: true }
+    }
+
+    pub fn disabled(mut self, d: bool) -> Self {
+        self.enabled = !d;
+        self
+    }
 }
 
 impl Cells {
     pub fn new(cells: impl IntoIterator<Item = String>) -> Self {
-        Self { cells: cells.into_iter().collect(), icon: None, header: false }
+        Self { cells: cells.into_iter().collect(), ..Self::default() }
     }
 
     /// Nadpis sekce (Bezi, Aplikace, System) v seznamu.
     pub fn header(text: &str) -> Self {
-        Self { cells: alloc::vec![String::from(text)], icon: None, header: true }
+        Self { cells: alloc::vec![String::from(text)], header: true, ..Self::default() }
+    }
+
+    /// Radek agenta AI se stitkem "agent" ve sloupci `col`.
+    pub fn agent(mut self, col: usize) -> Self {
+        self.agent = Some(col);
+        self
+    }
+
+    /// Pruh prubehu `value` (0-100) ve sloupci `col`.
+    pub fn progress(mut self, col: usize, value: u32) -> Self {
+        self.progress = Some((col, value.min(100)));
+        self
+    }
+
+    /// Ikonova tlacitka radku (posledni sloupec).
+    pub fn actions(mut self, a: Vec<CellAction>) -> Self {
+        self.actions = a;
+        self
     }
 
     pub fn icon(mut self, name: &'static str) -> Self {
@@ -822,6 +950,9 @@ pub struct TableSpec<M> {
     pub multi: bool,
     /// Zobrazit zahlavi sloupcu.
     pub header: bool,
+    /// Seznam bez ramecku a car mezi radky (spoustec, design/spoustec.html d):
+    /// vyber a najeti se zaoblenym pozadim.
+    pub plain: bool,
     /// Razeni: sloupec a vzestupne.
     pub sort: Option<(usize, bool)>,
     pub on_selection: Option<Box<dyn Fn(Vec<u64>) -> M>>,
@@ -833,6 +964,8 @@ pub struct TableSpec<M> {
     pub on_drag: Option<Box<dyn Fn(Vec<u64>) -> M>>,
     /// Prave tlacitko na radku (kontextova nabidka).
     pub on_context: Option<Box<dyn Fn(u64) -> M>>,
+    /// Tlacitko v radku ([`Cells::actions`]): id radku a id akce.
+    pub on_row_action: Option<Box<dyn Fn(u64, u32) -> M>>,
     /// Pusteni tazenych radku (id) na radek `Some(id)` nebo na prazdne
     /// misto tabulky `None`; tah z teze nebo jine tabulky v okne.
     pub on_drop: Option<DropFn<M>>,
@@ -860,12 +993,14 @@ pub fn table<M>(columns: Vec<Col>, count: usize, id: impl Fn(usize) -> u64 + 'st
         selection: Vec::new(),
         multi: false,
         header: true,
+        plain: false,
         sort: None,
         on_selection: None,
         on_activate: None,
         on_sort: None,
         on_drag: None,
         on_context: None,
+        on_row_action: None,
         on_drop: None,
     })));
     n.grow = true;
@@ -904,6 +1039,14 @@ impl<M> Node<M> {
     pub fn header(mut self, h: bool) -> Self {
         if let Some(t) = self.spec() {
             t.header = h;
+        }
+        self
+    }
+
+    /// Seznam bez ramecku a car mezi radky ([`TableSpec::plain`]).
+    pub fn plain(mut self) -> Self {
+        if let Some(t) = self.spec() {
+            t.plain = true;
         }
         self
     }
@@ -950,6 +1093,14 @@ impl<M> Node<M> {
     pub fn on_context(mut self, f: impl Fn(u64) -> M + 'static) -> Self {
         if let Some(t) = self.spec() {
             t.on_context = Some(Box::new(f));
+        }
+        self
+    }
+
+    /// Stisk tlacitka v radku ([`Cells::actions`]): id radku a id akce.
+    pub fn on_row_action(mut self, f: impl Fn(u64, u32) -> M + 'static) -> Self {
+        if let Some(t) = self.spec() {
+            t.on_row_action = Some(Box::new(f));
         }
         self
     }

@@ -117,6 +117,8 @@ impl<B: Backend> ui::App for FileManager<B> {
             "files.up" => Msg::Up,
             "files.refresh" => Msg::Refresh,
             "files.properties" => Msg::Properties,
+            "files.download" => Msg::Download,
+            "files.eject" => Msg::Eject,
             "files.show" => {
                 let path = args.iter().find(|a| a.0 == "path").and_then(|a| match &a.1 {
                     guiproto::action::Value::Path(p) | guiproto::action::Value::Text(p) => Some(p.clone()),
@@ -181,6 +183,7 @@ pub fn app_menu(selected: bool) -> alloc::vec::Vec<guiproto::menu::MenuItem> {
         label: String::from("Soubor"),
         children: alloc::vec![
             item("Nová složka", "files.new-folder", "Ctrl+Shift+N", true),
+            item("Stáhnout z adresy…", "files.download", "", true),
             item("Přejmenovat", "files.rename", "F2", selected),
             item("Do koše", "files.trash", "Delete", selected),
             item("Kopírovat", "files.copy", "Ctrl+C", selected),

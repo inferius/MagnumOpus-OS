@@ -15,6 +15,10 @@
 //!   chyba cteni): cely disk jen pro cteni. Zapis, DISCARD i nebezpecne
 //!   operace vraci `READ_ONLY`.
 //!
+//! Vymenna media (flash disky s FAT, exFAT, NTFS) maji vlastni pohledy na
+//! oddily ([`media::media_partitions`]); zapis jen na vymenne USB a jen do
+//! FAT/exFAT.
+//!
 //! Rozhodnuti je zamerne opatrne: pri pochybnosti (prekryv oddilu, oddil
 //! mimo disk, spatny kontrolni soucet) plati "cizi disk". Knihovna nezavisi
 //! na `libos`, aby sla testovat na hostiteli (`tests/`) a aby ji mohl
@@ -27,6 +31,9 @@ extern crate alloc;
 pub mod crc32;
 pub mod gpt;
 pub mod install;
+pub mod media;
+
+pub use media::{MediaFs, media_partitions};
 
 /// Sektor protokolu klienta (`blockproto`). Disky mohou mit vetsi logicky
 /// sektor (4 KiB); knihovna pracuje v sektorech disku, prepocet na 512 B
@@ -120,6 +127,9 @@ pub enum Kind {
     /// Cely disk pro instalator ("raw" kanal): zapis jen do struktur GPT
     /// a nasich oddilu ([`install::raw_write_allowed`]).
     Installer,
+    /// Oddil vymenneho media s cizim FS ([`media::media_partitions`]);
+    /// `index` = poradi v tabulce, [`media::WHOLE`] = cele zarizeni.
+    Media { index: u32, fs: MediaFs },
 }
 
 impl Kind {
@@ -136,6 +146,7 @@ impl Kind {
             Kind::Unreadable => "disk nejde precist",
             Kind::LogPartition { .. } => "oddil pro logy (FAT32 MO-LOGY)",
             Kind::Installer => "cely disk pro instalator",
+            Kind::Media { .. } => "oddil media (cizi FS)",
         }
     }
 

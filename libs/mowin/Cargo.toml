@@ -19,6 +19,7 @@ inputproto = { path = "../inputproto" }
 # Bez `rt`: vstupni bod, heap a vlakna dava std (osrt).
 libos = { path = "../libos", default-features = false }
 clipproto = { path = "../clipproto" }
+audioproto = { path = "../audioproto", features = ["client"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("magnumopus"))'] }

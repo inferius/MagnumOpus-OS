@@ -23,7 +23,8 @@ fn fs() -> Result<&'static FsClient, alloc::string::String> {
 fn links(_: &Startup) -> TestResult {
     let f = fs()?;
     let traverse = Acl { flags: 0, grants: alloc::vec![Grant { who: EVERYONE, rights: rights::TRAVERSE, flags: grant::THIS }] };
-    f.set_acl("/", Some(&traverse)).map_err(|e| fail("acl /", e))?;
+    let mut g = super::restore::Restore::new(f);
+    g.set_acl("/", Some(&traverse))?;
     let _ = f.create("/odkazy", kind::DIR);
     f.set_owner("/odkazy", ALICE).map_err(|e| fail("vlastnik", e))?;
     // Slozka bez grantu: Alice ji nevidi.

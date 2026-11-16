@@ -106,18 +106,18 @@ impl<B: Backend> FileManager<B> {
         let none = self.sel.is_empty();
         let why = "Nic není vybráno";
         let mut v = vec![
-            menu_item("Otevřít", Msg::OpenSelected).shortcut("Enter"),
+            menu_item("Otevřít", Msg::OpenSelected).shortcut("Enter").icon("external"),
             menu_separator(),
-            menu_item("Kopírovat", Msg::Copy).shortcut("Ctrl+C"),
-            menu_item("Vyjmout", Msg::Cut).shortcut("Ctrl+X"),
-            menu_item("Vložit", Msg::Paste).shortcut("Ctrl+V"),
+            menu_item("Kopírovat", Msg::Copy).shortcut("Ctrl+C").icon("copy"),
+            menu_item("Vyjmout", Msg::Cut).shortcut("Ctrl+X").icon("cut"),
+            menu_item("Vložit", Msg::Paste).shortcut("Ctrl+V").icon("paste"),
             menu_separator(),
-            menu_item("Přejmenovat", Msg::Rename).shortcut("F2"),
-            menu_item("Do koše", Msg::Trash).shortcut("Delete"),
+            menu_item("Přejmenovat", Msg::Rename).shortcut("F2").icon("rename"),
+            menu_item("Do koše", Msg::Trash).shortcut("Delete").icon("trash"),
             menu_separator(),
-            menu_item("Nová složka", Msg::NewFolder).shortcut("Ctrl+Shift+N"),
+            menu_item("Nová složka", Msg::NewFolder).shortcut("Ctrl+Shift+N").icon("folder-plus"),
             menu_separator(),
-            menu_item("Vlastnosti", Msg::Properties).shortcut("Alt+Enter"),
+            menu_item("Vlastnosti", Msg::Properties).shortcut("Alt+Enter").icon("info"),
         ];
         if none {
             for i in [0, 2, 3, 7] {
@@ -139,12 +139,18 @@ impl<B: Backend> FileManager<B> {
     fn folder(&self, cx: &Context) -> Node<Msg> {
         let mut v = vec![self.actions(cx)];
         if let Some(e) = &self.edit {
-            let title = if e.item.is_some() { "Nové jméno:" } else { "Jméno nové složky:" };
+            let title = if e.url {
+                "Stáhnout z adresy:"
+            } else if e.item.is_some() {
+                "Nové jméno:"
+            } else {
+                "Jméno nové složky:"
+            };
             let mut field = text_input(&e.value).on_change(Msg::NameValue).on_submit(Msg::NameOk).grow();
             if !e.error.is_empty() {
                 field = field.error(&e.error);
             }
-            v.push(row([label(title), field, button("Uložit").on_click(Msg::NameOk), button("Zrušit").on_click(Msg::NameCancel)]));
+            v.push(row([label(title), field, button(if e.url { "Stáhnout" } else { "Uložit" }).on_click(Msg::NameOk), button("Zrušit").on_click(Msg::NameCancel)]));
             if !e.error.is_empty() {
                 v.push(label(&e.error));
             }
@@ -194,14 +200,19 @@ impl<B: Backend> FileManager<B> {
             Some((Op::Copy, p)) => format!("Vložit ({})", p.len()),
             None => String::from("Vložit"),
         };
-        row([
+        let mut buttons = vec![
             button("Nová složka").on_click(Msg::NewFolder),
             button("Přejmenovat").on_click(Msg::Rename).disabled(self.sel.len() != 1),
             button("Do koše").on_click(Msg::Trash).disabled(none),
             button("Kopírovat").on_click(Msg::Copy).disabled(none),
             button("Vyjmout").on_click(Msg::Cut).disabled(none),
             button(&paste_text).on_click(Msg::Paste).disabled(!self.can_paste(cx)),
-        ])
+        ];
+        // Ve slozce media: bezpecne odpojeni.
+        if self.current_medium().is_some() {
+            buttons.push(button("Odpojit").on_click(Msg::Eject));
+        }
+        row(buttons)
     }
 
     fn preview_panel(&self) -> Node<Msg> {
@@ -309,8 +320,8 @@ impl<B: Backend> FileManager<B> {
             .multi_select(true)
             .on_selection(Msg::TrashSelect)
             .context_menu(vec![
-                menu_item("Obnovit", Msg::TrashRestore).shortcut("Enter"),
-                menu_item("Smazat trvale", Msg::TrashPurge).shortcut("Delete"),
+                menu_item("Obnovit", Msg::TrashRestore).shortcut("Enter").icon("restore"),
+                menu_item("Smazat trvale", Msg::TrashPurge).shortcut("Delete").icon("trash"),
             ])
             .grow(),
         );

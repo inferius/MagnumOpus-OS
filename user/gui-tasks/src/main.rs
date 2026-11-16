@@ -52,11 +52,11 @@ fn main(startup: Startup) -> i64 {
             });
             let _ = taskd.write(&taskproto::Request::Hello { version: taskproto::VERSION }.encode(), alloc::vec::Vec::new());
             let app = TaskManager::new(backend);
-            ui::client::run_with(link, app, Mode::Standard, 560, 620, Some(taskd))
+            ui::client::run_with(link, app, Mode::Standard, 680, 540, Some(taskd))
         }
         None => {
             let app = TaskManager::new(TestBackend::default());
-            ui::client::run(link, app, Mode::Standard, 560, 620)
+            ui::client::run(link, app, Mode::Standard, 680, 540)
         }
     };
     match r {

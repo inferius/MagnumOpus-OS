@@ -190,6 +190,12 @@ impl Comp {
         }
     }
 
+    /// Je ukazatel nad systemovou vrstvou (lista, paleta a spoustec, panel
+    /// listy)? Tam vzdy sipka, ne kurzor okna pod ni (O12).
+    pub(crate) fn over_system(&self, x: i32, y: i32) -> bool {
+        self.panel_rect().contains(x, y) || self.palette_rect().is_some_and(|r| r.contains(x, y)) || self.bar_panel_rect().is_some_and(|r| r.contains(x, y))
+    }
+
     /// Zmena tvaru kurzoru: poskodit stare i nove misto.
     pub(crate) fn set_cursor(&mut self, k: Cursor) {
         if self.input.cursor == k {
@@ -405,6 +411,17 @@ impl Comp {
                     }
                     return;
                 }
+                // Panel listy nad ui: klavesy (Tab, sipky, mezernik) jdou
+                // jemu, Esc ho zavre (nize); aplikaci nejdou.
+                if self.barpanel.is_some() && code != inputproto::code::KEY_ESC && self.dialogs.active().is_none() {
+                    let a = match action {
+                        Action::Press => 1,
+                        Action::Repeat => 2,
+                        _ => 0,
+                    };
+                    self.bar_panel_event(InputEvent::Key { code, action: a, ch }, mods, r.time, now);
+                    return;
+                }
                 // Esc zavre panel nad listou (aplikaci nejde).
                 if code == inputproto::code::KEY_ESC && self.flyout.is_some() && !syn {
                     if action == Action::Press {
@@ -554,6 +571,15 @@ impl Comp {
         if let Some(d) = self.input.drag {
             return self.drag_to(d, px, py, now);
         }
+        // Najeti v panelu listy (a odchod z nej).
+        if let Some(bp) = self.barpanel.as_mut() {
+            let inside = bp.rect.contains(px, py);
+            if inside || bp.hover {
+                bp.hover = inside;
+                let ev = if inside { InputEvent::PointerMove { x: px, y: py } } else { InputEvent::PointerLeave };
+                self.bar_panel_event(ev, mods, time, now);
+            }
+        }
         if self.dialogs.active().is_some() {
             return self.set_hover(None);
         }
@@ -630,7 +656,7 @@ impl Comp {
         let now = self.input_now;
         self.max_hover(over, px, py, now);
         let k = match hit {
-            _ if self.panel_rect().contains(px, py) => Cursor::Arrow,
+            _ if self.over_system(px, py) => Cursor::Arrow,
             // Nad obsahem okna kurzor aplikace (jen bez dialogu systemu).
             Some((g, Zone::Content(..))) if self.dialogs.active().is_none() && self.windows.get(&g).is_some_and(|w| w.app_cursor.is_some()) => Cursor::App(g),
             h => h.map_or(Cursor::Arrow, |(_, z)| z.cursor()),
@@ -800,6 +826,16 @@ impl Comp {
         if pressed {
             self.tip_hide(now);
         }
+        // Panel listy nad ui: stisk v nem (a pusteni po nem) dostane pohled.
+        if self.dialogs.active().is_none()
+            && let Some(bp) = self.barpanel.as_mut()
+            && (bp.rect.contains(px, py) || (!pressed && bp.pressed))
+        {
+            bp.pressed = pressed;
+            self.trace(time, format_args!("{button:?} {} na {px},{py}: panel listy", if pressed { "stisk" } else { "pusteni" }));
+            self.bar_panel_event(InputEvent::Button { code: button.code(), pressed, x: px, y: py }, mods, time, now);
+            return;
+        }
         // Systemove ovladaci prvky: stisk = jen stav "stisknuto", akce az pri
         // pusteni nad stejnym prvkem (odjeti s drzenym tlacitkem akci zrusi).
         // Systemovy dialog prijme jen fyzicky vstup.
@@ -875,6 +911,12 @@ impl Comp {
         if pressed && self.max_menu.is_some() && self.max_menu_click(px, py, now) {
             return;
         }
+        // Vyskakovaci oznameni: jen fyzicky klik (akce oznameni neprovede
+        // umely vstup).
+        if pressed && !syn && button == Button::Left && self.toast_click(px, py, now) {
+            self.trace(time, format_args!("{button:?} {act} na {px},{py}: oznameni"));
+            return;
+        }
         // Cela obrazovka: tlacitko navratu vedle odznaku.
         if pressed
             && let Some(g) = self.focus
@@ -943,6 +985,7 @@ impl Comp {
                 (bar.volume, crate::flyout::Flyout::Volume),
                 (Some(bar.bell), crate::flyout::Flyout::Bell),
                 (Some(bar.look), crate::flyout::Flyout::Look),
+                (bar.clock, crate::flyout::Flyout::Clock),
                 #[cfg(feature = "dev-mode")]
                 (bar.dev, crate::flyout::Flyout::Dev),
             ]

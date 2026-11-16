@@ -16,6 +16,7 @@ extern crate alloc;
 
 mod gpu;
 mod login;
+mod notify;
 mod status;
 mod peers;
 mod screen;
@@ -64,6 +65,8 @@ struct Service {
     snapshots: Option<Channel>,
     /// Kanal k initu pro spousteni aplikaci (`launcher`).
     launcher: Option<Channel>,
+    /// Prohlizece oznameni relaci (`notify.rs`).
+    notify: notify::Viewers,
     /// Kanal `login` ke sluzbe uctu (prihlasovaci obrazovka).
     login: Option<login::Login>,
     /// Prechod ze startovni obrazovky (`splash.rs`): bezici a ohlaseny
@@ -133,6 +136,7 @@ fn main(startup: Startup) -> i64 {
         audio_src: None,
         snapshots: None,
         launcher: None,
+        notify: notify::Viewers::default(),
         login: None,
         splash: None,
         splash_pending: None,
@@ -199,6 +203,9 @@ impl Service {
         if let Some(s) = &self.snapshots {
             items.push((s.handle(), rd));
         }
+        for (_, ch) in &self.notify.list {
+            items.push((ch.handle(), rd));
+        }
         self.peers.wait_items(&mut items);
         let r = self.waits.wait(&items, deadline);
         drop(items);
@@ -230,6 +237,7 @@ impl Service {
         }
         let login = if self.login.is_some() { next(&obs) } else { Signals(0) };
         let snap = if self.snapshots.is_some() { next(&obs) } else { Signals(0) };
+        let notify_obs: Vec<Signals> = (0..self.notify.list.len()).map(|_| next(&obs)).collect();
         let peer_obs: Vec<Signals> = obs.get(i..).map(|s| s.to_vec()).unwrap_or_default();
         // 1. Vstup ma prednost.
         if foc.intersects(Signals::READABLE) {
@@ -307,6 +315,11 @@ impl Service {
             && let Some(why) = c.take_snapshot_request()
         {
             snapshot::take(c, &why, self.peers.frame, self.snapshots.as_ref());
+        }
+        // Oznameni: zmeny od notifyd do karet, pozadavky karet zpet.
+        if let Some(c) = self.comp.as_mut() {
+            self.notify.read(&notify_obs, c, now);
+            self.notify.send(c.take_notify_requests());
         }
         // Pozadavky prihlasovaci obrazovky na sluzbu uctu.
         if let Some(c) = self.comp.as_mut() {
@@ -451,7 +464,10 @@ impl Service {
         let Some(c) = self.comp.as_mut() else { return };
         if let Some(s) = self.net_src.as_mut() {
             match s.read(status::net_state) {
-                Ok(Some(v)) => c.set_net(Some(v)),
+                Ok(Some((v, addr))) => {
+                    c.set_net(Some(v));
+                    c.set_net_addr(addr);
+                }
                 Ok(None) => {}
                 Err(()) => {
                     self.net_src = None;
@@ -461,15 +477,19 @@ impl Service {
         }
         if let Some(s) = self.audio_src.as_mut() {
             match s.read(status::volume) {
-                Ok(Some((v, rec))) => {
+                Ok(Some((v, rec, info))) => {
                     c.set_volume(Some(v));
                     c.set_capturing(rec);
+                    c.set_audio_info(Some(info));
+                    c.audio_ctl = true;
                 }
                 Ok(None) => {}
                 Err(()) => {
                     self.audio_src = None;
                     c.set_volume(None);
                     c.set_capturing(alloc::vec::Vec::new());
+                    c.set_audio_info(None);
+                    c.audio_ctl = false;
                 }
             }
         }
@@ -478,6 +498,8 @@ impl Service {
     /// Hodiny v liste: mistni cas v pasmu od initu. Vraci, kdy se zmeni
     /// minuta (probuzeni), `None` = hodiny se neukazuji.
     fn update_clock(&mut self, now: u64) -> Option<u64> {
+        /// Svetovy cas v panelu hodin (pasmo, jmeno mesta).
+        const WORLD: &[(&str, &str)] = &[("Europe/London", "Londýn"), ("America/New_York", "New York"), ("Asia/Tokyo", "Tokio")];
         let zone = self.zone?;
         let c = self.comp.as_mut()?;
         let Some(utc) = libos::time::wall() else {
@@ -494,6 +516,19 @@ impl Service {
             format!("{}:{:02}", civil.hour, civil.minute),
             format!("{wd} {}. {}.", civil.day, civil.month),
         )));
+        // Panel hodin: dnesni datum a svetovy cas (mesta jineho pasma).
+        let mut world = Vec::new();
+        for (name, city) in WORLD {
+            let Some(z) = libos::time::zone::Zone::by_name(name) else { continue };
+            let o = z.to_local(utc);
+            if o.offset.secs == l.offset.secs {
+                continue;
+            }
+            let diff = (o.offset.secs - l.offset.secs) / 60;
+            let d = if diff % 60 == 0 { format!("{:+} h", diff / 60) } else { format!("{:+} h {} min", diff / 60, (diff % 60).abs()) };
+            world.push((String::from(*city), format!("{}:{:02}", o.civil.hour, o.civil.minute), d));
+        }
+        c.set_calendar(Some(comp::calendar::CalendarInfo { year: civil.year as i32, month: civil.month as u8, day: civil.day as u8, world }));
         // Vzhled podle denni doby: misto pasma a den/noc (kazdou minutu).
         c.set_sun_place(zone.place().map(|p| (p.lat, p.lon)));
         c.sun_tick(utc.secs, l.offset.secs, now);
@@ -517,6 +552,16 @@ impl Service {
                         let _ = l.write(format!("{} user {uid} {}", control::APPEARANCE, pref.to_words()).as_bytes(), Vec::new());
                     }
                     None => println!("compd: volbu vzhledu nejde ulozit: init nedal kanal launcher"),
+                },
+                // Zadost panelu Zvuk: stejnym kanalem jako stav (systemova
+                // relace od initu); stav se pak precte hned.
+                Out::Audio(req) => match self.audio_src.as_mut() {
+                    Some(s) => {
+                        if !s.send(&status::audio_control(&req)) {
+                            println!("compd: zadost o zvuk se nepodarila poslat");
+                        }
+                    }
+                    None => println!("compd: zadost o zvuk bez kanalu ke sluzbe zvuku"),
                 },
                 Out::Device { source, trust } => {
                     if let Some(s) = &self.secure {
@@ -588,10 +633,28 @@ impl Service {
                 }
                 None => Err(Error::BadState),
             },
+            control::NOTIFY => match (words.next().and_then(|u| u.parse::<u64>().ok()), handles.into_iter().next()) {
+                (Some(uid), Some(h)) => {
+                    self.notify.add(uid, Channel::from_handle(h));
+                    Ok((String::new(), Vec::new()))
+                }
+                _ => Err(Error::InvalidArgs),
+            },
             control::LAUNCHER => handles.into_iter().next().ok_or(Error::InvalidArgs).map(|h| {
                 self.launcher = Some(Channel::from_handle(h));
                 (String::new(), Vec::new())
             }),
+            control::PANEL => match (self.comp.as_mut(), words.next()) {
+                (Some(c), Some(name)) => {
+                    if c.open_panel(name) {
+                        Ok((String::new(), Vec::new()))
+                    } else {
+                        Err(Error::InvalidArgs)
+                    }
+                }
+                (None, _) => Err(Error::BadState),
+                _ => Err(Error::InvalidArgs),
+            },
             control::DND_FULLSCREEN => match (self.comp.as_mut(), words.next()) {
                 (Some(c), Some(v @ ("on" | "off"))) => {
                     c.set_dnd_fullscreen(v == "on");

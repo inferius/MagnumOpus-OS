@@ -30,6 +30,18 @@ pub const TESTS: &[Test] = &[
     ("wine: klavesy z QEMU - WM_KEYDOWN s VK i u pismen, znak jednou (W3)", super::wine_gui::keys),
     ("wine: poznamkovy blok - psani z QEMU, Ulozit jako, Alt+F4 (W3)", super::wine_gui::notepad),
     ("wine: winecfg okno (W3)", super::wine_gui::winecfg),
+    // W4 (wine_w4.rs).
+    ("wine: schranka z nasi aplikace do poznamkoveho bloku (W4)", super::wine_w4::clipboard_to_wine),
+    ("wine: ton pres WAV, mmdevapi -> audiod (W4)", super::wine_w4::tone_via_audiod),
+    ("wine: PuTTY - dialog konfigurace (W4)", super::wine_w4::putty_config),
+    // W4b (wine_net.rs).
+    ("wine: Winsock TCP pres loopback (W4b)", super::wine_net::winsock_loopback),
+    ("wine: Winsock TCP k echo serveru hostitele (W4b)", super::wine_net::winsock_host),
+    ("wine: Winsock naslouchani - loopback ano, sit EACCES (W4b)", super::wine_net::winsock_listen),
+    ("wine: PuTTY raw - pozdrav, psani z QEMU, ozvena (W4b)", super::wine_net::putty_raw),
+    ("wine: PuTTY telnet - pozdrav, psani z QEMU, ozvena (W4b)", super::wine_net::putty_telnet),
+    // Posledni: zabije kompozitor testu (dalsi testy by bezely nad novou instanci).
+    ("wine: okna Wine po padu kompozitoru (W4)", super::wine_w4::recover_after_compd_crash),
 ];
 
 /// Testovaci programy Windows na disku (`xtask/src/datadisk.rs`).

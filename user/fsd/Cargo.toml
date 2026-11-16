@@ -11,6 +11,7 @@ test = false
 bench = false
 
 [dependencies]
+volproto = { path = "../../libs/volproto" }
 taskproto = { path = "../../libs/taskproto" }
 libos = { path = "../../libs/libos" }
 blockproto = { path = "../../libs/blockproto" }
