@@ -122,3 +122,17 @@ impl Classes {
 
 #[cfg(test)]
 mod tests;
+
+/// Pocatecni velikost heapu procesu (`libos` `rt_own`). Objekt pameti si
+/// pri vytvoreni vezme slib za celou velikost, proto heap zacina maly.
+pub const HEAP_INITIAL: u64 = 256 * 1024;
+/// Nejmensi prirustek heapu.
+pub const HEAP_GROW_MIN: u64 = 256 * 1024;
+
+/// O kolik heap velikosti `size` naroste, kdyz se do nej nevejde alokace
+/// `need` bajtu: aspon [`HEAP_GROW_MIN`] a aspon o polovinu dosavadni
+/// velikosti (pocet rustu, mapovani a volani jadra je logaritmicky),
+/// zarovnane na stranku `page`.
+pub fn heap_grow(need: u64, size: u64, page: u64) -> u64 {
+    need.max(HEAP_GROW_MIN).max(size / 2).next_multiple_of(page.max(1))
+}

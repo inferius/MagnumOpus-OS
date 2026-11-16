@@ -153,6 +153,10 @@ impl Reg {
 /// pres 64 relaci).
 fn many_sessions(s: &Startup) -> TestResult {
     const N: usize = 70;
+    // Pamet systemu (job initu) pred relacemi a ve spicce: hlidat cenu
+    // procesu shsess (docs/cs/sprava-pameti.md, halda libos).
+    let used = || libos::job::current().and_then(|j| j.info()).map_or(0, |i| i.user.used);
+    let before = used();
     let mut reg = Reg { store: Registry::default(), chan: None };
     let (proc, w) = start_termd(s, &mut reg)?;
     let mut ids = Vec::new();
@@ -166,6 +170,13 @@ fn many_sessions(s: &Startup) -> TestResult {
         // Registr (uschova nahradnich koncu) obsluhovat prubezne.
         reg.pump(false)?;
     }
+    let peak = used();
+    libos::println!(
+        "init: test termd: pamet uzivatel {} MiB pred relacemi, {} MiB s {N} relacemi ({} KiB na relaci)",
+        before >> 20,
+        peak >> 20,
+        peak.saturating_sub(before) / N as u64 >> 10
+    );
     // Odpovidaji vsechny, posledni (nad starym limitem) prvni.
     for (i, id) in ids.iter().enumerate().rev() {
         let v = w.value(*id, "1 + 1").map_err(|e| alloc::format!("relace {i}: {e}"))?;

@@ -124,3 +124,20 @@ fn random_load_keeps_contents() {
         }
     }
 }
+
+#[test]
+fn heap_grows_from_small_start_logarithmically() {
+    use crate::{HEAP_GROW_MIN, HEAP_INITIAL, heap_grow};
+    let page = 4096;
+    assert_eq!(heap_grow(100, HEAP_INITIAL, page), HEAP_GROW_MIN);
+    assert_eq!(heap_grow(1 << 20, HEAP_INITIAL, page), 1 << 20, "velka alokace = jeji velikost");
+    assert_eq!(heap_grow(10, 64 << 20, page), 32 << 20, "velky heap o polovinu");
+    assert_eq!(heap_grow(5000, 0, 65536) % 65536, 0, "zarovnani na stranku");
+    // Z 256 KiB na 256 MiB staci par desitek rustu (mapovani).
+    let (mut size, mut steps) = (HEAP_INITIAL, 0);
+    while size < 256 << 20 {
+        size += heap_grow(4096, size, page);
+        steps += 1;
+    }
+    assert!(steps <= 20, "{steps} rustu");
+}
