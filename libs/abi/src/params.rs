@@ -112,10 +112,20 @@ pub mod fd_kind {
     /// Fd vlakna (`mo_self_thread_fd`, Windows vrstva): handle vlakna jen
     /// s pravem `INTERRUPT` `tag::FD`, data prazdna.
     pub const THREAD: u8 = 7;
+    /// Socket TCP nebo UDP se spojenim u netd (spojeni, naslouchani, UDP):
+    /// handle noveho kanalu ke stejnemu socketu (`netproto` `DUP`) `tag::FD`;
+    /// data `druh u8 (1 proud, 2 datagram), IPv6 u8, stav u8 (1 spojeni,
+    /// 2 naslouchani, 3 UDP), u UDP cil po connect (ma u8 [socket_addr])`.
+    /// Socket patri dal identite, ktera ho vytvorila (limity, odvolani).
+    pub const SOCKET: u8 = 8;
+    /// Socket bez spojeni u netd (po `socket()`, pripadne s adresou z
+    /// `bind` u TCP), bez handlu; data `druh u8, IPv6 u8, ma adresu u8
+    /// [socket_addr]`.
+    pub const SOCKET_NEW: u8 = 9;
 
     /// Ma polozka handle ve startovni zprave?
     pub const fn has_handle(kind: u8) -> bool {
-        matches!(kind, PIPE | MEMORY | UNIX | PROCESS | THREAD)
+        matches!(kind, PIPE | MEMORY | UNIX | PROCESS | THREAD | SOCKET)
     }
 }
 

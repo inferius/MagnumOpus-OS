@@ -88,6 +88,12 @@ pub struct Budget {
 }
 
 impl Budget {
+    /// Rozpocet identity aplikace (sockety a bajty vsech jejich relaci,
+    /// `Auth::set_identity`): sluzba ho drzi v registru podle identity.
+    pub fn identity(quota: Quota) -> Rc<Self> {
+        Self::new(None, quota)
+    }
+
     fn new(parent: Option<Rc<Budget>>, quota: Quota) -> Rc<Self> {
         Rc::new(Self {
             parent,
@@ -148,16 +154,21 @@ impl Drop for OpTicket {
     }
 }
 
-/// Strzeni jednoho socketu z rozpoctu relace; vrati se pri zaniku.
+/// Strzeni jednoho socketu z rozpoctu relace (a identity); vrati se pri
+/// zaniku.
 #[derive(Debug)]
 pub struct Usage {
     budget: Rc<Budget>,
+    identity: Option<Rc<Budget>>,
     bytes: u64,
 }
 
 impl Drop for Usage {
     fn drop(&mut self) {
         self.budget.add(-1, -(self.bytes as i64));
+        if let Some(i) = &self.identity {
+            i.add(-1, -(self.bytes as i64));
+        }
     }
 }
 
@@ -265,6 +276,9 @@ pub struct Auth {
     layers: Vec<Layer>,
     learned: Vec<Learned>,
     budget: Rc<Budget>,
+    /// Rozpocet identity aplikace: sockety vsech relaci stejne identity
+    /// (procesy s dedenou siti ho neobejdou).
+    identity: Option<Rc<Budget>>,
     /// Strzeni teto relace z rozpoctu rodice (koren nema).
     _held: Option<Rc<Usage>>,
 }
@@ -288,6 +302,7 @@ impl Auth {
             layers: Vec::new(),
             learned: Vec::new(),
             budget: Budget::new(None, quota),
+            identity: None,
             _held: None,
         }
     }
@@ -303,7 +318,13 @@ impl Auth {
             // Dotaz bez identity by uzivatel nemel s cim spojit.
             return Err(Error::InvalidArgs);
         }
-        let held = self.charge(SESSION_COST)?;
+        // Cena relace jde jen do stromu relaci (rozpocet identity pocita
+        // sockety aplikace, ne jeji relace).
+        if !self.budget.fits(SESSION_COST) {
+            return Err(Error::NoResources);
+        }
+        self.budget.add(1, SESSION_COST as i64);
+        let held = Usage { budget: self.budget.clone(), identity: None, bytes: SESSION_COST };
         let mut layers = self.layers.clone();
         layers.push(Layer {
             policy: r.policy,
@@ -315,8 +336,19 @@ impl Auth {
             layers,
             learned: self.learned.clone(),
             budget: Budget::new(Some(self.budget.clone()), r.quota),
+            // Stejna identita (zuzeni bez nove identity) = stejny rozpocet.
+            identity: self.identity.clone(),
             _held: Some(Rc::new(held)),
         })
+    }
+
+    /// Rozpocet identity (sluzba ho sdili mezi relacemi stejne identity).
+    pub fn set_identity(&mut self, budget: Rc<Budget>) {
+        self.identity = Some(budget);
+    }
+
+    pub fn identity_budget(&self) -> Option<&Rc<Budget>> {
+        self.identity.as_ref()
     }
 
     /// Uzsi relace jen s pravy a pravidly.
@@ -359,12 +391,16 @@ impl Auth {
     }
 
     pub fn charge(&self, bytes: u64) -> Result<Usage> {
-        if !self.budget.fits(bytes) {
+        if !self.budget.fits(bytes) || self.identity.as_ref().is_some_and(|i| !i.fits(bytes)) {
             return Err(Error::NoResources);
         }
         self.budget.add(1, bytes as i64);
+        if let Some(i) = &self.identity {
+            i.add(1, bytes as i64);
+        }
         Ok(Usage {
             budget: self.budget.clone(),
+            identity: self.identity.clone(),
             bytes,
         })
     }

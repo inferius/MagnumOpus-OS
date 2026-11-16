@@ -98,6 +98,11 @@ fn call_now(m: &Arc<Mux>, code: u32, body: Writer) -> Result<Vec<u8>> {
     call(m, code, body, Deadline::NONE, Wait::Immediate, None).map(|(b, _)| b)
 }
 
+/// `DUP`: novy kanal ke stejnemu socketu (pro jiny proces).
+fn dup_of(m: &Arc<Mux>) -> Result<Channel> {
+    one_channel(call(m, op::DUP, Writer::new(), Deadline::NONE, Wait::Immediate, None)?).map(|(_, ch)| ch)
+}
+
 /// Odpoved s prave jednim novym kanalem.
 fn one_channel((body, mut handles): (Vec<u8>, Vec<Handle>)) -> Result<(Vec<u8>, Channel)> {
     if handles.len() != 1 {
@@ -527,6 +532,12 @@ impl TcpStream {
         Mux::into_channel(self.mux)
     }
 
+    /// Novy kanal ke stejnemu spojeni (`DUP`): pro jiny proces (`SCM_RIGHTS`,
+    /// dedeni); spojeni zanikne az se zavrenim posledniho kanalu.
+    pub fn dup(&self) -> Result<Channel> {
+        dup_of(&self.mux)
+    }
+
     /// Spojeni z kanalu, ktery prisel od jineho procesu.
     pub fn from_channel(ch: Channel) -> Result<Self> {
         let s = Self::new(ch, SocketAddr::from(([0, 0, 0, 0], 0)), SocketAddr::from(([0, 0, 0, 0], 0)));
@@ -621,6 +632,16 @@ impl TcpListener {
         Ok(Self { mux: self.mux.clone() })
     }
 
+    /// Novy kanal ke stejnemu naslouchani (`DUP`, pro jiny proces).
+    pub fn dup(&self) -> Result<Channel> {
+        dup_of(&self.mux)
+    }
+
+    /// Naslouchani z kanalu od jineho procesu.
+    pub fn from_channel(ch: Channel) -> Self {
+        Self { mux: Mux::new(ch) }
+    }
+
     /// Event pripravenosti (`READABLE` = ceka spojeni na `accept`).
     pub fn readiness(&self) -> Result<Readiness> {
         readiness_of(&self.mux)
@@ -658,6 +679,16 @@ impl UdpSocket {
 
     pub fn try_clone(&self) -> Result<UdpSocket> {
         Ok(Self { mux: self.mux.clone() })
+    }
+
+    /// Novy kanal ke stejnemu socketu (`DUP`, pro jiny proces).
+    pub fn dup(&self) -> Result<Channel> {
+        dup_of(&self.mux)
+    }
+
+    /// Socket z kanalu od jineho procesu.
+    pub fn from_channel(ch: Channel) -> Self {
+        Self { mux: Mux::new(ch) }
     }
 
     /// Event pripravenosti (`READABLE` = datagram, `WRITABLE` = misto).

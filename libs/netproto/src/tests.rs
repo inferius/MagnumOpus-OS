@@ -208,6 +208,27 @@ fn session_budget_is_hierarchical() {
     assert_eq!(root.budget().used(), (0, 0), "zanikla relace se vratila");
 }
 
+/// Rozpocet identity: sockety vsech relaci stejne identity dohromady
+/// (zuzena relace ho zdedi), kazda relace ma presto svuj limit.
+#[test]
+fn identity_budget_spans_sessions() {
+    let root = Auth::root();
+    let id = crate::auth::Budget::identity(Quota { sockets: 3, bytes: u64::MAX, ops: 4 });
+    let mut a = root.restrict_with(Restriction { rights: rights::ALL, ..Restriction::default() }).unwrap();
+    a.set_identity(id.clone());
+    let mut b = root.restrict_with(Restriction { rights: rights::ALL, ..Restriction::default() }).unwrap();
+    b.set_identity(id.clone());
+    // Potomek (role Net) zdedi rozpocet identity.
+    let child = a.restrict_with(Restriction { rights: rights::ALL, ..Restriction::default() }).unwrap();
+    let x = a.charge(10).unwrap();
+    let y = b.charge(10).unwrap();
+    let z = child.charge(10).unwrap();
+    assert_eq!(b.charge(0).err(), Some(Error::NoResources), "limit identity pres relace");
+    assert_eq!(id.used(), (3, 30));
+    drop((x, y, z));
+    assert_eq!(id.used(), (0, 0), "strzeni identity se vratila");
+}
+
 #[test]
 fn ask_layers_and_user_rules() {
     let only_lan = Policy::only(vec![Rule::any_port(

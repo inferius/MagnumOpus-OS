@@ -135,8 +135,14 @@ fn ctest_net(s: &Startup) -> TestResult {
         Rule::port(proto::TCP, target.clone(), p.callback),
         Rule::port(proto::UDP, target, p.udp_echo),
     ]);
-    // Naslouchat smi jen na portu presmerovanem z hostitele.
-    policy.bind = Some(vec![(p.forwarded, p.forwarded)]);
+    // Loopback (predani socketu, krok share): spojeni a naslouchani na 47100.
+    policy.connect.get_or_insert_with(Vec::new).push(Rule::port(
+        proto::TCP,
+        Target::Net { addr: core::net::IpAddr::V4(core::net::Ipv4Addr::LOCALHOST), prefix: 8 },
+        47100,
+    ));
+    // Naslouchat smi jen na portu presmerovanem z hostitele (a 47100).
+    policy.bind = Some(vec![(p.forwarded, p.forwarded), (47100, 47100)]);
     let session = root
         .restrict(rights::CLIENT | rights::TCP_LISTEN, &policy)
         .map_err(|e| fail("restrict", e))?;
@@ -151,15 +157,24 @@ fn ctest_net(s: &Startup) -> TestResult {
     ];
     let env: Vec<&str> = env.iter().map(|e| e.as_str()).collect();
     let ch = session.into_channel().map_err(|e| format!("predani site: {e:?}"))?;
+    // Kanal ke launchd a relace FS: krok share spousti potomky (predani
+    // socketu; posix_spawn hleda program a pracovni adresar ve FS).
+    let launch = crate::launch::client().map_err(|e| fail("kanal ke launchd", e))?;
+    let fs = devices().and_then(|d| d.fs.as_ref()).ok_or("sluzba fsd nebezi")?;
+    let own = fs.connect().map_err(|e| fail("relace fsd", e))?;
     let run = run_std_app(
         s,
         "ctest",
         &["net"],
         &env,
-        vec![StartHandle::tagged(tag::NET, ch.into_handle())],
+        vec![
+            StartHandle::tagged(tag::NET, ch.into_handle()),
+            StartHandle::tagged(tag::LAUNCH, launch.into_handle()),
+            StartHandle::tagged(tag::FS, own.into_channel().into_handle()),
+        ],
         Duration::from_secs(120),
     )?;
-    run.expect("ctest", &["tcp", "udp", "dns", "refused", "accept"])
+    run.expect("ctest", &["tcp", "udp", "dns", "refused", "accept", "share", "netrole"])
 }
 
 /// Dva procesy `ctest lock` nad jednim souborem (zamky drzi fsd).

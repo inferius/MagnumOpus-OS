@@ -516,6 +516,33 @@ datagramy UDP jdou rovnou do fronty cílového socketu.
 - Velikost fronty spojení = buffer příjmu přijímající strany (`Buffers`).
 - Funguje i před DHCP (nepotřebuje adresu rozhraní).
 
+## Předání socketu, limity identity a odvolání
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (sady „sit loopback“ a „cstd sit“).
+
+- **`DUP`** (op 51, každý socket): nový kanál ke stejnému socketu
+  (spojení, naslouchání, UDP). Tím jde socket jinému procesu: cstd ho dědí
+  v `posix_spawn` a posílá v `SCM_RIGHTS` přes `AF_UNIX` (`osrt::inherit`,
+  druh fd `SOCKET`). Socket zanikne až se zavřením posledního kanálu;
+  fronty dotazů a událost připravenosti má každý kanál svoje.
+- **Komu socket patří:** dál identitě, která ho vytvořila (limity, audit,
+  firewall, odvolání); příjemce ho jen používá.
+- **Limity na identitu:** kromě rozpočtu relace (strom relací) má každá
+  identita aplikace jeden rozpočet socketů a bajtů pro všechny své relace
+  (`Auth::set_identity`, registr `Stack::idents` v netd; kvóta z první
+  relace identity). Procesy se zděděnou sítí ho tak neobejdou. Zúžení bez
+  nové identity (`RESTRICT` s prázdnou identitou) rozpočet zdědí.
+- **Odvolání:** init pošle netd na řídicím kanálu `revoke\0<identita>`
+  (`system::revoke_net`); netd zavře všechny relace a sockety identity
+  včetně kanálů předaných jiným procesům a odpoví `revoked <počet>`.
+- **Role Net (síť pro potomky):** runtime procesu s relací sítě nastaví
+  `MO_NET=1`; potomek s neprázdným `MO_NET` v prostředí dostane vlastní
+  relaci zúženou bez nové identity (`RESTRICT` s prázdnou identitou:
+  stejná práva, pravidla a rozpočet identity, nikdy širší), bez proměnné
+  žádnou (opt-out jako `MO_GUI`, `MO_AUDIO`). Takové zúžení smí každá
+  relace; novou identitu a dotazy uživateli jen s právem `RESTRICT`.
+  Odvolání identity zavře relace rodiče i potomků (stejná identita).
+
 ## Protokol netproto
 
 Verze 2 **[ověřeno v QEMU]**. Každá zpráva má hlavičku s kontextem
@@ -568,6 +595,7 @@ Kanál mezi `fwd` a agentem uživatele má vlastní formát odpovědi
 | naslouchání, UDP | `LOCAL_ADDR` (31) | → místní adresa (podle aktuální adresy rozhraní) |
 | UDP | `SEND_TO` (40) | cíl, data → () (na místo ve frontě nejvýš 5 s) |
 | každý socket | `READINESS` (50) | → () + event připravenosti v handlech (viz [Připravenost socketů](#připravenost-socketů)) |
+| každý socket | `DUP` (51) | → () + nový kanál ke stejnému socketu v handlech (viz [Předání socketu](#předání-socketu-limity-identity-a-odvolání)) |
 | UDP | `RECV_FROM` (41) | nejvýš u32 → odesílatel, data |
 
 **Info:** MAC (6 B), MTU u16, příznaky u8 (bit 0 linka, bit 1 nastaveno),

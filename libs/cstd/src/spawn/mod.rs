@@ -15,8 +15,9 @@
 //! Na konci se zahodi cisla s `FD_CLOEXEC`. Fd 0-2 dostane potomek jako
 //! proudy (soubor = proud z fsd, `OPEN_STREAM`), vyssi cisla jako zdedene
 //! fd v bloku parametru (`osrt::inherit`: roura a pametovy fd = duplikat
-//! handlu, soubor = `REOPEN` ve fsd s kopii pozice). Socket zdedit nejde:
-//! zdedeny se preskoci, `adddup2` socketu = `ENOTSUP`.
+//! handlu, soubor = `REOPEN` ve fsd s kopii pozice, socket TCP/UDP = novy
+//! kanal ke stejnemu socketu u netd). `epoll` zdedit nejde: zdedeny se
+//! preskoci, z akce `adddup2` = `ENOTSUP`.
 //!
 //! Program: cesta s `/` (relativni vuci adresari potomka), u `posix_spawn`
 //! holy nazev = soubor v adresari potomka, kdyz existuje; `posix_spawnp`

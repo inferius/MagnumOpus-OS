@@ -516,11 +516,13 @@ fn restricted(s: &Startup) -> TestResult {
         Some(Error::AccessDenied),
         "naslouchani bez prava"
     );
-    check_eq!(
-        app.restrict(rights::ALL, &Policy::unrestricted()).err(),
-        Some(Error::AccessDenied),
-        "dalsi relace bez prava RESTRICT"
-    );
+    // Zuzeni bez nove identity (role Net) smi; nova identita jen s pravem
+    // RESTRICT (jinak by obesla rozpocet identity).
+    let narrow = app.restrict(rights::ALL, &Policy::unrestricted()).map_err(|e| fail("zuzeni bez identity", e))?;
+    check_eq!(narrow.tcp_listen(0, 1).err(), Some(Error::AccessDenied), "zuzena relace nema vic prav");
+    let mut other = netproto::Restriction::new(rights::ALL, Policy::unrestricted());
+    other.app = alloc::string::String::from("org.jina");
+    check_eq!(app.restrict_with(&other).err(), Some(Error::AccessDenied), "nova identita bez prava RESTRICT");
     check_eq!(
         app.set_dns(&[host(p.dns)]).err(),
         Some(Error::AccessDenied),

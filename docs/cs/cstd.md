@@ -849,7 +849,8 @@ potomka (`osrt::inherit`) je vloží do tabulky fd ještě před `main`:
 | paměťový fd (`memfd_create`) | duplikát objektu paměti, pečetě, kopie pozice |
 | `/dev/null`, stdio rodiče bez kanálu | prázdný fd bez handlu (čtení = konec, zápis se zahodí) |
 | soubor, adresář | trvalá identita objektu (dataset, oid, generace); potomek ho otevře ve své relaci FS operací `REOPEN` - fsd znovu ověří práva a připojené cesty relace |
-| socket, `epoll` | **nedědí se** (spojení s netd patří relaci rodiče); zděděné číslo se přeskočí, `adddup2` socketu = `ENOTSUP` |
+| socket TCP/UDP | nový kanál ke stejnému socketu u netd (`DUP`, [Síť](sit.md#protokol-netproto)); socket dál patří identitě, která ho vytvořila (limity, odvolání sítě ho zavře i u potomka). Stejně v `SCM_RIGHTS` přes `AF_UNIX`. Socket bez spojení (po `socket()`/`bind`) jen druh a adresa **[ověřeno v QEMU]** x86_64 i aarch64 (`ctest net`, krok `share`) |
+| `epoll` | **nedědí se**; zděděné číslo se přeskočí |
 
 Rozdíly proti POSIX (výslovně): pozice souboru se mezi rodičem a potomkem
 **nesdílí** - potomek začíná na pozici rodiče a dál má vlastní (sdílený

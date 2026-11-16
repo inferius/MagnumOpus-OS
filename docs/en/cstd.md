@@ -886,7 +886,8 @@ before `main`:
 | memory fd (`memfd_create`) | a duplicate of the memory object, seals, a copy of the position |
 | `/dev/null`, the parent's stdio without a channel | an empty fd without a handle (reading = end, writes are discarded) |
 | file, directory | the durable identity of the object (dataset, oid, generation); the child opens it in its own FS session with `REOPEN` - fsd checks the rights and the session's mounted paths again |
-| socket, `epoll` | **not inherited** (the connection to netd belongs to the parent's session); an inherited number is skipped, `adddup2` of a socket = `ENOTSUP` |
+| TCP/UDP socket | a new channel to the same socket at netd (`DUP`, [Network](network.md#the-netproto-protocol)); the socket still belongs to the identity that created it (limits, network revocation closes it in the child too). The same in `SCM_RIGHTS` over `AF_UNIX`. A socket without a connection (after `socket()`/`bind`) only kind and address **[verified in QEMU]** x86_64 and aarch64 (`ctest net`, step `share`) |
+| `epoll` | **not inherited**; an inherited number is skipped |
 
 Differences from POSIX (explicitly): the file position is **not shared**
 between the parent and the child - the child starts at the parent's

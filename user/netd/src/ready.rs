@@ -40,7 +40,7 @@ impl Readiness {
 /// Aktualni bity pripravenosti objektu.
 fn compute(stack: &mut Stack, o: &mut Obj) -> Signals {
     let mut bits = Signals::NONE;
-    match &mut o.kind {
+    match &mut *o.kind.borrow_mut() {
         Kind::Stream(s) => {
             crate::tcp::update_fin(stack, s);
             let fin = s.fin_seen;

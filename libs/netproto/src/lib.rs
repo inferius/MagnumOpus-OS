@@ -177,6 +177,10 @@ pub mod op {
     /// () -> () + event pripravenosti v handlech (jen pravo `WAIT`), viz
     /// [`crate::ready`]
     pub const READINESS: u32 = 50;
+    /// () -> () + novy kanal ke stejnemu socketu v handlech (predani socketu
+    /// jinemu procesu: `SCM_RIGHTS`, dedeni). Socket zanikne az se zavrenim
+    /// posledniho kanalu; fronty dotazu a pripravenost ma kazdy kanal svoje.
+    pub const DUP: u32 = 51;
 
     // Kanal socketu UDP.
     /// cil socket_addr, data -> ()

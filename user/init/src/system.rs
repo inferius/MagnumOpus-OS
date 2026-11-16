@@ -439,7 +439,8 @@ fn time_started() -> Result<()> {
 /// jen uzsi relace (`Net::restrict`).
 pub struct NetService {
     pub process: Process,
-    pub _control: Channel,
+    /// Ridici kanal netd (`revoke <identita>`, [`revoke_net`]).
+    pub control: Channel,
     pub root: Net,
     /// Sluzba firewallu (proces, bootstrap kanal); `None` = nebezi.
     pub fwd: Option<(Process, Channel)>,
@@ -495,12 +496,27 @@ pub fn start_net(startup: &Startup, devices: &mut Devices, sup: &mut crate::supe
     };
     Ok(NetService {
         process,
-        _control: control,
+        control,
         root: Net::new(root),
         fwd,
         agent,
         dnsd_end: Some(dns_dnsd),
     })
+}
+
+/// Odvola sit aplikaci `app` (id z manifestu): netd zavre vsechny jeji
+/// relace a sockety (i predane jinym procesum). Vraci pocet zavrenych
+/// kanalu.
+pub fn revoke_net(app: &str) -> Result<usize> {
+    let net = NET.get().ok_or(Error::ServiceUnavailable)?;
+    while net.control.try_read().is_ok() {}
+    let mut m = Vec::from(&b"revoke "[..]);
+    m.extend_from_slice(app.as_bytes());
+    net.control.write(&m, Vec::new())?;
+    let r = net.control.read(Some(time::deadline_after(Duration::from_secs(5))))?;
+    let n = core::str::from_utf8(&r.data).ok().and_then(|t| t.strip_prefix("revoked ")).and_then(|t| t.parse().ok()).ok_or(Error::Corrupted)?;
+    println!("init: sit aplikace {app} odvolana ({n} kanalu)");
+    Ok(n)
 }
 
 /// Prida uctu `who` pravo pruchodu adresarem (ostatni granty zustanou).

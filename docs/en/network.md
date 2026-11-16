@@ -550,6 +550,38 @@ socket's queue.
   (`Buffers`).
 - It also works before DHCP (it needs no interface address).
 
+## Passing sockets, identity limits and revocation
+
+**[verified in QEMU]** x86_64 and aarch64 (suites "sit loopback" and
+"cstd sit").
+
+- **`DUP`** (op 51, every socket): a new channel to the same socket
+  (connection, listener, UDP). This is how a socket goes to another
+  process: cstd inherits it in `posix_spawn` and sends it in `SCM_RIGHTS`
+  over `AF_UNIX` (`osrt::inherit`, fd kind `SOCKET`). The socket ends only
+  when its last channel closes; every channel has its own request queues
+  and readiness event.
+- **Who owns the socket:** still the identity that created it (limits,
+  audit, firewall, revocation); the receiver only uses it.
+- **Limits per identity:** besides the session budget (the session tree)
+  each application identity has one socket and byte budget for all its
+  sessions (`Auth::set_identity`, the `Stack::idents` registry in netd;
+  the quota of the identity's first session). Processes with an inherited
+  network cannot bypass it. A narrowing without a new identity (`RESTRICT`
+  with an empty identity) inherits the budget.
+- **Revocation:** init sends netd `revoke\0<identity>` on the control
+  channel (`system::revoke_net`); netd closes all sessions and sockets of
+  the identity, including channels passed to other processes, and replies
+  `revoked <count>`.
+- **Role Net (network for children):** the runtime of a process with a
+  network session sets `MO_NET=1`; a child with a non-empty `MO_NET` in its
+  environment gets its own session narrowed without a new identity
+  (`RESTRICT` with an empty identity: the same rights, rules and identity
+  budget, never wider), without the variable none (opt-out like `MO_GUI`,
+  `MO_AUDIO`). Any session may narrow like that; a new identity and user
+  prompts need the `RESTRICT` right. Revoking the identity closes the
+  sessions of the parent and the children (the same identity).
+
 ## The netproto protocol
 
 Version 2 **[verified in QEMU]**. Every message has a header with the
@@ -605,6 +637,7 @@ channel between `fwd` and the user agent has its own reply format
 | listener, UDP | `LOCAL_ADDR` (31) | → local address (from the current interface address) |
 | UDP | `SEND_TO` (40) | destination, data → () (at most 5 s for room in the queue) |
 | every socket | `READINESS` (50) | → () + readiness event in the handles (see [Socket readiness](#socket-readiness)) |
+| every socket | `DUP` (51) | → () + a new channel to the same socket in the handles (see [Passing sockets](#passing-sockets-identity-limits-and-revocation)) |
 | UDP | `RECV_FROM` (41) | max u32 → sender, data |
 
 **Info:** MAC (6 B), MTU u16, flags u8 (bit 0 link, bit 1 configured),

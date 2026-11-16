@@ -67,6 +67,80 @@ impl Socket {
         }
     }
 
+    /// Export pro jiny proces (`SCM_RIGHTS`, dedeni v `posix_spawn`):
+    /// (druh `abi::params::fd_kind`, data, handle). Socket se spojenim dostane
+    /// novy kanal ke stejnemu socketu u netd (`DUP`).
+    pub(crate) fn export(&self) -> Result<(u8, Vec<u8>, Option<libos::Handle>)> {
+        use abi::params::fd_kind;
+        let mut w = netproto::Writer::new();
+        w.u8(if self.kind == Kind::Stream { 1 } else { 2 }).u8(u8::from(self.v6));
+        let st = self.state.lock();
+        let (kind, ch) = match &*st {
+            State::New { bound } => {
+                match bound {
+                    Some(a) => {
+                        w.u8(1);
+                        netproto::WriteAddr::socket_addr(&mut w, *a);
+                    }
+                    None => {
+                        w.u8(0);
+                    }
+                }
+                (fd_kind::SOCKET_NEW, None)
+            }
+            State::Stream(s) => {
+                w.u8(1);
+                (fd_kind::SOCKET, Some(s.dup()?))
+            }
+            State::Listener(l) => {
+                w.u8(2);
+                (fd_kind::SOCKET, Some(l.dup()?))
+            }
+            State::Udp(u, peer) => {
+                w.u8(3);
+                match peer {
+                    Some(p) => {
+                        w.u8(1);
+                        netproto::WriteAddr::socket_addr(&mut w, *p);
+                    }
+                    None => {
+                        w.u8(0);
+                    }
+                }
+                (fd_kind::SOCKET, Some(u.dup()?))
+            }
+        };
+        Ok((kind, w.finish(), ch.map(|c| c.into_handle())))
+    }
+
+    /// Socket od jineho procesu (viz [`Socket::export`]).
+    pub(crate) fn import(kind: u8, data: &[u8], handle: Option<libos::Handle>) -> Result<Self> {
+        use abi::params::fd_kind;
+        use netproto::ReadAddr;
+        let mut r = netproto::Reader::new(data);
+        let k = if r.u8()? == 1 { Kind::Stream } else { Kind::Datagram };
+        let v6 = r.u8()? != 0;
+        let me = Socket::new(k, v6);
+        let st = match kind {
+            fd_kind::SOCKET_NEW => State::New { bound: if r.u8()? != 0 { Some(r.socket_addr()?) } else { None } },
+            fd_kind::SOCKET => {
+                let ch = libos::Channel::from_handle(handle.ok_or(Error::Corrupted)?);
+                match r.u8()? {
+                    1 => State::Stream(Arc::new(TcpStream::from_channel(ch)?)),
+                    2 => State::Listener(Arc::new(TcpListener::from_channel(ch))),
+                    3 => {
+                        let peer = if r.u8()? != 0 { Some(r.socket_addr()?) } else { None };
+                        State::Udp(Arc::new(UdpSocket::from_channel(ch)), peer)
+                    }
+                    _ => return Err(Error::Corrupted),
+                }
+            }
+            _ => return Err(Error::NotSupported),
+        };
+        *me.state.lock() = st;
+        Ok(me)
+    }
+
     /// Prijate spojeni z `accept`.
     fn from_stream(s: TcpStream, v6: bool) -> Self {
         let me = Socket::new(Kind::Stream, v6);

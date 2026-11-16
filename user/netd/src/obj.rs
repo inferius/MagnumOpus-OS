@@ -27,9 +27,13 @@ use crate::{fw, lo, session, tcp, udp};
 /// filtruji, a preklady jmen z relace plati i pro ne).
 pub type AuthRef = Rc<RefCell<Auth>>;
 
+/// Stav objektu sdileny kanaly (`DUP`: vic kanalu ke stejnemu socketu).
+pub type KindRef = Rc<RefCell<Kind>>;
+
 pub struct Obj {
     pub ch: Channel,
-    pub kind: Kind,
+    /// Stav (sdileny s dalsimi kanaly po `DUP`; uklidi se s poslednim).
+    pub kind: KindRef,
     /// Rozpracovane a cekajici dotazy (poradi = poradi prijeti).
     pub ops: Vec<Op>,
     /// Relace s plnym limitem dotazu: odlozene zpravy (FIFO, nejvys
@@ -47,6 +51,11 @@ pub struct Obj {
 
 impl Obj {
     pub fn new(ch: Channel, kind: Kind) -> Self {
+        Self::shared(ch, Rc::new(RefCell::new(kind)))
+    }
+
+    /// Dalsi kanal ke stejnemu objektu (`DUP`).
+    pub fn shared(ch: Channel, kind: KindRef) -> Self {
         Self {
             ch,
             kind,
@@ -402,7 +411,32 @@ pub fn cancel_pending(stack: &mut Stack, p: Pending) -> Result<Writer> {
     Err(Error::Canceled)
 }
 
-/// Uklid po zavreni kanalu klientem.
+/// Identita aplikace objektu (relace podle vrstev, socket podle relace,
+/// ktera ho vytvorila; systemove = "system").
+pub fn identity(kind: &Kind) -> String {
+    match kind {
+        Kind::Session(auth) => fw::app_name(&auth.borrow()),
+        Kind::Stream(s) => s.app.clone(),
+        Kind::Listener(l) => l.app.clone(),
+        Kind::Udp(u) => u.app.clone(),
+        Kind::LoStream(s) => s.app.clone(),
+    }
+}
+
+/// Kanal zavren klientem: zrusi jeho dotazy; objekt se uklidi az
+/// s poslednim kanalem (`DUP`).
+pub fn close_channel(stack: &mut Stack, kind: KindRef, ops: Vec<Op>) {
+    for op in ops {
+        if let OpState::Active(p) = op.state {
+            let _ = cancel_pending(stack, p);
+        }
+    }
+    if let Ok(k) = Rc::try_unwrap(kind) {
+        close(stack, k.into_inner(), Vec::new());
+    }
+}
+
+/// Uklid objektu (posledni kanal zavren, nebo novy objekt bez odpovedi).
 pub fn close(stack: &mut Stack, kind: Kind, ops: Vec<Op>) {
     for op in ops {
         if let OpState::Active(p) = op.state {

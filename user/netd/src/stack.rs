@@ -72,6 +72,8 @@ pub struct Stack {
     pub lo: crate::lo::Loopback,
     /// Kolo zmenilo stav loopbacku: smycka udela hned dalsi kolo.
     pub lo_dirty: bool,
+    /// Rozpocty identit aplikaci (sockety a bajty vsech relaci identity).
+    pub idents: alloc::collections::BTreeMap<alloc::string::String, alloc::rc::Weak<netproto::auth::Budget>>,
 }
 
 /// Monotonni cas v ns.
@@ -146,6 +148,7 @@ impl Stack {
             closing: Vec::new(),
             lo: crate::lo::Loopback::default(),
             lo_dirty: false,
+            idents: alloc::collections::BTreeMap::new(),
         }
     }
 
