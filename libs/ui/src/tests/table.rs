@@ -485,3 +485,21 @@ fn row_action_buttons() {
     assert_eq!(m, vec![A::Sel(vec![11])]);
     assert!(ui.a11y().into_iter().all(|n| n.role != Role::Button || n.state & state::FOCUSED == 0));
 }
+
+/// Akce pristupnosti na radku za nadpisem sekce vybere ten radek (nadpisy
+/// jsou uzly Label, poradi uzlu Row index radku neurcuje).
+#[test]
+fn a11y_activate_row_after_section_header() {
+    let mut ui: Ui<M> = Ui::new(crate::Look::ui_fonts(), 300, 300);
+    let view = || {
+        table::<M>(vec![col("", 0)], 4, |i| 100 + i as u64, |i| match i {
+            0 | 2 => Cells::header("Sekce"),
+            _ => Cells::new([alloc::format!("radek {i}")]),
+        })
+        .header(false)
+        .on_selection(M::Sel)
+    };
+    ui.rebuild(String::new(), view());
+    let row3 = ui.a11y().into_iter().find(|n| n.role == Role::Row && n.name == "radek 3").unwrap();
+    assert_eq!(ui.a11y_action(row3.id, actions::ACTIVATE, "").msgs, vec![M::Sel(vec![103])]);
+}

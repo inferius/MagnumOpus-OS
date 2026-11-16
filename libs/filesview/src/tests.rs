@@ -652,3 +652,18 @@ fn downloads_place_origin_and_media_group() {
     assert!(labels.windows(2).any(|w| w[0] == "Staženo z" && w[1] == "https://example.org/data.bin"), "{labels:?}");
     assert!(crate::backend::parse_origin(b"bez casu").is_none());
 }
+
+/// Misto vybrane pres pristupnost (akce `activate` na radku, jako agent
+/// nebo test v QEMU) otevre slozku.
+#[test]
+fn place_row_activates_by_a11y() {
+    let mut m = fm();
+    let mut u = ui_for(&m, 1200);
+    let n = u.a11y().into_iter().find(|n| n.role == Role::Row && n.name == "Projekty").unwrap();
+    let r = u.a11y_action(n.id, a11y_actions::ACTIVATE, "");
+    for msg in r.msgs {
+        m.update(msg);
+    }
+    u.refresh(&m);
+    assert_eq!(m.nav.cur, "/home/jana/Projekty");
+}

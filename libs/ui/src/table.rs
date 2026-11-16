@@ -823,13 +823,16 @@ impl<M: Clone> Ui<M> {
             if self.actions_a11y_action(i, id, node, action, r) {
                 return true;
             }
-            let mut nodes = Vec::new();
-            self.table_a11y(i, id, 0, &mut nodes);
-            let rows: Vec<u32> = nodes.iter().filter(|n| n.role == Role::Row).map(|n| n.id).collect();
-            if rows.contains(&node) {
-                let ts = self.tables.get(&self.elems[i].key).cloned().unwrap_or_default();
-                let first = (ts.scroll / self.look.row_h() as i32).max(0) as usize;
-                let k = first + rows.iter().position(|&x| x == node).unwrap();
+            // Radek podle id uzlu (ne podle poradi uzlu Row: nadpisy sekci
+            // jsou Label a poradi by posunuly).
+            let g = self.geo(i);
+            let ts = self.tables.get(&self.elems[i].key).cloned().unwrap_or_default();
+            let rh = g.rh as i32;
+            let first = (ts.scroll / rh).max(0) as usize;
+            let Some(t) = self.spec(i) else { continue };
+            let last = (((ts.scroll + g.body.h as i32) / rh) as usize + 1).min(t.count);
+            let hit = (first..last).find(|&k| !(t.row)(k).header && virt_id(id, 2, (t.id)(k)) == node);
+            if let Some(k) = hit {
                 if action & (a11y::actions::ACTIVATE | a11y::actions::FOCUS) != 0 {
                     self.focus = Some(i);
                     self.select_row(i, k, false, false, r);
