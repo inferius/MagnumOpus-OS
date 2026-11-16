@@ -106,10 +106,13 @@ impl Comp {
         let mut trees: Vec<(u32, Kids)> = Vec::new();
         let hidden = self.greeter_visible();
         let popover = self.popover_pass(hidden);
+        let owners = self.owner_popovers(hidden);
         for &gid in self.z.iter().filter(|_| !hidden) {
             let Some(w) = self.windows.get(&gid) else { continue };
-            // Stejny vyber jako CPU cesta (vcetne stinu).
-            if !w.mapped || w.minimized || !rects.iter().any(|r| !w.visual().intersect(r).is_empty()) {
+            // Stejny vyber jako CPU cesta (vcetne stinu a popoveru vlastnika).
+            let hit = |a: &Rect| rects.iter().any(|r| !a.intersect(r).is_empty());
+            let pops = owners.iter().find(|o| o.0 == gid).is_some_and(|o| o.2.iter().any(hit));
+            if !w.mapped || w.minimized || !(hit(&w.visual()) || pops) {
                 continue;
             }
             let Some(cl) = self.clients.get(&w.client) else { continue };
@@ -127,7 +130,20 @@ impl Comp {
             sink.draw(GpuDraw { src: Src::Desktop, src_rect: r, dst: r, clip: r, opacity: 255, opaque: true });
             for (gid, kids) in &trees {
                 let w = &self.windows[gid];
+                let cl = &self.clients[&w.client];
+                // Popovery vlastnika i mimo okno (okno samo tu nic nekresli).
+                let draw_owner_pops = |sink: &mut dyn GpuSink| {
+                    if let Some((_, okids, orects)) = owners.iter().find(|o| o.0 == *gid) {
+                        for pr in orects {
+                            let clip = r.intersect(pr);
+                            if !clip.is_empty() {
+                                gpu_children(sink, w.client, cl, okids, 0, (w.rect.x, w.rect.y), clip, 255, 0);
+                            }
+                        }
+                    }
+                };
                 if w.visual().intersect(&r).is_empty() {
+                    draw_owner_pops(sink);
                     continue;
                 }
                 let b = window_bounds(w);
@@ -183,6 +199,8 @@ impl Comp {
                     sink.upload(Src::Above(*gid), b, reg, canvas.pixels(), stride);
                     sink.draw(GpuDraw { src: Src::Above(*gid), src_rect: local(reg, b), dst: reg, clip: r, opacity: 255, opaque: false });
                 }
+                // Popovery vlastnika okna s fokusem (jako CPU: hned nad nim).
+                draw_owner_pops(sink);
             }
             // Popover okna s fokusem (stejne jako CPU: nad okny, pod listou).
             if let Some((g, kids, rects)) = &popover {

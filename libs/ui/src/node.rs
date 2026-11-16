@@ -714,6 +714,15 @@ impl<M> Node<M> {
         self
     }
 
+    /// Koncovy slot pole: napoveda klavesy, ikona nebo text
+    /// ([`crate::fieldopts::Trailing`]).
+    pub fn trailing(mut self, t: crate::fieldopts::Trailing) -> Self {
+        if let Kind::TextInput { opts, .. } = &mut self.kind {
+            opts.trailing = Some(t);
+        }
+        self
+    }
+
     /// Nejvic `n` znaku (grafemu); vlozeni delsiho textu se zkrati.
     pub fn max_len(mut self, n: usize) -> Self {
         if let Kind::TextInput { opts, .. } = &mut self.kind {
@@ -851,16 +860,65 @@ pub struct Cells {
     pub icon: Option<&'static str>,
     /// Nadpis sekce (`.sec` v navrhu): nejde vybrat, klavesy ho preskoci.
     pub header: bool,
+    /// Radek ulohy agenta AI: sloupec se stitkem "agent" (radek ma
+    /// podklad `ai_soft` a levy pruh `ai`, jako polozka seznamu `.agent()`).
+    /// Jen pro systemova okna (spravce uloh), barvy `ai_*` patri agentovi.
+    pub agent: Option<usize>,
+    /// Pruh prubehu (sloupec, 0-100) misto textu bunky; text bunky zustava
+    /// ve stromu pristupnosti.
+    pub progress: Option<(usize, u32)>,
+    /// Ikonova tlacitka radku v poslednim sloupci (zarovnana vpravo, styl
+    /// `ghost`); stisk posle `on_row_action` s id radku a `CellAction::id`.
+    pub actions: Vec<CellAction>,
+}
+
+/// Tlacitko v radku tabulky: ikona, popisek (bublina a pristupnost)
+/// a zda jde stisknout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CellAction {
+    pub id: u32,
+    pub icon: &'static str,
+    pub label: String,
+    pub enabled: bool,
+}
+
+impl CellAction {
+    pub fn new(id: u32, icon: &'static str, label: &str) -> Self {
+        Self { id, icon, label: label.into(), enabled: true }
+    }
+
+    pub fn disabled(mut self, d: bool) -> Self {
+        self.enabled = !d;
+        self
+    }
 }
 
 impl Cells {
     pub fn new(cells: impl IntoIterator<Item = String>) -> Self {
-        Self { cells: cells.into_iter().collect(), icon: None, header: false }
+        Self { cells: cells.into_iter().collect(), ..Self::default() }
     }
 
     /// Nadpis sekce (Bezi, Aplikace, System) v seznamu.
     pub fn header(text: &str) -> Self {
-        Self { cells: alloc::vec![String::from(text)], icon: None, header: true }
+        Self { cells: alloc::vec![String::from(text)], header: true, ..Self::default() }
+    }
+
+    /// Radek agenta AI se stitkem "agent" ve sloupci `col`.
+    pub fn agent(mut self, col: usize) -> Self {
+        self.agent = Some(col);
+        self
+    }
+
+    /// Pruh prubehu `value` (0-100) ve sloupci `col`.
+    pub fn progress(mut self, col: usize, value: u32) -> Self {
+        self.progress = Some((col, value.min(100)));
+        self
+    }
+
+    /// Ikonova tlacitka radku (posledni sloupec).
+    pub fn actions(mut self, a: Vec<CellAction>) -> Self {
+        self.actions = a;
+        self
     }
 
     pub fn icon(mut self, name: &'static str) -> Self {
@@ -906,6 +964,8 @@ pub struct TableSpec<M> {
     pub on_drag: Option<Box<dyn Fn(Vec<u64>) -> M>>,
     /// Prave tlacitko na radku (kontextova nabidka).
     pub on_context: Option<Box<dyn Fn(u64) -> M>>,
+    /// Tlacitko v radku ([`Cells::actions`]): id radku a id akce.
+    pub on_row_action: Option<Box<dyn Fn(u64, u32) -> M>>,
     /// Pusteni tazenych radku (id) na radek `Some(id)` nebo na prazdne
     /// misto tabulky `None`; tah z teze nebo jine tabulky v okne.
     pub on_drop: Option<DropFn<M>>,
@@ -940,6 +1000,7 @@ pub fn table<M>(columns: Vec<Col>, count: usize, id: impl Fn(usize) -> u64 + 'st
         on_sort: None,
         on_drag: None,
         on_context: None,
+        on_row_action: None,
         on_drop: None,
     })));
     n.grow = true;
@@ -1032,6 +1093,14 @@ impl<M> Node<M> {
     pub fn on_context(mut self, f: impl Fn(u64) -> M + 'static) -> Self {
         if let Some(t) = self.spec() {
             t.on_context = Some(Box::new(f));
+        }
+        self
+    }
+
+    /// Stisk tlacitka v radku ([`Cells::actions`]): id radku a id akce.
+    pub fn on_row_action(mut self, f: impl Fn(u64, u32) -> M + 'static) -> Self {
+        if let Some(t) = self.spec() {
+            t.on_row_action = Some(Box::new(f));
         }
         self
     }

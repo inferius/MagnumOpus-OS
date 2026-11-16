@@ -74,6 +74,40 @@ impl<M: Clone> Ui<M> {
         r.redraw = true;
     }
 
+    /// Koncovy slot (`Trailing`) vpravo pred tlacitky pole: stitek klavesy
+    /// (`.kbd`: `surface`, okraj `border_strong` se silnejsi spodni hranou,
+    /// `radius.xs`, pismo `caption`), ikona nebo text `ink_muted`.
+    fn draw_trailing(&mut self, c: &mut Canvas<'_>, i: usize, b: Rect, fade: impl Fn(u32) -> u32) {
+        use crate::fieldopts::Trailing;
+        let Some(t) = self.trailing_of(i) else { return };
+        let th = self.look.theme.clone();
+        let col = &th.color;
+        let tw = self.trailing_w(i);
+        let end = self.field_buttons(i).iter().map(|(_, r)| r.x).min().unwrap_or(b.right() as i32 - th.space[3] as i32);
+        let x = end - tw as i32;
+        let cs = th.text.caption;
+        match t {
+            Trailing::Key(k) => {
+                let h = cs.line + th.space[1];
+                let r = Rect::new(x, b.y + (b.h as i32 - h as i32) / 2, tw, h);
+                c.round_fill_bordered(r, th.radius.xs, fade(col.surface), fade(col.border_strong), 1);
+                c.fill(Rect::new(r.x + th.radius.xs as i32 / 2, r.bottom() as i32 - 2, r.w.saturating_sub(th.radius.xs), 1), fade(col.border_strong));
+                let f = self.look.face(cs);
+                let base = r.y + f.baseline_in(cs.size, h);
+                f.draw(c, x + th.space[2] as i32, base, &k, cs.size, fade(col.ink));
+            }
+            Trailing::Icon(name) => {
+                let is = th.size.icon_s;
+                self.icons.draw(c, name, x, b.y + (b.h as i32 - is as i32) / 2, is, th.icon_stroke, fade(col.ink_muted));
+            }
+            Trailing::Text(s) => {
+                let f = self.look.face(cs);
+                let base = b.y + f.baseline_in(cs.size, b.h);
+                f.draw(c, x, base, &s, cs.size, fade(col.ink_muted));
+            }
+        }
+    }
+
     /// Varovani Caps Lock pod polem s heslem (s fokusem, bez chyby).
     pub(crate) fn caps_warning(&self, i: usize) -> bool {
         self.focus == Some(i) && self.mods & mods::CAPS_LOCK != 0 && self.elems[i].error.is_none() && self.field_kind(i).is_some_and(|k| k.1)
@@ -136,6 +170,7 @@ impl<M: Clone> Ui<M> {
             let hot = self.hover == Some(i) && self.pointer_in(i, r);
             self.icons.draw(c, name, r.x + (r.w as i32 - size as i32) / 2, r.y + (r.h as i32 - size as i32) / 2, size, th.icon_stroke, if hot { col.ink } else { col.ink_muted });
         }
+        self.draw_trailing(c, i, b, fade);
         if let FieldKind::Number(n) = &opts.kind
             && !n.unit.is_empty()
         {

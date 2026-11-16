@@ -86,11 +86,17 @@ pub fn audio_request() -> Vec<u8> {
     audioproto::client::Request::Overview.encode()
 }
 
-pub fn net_state(data: &[u8]) -> Option<comp::render::NetState> {
+/// Stav site a adresa rozhrani (`10.0.2.15/24`).
+pub fn net_state(data: &[u8]) -> Option<(comp::render::NetState, Option<alloc::string::String>)> {
     let mut r = netproto::parse_reply(data).ok()?;
     let i = netproto::Info::get(&mut r).ok()?;
+    let addr = i.addr.map(|(a, p)| alloc::format!("{a}/{p}"));
+    Some((net_kind(&i), addr))
+}
+
+fn net_kind(i: &netproto::Info) -> comp::render::NetState {
     // Bez rozhrani netd hlasi nulovou MAC (karta chybi nebo ji neumime).
-    Some(if i.mac == [0; 6] {
+    if i.mac == [0; 6] {
         comp::render::NetState::NoDevice
     } else if !i.link_up {
         comp::render::NetState::Offline
@@ -98,7 +104,7 @@ pub fn net_state(data: &[u8]) -> Option<comp::render::NetState> {
         comp::render::NetState::Online
     } else {
         comp::render::NetState::Connecting
-    })
+    }
 }
 
 /// Hlasitost, ztlumeni a nahravajici aplikace ze stavu `audiod`.

@@ -206,7 +206,7 @@ fn recording_indicator_in_bar() {
     t.frame();
     let r = t.c.bar_layout().volume.expect("ikona zvuku");
     let before: Vec<u32> = (r.y..r.y + r.h as i32).flat_map(|y| (r.x..r.x + r.w as i32).map(move |x| (x, y))).map(|(x, y)| t.px(x, y)).collect();
-    assert_eq!(t.c.tip_text(Tip::Bar(SysKey::BarIcon(1))), "Zvuk: hlasitost 60 %");
+    assert_eq!(t.c.tip_text(Tip::Bar(SysKey::BarIcon(1))), "Hlasitost 60 %");
     // Nahravani: mikrofon v barve nebezpeci a jmena aplikaci v bublince.
     t.c.set_capturing(vec!["SDL test".into()]);
     t.frame();
@@ -214,7 +214,7 @@ fn recording_indicator_in_bar() {
     let after: Vec<u32> = (r.y..r.y + r.h as i32).flat_map(|y| (r.x..r.x + r.w as i32).map(move |x| (x, y))).map(|(x, y)| t.px(x, y)).collect();
     assert_ne!(before, after, "ikona se zmenila");
     assert!(after.iter().any(|&p| p == danger), "mikrofon v barve nebezpeci");
-    assert_eq!(t.c.tip_text(Tip::Bar(SysKey::BarIcon(1))), "Nahrává zvuk: SDL test");
+    assert_eq!(t.c.tip_text(Tip::Bar(SysKey::BarIcon(1))), "Nahrává zvuk - SDL test");
     // Konec nahravani: zpet ikona hlasitosti.
     t.c.set_capturing(Vec::new());
     t.frame();

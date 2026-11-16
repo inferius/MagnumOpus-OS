@@ -99,7 +99,7 @@ tlačítko Menu = kontextová nabídka.
 | Textové pole, víceřádkové | ano | `--k-h`, `radius.control`, `s4`; popisek nad, nápověda / chyba pod | šipky, Ctrl+šipky, výběr se Shift, schránka, undo; víceřádkové Ctrl+Enter odešle |
 | Číslo | ano | jako pole, zarovnání vpravo, jednotka, krokovací tlačítka mimo Tab | &uarr; &darr; krok, PgUp / PgDn 10 kroků, Home / End |
 | Heslo | ano | jako pole + oko (`aria-pressed`), varování Caps Lock | jako pole, nikdy návrhy |
-| Hledání | ano | lupa vlevo, křížek jen s textem, filtr s prodlevou 150 ms | Esc smaže, druhé Esc opustí, &darr; do výsledků |
+| Hledání | ano | lupa vlevo, křížek jen s textem, filtr s prodlevou 150 ms; koncový slot (`.trailing`: štítek klávesy `.kbd` jen u prázdného pole, ikona, krátký text `ink_muted`) pro každé jednořádkové pole | Esc smaže, druhé Esc opustí, &darr; do výsledků |
 | Zaškrtávátko | částečně | políčko 18 / 22 / 28, `radius.xs`, okraj 2 px; neurčitý stav | Mezerník |
 | Přepínač | ano | `switch_*`; okamžitý účinek | Mezerník |
 | Radio | částečně | kruh 18 / 22 / 28; skupina je jedna zastávka | šipky rovnou vybírají |
@@ -113,7 +113,7 @@ tlačítko Menu = kontextová nabídka.
 | Dialog aplikace | ne | `dialog_w`, `radius.window`, `shadow.dialog`, `scrim` | past fokusu, Enter výchozí, Esc zrušit, návrat fokusu |
 | Oznámení (toast) | ne | max. 440, min. výška 48, inverzní barvy, 5 s / 8 s s akcí, nejvýš 3 | nebere fokus; F6, Esc |
 | Seznam | ano | řádek `--k-row`, `radius.control` | šipky, Ctrl+Mezerník, Shift+šipky, Ctrl+A, písmena, Enter |
-| Tabulka | ano | řádek `--k-row`, hlavička `type.caption` na `surface_2`, čísla vpravo | jako seznam, Enter v hlavičce třídí |
+| Tabulka | ano | řádek `--k-row`, hlavička `type.caption` na `surface_2`, čísla vpravo; v buňkách pruh průběhu, štítek agenta (jen systém) a ikonová tlačítka řádku (`Cells::actions`, styl ghost) | jako seznam, Enter v hlavičce třídí; Šipka vpravo / vlevo mezi tlačítky řádku, Enter / Mezerník stiskne |
 | Strom | ne | řádek `--k-row`, odsazení úrovně 20, trojúhelník otočený o 90&deg; | &rarr; rozbalí / dítě, &larr; sbalí / rodič, `*` sourozenci |
 | Průběh, kolečko, kostra | částečně | pruh 8 px; kolečko 24 / 16 / 40; kostra 12 px | není zaměřitelný; čtečce po 10 % |
 | Odznak, štítek, filtrovací štítek | částečně | odznak 18; štítek 24 `type.caption`; filtrovací `--k-h-sm` | skupina štítků: šipky, Mezerník, Delete |

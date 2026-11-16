@@ -469,7 +469,8 @@ Křivky: standard `cubic-bezier(0.2, 0, 0, 1)`, enter
 - Tvar: pilulka 26 px v barvách `trust-*`, ikona štítu, jméno aplikace,
   za oddělovačem ikony právě platných oprávnění (složka, síť, kamera,
   mikrofon, snímání obrazovky). **Červená tečka** = zařízení právě běží.
-- Systémové aplikace mají místo jména slovo „Systém“ a štít s fajfkou.
+- Systémové aplikace mají jméno aplikace a štít s fajfkou (`shieldcheck`)
+  místo štítu; jméno i značku dodá init z manifestu. **[implementováno]**
 - Klik, Enter nebo mezerník otevře **přehled oprávnění** (kreslí ho
   kompozitor ve vrstvě nabídek): aplikace, podpis, seznam oprávnění
   s časem posledního použití a tlačítkem **Odebrat**. Odebrání platí

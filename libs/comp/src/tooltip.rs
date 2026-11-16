@@ -5,6 +5,7 @@
 
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use gfx::Canvas;
 use guiproto::Rect;
@@ -18,6 +19,14 @@ pub const DELAY: u64 = 500_000_000;
 pub const REOPEN: u64 = 300_000_000;
 /// Nejvetsi sirka bubliny.
 pub const MAX_W: u32 = 280;
+
+/// Obsah bubliny: titulek, popis (muze byt prazdny), klavesa.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TipText {
+    pub title: String,
+    pub desc: String,
+    pub key: Option<&'static str>,
+}
 
 /// Prvek s bublinou.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,44 +64,96 @@ impl Comp {
         }
     }
 
-    /// Text bubliny.
-    pub(crate) fn tip_text(&self, tip: Tip) -> String {
+    /// Obsah bubliny (`.tip`): tucny titulek, popis `ink_muted` pod nim
+    /// a stitek klavesy za titulkem.
+    pub(crate) fn tip_parts(&self, tip: Tip) -> TipText {
+        let t = |title: String, desc: String| TipText { title, desc, key: None };
+        // "Pevna sit: pripojeno" -> titulek a popis.
+        let split = |s: String| match s.split_once(": ") {
+            Some((a, b)) => t(String::from(a), b.chars().take(1).flat_map(char::to_uppercase).chain(b.chars().skip(1)).collect()),
+            None => t(s, String::new()),
+        };
         match tip {
-            Tip::Clock => self.clock.as_ref().map_or(String::new(), |(_, d)| d.clone()),
+            Tip::Clock => t(self.clock.as_ref().map_or(String::new(), |(_, d)| d.clone()), String::from("Kalendář a světový čas")),
             Tip::Bar(SysKey::BarApp(k)) => {
                 let bar = self.bar_layout();
                 let (rep, n) = (bar.apps.get(k).map_or(0, |a| a.0), bar.groups.get(k).map_or(1, |g| g.len()));
                 let title = self.windows.get(&rep).map_or(String::new(), |w| w.title.clone());
-                if n > 1 { format!("{title} (oken: {n})") } else { title }
+                t(title, if n > 1 { format!("Oken: {n}") } else { String::new() })
             }
-            Tip::Bar(SysKey::BarLaunch(i)) => self.launchable.get(i).map_or(String::new(), |(_, n)| format!("{n} - spustit")),
-            Tip::Bar(SysKey::Launcher) => String::from("Aplikace"),
-            Tip::Bar(SysKey::BarIcon(0)) => self.net_line(),
-            Tip::Bar(SysKey::BarIcon(1)) if !self.status.capturing.is_empty() => format!("Nahrává zvuk: {}", self.status.capturing.join(", ")),
-            Tip::Bar(SysKey::BarIcon(1)) => match self.status.volume {
-                Some((_, true)) => String::from("Zvuk: ztlumeno"),
-                Some((v, false)) => format!("Zvuk: hlasitost {v} %"),
-                None => String::from("Zvuk"),
-            },
-            Tip::Bar(SysKey::BarIcon(2)) => String::from(if self.do_not_disturb() { "Oznámení: nerušit" } else { "Oznámení" }),
-            Tip::Bar(SysKey::BarIcon(_)) => self.look_tip(),
-            Tip::Bar(SysKey::Tasks) => self.tasks_tip(),
-            Tip::Bar(_) => String::new(),
+            Tip::Bar(SysKey::BarLaunch(i)) => t(self.launchable.get(i).map_or(String::new(), |(_, n)| n.clone()), String::from("Spustit")),
+            Tip::Bar(SysKey::Launcher) => TipText { title: String::from("Aplikace"), desc: String::from("Spouštěč a hledání"), key: Some("Super") },
+            Tip::Bar(SysKey::BarIcon(0)) => {
+                let mut p = split(self.net_line());
+                if let (Some(a), Some(crate::render::NetState::Online)) = (&self.status.net_addr, self.status.net) {
+                    p.desc = format!("{} · IP {a}", p.desc);
+                }
+                p
+            }
+            Tip::Bar(SysKey::BarIcon(1)) if !self.status.capturing.is_empty() => t(String::from("Nahrává zvuk"), self.status.capturing.join(", ")),
+            Tip::Bar(SysKey::BarIcon(1)) => t(
+                match self.status.volume {
+                    Some((_, true)) => String::from("Zvuk ztlumen"),
+                    Some((v, false)) => format!("Hlasitost {v} %"),
+                    None => String::from("Zvuk"),
+                },
+                String::new(),
+            ),
+            Tip::Bar(SysKey::BarIcon(2)) => t(String::from("Oznámení"), String::from(if self.do_not_disturb() { "Nerušit je zapnuté" } else { "" })),
+            Tip::Bar(SysKey::BarIcon(_)) => split(self.look_tip()),
+            Tip::Bar(SysKey::Tasks) => split(self.tasks_tip()),
+            Tip::Bar(_) => t(String::new(), String::new()),
         }
+    }
+
+    /// Text bubliny jednim radkem (titulek - popis; testy, pristupnost).
+    pub(crate) fn tip_text(&self, tip: Tip) -> String {
+        let p = self.tip_parts(tip);
+        if p.desc.is_empty() { p.title } else { format!("{} - {}", p.title, p.desc) }
+    }
+
+    /// Popis zalomeny do sirky `w` (nejvys tri radky).
+    fn tip_desc_lines(&self, desc: &str, w: u32) -> Vec<String> {
+        let s = self.style.theme.text.small;
+        let mut out: Vec<String> = Vec::new();
+        let mut line = String::new();
+        for word in desc.split(' ') {
+            let cand = if line.is_empty() { String::from(word) } else { format!("{line} {word}") };
+            if !line.is_empty() && self.style.width(&cand, s) > w {
+                out.push(core::mem::replace(&mut line, String::from(word)));
+            } else {
+                line = cand;
+            }
+        }
+        if !line.is_empty() {
+            out.push(line);
+        }
+        out.truncate(3);
+        out
+    }
+
+    /// Sirka stitku klavesy v bubline.
+    fn tip_key_w(&self, key: &str) -> u32 {
+        let t = &self.style.theme;
+        self.style.width(key, t.text.caption) + 2 * t.space[2]
     }
 
     /// Obdelnik bubliny `tip` (8 px nad listou, nad prvkem, u okraje
     /// obrazovky zarovnany).
     fn tip_rect_of(&self, tip: Tip) -> Option<Rect> {
         let a = self.tip_anchor(tip)?;
-        let text = self.tip_text(tip);
-        if text.is_empty() {
+        let p = self.tip_parts(tip);
+        if p.title.is_empty() {
             return None;
         }
         let t = &self.style.theme;
-        let s = t.text.small;
-        let w = (self.style.width(&text, s) + 2 * t.space[4]).min(MAX_W).min(self.w);
-        let h = s.line + 2 * t.space[2];
+        let (s, strong) = (t.text.small, t.text.body_strong);
+        let key_w = p.key.map_or(0, |k| t.space[2] + self.tip_key_w(k));
+        let room = MAX_W - 2 * t.space[4];
+        let lines = self.tip_desc_lines(&p.desc, room);
+        let inner = (self.style.width(&p.title, strong) + key_w).max(lines.iter().map(|l| self.style.width(l, s)).max().unwrap_or(0));
+        let w = (inner + 2 * t.space[4]).min(MAX_W).min(self.w);
+        let h = strong.line + lines.len() as u32 * s.line + 2 * t.space[2];
         let x = (a.x + (a.w as i32 - w as i32) / 2).clamp(0, (self.w - w) as i32);
         Some(Rect::new(x, self.panel_rect().y - t.space[3] as i32 - h as i32, w, h))
     }
@@ -156,15 +217,36 @@ impl Comp {
         }
     }
 
-    /// Kresli zobrazenou bublinu (systemovy material, bez sipky).
+    /// Kresli zobrazenou bublinu (systemovy material, bez sipky): tucny
+    /// titulek (`body_strong`), za nim stitek klavesy (`.kb`), pod nim popis
+    /// `small` barvou `ink_muted`.
     pub(crate) fn draw_tooltip(&mut self, c: &mut Canvas<'_>) {
         let (Some(tip), Some(r)) = (self.tip_shown, self.tip_rect()) else { return };
-        let text = self.tip_text(tip);
+        let p = self.tip_parts(tip);
         let t = self.style.theme.clone();
-        let s = t.text.small;
+        let (s, strong) = (t.text.small, t.text.body_strong);
         c.round_fill_bordered(r, t.radius.control, t.color.surface, t.color.border_strong, 1);
+        let (x, room) = (r.x + t.space[4] as i32, r.w.saturating_sub(2 * t.space[4]));
+        let mut y = r.y + t.space[2] as i32;
+        let face = self.style.face(strong);
+        face.draw_ellipsized(c, x, y + face.baseline_in(strong.size, strong.line), &p.title, strong.size, t.color.ink, room);
+        if let Some(k) = p.key {
+            let cs = t.text.caption;
+            let kw = self.tip_key_w(k);
+            let kx = x + (self.style.width(&p.title, strong).min(room) + t.space[2]) as i32;
+            let kh = cs.line + t.space[1];
+            let kr = Rect::new(kx, y + (strong.line as i32 - kh as i32) / 2, kw, kh);
+            c.round_fill_bordered(kr, t.radius.xs, t.color.surface, t.color.border_strong, 1);
+            c.fill(Rect::new(kr.x + t.radius.xs as i32 / 2, kr.y + kr.h as i32 - 2, kr.w.saturating_sub(t.radius.xs), 1), t.color.border_strong);
+            let f = self.style.face(cs);
+            f.draw(c, kx + t.space[2] as i32, kr.y + f.baseline_in(cs.size, kh), k, cs.size, t.color.ink);
+        }
+        y += strong.line as i32;
+        let lines = self.tip_desc_lines(&p.desc, MAX_W - 2 * t.space[4]);
         let face = self.style.face(s);
-        let base = r.y + face.baseline_in(s.size, r.h);
-        face.draw_ellipsized(c, r.x + t.space[4] as i32, base, &text, s.size, t.color.ink, r.w.saturating_sub(2 * t.space[4]));
+        for l in lines {
+            face.draw_ellipsized(c, x, y + face.baseline_in(s.size, s.line), &l, s.size, t.color.ink_muted, room);
+            y += s.line as i32;
+        }
     }
 }
