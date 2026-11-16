@@ -638,6 +638,8 @@ dependencies = [
  "libos",
  "netproto",
  "notifyproto",
+ "taskproto",
+ "taskview",
  "theme",
  "venus",
  "vkcomp",

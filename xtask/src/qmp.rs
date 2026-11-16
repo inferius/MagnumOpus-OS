@@ -503,8 +503,8 @@ mod gui {
     /// `user/init/src/tests/gui_look.rs` (`QEMU_SHOT_DARK_START`).
     pub const DARK_START: &str = "init: test gui: snimek tmavy-start";
     /// `gui_look.rs` (`QEMU_SHOT_PANEL` + jmeno souboru, `PANEL_SHOTS`).
-    pub const PANEL_SHOT: [&str; 2] = ["init: test gui: snimek panelu panel-vzhled", "init: test gui: snimek panelu panel-oznameni"];
-    pub const PANEL_NAMES: [&str; 2] = ["panel-vzhled", "panel-oznameni"];
+    pub const PANEL_SHOT: [&str; 3] = ["init: test gui: snimek panelu panel-vzhled", "init: test gui: snimek panelu panel-oznameni", "init: test gui: snimek panelu panel-ulohy"];
+    pub const PANEL_NAMES: [&str; 3] = ["panel-vzhled", "panel-oznameni", "panel-ulohy"];
     pub const DIALOG: &str = "init: test gui: dialog ceka na klavesy z QEMU";
     pub const SECURE: &str = "init: test gui: cekam na zkratku z QEMU";
     pub const SECURE_ENTER: &str = "init: test gui: bezpecna obrazovka ceka na Enter";

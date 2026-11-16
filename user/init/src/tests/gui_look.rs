@@ -159,7 +159,7 @@ pub fn start_dark(startup: &Startup) -> TestResult {
 /// Znacky snimku panelu listy (xtask `qmp.rs`, `gui::PANEL_SHOT`): jmeno
 /// panelu pro kompozitor a jmeno souboru. Zvuk a sit sada `gui` nema
 /// (bez sluzeb neni ikona v liste, panel se neotevre).
-pub const PANEL_SHOTS: [(&str, &str); 2] = [("look", "panel-vzhled"), ("bell", "panel-oznameni")];
+pub const PANEL_SHOTS: [(&str, &str); 3] = [("look", "panel-vzhled"), ("bell", "panel-oznameni"), ("tasks", "panel-ulohy")];
 pub const QEMU_SHOT_PANEL: &str = "init: test gui: snimek panelu ";
 
 /// Panely listy nad komponentou panel (tmavy rezim jako snimky odchylek):
@@ -168,6 +168,11 @@ pub fn panel_shots(_: &Startup) -> TestResult {
     with(|s| {
         cmd(s, "appearance system tmavy ne ano")?;
         settle(&s.inspect)?;
+        // Panel Ulohy: odber taskd jako v systemu (`sources tasks`) a ikona
+        // v liste (pocet uloh posila init).
+        let ch = crate::tasks::client_view_all("uzivatel").map_err(|e| super::fail("klient taskd", e))?;
+        s.gui.command(b"sources tasks", alloc::vec![ch.into_handle()]).map_err(|e| super::fail("sources tasks", e))?;
+        cmd(s, "tasks 3 1")?;
         let r = (|| -> TestResult {
             for (name, file) in PANEL_SHOTS {
                 cmd(s, &alloc::format!("panel {name}"))?;
@@ -180,6 +185,7 @@ pub fn panel_shots(_: &Startup) -> TestResult {
             Ok(())
         })();
         let _ = cmd(s, "panel none");
+        let _ = cmd(s, "tasks 0 0");
         cmd(s, "appearance system svetly ne ano")?;
         settle(&s.inspect)?;
         r

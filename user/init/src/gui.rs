@@ -604,6 +604,12 @@ pub fn start_desktop(startup: &Startup, input: Option<&Input>, sup: &mut Supervi
         names.push("audio");
         hs.push(a.into_handle());
     }
+    // Panel Ulohy: odber taskd se stejnou identitou jako Spravce uloh
+    // (vidi vse, ridi jen co taskd povoli).
+    if let Ok(t) = crate::tasks::client_view_all("uzivatel") {
+        names.push("tasks");
+        hs.push(t.into_handle());
+    }
     if !hs.is_empty()
         && let Err(e) = gui.command(format!("{} {}", control::SOURCES, names.join(" ")).as_bytes(), hs)
     {

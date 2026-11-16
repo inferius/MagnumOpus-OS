@@ -46,6 +46,9 @@ pub(crate) enum PanelMsg {
     CloseAll,
     /// Panel hodin: o mesic zpet nebo dopredu.
     Month(i32),
+    /// Panel uloh: akce nad ulohou, otevrit Spravce uloh.
+    Task(crate::TaskAct),
+    OpenTasks,
 }
 
 /// Otevreny panel listy.
@@ -70,7 +73,7 @@ impl Comp {
     /// Kresli panel `f` knihovna ui (ostatni karty jsou ve `flyout.rs`)?
     pub(crate) fn is_ui_panel(f: Flyout) -> bool {
         match f {
-            Flyout::Look | Flyout::Net | Flyout::Volume | Flyout::Bell | Flyout::AppWindows(_) | Flyout::Clock => true,
+            Flyout::Look | Flyout::Net | Flyout::Volume | Flyout::Bell | Flyout::AppWindows(_) | Flyout::Clock | Flyout::Tasks => true,
             #[cfg(feature = "dev-mode")]
             Flyout::Dev => true,
             _ => false,
@@ -236,6 +239,7 @@ impl Comp {
             Flyout::Volume => self.volume_view(&s),
             Flyout::Bell => self.bell_view(&s),
             Flyout::Clock => self.clock_view(&s),
+            Flyout::Tasks => self.tasks_view(&s),
             #[cfg(feature = "dev-mode")]
             Flyout::Dev => self.dev_view(&s),
             _ => return None,
@@ -251,6 +255,7 @@ impl Comp {
             "volume" => Flyout::Volume,
             "bell" => Flyout::Bell,
             "clock" => Flyout::Clock,
+            "tasks" => Flyout::Tasks,
             #[cfg(feature = "dev-mode")]
             "dev" => Flyout::Dev,
             "none" => {
@@ -271,6 +276,7 @@ impl Comp {
             Flyout::Volume => "Zvuk",
             Flyout::Bell => "Oznámení",
             Flyout::Clock => "Kalendář",
+            Flyout::Tasks => "Úlohy na pozadí",
             _ => "Panel",
         }
     }
@@ -459,6 +465,11 @@ impl Comp {
             }
             PanelMsg::Output(i) => self.out.push(crate::Out::Audio(crate::AudioReq::Output(i))),
             PanelMsg::Input(i) => self.out.push(crate::Out::Audio(crate::AudioReq::Input(i))),
+            PanelMsg::Task(a) => self.out.push(crate::Out::Task(a)),
+            PanelMsg::OpenTasks => {
+                self.set_flyout(None);
+                self.launch_or_activate(crate::render::TASKS_APP, time);
+            }
             PanelMsg::Month(d) => self.calendar_offset = self.calendar_offset.saturating_add(d).clamp(-1200, 1200),
             PanelMsg::Window(w) => {
                 self.set_flyout(None);

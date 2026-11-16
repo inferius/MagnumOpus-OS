@@ -135,8 +135,9 @@ pub fn state_text(t: &Task) -> String {
     }
 }
 
-/// Stav bez prubehu (sloupec Stav; prubeh ma vlastni sloupec).
-fn state_word(t: &Task) -> String {
+/// Stav bez prubehu (sloupec Stav; prubeh ma vlastni sloupec; panel
+/// Ulohy v liste).
+pub fn state_word(t: &Task) -> String {
     match &t.state {
         State::Running => String::from("běží"),
         State::Paused => String::from("pozastaveno"),
