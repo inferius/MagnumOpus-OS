@@ -38,6 +38,7 @@ pub mod tasks;
 pub mod theme;
 pub mod ui;
 pub mod vt;
+pub mod vtkeys;
 
 #[cfg(test)]
 mod tests;
@@ -71,3 +72,5 @@ mod tests_tasks;
 mod tests_ui;
 #[cfg(test)]
 mod tests_wrap;
+#[cfg(test)]
+mod tests_vtkeys;
