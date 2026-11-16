@@ -323,6 +323,8 @@ controls.
 | `badge-h` | 26 px | trust badge |
 | `bar-h` | 52 px | bar; 8 px offset from the edge |
 | `resize-edge` | 6 px | invisible edge for resizing (corner 18 px) |
+| `panel-w`, `panel-row` | 360 px, 40 px | bar panel (Appearance, Sound, Network, ...): width and smallest row height |
+| `panel-gap`, `panel-edge` | 10 px, 14 px | panel: icon-text gap and section spacing, header top edge and footer bottom edge ([panel component](components.md)) |
 
 ### Radii and shadows
 
