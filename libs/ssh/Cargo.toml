@@ -3,8 +3,23 @@ name = "ssh"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "SSH pro MagnumOpus: server a klient nad sunset (sans-IO), adapter na netproto"
+description = "SSH pro MagnumOpus: klice uzivatelu (otisk, overeni podpisu) a protokol nad sunset (sans-IO)"
+
+[features]
+default = []
+# Protokol SSH (server a klient nad sunset). Bez nej jen `keys`
+# (sluzba uctu).
+proto = ["dep:sunset"]
 
 [dependencies]
+abi.workspace = true
 # Bez std; mlkem = hybridni vymena klicu mlkem768x25519 (vychozi v OpenSSH 10).
-sunset = { version = "0.6", default-features = false, features = ["mlkem"] }
+sunset = { version = "0.6", default-features = false, features = ["mlkem"], optional = true }
+# Stejne verze jako sunset (jedna kopie v programu, ktery ma oboje).
+ed25519-dalek = { version = "3", default-features = false }
+sha2 = { version = "0.11", default-features = false }
+base64ct = { version = "1.8", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+sha2 = { version = "0.11" }
+ed25519-dalek = { version = "3" }
