@@ -380,13 +380,13 @@ impl<B: Backend> FileManager<B> {
         );
         let none = self.trash_sel.is_empty();
         let mut v = vec![row([
-            button("Obnovit").on_click(Msg::TrashRestore).disabled(none),
-            button("Smazat trvale").on_click(Msg::TrashPurge).disabled(none),
+            button("Obnovit").icon("restore").on_click(Msg::TrashRestore).disabled(none),
+            button("Smazat trvale").icon("trash").danger().on_click(Msg::TrashPurge).disabled(none),
         ])];
         if self.confirm_purge {
             v.push(row([
                 label(&format!("Trvale smazat {}? Nejde vrátit.", format::plural(self.trash_sel.len() as u64, "položku", "položky", "položek"))).grow(),
-                button("Smazat trvale").on_click(Msg::TrashPurgeConfirm(true)),
+                button("Smazat trvale").danger().on_click(Msg::TrashPurgeConfirm(true)),
                 button("Zrušit").on_click(Msg::TrashPurgeConfirm(false)),
             ]));
         }
