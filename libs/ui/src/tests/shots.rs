@@ -192,10 +192,10 @@ fn shot_menu() {
         240,
         &|| {
             column([button::<M>("Soubor").context_menu(vec![
-                MenuEntry { label: "Kopírovat".into(), shortcut: "Ctrl+C".into(), disabled: String::new(), checked: None, separator: false, act: None },
-                MenuEntry { label: "Vložit".into(), shortcut: "Ctrl+V".into(), disabled: "Schránka je prázdná".into(), checked: None, separator: false, act: None },
+                MenuEntry { label: "Kopírovat".into(), shortcut: "Ctrl+C".into(), disabled: String::new(), checked: None, separator: false, act: None, icon: None, header: false },
+                MenuEntry { label: "Vložit".into(), shortcut: "Ctrl+V".into(), disabled: "Schránka je prázdná".into(), checked: None, separator: false, act: None, icon: None, header: false },
                 menu_separator(),
-                MenuEntry { label: "Zobrazit skryté".into(), shortcut: String::new(), disabled: String::new(), checked: Some(true), separator: false, act: None },
+                MenuEntry { label: "Zobrazit skryté".into(), shortcut: String::new(), disabled: String::new(), checked: Some(true), separator: false, act: None, icon: None, header: false },
             ])])
         },
         &|u| {
@@ -225,5 +225,23 @@ fn shot_suggest() {
             u.set_mono_fonts(gfx::text::Family::new(font::mono(), &[]));
             u.event(guiproto::window::InputEvent::Key { code: inputproto::code::KEY_DOWN, action: 1, ch: None }, 0);
         },
+    );
+}
+
+/// K4: varianty tlacitka (primarni, sekundarni, nebezpecne, ghost, ikonove,
+/// nedostupne) ve svetlem, tmavem a kontrastnim rezimu.
+#[test]
+fn shot_button_variants() {
+    shot(
+        "tlacitka",
+        420,
+        120,
+        &|| {
+            column([
+                row([button::<M>("Uložit").primary(), button("Zrušit"), button("Smazat").danger(), button("Více").ghost(), spacer()]),
+                row([button::<M>("Uložit").primary().disabled(true), button("").icon("settings").tooltip("Nastavení"), button("Kopírovat").icon("copy").ghost(), spacer()]),
+            ])
+        },
+        &none,
     );
 }

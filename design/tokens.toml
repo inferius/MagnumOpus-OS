@@ -146,6 +146,13 @@ launcher_w = 300
 # a nejvetsi vyska.
 completion_w = 380
 completion_max_h = 260
+# Panel listy (design/bubliny-panely.html, `.pnl`): sirka, nejmensi vyska
+# radku, mezera ikona-text a svisle odsazeni sekce a paty, horni okraj
+# hlavicky a dolni okraj paty.
+panel_w = 360
+panel_row = 40
+panel_gap = 10
+panel_edge = 14
 
 [radius]
 xs = 6

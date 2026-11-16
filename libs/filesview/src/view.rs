@@ -106,18 +106,18 @@ impl<B: Backend> FileManager<B> {
         let none = self.sel.is_empty();
         let why = "Nic není vybráno";
         let mut v = vec![
-            menu_item("Otevřít", Msg::OpenSelected).shortcut("Enter"),
+            menu_item("Otevřít", Msg::OpenSelected).shortcut("Enter").icon("external"),
             menu_separator(),
-            menu_item("Kopírovat", Msg::Copy).shortcut("Ctrl+C"),
-            menu_item("Vyjmout", Msg::Cut).shortcut("Ctrl+X"),
-            menu_item("Vložit", Msg::Paste).shortcut("Ctrl+V"),
+            menu_item("Kopírovat", Msg::Copy).shortcut("Ctrl+C").icon("copy"),
+            menu_item("Vyjmout", Msg::Cut).shortcut("Ctrl+X").icon("cut"),
+            menu_item("Vložit", Msg::Paste).shortcut("Ctrl+V").icon("paste"),
             menu_separator(),
-            menu_item("Přejmenovat", Msg::Rename).shortcut("F2"),
-            menu_item("Do koše", Msg::Trash).shortcut("Delete"),
+            menu_item("Přejmenovat", Msg::Rename).shortcut("F2").icon("rename"),
+            menu_item("Do koše", Msg::Trash).shortcut("Delete").icon("trash"),
             menu_separator(),
-            menu_item("Nová složka", Msg::NewFolder).shortcut("Ctrl+Shift+N"),
+            menu_item("Nová složka", Msg::NewFolder).shortcut("Ctrl+Shift+N").icon("folder-plus"),
             menu_separator(),
-            menu_item("Vlastnosti", Msg::Properties).shortcut("Alt+Enter"),
+            menu_item("Vlastnosti", Msg::Properties).shortcut("Alt+Enter").icon("info"),
         ];
         if none {
             for i in [0, 2, 3, 7] {
@@ -320,8 +320,8 @@ impl<B: Backend> FileManager<B> {
             .multi_select(true)
             .on_selection(Msg::TrashSelect)
             .context_menu(vec![
-                menu_item("Obnovit", Msg::TrashRestore).shortcut("Enter"),
-                menu_item("Smazat trvale", Msg::TrashPurge).shortcut("Delete"),
+                menu_item("Obnovit", Msg::TrashRestore).shortcut("Enter").icon("restore"),
+                menu_item("Smazat trvale", Msg::TrashPurge).shortcut("Delete").icon("trash"),
             ])
             .grow(),
         );

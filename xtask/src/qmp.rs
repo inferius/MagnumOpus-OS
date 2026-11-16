@@ -142,6 +142,8 @@ const STARTS: &[&str] = &[
     MARKER,
     MARKER_PS2,
     usb::KEYS,
+    gui::DARK_START,
+    gui::PANEL_SHOT[0],
     media::PLUG,
     gui::DIALOG,
     gui::SECURE,
@@ -155,6 +157,7 @@ const STARTS: &[&str] = &[
     wine::KEYS_CLICK,
     wine::CLICK,
     wine::PASTE_CLICK,
+    wine::OFFER_CLICK,
 ];
 
 /// Konec testovaciho behu userspace (dal uz zadny usek neprijde).
@@ -358,6 +361,18 @@ fn wine_steps(s: &mut Vec<Step>) {
     // Vlozeni do naseho okna (gui-probe vloz): klik a Ctrl+V.
     s.push(Step::ClickAt(wine::PASTE_CLICK));
     press(s, &["ctrl", "v"]);
+    // W4: nase aplikace nabidne text (klik a stisk klavesy = gesto),
+    // poznamkovy blok ho vlozi a ulozi jako u.txt.
+    s.push(Step::ClickAt(wine::OFFER_CLICK));
+    press(s, &["ctrl", "c"]);
+    s.push(Step::ClickAt(wine::PASTE_WINE_CLICK));
+    press(s, &["ctrl", "v"]);
+    s.push(Step::WaitFor(wine::SAVE2_KEYS));
+    press(s, &["ctrl", "s"]);
+    s.push(Step::WaitFor(wine::SAVE2_NAME));
+    for k in ["u", "dot", "t", "x", "t", "ret"] {
+        press(s, &[k]);
+    }
 }
 
 /// Znacky testu W3 (musi sedet s `user/init/src/tests/wine_gui.rs`).
@@ -370,6 +385,10 @@ mod wine {
     pub const COPY: &str = "init: test wine: kopiruj text";
     pub const CLOSE: &str = "init: test wine: zavri poznamkovy blok";
     pub const PASTE_CLICK: &str = "init: test wine: klik do vkladaciho okna na ";
+    pub const OFFER_CLICK: &str = "init: test wine: klik do nabidky textu na ";
+    pub const PASTE_WINE_CLICK: &str = "init: test wine: klik pro vlozeni ve Wine na ";
+    pub const SAVE2_KEYS: &str = "init: test wine: uloz vlozeny text";
+    pub const SAVE2_NAME: &str = "init: test wine: nazev vlozeneho souboru";
 }
 
 /// Znacky testu SDL (musi sedet s `user/init/src/tests/sdl.rs`).
@@ -387,6 +406,18 @@ mod sdl {
 /// GUI (`user/init/src/tests/gui.rs`): fyzicka klavesnice odpovi na
 /// systemovy dialog (umely vstup ho nepotvrdi) a na bezpecnou obrazovku.
 fn gui_steps(s: &mut Vec<Step>) {
+    // Snimek aplikaci spustenych v tmavem rezimu (test `start_dark`).
+    s.push(Step::WaitFor(gui::DARK_START));
+    let shots = crate::target_dir().join("shots");
+    let _ = std::fs::create_dir_all(&shots);
+    let file = shots.join("tmavy-start.png").display().to_string().replace('\\', "/");
+    s.push(Step::Qmp(format!(r#"{{"execute":"screendump","arguments":{{"filename":"{file}","device":"gpu0","format":"png"}}}}"#)));
+    // Panely listy (test `panel_shots`).
+    for (marker, name) in gui::PANEL_SHOT.iter().zip(gui::PANEL_NAMES) {
+        s.push(Step::WaitFor(marker));
+        let file = shots.join(format!("{name}.png")).display().to_string().replace('\\', "/");
+        s.push(Step::Qmp(format!(r#"{{"execute":"screendump","arguments":{{"filename":"{file}","device":"gpu0","format":"png"}}}}"#)));
+    }
     s.push(Step::WaitFor(gui::DIALOG));
     for (k, d) in [("tab", true), ("tab", false), ("ret", true), ("ret", false)] {
         s.push(Step::Send(vec![key(k, d)]));
@@ -469,6 +500,11 @@ fn gui_steps(s: &mut Vec<Step>) {
 
 /// Znacky testu GUI (musi sedet s `user/init/src/tests/gui.rs`).
 mod gui {
+    /// `user/init/src/tests/gui_look.rs` (`QEMU_SHOT_DARK_START`).
+    pub const DARK_START: &str = "init: test gui: snimek tmavy-start";
+    /// `gui_look.rs` (`QEMU_SHOT_PANEL` + jmeno souboru, `PANEL_SHOTS`).
+    pub const PANEL_SHOT: [&str; 2] = ["init: test gui: snimek panelu panel-vzhled", "init: test gui: snimek panelu panel-oznameni"];
+    pub const PANEL_NAMES: [&str; 2] = ["panel-vzhled", "panel-oznameni"];
     pub const DIALOG: &str = "init: test gui: dialog ceka na klavesy z QEMU";
     pub const SECURE: &str = "init: test gui: cekam na zkratku z QEMU";
     pub const SECURE_ENTER: &str = "init: test gui: bezpecna obrazovka ceka na Enter";

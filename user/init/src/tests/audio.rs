@@ -29,6 +29,7 @@ pub const TESTS: &[Test] = &[
     ("nahravani: vstup bezi a data prichazeji", recording),
     ("dve zvukove karty: seznam, vyber, nahravani z druhe", devices),
     ("shell: audio tone, volume, status", shell_audio),
+    ("aplikace podle identity: prehled, hlasitost aplikace, vyber vstupu", apps_by_identity),
 ];
 
 fn client() -> Result<AudioClient, String> {
@@ -259,4 +260,54 @@ fn shell_audio(s: &Startup) -> TestResult {
     })();
     let _ = proc.kill();
     r
+}
+
+/// Panel Zvuk v liste: dve relace jedne aplikace (Wine z vic procesu) jsou
+/// v prehledu jedna polozka a hlasitost aplikace plati pro obe; jina
+/// aplikace zvlast. Aplikace sama prehled ani cizi hlasitost nesmi. Vyber
+/// vstupu overi zarizeni.
+fn apps_by_identity(_: &Startup) -> TestResult {
+    use audioproto::session::{Capture, Recipe};
+    let sys = client()?;
+    let recipe = |id: &str, name: &str| Recipe { app_id: id.into(), app_name: name.into(), uid: 1000, capture: Capture::No };
+    let wine = recipe("org.test.wine", "Wine");
+    let mut apps = vec::Vec::new();
+    for r in [&wine, &wine, &recipe("org.test.player", "Přehrávač")] {
+        let ch = crate::audio::app_channel(r).map_err(|e| fail("relace aplikace", e))?;
+        apps.push(AudioClient::new(ch));
+    }
+    let mut streams = vec::Vec::new();
+    let pcm = tone_pcm(440, 48_000, 2, 150, 10);
+    let deadline = Some(time::deadline_after(Duration::from_secs(10)));
+    for a in &apps {
+        let s = a.open(Direction::Output, Format::DEVICE_DEFAULT, 200_000).map_err(|e| fail("OPEN aplikace", e))?;
+        s.write_all(&pcm, false, deadline).map_err(|e| fail("zapis", e))?;
+        s.start().map_err(|e| fail("START", e))?;
+        streams.push(s);
+    }
+    let o = sys.overview().map_err(|e| fail("OVERVIEW", e))?;
+    let ids: vec::Vec<&str> = o.apps.iter().map(|a| a.app_id.as_str()).collect();
+    check_eq!(ids, vec!["org.test.wine", "org.test.player"], "jedna polozka na identitu");
+    check!(o.apps.iter().all(|a| a.volume == 100 && a.playing), format!("vychozi stav: {:?}", o.apps));
+    check!(!o.devices.is_empty() && o.status.streams >= 3, "zarizeni a proudy v prehledu");
+    sys.app_volume("org.test.wine", 30).map_err(|e| fail("APP_VOLUME", e))?;
+    let a = sys.apps().map_err(|e| fail("APPS", e))?;
+    check!(a.iter().any(|x| x.app_id == "org.test.wine" && x.volume == 30) && a.iter().any(|x| x.app_id == "org.test.player" && x.volume == 100), format!("hlasitost aplikace: {a:?}"));
+    // Aplikace prehled a cizi hlasitost nesmi.
+    check_eq!(apps[0].overview().err(), Some(Error::AccessDenied), "OVERVIEW z aplikace");
+    check_eq!(apps[2].app_volume("org.test.wine", 100).err(), Some(Error::AccessDenied), "APP_VOLUME z aplikace");
+    // Vyber vstupu: neexistujici zarizeni odmitne, automaticky jde vzdy.
+    check_eq!(sys.select_input(200).err(), Some(Error::InvalidArgs), "neplatny vstup");
+    if let Some(i) = o.input {
+        sys.select_input(i).map_err(|e| fail("SELECT_INPUT", e))?;
+        check_eq!(sys.overview().map_err(|e| fail("OVERVIEW", e))?.input, Some(i), "zvoleny vstup");
+    }
+    sys.select_input(u8::MAX).map_err(|e| fail("SELECT_INPUT auto", e))?;
+    sys.app_volume("org.test.wine", 100).map_err(|e| fail("APP_VOLUME zpet", e))?;
+    for s in &streams {
+        let _ = s.stop();
+    }
+    drop(streams);
+    drop(apps);
+    Ok(())
 }

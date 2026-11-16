@@ -67,6 +67,8 @@ fn main(startup: Startup) -> i64 {
         pending: Vec::new(),
         client_seq: 0,
         ask_seq: 0,
+        app_volumes: Default::default(),
+        input_pref: None,
     };
     svc.choose_default();
     if svc.device.is_none() {

@@ -72,3 +72,107 @@ fn shot_palette_and_launcher() {
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
+
+/// Panely listy nad komponentou panel (Vzhled, Zvuk s vystupem, vstupem,
+/// nahravanim a aplikacemi) ve svetlem, tmavem a kontrastnim rezimu.
+#[test]
+fn shot_bar_panels() {
+    use crate::render::{AudioApp, AudioDev, AudioInfo};
+    let mut errors = Vec::new();
+    for (mode, mname) in [(theme::Mode::Light, "svetly"), (theme::Mode::Dark, "tmavy"), (theme::Mode::Contrast, "kontrast")] {
+        for (panel, pname) in [("look", "vzhled"), ("volume", "zvuk")] {
+            let mut t = T::new();
+            t.c.set_mode(mode);
+            t.c.set_volume(Some((60, false)));
+            t.c.set_capturing(alloc::vec![String::from("Hovory")]);
+            t.c.audio_ctl = true;
+            t.c.set_audio_info(Some(AudioInfo {
+                devices: alloc::vec![
+                    AudioDev { index: 0, name: String::from("Reproduktory"), outputs: String::from("line-out"), input: true, active: true },
+                    AudioDev { index: 1, name: String::from("Sluchátka USB"), outputs: String::from("headphone"), input: false, active: false },
+                ],
+                apps: alloc::vec![
+                    AudioApp { id: String::from("org.magnumopus.calls"), name: String::from("Hovory"), volume: 80, playing: true, capturing: true },
+                    AudioApp { id: String::from("org.magnumopus.player"), name: String::from("Přehrávač"), volume: 45, playing: true, capturing: false },
+                ],
+                input: Some(0),
+            }));
+            let a = t.client("a");
+            t.window(a, Mode::Standard, RED);
+            t.frame();
+            assert!(t.c.open_panel(panel));
+            t.frame();
+            let Some(r) = t.c.bar_panel_rect() else {
+                errors.push(format!("panel {panel} se neotevrel"));
+                continue;
+            };
+            let (px, w, h) = crop(&t, r);
+            errors.extend(compare(&format!("panel-{pname}-{mname}"), &px, w, h));
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+
+/// Nabidka zastupce aplikace v liste (O7) ve svetlem a tmavem rezimu.
+#[test]
+fn shot_app_shortcut_menu() {
+    let mut errors = Vec::new();
+    for (mode, mname) in [(theme::Mode::Light, "svetly"), (theme::Mode::Dark, "tmavy")] {
+        let mut t = T::new();
+        t.c.set_mode(mode);
+        t.c.set_launchable(alloc::vec![(String::from("org.term"), String::from("Terminál"))]);
+        t.c.set_multi(alloc::vec![String::from("org.term")]);
+        for c in [RED, BLUE] {
+            let a = t.client("org.term");
+            t.window(a, Mode::Standard, c);
+        }
+        t.frame();
+        let r = t.c.bar_layout().apps[0].1;
+        t.click(r.x + 4, r.y + 4);
+        t.frame();
+        let Some(m) = t.c.bar_panel_rect() else {
+            errors.push(String::from("nabidka se neotevrela"));
+            continue;
+        };
+        let (px, w, h) = crop(&t, m);
+        errors.extend(compare(&format!("nabidka-zastupce-{mname}"), &px, w, h));
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+
+/// Spoustec se sekcemi Bezi / Aplikace / Nedavne a patou s uctem (O13,
+/// O14, K9) a paleta s prazdnym vysledkem (K8).
+#[test]
+fn shot_launcher_sections_and_empty() {
+    let mut errors = Vec::new();
+    for (scheme, mname) in [(theme::Scheme::Light, "svetly"), (theme::Scheme::Dark, "tmavy")] {
+        let mut t = T::new();
+        // Volba vzhledu systemu i uzivatele bez prechodu (relace ji meni).
+        let p = theme::Pref { scheme, contrast: false, reduce_motion: true };
+        t.c.set_appearance_system(p, t.now);
+        t.c.set_appearance_user(1000, p, t.now);
+        t.c.set_launchable(alloc::vec![
+            (String::from("org.term"), String::from("Terminál")),
+            (String::from("org.files"), String::from("Soubory")),
+            (String::from("org.tasks"), String::from("Správce úloh")),
+            (String::from("org.demo"), String::from("Ukázka")),
+        ]);
+        t.c.session_opened(1, 1000, "michal", t.now);
+        let a = t.client("org.term");
+        t.window(a, Mode::Standard, RED);
+        t.frame();
+        let g = t.c.clients[&a].windows[&1];
+        t.c.palette_recent = alloc::vec![alloc::format!("win:{g}")];
+        t.c.set_palette(Some(crate::palette::Palette { launcher: true, ..Default::default() }));
+        t.frame();
+        let r = t.c.palette_rect().unwrap();
+        let (px, w, h) = crop(&t, r);
+        errors.extend(compare(&format!("spoustec-sekce-{mname}"), &px, w, h));
+        t.c.set_palette(Some(crate::palette::Palette { query: String::from("xyzzy"), ..Default::default() }));
+        t.frame();
+        let r = t.c.palette_rect().unwrap();
+        let (px, w, h) = crop(&t, r);
+        errors.extend(compare(&format!("paleta-prazdna-{mname}"), &px, w, h));
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}

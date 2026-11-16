@@ -164,7 +164,7 @@ impl Comp {
         }
         let (px, py) = (self.input.px, self.input.py);
         let k = match self.hit(px, py) {
-            _ if self.panel_rect().contains(px, py) => Cursor::Arrow,
+            _ if self.over_system(px, py) => Cursor::Arrow,
             Some((g, crate::input::Zone::Content(..))) if self.dialogs.active().is_none() && self.windows.get(&g).is_some_and(|w| w.app_cursor.is_some()) => Cursor::App(g),
             h => h.map_or(Cursor::Arrow, |(_, z)| z.cursor()),
         };

@@ -367,7 +367,11 @@ over `libc.so`).
   procesu a fd vláken / server signals via the process control fd and
   thread fds), `0008-winemo-drv-magnumopus.patch` (ovladač `winemo.drv`
   v `configure`, výchozí ovladač grafiky v `explorer` / the `winemo.drv`
-  driver in `configure`, the default graphics driver in `explorer`).
+  driver in `configure`, the default graphics driver in `explorer`),
+  `0009-winemoaudio-drv-magnumopus.patch` (ovladač `winemoaudio.drv`
+  v `configure`, výchozí seznam ovladačů zvuku `mmdevapi` začíná
+  `moaudio` / the `winemoaudio.drv` driver in `configure`, the default
+  `mmdevapi` sound driver list starts with `moaudio`).
 - **Ovladač grafiky / Graphics driver:** `third_party/wine/winemo.drv/`
   (LGPL jako Wine, část `window.c` a tabulka kláves z `winewayland.drv` /
   LGPL like Wine, part of `window.c` and the key table from
@@ -375,8 +379,37 @@ over `libc.so`).
   `mowin` (náš kód, `libs/mowin`) / Wine windows on the compositor through
   our `mowin` library (our code, `libs/mowin`). Sestavení ho zkopíruje do
   `dlls/winemo.drv` / the build copies it into `dlls/winemo.drv`.
+- **Ovladač zvuku / Sound driver:** `third_party/wine/winemoaudio.drv/`
+  (LGPL jako Wine, postavený podle `wineoss.drv` / LGPL like Wine, built
+  after `wineoss.drv`): `mmdevapi` nad naším `moaudio` (`libs/mowin`) /
+  `mmdevapi` over our `moaudio` (`libs/mowin`). Sestavení ho zkopíruje do
+  `dlls/winemoaudio.drv` / the build copies it into `dlls/winemoaudio.drv`.
 - **Popis / Description:** `docs/cs/windows-vrstva.md`,
   `docs/en/windows-layer.md`.
+
+## PuTTY 0.85 (test Windows vrstvy / Windows layer test)
+
+Není v repozitáři: `cargo xtask wine` stáhne `putty-0.85.tar.gz`
+z the.earth.li (HTTPS) a ověří SHA-256
+`13fd4db2936d03b73812a7bcc2a658e4dd29cc776a56c3670a7fc6f1a0ee8af8`
+(ze seznamu `sha256sums` projektu; archiv ověřený podpisem klíče PuTTY
+Releases 2026, otisk `1A07 DAC0 F220 CF12 248E A719 5C67 D0F8 8BC3 E5B5`).
+Bez úprav zdrojů; přeloží ho clang pro `x86_64-pc-windows-msvc` nad
+hlavičkami a importními knihovnami Wine (`xtask/src/wine/putty.rs`, start
+s `WinMain` a TLS v našem `xtask/src/wine/wincrt.c`) jako `putty.exe` jen
+pro testy (datový disk `--wine`, `/apps/org.magnumopus.wintest`). / Not in
+the repository: `cargo xtask wine` downloads `putty-0.85.tar.gz` from
+the.earth.li (HTTPS) and checks the SHA-256 above (from the project's
+`sha256sums`; the archive verified against the PuTTY Releases 2026 key
+signature, fingerprint above). No source changes; clang builds it for
+`x86_64-pc-windows-msvc` over Wine headers and import libraries as
+`putty.exe` for tests only.
+
+- **Licence / Licence:** MIT (PuTTY, © 1997-2026 Simon Tatham a další /
+  and others), text `LICENCE` v archivu / in the archive. Zdroj / source:
+  <https://www.chiark.greenend.org.uk/~sgtatham/putty/>.
+- **Popis / Description:** `docs/cs/windows-vrstva.md`,
+  `docs/en/windows-layer.md` (kapitola W4 / chapter W4).
 
 ## Písmo Tuffy / Tuffy font
 

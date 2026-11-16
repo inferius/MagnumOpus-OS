@@ -85,7 +85,10 @@ prikazy:
   docs     HTML dokumentace z docs/ do target/docs (s kontrolou odkazu)
   wine [--keep-going]
            Wine 11 pro Windows vrstvu ve WSL (LLVM 23, docs/cs/windows-vrstva.md);
-           jen x86_64, predpoklad `build`; --keep-going = prehled chyb portu
+           jen x86_64, predpoklad `build`; --keep-going = prehled chyb portu;
+           na konci PuTTY pro testy (clang nad SDK Wine)
+  wine-putty
+           jen PuTTY nad SDK z posledniho `wine` (target/wine/<arch>/sdk)
   unicode-tables
            tabulky libs/uniprop (tridy znaku, velikost pismen, sirka)
            z Unicode Character Database (HTTPS + SHA-256)
@@ -452,6 +455,8 @@ fn run_cli() -> Result<()> {
         }
         Some("unicode-tables") => unicode::generate(),
         Some("wine") => wine::build(opts.arch, keep_going).map(|p| println!("xtask: Wine {}", p.display())),
+        // Jen PuTTY nad uz pripravenym SDK Wine (W4; `wine` ho stavi taky).
+        Some("wine-putty") => wine::build_putty(opts.arch).map(|_| ()),
         Some("image") => build(&opts).and_then(|a| image_for(&a, &opts)).map(|_| ()),
         Some("run") => {
             // Okno QEMU ukazuje prvni grafickou kartu (VGA, framebuffer

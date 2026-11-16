@@ -896,11 +896,17 @@ grid button in the bar or the Super key alone (press and release without
 another key, local physical keyboard only) opens it. It sits at the left
 above the bar, width token `size.launcher_w` (300). An empty query shows
 the sections Running (started apps, window count on the right),
-Applications and System; the Recent group is prepared and has no source
-yet. Typing gives the same results and ranking as the palette (Ctrl+K).
-Footer: sign-in state and a power button with the menu Lock, Sign out
-(disabled with a reason for now), Restart and Shut down (system
-confirmation).
+Applications (whole, without "more...") and Recent (recently used windows
+and palette actions, not apps from the rows above); the list has no frame
+or lines (`table(..).plain()`), the search field has a magnifier. Typing
+gives the same results and ranking as the palette (Ctrl+K); with no result
+an empty state "Nic nenalezeno" (`ui::empty_state`). Footer: a circle with
+the initial and the display name of the session user, Settings (disabled,
+"Nastavení zatím nejsou") and power with the menu Lock, Sign out (disabled
+with a reason for now), Restart and Shut down (system confirmation). Above
+the launcher, the palette and a bar panel the cursor is always an arrow
+(not the edge shape of a window below). **[implemented]** (screenshots
+`spoustec-sekce-*`, `paleta-prazdna-*`, host `launcher_hides_window_edge_cursor`)
 
 - **Budget:** opening fits into one frame; the test `palette_open_budget`
   measures opening and closing with a composed frame
@@ -941,6 +947,36 @@ Hovering the tasks icon shows "Úlohy: 20 běží, z toho agent AI 1"; the
 number and the Task manager use the same `taskd` view (all tasks; the Task
 manager controls only the user's tasks: client `own`). **[implemented]**
 (tests `bar_icons_open_flyouts`, `tasks_icon_tooltip` in `libs/comp`)
+
+The Appearance, Network, Sound, Notifications and Developer mode panels
+are `ui` views over the [panel component](components.md)
+(`libs/comp/src/barpanel.rs`): width `size.panel_w`, height by content,
+centred above the icon, rounding `radius.window`, shadow
+`shadow.popover`. The app shortcut menu in the bar (right button, or a click with several
+windows) is a `ui` menu (`Ui::open_menu`): the application's windows
+(the active one with a check mark), New window, Pin to the bar (disabled,
+"not yet"), Close all windows. **[implemented]** (host
+`app_shortcut_menu_is_ui_menu`, screenshot `nabidka-zastupce-*.png`)
+The Sound panel: volume and mute, output and input (radio groups), a
+"Nahrává: ..." (recording) row and application volume by the manifest
+identity; data from `audiod` (`OVERVIEW`, a channel from init, the
+compositor asks for it instead of `STATUS`), changes go through the same
+channel (`MASTER_VOLUME`, `MUTE`, `SELECT`, `SELECT_INPUT`,
+`APP_VOLUME`); without the channel the controls are disabled.
+Screenshots `libs/comp/tests/shots/panel-zvuk-*.png`.
+Keys (Tab, arrows in options, Space), hover and
+accessibility are as in applications; Esc or a click outside closes the
+panel. The icon with an open panel has `surface_3` and an `accent`
+underline. Material: the blurred scene under the panel (once on opening,
+again only after damage under it) with `surface` at `opacity.bar`; if the
+computation takes longer than `COMPOSE_BUDGET`, the panel switches to a
+solid background and `compd` logs it once; high contrast is solid.
+Measured in the frame breakdown as "material panelu". The Settings
+buttons in the footer are disabled with the reason "Nastavení zatím
+nejsou" (Settings do not exist yet). The compositor command
+`panel <name>` opens a panel (tests, screenshots). **[verified in QEMU]**
+(test "panely listy nad komponentou panel", screenshots
+`target/shots/panel-*.png`; host `bar_look_card_chooses_scheme_and_reports_it`)
 
 Network icon: wired (`ethernet`); without a network card (netd reports an
 all-zero MAC, e.g. the VMware e1000 we do not support yet) a crossed
@@ -1292,6 +1328,7 @@ with `inputd`); the reply is `ok`, `ok <data>` or `err <CODE>`.
 | `sources [net] [audio]` | network session (`INFO`), audio channel | `ok` (bar state) |
 | `apps` + lines `<id>\t<name>\t<single\|multi>` | - | empty (launchable apps in the bar) |
 | `dnd-fullscreen on\|off` | - | empty (Do not disturb in fullscreen) |
+| `panel look\|net\|volume\|bell\|dev\|none` | - | empty (opens a bar panel like a click on its icon; tests and look screenshots) |
 | `launcher` | channel to init | empty (`launch <id>` requests) |
 | `snapshots` | channel to `logd` | empty (images of the [diagnostic snapshot](#diagnostic-snapshot-print-screen)) |
 

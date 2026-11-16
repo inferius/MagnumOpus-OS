@@ -29,6 +29,7 @@ mod submenu;
 pub mod layout;
 pub mod look;
 pub mod node;
+pub mod panel;
 pub(crate) mod popup;
 pub mod scrollbar;
 pub mod spatial;
@@ -60,6 +61,7 @@ pub use node::*;
 
 use layout::{ElemKind, Element};
 pub use look::Look;
+pub use panel::{Deco, Fill, PanelSize, RowLook, TextTone, empty_state, icon, icon_sized, panel, panel_footer, panel_header, panel_line, panel_section, panel_state};
 pub use context::{Context, SizeClass};
 pub use spatial::Axis;
 pub use suggest::{Suggest, suggest};
@@ -280,6 +282,14 @@ pub struct Ui<M> {
     pub(crate) now: u64,
     /// Nabidka a bublina ve vlastni vrstve popoveru (klient v OS).
     pub(crate) overlay: bool,
+    /// Nekreslit pozadi `surface` (volajici dal vlastni, napr. material
+    /// panelu v kompozitoru).
+    pub transparent: bool,
+    /// Masky stinu nabidek (`shadow.popover`) podle polomeru a rozmazani.
+    pub(crate) shadow_masks: alloc::collections::BTreeMap<(u32, u32), gfx::shadow::ShadowMask>,
+    /// Okraj okna `look.pad()` kolem obsahu (panel kompozitoru ho nema,
+    /// odsazeni maji jeho radky).
+    pub window_pad: bool,
     /// Posun bubliny pri kresleni do vrstvy popoveru (jeji pocatek).
     pub(crate) tip_shift: (i32, i32),
     /// Trida zdroje zpracovavane udalosti (`guiproto::window::input_class`).
@@ -372,6 +382,9 @@ impl<M: Clone> Ui<M> {
             tip_shown: None,
             now: 0,
             overlay: false,
+            transparent: false,
+            shadow_masks: alloc::collections::BTreeMap::new(),
+            window_pad: true,
             tip_shift: (0, 0),
             input_class: 0,
             paste_class: 0,
@@ -470,7 +483,7 @@ impl<M: Clone> Ui<M> {
     pub fn rebuild(&mut self, title: String, view: Node<M>) {
         let key_of = |o: Option<usize>| o.and_then(|i| self.elems.get(i)).map(|e| e.key);
         let (fk, pk, kk) = (key_of(self.focus), key_of(self.pressed), key_of(self.key_pressed));
-        let p = self.look.pad();
+        let p = if self.window_pad { self.look.pad() } else { 0 };
         let area = Rect::new(p as i32, p as i32, self.w.saturating_sub(2 * p), self.h.saturating_sub(2 * p));
         self.elems = layout::layout(view, area, &self.look);
         self.title = title;
@@ -500,6 +513,7 @@ impl<M: Clone> Ui<M> {
             self.popup = None;
             self.popup_stack.clear();
         }
+        self.refresh_context();
         if self.tip.is_some_and(|(k, _)| self.index_of(k).is_none()) {
             self.tip = None;
             self.tip_shown = None;
@@ -548,6 +562,13 @@ impl<M: Clone> Ui<M> {
     }
 
     /// Index prvku s klicem `k` (po poslednim rozvrzeni).
+    /// Prirozena vyska pohledu `view` pri sirce okna (bez natazeni):
+    /// vyska okna podle obsahu (panel listy).
+    pub fn natural_height(&self, view: &Node<M>) -> u32 {
+        let pad = if self.window_pad { self.look.pad() } else { 0 };
+        layout::natural_height(view, &self.look, self.w.saturating_sub(2 * pad)) + 2 * pad
+    }
+
     pub fn index_of(&self, k: Key) -> Option<usize> {
         self.by_key.get(&k).copied()
     }
@@ -631,6 +652,11 @@ impl<M: Clone> Ui<M> {
                     ElemKind::Scroll { .. } => (Role::ScrollArea, none(), none(), SCROLL),
                     _ => (Role::Group, none(), none(), 0),
                 }
+            };
+            // Radek panelu: popis pod nazvem jako hodnota.
+            let value = match &e.row {
+                Some(r) if value.is_empty() && !r.desc.is_empty() => r.desc.clone(),
+                _ => value,
             };
             let layer = if e.space == 0 { ROOT_LAYER } else { scroll_layers(self.elem_ids[e.space - 1]).1 };
             let id = self.elem_ids[i];

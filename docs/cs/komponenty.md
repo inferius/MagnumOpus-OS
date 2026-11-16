@@ -95,7 +95,7 @@ tlačítko Menu = kontextová nabídka.
 
 | Komponenta | `libs/ui` | Rozměry a tokeny | Klávesnice |
 |---|---|---|---|
-| Tlačítko: primární, sekundární, nebezpečné, ikonové | částečně | výška `--k-h`, min. šířka 2 &times; výška, `s5`, pilulka; primární `accent`, nebezpečné `danger`; stav *probíhá* (kolečko, pevná šířka) | Enter, Mezerník při uvolnění |
+| Tlačítko: primární, sekundární, nebezpečné, ikonové | ano | výška `--k-h`, min. šířka 2 &times; výška, `s5`, pilulka; primární `accent`, nebezpečné `danger`; stav *probíhá* (kolečko, pevná šířka) | Enter, Mezerník při uvolnění |
 | Textové pole, víceřádkové | ano | `--k-h`, `radius.control`, `s4`; popisek nad, nápověda / chyba pod | šipky, Ctrl+šipky, výběr se Shift, schránka, undo; víceřádkové Ctrl+Enter odešle |
 | Číslo | ano | jako pole, zarovnání vpravo, jednotka, krokovací tlačítka mimo Tab | &uarr; &darr; krok, PgUp / PgDn 10 kroků, Home / End |
 | Heslo | ano | jako pole + oko (`aria-pressed`), varování Caps Lock | jako pole, nikdy návrhy |
@@ -119,7 +119,8 @@ tlačítko Menu = kontextová nabídka.
 | Odznak, štítek, filtrovací štítek | částečně | odznak 18; štítek 24 `type.caption`; filtrovací `--k-h-sm` | skupina štítků: šipky, Mezerník, Delete |
 | Drobečky | ne | `--k-h-sm`, oddělovač `/` v `ink_faint`, zkrácení na „...“ | každý odkaz zastávka Tab |
 | Rozbalovací panel | ne | hlavička `--k-h` + 12, `radius.card`, šipka otočená o 180&deg; | Enter / Mezerník, ve skupině &uarr; &darr; |
-| Prázdný stav | ne | kruh 72 s ikonou `icon_xl`, nadpis `type.title`, jedna akce | fokus na akci |
+| Prázdný stav | ano | kruh 72 s ikonou `icon_xl`, nadpis `type.title`, jedna akce | fokus na akci |
+| Panel (lišta, Nastavení) | ano | šířka `size.panel_w` (360), řádek nejméně `size.panel_row` (40), mezera ikona-text `size.panel_gap` (10), okraj hlavičky a paty `size.panel_edge` (14), boky `s5`; hlavička s ikonou, tučným názvem (`body_strong`) a souhrnem (`caption`, `ink_muted`), řádek s ikonou, názvem a popisem (tlačítko s najetím `surface_3`, volba radio s fajfkou vpravo, přepínač vpravo, informace), sekce (`caption` velkými), stavový řádek (`surface_3` / `danger_soft`, `radius.control`), pata s čarou `border`. Skládá se z běžných prvků (`libs/ui/src/panel.rs`: `panel_header`, `.panel_row(ikona, popis)`, `panel_section`, `panel_state`, `panel_footer`); popis řádku je hodnota pro čtečku | volby radio jsou skupina (šipky vyberou), Tab mezi skupinou, přepínačem a patou; fokus jako vnitřní rámeček `radius.control` |
 
 Kdy co použít:
 

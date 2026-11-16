@@ -67,6 +67,9 @@ pub const DND_FULLSCREEN: &str = "dnd-fullscreen";
 /// `notify <uid>` + kanal prohlizece oznameni (`notifyproto::View`) pro
 /// relaci uzivatele: vyskakovaci oznameni (`docs/cs/oznameni.md`).
 pub const NOTIFY: &str = "notify";
+/// `panel look|net|volume|bell|dev|none`: otevre panel listy (jako klik na
+/// ikonu; testy a snimky vzhledu), `none` ho zavre.
+pub const PANEL: &str = "panel";
 /// `snapshot`: udelat diagnosticky snimek hned (prikaz shellu pres init).
 pub const SNAPSHOT: &str = "snapshot";
 pub const INPUT: &str = "input";

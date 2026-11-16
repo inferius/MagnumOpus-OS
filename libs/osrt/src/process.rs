@@ -157,6 +157,8 @@ pub fn spawn_with_fds(s: Spawn, fds: Vec<crate::inherit::Export>) -> Result<(Chi
     }
     // Relace okna pro potomka podle jeho prostredi (`MO_GUI`).
     let gui = crate::gui::wanted(&s.env);
+    // Relace zvuku podle `MO_AUDIO` (role Audio).
+    let audio = crate::audio::wanted(&s.env);
     let params = libos::params::Params { cwd: s.cwd, args: s.args, env: s.env, flags, fds: fd_entries }.encode().map_err(fail)?;
 
     let mut roles = Vec::new();
@@ -197,6 +199,19 @@ pub fn spawn_with_fds(s: Spawn, fds: Vec<crate::inherit::Export>) -> Result<(Chi
                 handles.push(lease.into_handle());
             }
             Err(e) => libos::println!("osrt: relace okna pro potomka {}: {e}, spoustim bez GUI", s.program),
+        }
+    }
+    // Relace zvuku (role Audio): stejne pravidlo s `MO_AUDIO`; nahravani
+    // potomka jen jako u rodice (dialog povoleni mikrofonu), nikdy sirsi.
+    if audio {
+        match crate::audio::child() {
+            Ok((session, lease)) => {
+                roles.push(Role::Audio);
+                handles.push(session.into_handle());
+                roles.push(Role::AudioLease);
+                handles.push(lease.into_handle());
+            }
+            Err(e) => libos::println!("osrt: relace zvuku pro potomka {}: {e}, spoustim bez zvuku", s.program),
         }
     }
     let req = Launch { program: s.program, flags: 0, roles, params }.encode(NEXT_ID.fetch_add(1, Ordering::Relaxed)).map_err(fail)?;

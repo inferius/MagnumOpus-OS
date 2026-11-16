@@ -20,11 +20,16 @@ Nativní knihovna UI (milník 6c): jedna pro všechny aplikace. Aplikace popíš
 - Najetí: prvek s částmi, které se zvýrazňují zvlášť (záložky, řádky a posuvník tabulky), musí část vracet z `Ui::hover_part`; jinak se pohyb uvnitř prvku nepřekreslí a zvýraznění zůstane na staré části (test `hover.rs`).
 - Rozvržení měří podle dostupné šířky (`layout::measure(n, t, avail)`): výška zalamovaného štítku závisí na šířce. `measure` a `place` musí šířky počítat stejně (řádek přes `row_sizes`), jinak se výška štítku a obdélník rozejdou.
 
+- `empty_state` (prázdný stav) a `table(..).plain()` (seznam bez rámečku a čar) jsou v `panel.rs` a `table.rs`.
+- Varianty tlačítka jsou vlastnost uzlu `Node::variant` (`.primary()`, `.danger()`, `.ghost()`), ne druh prvku; kreslí `draw.rs` (Button). Nejvýš jedno primární na obrazovce.
+- Komponenta panel (`panel.rs`) nemá vlastní druh prvku: vlastnosti uzlu `pad`, `gap`, `deco`, `tone` a `row` (radek s ikonou a popisem pro tlačítko, radio, přepínač, štítek; kreslí `draw_panel_row`, rozměr `row_size`). `Ui::transparent` (bez pozadí, materiál kreslí volající) a `Ui::window_pad` (okraj okna). Test `tests/panel.rs`.
 - Režim barev při startu je součást pozdravu: `handshake` nesmí zahodit `THEME` mezi `WELCOME` a `CONFIGURE` (`Window::mode`, `run_video` ho použije před prvním kreslením, obnova pošle `Event::Theme`, když se mezitím změnil; test QEMU `compd: aplikace spustena v tmavem rezimu ...`).
 - Změna režimu: `Event::Theme` nastaví `look` i `Context::mode` (cílový režim pro aplikace s vlastním vzhledem). Plynulý přechod dělá kompozitor smícháním snímků; aplikace se překreslí jen jednou.
 - Aplikace UI vykresluje do vlastního bufferu; kompozitor mu nevěří (viz `libs/comp/CLAUDE.md`), ale i klient musí ošetřit nesmyslné rozměry od kompozitoru.
 - `client/mod.rs` má ~730 řádků; při dalším růstu dělit (obnova po pádu je v `restore.rs`, schránka v `clip.rs`).
 - Seznam návrhů u pole: jádro bez stromu `complete.rs` (`Completion`, používá ho i gui-term samostatně), napojení na pole `suggest.rs`. Klávesy, které seznam nevezme, musí jít do pole (`Outcome::Ignored`); heslo seznam nikdy nemá.
+- Nabídka: ikona vlevo (`MenuEntry::icon`, sloupec vždy), nadpis skupiny (`menu_header`, nevybírá se, `usable` false), vpravo zkratka nebo důvod zakázání a fajfka; stín `shadow.popover` z `Ui::shadow_masks`, vrstva popoveru (`overlay_rect`) má okraj `popup_shadow_margin`.
+- `Ui::open_menu(items, kotva)` otevře nabídku bez prvku (vlastník = kořen pohledu; nabídka zástupce v liště kompozitoru), `Ui::popup_rect` její obdélník.
 - Nabídky: `Ui::popup` je vždy nejhlubší úroveň, rodiče podnabídek drží `Ui::popup_stack` (`submenu.rs`); kdo nabídku zavírá, volá `close_popup` (vyprázdní i zásobník), ne `popup = None`.
 - Skupina radio = sourozenci se stejným rodičem (`groups.rs`, `tab_stop`): pořadí Tab musí jít přes `tab_stop`, ne přímo přes `focusable`.
 - `client/pointer.rs`: kurzor okna, zámek ukazatele a celá obrazovka pro okna, která kreslí sama (SDL); `Event::PointerLock` a `Event::State` (stav z `CONFIGURE` bez fokusu) běhová smyčka `run` ignoruje.

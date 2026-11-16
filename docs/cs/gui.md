@@ -850,11 +850,17 @@ zvoleno 12. 11. 2026) je tatáž paleta jinde a jinak prázdná: otevře ho
 tlačítko mřížky v liště nebo samotná klávesa Super (stisk a puštění bez
 jiné klávesy, jen místní fyzická klávesnice). Leží vlevo nad lištou,
 šířka token `size.launcher_w` (300). Prázdný dotaz ukáže sekce Běží
-(spuštěné aplikace, vpravo počet oken), Aplikace a Systém; skupina Nedávné
-je připravená, zatím nemá zdroj. Psaní dá stejné výsledky a řazení jako
-paleta (Ctrl+K). Pata: stav přihlášení a tlačítko napájení s nabídkou
+(spuštěné aplikace, vpravo počet oken), Aplikace (celá, bez „další...“)
+a Nedávné (naposledy použitá okna a akce z palety, ne aplikace z řádků
+výše); seznam je bez rámečku a čar (`table(..).plain()`), pole hledání
+s lupou. Psaní dá stejné výsledky a řazení jako paleta (Ctrl+K); bez
+výsledku prázdný stav „Nic nenalezeno“ (`ui::empty_state`). Pata:
+kolečko s počátečním písmenem a zobrazované jméno uživatele relace,
+Nastavení (vypnuté, „Nastavení zatím nejsou“) a napájení s nabídkou
 Zamknout, Odhlásit (zatím zakázané s důvodem), Restartovat a Vypnout
-(systémové potvrzení).
+(systémové potvrzení). Nad spouštěčem, paletou i panelem lišty je kurzor
+vždy šipka (ne tvar okraje okna pod nimi). **[implementováno]** (snímky
+`spoustec-sekce-*`, `paleta-prazdna-*`, host `launcher_hides_window_edge_cursor`)
 
 - **Rozpočet:** otevření se vejde do jednoho snímku; test
   `palette_open_budget` měří otevření a zavření se složením snímku (na
@@ -891,6 +897,33 @@ Po najetí na ikonu úloh popisek „Úlohy: 20 běží, z toho agent AI 1“; �
 i Správce úloh berou stejný pohled `taskd` (všechny úlohy, Správce úloh
 řídí jen úlohy uživatele: klient `own`). **[implementováno]** (testy
 `bar_icons_open_flyouts`, `tasks_icon_tooltip` v `libs/comp`)
+
+Panely Vzhled, Síť, Zvuk, Oznámení a Režim vývojáře jsou pohledy
+knihovny `ui` nad [komponentou panel](komponenty.md)
+(`libs/comp/src/barpanel.rs`): šířka `size.panel_w`, výška podle obsahu,
+střed nad ikonou, zaoblení `radius.window`, stín `shadow.popover`.
+Nabídka zástupce aplikace v liště (pravé tlačítko, nebo klik při víc
+oknech) je nabídka knihovny `ui` (`Ui::open_menu`): okna aplikace
+(aktivní s fajfkou), Nové okno, Připnout na lištu (vypnuté, „zatím
+není“), Zavřít všechna okna. **[implementováno]** (host
+`app_shortcut_menu_is_ui_menu`, snímek `nabidka-zastupce-*.png`)
+Panel Zvuk: hlasitost a ztlumení, výstup a vstup (skupiny radio), řádek
+„Nahrává: ...“ a hlasitost aplikací podle identity z manifestu; data
+z `audiod` (`OVERVIEW`, kanál od initu, kompozitor se ptá místo `STATUS`),
+změny jdou stejným kanálem (`MASTER_VOLUME`, `MUTE`, `SELECT`,
+`SELECT_INPUT`, `APP_VOLUME`); bez kanálu je ovládání vypnuté. Snímky
+`libs/comp/tests/shots/panel-zvuk-*.png`.
+Klávesy (Tab, šipky ve volbách, mezerník), najetí a přístupnost jsou jako
+v aplikacích; Esc nebo klik mimo panel zavře. Ikona s otevřeným panelem
+má `surface_3` a podtržení `accent`. Materiál: rozmazaná scéna pod
+panelem (jednou při otevření, znovu jen po poškození pod ním) se
+`surface` v krytí `opacity.bar`; trvá-li výpočet déle než
+`COMPOSE_BUDGET`, panel přejde na plné pozadí a `compd` to jednou
+zaloguje; vysoký kontrast je plný. Měření v rozpadu snímku „materiál
+panelu“. Tlačítka Nastavení v patě jsou vypnutá s důvodem „Nastavení
+zatím nejsou“. Příkaz kompozitoru `panel <jméno>` panel otevře (testy,
+snímky). **[ověřeno v QEMU]** (test „panely lišty nad komponentou panel“,
+snímky `target/shots/panel-*.png`; host `bar_look_card_chooses_scheme_and_reports_it`)
 
 Ikona sítě: pevná síť (`ethernet`), bez síťové karty (netd hlásí nulovou
 MAC, např. e1000 ve VMware, kterou zatím neumíme) přeškrtnutá ikona
@@ -1236,6 +1269,7 @@ Init mluví s `compd` po bootstrap kanálu textovými příkazy (jako s
 | `sources [net] [audio]` | relace sítě (`INFO`), kanál zvuku | `ok` (stav v liště) |
 | `apps` + řádky `<id>\t<jméno>\t<single\|multi>` | - | prázdná (spustitelné aplikace v liště) |
 | `dnd-fullscreen on\|off` | - | prázdná (Nerušit při celé obrazovce) |
+| `panel look\|net\|volume\|bell\|dev\|none` | - | prázdná (otevře panel lišty jako klik na ikonu; testy a snímky vzhledu) |
 | `launcher` | kanál k initu | prázdná (žádosti `launch <id>`) |
 | `snapshots` | kanál na `logd` | prázdná (obrázky [diagnostického snímku](#diagnostický-snímek-print-screen)) |
 

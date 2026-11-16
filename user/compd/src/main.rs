@@ -474,15 +474,19 @@ impl Service {
         }
         if let Some(s) = self.audio_src.as_mut() {
             match s.read(status::volume) {
-                Ok(Some((v, rec))) => {
+                Ok(Some((v, rec, info))) => {
                     c.set_volume(Some(v));
                     c.set_capturing(rec);
+                    c.set_audio_info(Some(info));
+                    c.audio_ctl = true;
                 }
                 Ok(None) => {}
                 Err(()) => {
                     self.audio_src = None;
                     c.set_volume(None);
                     c.set_capturing(alloc::vec::Vec::new());
+                    c.set_audio_info(None);
+                    c.audio_ctl = false;
                 }
             }
         }
@@ -530,6 +534,16 @@ impl Service {
                         let _ = l.write(format!("{} user {uid} {}", control::APPEARANCE, pref.to_words()).as_bytes(), Vec::new());
                     }
                     None => println!("compd: volbu vzhledu nejde ulozit: init nedal kanal launcher"),
+                },
+                // Zadost panelu Zvuk: stejnym kanalem jako stav (systemova
+                // relace od initu); stav se pak precte hned.
+                Out::Audio(req) => match self.audio_src.as_mut() {
+                    Some(s) => {
+                        if !s.send(&status::audio_control(&req)) {
+                            println!("compd: zadost o zvuk se nepodarila poslat");
+                        }
+                    }
+                    None => println!("compd: zadost o zvuk bez kanalu ke sluzbe zvuku"),
                 },
                 Out::Device { source, trust } => {
                     if let Some(s) = &self.secure {
@@ -612,6 +626,17 @@ impl Service {
                 self.launcher = Some(Channel::from_handle(h));
                 (String::new(), Vec::new())
             }),
+            control::PANEL => match (self.comp.as_mut(), words.next()) {
+                (Some(c), Some(name)) => {
+                    if c.open_panel(name) {
+                        Ok((String::new(), Vec::new()))
+                    } else {
+                        Err(Error::InvalidArgs)
+                    }
+                }
+                (None, _) => Err(Error::BadState),
+                _ => Err(Error::InvalidArgs),
+            },
             control::DND_FULLSCREEN => match (self.comp.as_mut(), words.next()) {
                 (Some(c), Some(v @ ("on" | "off"))) => {
                     c.set_dnd_fullscreen(v == "on");

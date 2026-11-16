@@ -1,8 +1,9 @@
 //! Zarizeni pro nahravani.
 //!
-//! Nahrava se z aktivniho zarizeni, kdyz ma vstup. Kdyz ne (napr. vystup
-//! jde pres kartu bez mikrofonu), vezme se prvni jine zarizeni se vstupem
-//! a otevre se zvlast ([`Service::rec`]); jeho vystup se nespousti.
+//! Nahrava se ze zvoleneho zarizeni (`SELECT_INPUT`, [`Service::input_pref`]),
+//! jinak z aktivniho, kdyz ma vstup. Kdyz ne (napr. vystup jde pres kartu
+//! bez mikrofonu), vezme se prvni jine zarizeni se vstupem a otevre se
+//! zvlast ([`Service::rec`]); jeho vystup se nespousti.
 
 use libos::{Channel, println};
 
@@ -12,9 +13,46 @@ use crate::device::Device;
 use crate::service::Service;
 
 impl Service {
-    /// Ma aktivni zarizeni vlastni vstup?
+    /// Nahrava se z aktivniho zarizeni? (Ma vstup a uzivatel nezvolil jine.)
     fn active_has_input(&self) -> bool {
-        self.device.as_ref().is_some_and(|d| d.info.input)
+        self.device.as_ref().is_some_and(|d| d.info.input) && self.input_pref.is_none_or(|j| Some(j) == self.active)
+    }
+
+    /// Zarizeni, ze ktereho se nahrava nebo bude nahravat (`OVERVIEW`).
+    pub fn input_index(&self) -> Option<usize> {
+        if self.active_has_input() {
+            return self.active;
+        }
+        if let Some((j, _)) = &self.rec {
+            return Some(*j);
+        }
+        match self.input_pref {
+            Some(j) if self.slots.get(j).is_some_and(|s| s.chan.is_some() && s.info.input) => Some(j),
+            _ => self.slots.iter().position(|s| s.chan.is_some() && s.info.input),
+        }
+    }
+
+    /// Zvoli zarizeni pro nahravani (255 = automaticky). Za behu nahravani
+    /// se zmena projevi u dalsiho otevreni vstupu (`BUSY` by uzivatele
+    /// zbytecne zdrzel; bezici zaznam se neprerusi).
+    pub fn select_input(&mut self, index: u8) -> Result<()> {
+        let pref = if index == u8::MAX { None } else { Some(index as usize) };
+        if let Some(j) = pref {
+            let ok = Some(j) == self.active && self.device.as_ref().is_some_and(|d| d.info.input) || self.slots.get(j).is_some_and(|s| s.info.input && (s.chan.is_some() || self.rec.as_ref().is_some_and(|r| r.0 == j)));
+            if !ok {
+                return Err(Error::InvalidArgs);
+            }
+        }
+        if self.input_pref == pref {
+            return Ok(());
+        }
+        self.input_pref = pref;
+        let capturing = self.streams.iter().any(|s| s.dir == Direction::Input && s.active());
+        if !capturing && self.rec.as_ref().is_some_and(|r| Some(r.0) != pref) {
+            self.release_rec();
+        }
+        println!("audiod: nahravani ze zarizeni {}", pref.map_or(alloc::string::String::from("automaticky"), |j| alloc::format!("{j}")));
+        Ok(())
     }
 
     /// Zarizeni pro nahravani (otevre samostatne, kdyz je treba).
@@ -23,11 +61,11 @@ impl Service {
             return self.device.as_mut().ok_or(Error::NotFound);
         }
         if self.rec.is_none() {
-            let j = self
-                .slots
-                .iter()
-                .position(|s| s.chan.is_some() && s.info.input)
-                .ok_or(Error::NotSupported)?;
+            let pick = |s: &crate::service::Slot| s.chan.is_some() && s.info.input;
+            let j = match self.input_pref {
+                Some(j) if self.slots.get(j).is_some_and(pick) => j,
+                _ => self.slots.iter().position(pick).ok_or(Error::NotSupported)?,
+            };
             let chan = self.slots[j].chan.take().ok_or(Error::NotFound)?;
             let info = self.slots[j].info.clone();
             match Device::open(Channel::from_handle(chan.handle().duplicate(None)?), info) {

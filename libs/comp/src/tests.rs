@@ -18,6 +18,7 @@ use inputproto::{Action, Button, Event, Record};
 use crate::*;
 
 mod appearance;
+mod barpanel;
 mod bench;
 mod caret;
 mod compose;

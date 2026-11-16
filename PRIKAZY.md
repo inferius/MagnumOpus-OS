@@ -65,6 +65,7 @@ příkaz `report`.
 | jen vybrané sady testů | `cargo xtask test --only gui,sit` |
 | jen start v release | `cargo xtask test --only release` |
 | Wine na datovém disku (`/apps/org.winehq.wine`) a jeho test | `cargo xtask wine`, pak `cargo xtask test --only wine --wine` |
+| Jen PuTTY pro test Windows vrstvy (nad SDK z `cargo xtask wine`) | `cargo xtask wine-putty` |
 | složka hostitele jako flash disk v `/media` (jen čtení; `--share-rw` se zápisem, experimentální) | `cargo xtask run --share C:\data` |
 | dokumentace (HTML do target/docs) | `cargo xtask docs` |
 | přeložit adresy v záznamu pádu | `cargo xtask symbolize <soubor>` |

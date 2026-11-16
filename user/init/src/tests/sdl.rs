@@ -38,6 +38,9 @@ pub const TESTS: &[Test] = &[
     ("sdl: mereni cesty videa 1080p (YUV v SDL, kopie do okna)", video_bench),
     ("sdl: zvuk - prehravani, nahravani s povolenim, odvolani (QMP)", audio_permission),
     ("sdl: ukazkove hry snake a woodeneye-008", demo_games),
+    // Role Audio (audio_role.rs): stejne jadro zvuku moaudio.
+    ("sdl: role Audio - potomek s MO_AUDIO hraje, bez ni ne", super::audio_role::inherit_and_opt_out),
+    ("sdl: role Audio - odvolani zvuku zastavi potomka", super::audio_role::revoke_reaches_children),
 ];
 
 /// Znacky pro fyzicky vstup z QEMU (musi sedet s `xtask/src/qmp.rs`, `sdl`).

@@ -1588,6 +1588,7 @@ version = "0.1.0"
 dependencies = [
  "clipproto",
  "guiproto",
+ "mowin",
 ]
 
 [[package]]
@@ -2279,7 +2280,6 @@ dependencies = [
 name = "mosdl"
 version = "0.1.0"
 dependencies = [
- "audioproto",
  "clipproto",
  "gfx",
  "guiproto",
@@ -2301,6 +2301,7 @@ dependencies = [
 name = "mowin"
 version = "0.1.0"
 dependencies = [
+ "audioproto",
  "clipproto",
  "guiproto",
  "inputproto",
