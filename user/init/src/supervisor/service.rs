@@ -79,6 +79,7 @@ pub struct Dep {
 }
 
 impl Dep {
+    #[cfg(feature = "tests")]
     pub const fn restart(name: &'static str) -> Self {
         Self {
             name,

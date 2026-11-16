@@ -24,6 +24,7 @@ use crate::system::{Devices, NetService};
 
 pub struct Dnsd {
     pub process: Process,
+    #[cfg_attr(not(feature = "tests"), allow(dead_code))]
     pub control: Channel,
 }
 

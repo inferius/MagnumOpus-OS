@@ -20,7 +20,9 @@ use guiproto::display::{Reply as DisplayReply, Request as DisplayRequest};
 use libos::initfs::Initfs;
 use libos::spawn::StartHandle;
 use libos::{Channel, Error, Process, Result, Startup, println, time};
-use renderproto::node::{Reply, Request};
+use renderproto::node::Reply;
+#[cfg(feature = "tests")]
+use renderproto::node::Request;
 
 use crate::supervisor::{Kept, Restart, Started};
 
@@ -102,6 +104,7 @@ fn ready() -> Result<()> {
 
 /// Novy render uzel od gpud. `NOT_SUPPORTED` = gpud nebezi (displej bez
 /// render uzlu).
+#[cfg(feature = "tests")]
 pub fn open_render() -> Result<Channel> {
     let guard = GPUD.lock();
     let g = guard.as_ref().ok_or(Error::NotSupported)?;

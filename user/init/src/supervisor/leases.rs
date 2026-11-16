@@ -98,6 +98,7 @@ impl Supervisor {
     }
 
     /// Pocet zivych listku (testy).
+    #[cfg(feature = "tests")]
     pub fn lease_count(&self) -> usize {
         self.leases.len()
     }
@@ -307,6 +308,7 @@ impl Supervisor {
     /// a vsechny z nich odvozene (`NARROW`, `ADOPT`, do libovolne hloubky).
     /// Konec supervisoru se zavre: klient dostane `PEER_CLOSED` a obnova
     /// vrati `SERVICE_UNAVAILABLE`. Vraci pocet odvolanych listku.
+    #[cfg(feature = "tests")]
     pub fn revoke_leases(&mut self, service: &str, pred: impl Fn(&[u8]) -> bool) -> usize {
         let Some(i) = self.find(service) else { return 0 };
         let mut doomed: Vec<u64> = self.leases.iter().filter(|(_, l)| l.service == i && pred(&l.recipe)).map(|(k, _)| *k).collect();

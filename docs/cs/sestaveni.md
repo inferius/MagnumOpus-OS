@@ -120,6 +120,22 @@ na disk se překládají bez ní - kód režimu v nich vůbec není.
   `cargo test -p shlang --features dev-mode`, `cargo test -p accountproto
   --features dev-mode`.
 
+## Testy jen v testovacím sestavení
+
+**[implementováno]** (`xtask/src/testcode.rs`). Testy userspace
+(`user/init/src/tests`) a háčky initu pro ně jsou za cargo feature
+`tests` programu `init`. Zapíná ji jen `cargo xtask test` (i zvláštní běhy
+napájení, release, záznamu pádu); `cargo xtask image`, `run`, živé USB,
+`instfs.img` pro instalaci a všechno ostatní se překládá bez ní.
+
+- **Pojistka:** sestavení bez testů prohledá programy initfs na texty,
+  které existují jen v kódu testů (`testcode::MARKERS`: souhrn běhu,
+  kontrola stavu po sadě, úklid sad). Nález = **chyba sestavení**, ne
+  varování. Platí pro každý initfs postavený přes `build`, tedy i pro živé
+  USB, instalátor a balíček aktualizace.
+- `cargo xtask test` přepíná mezi sestavením s testy a bez nich (živé USB,
+  instalace): po změně initu se init přeloží v obou variantách.
+
 ## Dokumentace jako web
 
 `cargo xtask docs` (a také `cargo xtask test`) vytvoří web se dvěma knihami: **Příručka**

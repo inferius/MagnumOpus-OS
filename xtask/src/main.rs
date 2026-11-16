@@ -44,6 +44,7 @@ mod powertest;
 mod qmp;
 mod sshtest;
 mod symbolize;
+mod testcode;
 mod testdisks;
 mod unicode;
 mod usb;
@@ -1098,6 +1099,10 @@ fn cargo_build(packages: &[&str], target: &str, opts: &Options, user: bool) -> R
     if user && let Some(f) = devmode::features(opts, packages) {
         cmd.args(["--features", &f]);
     }
+    // Testy userspace jen v testovacim sestaveni (`testcode.rs`).
+    if user && let Some(f) = testcode::features(opts, packages) {
+        cmd.args(["--features", &f]);
+    }
     if packages.contains(&"kernel")
         && let Some(level) = &opts.kernel_opt
     {
@@ -1288,15 +1293,21 @@ fn build(opts: &Options) -> Result<Artifacts> {
         files.push((Manifest::file_name(&f.manifest.name), data));
     }
     files.push((String::from("certs.pem"), webhelper::bundle_pem()));
-    // Vydani (bez vyvojoveho profilu) nesmi mit kod rezimu vyvojare.
+    // Vydani (bez vyvojoveho profilu) nesmi mit kod rezimu vyvojare
+    // a sestaveni mimo `xtask test` kod testu (tvrda chyba).
     let dev = devmode::dev_profile(opts);
-    if !dev {
-        let rust: Vec<(&str, &[u8])> = files
+    let rust = || -> Vec<(&str, &[u8])> {
+        files
             .iter()
             .filter(|(n, _)| programs.contains(&n.as_str()) || stdsys::STD_PROGRAMS.contains(&n.as_str()))
             .map(|(n, d)| (n.as_str(), d.as_slice()))
-            .collect();
-        devmode::check_release("initfs bez vyvojoveho profilu", rust)?;
+            .collect()
+    };
+    if !dev {
+        devmode::check_release("initfs bez vyvojoveho profilu", rust())?;
+    }
+    if !opts.test {
+        testcode::check_release("initfs bez testu", rust())?;
     }
     files.extend(opts.extra_initfs.iter().cloned());
     let refs: Vec<(&str, &[u8])> = files

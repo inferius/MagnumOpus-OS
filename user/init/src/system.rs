@@ -455,12 +455,14 @@ fn time_started() -> Result<()> {
 pub struct NetService {
     pub process: Process,
     /// Ridici kanal netd (`revoke\0<identita>`, [`revoke_net`]).
+    #[cfg_attr(not(feature = "tests"), allow(dead_code))]
     pub control: Channel,
     pub root: Net,
     /// Sluzba firewallu (proces, bootstrap kanal); `None` = nebezi.
     pub fwd: Option<(Process, Channel)>,
     /// Kanal agenta uzivatele u `fwd` (dotazy na cile a site). Zatim ho
     /// drzi init (testy); pozdeji ho dostane UI sezeni.
+    #[cfg_attr(not(feature = "tests"), allow(dead_code))]
     pub agent: Option<Channel>,
     /// Konec kanalu netd <-> dnsd pro dnsd (preda se pri jejim startu).
     pub dnsd_end: Option<Channel>,
@@ -522,6 +524,7 @@ pub fn start_net(startup: &Startup, devices: &mut Devices, sup: &mut crate::supe
 /// Odvola sit aplikaci `app` (id z manifestu): netd zavre vsechny jeji
 /// relace a sockety (i predane jinym procesum). Vraci pocet zavrenych
 /// kanalu.
+#[cfg(feature = "tests")]
 pub fn revoke_net(app: &str) -> Result<usize> {
     let net = NET.get().ok_or(Error::ServiceUnavailable)?;
     while net.control.try_read().is_ok() {}

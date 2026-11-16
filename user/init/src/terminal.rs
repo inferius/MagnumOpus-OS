@@ -148,6 +148,7 @@ impl Terminals {
 
     /// (Testy) Klient bez prihlaseni, ale s kanalem sluzby "otevri cestu"
     /// testovaci relace (`open::test_session`).
+    #[cfg(feature = "tests")]
     pub fn client_with_open(&mut self, name: &'static str, open_session: u64) -> Result<Channel> {
         let ch = self.client_for(name, None)?;
         if let Some(c) = self.clients.last_mut() {
@@ -469,6 +470,7 @@ impl Terminals {
 
     /// Obslouzi vsechny klienty bez cekani (testy, kde smycku supervisoru
     /// nahrazuje test).
+    #[cfg(feature = "tests")]
     pub fn poll(&mut self, startup: &Startup) {
         for i in 0..self.clients.len() {
             if !self.clients[i].closed {
@@ -480,6 +482,7 @@ impl Terminals {
 
     /// Je klient `name` ukonceny (okno skoncilo, termd ukoncen)? Nezname
     /// jmeno = ano.
+    #[cfg(feature = "tests")]
     pub fn is_closed(&self, name: &str) -> bool {
         self.clients.iter().filter(|c| c.name == name).all(|c| c.closed)
     }

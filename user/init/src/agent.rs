@@ -213,6 +213,7 @@ pub fn open(user: u64, groups: &[u64], mut spec: OpenSpec, sys_tools: bool) -> R
 }
 
 /// Zaregistruje poskytovatele nastroju (kanal, na kterem posle `Register`).
+#[cfg(feature = "tests")]
 pub fn register_provider(name: &str, chan: Channel) -> Result<()> {
     gate_call(&GateMsg::Provider { name: String::from(name) }, vec![chan.into_handle()]).map(|_| ())
 }

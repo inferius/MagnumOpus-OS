@@ -194,6 +194,14 @@ Tests that need the supervisor (USB hotplug, service restart) drive it
 through `Supervisor::step`. Without the flag (`cargo xtask run`, a real
 machine) init does not run the tests.
 
+The tests are in init only with the cargo feature `tests`, which xtask
+turns on only for `cargo xtask test` **[implemented]**. Init hooks called
+only from tests (`Supervisor::kill_for_test`, `audio::register_for_tests`,
+...) are behind the same feature. The production init (image, live USB,
+installation) has neither tests nor hooks; xtask checks it
+([Building](building.md#tests-only-in-the-test-build)). An init without
+tests that still gets `TEST_RUN` exits with an error (`src/testrun.rs`).
+
 Tests of the `supervisor` suite:
 
 | Test | What it checks |

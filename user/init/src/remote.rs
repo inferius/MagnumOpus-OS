@@ -24,7 +24,9 @@ pub struct RemoteSession {
     /// Adresa klienta (indikator, audit).
     pub peer: String,
     pub fs: FsClient,
-    /// Kanal self do accountd (nastaveni uctu v relaci).
+    /// Kanal self do accountd (nastaveni uctu v relaci). Jen se drzi po
+    /// dobu relace (cte ho az nastaveni uctu), proto nikdo necte.
+    #[allow(dead_code)]
     pub own: Option<Channel>,
     pub job: Job,
     ticket: [u8; TICKET],

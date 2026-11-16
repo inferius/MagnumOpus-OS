@@ -268,6 +268,7 @@ pub fn running() -> bool {
 }
 
 /// Pocka, az acpid odpovi na `Status` (po inicializaci ACPICA).
+#[cfg(feature = "tests")]
 pub fn wait_ready(timeout: Duration) -> Result<powerproto::Status> {
     match request(&Request::Status, timeout)? {
         Reply::Status(s) => Ok(s),

@@ -23,7 +23,9 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
-use guiproto::control::{self, ConnectInfo, Status};
+use guiproto::control::{self, ConnectInfo};
+#[cfg(feature = "tests")]
+use guiproto::control::Status;
 use libos::initfs::Initfs;
 use libos::spawn::StartHandle;
 use libos::{Channel, Error, Handle, Process, Result, Startup, Vmo, println, time};
@@ -306,6 +308,7 @@ pub struct Gui {
     /// Aplikace relaci: (relace, index v `apps`); odhlaseni je ukonci.
     pub session_apps: Vec<(u64, usize)>,
     /// Velikost obrazovky.
+    #[cfg_attr(not(feature = "tests"), allow(dead_code))]
     pub size: (u32, u32),
 }
 
@@ -355,6 +358,7 @@ pub fn uses_framebuffer() -> bool {
 /// [`DISPLAY`], aby ho dalsi [`start`] pouzil znovu. Bez toho zanikne
 /// posledni konec klienta, ovladac displeje skonci a dalsi start si vezme
 /// jiny nativni ovladac (`virtio-gpu`, pak `bochs-display`).
+#[cfg(feature = "tests")]
 pub fn park_display(shared: &CompdRef) {
     if let Ok(ch) = shared.lock().display.give() {
         *DISPLAY.lock() = Some(ch);
@@ -441,6 +445,7 @@ impl Gui {
         Ok(Channel::from_handle(h.remove(0)))
     }
 
+    #[cfg(feature = "tests")]
     pub fn status(&self) -> Result<Status> {
         let (t, _) = self.command(control::STATUS.as_bytes(), Vec::new())?;
         Status::parse(&t).ok_or(Error::Corrupted)
@@ -471,11 +476,13 @@ impl Gui {
     /// Spusti aplikaci z initfs s oknem bez obnovy (testy bez
     /// supervisoru): listek je kanal bez druheho konce, takze pad
     /// kompozitoru okno ukonci.
+    #[cfg(feature = "tests")]
     pub fn launch(&mut self, startup: &Startup, name: &str) -> Result<usize> {
         self.launch_extra(startup, name, Vec::new())
     }
 
     /// Jako [`Gui::launch`] (bez obnovy), s dalsimi handly aplikace.
+    #[cfg(feature = "tests")]
     pub fn launch_extra(&mut self, startup: &Startup, name: &str, extra: Vec<StartHandle>) -> Result<usize> {
         let info = recipe(startup, name)?;
         let ch = self.channel(&info.encode())?;
@@ -511,6 +518,7 @@ impl Gui {
     }
 
     /// Spusti aplikaci: handly 0 = okno, 1 = listek, pak `extra`.
+    #[cfg(feature = "tests")]
     pub fn launch_with(&mut self, startup: &Startup, name: &str, window: Channel, lease: Channel, extra: Vec<StartHandle>) -> Result<usize> {
         self.launch_in(startup, name, window, lease, extra, None)
     }
@@ -533,6 +541,7 @@ impl Gui {
 /// vsechny listky jeji identity u kompozitoru i z nich odvozene (role
 /// `Gui` potomku) a kompozitor zavre vsechna jeji spojeni (okna).
 /// Vraci (pocet listku, pocet spojeni).
+#[cfg(feature = "tests")]
 pub fn revoke(gui: &Gui, sup: &mut Supervisor, app: &str) -> Result<(usize, usize)> {
     let leases = sup.revoke_leases(NAME, |r| ConnectInfo::decode(r).is_ok_and(|i| i.id == app));
     let (n, _) = gui.command(format!("{} {app}", control::REVOKE).as_bytes(), Vec::new())?;

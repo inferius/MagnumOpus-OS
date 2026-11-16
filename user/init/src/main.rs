@@ -53,7 +53,10 @@ mod system;
 mod sysfiles;
 mod tasks;
 mod terminal;
+// Testy userspace jen v testovacim sestaveni (`testrun.rs`).
+#[cfg(feature = "tests")]
 mod tests;
+mod testrun;
 
 use libos::{Error, Startup, println};
 
@@ -134,9 +137,9 @@ fn main(startup: Startup) -> i64 {
         Err(Error::NotFound) => println!("init: ACPI neni (jadro nepredalo udaje), napajeni jen pres firmware"),
         Err(e) => println!("init: sluzbu ACPI nelze spustit: {e}"),
     }
-    let crash_test = startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 && tests::diag::crash_mode(&startup);
+    let crash_test = startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 && testrun::crash_mode(&startup);
     let power_test = if startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 {
-        tests::power::mode(&startup)
+        testrun::power_mode(&startup)
     } else {
         None
     };
@@ -239,7 +242,7 @@ fn main(startup: Startup) -> i64 {
                     // Testy: zalozni neovereny resolver jen na pomocny
                     // server hostitele, nikdy skutecne DNS (nestabilni).
                     if startup.flags & libos::abi::bootstrap::flags::TEST_RUN != 0 {
-                        tests::net::local_dns(&startup, &n.root);
+                        testrun::local_dns(&startup, &n.root);
                     }
                     // dnsd hned po netd: systemovy preklad (i pro ntpd a revocd).
                     if let Some(end) = dnsd_end {
@@ -329,20 +332,5 @@ fn main(startup: Startup) -> i64 {
     // Testovaci beh (jadro s qemu-test): testy userspace, pak konec
     // s vysledkem (jadro ukonci QEMU). Testy supervisor ridi samy.
     drop(sup);
-    if let Some(mode) = power_test {
-        // Zvlastni beh: vypnuti nebo restart (QEMU skonci samo).
-        return tests::power::scenario(&startup, &mode);
-    }
-    if crash_test {
-        // Zvlastni beh: zaznam padu jadra prezije restart.
-        return tests::diag::scenario(&startup);
-    }
-    let failed = tests::run_all(&startup);
-    if failed == 0 {
-        println!("init: vsechny testy userspace prosly");
-        0
-    } else {
-        println!("init: {failed} testu userspace selhalo");
-        1
-    }
+    testrun::run(&startup, power_test, crash_test)
 }

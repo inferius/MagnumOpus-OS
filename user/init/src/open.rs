@@ -69,6 +69,7 @@ pub fn open_session(session: u64) -> Result<()> {
 }
 
 /// (Testy) Relace bez prihlaseni: kanal sluzby s danou relaci FS.
+#[cfg(feature = "tests")]
 pub fn test_session(session: u64, fs: FsClient) -> Result<()> {
     let (mine, theirs) = Channel::create()?;
     OPEN.lock().sessions.push(SessionOpen { session, mine, theirs, fs: Some(fs) });
@@ -77,6 +78,7 @@ pub fn test_session(session: u64, fs: FsClient) -> Result<()> {
 
 /// (Testy) Kanal volajiciho ke kompozitoru testu (v testovacim behu neni
 /// `gui::GUI`).
+#[cfg(feature = "tests")]
 pub fn set_caller(c: Channel) {
     OPEN.lock().caller = Some(c);
 }
@@ -137,6 +139,7 @@ pub fn poll(startup: &Startup, sup: &mut Supervisor) {
 
 /// (Testy) Jako [`poll`], ale bez spousteni aplikaci (aplikace testu uz
 /// bezi; aplikace, ktera nebezi = chyba).
+#[cfg(feature = "tests")]
 pub fn poll_test() {
     poll_with(None);
 }

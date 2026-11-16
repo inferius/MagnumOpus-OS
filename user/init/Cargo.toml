@@ -15,13 +15,17 @@ default = []
 # Rezim vyvojare: jen predani prikazu `devmode` sluzbe uctu. Jen vyvojove
 # sestaveni, zapina ho xtask pro obrazy s vyvojovym profilem.
 dev-mode = ["powerproto/dev-mode", "accountproto/dev-mode"]
+# Testy userspace (`src/tests/`) v initu: jen testovaci sestaveni, zapina ho
+# xtask pro `cargo xtask test` (`xtask/src/testcode.rs`). Produkcni init
+# (obraz, zive USB, instalator, aktualizace) je nema - kontroluje xtask.
+tests = ["dep:bootsplash", "dep:yuv", "dep:ttyproto", "dep:fileops"]
 
 [dependencies]
 installplan = { workspace = true }
 # Barvy vzhledu v testech GUI (stejne tokeny jako kompozitor).
 theme = { path = "../../libs/theme" }
 # Test determinismu startovniho obrazu (sada displej).
-bootsplash = { path = "../../libs/bootsplash" }
+bootsplash = { path = "../../libs/bootsplash", optional = true }
 libos = { path = "../../libs/libos" }
 blockproto = { path = "../../libs/blockproto" }
 fsproto = { path = "../../libs/fsproto" }
@@ -30,10 +34,10 @@ inputproto = { path = "../../libs/inputproto" }
 guiproto = { path = "../../libs/guiproto" }
 renderproto = { path = "../../libs/renderproto" }
 bufdesc = { path = "../../libs/bufdesc" }
-yuv = { path = "../../libs/yuv" }
+yuv = { path = "../../libs/yuv", optional = true }
 netproto = { path = "../../libs/netproto", features = ["client"] }
 # Testovaci terminal pro termios (sada cstd).
-ttyproto = { path = "../../libs/ttyproto" }
+ttyproto = { path = "../../libs/ttyproto", optional = true }
 manifest = { path = "../../libs/manifest" }
 conf = { workspace = true }
 spin = "0.12"
@@ -54,5 +58,5 @@ wire = { path = "../../libs/wire" }
 ssh = { path = "../../libs/ssh", default-features = false }
 taskproto = { path = "../../libs/taskproto" }
 notifyproto = { path = "../../libs/notifyproto" }
-fileops = { path = "../../libs/fileops" }
+fileops = { path = "../../libs/fileops", optional = true }
 openwith = { path = "../../libs/openwith" }
