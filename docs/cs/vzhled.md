@@ -310,6 +310,8 @@ Vše leží na **mřížce 4 px**. Rozestupy: 2, 4, 8, 12, 16, 20, 24, 32, 40,
 | `badge-h` | 26 px | odznak důvěry |
 | `bar-h` | 52 px | lišta; odsazení od okraje 8 px |
 | `resize-edge` | 6 px | neviditelný okraj pro změnu velikosti (roh 18 px) |
+| `panel-w`, `panel-row` | 360 px, 40 px | panel lišty (Vzhled, Zvuk, Síť, ...): šířka a nejmenší výška řádku |
+| `panel-gap`, `panel-edge` | 10 px, 14 px | panel: mezera ikona-text a odsazení sekce, horní okraj hlavičky a dolní okraj paty ([komponenta panel](komponenty.md)) |
 
 ### Zaoblení a stíny
 

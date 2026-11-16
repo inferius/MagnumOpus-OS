@@ -29,6 +29,7 @@ pub const TESTS: &[Test] = &[
     ("compd: displej, okno ukazky, strom pristupnosti", window_and_a11y),
     ("compd: volba vzhledu: plynuly prechod barev, omezit pohyb", super::gui_look::fade),
     ("compd: aplikace spustena v tmavem rezimu je tmava od prvniho snimku", super::gui_look::start_dark),
+    ("compd: panely listy nad komponentou panel, snimky (QMP)", super::gui_look::panel_shots),
     ("init: volba vzhledu se ulozi jen pro system", super::gui_look::store),
     ("compd: umely vstup klika v aplikaci", injected_click),
     ("compd: akce aplikace: overeni argumentu a potvrzeni", app_actions),

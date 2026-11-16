@@ -45,9 +45,8 @@ impl Comp {
         let next = DevMode { on, peer: Some(peer) };
         if self.dev_mode != next {
             self.dev_mode = next;
-            if self.flyout == Some(crate::flyout::Flyout::Dev) {
-                self.set_flyout(None);
-            }
+            // Otevreny panel ukaze novy stav (prepinac, varovani).
+            self.bar_panel_changed();
             self.damage_panel();
         }
     }

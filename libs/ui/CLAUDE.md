@@ -20,6 +20,7 @@ Nativní knihovna UI (milník 6c): jedna pro všechny aplikace. Aplikace popíš
 - Najetí: prvek s částmi, které se zvýrazňují zvlášť (záložky, řádky a posuvník tabulky), musí část vracet z `Ui::hover_part`; jinak se pohyb uvnitř prvku nepřekreslí a zvýraznění zůstane na staré části (test `hover.rs`).
 - Rozvržení měří podle dostupné šířky (`layout::measure(n, t, avail)`): výška zalamovaného štítku závisí na šířce. `measure` a `place` musí šířky počítat stejně (řádek přes `row_sizes`), jinak se výška štítku a obdélník rozejdou.
 
+- Komponenta panel (`panel.rs`) nemá vlastní druh prvku: vlastnosti uzlu `pad`, `gap`, `deco`, `tone` a `row` (radek s ikonou a popisem pro tlačítko, radio, přepínač, štítek; kreslí `draw_panel_row`, rozměr `row_size`). `Ui::transparent` (bez pozadí, materiál kreslí volající) a `Ui::window_pad` (okraj okna). Test `tests/panel.rs`.
 - Režim barev při startu je součást pozdravu: `handshake` nesmí zahodit `THEME` mezi `WELCOME` a `CONFIGURE` (`Window::mode`, `run_video` ho použije před prvním kreslením, obnova pošle `Event::Theme`, když se mezitím změnil; test QEMU `compd: aplikace spustena v tmavem rezimu ...`).
 - Změna režimu: `Event::Theme` nastaví `look` i `Context::mode` (cílový režim pro aplikace s vlastním vzhledem). Plynulý přechod dělá kompozitor smícháním snímků; aplikace se překreslí jen jednou.
 - Aplikace UI vykresluje do vlastního bufferu; kompozitor mu nevěří (viz `libs/comp/CLAUDE.md`), ale i klient musí ošetřit nesmyslné rozměry od kompozitoru.

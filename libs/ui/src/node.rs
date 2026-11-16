@@ -130,6 +130,8 @@ pub enum Kind<M> {
     /// Posouvany obsah: posun dela kompozitor (vlastni vrstva s orezem).
     Scroll(Box<Node<M>>),
     Spacer,
+    /// Ikona (`gfx::icon`), velikost 0 = `size.icon_m`.
+    Icon { name: &'static str, size: u32 },
 }
 
 /// Uzel stromu: prvek, jmeno pro pristupnost a pruznost v rozvrzeni.
@@ -160,6 +162,16 @@ pub struct Node<M> {
     pub focus_group: Option<crate::spatial::Axis>,
     /// Vychozi fokus obrazovky.
     pub default_focus: bool,
+    /// Mezera mezi detmi kontejneru (`None` = `space.s3`).
+    pub gap: Option<u32>,
+    /// Vnitrni odsazeni kontejneru: nahore, vpravo, dole, vlevo.
+    pub pad: [u32; 4],
+    /// Vypln a cara kontejneru ([`crate::panel::Deco`]).
+    pub deco: Option<Box<crate::panel::Deco>>,
+    /// Ton stitku ([`crate::panel::TextTone`]).
+    pub tone: crate::panel::TextTone,
+    /// Prvek jako radek panelu s ikonou a popisem.
+    pub row: Option<Box<crate::panel::RowLook>>,
 }
 
 /// Co polozka nabidky udela.
@@ -257,7 +269,7 @@ pub fn menu_from<M>(items: &[guiproto::menu::MenuItem]) -> Vec<MenuEntry<M>> {
     out
 }
 
-fn node<M>(kind: Kind<M>) -> Node<M> {
+pub(crate) fn node<M>(kind: Kind<M>) -> Node<M> {
     Node {
         kind,
         grow: false,
@@ -272,6 +284,11 @@ fn node<M>(kind: Kind<M>) -> Node<M> {
         tooltip: None,
         focus_group: None,
         default_focus: false,
+        gap: None,
+        pad: [0; 4],
+        deco: None,
+        tone: crate::panel::TextTone::Normal,
+        row: None,
     }
 }
 

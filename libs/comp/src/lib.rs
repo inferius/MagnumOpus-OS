@@ -22,6 +22,7 @@
 extern crate alloc;
 
 pub mod appearance;
+pub mod barpanel;
 pub mod clipboard;
 pub mod diag;
 pub mod dialog;
@@ -108,6 +109,16 @@ pub enum Out {
     /// Rozhodnuti o novem vstupnim zarizeni: `trust <id>` / `reject <id>`
     /// na kanal `secure`.
     Device { source: u16, trust: bool },
+    /// Ovladani zvuku z panelu listy (kanal ke sluzbe zvuku od initu).
+    Audio(AudioReq),
+}
+
+/// Zadost panelu Zvuk sluzbe zvuku.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AudioReq {
+    /// Hlavni hlasitost (procenta).
+    Master(u8),
+    Mute(bool),
 }
 
 /// Kompozitor.
@@ -169,6 +180,12 @@ pub struct Comp {
     pub(crate) last_auto_snapshot: Option<u64>,
     /// Otevreny panel nad listou (`flyout.rs`).
     pub(crate) flyout: Option<flyout::Flyout>,
+    /// Otevreny panel listy nad `ui` (`barpanel.rs`).
+    pub(crate) barpanel: Option<barpanel::BarPanel>,
+    /// Material panelu presahl rozpocet: plne pozadi (do konce behu).
+    pub(crate) panel_material_off: bool,
+    /// Sluzba posila zadosti panelu Zvuk sluzbe zvuku (`Out::Audio`).
+    pub audio_ctl: bool,
     /// Rezim vyvojare od sluzby uctu (jen vyvojove sestaveni, `devmode.rs`).
     #[cfg(feature = "dev-mode")]
     pub(crate) dev_mode: devmode::DevMode,
@@ -250,6 +267,9 @@ impl Comp {
             snapshot_cfg: diag::Config::default(),
             last_auto_snapshot: None,
             flyout: None,
+            barpanel: None,
+            panel_material_off: false,
+            audio_ctl: false,
             #[cfg(feature = "dev-mode")]
             dev_mode: Default::default(),
             launchable: Vec::new(),
@@ -324,6 +344,14 @@ impl Comp {
             self.bar_blur_dirty = true;
             let p = self.panel_visual();
             self.dirty.add(p, s);
+        }
+        // Material panelu listy: scena pod nim se zmenila.
+        if let Some(bp) = self.barpanel.as_mut()
+            && !r.intersect(&bp.rect).is_empty()
+        {
+            bp.blur_dirty = true;
+            let pr = bp.rect;
+            self.dirty.add(pr, s);
         }
         self.dirty.add(r, s);
     }

@@ -27,10 +27,12 @@ pub enum Part {
     Dialog,
     /// Prechod rezimu: michani stareho a noveho snimku (`fade.rs`).
     Fade,
+    /// Material panelu listy (rozmazani sceny pod panelem, `barpanel.rs`).
+    PanelBlur,
 }
 
-pub const PARTS: usize = 8;
-const NAMES: [&str; PARTS] = ["plocha", "stiny", "okna", "rozmazani listy", "nad okny", "z toho lista", "z toho dialog", "prechod rezimu"];
+pub const PARTS: usize = 9;
+const NAMES: [&str; PARTS] = ["plocha", "stiny", "okna", "rozmazani listy", "nad okny", "z toho lista", "z toho dialog", "prechod rezimu", "material panelu"];
 
 /// Soucty casu po castech (ns) od posledniho `take`.
 #[derive(Debug, Clone, Default)]
