@@ -62,7 +62,7 @@ jednou opraví celý systém, proto jdou první.
 | O8 | **Ikona Úlohy** otevře Správce úloh místo panelu s průběhy. `flyout.rs` to dělá záměrně, když Správce běží. Návrh a kód se rozcházejí; je potřeba rozhodnout, co platí. | [bubliny-panely.html](../../design/bubliny-panely.html) (Úlohy) | comp | P3 | S |
 | O9 | **Značky běžících aplikací**: po startu má většina oranžovou značku (`warn` = žádá pozornost). Má ji být šedá (`ink_faint`) a jen aktivní `accent`. Žádost o pozornost hned po startu je šum.<br>**Opraveno:** okna otevřená na pozadí do `STARTUP_QUIET` (15 s) po otevření relace (automaticky spuštěné aplikace) o pozornost nežádají; značka je šedá, aktivní `accent`. Okno otevřené samo později dál žádá. | [plocha.html](../../design/plocha.html) (lišta) | comp, aplikace | P2 | S |
 | O10 | **Ikona otevřeného panelu** v liště nemá otevřený stav (`surface_3` + podtržení `accent`), takže není poznat, k čemu panel patří.<br>**Opraveno:** ikona otevřeného panelu má `surface_3` a podtržení `accent`. | [bubliny-panely.html](../../design/bubliny-panely.html) | comp | P2 | v K2 |
-| O11 | **Pravé tlačítko na plochu** nic neotevře. Prototyp má nabídku plochy. | [kontextove-nabidky.html](../../design/kontextove-nabidky.html) (plocha) | comp | P3 | M |
+| O11 | **Pravé tlačítko na plochu** nic neotevře. Prototyp má nabídku plochy.<br>**Čeká na služby:** položky nabídky (Nová složka, Seřadit ikony, Změnit tapetu, Nastavení displeje, Přizpůsobit plochu) potřebují složku plochy s ikonami a aplikaci Nastavení; nabídka jen s neaktivními položkami by nepomohla. | [kontextove-nabidky.html](../../design/kontextove-nabidky.html) (plocha) | comp | P3 | M |
 | O12 | **Kurzor nad spouštěčem** ukazuje šipky změny velikosti okna, které je pod ním. Spouštěč nezakrývá okraje okna pro tvar kurzoru. Snímek [05](../../design/snimky/odchylky/05-spoustec.png).<br>**Opraveno:** nad spouštěčem, paletou a panelem lišty je kurzor šipka (`Comp::over_system`; host test). | - | comp | P2 | S |
 
 ## Spouštěč
@@ -77,7 +77,7 @@ jednou opraví celý systém, proto jdou první.
 | ID | Co je jinak | Prototyp | Knihovna | P | Velikost |
 |---|---|---|---|---|---|
 | O15 | **Odznak důvěry** u Souborů a Správce úloh říká „Systém“. Prototyp ukazuje jméno aplikace a ikonu oprávnění (Soubory + domov).<br>**Opraveno:** odznak ukazuje jméno aplikace, systémovou aplikaci značí štít s fajfkou (jméno i značku dává init z manifestu). | [okna.html](../../design/okna.html) (Odznak důvěry), [soubory.html](../../design/soubory.html) | comp | P2 | S |
-| O16 | **Tlačítka okna s vlastním titulkem** (Terminál) jsou šedá jako u neaktivního okna, i když okno má fokus. Snímek [08](../../design/snimky/odchylky/08-terminal.png). | [okna.html](../../design/okna.html) (Režimy okna) | comp | P3 | S |
+| O16 | **Tlačítka okna s vlastním titulkem** (Terminál) jsou šedá jako u neaktivního okna, i když okno má fokus. Snímek [08](../../design/snimky/odchylky/08-terminal.png).<br>**Nereprodukuje se na hostiteli:** CPU i referenční GPU cesta kreslí tlačítka okna s vlastním titulkem stejnou barvou `ink_muted` jako u standardního okna (ověřeno sondou v testech comp). Je potřeba snímek z QEMU nebo HW s backendem, na kterém vznikl snímek 08. | [okna.html](../../design/okna.html) (Režimy okna) | comp | P3 | S |
 
 ## Soubory
 

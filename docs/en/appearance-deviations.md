@@ -69,7 +69,7 @@ whole system, so they go first.
 | O8 | **Tasks icon** opens the Task manager instead of the panel with progress. `flyout.rs` does this on purpose when the Task manager runs. The design and the code differ, so it needs a decision. | [bubliny-panely.html](../../design/bubliny-panely.html) (Tasks) | comp | P3 | S |
 | O9 | **Running app markers:** after boot most of them are orange (`warn` = wants attention). They should be grey (`ink_faint`), with only the active one `accent`. Asking for attention right after start is noise.<br>**Fixed:** windows opened in the background within `STARTUP_QUIET` (15 s) after the session opens (autostarted apps) do not ask for attention; the mark is grey, the active one `accent`. A window that opens by itself later still asks. | [plocha.html](../../design/plocha.html) (bar) | comp, app | P2 | S |
 | O10 | **Bar icon of the open panel** has no open state (`surface_3` + `accent` underline), so it is unclear which icon the panel belongs to.<br>**Fixed:** the icon of the open panel has `surface_3` and an `accent` underline. | [bubliny-panely.html](../../design/bubliny-panely.html) | comp | P2 | within K2 |
-| O11 | **Right click on the desktop** opens nothing; the prototype has a desktop menu. | [kontextove-nabidky.html](../../design/kontextove-nabidky.html) (desktop) | comp | P3 | M |
+| O11 | **Right click on the desktop** opens nothing; the prototype has a desktop menu.<br>**Waits for services:** the menu items (New folder, Sort icons, Change wallpaper, Display settings, Customize desktop) need a desktop folder with icons and the Settings app; a menu with only disabled items would not help. | [kontextove-nabidky.html](../../design/kontextove-nabidky.html) (desktop) | comp | P3 | M |
 | O12 | **Cursor over the launcher** shows the resize arrows of the window below it. The launcher does not hide window edges from the cursor shape. Screenshot [05](../../design/snimky/odchylky/05-spoustec.png).<br>**Fixed:** above the launcher, palette and bar panel the cursor is an arrow (`Comp::over_system`; host test). | - | comp | P2 | S |
 
 ## Launcher
@@ -84,7 +84,7 @@ whole system, so they go first.
 | ID | What differs | Prototype | Library | P | Size |
 |---|---|---|---|---|---|
 | O15 | **Trust badge** on Files and the Task manager says "System". The prototype shows the app name and its permission icon (Files + home).<br>**Fixed:** the badge shows the application name, a system app is marked by a shield with a check mark (init supplies the name and the mark from the manifest). | [okna.html](../../design/okna.html) (Trust badge), [soubory.html](../../design/soubory.html) | comp | P2 | S |
-| O16 | **Window buttons with a custom title** (Terminal) are grey as in an inactive window, even when the window has focus. Screenshot [08](../../design/snimky/odchylky/08-terminal.png). | [okna.html](../../design/okna.html) (Window modes) | comp | P3 | S |
+| O16 | **Window buttons with a custom title** (Terminal) are grey as in an inactive window, even when the window has focus. Screenshot [08](../../design/snimky/odchylky/08-terminal.png).<br>**Not reproducible on the host:** the CPU and the reference GPU path draw custom-title window buttons in the same `ink_muted` as a standard window (checked with a probe in the comp tests). It needs a screenshot from QEMU or hardware with the backend that produced screenshot 08. | [okna.html](../../design/okna.html) (Window modes) | comp | P3 | S |
 
 ## Files
 
