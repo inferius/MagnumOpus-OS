@@ -16,6 +16,7 @@ use smoltcp::socket::tcp::State;
 use smoltcp::wire::{IpAddress, IpEndpoint};
 
 use crate::fw::app_name;
+use crate::lo;
 use crate::obj::{AuthRef, Deferred, Gate, Kind, Listener, Pending, Step, Stream, ask_wait, gate};
 use crate::stack::{PortProto, Stack, expired, now_ns, v4};
 
@@ -85,6 +86,20 @@ pub fn connect_start(
     granted: Vec<String>,
 ) -> Result<Step> {
     let remote = req.remote;
+    // Loopback: stejna kontrola cile a rozpocet, spojeni bez site.
+    if lo::is_loopback(remote.ip()) {
+        if remote.port() == 0 {
+            return Err(Error::InvalidArgs);
+        }
+        let gated = gate(stack, &auth.borrow(), proto::TCP, remote, &granted)?;
+        if let Gate::Ask(id, app) = gated {
+            return Ok(ask_wait(id, app, proto::TCP, remote, granted, Deferred::Connect(req)));
+        }
+        let (rx, tx) = req.buffers.resolved();
+        let usage = auth.borrow().charge((rx + tx) as u64)?;
+        let app = app_name(&auth.borrow());
+        return lo::connect(stack, remote, rx, app, usage);
+    }
     let ip = v4(remote.ip())?;
     if remote.port() == 0 || ip.is_unspecified() || ip.is_broadcast() || ip.is_multicast() {
         return Err(Error::InvalidArgs);
@@ -350,7 +365,8 @@ pub fn reap_closing(stack: &mut Stack) {
 
 /// `TCP_LISTEN` na relaci.
 pub fn listen(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
-    let port = stack.bind_port(r.socket_addr()?)?;
+    let bind = lo::bind_of(stack, r.socket_addr()?)?;
+    let port = bind.port;
     let backlog = (r.u16()? as usize).clamp(1, BACKLOG_MAX);
     let buffers = Buffers::get(r)?;
     auth.borrow().require(rights::TCP_LISTEN)?;
@@ -358,9 +374,11 @@ pub fn listen(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step>
         return Err(Error::AccessDenied);
     }
     let (rx, tx) = buffers.resolved();
-    let spare = backlog.min(LISTEN_SPARE);
+    // Jen loopback: zadne sockety smoltcp.
+    let spare = if bind.net { backlog.min(LISTEN_SPARE) } else { 0 };
     let usage = auth.borrow().charge((spare * (rx + tx)) as u64)?;
     let port = stack.take_port(PortProto::Tcp, port)?;
+    let bind = lo::Bind { port, ..bind };
     let mut listening = Vec::new();
     for _ in 0..spare {
         match listening_socket(stack, port, rx, tx) {
@@ -374,16 +392,21 @@ pub fn listen(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step>
             }
         }
     }
-    stack.listen_started(port);
+    if bind.net {
+        stack.listen_started(port);
+    }
+    let lo_queue = bind.lo.map(|ip| lo::listen(stack, ip, port, backlog, rx));
     let app = app_name(&auth.borrow());
     stack.fw.record(audit::LISTEN, &app, proto::TCP, None, port, "");
-    let local = stack.local_addr(port);
+    let local = bind.local(stack);
     let mut w = Writer::new();
     w.socket_addr(local);
     Ok(Step::Done(
         Ok(w),
         Some(Kind::Listener(Listener {
             port,
+            bind,
+            lo: lo_queue,
             listening,
             ready: VecDeque::new(),
             backlog,
@@ -416,7 +439,7 @@ pub fn listener_request(
         op::ACCEPT => Ok(accept_progress(stack, l, until, now_ns())),
         op::LOCAL_ADDR => {
             let mut w = Writer::new();
-            w.socket_addr(stack.local_addr(l.port));
+            w.socket_addr(l.bind.local(stack));
             Ok(Step::reply(Ok(w)))
         }
         _ => Err(Error::NotSupported),
@@ -426,7 +449,7 @@ pub fn listener_request(
 /// Ceka nejake spojeni na `accept` (pripravenost naslouchani)?
 pub fn listener_has_ready(stack: &mut Stack, l: &mut Listener) -> bool {
     refill(stack, l);
-    !l.ready.is_empty()
+    !l.ready.is_empty() || l.lo.as_ref().is_some_and(lo::has_incoming)
 }
 
 /// Presune navazana spojeni do fronty `ready` a doplni naslouchajici
@@ -448,7 +471,8 @@ fn refill(stack: &mut Stack, l: &mut Listener) {
             }
         }
     }
-    let want = LISTEN_SPARE.min(l.backlog.saturating_sub(l.ready.len()));
+    // Jen loopback: zadne sockety smoltcp.
+    let want = if l.bind.net { LISTEN_SPARE.min(l.backlog.saturating_sub(l.ready.len())) } else { 0 };
     while l.listening.len() < want {
         match listening_socket(stack, l.port, l.rx, l.tx) {
             Ok(h) => l.listening.push(h),
@@ -459,6 +483,15 @@ fn refill(stack: &mut Stack, l: &mut Listener) {
 
 pub fn accept_progress(stack: &mut Stack, l: &mut Listener, deadline: u64, now: u64) -> Step {
     refill(stack, l);
+    // Spojeni z loopbacku (vlastni strzeni jako ze site).
+    if let Some(a) = l.lo.clone()
+        && lo::has_incoming(&a)
+        && let Ok(usage) = l.auth.borrow().charge((l.rx + l.tx) as u64)
+        && let Some((w, kind)) = lo::accept(&a, &l.app, usage)
+    {
+        stack.fw.socket_opened(&l.app);
+        return Step::Done(Ok(w), Some(kind));
+    }
     while let Some(h) = l.ready.pop_front() {
         // Prijate spojeni ma vlastni strzeni (naslouchani drzi jen sve
         // sockety); bez rozpoctu se spojeni zrusi.
@@ -512,6 +545,11 @@ pub fn close_listener(stack: &mut Stack, l: Listener) {
         stack.tcp(h).abort();
         stack.remove(h);
     }
-    stack.listen_stopped(l.port);
+    if let Some(a) = &l.lo {
+        lo::unlisten(stack, l.bind.v6(), l.port, a);
+    }
+    if l.bind.net {
+        stack.listen_stopped(l.port);
+    }
     stack.release_port(PortProto::Tcp, l.port);
 }

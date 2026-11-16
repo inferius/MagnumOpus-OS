@@ -21,7 +21,7 @@ use smoltcp::iface::SocketHandle;
 use crate::ping::{Ping, PingReq};
 use crate::resolve::{Resolve, ResolveReq};
 use crate::stack::{Stack, now_ns};
-use crate::{fw, session, tcp, udp};
+use crate::{fw, lo, session, tcp, udp};
 
 /// Opravneni relace sdilene s jejimi sockety (sockety UDP podle nej
 /// filtruji, a preklady jmen z relace plati i pro ne).
@@ -107,6 +107,8 @@ pub enum Kind {
     Stream(Stream),
     Listener(Listener),
     Udp(Udp),
+    /// Spojeni na loopbacku (`lo.rs`).
+    LoStream(lo::LoStream),
 }
 
 pub struct Stream {
@@ -125,6 +127,10 @@ pub struct Stream {
 
 pub struct Listener {
     pub port: u16,
+    /// Kam nasloucha (sit, loopback, obe).
+    pub bind: lo::Bind,
+    /// Fronta spojeni z loopbacku.
+    pub lo: Option<lo::AcceptRef>,
     /// Sockety ve stavu naslouchani (prijimaji SYN).
     pub listening: Vec<SocketHandle>,
     /// Navazana spojeni cekajici na `accept`.
@@ -141,8 +147,12 @@ pub struct Listener {
 }
 
 pub struct Udp {
-    pub sock: SocketHandle,
+    /// Socket smoltcp (`None` = jen loopback: 127.x, `::1`, `::`).
+    pub sock: Option<SocketHandle>,
     pub port: u16,
+    pub bind: lo::Bind,
+    /// Fronta datagramu z loopbacku.
+    pub lo: Option<lo::UdpRef>,
     pub auth: AuthRef,
     pub app: String,
     /// Cile, ktere uzivatel pro tento socket povolil jednorazove (plati do
@@ -347,6 +357,7 @@ pub fn request(stack: &mut Stack, kind: &mut Kind, code: u32, until: u64, r: &mu
         Kind::Stream(s) => tcp::stream_request(stack, s, code, until, r),
         Kind::Listener(l) => tcp::listener_request(stack, l, code, until, r),
         Kind::Udp(u) => udp::request(stack, u, code, until, r),
+        Kind::LoStream(s) => lo::stream_request(stack, s, code, until, r),
     };
     match step {
         Ok(s) => s,
@@ -364,6 +375,7 @@ pub fn progress(stack: &mut Stack, kind: &mut Kind, p: Pending) -> Step {
             tcp::accept_progress(stack, l, deadline, now)
         }
         (Kind::Udp(u), p) => udp::progress(stack, u, p, now),
+        (Kind::LoStream(s), p) => lo::stream_progress(stack, s, p, now),
         (_, _) => Step::err(Error::BadState),
     }
 }
@@ -401,9 +413,7 @@ pub fn close(stack: &mut Stack, kind: Kind, ops: Vec<Op>) {
         Kind::Session(_) => {}
         Kind::Stream(s) => tcp::close_stream(stack, s),
         Kind::Listener(l) => tcp::close_listener(stack, l),
-        Kind::Udp(u) => {
-            stack.remove(u.sock);
-            stack.release_port(crate::stack::PortProto::Udp, u.port);
-        }
+        Kind::Udp(u) => udp::close(stack, u),
+        Kind::LoStream(s) => lo::close_stream(stack, s),
     }
 }

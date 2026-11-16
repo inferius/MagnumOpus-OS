@@ -11,6 +11,7 @@ use netproto::{Buffers, MAX_DATAGRAM, ReadAddr, Reader, Verdict, WriteAddr, Writ
 use smoltcp::wire::IpAddress;
 
 use crate::fw::app_name;
+use crate::lo;
 use crate::obj::{
     AuthRef, Deferred, Gate, Kind, Pending, Step, UDP_TARGETS_MAX, Udp, ask_progress, ask_wait, gate,
 };
@@ -22,7 +23,8 @@ const SEND_WAIT_NS: u64 = 5_000_000_000;
 
 /// `UDP_BIND` na relaci.
 pub fn bind(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
-    let port = stack.bind_port(r.socket_addr()?)?;
+    let bind = lo::bind_of(stack, r.socket_addr()?)?;
+    let port = bind.port;
     let buffers = Buffers::get(r)?;
     auth.borrow().require(rights::UDP)?;
     if !auth.borrow().allows_bind(port) {
@@ -31,15 +33,23 @@ pub fn bind(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
     let (rx, tx) = buffers.resolved();
     let usage = auth.borrow().charge((rx + tx) as u64)?;
     let port = stack.take_port(PortProto::Udp, port)?;
-    let sock = stack.new_udp(rx, tx);
-    if stack.udp(sock).bind(port).is_err() {
-        stack.remove(sock);
-        stack.release_port(PortProto::Udp, port);
-        return Err(Error::InvalidArgs);
-    }
+    let bind = lo::Bind { port, ..bind };
+    // Socket smoltcp jen pro sit (loopback ma vlastni frontu).
+    let sock = if bind.net {
+        let sock = stack.new_udp(rx, tx);
+        if stack.udp(sock).bind(port).is_err() {
+            stack.remove(sock);
+            stack.release_port(PortProto::Udp, port);
+            return Err(Error::InvalidArgs);
+        }
+        Some(sock)
+    } else {
+        None
+    };
+    let lo_queue = bind.lo.map(|ip| lo::udp_bind(stack, ip, port));
     let app = app_name(&auth.borrow());
     stack.fw.socket_opened(&app);
-    let local = stack.local_addr(port);
+    let local = bind.local(stack);
     let mut w = Writer::new();
     w.socket_addr(local);
     Ok(Step::Done(
@@ -47,6 +57,8 @@ pub fn bind(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
         Some(Kind::Udp(Udp {
             sock,
             port,
+            bind,
+            lo: lo_queue,
             auth: auth.clone(),
             app,
             allowed: Vec::new(),
@@ -63,12 +75,19 @@ pub fn request(stack: &mut Stack, u: &mut Udp, code: u32, until: u64, r: &mut Re
             // Na misto v plne fronte nejvys SEND_WAIT_NS.
             let until = until.min(now_ns().saturating_add(SEND_WAIT_NS));
             let data = r.rest().to_vec();
-            if data.len() > MAX_DATAGRAM || data.len() > stack.udp(u.sock).payload_send_capacity() {
+            let cap = u.sock.map_or(MAX_DATAGRAM, |h| stack.udp(h).payload_send_capacity());
+            if data.len() > MAX_DATAGRAM || data.len() > cap {
                 return Err(Error::OutOfRange);
             }
-            let ip = v4(to.ip())?;
-            if to.port() == 0 || ip.is_unspecified() {
+            if to.port() == 0 || to.ip().is_unspecified() {
                 return Err(Error::InvalidArgs);
+            }
+            // Mimo loopback jen IPv4 a socket se siti.
+            if !lo::is_loopback(to.ip()) {
+                v4(to.ip())?;
+                if u.sock.is_none() {
+                    return Err(Error::Unreachable);
+                }
             }
             send_to_start(stack, u, to, data, until, Vec::new())
         }
@@ -78,7 +97,7 @@ pub fn request(stack: &mut Stack, u: &mut Udp, code: u32, until: u64, r: &mut Re
         }
         op::LOCAL_ADDR => {
             let mut w = Writer::new();
-            w.socket_addr(stack.local_addr(u.port));
+            w.socket_addr(u.bind.local(stack));
             Ok(Step::reply(Ok(w)))
         }
         _ => Err(Error::NotSupported),
@@ -127,7 +146,9 @@ fn send_to_start(
             u.allowed.push(to);
         }
     }
-    stack.local_ip()?;
+    if !lo::is_loopback(to.ip()) {
+        stack.local_ip()?;
+    }
     Ok(send_progress(stack, u, to, data, until, now_ns()))
 }
 
@@ -154,11 +175,17 @@ fn send_progress(
     deadline: u64,
     now: u64,
 ) -> Step {
-    let Ok(ip) = v4(to.ip()) else {
+    // Loopback: rovnou do fronty ciloveho socketu (plna = zahozeno).
+    if lo::is_loopback(to.ip()) {
+        stack.fw.traffic(&u.app, data.len(), 0);
+        lo::udp_send(stack, u.port, to, data);
+        return Step::ok();
+    }
+    let (Ok(ip), Some(h)) = (v4(to.ip()), u.sock) else {
         return Step::err(Error::Unreachable);
     };
     match stack
-        .udp(u.sock)
+        .udp(h)
         .send_slice(&data, (IpAddress::Ipv4(ip), to.port()))
     {
         Ok(()) => {
@@ -175,8 +202,26 @@ fn send_progress(
 }
 
 fn recv_progress(stack: &mut Stack, u: &Udp, max: usize, deadline: u64, now: u64) -> Step {
-    let mut buf = vec![0u8; stack.udp(u.sock).payload_recv_capacity().min(MAX_DATAGRAM)];
-    while let Ok((n, meta)) = stack.udp(u.sock).recv_slice(&mut buf) {
+    // Nejdriv loopback (stejny filtr odesilatelu jako ze site).
+    if let Some(q) = &u.lo {
+        while let Some((from, data)) = lo::udp_recv(stack, q) {
+            if !(u.allowed.contains(&from) || u.auth.borrow().check(proto::UDP, from, now, &stack.fw.user, &[]) == Verdict::Allow) {
+                continue;
+            }
+            stack.fw.traffic(&u.app, 0, data.len());
+            let mut w = Writer::new();
+            w.socket_addr(from).bytes(&data[..data.len().min(max)]);
+            return Step::reply(Ok(w));
+        }
+    }
+    let Some(h) = u.sock else {
+        if now >= deadline {
+            return Step::err(expired(deadline));
+        }
+        return Step::Wait(Pending::RecvFrom { max, deadline });
+    };
+    let mut buf = vec![0u8; stack.udp(h).payload_recv_capacity().min(MAX_DATAGRAM)];
+    while let Ok((n, meta)) = stack.udp(h).recv_slice(&mut buf) {
         let from = to_sa(meta.endpoint);
         // Datagram od odesilatele mimo omezeni relace se zahodi (bez dotazu:
         // prichozi provoz se uzivateli nenabizi).
@@ -194,4 +239,15 @@ fn recv_progress(stack: &mut Stack, u: &Udp, max: usize, deadline: u64, now: u64
         return Step::err(expired(deadline));
     }
     Step::Wait(Pending::RecvFrom { max, deadline })
+}
+
+/// Kanal socketu zavren klientem.
+pub fn close(stack: &mut Stack, u: Udp) {
+    if let Some(h) = u.sock {
+        stack.remove(h);
+    }
+    if u.lo.is_some() {
+        lo::udp_unbind(stack, u.bind.v6(), u.port);
+    }
+    stack.release_port(PortProto::Udp, u.port);
 }

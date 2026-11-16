@@ -420,7 +420,7 @@ stop.cancel();          // čtení skončí s CANCELED
 | `Net::tcp_connect_with`, `tcp_listen_with`, `udp_bind_with` | jako bez `_with` | `NO_RESOURCES` (rozpočet relace) |
 | varianty `*_ctx` | jako bez `_ctx` | `CANCELED` (zrušeno tokenem), `TIMED_OUT` (termín) |
 | každý dotaz na socketu | | `NO_RESOURCES` (fronta směru plná, víc než 8 dotazů jednoho směru) |
-| `Net::tcp_listen_addr`, `udp_bind_addr` | jako `tcp_listen`, `udp_bind` | `ADDRESS_NOT_AVAILABLE` (adresa není `0.0.0.0` ani adresa rozhraní; i `127.0.0.1`, loopback zatím chybí) |
+| `Net::tcp_listen_addr`, `udp_bind_addr` | jako `tcp_listen`, `udp_bind` | `ADDRESS_NOT_AVAILABLE` (adresa není `0.0.0.0`, adresa rozhraní, 127.x ani `::`/`::1`, viz [Loopback](#loopback)) |
 | `Net::set_dns` | `CONFIGURE` | |
 | `Net::ntp_query` | `UDP` + cíl | `TIMED_OUT`, `BAD_STATE` (server nesynchronizovaný) |
 | `TcpStream::read`, `write` | | `CONNECTION_RESET`, `TIMED_OUT` |
@@ -493,6 +493,28 @@ loop {
 > smyčku šlo udělat jen vláknem na socket. **Proč:** mio/tokio a servery
 > s tisíci spojení. Jádro na to dostalo uživatelské bity eventu (malá
 > změna `OBJECT_SIGNAL`), `netd` jimi stav ukazuje bez zpráv navíc.
+
+## Loopback
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (sada „sit loopback“). `netd` má
+loopback 127.0.0.0/8 a `::1` **bez linky a bez zásobníku smoltcp**
+(`user/netd/src/lo.rs`): spojení TCP jsou dvě fronty bajtů mezi stranami,
+datagramy UDP jdou rovnou do fronty cílového socketu.
+
+- **Stejná oprávnění jako síť:** práva relace (`TCP_CONNECT`,
+  `TCP_LISTEN`, `UDP`), pravidla cílů (`Policy`, cíl 127.0.0.1 musí být
+  povolený jako každý jiný), rozpočet socketů a bajtů, porty navázání
+  (`allows_bind`). Porty sdílí prostor se síťovými sockety.
+- **Navázání:** `0.0.0.0` přijímá ze sítě i z loopbacku, 127.x jen
+  z loopbacku, adresa rozhraní jen ze sítě; IPv6 je zatím jen loopback
+  (`::` a `::1`). Jiná adresa = `ADDRESS_NOT_AVAILABLE`.
+- **Sémantika:** spojení na port bez naslouchání = `CONNECTION_REFUSED`;
+  spojení čeká ve frontě naslouchání (do `backlog`) jako po SYN; konec
+  zápisu (`SHUTDOWN`) a zavření kanálu = konec proudu u protějšku, zápis do
+  zavřeného = `CONNECTION_RESET`; zánik naslouchání zruší čekající spojení.
+  Datagram na port bez socketu nebo do plné fronty (256 KiB) se zahodí.
+- Velikost fronty spojení = buffer příjmu přijímající strany (`Buffers`).
+- Funguje i před DHCP (nepotřebuje adresu rozhraní).
 
 ## Protokol netproto
 
@@ -732,7 +754,8 @@ překládá adresu 10.0.2.2 na 127.0.0.1 hostitele.
 | oprávnění | chybějící práva, cíle mimo omezení, předání spojení jinému kanálu |
 | jméno hostitele | pravidlo `*.magnumopus` platí po systémovém překladu, ne po překladu vlastním serverem |
 | šifrované DNS | sada „sifrovane DNS“: ověřené A, CNAME, wildcard, AAAA; NXDOMAIN (NSEC i NSEC3), NODATA; nepodepsaná a podvržená zóna; přechod z nefunkčního resolveru, DoT, mezipaměť; pravidlo profilu |
-| souběh (sada „sit soubeh“) | čtení a zápis jednoho spojení ze dvou vláken (zápis nečeká za čtením), dva čtenáři jednoho spojení (fronta FIFO), „jen zkusit“ = `SHOULD_WAIT` a termín 300 ms, zrušení čtení z jiného vlákna a token zrušený předem, místní adresa naslouchání a UDP (`ADDRESS_NOT_AVAILABLE` pro cizí adresu a 127.0.0.1) |
+| souběh (sada „sit soubeh“) | čtení a zápis jednoho spojení ze dvou vláken (zápis nečeká za čtením), dva čtenáři jednoho spojení (fronta FIFO), „jen zkusit“ = `SHOULD_WAIT` a termín 300 ms, zrušení čtení z jiného vlákna a token zrušený předem, místní adresa naslouchání a UDP (`ADDRESS_NOT_AVAILABLE` pro cizí adresu) |
+| loopback (sada „sit loopback“) | TCP přes 127.0.0.1 a `::1` (256 KiB oběma směry, konec zápisu, zavření = konec proudu, adresy), naslouchání na 0.0.0.0 přijímá z 127.0.0.1, `CONNECTION_REFUSED` bez naslouchání, UDP přes 127.0.0.1 a `::1` (adresa odesílatele), omezená relace bez pravidla pro loopback = `ACCESS_DENIED` |
 | plný limit relace (sada „firewall“) | relace s `ops = 1`: druhý dotaz se odloží (nečeká chybou), jeho zrušení přijde do 2 s, i když první dotaz dál čeká na uživatele |
 | zrušení connectu (sada „firewall“) | connect čeká na dotaz uživatele, relace mezitím odpovídá na `INFO`, `CancelToken` ho zruší do 2 s (`CANCELED`), pozdní odpověď uživatele nic nezmění |
 | NTP | `ntpd` proti serveru hostitele (sada „synchronizace casu“, viz [cas.md](cas.md#synchronizace-podle-sítě-ntpd)) |
@@ -779,6 +802,5 @@ Formáty a oprávnění testuje i hostitel: `cargo test -p netproto
   s příznakem `PEEK` (i `RECV_FROM`), `SHUTDOWN_READ`, `SET_OPTION`
   a `GET_OPTION` (nodelay, TTL, keep-alive, linger, broadcast), počet
   bajtů k přečtení (`FIONREAD`) **[navrženo]**.
-- **Loopback** (127.0.0.1) ve službě **[navrženo]**.
 - **Víc karet**, statická konfigurace, mezipaměť DNS, servery NTP z DHCP
   (volba 42).

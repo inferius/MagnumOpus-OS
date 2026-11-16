@@ -443,7 +443,7 @@ stop.cancel();          // the read ends with CANCELED
 | `Net::tcp_connect_with`, `tcp_listen_with`, `udp_bind_with` | as without `_with` | `NO_RESOURCES` (session budget) |
 | `*_ctx` variants | as without `_ctx` | `CANCELED` (cancelled by a token), `TIMED_OUT` (deadline) |
 | every request on a socket | | `NO_RESOURCES` (the direction queue is full, more than 8 requests in one direction) |
-| `Net::tcp_listen_addr`, `udp_bind_addr` | as `tcp_listen`, `udp_bind` | `ADDRESS_NOT_AVAILABLE` (the address is neither `0.0.0.0` nor the interface address; `127.0.0.1` too, there is no loopback yet) |
+| `Net::tcp_listen_addr`, `udp_bind_addr` | as `tcp_listen`, `udp_bind` | `ADDRESS_NOT_AVAILABLE` (the address is not `0.0.0.0`, the interface address, 127.x or `::`/`::1`, see [Loopback](#loopback)) |
 | `Net::set_dns` | `CONFIGURE` | |
 | `Net::ntp_query` | `UDP` + destination | `TIMED_OUT`, `BAD_STATE` (unsynchronized server) |
 | `TcpStream::read`, `write` | | `CONNECTION_RESET`, `TIMED_OUT` |
@@ -522,6 +522,33 @@ loop {
 > servers with thousands of connections. The kernel got user bits on
 > events for it (a small change of `OBJECT_SIGNAL`), and `netd` shows the
 > state with them without extra messages.
+
+## Loopback
+
+**[verified in QEMU]** x86_64 and aarch64 (suite "sit loopback"). `netd` has
+a loopback for 127.0.0.0/8 and `::1` **without a link and without the
+smoltcp stack** (`user/netd/src/lo.rs`): TCP connections are two byte
+queues between the sides, UDP datagrams go straight into the target
+socket's queue.
+
+- **The same permissions as the network:** session rights (`TCP_CONNECT`,
+  `TCP_LISTEN`, `UDP`), destination rules (`Policy`, 127.0.0.1 must be
+  allowed like any other destination), the socket and byte budget, bind
+  ports (`allows_bind`). Ports share the space with network sockets.
+- **Binding:** `0.0.0.0` accepts from the network and the loopback, 127.x
+  only from the loopback, the interface address only from the network;
+  IPv6 is loopback only for now (`::` and `::1`). Any other address =
+  `ADDRESS_NOT_AVAILABLE`.
+- **Semantics:** a connection to a port without a listener =
+  `CONNECTION_REFUSED`; the connection waits in the listener queue (up to
+  `backlog`) as after a SYN; shutting down the write side (`SHUTDOWN`) and
+  closing the channel = end of stream at the peer, writing to a closed one
+  = `CONNECTION_RESET`; closing the listener cancels waiting connections.
+  A datagram to a port without a socket or into a full queue (256 KiB) is
+  dropped.
+- The connection queue size = the receive buffer of the receiving side
+  (`Buffers`).
+- It also works before DHCP (it needs no interface address).
 
 ## The netproto protocol
 
@@ -769,7 +796,8 @@ host's 127.0.0.1.
 | permissions | missing rights, destinations outside restrictions, handing a connection to another channel |
 | host name | the `*.magnumopus` rule applies after a system resolution, not after one by an own server |
 | encrypted DNS | the "sifrovane DNS" suite: validated A, CNAME, wildcard, AAAA; NXDOMAIN (NSEC and NSEC3), NODATA; unsigned and bogus zone; failover from a broken resolver, DoT, cache; the profile rule |
-| concurrency ("sit soubeh" suite) | reading and writing one connection from two threads (the write does not wait behind the read), two readers on one connection (FIFO queue), "only try" = `SHOULD_WAIT` and a 300 ms deadline, cancelling a read from another thread and a token cancelled beforehand, the local address of a listener and a UDP socket (`ADDRESS_NOT_AVAILABLE` for a foreign address and 127.0.0.1) |
+| concurrency ("sit soubeh" suite) | reading and writing one connection from two threads (the write does not wait behind the read), two readers on one connection (FIFO queue), "only try" = `SHOULD_WAIT` and a 300 ms deadline, cancelling a read from another thread and a token cancelled beforehand, the local address of a listener and a UDP socket (`ADDRESS_NOT_AVAILABLE` for a foreign address) |
+| loopback ("sit loopback" suite) | TCP over 127.0.0.1 and `::1` (256 KiB both ways, shutdown, close = end of stream, addresses), a listener on 0.0.0.0 accepts from 127.0.0.1, `CONNECTION_REFUSED` without a listener, UDP over 127.0.0.1 and `::1` (sender address), a restricted session without a loopback rule = `ACCESS_DENIED` |
 | full session limit ("firewall" suite) | a session with `ops = 1`: the second request is set aside (it does not fail), its cancellation arrives within 2 s while the first request still waits for the user |
 | connect cancellation ("firewall" suite) | a connect waits for a user question, the session meanwhile answers `INFO`, a `CancelToken` cancels it within 2 s (`CANCELED`), a late user answer changes nothing |
 | NTP | `ntpd` against the host server (the "synchronizace casu" suite, see [time.md](time.md#synchronization-over-the-network-ntpd)) |
@@ -820,6 +848,5 @@ described in [firewall.md](firewall.md#tests).
   with a `PEEK` flag (`RECV_FROM` too), `SHUTDOWN_READ`, `SET_OPTION` and
   `GET_OPTION` (nodelay, TTL, keep-alive, linger, broadcast), the number
   of bytes to read (`FIONREAD`) **[designed]**.
-- **Loopback** (127.0.0.1) in the service **[designed]**.
 - **More cards**, static configuration, DNS cache, NTP servers from DHCP
   (option 42).

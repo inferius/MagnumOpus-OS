@@ -31,6 +31,7 @@ extern crate alloc;
 mod forward;
 mod fw;
 mod link;
+mod lo;
 mod obj;
 mod ops;
 mod ready;
@@ -199,6 +200,7 @@ impl Service {
             return;
         }
         loop {
+            stack.lo_dirty = false;
             stack.poll();
             self.progress_pending(stack);
             // Odeslat, co pozadavky zaradily, a uklidit zavrena spojeni.
@@ -219,7 +221,9 @@ impl Service {
                     wake = wake.min(ops::wake_at(o));
                 }
             }
-            if stack.dev.has_rx() {
+            // Rx od karty nebo zmena na loopbacku (protejsek muze cekat):
+            // hned dalsi kolo.
+            if stack.dev.has_rx() || stack.lo_dirty {
                 wake = now;
             }
             // Prvni paket s terminem, dalsi uz jen bez cekani.
