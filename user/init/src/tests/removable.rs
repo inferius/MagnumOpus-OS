@@ -51,6 +51,17 @@ fn used() -> u64 {
     libos::job::current().and_then(|j| j.info()).map_or(0, |i| i.user.used)
 }
 
+/// Bezicich procesu se jmenem `name` v systemu (job initu a potomci;
+/// skoncene, jejichz handle jeste nekdo drzi, se nepocitaji).
+fn count(name: &str) -> usize {
+    libos::job::current().and_then(|j| j.processes()).map_or(0, |ps| {
+        ps.iter()
+            .filter(|p| p.flags & libos::abi::job::proc_flags::FINISHED == 0)
+            .filter(|p| p.name.split(|&b| b == 0).next() == Some(name.as_bytes()))
+            .count()
+    })
+}
+
 /// Pocka, az `want(seznam)` plati. Zpravy devmgr (medium pripojene za
 /// behu) zpracuje jako supervisor, ktery v testovacim behu nebezi.
 fn wait_list(fs: &FsClient, what: &str, want: impl Fn(&[MediaEntry]) -> bool) -> Result<Vec<MediaEntry>, String> {
@@ -147,17 +158,27 @@ fn media(startup: &Startup) -> TestResult {
 
     // Konec: flash disky ze startu pryc, procesy medii a ovladace skonci
     // a pamet se vrati (dalsi sady, napr. 70 relaci termd).
-    let before = used();
+    // Kontrola nezavisla na velikosti haldy: procesy medii (ovladace
+    // flashek, volfs) skonci; pamet je jen pro informaci.
+    let before = (used(), count("usb-storage"), count("volfs"));
     println!("{UNPLUG_ALL}");
     wait_list(sys, "vytazene vsechny flashky", |l| l.is_empty())?;
     // Ovladace usb-storage konci s odpojenim zarizeni (chvili po medii).
     let until = time::deadline_after(Duration::from_secs(10));
-    let mut after = used();
-    while time::now() < until && before.saturating_sub(after) < 4 << 20 {
+    let gone = |b: usize| count("usb-storage") + 3 <= b && count("volfs") == 0;
+    while time::now() < until && !gone(before.1) {
         time::sleep(Duration::from_millis(200));
-        after = used();
     }
-    println!("init: test media: pamet uzivatel {} MiB se zasunutymi flashkami, {} MiB po vytazeni", before >> 20, after >> 20);
-    check!(before.saturating_sub(after) >= 4 << 20, "vytazeni flashek vratilo pamet");
+    let after = (used(), count("usb-storage"), count("volfs"));
+    println!(
+        "init: test media: pamet uzivatel {} -> {} MiB, procesy usb-storage {} -> {}, volfs {} -> {}",
+        before.0 >> 20,
+        after.0 >> 20,
+        before.1,
+        after.1,
+        before.2,
+        after.2
+    );
+    check!(gone(before.1), "vytazeni flashek ukoncilo ovladace a procesy medii");
     Ok(())
 }

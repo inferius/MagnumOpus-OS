@@ -214,8 +214,9 @@ Relace vidí `/media`, jen když ho má v připojených cestách
   a superfloppy FAT pro zasunutí za běhu (QMP `device_add`, `device_del`).
   Test čte, zapisuje (dočasné jméno a přejmenování), ověří NTFS jen pro
   čtení, odpojí, zasune a vytáhne médium a nakonec vytáhne i flashky ze
-  startu (ovladače a procesy médií skončí, paměť se vrátí dalším sadám:
-  vypíše ji, 14 MiB za tři flashky); xtask pak na hostiteli ověří, že
+  startu: test ověří, že ovladače `usb-storage` i procesy `volfs` skončily
+  (paměť jen vypíše, její velikost závisí na haldě programů); xtask pak na
+  hostiteli ověří, že
   zápis na FAT přečte `fatfs` a zápis na exFAT nezávislý `exfat-fs`
   **[ověřeno v QEMU]** (x86_64).
 - `cargo test -p volfs`, `cargo test -p diskguard --test media`,

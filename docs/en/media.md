@@ -225,9 +225,9 @@ A session sees `/media` only when it has it among its mounted paths
   and a superfloppy FAT for inserting while running (QMP `device_add`,
   `device_del`). The test reads, writes (temporary name and rename),
   checks NTFS is read only, ejects, inserts and pulls out a medium and at
-  the end pulls out the boot-time drives too (drivers and media processes
-  end, the memory returns to the next suites: it is printed, 14 MiB for
-  three drives); then
+  the end pulls out the boot-time drives too: the test checks that the
+  `usb-storage` drivers and the `volfs` processes ended (the memory is only
+  printed, its size depends on the program heap); then
   xtask checks on the host that the FAT write is read by `fatfs` and the
   exFAT write by the independent `exfat-fs` **[verified in QEMU]**
   (x86_64).
