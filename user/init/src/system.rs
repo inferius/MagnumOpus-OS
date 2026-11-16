@@ -293,6 +293,11 @@ pub fn start_devices(startup: &Startup) -> Result<Devices> {
 /// v UTC; na pocitaci s Windows (RTC v mistnim case) patri `rtc = local`.
 pub const TIME_SETTINGS: &str = "zone = Europe/Prague\nrtc = utc\n";
 
+/// Jmeno pasma systemu z [`TIME_SETTINGS`] (hodiny v liste, `TZ` aplikaci).
+pub fn zone_name() -> &'static str {
+    libos::time::zone::Settings::parse(TIME_SETTINGS).map(|s| s.zone.name).ok().filter(|n| !n.is_empty()).unwrap_or("UTC")
+}
+
 /// Bezici sluzba casu a jeji kanal.
 pub struct TimeService {
     pub process: Process,

@@ -34,9 +34,11 @@ fn home(session: u64) -> Result<alloc::string::String> {
     Ok(format!("/home/{name}"))
 }
 
-/// Blok parametru s domovem jako pracovnim adresarem.
+/// Blok parametru s domovem jako pracovnim adresarem a pasmem systemu
+/// (`TZ`, stejne jako hodiny v liste; casy souboru mistne, O20).
 fn params(session: u64) -> Result<StartHandle> {
-    Params { cwd: home(session)?.into_bytes(), args: vec![], env: vec![], flags: 0, ..Default::default() }.start_handle()
+    let tz = format!("TZ={}", crate::system::zone_name()).into_bytes();
+    Params { cwd: home(session)?.into_bytes(), args: vec![], env: vec![tz], flags: 0, ..Default::default() }.start_handle()
 }
 
 /// Spusti `files-copy` pro relaci (pri otevreni relace).

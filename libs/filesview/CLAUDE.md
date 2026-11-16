@@ -16,4 +16,5 @@ Správce souborů v GUI (`user/gui-files`): stav a zprávy (`app.rs`), rozhraní
 
 ## Pasti
 
+- Ikonová tlačítka (lišta, akce pod seznamem) mají jméno v přístupnosti z bubliny (`.tooltip`): „Zpět“, „Do koše“, „Vložit (2)“ … zůstávají stejná jako dřívější textové popisky, testy podle nich klikají. Místa jsou tabulka (`Role::Row`, id = index + 1, nadpisy skupin `PLACE_HEAD`), ne seznam.
 - Popisky tlačítek jsou zároveň jména v přístupnosti, podle nich klikají testy: stejný popisek dvakrát v jednom okně (např. „Obnovit“) je chyba. Proto řádky sdílení nesou jméno příjemce („Odebrat: Petr Svoboda“, „Petr Svoboda: i pro obsah složky“).

@@ -45,7 +45,9 @@ Kód:
 
 | Vlastnost | Stav |
 |---|---|
-| postranní panel: Domov, datasety (`DATASETS`), Svazek, Koš | **[ověřeno v QEMU]** (test `gui: compd: spravce souboru...`) |
+| postranní panel bez rámečku s ikonami a skupinami Místa (Domov, Stažené, datasety `DATASETS`), Média, Další (Svazek, Koš) | **[ověřeno v QEMU]** (test `gui: compd: spravce souboru...`), skupiny a Stažené host `downloads_place_origin_and_media_group` |
+| lišta v jednom řádku: ikony Zpět, Vpřed, Nahoru, drobečky cesty (domov s ikonou, aktuální složka tučně), hledání s lupou (v koncovém slotu počet výsledků), Znovu načíst; akce nad výběrem (Nová složka, ikony Přejmenovat, Do koše, Kopírovat, Vyjmout, Vložit, u média Odpojit) v řádku pod seznamem; náhled jen když tabulce zbude místo | **[implementováno]** (host testy `filesview`), QEMU **[ověřeno v QEMU]** (test `gui: compd: spravce souboru...`) |
+| náhled: velká ikona, jméno, dvojice klíč - hodnota se zalamováním (Velikost, Změněno, Smíte, Úložiště), u staženého souboru „Staženo z“ a čas (`sys.origin`); časy v pásmu systému (`TZ` od initu) | **[implementováno]** (host `downloads_place_origin_and_media_group`, `preview_shows_three_states_and_versions`) |
 | drobečková navigace, Zpět, Vpřed, Nahoru (po návratu je vybraná složka, ze které se odešlo) | **[implementováno]** (host `navigate_into_and_up_reselects`) |
 | tabulka Jméno, Změněno, Velikost, Druh; řazení klikem na záhlaví, složky vždy první, přirozené pořadí jmen (`2` před `10`) | **[ověřeno v QEMU]** |
 | hledání v aktuální složce (bez rozlišení velikosti písmen) | **[implementováno]** (host `natural_sort_dirs_first_and_unknown_last`) |
