@@ -23,6 +23,9 @@ struct Installd {
 static INSTALLD: spin::Mutex<Option<Installd>> = spin::Mutex::new(None);
 /// Startovni zprava initu (kvuli initfs).
 pub static STARTUP_INITFS: spin::Once<Initfs> = spin::Once::new();
+/// VMO initfs (sluzby spoustene za behu, ktere samy spousteji programy
+/// z initfs: sshd).
+pub static STARTUP_INITFS_VMO: spin::Once<libos::Vmo> = spin::Once::new();
 
 /// Kanal k instalatoru (sluzbu spusti, kdyz jeste nebezi).
 pub fn open() -> Result<Channel> {

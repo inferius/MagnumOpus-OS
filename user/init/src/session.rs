@@ -90,6 +90,17 @@ impl Event {
     }
 }
 
+/// Duplikat kanalu k accountd pro udalosti initu (konec relace, kterou
+/// neukoncila sluzba uctu: vzdalena relace po konci spojeni).
+static TO_ACCOUNTD: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
+
+/// Ohlasi sluzbe uctu konec relace `session` (`SESSION_CLOSED`).
+pub fn notify_closed(session: u64) {
+    if let Some(c) = TO_ACCOUNTD.lock().as_ref() {
+        let _ = c.write(&accountproto::encode_session_closed(session), Vec::new());
+    }
+}
+
 /// Kanal udalosti relaci: (zapis = vlakno sezeni, cteni = supervisor).
 pub static EVENTS: spin::Once<(Channel, Channel)> = spin::Once::new();
 
@@ -111,20 +122,23 @@ pub fn init_events() -> Result<()> {
     Ok(())
 }
 
-/// Duplikat jobu relace (spousteni procesu relace).
+/// Duplikat jobu relace (spousteni procesu relace; i vzdalene).
 pub fn job(session: u64) -> Result<Job> {
     let s = SESSIONS.lock();
-    s.iter().find(|u| u.id == session).ok_or(Error::NotFound)?.job.duplicate(None)
+    match s.iter().find(|u| u.id == session) {
+        Some(u) => u.job.duplicate(None),
+        None => crate::remote::job(session),
+    }
 }
 
-/// Uzivatel relace.
+/// Uzivatel relace (i vzdalene).
 pub fn uid(session: u64) -> Option<u64> {
-    SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.uid)
+    SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.uid).or_else(|| crate::remote::uid(session))
 }
 
-/// Jmeno uzivatele relace.
+/// Jmeno uzivatele relace (i vzdalene).
 pub fn name(session: u64) -> Option<String> {
-    SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.name.clone())
+    SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.name.clone()).or_else(|| crate::remote::name(session))
 }
 
 /// Bezi nejaka relace? Bez ni kompozitor ukaze prihlasovaci obrazovku
@@ -144,16 +158,19 @@ fn is_person(uid: u64) -> bool {
     (ids::FIRST_USER..=ids::LAST_USER).contains(&uid)
 }
 
-/// Dalsi relace FS se stejnou identitou (pro procesy relace a testy).
+/// Dalsi relace FS se stejnou identitou (pro procesy relace a testy; i
+/// vzdalene).
 pub fn connect(session: u64) -> Result<FsClient> {
     let s = SESSIONS.lock();
-    let u = s.iter().find(|u| u.id == session).ok_or(Error::NotFound)?;
-    u.fs.connect()
+    match s.iter().find(|u| u.id == session) {
+        Some(u) => u.fs.connect(),
+        None => crate::remote::connect(session),
+    }
 }
 
-/// Jmeno uzivatele relace (domov `/home/<jmeno>`).
+/// Jmeno uzivatele relace (domov `/home/<jmeno>`; i vzdalene).
 pub fn user_name(session: u64) -> Option<alloc::string::String> {
-    SESSIONS.lock().iter().find(|u| u.id == session).map(|u| u.name.clone())
+    name(session)
 }
 
 /// Kanal self relace (nastaveni uctu v relaci); vezme si ho jednou.
@@ -211,6 +228,33 @@ fn create_home(fs: &FsClient, uid: u64, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Soukroma docasna slozka uzivatele (`fsproto::perm::user_tmp`): klony
+/// "bokem" shellu a docasne soubory. Zaklada se pri kazdem otevreni
+/// relace (po startu systemu ji nic nemusi zalozit drive); existujici
+/// cizi polozka stejneho jmena (nemelo by nastat: cislo uzivatele se
+/// znovu nepouziva) = chyba, nikdy predani cizich souboru.
+fn create_tmp(fs: &FsClient, uid: u64) -> Result<()> {
+    let path = fsproto::perm::user_tmp(uid);
+    match fs.create(&path, fsproto::kind::DIR) {
+        Ok(()) => {}
+        Err(Error::AlreadyExists) => {
+            if fs.stat(&path)?.owner != uid {
+                println!("init: {path} patri jinemu uzivateli");
+                return Err(Error::AlreadyExists);
+            }
+        }
+        Err(e) => return Err(e),
+    }
+    if fs.stat(&path)?.owner != uid {
+        fs.set_owner(&path, uid)?;
+    }
+    let acl = private_acl();
+    if fs.permissions(&path)?.acl.as_ref() != Some(&acl) {
+        fs.set_acl(&path, Some(&acl))?;
+    }
+    Ok(())
+}
+
 fn delete_home(fs: &FsClient, uid: u64, name: &str) -> Result<()> {
     if !is_person(uid) || !valid_name(name) {
         return Err(Error::InvalidArgs);
@@ -231,6 +275,7 @@ pub(crate) fn handle(fs: &FsClient, m: ToInit, handles: Vec<Handle>) -> Result<V
             }
             let name = home.strip_prefix("/home/").filter(|n| valid_name(n)).ok_or(Error::InvalidArgs)?;
             let name = String::from(name);
+            create_tmp(fs, uid)?;
             let (_, user_fs) = fs.connect_as(uid, &groups, &Profile::Standard.user_mounts())?;
             let job = Job::create(&libos::job::current()?)?;
             // Procesy relace samy JIT nesmi; aplikacim ho udeli manifest.
@@ -242,7 +287,26 @@ pub(crate) fn handle(fs: &FsClient, m: ToInit, handles: Vec<Handle>) -> Result<V
             notify(Event::Opened(id));
             Ok(id.to_le_bytes().to_vec())
         }
+        ToInit::OpenRemote { uid, groups, home, peer } => {
+            if !is_person(uid) || groups.iter().any(|g| *g < ids::GROUP_USERS) {
+                return Err(Error::AccessDenied);
+            }
+            let name = home.strip_prefix("/home/").filter(|n| valid_name(n)).ok_or(Error::InvalidArgs)?;
+            let name = String::from(name);
+            create_tmp(fs, uid)?;
+            let (_, user_fs) = fs.connect_as(uid, &groups, &Profile::Standard.user_mounts())?;
+            let job = Job::create(&libos::job::current()?)?;
+            job.set_jit(libos::abi::job::jit::GRANT)?;
+            let id = NEXT.fetch_add(1, Ordering::Relaxed);
+            let own = handles.into_iter().next().map(Channel::from_handle);
+            // Bez udalosti `Opened`: kompozitor o vzdalene relaci nevi
+            // (zadna plocha); indikator ma vlastni cestu.
+            crate::remote::open(id, uid, name, peer, user_fs, own, job)
+        }
         ToInit::CloseSession { session } => {
+            if crate::remote::close(session) {
+                return Ok(Vec::new());
+            }
             let mut s = SESSIONS.lock();
             let i = s.iter().position(|u| u.id == session).ok_or(Error::NotFound)?;
             // Zahozeni relace FS zavre jeji kanal; procesy relace (az je
@@ -283,6 +347,9 @@ pub(crate) fn handle(fs: &FsClient, m: ToInit, handles: Vec<Handle>) -> Result<V
 /// Smycka vlakna: pozadavky accountd na kanalu `ch`, `fs` = ridici
 /// relace FS (system).
 pub fn serve(ch: Channel, fs: FsClient) {
+    if let Ok(h) = ch.handle().duplicate(None) {
+        *TO_ACCOUNTD.lock() = Some(Channel::from_handle(h));
+    }
     loop {
         let mut msg = match ch.read(None) {
             Ok(m) => m,

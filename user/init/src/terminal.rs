@@ -78,8 +78,29 @@ pub struct Terminals {
 /// jednoho uzivatele).
 const USER: &str = "uzivatel";
 
-/// Kde lezi klony bokem relaci shellu (viz `shsess`).
+/// Kde lezi klony bokem relaci shellu systemu (uzivatele: `/tmp/<uid>/.aside`,
+/// viz `shsess`).
 const ASIDE_DIR: &str = "/tmp/.aside";
+
+/// Klony bokem po minulem behu: `/tmp/.aside` (relace systemu) a `.aside`
+/// v soukromych slozkach uzivatelu `/tmp/<uid>`.
+fn leftover_clones(fs: &fsproto::FsClient) -> Vec<String> {
+    let mut dirs = alloc::vec![String::from(ASIDE_DIR)];
+    if let Ok(list) = fs.list(fsproto::perm::TMP_DIR) {
+        dirs.extend(
+            list.into_iter()
+                .filter(|e| e.name.parse::<u64>().is_ok())
+                .map(|e| alloc::format!("{}/{}", fsproto::perm::TMP_DIR, e.name) + "/.aside"),
+        );
+    }
+    let mut out = Vec::new();
+    for d in dirs {
+        if let Ok(list) = fs.list(&d) {
+            out.extend(list.into_iter().map(|e| alloc::format!("{d}/{}", e.name)));
+        }
+    }
+    out
+}
 
 /// Terminaly initu (bezny beh).
 pub static TERMINALS: spin::Mutex<Terminals> = spin::Mutex::new(Terminals { clients: Vec::new(), console: None, cleaned: false });
@@ -342,9 +363,8 @@ impl Terminals {
             && !test_run
         {
             self.cleaned = true;
-            match fs.list(ASIDE_DIR) {
-                Ok(list) if !list.is_empty() => {
-                    let names: Vec<String> = list.into_iter().map(|e| alloc::format!("{ASIDE_DIR}/{}", e.name)).collect();
+            match leftover_clones(fs) {
+                names if !names.is_empty() => {
                     match fs.connect() {
                         Ok(own) => {
                             if let Err(e) = libos::thread::spawn("aside-uklid", move || {

@@ -80,6 +80,8 @@ members = [
     "libs/pci",
     "libs/powerproto",
     "libs/tls",
+    "libs/ssh",
+    "user/sshd",
     "libs/tz",
     "libs/shlang",
     "libs/sizeclass",
@@ -338,6 +340,23 @@ opt-level = 3
 [profile.dev.package."ed25519-dalek"]
 opt-level = 3
 
+# SSH (libs/ssh, sunset): vymena klicu ML-KEM + x25519 a sifra v kazdem
+# paketu; bez optimalizace trva handshake v debug obrazu i testech minuty.
+[profile.dev.package.sunset]
+opt-level = 2
+
+[profile.dev.package.ml-kem]
+opt-level = 2
+
+[profile.dev.package.module-lattice]
+opt-level = 2
+
+[profile.dev.package.keccak]
+opt-level = 2
+
+[profile.dev.package.sha3]
+opt-level = 2
+
 [profile.dev.package.p256]
 opt-level = 3
 
@@ -365,3 +384,12 @@ opt-level = 3
 [profile.release]
 panic = "abort"
 debug = true
+
+# getrandom 0.4.3 s backendem pro `target_os = "magnumopus"` (syscall
+# `RANDOM_GET`): stejna zaplata jako u portu std
+# (`third_party/ports/getrandom-0.4.3.patch`), zde pro programy workspace
+# (sunset v `libs/ssh`). Az bude cil v upstream, patch odpadne.
+[patch.crates-io]
+getrandom = { path = "third_party/crates/getrandom-0.4.3" }
+# sunset 0.6.0 (SSH, `libs/ssh`) s doplnky: viz THIRD-PARTY.md, kapitola SSH.
+sunset = { path = "third_party/crates/sunset-0.6.0" }

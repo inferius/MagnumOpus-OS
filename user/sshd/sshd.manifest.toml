@@ -1,0 +1,17 @@
+# Server SSH: jen nasloucha na portu 22 (init omezi relaci site) a pro
+# kazde spojeni spusti `sshd-conn` (docs/cs/ssh.md).
+[app]
+id = "org.magnumopus.sshd"
+name = "Vzdálený přístup (SSH)"
+
+[limits]
+# Procesy spojeni bezi v jobech pod jobem sshd: limit pokryva i je
+# (MAX_CONNS x CONN_MEMORY v src/main.rs + vlastni pamet).
+memory = "208M"
+kernel_memory = "2M"
+stack = "256K"
+
+[network]
+rights = ["info", "tcp", "listen"]
+sockets = 32
+buffers = "2M"

@@ -238,7 +238,7 @@ impl Env for SysEnv {
         }
         let c = self.spawner.as_ref().and_then(|s| s.connect().ok());
         let mut f: Box<dyn Fs> = match c {
-            Some(c) => Box::new(fs::FsdFs::new(c, alloc::format!("{}-ai", self.tag))),
+            Some(c) => Box::new(fs::FsdFs::new(c, alloc::format!("{}-ai", self.tag), &self.home)),
             None => Box::new(fs::NoFs),
         };
         let home = self.home.clone();
@@ -257,7 +257,7 @@ impl Env for SysEnv {
 
     fn task_fs(&mut self, task: u64) -> Option<Box<dyn Fs + Send>> {
         let c = self.spawner.as_ref()?.connect().ok()?;
-        Some(Box::new(fs::FsdFs::new(c, alloc::format!("{}-t{task}", self.tag))))
+        Some(Box::new(fs::FsdFs::new(c, alloc::format!("{}-t{task}", self.tag), &self.home)))
     }
 
     fn notifier(&mut self) -> Option<Arc<dyn Notify>> {
@@ -363,6 +363,30 @@ impl Env for SysEnv {
         let req = powerproto::Request::LogLevel { target: String::from(target), level: String::from(level) };
         chan.write(&req.encode(), Vec::new())?;
         let m = chan.read(Some(time::deadline_after(Duration::from_secs(10))))?;
+        match powerproto::Reply::decode(&m.data)? {
+            powerproto::Reply::Text(t) => Ok(t),
+            powerproto::Reply::Failed(e) => Err(e),
+            _ => Err(Error::Corrupted),
+        }
+    }
+
+    /// `sshd`, `ssh-key`, `remote-access`: pres init (ten mluvi se sluzbou
+    /// uctu a sshd). Zapnuti a vypnuti sshd ceka na potvrzeni spravce:
+    /// init odpovi kanalem, vysledek prijde na nej (nejdele 2 minuty).
+    fn ssh(&mut self, op: &str, arg: &str, password: &str) -> Result<String, Error> {
+        let guard = POWER.lock();
+        let chan = guard.as_ref().ok_or(Error::NotSupported)?;
+        let req = powerproto::Request::Ssh { op: String::from(op), arg: String::from(arg), password: String::from(password) };
+        let mut data = req.encode();
+        let w = chan.write(&data, Vec::new());
+        data.iter_mut().for_each(|b| *b = 0);
+        w?;
+        let mut m = chan.read(Some(time::deadline_after(Duration::from_secs(30))))?;
+        if let Ok(powerproto::Reply::Ok) = powerproto::Reply::decode(&m.data) {
+            let h = m.handles.pop().ok_or(Error::Corrupted)?;
+            drop(guard);
+            m = Channel::from_handle(h).read(Some(time::deadline_after(Duration::from_secs(120))))?;
+        }
         match powerproto::Reply::decode(&m.data)? {
             powerproto::Reply::Text(t) => Ok(t),
             powerproto::Reply::Failed(e) => Err(e),
@@ -504,7 +528,7 @@ fn main(startup: Startup) -> i64 {
     };
     let mut hs = first.handles.into_iter();
     let mut spare = hs.next().map(Channel::from_handle);
-    let mut fsd = hs.next().map(|h| fs::FsdFs::new(FsClient::new(Channel::from_handle(h)), tag.clone()));
+    let mut fsd = hs.next().map(|h| fs::FsdFs::new(FsClient::new(Channel::from_handle(h)), tag.clone(), &home));
     let agent_gate = hs.next().map(Channel::from_handle);
     let mut nofs = fs::NoFs;
     let mut svc = Service::single(&home, session);

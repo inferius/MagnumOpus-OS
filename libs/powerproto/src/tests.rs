@@ -20,6 +20,7 @@ fn shell_pozadavky_tam_a_zpet() {
         Request::Appearance { system: true, change: String::from("schema tmavy") },
         Request::Permissions { app: String::from("org.example.rec"), perm: String::from("microphone") },
         Request::Accounts,
+        Request::Ssh { op: String::from("key-add"), arg: String::from("ssh-ed25519 AAAA x"), password: String::from("heslo") },
     ] {
         assert_eq!(Request::decode(&q.encode()), Ok(q.clone()));
     }

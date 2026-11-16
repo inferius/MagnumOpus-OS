@@ -52,9 +52,18 @@ pub struct Helper {
     /// celou dobu behu. Spojeni na nej jadro odmitne (RST) a zadny jiny
     /// proces ho mezitim nemuze obsadit.
     _closed: socket2::Socket,
+    /// Dalsi presmerovani (`hostfwd=...`), ktera prezijou novy port
+    /// [`Helper::rearm_forwarded_port`] (test SSH).
+    extra: Vec<String>,
 }
 
 impl Helper {
+    /// Prida presmerovani do argumentu `-netdev user` (napr. port 22 hosta).
+    pub fn add_forward(&mut self, f: &str) {
+        self.extra.push(f.to_string());
+        self.hostfwd = format!("{},{f}", self.hostfwd);
+    }
+
     pub fn release_forwarded_port(&mut self) {
         self.hold = None;
     }
@@ -67,6 +76,9 @@ impl Helper {
         self.host_fwd.store(port, Ordering::Relaxed);
         self.hold = Some(hold);
         self.hostfwd = hostfwd_arg(port);
+        for f in &self.extra {
+            self.hostfwd = format!("{},{f}", self.hostfwd);
+        }
         Ok(self.hostfwd.clone())
     }
 }
@@ -174,6 +186,7 @@ pub fn start() -> std::io::Result<Helper> {
         hold: Some(hold),
         host_fwd,
         _closed: closed_sock,
+        extra: Vec::new(),
     })
 }
 

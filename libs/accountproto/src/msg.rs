@@ -46,6 +46,20 @@ pub enum Request {
     /// (`NOT_SUPPORTED`).
     #[cfg(feature = "dev-mode")]
     DevMode { set: u8 },
+    /// Pridat klic SSH (radek `authorized_keys`); chce heslo. Odpoved:
+    /// `u32` cislo, `str` otisk.
+    SshKeyAdd { password: Secret, line: String },
+    /// Klice SSH uctu ([`crate::ssh::encode_keys`]).
+    SshKeyList,
+    SshKeyRemove { id: u32 },
+    /// Vzdaleny pristup uctu; zapnuti chce heslo.
+    SetRemote { password: Secret, on: bool },
+    /// Kanal ssh: prijme server klic `key` (blob) uctu `user`?
+    /// Odpoved 1 B (1 = ano).
+    SshProbe { user: String, addr: String, key: Vec<u8> },
+    /// Kanal ssh: prihlaseni klicem; `data` = podepsana data (RFC 4252),
+    /// `sig` = podpis. Odpoved [`crate::ssh::SshAuthReply`].
+    SshAuth { user: String, addr: String, key: Vec<u8>, data: Vec<u8>, sig: Vec<u8> },
 }
 
 /// Hodnoty `Request::DevMode::set` (cislo operace [`op::DEV_MODE`] je
@@ -79,13 +93,40 @@ impl Request {
             Request::Names => op::NAMES,
             #[cfg(feature = "dev-mode")]
             Request::DevMode { .. } => op::DEV_MODE,
+            Request::SshKeyAdd { .. } => op::SSH_KEY_ADD,
+            Request::SshKeyList => op::SSH_KEY_LIST,
+            Request::SshKeyRemove { .. } => op::SSH_KEY_REMOVE,
+            Request::SetRemote { .. } => op::SET_REMOTE,
+            Request::SshProbe { .. } => op::SSH_PROBE,
+            Request::SshAuth { .. } => op::SSH_AUTH,
         }
     }
 
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::op(self.op());
         match self {
-            Request::List | Request::WhoAmI | Request::Lock | Request::Logout | Request::PermList | Request::Names => {}
+            Request::List | Request::WhoAmI | Request::Lock | Request::Logout | Request::PermList | Request::Names | Request::SshKeyList => {}
+            Request::SshKeyAdd { password, line } => {
+                put_secret(&mut w, password);
+                w.str(line);
+            }
+            Request::SshKeyRemove { id } => {
+                w.u32(*id);
+            }
+            Request::SetRemote { password, on } => {
+                put_secret(&mut w, password);
+                w.u8(*on as u8);
+            }
+            Request::SshProbe { user, addr, key } => {
+                w.str(user).str(addr);
+                put_blob(&mut w, key);
+            }
+            Request::SshAuth { user, addr, key, data, sig } => {
+                w.str(user).str(addr);
+                put_blob(&mut w, key);
+                put_blob(&mut w, data);
+                put_blob(&mut w, sig);
+            }
             Request::PermRevoke { app_id, perm } => {
                 w.str(app_id).u8(*perm as u8);
             }
@@ -175,6 +216,18 @@ impl Request {
             op::PERM_REVOKE => Request::PermRevoke { app_id: r.str()?, perm: crate::perm::Perm::from_u8(r.u8()?)? },
             op::ELEVATE => Request::Elevate { action: r.u32()?, params: get_blob(&mut r)? },
             op::SET_KEY_PIN => Request::SetKeyPin { pin: get_secret(&mut r)? },
+            op::SSH_KEY_ADD => Request::SshKeyAdd { password: get_secret(&mut r)?, line: r.str()? },
+            op::SSH_KEY_LIST => Request::SshKeyList,
+            op::SSH_KEY_REMOVE => Request::SshKeyRemove { id: r.u32()? },
+            op::SET_REMOTE => Request::SetRemote { password: get_secret(&mut r)?, on: r.u8()? != 0 },
+            op::SSH_PROBE => Request::SshProbe { user: r.str()?, addr: r.str()?, key: get_blob(&mut r)? },
+            op::SSH_AUTH => Request::SshAuth {
+                user: r.str()?,
+                addr: r.str()?,
+                key: get_blob(&mut r)?,
+                data: get_blob(&mut r)?,
+                sig: get_blob(&mut r)?,
+            },
             #[cfg(feature = "dev-mode")]
             op::DEV_MODE => match r.u8()? {
                 set @ (DEV_QUERY | DEV_OFF | DEV_ON) => Request::DevMode { set },
@@ -203,7 +256,12 @@ impl Request {
 
     /// Patri operace na kanal self?
     pub fn is_self(&self) -> bool {
-        (op::WHOAMI..=op::DEV_MODE).contains(&self.op())
+        (op::WHOAMI..=op::SET_REMOTE).contains(&self.op())
+    }
+
+    /// Patri operace na kanal ssh (sluzba sshd)?
+    pub fn is_ssh(&self) -> bool {
+        matches!(self, Request::SshProbe { .. } | Request::SshAuth { .. })
     }
 }
 
@@ -381,6 +439,10 @@ pub enum ToInit {
     ListSessions,
     /// Klic domova pro fsd (`LOAD_KEY`); az FS sifrovani umi.
     UnlockHome { uid: u64, key: Secret },
+    /// Vzdalena relace po prihlaseni klicem SSH (`peer` = adresa klienta
+    /// pro indikator a audit). Odpoved: `u64` relace + [`crate::ssh::TICKET`]
+    /// B listku, kterym si ji sshd vyzvedne u initu.
+    OpenRemote { uid: u64, groups: Vec<u64>, home: String, peer: String },
 }
 
 impl ToInit {
@@ -419,6 +481,12 @@ impl ToInit {
                 w.u64(*uid);
                 put_secret(&mut w, key);
             }
+            ToInit::OpenRemote { uid, groups, home, peer } => {
+                w = Writer::op(op::OPEN_REMOTE);
+                w.u64(*uid);
+                put_u64s(&mut w, groups);
+                w.str(home).str(peer);
+            }
         }
         w.finish()
     }
@@ -434,6 +502,7 @@ impl ToInit {
             op::DELETE_HOME => ToInit::DeleteHome { uid: r.u64()?, name: r.str()? },
             op::LIST_SESSIONS => ToInit::ListSessions,
             op::UNLOCK_HOME => ToInit::UnlockHome { uid: r.u64()?, key: get_secret(&mut r)? },
+            op::OPEN_REMOTE => ToInit::OpenRemote { uid: r.u64()?, groups: get_u64s(&mut r)?, home: r.str()?, peer: r.str()? },
             _ => return Err(Error::NotSupported),
         };
         if !r.is_empty() {

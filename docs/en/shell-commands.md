@@ -11,7 +11,7 @@
 - **Tasks:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Session and safety:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Help:** [`help`](#help), [`explain`](#explain)
-- **System:** [`audio`](#audio), [`theme`](#theme), [`permissions`](#permissions), [`acl`](#acl), [`system`](#system), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **System:** [`audio`](#audio), [`theme`](#theme), [`permissions`](#permissions), [`acl`](#acl), [`sshd`](#sshd), [`ssh-key`](#ssh-key), [`remote-access`](#remote-access), [`system`](#system), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Files
 
@@ -1925,6 +1925,94 @@ acl remove bob ~/Projekty
 **Errors:** `SH_ARGS`, `ACCESS_DENIED`, `NOT_FOUND`, `NOT_SUPPORTED`
 
 **Related:** [`ls`](#ls)
+
+
+### `sshd`
+
+SSH remote access for the whole computer: status without arguments, `sshd enable` / `sshd disable` (an administrator confirms)
+
+An SSH server for connecting from another computer (`ssh`, `scp` from Windows, Linux, macOS). Without arguments it shows the state: enabled, running, port, the server key fingerprint and connected sessions. `sshd enable` and `sshd disable` are administration actions: a person with the administration role confirms them in a system dialog that also shows the server key fingerprint (compare it with what the client shows on the first connection). It is off by default. The server listens on port 22 on all network interfaces, but the firewall drops incoming connections on a public network (home network only, or an exception). Login is by key only; an account enables remote access itself (`remote-access on`) and adds a key (`ssh-key add`).
+
+```shell
+sshd [action]
+```
+
+Full name `remote-sshd` · input: nothing · output: table (enabled, running, port, host_key, sessions, connected)
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `[action]` | text | status | status, enable or disable |
+
+Enables remote access (an administrator confirms).
+
+```shell
+sshd enable
+```
+
+**Needs:** a signed-in session at the computer (administration actions only locally)
+
+**Errors:** `SH_ARGS`, `ACCESS_DENIED`, `NOT_SUPPORTED`
+
+**Related:** [`ssh-key`](#ssh-key), [`remote-access`](#remote-access)
+
+
+### `ssh-key`
+
+SSH keys of your account: list, `ssh-key add <file.pub|->` (asks for the password), `ssh-key remove <number>`
+
+Public SSH keys you use to sign in to the account remotely. Without arguments a list (`id`, `algo`, `fingerprint`, `comment`, `added`). `ssh-key add` adds a key from a `*.pub` file (also from a USB stick), from text or from a pipe (`-`); it asks for the account password and shows the key fingerprint. The account service keeps the keys, so they work with an encrypted home too. Supported are ed25519 and FIDO `sk-ssh-ed25519` keys (a security key at the client); RSA and ECDSA not yet. `ssh-key remove <number>` removes a key (no password).
+
+```shell
+ssh-key [action] ...
+```
+
+Full name `remote-ssh-key` · input: any value · output: table (id, algo, fingerprint, comment, added)
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `[action]` | text | list | list, add or remove |
+| `...` | value |  | a key file, `-` or a key number |
+
+Adds a key from a USB stick (asks for the password).
+
+```shell
+ssh-key add /media/flash/id_ed25519.pub
+```
+
+**Needs:** a signed-in session (keys belong to the session's user)
+
+**Errors:** `SH_ARGS`, `SH_REJECTED`, `ACCESS_DENIED`, `ALREADY_EXISTS`, `NOT_SUPPORTED`, `NOT_FOUND`
+
+**Related:** [`remote-access`](#remote-access), [`sshd`](#sshd)
+
+
+### `remote-access`
+
+remote access of your account: status without arguments, `remote-access on` (asks for the password) / `off`
+
+Allows or forbids remote access of your account (SSH). It is forbidden by default. Turning it on asks for the account password, turning it off does not. Remote login works only when the server is on as well (`sshd enable`) and the account has a key (`ssh-key add`). A remote session is separate from the local one: it has no screen, clipboard or sound, and administration actions do not work from it.
+
+```shell
+remote-access [state]
+```
+
+Full name `remote-access` · input: nothing · output: table (remote_access)
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `[state]` | text |  | on or off, without it the state |
+
+Allows remote access (asks for the password).
+
+```shell
+remote-access on
+```
+
+**Needs:** a signed-in session
+
+**Errors:** `SH_ARGS`, `SH_REJECTED`, `ACCESS_DENIED`, `NOT_SUPPORTED`
+
+**Related:** [`ssh-key`](#ssh-key), [`sshd`](#sshd)
 
 
 ### `system`

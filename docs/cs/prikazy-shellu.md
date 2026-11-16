@@ -11,7 +11,7 @@
 - **Úlohy:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Relace a bezpečnost:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Nápověda:** [`help`](#help), [`explain`](#explain)
-- **Systém:** [`audio`](#audio), [`theme`](#theme), [`permissions`](#permissions), [`acl`](#acl), [`system`](#system), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **Systém:** [`audio`](#audio), [`theme`](#theme), [`permissions`](#permissions), [`acl`](#acl), [`sshd`](#sshd), [`ssh-key`](#ssh-key), [`remote-access`](#remote-access), [`system`](#system), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Soubory
 
@@ -1925,6 +1925,94 @@ acl remove bob ~/Projekty
 **Chyby:** `SH_ARGS`, `ACCESS_DENIED`, `NOT_FOUND`, `NOT_SUPPORTED`
 
 **Souvisí:** [`ls`](#ls)
+
+
+### `sshd`
+
+vzdálený přístup SSH pro celý počítač: bez argumentu stav, `sshd enable` / `sshd disable` (potvrdí správce)
+
+Server SSH pro připojení z jiného počítače (`ssh`, `scp` z Windows, Linuxu, macOS). Bez argumentu vypíše stav: zapnuto, běží, port, otisk klíče serveru a připojené relace. `sshd enable` a `sshd disable` jsou úkony správy: potvrdí je člověk s rolí správy v systémovém dialogu, který ukáže i otisk klíče serveru (při prvním připojení ho porovnejte s tím, co ukáže klient). Ve výchozím stavu je vypnuto. Server poslouchá na portu 22 na všech síťových rozhraních, firewall ale ve veřejné síti příchozí spojení zahodí (jen domácí síť nebo výjimka). Přihlásit se jde jen klíčem; účet si vzdálený přístup povolí sám (`remote-access on`) a přidá klíč (`ssh-key add`).
+
+```shell
+sshd [action]
+```
+
+Plné jméno `remote-sshd` · vstup: nic · výstup: tabulka (enabled, running, port, host_key, sessions, connected)
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[action]` | text | status | status, enable nebo disable |
+
+Zapne vzdálený přístup (potvrdí správce).
+
+```shell
+sshd enable
+```
+
+**Potřebuje:** přihlášená relace u počítače (úkon správy jen místně)
+
+**Chyby:** `SH_ARGS`, `ACCESS_DENIED`, `NOT_SUPPORTED`
+
+**Souvisí:** [`ssh-key`](#ssh-key), [`remote-access`](#remote-access)
+
+
+### `ssh-key`
+
+klíče SSH vašeho účtu: výpis, `ssh-key add <soubor.pub|->` (chce heslo), `ssh-key remove <číslo>`
+
+Veřejné klíče SSH, kterými se k účtu přihlásíte na dálku. Bez argumentu výpis (`id`, `algo`, `fingerprint`, `comment`, `added`). `ssh-key add` přidá klíč ze souboru `*.pub` (i z flashky), z textu nebo z roury (`-`); chce heslo účtu a ukáže otisk klíče. Klíče eviduje služba účtů, takže fungují i se šifrovaným domovem. Podporované jsou ed25519 a klíče FIDO `sk-ssh-ed25519` (bezpečnostní klíč u klienta); RSA a ECDSA zatím ne. `ssh-key remove <číslo>` klíč odebere (bez hesla).
+
+```shell
+ssh-key [action] ...
+```
+
+Plné jméno `remote-ssh-key` · vstup: libovolná hodnota · výstup: tabulka (id, algo, fingerprint, comment, added)
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[action]` | text | list | list, add nebo remove |
+| `...` | hodnota |  | soubor s klíčem, `-` nebo číslo klíče |
+
+Přidá klíč z flashky (zeptá se na heslo).
+
+```shell
+ssh-key add /media/flash/id_ed25519.pub
+```
+
+**Potřebuje:** přihlášená relace (klíče patří uživateli relace)
+
+**Chyby:** `SH_ARGS`, `SH_REJECTED`, `ACCESS_DENIED`, `ALREADY_EXISTS`, `NOT_SUPPORTED`, `NOT_FOUND`
+
+**Souvisí:** [`remote-access`](#remote-access), [`sshd`](#sshd)
+
+
+### `remote-access`
+
+vzdálený přístup vašeho účtu: bez argumentu stav, `remote-access on` (chce heslo) / `off`
+
+Povolí nebo zakáže vzdálený přístup vašeho účtu (SSH). Ve výchozím stavu je zakázaný. Zapnutí chce heslo účtu, vypnutí ne. Přihlásit se na dálku jde, jen když je zapnutý i server (`sshd enable`) a účet má klíč (`ssh-key add`). Vzdálená relace je oddělená od místní: nemá obrazovku, schránku ani zvuk a úkony správy z ní nejdou.
+
+```shell
+remote-access [state]
+```
+
+Plné jméno `remote-access` · vstup: nic · výstup: tabulka (remote_access)
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[state]` | text |  | on nebo off, bez argumentu stav |
+
+Povolí vzdálený přístup (zeptá se na heslo).
+
+```shell
+remote-access on
+```
+
+**Potřebuje:** přihlášená relace
+
+**Chyby:** `SH_ARGS`, `SH_REJECTED`, `ACCESS_DENIED`, `NOT_SUPPORTED`
+
+**Souvisí:** [`ssh-key`](#ssh-key), [`sshd`](#sshd)
 
 
 ### `system`

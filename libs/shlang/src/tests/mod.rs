@@ -17,6 +17,7 @@ mod misc;
 mod missing;
 mod power;
 mod regress;
+mod remote;
 mod roundtrip;
 mod start;
 mod system;

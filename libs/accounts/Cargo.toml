@@ -9,6 +9,8 @@ description = "Logika sluzby uctu (accountd): zaznamy, Argon2id, PIN s klicem za
 abi = { workspace = true }
 wire = { path = "../wire" }
 accountproto = { path = "../accountproto" }
+# Klice SSH (rozbor, overeni podpisu); bez protokolu (sunset).
+ssh = { path = "../ssh", default-features = false }
 argon2 = { version = "0.5", default-features = false, features = ["alloc", "zeroize"] }
 blake2 = { version = "0.10", default-features = false }
 sha2 = { version = "0.10", default-features = false, features = ["force-soft"] }
@@ -22,4 +24,5 @@ rand_core = { version = "0.6", default-features = false }
 unicode-normalization = { version = "0.1", default-features = false }
 
 [dev-dependencies]
+ed25519-dalek = { version = "3" }
 accountproto = { path = "../accountproto", features = ["soft"] }

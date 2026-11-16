@@ -409,6 +409,11 @@ impl Host for LineHost {
         self.call(|c| c.env.accounts()).unwrap_or(Err(abi::Error::Canceled))
     }
 
+    fn ssh(&mut self, op: &str, arg: &str, password: &str) -> Result<String, abi::Error> {
+        let (o, a, p) = (String::from(op), String::from(arg), String::from(password));
+        self.call(move |c| c.env.ssh(&o, &a, &p)).unwrap_or(Err(abi::Error::Canceled))
+    }
+
     fn task_spawn(&mut self, spec: TaskSpec) -> Option<Result<u64, ShError>> {
         let wire = match tasks::SpecWire::of(&spec) {
             Ok(w) => w,

@@ -100,6 +100,15 @@ impl Service {
                 },
                 Err(_) => format!("Změnit systémový soubor (neplatné parametry, {} B)", params.len()),
             },
+            _ if act == action::SSHD => {
+                let p = String::from_utf8_lossy(params);
+                match p.strip_prefix("enable ") {
+                    Some(fp) => format!(
+                        "Zapnout vzdálený přístup SSH (port 22 na všech síťových rozhraních, přihlášení jen klíčem). Otisk klíče serveru: {fp}"
+                    ),
+                    None => String::from("Vypnout vzdálený přístup SSH (připojené relace skončí)"),
+                }
+            }
             _ if act == action::APPEARANCE_SYSTEM => {
                 format!("Změnit vzhled přihlašovací obrazovky pro všechny: {}", String::from_utf8_lossy(params))
             }

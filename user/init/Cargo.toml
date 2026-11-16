@@ -50,6 +50,8 @@ xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"] }
 zeroize = { version = "1.8", default-features = false, features = ["alloc"] }
 agentproto = { path = "../../libs/agentproto" }
 wire = { path = "../../libs/wire" }
+# Otisk klice hostitele SSH (bez protokolu).
+ssh = { path = "../../libs/ssh", default-features = false }
 taskproto = { path = "../../libs/taskproto" }
 notifyproto = { path = "../../libs/notifyproto" }
 fileops = { path = "../../libs/fileops" }

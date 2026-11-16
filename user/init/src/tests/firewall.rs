@@ -47,14 +47,14 @@ fn wait(secs: u64) -> Option<u64> {
 }
 
 /// Agent uzivatele: dotazy od fwd a odpovedi na vlastni pozadavky.
-struct Agent<'a> {
+pub(super) struct Agent<'a> {
     ch: &'a Channel,
 }
 
 /// Zpravy fwd, ktere prisly behem cekani na odpoved (dotazy).
 static STASH: spin::Mutex<VecDeque<Vec<u8>>> = spin::Mutex::new(VecDeque::new());
 
-fn agent() -> Result<Agent<'static>, String> {
+pub(super) fn agent() -> Result<Agent<'static>, String> {
     let ch = net_service()
         .and_then(|n| n.agent.as_ref())
         .ok_or("firewall nebezi (chybi agent)")?;
@@ -150,7 +150,7 @@ impl Agent<'_> {
         self.request(w).map(|_| ())
     }
 
-    fn profile(&self, p: &str) -> TestResult {
+    pub(super) fn profile(&self, p: &str) -> TestResult {
         let mut w = Writer::op(op::PROFILE_SET);
         w.str(p);
         self.request(w).map(|_| ())
@@ -220,7 +220,7 @@ fn need_ports(s: &Startup, test: &str) -> Result<Option<Ports>, String> {
 const PROFILE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Poradove cislo, od ktereho prijdou nove zaznamy auditu.
-fn audit_end(root: &netproto::Net) -> Result<u64, String> {
+pub(super) fn audit_end(root: &netproto::Net) -> Result<u64, String> {
     let mut from = 0;
     loop {
         let (recs, next) = root.audit(from, 256).map_err(|e| fail("AUDIT", e))?;
@@ -234,7 +234,7 @@ fn audit_end(root: &netproto::Net) -> Result<u64, String> {
 /// Pocka na udalost prepnuti profilu na `want` v netd (zaznam auditu
 /// PROFILE od `from`) s limitem [`PROFILE_TIMEOUT`]. Kdyz uz profil `want`
 /// byl, zaznam nevznikne - staci aktualni profil.
-fn wait_profile(root: &netproto::Net, mut from: u64, want: &str) -> TestResult {
+pub(super) fn wait_profile(root: &netproto::Net, mut from: u64, want: &str) -> TestResult {
     let deadline = time::deadline_after(PROFILE_TIMEOUT);
     loop {
         let (recs, next) = root.audit(from, 256).map_err(|e| fail("AUDIT", e))?;

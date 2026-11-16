@@ -185,6 +185,12 @@ fn start_termd(s: &Startup, reg: &mut Reg) -> Result<(Process, Window), String> 
 pub(super) fn start_termd_with(s: &Startup, reg: &mut Reg, audio: Option<Channel>) -> Result<(Process, Window), String> {
     let fs = devices().and_then(|d| d.fs.as_ref()).ok_or("sluzba fsd nebezi")?;
     let own = fs.connect().map_err(|e| fail("nova relace fsd", e))?;
+    start_termd_fs(s, reg, own, audio)
+}
+
+/// Jako `start_termd_with`, s danou relaci FS (napr. relace prihlaseneho
+/// uzivatele; domov relaci shellu nastavi `reg.store.home`).
+pub(super) fn start_termd_fs(s: &Startup, reg: &mut Reg, own: fsproto::FsClient, audio: Option<Channel>) -> Result<(Process, Window), String> {
     let initfs = Initfs::open(s).map_err(|e| fail("initfs", e))?;
     let image = initfs.find("termd").ok_or("termd neni v initfs")?;
     let vmo = s.initfs.as_ref().ok_or("initfs chybi")?;

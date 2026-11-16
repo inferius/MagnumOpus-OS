@@ -9,6 +9,7 @@ mod media_ffmpeg;
 mod audio_recovery;
 mod audio_role;
 mod accounts;
+mod accounts_shell;
 mod agent;
 mod agent_shell;
 mod basic;
@@ -45,6 +46,7 @@ mod fs_perf;
 mod fs_recovery;
 mod gui;
 mod sdl;
+mod ssh;
 mod gui_gpu;
 mod gui_video;
 mod gui_clients;
@@ -185,6 +187,7 @@ const SUITES: &[(&str, &[Test])] = &[
     ("gui", gui::TESTS),
     // Port SDL: okno kompozitoru (sdili ho se sadou gui, bezi-li).
     ("sdl", sdl::TESTS),
+    ("ssh", ssh::TESTS),
     // Zvuk po padu: ridi hlavni supervisor (jako obnova fsd, pred ni).
     ("obnova zvuku", audio_recovery::TESTS),
     // Po vsech testech FS: cena radku shellu na plnem svazku.

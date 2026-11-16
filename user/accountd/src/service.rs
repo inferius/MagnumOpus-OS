@@ -43,6 +43,8 @@ pub struct Service {
     pub admin: crate::admin::Admin,
     /// Povoleni aplikaci: kanal `permissions`, cekajici dotazy (`perms.rs`).
     pub perms: crate::perms::Perms,
+    /// Zpomaleni vzdalenych pokusu a pouzite relace SSH (`remote.rs`).
+    pub remote: accounts::remote::RemoteGuard,
 }
 
 /// Realny cas v sekundach (zpomaleni po chybach).
@@ -260,6 +262,7 @@ impl Service {
             }
             Request::RemoveKey { password, id } => self.eng.remove_key(uid, &password, id, now).map(|_| Vec::new()),
             Request::SetKeyPin { pin } => self.set_key_pin(&pin),
+            r @ (Request::SshKeyAdd { .. } | Request::SshKeyList | Request::SshKeyRemove { .. } | Request::SetRemote { .. }) => self.own_ssh(uid, r),
             Request::EncryptHome { password } => self.encrypt_home(uid, &password, now),
             Request::Lock => self.to_init(&ToInit::LockSession { session }, Vec::new()).map(|_| {
                 self.sessions[i].locked = true;

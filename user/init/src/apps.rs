@@ -75,8 +75,14 @@ pub fn spawn_in(startup: &Startup, name: &str, handles: Vec<StartHandle>, parent
 /// (spoustec programu se zavadecem, napr. `mediad` pro `ffdec`).
 pub fn spawn_with_libd(startup: &Startup, name: &str, handles: Vec<StartHandle>, parent: Option<&Job>, libd: bool) -> Result<App> {
     let fs = Initfs::open(startup)?;
+    spawn_from(&fs, name, handles, parent, libd)
+}
+
+/// Jako [`spawn_with_libd`] z jiz otevreneho initfs (sluzby spoustene az
+/// za behu, napr. sshd po `sshd enable`).
+pub fn spawn_from(fs: &Initfs, name: &str, handles: Vec<StartHandle>, parent: Option<&Job>, libd: bool) -> Result<App> {
     let image = fs.find(name).ok_or(Error::NotFound)?;
-    let manifest = manifest(&fs, name)?;
+    let manifest = manifest(fs, name)?;
     let job = match parent {
         Some(p) => job_in(p, manifest.as_ref())?,
         None => job_for(manifest.as_ref())?,
