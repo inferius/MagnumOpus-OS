@@ -397,7 +397,7 @@ impl SessionHost<'_> {
     fn ask(&mut self, question: &str, detail: Item, choices: &[String]) -> Option<ClientMsg> {
         let id = *self.next_prompt;
         *self.next_prompt += 1;
-        self.link.send(&ServerMsg::Prompt { prompt: id, question: question.into(), detail, choices: choices.to_vec() });
+        self.link.send(&ServerMsg::Prompt { prompt: id, question: question.into(), detail, choices: choices.to_vec(), label: String::new() });
         loop {
             match self.link.wait() {
                 Some(m @ ClientMsg::Answer { prompt, .. }) | Some(m @ ClientMsg::Choose { prompt, .. }) if prompt == id => {
@@ -523,7 +523,7 @@ impl Host for SessionHost<'_> {
         }
         let id = *self.next_prompt;
         *self.next_prompt += 1;
-        self.link.send(&ServerMsg::Ask { prompt: id, question: question.into(), secret, default: default.into() });
+        self.link.send(&ServerMsg::Ask { prompt: id, question: question.into(), secret, default: default.into(), label: String::new() });
         loop {
             match self.link.wait() {
                 Some(ClientMsg::Text { prompt, text }) if prompt == id => {

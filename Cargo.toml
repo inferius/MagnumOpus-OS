@@ -115,6 +115,7 @@ members = [
     "user/std-proc",
     "user/std-exec",
     "user/nettools",
+    "user/sshtools",
     "user/gui-probe",
     "libs/mowin",
     "user/std-http",

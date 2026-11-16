@@ -19,7 +19,7 @@ use crate::wrap::Wrap;
 const MAGIC: &[u8; 4] = b"MOAC";
 const META_MAGIC: &[u8; 4] = b"MOAM";
 /// Verze 2 = klice SSH na konci zaznamu (verze 1 se cte bez nich).
-pub const FORMAT: u32 = 2;
+pub const FORMAT: u32 = 3;
 /// Verze metadat DB (`/db/meta`).
 pub const META_FORMAT: u32 = 1;
 
@@ -37,6 +37,21 @@ pub struct KeyRec {
     pub uv: bool,
     /// Klic umi hmac-secret (obal klice domova).
     pub hmac_secret: bool,
+}
+
+/// Klic klienta SSH (identita pro prihlaseni k jinym serverum). Soukroma
+/// cast (seed ed25519) je obalena heslem uctu; ven ze sluzby nejde.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientKeyRec {
+    pub id: u32,
+    /// Verejny klic ed25519.
+    pub public: [u8; 32],
+    pub comment: String,
+    pub added: i64,
+    /// Seed obaleny heslem (`wrap::kind::CLIENT_KEY`, `key_id` = `id`).
+    pub wrap: Wrap,
+    /// Servery, pro ktere uzivatel pouziti klice potvrdil.
+    pub hosts: Vec<String>,
 }
 
 /// Verejny klic SSH (vzdaleny pristup, `crate::remote`).
@@ -90,6 +105,9 @@ pub struct Account {
     /// Klice SSH (prihlaseni na dalku; plati jen s `flags::REMOTE`).
     pub ssh_keys: Vec<SshKeyRec>,
     pub next_ssh_id: u32,
+    /// Klice klienta SSH (formát 3).
+    pub client_keys: Vec<ClientKeyRec>,
+    pub next_client_id: u32,
 }
 
 impl Account {
@@ -114,6 +132,8 @@ impl Account {
             last_login: 0,
             ssh_keys: Vec::new(),
             next_ssh_id: 1,
+            client_keys: Vec::new(),
+            next_client_id: 1,
         }
     }
 
@@ -215,6 +235,19 @@ impl Account {
             w.str(&k.comment).u64(k.added as u64);
         }
         w.u32(self.next_ssh_id);
+        if format < 3 {
+            return seal(w.finish());
+        }
+        w.u32(self.client_keys.len() as u32);
+        for k in &self.client_keys {
+            w.u32(k.id).bytes(&k.public).str(&k.comment).u64(k.added as u64);
+            k.wrap.put(&mut w);
+            w.u32(k.hosts.len() as u32);
+            for h in &k.hosts {
+                w.str(h);
+            }
+        }
+        w.u32(self.next_client_id);
         seal(w.finish())
     }
 
@@ -222,7 +255,7 @@ impl Account {
         let body = unseal(b, MAGIC)?;
         let mut r = Reader::new(body);
         let format = r.u32()?;
-        if format != 1 && format != FORMAT {
+        if !(1..=FORMAT).contains(&format) {
             return Err(Error::NotSupported);
         }
         let uid = r.u64()?;
@@ -283,6 +316,27 @@ impl Account {
             }
             next_ssh_id = r.u32()?;
         }
+        let (mut client_keys, mut next_client_id) = (Vec::new(), 1);
+        if format >= 3 {
+            let n = r.u32()? as usize;
+            if n > crate::client::MAX_CLIENT_KEYS {
+                return Err(Error::Corrupted);
+            }
+            for _ in 0..n {
+                let id = r.u32()?;
+                let public: [u8; 32] = r.take(32)?.try_into().map_err(|_| Error::Corrupted)?;
+                let comment = r.str()?;
+                let added = r.u64()? as i64;
+                let wrap = Wrap::get(&mut r)?;
+                let h = r.u32()? as usize;
+                if h > crate::client::MAX_HOSTS {
+                    return Err(Error::Corrupted);
+                }
+                let hosts = (0..h).map(|_| r.str()).collect::<Result<Vec<_>>>()?;
+                client_keys.push(ClientKeyRec { id, public, comment, added, wrap, hosts });
+            }
+            next_client_id = r.u32()?;
+        }
         if !r.is_empty() || !accountproto::valid_name(&name) {
             return Err(Error::Corrupted);
         }
@@ -306,6 +360,8 @@ impl Account {
             last_login,
             ssh_keys,
             next_ssh_id,
+            client_keys,
+            next_client_id,
         })
     }
 }

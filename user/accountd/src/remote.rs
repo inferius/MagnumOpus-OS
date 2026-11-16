@@ -6,6 +6,7 @@
 //! (`ToInit::OpenRemote`); init vrati listek, kterym si ji sshd vyzvedne.
 //! Kazdy pokus jde do logu (logd) bez obsahu: kdo, odkud, vysledek.
 
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -81,7 +82,16 @@ impl Service {
         let Some((uid, rest)) = data.split_first_chunk::<8>() else { return reply_err(Error::InvalidArgs) };
         let uid = u64::from_le_bytes(*uid);
         match Request::decode(rest) {
-            Ok(r @ (Request::SshKeyAdd { .. } | Request::SshKeyList | Request::SshKeyRemove { .. } | Request::SetRemote { .. })) => {
+            Ok(
+                r @ (Request::SshKeyAdd { .. }
+                | Request::SshKeyList
+                | Request::SshKeyRemove { .. }
+                | Request::SetRemote { .. }
+                | Request::ClientKeyCreate { .. }
+                | Request::ClientKeyImport { .. }
+                | Request::ClientKeyList
+                | Request::ClientKeyRemove { .. }),
+            ) => {
                 match self.own_ssh(uid, r) {
                     Ok(b) => reply_ok(&b),
                     Err(e) => reply_err(e),
@@ -115,6 +125,34 @@ impl Service {
             Request::SshKeyRemove { id } => {
                 self.eng.ssh_key_remove(uid, id)?;
                 println!("accountd: ucet {uid}: odebran klic SSH {id}");
+                Ok(Vec::new())
+            }
+            Request::ClientKeyCreate { password, comment } => {
+                let (id, k) = self.eng.client_key_create(uid, &password, &comment, None, now)?;
+                println!("accountd: ucet {uid}: vytvoren klic klienta SSH {}", k.fingerprint());
+                Ok(accountproto::agent::encode_created(id, &k.line(), &k.fingerprint()))
+            }
+            Request::ClientKeyImport { password, private } => {
+                let text = core::str::from_utf8(private.expose()).map_err(|_| Error::InvalidArgs)?;
+                let (mut seed, pk) = ssh::keys::parse_private(text)?;
+                let s = accountproto::Secret::new(seed.to_vec());
+                zeroize::Zeroize::zeroize(&mut seed);
+                let (id, k) = self.eng.client_key_create(uid, &password, &pk.comment, Some(&s), now)?;
+                println!("accountd: ucet {uid}: importovan klic klienta SSH {}", k.fingerprint());
+                Ok(accountproto::agent::encode_created(id, &k.line(), &k.fingerprint()))
+            }
+            Request::ClientKeyList => {
+                let list: Vec<SshKey> = self
+                    .eng
+                    .client_keys(uid)?
+                    .into_iter()
+                    .map(|k| SshKey { id: k.id, algo: String::from(k.public.algo_name()), fingerprint: k.fingerprint, comment: k.comment, added: k.added })
+                    .collect();
+                Ok(encode_keys(&list))
+            }
+            Request::ClientKeyRemove { id } => {
+                self.eng.client_key_remove(uid, id)?;
+                println!("accountd: ucet {uid}: odebran klic klienta SSH {id}");
                 Ok(Vec::new())
             }
             Request::SetRemote { password, on } => {

@@ -9,7 +9,10 @@ extern crate alloc;
 
 pub mod keys;
 pub mod sftp;
+pub mod sftp_client;
 
+#[cfg(feature = "proto")]
+pub mod client;
 #[cfg(feature = "proto")]
 pub mod server;
 #[cfg(feature = "proto")]
@@ -23,3 +26,5 @@ mod tests_sftp;
 mod tests_server;
 #[cfg(all(test, feature = "proto"))]
 mod tests_fuzz;
+#[cfg(all(test, feature = "proto"))]
+mod tests_client;

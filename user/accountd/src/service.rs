@@ -45,6 +45,10 @@ pub struct Service {
     pub perms: crate::perms::Perms,
     /// Zpomaleni vzdalenych pokusu a pouzite relace SSH (`remote.rs`).
     pub remote: accounts::remote::RemoteGuard,
+    /// Kanaly podpisu klientu SSH (`agent.rs`).
+    pub agents: Vec<crate::agent::Agent>,
+    /// Odemcene klice klienta podle relace.
+    pub unlocked: Vec<crate::agent::Unlocked>,
 }
 
 /// Realny cas v sekundach (zpomaleni po chybach).
@@ -169,7 +173,12 @@ impl Service {
                 _ => Err(Error::NotFound),
             },
             Request::Auth { uid, method, secret } => match self.authenticate(uid, method, &secret) {
-                Ok((Outcome::Ok { .. }, key)) => self.open_session(uid, key).map(|s| AuthReply::Ok { session: s }.encode()),
+                Ok((Outcome::Ok { .. }, key)) => self.open_session(uid, key).map(|s| {
+                    if method == Method::Password {
+                        self.unlock_after_login(s, uid, &secret);
+                    }
+                    AuthReply::Ok { session: s }.encode()
+                }),
                 Ok((o, _)) => Ok(o.reply(0).encode()),
                 Err(e) => Err(e),
             },
@@ -262,7 +271,14 @@ impl Service {
             }
             Request::RemoveKey { password, id } => self.eng.remove_key(uid, &password, id, now).map(|_| Vec::new()),
             Request::SetKeyPin { pin } => self.set_key_pin(&pin),
-            r @ (Request::SshKeyAdd { .. } | Request::SshKeyList | Request::SshKeyRemove { .. } | Request::SetRemote { .. }) => self.own_ssh(uid, r),
+            r @ (Request::SshKeyAdd { .. }
+            | Request::SshKeyList
+            | Request::SshKeyRemove { .. }
+            | Request::SetRemote { .. }
+            | Request::ClientKeyCreate { .. }
+            | Request::ClientKeyImport { .. }
+            | Request::ClientKeyList
+            | Request::ClientKeyRemove { .. }) => self.own_ssh(uid, r),
             Request::EncryptHome { password } => self.encrypt_home(uid, &password, now),
             Request::Lock => self.to_init(&ToInit::LockSession { session }, Vec::new()).map(|_| {
                 self.sessions[i].locked = true;
@@ -270,6 +286,8 @@ impl Service {
             }),
             Request::Logout => self.to_init(&ToInit::CloseSession { session }, Vec::new()).map(|_| {
                 self.sessions[i].closed = true;
+                // Klice klienta SSH relace z pameti pryc hned.
+                self.agent_session_closed(session);
                 Vec::new()
             }),
             _ => Err(Error::AccessDenied),
@@ -320,6 +338,7 @@ impl Service {
     pub fn init_event(&mut self, data: &[u8]) {
         if let Ok(session) = accountproto::decode_session_closed(data) {
             self.sessions.retain(|s| s.id != session);
+            self.agent_session_closed(session);
         }
     }
 }

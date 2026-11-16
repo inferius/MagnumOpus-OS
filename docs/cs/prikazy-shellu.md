@@ -11,7 +11,7 @@
 - **Úlohy:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Relace a bezpečnost:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Nápověda:** [`help`](#help), [`explain`](#explain)
-- **Účet a oprávnění:** [`permissions`](#permissions), [`acl`](#acl), [`ssh-key`](#ssh-key), [`remote-access`](#remote-access)
+- **Účet a oprávnění:** [`permissions`](#permissions), [`acl`](#acl), [`ssh-key`](#ssh-key), [`ssh-keygen`](#ssh-keygen), [`remote-access`](#remote-access)
 - **Systém:** [`audio`](#audio), [`theme`](#theme), [`sshd`](#sshd), [`system`](#system), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Soubory
@@ -1857,9 +1857,9 @@ acl remove bob ~/Projekty
 
 ### `ssh-key`
 
-klíče SSH vašeho účtu: výpis, `ssh-key add <soubor.pub|->` (chce heslo), `ssh-key remove <číslo>`
+klíče SSH vašeho účtu: výpis, `ssh-key add <soubor.pub|->` (chce heslo), `ssh-key remove <číslo>`; klíče klienta `identities`, `import`, `forget`
 
-Veřejné klíče SSH, kterými se k účtu přihlásíte na dálku. Bez argumentu výpis (`id`, `algo`, `fingerprint`, `comment`, `added`). `ssh-key add` přidá klíč ze souboru `*.pub` (i z flashky), z textu nebo z roury (`-`); chce heslo účtu a ukáže otisk klíče. Klíče eviduje služba účtů, takže fungují i se šifrovaným domovem. Podporované jsou ed25519 a klíče FIDO `sk-ssh-ed25519` (bezpečnostní klíč u klienta); RSA a ECDSA zatím ne. `ssh-key remove <číslo>` klíč odebere (bez hesla).
+Veřejné klíče SSH, kterými se k účtu přihlásíte na dálku. Bez argumentu výpis (`id`, `algo`, `fingerprint`, `comment`, `added`). `ssh-key add` přidá klíč ze souboru `*.pub` (i z flashky), z textu nebo z roury (`-`); chce heslo účtu a ukáže otisk klíče. Klíče eviduje služba účtů, takže fungují i se šifrovaným domovem. Podporované jsou ed25519 a klíče FIDO `sk-ssh-ed25519` (bezpečnostní klíč u klienta); RSA a ECDSA zatím ne. `ssh-key remove <číslo>` klíč odebere (bez hesla). Klíče klienta (přihlášení odsud k jiným serverům příkazy `ssh`, `scp`, `sftp`) drží služba účtů a soukromý klíč žádný program nedostane: `ssh-key identities` je vypíše, `ssh-key import <soubor|->` převezme soukromý klíč OpenSSH (jen nešifrovaný ed25519; chce heslo, soubor pak smažte), `ssh-key forget <číslo>` klíč klienta odebere. Nový klíč klienta vytvoří `ssh-keygen`.
 
 ```shell
 ssh-key [action] ...
@@ -1869,7 +1869,7 @@ Plné jméno `remote-ssh-key` · vstup: libovolná hodnota · výstup: tabulka (
 
 | Argument | Typ | Výchozí | Popis |
 |---|---|---|---|
-| `[action]` | text | list | list, add nebo remove |
+| `[action]` | text | list | list, add, remove, identities, import nebo forget |
 | `...` | hodnota |  | soubor s klíčem, `-` nebo číslo klíče |
 
 Přidá klíč z flashky (zeptá se na heslo).
@@ -1882,7 +1882,36 @@ ssh-key add /media/flash/id_ed25519.pub
 
 **Chyby:** `SH_ARGS`, `SH_REJECTED`, `ACCESS_DENIED`, `ALREADY_EXISTS`, `NOT_SUPPORTED`, `NOT_FOUND`
 
-**Souvisí:** [`remote-access`](#remote-access), [`sshd`](#sshd)
+**Souvisí:** [`ssh-keygen`](#ssh-keygen), [`remote-access`](#remote-access), [`sshd`](#sshd)
+
+
+### `ssh-keygen`
+
+nový klíč klienta SSH přímo ve službě účtů (chce heslo); vypíše veřejný klíč pro server
+
+Vytvoří nový klíč ed25519 pro přihlášení odsud k jiným serverům (`ssh`, `scp`, `sftp`). Soukromý klíč vznikne a zůstane ve službě účtů, obalený heslem účtu; žádný program ho nedostane, podpis dělá služba. Vypíše číslo, veřejný klíč (`public`, řádek pro `authorized_keys` serveru) a otisk. Chce heslo účtu. Klíče se odemknou přihlášením heslem; jinak se služba zeptá systémovou výzvou se štítkem Účty.
+
+```shell
+ssh-keygen [comment]
+```
+
+Plné jméno `remote-ssh-keygen` · vstup: nic · výstup: tabulka (id, public, fingerprint)
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[comment]` | text |  | komentář klíče (např. alice@pc) |
+
+Nový klíč klienta (zeptá se na heslo).
+
+```shell
+ssh-keygen alice@pc
+```
+
+**Potřebuje:** přihlášená relace
+
+**Chyby:** `SH_REJECTED`, `ACCESS_DENIED`, `NO_SPACE`
+
+**Souvisí:** [`ssh-key`](#ssh-key)
 
 
 ### `remote-access`

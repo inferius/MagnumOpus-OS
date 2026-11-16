@@ -294,9 +294,9 @@ impl Service {
                     p.sent = Some(id);
                     Some(match &p.text {
                         Some((secret, default)) => {
-                            ServerMsg::Ask { prompt: id, question: p.question.clone(), secret: *secret, default: default.clone() }
+                            ServerMsg::Ask { prompt: id, question: p.question.clone(), secret: *secret, default: default.clone(), label: p.label.clone() }
                         }
-                        None => ServerMsg::Prompt { prompt: id, question: p.question.clone(), detail: p.detail.clone(), choices: p.choices.clone() },
+                        None => ServerMsg::Prompt { prompt: id, question: p.question.clone(), detail: p.detail.clone(), choices: p.choices.clone(), label: p.label.clone() },
                     })
                 }
                 _ => None,

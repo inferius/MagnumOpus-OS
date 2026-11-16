@@ -22,7 +22,7 @@ pub const MAX_PACKET: usize = 256 * 1024 + 64;
 /// Nejvic dat v jedne odpovedi READ.
 const MAX_READ: usize = 64 * 1024;
 
-mod ty {
+pub mod ty {
     pub const INIT: u8 = 1;
     pub const VERSION: u8 = 2;
     pub const OPEN: u8 = 3;
@@ -59,7 +59,8 @@ pub mod status {
     pub const OP_UNSUPPORTED: u32 = 8;
 }
 
-mod pflags {
+pub mod pflags {
+    pub const READ: u32 = 1;
     pub const WRITE: u32 = 2;
     pub const APPEND: u32 = 4;
     pub const CREAT: u32 = 8;

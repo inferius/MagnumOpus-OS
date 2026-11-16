@@ -283,6 +283,17 @@ impl Channels {
         self.get_mut(num)?.close_local(s)
     }
 
+    /// MagnumOpus: jen EOF od aplikace (klient: konec vstupu, kanal
+    /// zustava otevreny pro odpoved).
+    pub(crate) fn send_eof(&mut self, num: ChanNum, s: &mut TrafSend) -> Result<()> {
+        let ch = self.get_mut(num)?;
+        if !ch.sent_eof {
+            s.send(packets::ChannelEof { num: ch.send_num()? })?;
+            ch.sent_eof = true;
+        }
+        Ok(())
+    }
+
     /// MagnumOpus: server posle kod ukonceni prikazu na kanale `num`.
     pub(crate) fn exit_status(&self, num: ChanNum, status: u32, s: &mut TrafSend) -> Result<()> {
         let ch = self.get(num)?;

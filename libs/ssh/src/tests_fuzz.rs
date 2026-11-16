@@ -181,3 +181,62 @@ fn fuzz_klice() {
         let _ = PublicKey::parse_line(&line);
     }
 }
+
+struct NoClient;
+
+impl crate::client::ClientBackend for NoClient {
+    fn hostkey(&mut self, _: &PublicKey) -> bool {
+        true
+    }
+    fn identities(&mut self) -> Vec<PublicKey> {
+        vec![crate::keys::ed25519_public(&[1; 32])]
+    }
+    fn sign(&mut self, _: &PublicKey, _: &[u8]) -> Option<[u8; 64]> {
+        Some([0; 64])
+    }
+    fn password(&mut self) -> Option<alloc::string::String> {
+        None
+    }
+}
+
+/// Klient dostava od "serveru" nahodne a zmutovane bajty (vymena klicu,
+/// pakety pred prihlasenim i po nem).
+#[test]
+fn fuzz_klient() {
+    use crate::client::{ClientConn, Request};
+    let mut r = Rng(0x5EED_0004);
+    let hello = b"SSH-2.0-OpenSSH_9.7\r\n";
+    // Skutecny zacatek odpovedi serveru: uvod a KEXINIT.
+    let mut s = ServerConn::new(&[3; 32]).unwrap();
+    let mut out = vec![0u8; 40_000];
+    let n = s.output(&mut out);
+    let real = out[..n].to_vec();
+    for i in 0..3000 {
+        let d = if i % 2 == 0 {
+            mutate(&mut r, &real)
+        } else {
+            let mut d = hello.to_vec();
+            let k = r.below(3000);
+            d.extend(r.bytes(k));
+            d
+        };
+        let mut c = ClientConn::new("a", Request::Exec(alloc::string::String::from("x")));
+        let mut buf = vec![0u8; 40_000];
+        let _ = c.output(&mut buf);
+        for chunk in d.chunks(1 + r.below(700)) {
+            let mut off = 0;
+            let mut guard = 0;
+            while off < chunk.len() && guard < 64 {
+                guard += 1;
+                match c.input(&chunk[off..]) {
+                    Ok(n) => off += n,
+                    Err(_) => break,
+                }
+                if c.progress(&mut NoClient).is_err() {
+                    break;
+                }
+                while c.output(&mut buf) > 0 {}
+            }
+        }
+    }
+}

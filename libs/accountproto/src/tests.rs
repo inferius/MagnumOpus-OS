@@ -537,3 +537,27 @@ fn ssh_odpovedi_tam_a_zpet() {
     let m = ToInit::OpenRemote { uid: 1000, groups: vec![ids::GROUP_USERS], home: "/home/alice".into(), peer: "10.0.2.2".into() };
     assert_eq!(ToInit::decode(&m.encode()).unwrap(), m);
 }
+
+#[test]
+fn klienti_ssh_a_vyzvy() {
+    use crate::agent::*;
+    roundtrip(Request::ClientKeyCreate { password: Secret::from("a"), comment: String::from("alice@mo") });
+    roundtrip(Request::ClientKeyImport { password: Secret::from("a"), private: Secret::from("-----BEGIN") });
+    roundtrip(Request::ClientKeyList);
+    roundtrip(Request::ClientKeyRemove { id: 3 });
+    for r in [Request::ClientKeyCreate { password: Secret::default(), comment: String::new() }, Request::ClientKeyList, Request::ClientKeyRemove { id: 1 }] {
+        assert!(r.is_self(), "{r:?}");
+    }
+    let s = AgentReq::Sign { id: 2, host: String::from("[h]:22"), data: alloc::vec![1, 2, 3] };
+    assert_eq!(AgentReq::decode(&s.encode()).unwrap(), s);
+    assert_eq!(AgentReq::decode(&AgentReq::Identities.encode()).unwrap(), AgentReq::Identities);
+    assert_eq!(AgentReq::decode(&[9, 0, 0, 0]), Err(Error::NotSupported));
+    let ids = alloc::vec![Identity { id: 1, blob: alloc::vec![5; 51], comment: String::from("k") }];
+    assert_eq!(decode_identities(&encode_identities(&ids)).unwrap(), ids);
+    assert_eq!(decode_created(&encode_created(4, "ssh-ed25519 AAAA k", "SHA256:x")).unwrap(), (4, String::from("ssh-ed25519 AAAA k"), String::from("SHA256:x")));
+    for p in [Prompt::Secret { id: 1, question: String::from("Heslo") }, Prompt::Confirm { id: 2, question: String::from("Server?") }] {
+        assert_eq!(Prompt::decode(&p.encode()).unwrap(), p);
+    }
+    let a = PromptAnswer { id: 7, ok: true, text: Secret::from("tajne") };
+    assert_eq!(PromptAnswer::decode(&a.encode()).unwrap(), a);
+}

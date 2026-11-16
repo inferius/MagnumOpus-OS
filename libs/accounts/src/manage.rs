@@ -63,18 +63,24 @@ impl<S: Store, D: DeviceKey, R: CryptoRngCore> Engine<S, D, R> {
         check_password(new)?;
         let home = self.reauth(uid, old, now)?;
         self.need_home(uid, &home)?;
+        // Klice klienta SSH: rozbalit starym heslem (obnovovacim klicem to
+        // nejde: pak zaniknou, viz `client.rs`).
+        let i = self.index(uid)?;
+        let old_material = self.password_material(i, old)?;
+        let seeds = self.client_seeds(i, old_material.as_ref());
         let pw = normalize(new)?;
         let (v, d) = self.new_verifier(pw.expose())?;
         let w = match &home {
             Some(k) => Some(wrap::wrap(&mut self.rng, uid, kind::PASSWORD, 0, d.wrap_material(), k)?),
             None => None,
         };
-        let i = self.index(uid)?;
+        let rewrapped = self.rewrap_clients(uid, &seeds, d.wrap_material())?;
         self.update(i, |a| {
             a.password = Some(v);
             if let Some(w) = w {
                 replace_wrap(&mut a.crypt, w);
             }
+            crate::client::apply_rewrap(a, rewrapped);
         })
     }
 
@@ -211,6 +217,8 @@ impl<S: Store, D: DeviceKey, R: CryptoRngCore> Engine<S, D, R> {
             if let Some(c) = &mut a.crypt {
                 c.wraps.retain(|w| w.kind != kind::PASSWORD);
             }
+            // Klice klienta SSH bez stareho hesla rozbalit nejde.
+            a.client_keys.clear();
         })
     }
 

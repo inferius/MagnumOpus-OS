@@ -3469,6 +3469,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 name = "shsess"
 version = "0.1.0"
 dependencies = [
+ "accountproto",
  "agentproto",
  "agentsh",
  "audiomix",
@@ -3482,7 +3483,9 @@ dependencies = [
  "shlang",
  "spin 0.12.3",
  "term",
+ "ttyproto",
  "wire",
+ "zeroize",
 ]
 
 [[package]]
@@ -3633,6 +3636,7 @@ dependencies = [
  "ed25519-dalek 3.0.0",
  "sha2 0.11.0",
  "sunset",
+ "zeroize",
 ]
 
 [[package]]
@@ -3689,6 +3693,15 @@ dependencies = [
  "ssh",
  "term",
  "wire",
+]
+
+[[package]]
+name = "sshtools"
+version = "0.1.0"
+dependencies = [
+ "accountproto",
+ "ssh",
+ "ttyproto",
 ]
 
 [[package]]

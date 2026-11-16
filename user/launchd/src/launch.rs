@@ -195,8 +195,23 @@ pub fn launch(d: &mut Launchd, r: &mut Reader, handles: Vec<Handle>) -> Result<V
         (None, None) => None,
         _ => return Err(fail(Error::InvalidArgs, "role Audio jen s listkem AudioLease")),
     };
+    let tty = take(Role::Tty);
+    let agent = take(Role::Agent);
+    let initfs_only = req.flags & flags::INITFS_ONLY != 0;
+    // Kanal podpisu SSH jen programu, ktery si jmeno nemuze vzit nikdo
+    // jiny (initfs).
+    if agent.is_some() && !initfs_only {
+        return Err(fail(Error::AccessDenied, "role Agent jen s INITFS_ONLY"));
+    }
 
-    let source = find(d, &req.program, fs.as_ref())?;
+    let source = if initfs_only {
+        if !is_bare_name(&req.program) || d.initfs.find(&req.program).is_none() {
+            return Err(fail(Error::NotFound, format!("{}: neni v systemu (initfs)", req.program)));
+        }
+        Source::Initfs(req.program.clone())
+    } else {
+        find(d, &req.program, fs.as_ref())?
+    };
     let (name, image, manifest): (String, Vec<u8>, Option<Manifest>) = match &source {
         Source::Initfs(p) => {
             let image = d.initfs.find(p).ok_or_else(|| fail(Error::NotFound, format!("{p}: chybi v initfs")))?;
@@ -239,6 +254,12 @@ pub fn launch(d: &mut Launchd, r: &mut Reader, handles: Vec<Handle>) -> Result<V
     if let Some((s, l)) = audio {
         start.push(StartHandle::tagged(tag::AUDIO, s));
         start.push(StartHandle::tagged(tag::AUDIO_LEASE, l));
+    }
+    if let Some(h) = tty {
+        start.push(StartHandle::tagged(tag::TTY, h));
+    }
+    if let Some(h) = agent {
+        start.push(StartHandle::tagged(tag::SSH_AGENT, h));
     }
     if let Some(fs) = fs {
         start.push(StartHandle::tagged(tag::FS, fs.into_channel().into_handle()));

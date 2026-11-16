@@ -124,7 +124,7 @@ fn exec_roundtrip() {
 #[test]
 fn all_roles_fit() {
     let unique: alloc::vec::Vec<Role> = (1..=255u8).filter_map(Role::from_u8).filter(|r| *r != Role::Fd).collect();
-    assert_eq!(unique.len(), 10, "MAX_ROLES pocita s deseti jedinecnymi rolemi");
+    assert_eq!(unique.len(), 12, "MAX_ROLES pocita s dvanacti jedinecnymi rolemi");
     assert!(unique.contains(&Role::Audio) && unique.contains(&Role::AudioLease));
     let mut roles = unique.clone();
     roles.extend(core::iter::repeat_n(Role::Fd, abi::params::MAX_FDS));

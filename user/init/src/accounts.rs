@@ -162,6 +162,26 @@ pub fn channel(kind: &str) -> Result<Channel> {
     Ok(ours)
 }
 
+/// Kanal podpisu klienta SSH pro program `app` v relaci `session`
+/// (`accountproto::agent`): accountd dostane konec `chan` a kanal systemove
+/// vyzvy do shellu relace.
+pub fn agent(session: u64, uid: u64, app: &str, chan: Channel, prompt: Option<Channel>) -> Result<()> {
+    let a = ACCOUNTD.get().ok_or(Error::NotFound)?;
+    let mut msg = b"agent\0".to_vec();
+    msg.extend_from_slice(&session.to_le_bytes());
+    msg.extend_from_slice(&uid.to_le_bytes());
+    msg.extend_from_slice(app.as_bytes());
+    let mut hs = vec![chan.into_handle()];
+    hs.extend(prompt.map(Channel::into_handle));
+    let ctl = a.control.lock();
+    ctl.write(&msg, hs)?;
+    let r = ctl.read(Some(time::deadline_after(Duration::from_secs(5))))?;
+    if r.data != b"ok" {
+        return Err(Error::IoError);
+    }
+    Ok(())
+}
+
 fn send_key(ctl: &Channel, key: Channel) -> Result<()> {
     ctl.write(b"key", vec![key.into_handle()])?;
     let r = ctl.read(Some(time::deadline_after(Duration::from_secs(5))))?;

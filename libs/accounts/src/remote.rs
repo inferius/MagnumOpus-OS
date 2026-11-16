@@ -126,7 +126,7 @@ impl RemoteGuard {
 /// Podepsana data prihlaseni klicem (RFC 4252, 7): relace, `50`, jmeno,
 /// sluzba, `publickey`, `TRUE`, typ, blob klice. Vraci identifikator
 /// relace, jmeno a blob klice.
-fn parse_signed(data: &[u8]) -> Result<(&[u8], &str, &[u8])> {
+pub fn parse_signed(data: &[u8]) -> Result<(&[u8], &str, &[u8])> {
     struct R<'a>(&'a [u8]);
     impl<'a> R<'a> {
         fn s(&mut self) -> Result<&'a [u8]> {

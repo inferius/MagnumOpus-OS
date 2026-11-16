@@ -11,6 +11,7 @@ mod audio_role;
 mod accounts;
 mod accounts_shell;
 mod exec;
+mod ssh_client;
 mod agent;
 mod agent_shell;
 mod basic;

@@ -18,6 +18,7 @@
 extern crate alloc;
 
 mod admin;
+mod agent;
 #[cfg(feature = "dev-mode")]
 mod devmode;
 mod perms;
@@ -149,7 +150,7 @@ fn main(startup: Startup) -> i64 {
     for (name, e) in &eng.broken {
         println!("accountd: poskozeny zaznam uctu {name}: {e}");
     }
-    let mut svc = Service { eng, init, sessions: Vec::new(), keys: Vec::new(), events: Vec::new(), admin: Default::default(), perms: Default::default(), remote: Default::default() };
+    let mut svc = Service { eng, init, sessions: Vec::new(), keys: Vec::new(), events: Vec::new(), admin: Default::default(), perms: Default::default(), remote: Default::default(), agents: Vec::new(), unlocked: Vec::new() };
     if bootstrap.write(b"ok", Vec::new()).is_err() {
         return 4;
     }
@@ -200,8 +201,24 @@ fn main(startup: Startup) -> i64 {
             items.push((p.handle(), rd));
             items.len() - 1
         });
-        let observed = match waits.wait(&items, None) {
+        // Kanaly podpisu klientu SSH a jejich vyzvy (`agent.rs`): indexy
+        // (kanal, vyzva) pro kazdeho agenta.
+        let mut agent_idx: Vec<(usize, Option<usize>)> = Vec::new();
+        for a in &svc.agents {
+            items.push((a.chan.handle(), rd));
+            let c = items.len() - 1;
+            let p = a.prompt.as_ref().map(|p| {
+                items.push((p.handle(), rd));
+                items.len() - 1
+            });
+            agent_idx.push((c, p));
+        }
+        let nagents = svc.agents.len();
+        // Vyzvy cekajici na cloveka maji termin.
+        let deadline = if nagents > 0 { Some(libos::time::now() + 1_000_000_000) } else { None };
+        let observed = match waits.wait(&items, deadline) {
             Ok((_, o)) => o,
+            Err(Error::TimedOut) => alloc::vec![Signals(0); items.len()],
             Err(e) => {
                 println!("accountd: cekani: {e}");
                 return 5;
@@ -269,6 +286,18 @@ fn main(startup: Startup) -> i64 {
         if perm_admin_idx.is_some_and(|i| observed.get(i).is_some_and(|s| s.intersects(rd))) {
             svc.perm_admin();
         }
+        for i in (0..nagents).rev() {
+            let (ci, pi) = agent_idx[i];
+            let c = observed.get(ci).copied().unwrap_or(Signals(0));
+            let p = pi.and_then(|k| observed.get(k).copied()).unwrap_or(Signals(0));
+            if p.intersects(rd) {
+                svc.agent_answers(i);
+            }
+            if c.intersects(rd) && !svc.agent_requests(i) {
+                svc.agents.remove(i);
+            }
+        }
+        svc.agent_timeouts();
         if observed[1].contains(Signals::READABLE) {
             while let Ok(msg) = svc.init.try_read() {
                 svc.init_event(&msg.data);
@@ -289,6 +318,16 @@ fn main(startup: Startup) -> i64 {
                 return 6;
             }
         };
+        if msg.data.starts_with(b"agent\0") {
+            let r = match svc.add_agent(&msg.data[6..], msg.handles) {
+                Ok(()) => String::from("ok"),
+                Err(e) => format!("err:{e}"),
+            };
+            if bootstrap.write(r.as_bytes(), Vec::new()).is_err() {
+                return 0;
+            }
+            continue;
+        }
         let kind = match &msg.data[..] {
             b"login" => Some(Kind::Login),
             b"setup" => Some(Kind::Setup),

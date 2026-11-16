@@ -52,6 +52,13 @@ pub enum Request {
     /// Klice SSH uctu ([`crate::ssh::encode_keys`]).
     SshKeyList,
     SshKeyRemove { id: u32 },
+    /// Novy klic klienta SSH (heslo); odpoved `agent::encode_created`.
+    ClientKeyCreate { password: Secret, comment: String },
+    /// Import soukromeho klice OpenSSH (text souboru je tajemstvi).
+    ClientKeyImport { password: Secret, private: Secret },
+    /// Klice klienta (`ssh::encode_keys`).
+    ClientKeyList,
+    ClientKeyRemove { id: u32 },
     /// Vzdaleny pristup uctu; zapnuti chce heslo.
     SetRemote { password: Secret, on: bool },
     /// Kanal ssh: prijme server klic `key` (blob) uctu `user`?
@@ -96,6 +103,10 @@ impl Request {
             Request::SshKeyAdd { .. } => op::SSH_KEY_ADD,
             Request::SshKeyList => op::SSH_KEY_LIST,
             Request::SshKeyRemove { .. } => op::SSH_KEY_REMOVE,
+            Request::ClientKeyCreate { .. } => op::CLIENT_KEY_CREATE,
+            Request::ClientKeyImport { .. } => op::CLIENT_KEY_IMPORT,
+            Request::ClientKeyList => op::CLIENT_KEY_LIST,
+            Request::ClientKeyRemove { .. } => op::CLIENT_KEY_REMOVE,
             Request::SetRemote { .. } => op::SET_REMOTE,
             Request::SshProbe { .. } => op::SSH_PROBE,
             Request::SshAuth { .. } => op::SSH_AUTH,
@@ -105,7 +116,18 @@ impl Request {
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::op(self.op());
         match self {
-            Request::List | Request::WhoAmI | Request::Lock | Request::Logout | Request::PermList | Request::Names | Request::SshKeyList => {}
+            Request::List | Request::WhoAmI | Request::Lock | Request::Logout | Request::PermList | Request::Names | Request::SshKeyList | Request::ClientKeyList => {}
+            Request::ClientKeyCreate { password, comment } => {
+                put_secret(&mut w, password);
+                w.str(comment);
+            }
+            Request::ClientKeyImport { password, private } => {
+                put_secret(&mut w, password);
+                put_secret(&mut w, private);
+            }
+            Request::ClientKeyRemove { id } => {
+                w.u32(*id);
+            }
             Request::SshKeyAdd { password, line } => {
                 put_secret(&mut w, password);
                 w.str(line);
@@ -219,6 +241,10 @@ impl Request {
             op::SSH_KEY_ADD => Request::SshKeyAdd { password: get_secret(&mut r)?, line: r.str()? },
             op::SSH_KEY_LIST => Request::SshKeyList,
             op::SSH_KEY_REMOVE => Request::SshKeyRemove { id: r.u32()? },
+            op::CLIENT_KEY_CREATE => Request::ClientKeyCreate { password: get_secret(&mut r)?, comment: r.str()? },
+            op::CLIENT_KEY_IMPORT => Request::ClientKeyImport { password: get_secret(&mut r)?, private: get_secret(&mut r)? },
+            op::CLIENT_KEY_LIST => Request::ClientKeyList,
+            op::CLIENT_KEY_REMOVE => Request::ClientKeyRemove { id: r.u32()? },
             op::SET_REMOTE => Request::SetRemote { password: get_secret(&mut r)?, on: r.u8()? != 0 },
             op::SSH_PROBE => Request::SshProbe { user: r.str()?, addr: r.str()?, key: get_blob(&mut r)? },
             op::SSH_AUTH => Request::SshAuth {
@@ -256,7 +282,7 @@ impl Request {
 
     /// Patri operace na kanal self?
     pub fn is_self(&self) -> bool {
-        (op::WHOAMI..=op::SET_REMOTE).contains(&self.op())
+        (op::WHOAMI..=op::CLIENT_KEY_IMPORT).contains(&self.op()) || matches!(self.op(), op::CLIENT_KEY_LIST | op::CLIENT_KEY_REMOVE)
     }
 
     /// Patri operace na kanal ssh (sluzba sshd)?

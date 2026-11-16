@@ -149,6 +149,18 @@ impl<S: Store, D: DeviceKey, R: CryptoRngCore> Engine<S, D, R> {
         })
     }
 
+    /// Material obalu z hesla (`None` = spatne heslo nebo ucet bez hesla).
+    /// Bez zpomaleni: volat az po overeni (`reauth`).
+    pub(crate) fn password_material(&self, i: usize, secret: &Secret) -> Result<Option<Secret>> {
+        let Some(v) = &self.accounts[i].password else { return Ok(None) };
+        let pw = normalize(secret).unwrap_or_default();
+        let d = kdf::derive(&v.params, pw.expose(), &v.salt)?;
+        if !kdf::ct_eq(d.verifier(), &v.value) {
+            return Ok(None);
+        }
+        Ok(Some(Secret::new(d.wrap_material().to_vec())))
+    }
+
     pub(crate) fn check_password(&self, i: usize, secret: &Secret) -> Result<Check> {
         let a = &self.accounts[i];
         let Some(v) = &a.password else {
@@ -271,7 +283,9 @@ impl<S: Store, D: DeviceKey, R: CryptoRngCore> Engine<S, D, R> {
     /// Hodnota hesla se slabsimi parametry se po prihlaseni prepocita.
     fn maybe_rehash(&mut self, i: usize, secret: &Secret) -> Result<()> {
         let Some(v) = &self.accounts[i].password else { return Ok(()) };
-        if !v.params.weaker_than(&self.cfg.params) || self.accounts[i].crypt.is_some() {
+        // Obaly (sifrovany domov, klice klienta SSH) jsou z materialu hesla:
+        // prepocet by je rozbil; udela to pristi zmena hesla.
+        if !v.params.weaker_than(&self.cfg.params) || self.accounts[i].crypt.is_some() || !self.accounts[i].client_keys.is_empty() {
             // U sifrovaneho domova by se musel prebalit i obal; udela to
             // pristi zmena hesla.
             return Ok(());

@@ -80,7 +80,7 @@ fn protocol_roundtrip() {
         ServerMsg::Item { session: 1, block: 2, item: Item::Error { code: "X".into(), message: "m".into(), report: "r".into() } },
         ServerMsg::Item { session: 1, block: 2, item: Item::Progress { done: 1, total: 3, label: "kopiruji".into() } },
         ServerMsg::Item { session: 1, block: 2, item: Item::Link { text: "napoveda".into(), target: "help:ls".into() } },
-        ServerMsg::Prompt { prompt: 3, question: "Prevzit?".into(), detail: Item::Diff(Value::List(vec![])), choices: vec!["a".into()] },
+        ServerMsg::Prompt { prompt: 3, question: "Prevzit?".into(), detail: Item::Diff(Value::List(vec![])), choices: vec!["a".into()], label: String::new() },
         ServerMsg::ItemUpdate { session: 1, block: 2, index: 0, item: Item::Progress { done: 1, total: 4, label: "x".into() } },
         ServerMsg::Completions { seq: 4, start: 3, items: vec![("ls".into(), 0, "vypise".into())] },
         ServerMsg::SessionList { sessions: vec![(1, 2, "/home".into())] },

@@ -210,3 +210,73 @@ pub fn ed25519_public(seed: &[u8; 32]) -> PublicKey {
 pub fn fingerprint(blob: &[u8]) -> String {
     alloc::format!("SHA256:{}", Base64Unpadded::encode_string(&Sha256::digest(blob)))
 }
+
+/// Podpis ed25519 seedem (sluzba uctu za klienta SSH; seed proces klienta
+/// nikdy nema).
+pub fn ed25519_sign(seed: &[u8; 32], data: &[u8]) -> [u8; 64] {
+    use ed25519_dalek::Signer;
+    ed25519_dalek::SigningKey::from_bytes(seed).sign(data).to_bytes()
+}
+
+/// Nejvetsi soubor soukromeho klice, ktery se cte.
+pub const MAX_PRIVATE_TEXT: usize = 16 * 1024;
+
+/// Soukromy klic OpenSSH (`-----BEGIN OPENSSH PRIVATE KEY-----`, format
+/// `openssh-key-v1`): seed ed25519 a verejny klic s komentarem. Jen
+/// nesifrovany klic ed25519; sifrovany (heslo k souboru) = `NOT_SUPPORTED`
+/// (bcrypt-pbkdf zatim neni), jiny typ = `NOT_SUPPORTED`.
+pub fn parse_private(text: &str) -> Result<([u8; 32], PublicKey)> {
+    const BEGIN: &str = "-----BEGIN OPENSSH PRIVATE KEY-----";
+    const END: &str = "-----END OPENSSH PRIVATE KEY-----";
+    if text.len() > MAX_PRIVATE_TEXT {
+        return Err(Error::InvalidArgs);
+    }
+    let start = text.find(BEGIN).ok_or(Error::InvalidArgs)? + BEGIN.len();
+    let end = text[start..].find(END).ok_or(Error::InvalidArgs)? + start;
+    let b64: String = text[start..end].chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    let mut raw = Base64::decode_vec(&b64).map_err(|_| Error::InvalidArgs)?;
+    let r = parse_private_raw(&raw);
+    zeroize::Zeroize::zeroize(&mut raw);
+    r
+}
+
+fn parse_private_raw(raw: &[u8]) -> Result<([u8; 32], PublicKey)> {
+    const MAGIC: &[u8] = b"openssh-key-v1\0";
+    let rest = raw.strip_prefix(MAGIC).ok_or(Error::InvalidArgs)?;
+    let mut r = Wire(rest);
+    let cipher = r.str()?;
+    let _kdf = r.str()?;
+    let _kdf_opts = r.bytes()?;
+    if cipher != "none" {
+        return Err(Error::NotSupported);
+    }
+    if r.u32()? != 1 {
+        return Err(Error::NotSupported);
+    }
+    let public = PublicKey::from_blob(r.bytes()?)?;
+    let mut p = Wire(r.bytes()?);
+    r.end()?;
+    if p.u32()? != p.u32()? {
+        return Err(Error::InvalidArgs);
+    }
+    if p.str()? != ED25519 || public.algo != Algo::Ed25519 {
+        return Err(Error::NotSupported);
+    }
+    let pk = key32(p.bytes()?)?;
+    let sk = p.bytes()?;
+    if sk.len() != 64 || pk != public.key || sk[32..] != pk {
+        return Err(Error::InvalidArgs);
+    }
+    let seed = key32(&sk[..32])?;
+    if ed25519_public(&seed).key != pk {
+        return Err(Error::InvalidArgs);
+    }
+    let comment: String = p.str()?.chars().filter(|c| !c.is_control()).take(120).collect();
+    // Vycpavka 1, 2, 3, ...
+    for (i, b) in p.0.iter().enumerate() {
+        if *b != (i + 1) as u8 {
+            return Err(Error::InvalidArgs);
+        }
+    }
+    Ok((seed, PublicKey { comment, ..public }))
+}

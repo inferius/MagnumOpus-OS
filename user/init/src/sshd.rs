@@ -310,6 +310,28 @@ pub fn from_shell(session: Option<u64>, op: &str, arg: &str, password: &str) -> 
             }
             Ok(s)
         })),
+        "client-create" | "client-import" => {
+            let req = if op == "client-create" {
+                Request::ClientKeyCreate { password: Secret::from(password), comment: String::from(arg) }
+            } else {
+                Request::ClientKeyImport { password: Secret::from(password), private: Secret::from(arg) }
+            };
+            text(account_admin(uid, req).and_then(|b| {
+                let (id, line, fp) = accountproto::agent::decode_created(&b)?;
+                Ok(format!("{id}\t{line}\t{fp}\n"))
+            }))
+        }
+        "client-list" => text(account_admin(uid, Request::ClientKeyList).and_then(|b| {
+            let mut s = String::new();
+            for k in accountproto::ssh::decode_keys(&b)? {
+                s.push_str(&format!("{}\t{}\t{}\t{}\t{}\n", k.id, k.algo, k.fingerprint, k.comment, k.added));
+            }
+            Ok(s)
+        })),
+        "client-remove" => {
+            let id: u32 = arg.trim().parse().map_err(|_| fail(Error::InvalidArgs))?;
+            text(account_admin(uid, Request::ClientKeyRemove { id }).map(|_| String::new()))
+        }
         "key-remove" => {
             let id: u32 = arg.trim().parse().map_err(|_| fail(Error::InvalidArgs))?;
             text(account_admin(uid, Request::SshKeyRemove { id }).map(|_| String::new()))

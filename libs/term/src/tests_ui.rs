@@ -247,7 +247,7 @@ fn progress_bar_updates_in_place_with_rate_and_eta() {
 #[test]
 fn prompts_yes_no_and_choices() {
     let mut a = app();
-    a.on_msg(ServerMsg::Prompt { prompt: 9, question: "Prevzit 2 zmeny?".into(), detail: Item::Note(String::new()), choices: vec![] });
+    a.on_msg(ServerMsg::Prompt { prompt: 9, question: "Prevzit 2 zmeny?".into(), detail: Item::Note(String::new()), choices: vec![], label: String::new() });
     assert!(plain(&a).contains("Ano (a)"));
     a.key(Key::Char('a'));
     assert_eq!(a.take_out(), vec![ClientMsg::Answer { prompt: 9, yes: true }]);
@@ -256,11 +256,12 @@ fn prompts_yes_no_and_choices() {
         question: "Kam?".into(),
         detail: Item::Note(String::new()),
         choices: vec!["zaloha".into(), "kos".into(), "smazat".into()],
+        label: String::new(),
     });
     a.key(Key::Down);
     a.key(Key::Enter);
     assert_eq!(a.take_out(), vec![ClientMsg::Choose { prompt: 10, index: 1 }]);
-    a.on_msg(ServerMsg::Prompt { prompt: 11, question: "?".into(), detail: Item::Note(String::new()), choices: vec!["x".into(), "y".into()] });
+    a.on_msg(ServerMsg::Prompt { prompt: 11, question: "?".into(), detail: Item::Note(String::new()), choices: vec!["x".into(), "y".into()], label: String::new() });
     a.key(Key::Char('2'));
     assert_eq!(a.take_out(), vec![ClientMsg::Choose { prompt: 11, index: 1 }]);
 }

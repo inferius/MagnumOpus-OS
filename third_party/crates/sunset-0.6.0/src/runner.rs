@@ -768,6 +768,15 @@ impl<'a, CS: CliServ> Runner<'a, CS> {
         Ok(())
     }
 
+    /// MagnumOpus: jen EOF (konec dat od aplikace, typicky klient po konci
+    /// stdin); kanal zustava otevreny pro data protistrany.
+    pub fn send_eof(&mut self, chan: &ChanHandle) -> Result<()> {
+        let mut s = self.traf_out.sender(&mut self.keys);
+        self.conn.channels.send_eof(chan.0, &mut s)?;
+        self.wake();
+        Ok(())
+    }
+
     /// MagnumOpus: kod ukonceni prikazu (`exit-status`, jen server); pak
     /// obvykle `close_channel` a `channel_done`.
     pub fn exit_status(&mut self, chan: &ChanHandle, status: u32) -> Result<()> {

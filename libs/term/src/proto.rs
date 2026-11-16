@@ -80,10 +80,12 @@ pub enum ServerMsg {
     Item { session: u64, block: u64, item: Item },
     BlockEnd { session: u64, block: u64, ok: bool, duration: i64 },
     /// Vyzva: `choices` prazdne = ano/ne (`Answer`), jinak vyber (`Choose`).
-    Prompt { prompt: u64, question: String, detail: Item, choices: Vec<String> },
+    Prompt { prompt: u64, question: String, detail: Item, choices: Vec<String>, label: String },
     /// Dotaz na text (odpoved `Text`); `secret` = okno ho nezobrazi (heslo),
     /// `default` = predvyplneny text.
-    Ask { prompt: u64, question: String, secret: bool, default: String },
+    /// `label` = zdroj systemove vyzvy (napr. "Účty": vyzva sluzby uctu,
+    /// ne programu); okno ho kresli odlisene. Prazdne = bezna vyzva.
+    Ask { prompt: u64, question: String, secret: bool, default: String, label: String },
     /// Zmena polozky bloku na miste (pruh prubehu, stav): `index` = poradi
     /// polozky v bloku.
     ItemUpdate { session: u64, block: u64, index: u32, item: Item },
@@ -580,14 +582,15 @@ impl ServerMsg {
                 w.u8(*ok as u8);
                 w.i64(*duration);
             }
-            ServerMsg::Ask { prompt, question, secret, default } => {
+            ServerMsg::Ask { prompt, question, secret, default, label } => {
                 w.u8(15);
                 w.u64(*prompt);
                 w.str(question);
                 w.u8(*secret as u8);
                 w.str(default);
+                w.str(label);
             }
-            ServerMsg::Prompt { prompt, question, detail, choices } => {
+            ServerMsg::Prompt { prompt, question, detail, choices, label } => {
                 w.u8(6);
                 w.u64(*prompt);
                 w.str(question);
@@ -596,6 +599,7 @@ impl ServerMsg {
                 for c in choices {
                     w.str(c);
                 }
+                w.str(label);
             }
             ServerMsg::ItemUpdate { session, block, index, item } => {
                 w.u8(12);
@@ -684,10 +688,10 @@ impl ServerMsg {
                 for _ in 0..n {
                     choices.push(r.str()?);
                 }
-                ServerMsg::Prompt { prompt, question, detail, choices }
+                ServerMsg::Prompt { prompt, question, detail, choices, label: r.str()? }
             }
             14 => ServerMsg::Cwd { session: r.u64()?, cwd: r.str()? },
-            15 => ServerMsg::Ask { prompt: r.u64()?, question: r.str()?, secret: r.u8()? != 0, default: r.str()? },
+            15 => ServerMsg::Ask { prompt: r.u64()?, question: r.str()?, secret: r.u8()? != 0, default: r.str()?, label: r.str()? },
             13 => match taskproto::Reply::decode(&r.bytes()?) {
                 Ok(taskproto::Reply::Snapshot { tasks, .. }) => ServerMsg::Tasks { tasks },
                 _ => return Err(DecodeError),

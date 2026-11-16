@@ -19,6 +19,7 @@ sunset = { version = "0.6", default-features = false, features = ["mlkem", "allo
 ed25519-dalek = { version = "3", default-features = false }
 sha2 = { version = "0.11", default-features = false }
 base64ct = { version = "1.8", default-features = false, features = ["alloc"] }
+zeroize = { version = "1.8", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 sha2 = { version = "0.11" }

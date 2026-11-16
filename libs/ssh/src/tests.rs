@@ -146,3 +146,51 @@ fn spatne_a_nepodporovane_klice() {
     assert!(PublicKey::from_blob(&short).is_err());
     assert!(PublicKey::from_blob(&[0u8; 2000]).is_err());
 }
+
+
+/// Soukromy klic OpenSSH 9.x (`ssh-keygen -t ed25519 -N ""`), vygenerovany
+/// jen pro tento test.
+const PRIVATE: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACB7EhIo4RIjqW8DPAz7K0lIKiWaqPrPF9myB8nl4+2QvAAAAJBfq6LKX6ui
+ygAAAAtzc2gtZWQyNTUxOQAAACB7EhIo4RIjqW8DPAz7K0lIKiWaqPrPF9myB8nl4+2QvA
+AAAEBiqYOuHqsPulWOY2cgRUQfLsjB8DbA3AXrmAuNUxhhjnsSEijhEiOpbwM8DPsrSUgq
+JZqo+s8X2bIHyeXj7ZC8AAAAC3Zla3RvckB0ZXN0AQI=
+-----END OPENSSH PRIVATE KEY-----
+";
+const PRIVATE_PUB: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHsSEijhEiOpbwM8DPsrSUgqJZqo+s8X2bIHyeXj7ZC8 vektor@test";
+/// Tentyz format sifrovany heslem souboru (aes256-ctr + bcrypt).
+const PRIVATE_ENC: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABARXRGNb5
+rjSM6JFj9g3YW5AAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHNHHkXn/N5ECoMt
+ahejSqul9XYjHwV+QnPLuLOqTI59AAAAkA4KSaMqyjdhekQWQi6vjqY86dcWoVbZS5Q0xc
+sVzQj34icYSX1iVn8HwIqOfGWySrpTaMpm5ymXxW3ao8y3qQQ+pvRky8KPdECXlvVTqhXz
+dSsKXn/GStlaAj6USNDeDZBNr+erEo9Ti7RjaG4YqmcajwYkL4EiZYMpmp2sruhSvYK2Qi
+WvnAROjntT7setwQ==
+-----END OPENSSH PRIVATE KEY-----
+";
+
+#[test]
+fn soukromy_klic_openssh() {
+    use crate::keys::{ed25519_sign, parse_private};
+    let (seed, pk) = parse_private(PRIVATE).unwrap();
+    assert_eq!(pk.line(), PRIVATE_PUB);
+    assert_eq!(pk.comment, "vektor@test");
+    // Podpis seedem overi verejny klic.
+    let sig = ed25519_sign(&seed, b"data");
+    let mut blob = alloc::vec::Vec::new();
+    for part in [crate::keys::ED25519.as_bytes(), &sig[..]] {
+        blob.extend_from_slice(&(part.len() as u32).to_be_bytes());
+        blob.extend_from_slice(part);
+    }
+    pk.verify(b"data", &blob, false).unwrap();
+    // CRLF a okolni text nevadi.
+    let crlf = alloc::format!("komentar\r\n{}", PRIVATE.replace('\n', "\r\n"));
+    assert_eq!(parse_private(&crlf).unwrap().0, seed);
+    // Sifrovany soubor: zatim ne. Poskozeny: chyba, ne panika.
+    assert_eq!(parse_private(PRIVATE_ENC).err(), Some(abi::Error::NotSupported));
+    assert_eq!(parse_private("nic").err(), Some(abi::Error::InvalidArgs));
+    let broken = PRIVATE.replacen("BiqYOuHqsPulWOY", "BiqYOuHqsPulWOZ", 1);
+    assert_ne!(broken, PRIVATE);
+    assert!(parse_private(&broken).is_err());
+}

@@ -8,6 +8,7 @@ Logika služby účtů `accountd` bez závislosti na jádru (`no_std`, testy na 
 - Tajemství se nikdy nevypisují (ani do logu) a po zpracování se nulují (`zeroize`).
 - Čísla účtů se nerecyklují (viz `engine.rs`, metadata starší než účty).
 - Správa počítače bez roota; schválená rozhodnutí jsou v `docs/cs/ucty.md`.
+- Klíče klienta SSH (`src/client.rs`): seed obalený heslem (`wrap::kind::CLIENT_KEY`), ven ze služby nejde; změna hesla přebalí, reset nebo obnovovací klíč je zahodí; `maybe_rehash` se s nimi neprovede (změnil by materiál obalu).
 - SSH (`src/remote.rs`): přihlášení na dálku jen klíčem a jen s příznakem `REMOTE`; počítadla `RemoteGuard` jen v paměti, oddělená od místního přihlášení; identifikátor relace SSH jen jednou. Důvod odmítnutí se klientovi neprozradí.
 
 ## Testy

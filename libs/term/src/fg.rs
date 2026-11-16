@@ -67,6 +67,8 @@ pub struct LinePrompt {
     /// Dotaz na text (`ServerMsg::Ask`): skryty vstup a vychozi text.
     /// `None` = vyzva ano/ne nebo vyber (`ServerMsg::Prompt`).
     pub text: Option<(bool, String)>,
+    /// Zdroj systemove vyzvy ("Účty"); prazdne = bezna vyzva.
+    pub label: String,
     /// Cislo vyzvy v protokolu (az ji hlavni vlakno posle oknu).
     pub sent: Option<u64>,
     pub answer: Option<Answer>,
@@ -212,7 +214,7 @@ impl LineHost {
 
     /// Vyzva v okne a cekani na odpoved (nebo zruseni).
     fn ask(&mut self, question: &str, detail: Item, choices: &[String]) -> Answer {
-        self.wait_answer(LinePrompt { question: question.into(), detail, choices: choices.to_vec(), text: None, sent: None, answer: None })
+        self.wait_answer(LinePrompt { question: question.into(), detail, choices: choices.to_vec(), text: None, label: String::new(), sent: None, answer: None })
     }
 
     fn wait_answer(&mut self, prompt: LinePrompt) -> Answer {
@@ -248,7 +250,8 @@ impl LineHost {
     /// Obsluha beziciho programu az do jeho konce (viz `crate::program`).
     fn drive(&mut self, mut p: Box<dyn crate::program::Running>, name: &str, input: Value) -> Result<Value, ShError> {
         // Vstup z roury, jinak interaktivni: textova vyzva behem behu, ale
-        // az po `STDIN_PROMPT_NS` (rychle programy ji neukazou vubec).
+        // az po `STDIN_PROMPT_NS` (rychle programy ji neukazou vubec) nebo
+        // hned, kdyz program vypne ECHO (heslo).
         let mut interactive = matches!(input, Value::Nothing);
         let mut prompt_at = if interactive { (self.clock.now)().map(|t| t + STDIN_PROMPT_NS) } else { None };
         if !interactive {
@@ -262,33 +265,69 @@ impl LineHost {
         }
         let mut bufs = [Vec::new(), Vec::new()];
         let mut killed = false;
+        // Zobrazena vyzva vstupu programu: skryta? (`None` = zadna)
+        let mut shown: Option<bool> = None;
+        // Zobrazena systemova vyzva (sluzba uctu): jeji cislo.
+        let mut system: Option<u32> = None;
         let code = loop {
             if !killed && self.interrupted() {
                 p.kill();
                 killed = true;
             }
+            p.poll_control();
             for o in p.output() {
                 let i = o.stderr as usize;
                 for line in crate::program::lines(&mut bufs[i], &o.data) {
                     self.out_line(o.stderr, line);
                 }
             }
-            if let Some(at) = prompt_at
-                && (self.clock.now)().is_none_or(|t| t >= at)
+            // Systemova vyzva ma prednost (vstup programu ceka pod ni).
+            if system.is_none()
+                && let Some(sp) = p.system_prompt()
             {
-                prompt_at = None;
-                self.stdin_prompt(name);
+                let lp = LinePrompt {
+                    question: sp.question,
+                    detail: Item::Note(String::new()),
+                    choices: Vec::new(),
+                    text: sp.secret.then(|| (true, String::new())),
+                    label: String::from(crate::program::SYSTEM_LABEL),
+                    sent: None,
+                    answer: None,
+                };
+                self.sh.st.lock().prompt = Some(lp);
+                self.sh.main.notify();
+                system = Some(sp.id);
+                shown = None;
             }
-            if interactive && prompt_at.is_none() {
+            if let Some(id) = system {
                 let a = self.sh.st.lock().prompt.as_mut().and_then(|q| q.answer.take());
+                if let Some(a) = a {
+                    let (ok, text) = match a {
+                        Answer::Text(t) => (true, t),
+                        Answer::Yes(y) => (y, String::new()),
+                        Answer::Choice(c) => (c == 0, String::new()),
+                        Answer::Refused => (false, String::new()),
+                    };
+                    p.answer_system(id, ok, text);
+                    self.sh.st.lock().prompt = None;
+                    system = None;
+                }
+            } else if interactive {
+                let secret = !p.echo();
+                let due = prompt_at.is_none_or(|at| secret || (self.clock.now)().is_none_or(|t| t >= at));
+                if due && shown != Some(secret) {
+                    prompt_at = None;
+                    self.stdin_prompt(name, secret);
+                    shown = Some(secret);
+                }
+                let a = if shown.is_some() { self.sh.st.lock().prompt.as_mut().and_then(|q| q.answer.take()) } else { None };
                 match a {
                     None => {}
                     Some(Answer::Text(t)) => {
                         let mut d = t.into_bytes();
                         d.push(b'\n');
-                        if p.write_stdin(&d) {
-                            self.stdin_prompt(name);
-                        } else {
+                        shown = None;
+                        if !p.write_stdin(&d) {
                             interactive = false;
                             self.sh.st.lock().prompt = None;
                         }
@@ -296,6 +335,7 @@ impl LineHost {
                     Some(_) => {
                         // Vyzva zavrena (okno pryc, odmitnuti): konec vstupu.
                         interactive = false;
+                        shown = None;
                         self.sh.st.lock().prompt = None;
                         p.close_stdin();
                     }
@@ -306,7 +346,7 @@ impl LineHost {
             }
             self.nap(20_000_000);
         };
-        if interactive {
+        if shown.is_some() || system.is_some() {
             self.sh.st.lock().prompt = None;
         }
         for (i, b) in bufs.iter_mut().enumerate() {
@@ -334,13 +374,15 @@ impl LineHost {
         }
     }
 
-    /// Textova vyzva pro dalsi radek vstupu programu.
-    fn stdin_prompt(&mut self, name: &str) {
+    /// Textova vyzva pro dalsi radek vstupu programu (`secret` = program
+    /// vypnul ECHO: skryty vstup, do bloku ani logu nejde).
+    fn stdin_prompt(&mut self, name: &str, secret: bool) {
         let p = LinePrompt {
             question: alloc::format!("vstup pro {name} (Ctrl+C ukončí)"),
             detail: Item::Note(String::new()),
             choices: Vec::new(),
-            text: Some((false, String::new())),
+            text: Some((secret, String::new())),
+            label: String::new(),
             sent: None,
             answer: None,
         };
@@ -423,6 +465,7 @@ impl Host for LineHost {
             detail: Item::Note(String::new()),
             choices: Vec::new(),
             text: Some((secret, default.into())),
+            label: String::new(),
             sent: None,
             answer: None,
         };

@@ -4,13 +4,17 @@
 //! odpoved. Bezici program obsluhuje vlakno radku (`term::program`).
 
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::time::Duration;
 
 use launchproto::exec::{Exec, Mount, parse_reply};
 use libos::{Channel, Error, Process, time};
 use shlang::ShError;
-use term::program::{Output, Request, Running};
+use accountproto::Secret;
+use accountproto::agent::{Prompt, PromptAnswer};
+use term::program::{Output, Request, Running, SystemPrompt};
+use ttyproto::{Request as TtyRequest, Size, Tty};
 
 /// Kanal sluzby relace (`None` = relace ho nedostala: konzole systemu,
 /// testy bez prihlaseni).
@@ -36,12 +40,23 @@ pub fn start(req: &Request) -> Option<Result<Box<dyn Running>, ShError>> {
         Ok(m) => m,
         Err(err) => return fail(err, "příliš mnoho argumentů"),
     };
-    let pairs = (|| -> Result<_, Error> { Ok((Channel::create()?, Channel::create()?, Channel::create()?, Channel::create()?)) })();
-    let ((back, back_t), (in_w, in_t), (out_r, out_t), (err_r, err_t)) = match pairs {
+    let pairs = (|| -> Result<_, Error> {
+        Ok((Channel::create()?, Channel::create()?, Channel::create()?, Channel::create()?, Channel::create()?, Channel::create()?))
+    })();
+    let ((back, back_t), (in_w, in_t), (out_r, out_t), (err_r, err_t), (tty, tty_t), (prompt, prompt_t)) = match pairs {
         Ok(p) => p,
         Err(err) => return fail(err, "kanály"),
     };
-    let hs = alloc::vec![back_t.into_handle(), in_t.into_handle(), out_t.into_handle(), err_t.into_handle()];
+    // Ridici kanal terminalu programu a systemova vyzva (sluzba uctu, jen
+    // u klienta SSH; init ji jinak zahodi).
+    let hs = alloc::vec![
+        back_t.into_handle(),
+        in_t.into_handle(),
+        out_t.into_handle(),
+        err_t.into_handle(),
+        tty_t.into_handle(),
+        prompt_t.into_handle()
+    ];
     if let Err(err) = svc.write(&msg, hs) {
         return fail(err, "služba spouštění");
     }
@@ -62,7 +77,18 @@ pub fn start(req: &Request) -> Option<Result<Box<dyn Running>, ShError>> {
         return fail(Error::Corrupted, "chybí proces");
     };
     let control = hs.next().map(Channel::from_handle);
-    Some(Ok(Box::new(Program { process, _control: control, stdin: Some(in_w), out: [Some(out_r), Some(err_r)], code: None })))
+    let ttys = Tty::new(Size { rows: 24, cols: 80, xpixel: 0, ypixel: 0 });
+    Some(Ok(Box::new(Program {
+        process,
+        _control: control,
+        stdin: Some(in_w),
+        out: [Some(out_r), Some(err_r)],
+        code: None,
+        tty: Some(tty),
+        ttys,
+        prompt: Some(prompt),
+        asked: None,
+    })))
 }
 
 struct Program {
@@ -73,6 +99,13 @@ struct Program {
     /// stdout, stderr (`None` = zavreny a vycerpany).
     out: [Option<Channel>; 2],
     code: Option<i64>,
+    /// Ridici kanal terminalu programu a jeho stav (ECHO, velikost).
+    tty: Option<Channel>,
+    ttys: Tty,
+    /// Systemova vyzva od sluzby uctu (program ji nevidi).
+    prompt: Option<Channel>,
+    /// Prijata a jeste nezobrazena vyzva.
+    asked: Option<SystemPrompt>,
 }
 
 impl Running for Program {
@@ -128,5 +161,57 @@ impl Running for Program {
     fn kill(&mut self) {
         let _ = self.process.kill();
         self.stdin = None;
+    }
+
+    fn poll_control(&mut self) {
+        if let Some(ch) = &self.tty {
+            loop {
+                match ch.try_read() {
+                    Ok(m) => {
+                        let out = TtyRequest::decode(&m.data).and_then(|r| self.ttys.handle(&r));
+                        // Udalost zmeny velikosti zatim neni (okno shellu
+                        // velikost programu nemeni): WATCH_SIZE bez handlu.
+                        let _ = ch.write(&ttyproto::encode_reply(out), Vec::new());
+                    }
+                    Err(Error::ShouldWait) => break,
+                    Err(_) => {
+                        self.tty = None;
+                        break;
+                    }
+                }
+            }
+        }
+        if self.asked.is_none()
+            && let Some(ch) = &self.prompt
+        {
+            match ch.try_read() {
+                Ok(m) => {
+                    self.asked = match Prompt::decode(&m.data) {
+                        Ok(Prompt::Secret { id, question }) => Some(SystemPrompt { id, question, secret: true }),
+                        Ok(Prompt::Confirm { id, question }) => Some(SystemPrompt { id, question, secret: false }),
+                        Err(_) => None,
+                    };
+                }
+                Err(Error::ShouldWait) => {}
+                Err(_) => self.prompt = None,
+            }
+        }
+    }
+
+    fn echo(&self) -> bool {
+        self.ttys.mode.lflag & ttyproto::lflag::ECHO != 0
+    }
+
+    fn system_prompt(&mut self) -> Option<SystemPrompt> {
+        self.asked.take()
+    }
+
+    fn answer_system(&mut self, id: u32, ok: bool, text: String) {
+        let Some(ch) = &self.prompt else { return };
+        let mut a = PromptAnswer { id, ok, text: Secret::from(text.as_str()) }.encode();
+        let _ = ch.write(&a, Vec::new());
+        zeroize::Zeroize::zeroize(&mut a);
+        let mut t = text;
+        zeroize::Zeroize::zeroize(&mut t);
     }
 }
