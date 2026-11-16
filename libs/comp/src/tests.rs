@@ -31,6 +31,7 @@ mod owner;
 mod launcher;
 #[cfg(feature = "dev-mode")]
 mod devmode;
+mod remote;
 mod popover;
 mod secure;
 mod shots;

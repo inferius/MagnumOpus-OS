@@ -135,6 +135,8 @@ prepinace:
                    hostiteli (simulace) a v QEMU sada ovladace z manifestu
                    jen pro nej; bez kontroly jader ostatnich architektur
                    a dokumentace (rychla smycka vyvoje ovladace)
+  --ssh            (run) port 2222 hostitele -> 22 hosta (ssh -p 2222
+                   uzivatel@127.0.0.1; sshd zapnout v hostu `sshd enable`)
   --net-online     (test) i testy proti skutecne siti hostitele (resolver
                    hostitele pres slirp); bez nej jen lokalni servery
   --no-power       (test) bez zvlastnich behu testu napajeni (vypnuti
@@ -187,6 +189,8 @@ pub struct Options {
     test_repeat: u32,
     /// `--update-shots`: prepsat referencni snimky vzhledu `libs/ui`.
     update_shots: bool,
+    /// `--ssh` (run): presmerovani 2222 hostitele na port 22 hosta.
+    ssh_forward: bool,
     /// `--net-online`: i testy proti skutecne siti hostitele.
     net_online: bool,
     /// Backend zvuku QEMU (`--audio`); prazdne = test wav, beh none.
@@ -310,6 +314,7 @@ fn run_cli() -> Result<()> {
         test_repeat: 1,
         update_shots: false,
         net_online: false,
+        ssh_forward: false,
         audio: String::new(),
         test_driver: None,
         edu: false,
@@ -376,6 +381,7 @@ fn run_cli() -> Result<()> {
                 opts.test_repeat = value.to_string_lossy().parse().map_err(|_| "--repeat ocekava cislo")?;
             }
             Some("--net-online") => opts.net_online = true,
+            Some("--ssh") => opts.ssh_forward = true,
             Some("--update-shots") => opts.update_shots = true,
             Some("--dir") => {
                 let value = args.next().ok_or("--dir ocekava slozku")?;
@@ -449,6 +455,11 @@ fn run_cli() -> Result<()> {
             // Ucty: rychly profil Argon2id pro QEMU a vyvojove automaticke
             // prihlaseni (jen `run`; `image` pro uzivatele je nema).
             opts.extra_initfs.push((String::from("accounts-qemu"), b"1".to_vec()));
+            // SSH z hostitele (docs/cs/ssh.md, Pripojeni z Windows).
+            if opts.ssh_forward {
+                opts.hostfwd = Some(String::from("tcp:127.0.0.1:2222-:22"));
+                println!("xtask: SSH: ssh -p 2222 <uzivatel>@127.0.0.1 (v hostu sshd enable, remote-access on, ssh-key add)");
+            }
             opts.extra_initfs.push((String::from("accounts-dev"), b"1".to_vec()));
             opts.edu = edu_available(&opts);
             let artifacts = build(&opts)?;

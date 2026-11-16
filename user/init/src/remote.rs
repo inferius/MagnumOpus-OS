@@ -44,6 +44,7 @@ pub(crate) fn open(id: u64, uid: u64, name: String, peer: String, fs: FsClient, 
     let mut out = id.to_le_bytes().to_vec();
     out.extend_from_slice(&ticket);
     REMOTE.lock().push(RemoteSession { id, uid, name, peer, fs, own, job, ticket, claimed: false, started: libos::time::now() });
+    to_bar();
     Ok(out)
 }
 
@@ -72,6 +73,7 @@ pub fn close(session: u64) -> bool {
     if let Err(e) = s.job.kill(libos::abi::process::EXIT_KILLED) {
         println!("init: job vzdalene relace {}: {e}", s.id);
     }
+    to_bar();
     let secs = libos::time::now().saturating_sub(s.started) / 1_000_000_000;
     println!("init: vzdalena relace {} uzivatele {} z {} skoncila po {secs} s", s.id, s.uid, s.peer);
     true
@@ -93,6 +95,18 @@ pub fn job(session: u64) -> Result<Job> {
 
 pub fn connect(session: u64) -> Result<FsClient> {
     REMOTE.lock().iter().find(|s| s.id == session).ok_or(Error::NotFound)?.fs.connect()
+}
+
+/// Indikator v liste (pilulka v liste, prikaz `remote`
+/// kompozitoru). Bez kompozitoru nic.
+fn to_bar() {
+    let (_, who) = summary();
+    let cmd = alloc::format!("{} {}", guiproto::control::REMOTE, who.join(" "));
+    if let Some(g) = crate::gui::GUI.lock().as_ref()
+        && let Err(e) = g.command(cmd.trim_end().as_bytes(), alloc::vec::Vec::new())
+    {
+        println!("init: indikator vzdaleneho pristupu: {e}");
+    }
 }
 
 /// Pocet vzdalenych relaci a adresy (indikator "pripojen vzdalene").

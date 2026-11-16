@@ -48,6 +48,9 @@ pub const THEME: &str = "theme";
 /// kompozitor zmenu z listy na kanal [`LAUNCHER`] jako
 /// `appearance user <uid> <slova>` (init ji ulozi).
 pub const APPEARANCE: &str = "appearance";
+/// `remote [uzivatel@adresa ...]`: vzdalene relace SSH (pilulka v liste;
+/// bez slov = zadna). Posila init pri kazde zmene (`docs/cs/ssh.md`).
+pub const REMOTE: &str = "remote";
 /// `sources [net] [audio]`: kanaly pro stav v liste (handly ve stejnem
 /// poradi): relace site jen s pravem `INFO`, kanal zvukove sluzby.
 pub const SOURCES: &str = "sources";
