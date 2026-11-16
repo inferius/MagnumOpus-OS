@@ -262,6 +262,19 @@ impl<'a> Runner<'a, server::Server> {
         self.conn.set_auth_methods(password, pubkey)
     }
 
+    /// MagnumOpus: viz `Conn::fetch_servpubkey_parts`.
+    pub(crate) fn fetch_servpubkey_parts(&self, buf: &mut [u8]) -> Result<(usize, usize, usize)> {
+        let (payload, _seq) = self.traf_in.payload().trap()?;
+        self.conn.fetch_servpubkey_parts(payload, buf)
+    }
+
+    /// MagnumOpus: podpis klice pri prihlaseni overuje aplikace; sunset
+    /// ho neoveruje a `ServPubkeyAuth::parts` da podepsanou zpravu. Volat
+    /// pred prvnim prihlasenim.
+    pub fn set_external_pubkey_verify(&mut self, on: bool) -> Result<()> {
+        self.conn.set_external_verify(on)
+    }
+
     pub(crate) fn auth_methods(&self) -> Result<(bool, bool)> {
         let auth = &self.conn.server()?.auth;
         Ok((auth.method_password, auth.method_pubkey))
@@ -853,6 +866,14 @@ impl<'a, CS: CliServ> Runner<'a, CS> {
         let (payload, _seq) = self.traf_in.payload().trap()?;
         let p = self.conn.packet(payload)?;
         self.conn.channels.fetch_servcommand(&p)
+    }
+
+    /// MagnumOpus: viz `Channels::fetch_pty`.
+    pub(crate) fn fetch_pty(&self) -> Result<(u32, u32, TextString<'_>)> {
+        Self::check_chanreq(&self.resume_event);
+        let (payload, _seq) = self.traf_in.payload().trap()?;
+        let p = self.conn.packet(payload)?;
+        self.conn.channels.fetch_pty(&p)
     }
 
     pub(crate) fn fetch_env_name(&self) -> Result<TextString<'_>> {

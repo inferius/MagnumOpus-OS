@@ -676,6 +676,35 @@ impl Conn<Server> {
         }
     }
 
+    /// MagnumOpus: casti prihlaseni klicem pro overeni aplikaci: do `buf`
+    /// zapise blob klice, podepsanou zpravu (RFC 4252, 7) a blob podpisu
+    /// za sebou; vraci jejich delky. Bez podpisu (dotaz na klic) je delka
+    /// zpravy i podpisu 0.
+    pub(crate) fn fetch_servpubkey_parts(
+        &self,
+        payload: &[u8],
+        buf: &mut [u8],
+    ) -> Result<(usize, usize, usize)> {
+        let mut packet = self.packet(payload)?;
+        let Packet::UserauthRequest(p) = &mut packet else { return Error::bug() };
+        let AuthMethod::PubKey(m) = &mut p.method else { return Error::bug() };
+        let sig = m.sig.take();
+        m.force_sig = sig.is_some();
+        let kl = sshwire::write_ssh(buf, &m.pubkey.0)?;
+        let Some(sig) = sig else { return Ok((kl, 0, 0)) };
+        let sess_id = self.sess_id.as_ref().trap()?;
+        let msg = auth::AuthSigMsg::new(p.clone(), sess_id);
+        let ml = sshwire::write_ssh(&mut buf[kl..], &msg)?;
+        let sl = sshwire::write_ssh(&mut buf[kl + ml..], &sig.0)?;
+        Ok((kl, ml, sl))
+    }
+
+    /// MagnumOpus: podpis klice overuje aplikace (`ServAuth::external_verify`).
+    pub(crate) fn set_external_verify(&mut self, on: bool) -> Result<()> {
+        self.mut_server()?.auth.external_verify = on;
+        Ok(())
+    }
+
     pub(crate) fn resume_servauth(
         &mut self,
         allow: bool,

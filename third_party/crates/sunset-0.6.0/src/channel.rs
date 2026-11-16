@@ -565,6 +565,18 @@ impl Channels {
         }
     }
 
+    /// MagnumOpus: velikost terminalu z pozadavku `pty-req` (sloupce,
+    /// radky, jmeno terminalu).
+    pub fn fetch_pty<'p>(&self, p: &Packet<'p>) -> Result<(u32, u32, TextString<'p>)> {
+        match p {
+            Packet::ChannelRequest(ChannelRequest {
+                req: ChannelReqType::Pty(packets::PtyReq { cols, rows, term, .. }),
+                ..
+            }) => Ok((*cols, *rows, *term)),
+            _ => Error::bug(),
+        }
+    }
+
     pub fn fetch_env_name<'p>(&self, p: &Packet<'p>) -> Result<TextString<'p>> {
         match p {
             Packet::ChannelRequest(ChannelRequest {
@@ -934,6 +946,10 @@ impl Channel {
             ChannelReqType::Pty(_) => {
                 Ok(DispatchEvent::ServEvent(ServEventId::SessionPty { num }))
             }
+            // MagnumOpus: zmena velikosti okna klienta (bez odpovedi).
+            ChannelReqType::WinChange(w) => Ok(DispatchEvent::ServEvent(
+                ServEventId::SessionWinch { num, cols: w.cols, rows: w.rows },
+            )),
             ChannelReqType::Environment(_) => {
                 Ok(DispatchEvent::ServEvent(ServEventId::Environment { num }))
             }

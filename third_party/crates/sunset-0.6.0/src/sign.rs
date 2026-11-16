@@ -100,6 +100,7 @@ impl SigType {
     fn fuzz_fake_verify(&self, sig: &Signature) -> Result<()> {
         let b = match &sig {
             Signature::Ed25519(e) => e.sig.0,
+            Signature::SkEd25519(e) => e.sig.0,
             #[cfg(feature = "rsa")]
             Signature::RSA(e) => e.sig.0,
             Signature::Unknown(_) => panic!(),
@@ -309,6 +310,8 @@ impl TryFrom<Signature<'_>> for OwnedSig {
                 })?;
                 Ok(OwnedSig::ECDSA256 { r, s })
             }
+            // MagnumOpus: podpis FIDO sunset sam nevytvari ani neoveruje.
+            Signature::SkEd25519(_) => Err(Error::UnknownMethod { kind: "signature" }),
             Signature::Unknown(u) => {
                 debug!("Unknown {u} signature");
                 Err(Error::UnknownMethod { kind: "signature" })
@@ -440,7 +443,7 @@ impl SignKey {
             #[cfg(feature = "ecdsa256")]
             PubKey::ECDSA256(k) => Ok(Self::AgentECDSA256(k.key)),
 
-            PubKey::Unknown(_) => Err(Error::msg("Unsupported agent key")),
+            PubKey::SkEd25519(_) | PubKey::Unknown(_) => Err(Error::msg("Unsupported agent key")),
         }
     }
 

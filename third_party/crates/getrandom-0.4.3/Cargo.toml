@@ -162,4 +162,6 @@ check-cfg = [
     "cfg(getrandom_test_netbsd_fallback)",
     'cfg(target_os, values("cygwin"))',
     'cfg(target_os, values("motor"))',
+    # MagnumOpus: backend pro target_os = "magnumopus".
+    'cfg(target_os, values("magnumopus"))',
 ]

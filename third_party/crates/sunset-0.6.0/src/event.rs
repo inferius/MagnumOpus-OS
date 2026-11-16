@@ -301,6 +301,10 @@ pub enum ServEvent<'g, 'a> {
     /// Note: input strings are not sanitised.
     SessionEnv(ServEnvironmentRequest<'g, 'a>),
 
+    /// MagnumOpus: klient zmenil velikost okna (`window-change`); nic se
+    /// neodpovida.
+    SessionWinch { num: ChanNum, cols: u32, rows: u32 },
+
     /// The SSH session is no longer running
     Defunct,
 
@@ -326,6 +330,7 @@ impl Debug for ServEvent<'_, '_> {
             Self::SessionSubsystem(_) => "SessionSubsystem",
             Self::SessionPty(_) => "SessionPty",
             Self::SessionEnv(_) => "Environment",
+            Self::SessionWinch { .. } => "SessionWinch",
             Self::Defunct => "Defunct",
             Self::PollAgain => "PollAgain",
         };
@@ -488,6 +493,17 @@ impl<'g, 'a> ServPubkeyAuth<'g, 'a> {
     /// Retrieve the public key presented by a client.
     pub fn pubkey(&self) -> Result<PubKey<'_>> {
         self.runner.fetch_servpubkey()
+    }
+
+    /// MagnumOpus: je to prihlaseni s podpisem (ne jen dotaz na klic)?
+    pub fn has_signature(&self) -> bool {
+        self.real_sig
+    }
+
+    /// MagnumOpus: blob klice, podepsana zprava a blob podpisu za sebou
+    /// v `buf` (delky); pro overeni aplikaci pri `set_external_pubkey_verify`.
+    pub fn parts(&self, buf: &mut [u8]) -> Result<(usize, usize, usize)> {
+        self.runner.fetch_servpubkey_parts(buf)
     }
 
     /// Accept the presented public key.
@@ -810,7 +826,12 @@ impl<'g, 'a> ServPtyRequest<'g, 'a> {
         Self { runner, num, done: false }
     }
 
-    // TODO return PTY information to the caller
+    /// MagnumOpus: velikost terminalu klienta (sloupce, radky) a jeho jmeno
+    /// (`TERM`, napr. `xterm-256color`).
+    pub fn size(&self) -> Result<(u32, u32, &str)> {
+        let (c, r, t) = self.runner.fetch_pty()?;
+        Ok((c, r, t.to_str()?))
+    }
 
     /// Indicate that the request succeeded.
     ///
@@ -945,6 +966,12 @@ pub(crate) enum ServEventId {
     Environment {
         num: ChanNum,
     },
+    // MagnumOpus: zmena velikosti okna.
+    SessionWinch {
+        num: ChanNum,
+        cols: u32,
+        rows: u32,
+    },
     #[expect(unused)]
     Defunct,
     // TODO:
@@ -1006,6 +1033,9 @@ impl ServEventId {
                 debug_assert!(matches!(p, Some(Packet::ChannelRequest(_))));
                 Ok(ServEvent::SessionEnv(ServEnvironmentRequest::new(runner, num)))
             }
+            Self::SessionWinch { num, cols, rows } => {
+                Ok(ServEvent::SessionWinch { num, cols, rows })
+            }
             Self::Defunct => Ok(ServEvent::Defunct),
         }
     }
@@ -1014,7 +1044,7 @@ impl ServEventId {
     // Used for internal correctness checks.
     pub(crate) fn needs_resume(&self) -> bool {
         match self {
-            Self::Defunct | Self::Authenticated => false,
+            Self::Defunct | Self::Authenticated | Self::SessionWinch { .. } => false,
             Self::Hostkeys
             | Self::FirstAuth
             | Self::PasswordAuth

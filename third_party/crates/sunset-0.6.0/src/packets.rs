@@ -328,6 +328,10 @@ pub enum PubKey<'a> {
     #[sshwire(variant = SSH_NAME_ED25519)]
     Ed25519(Ed25519PubKey),
 
+    // MagnumOpus: klic FIDO (jen rozbor a kodovani, podpis overuje aplikace).
+    #[sshwire(variant = SSH_NAME_SK_ED25519)]
+    SkEd25519(SkEd25519PubKey<'a>),
+
     #[cfg(feature = "rsa")]
     #[sshwire(variant = SSH_NAME_RSA)]
     RSA(RSAPubKey),
@@ -345,6 +349,7 @@ impl PubKey<'_> {
     pub fn algorithm_name(&self) -> Result<&str, &Unknown<'_>> {
         match self {
             PubKey::Ed25519(_) => Ok(SSH_NAME_ED25519),
+            PubKey::SkEd25519(_) => Ok(SSH_NAME_SK_ED25519),
             #[cfg(feature = "rsa")]
             PubKey::RSA(_) => Ok(SSH_NAME_RSA),
             #[cfg(feature = "ecdsa256")]
@@ -408,6 +413,8 @@ impl TryFrom<&PubKey<'_>> for ssh_key::PublicKey {
                 Ok(k.into())
             }
 
+            // MagnumOpus: klic FIDO se pres ssh_key neprevadi.
+            PubKey::SkEd25519(_) => Err(Error::msg("Unsupported OpenSSH key")),
             PubKey::Unknown(u) => {
                 trace!("unsupported {u}");
                 Err(Error::msg("Unsupported OpenSSH key"))
@@ -420,6 +427,14 @@ impl TryFrom<&PubKey<'_>> for ssh_key::PublicKey {
 #[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
 pub struct Ed25519PubKey {
     pub key: Blob<[u8; 32]>,
+}
+
+/// MagnumOpus: verejny klic `sk-ssh-ed25519@openssh.com` (klic, aplikace).
+#[derive(Debug, Clone, PartialEq, SSHEncode, SSHDecode)]
+#[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
+pub struct SkEd25519PubKey<'a> {
+    pub key: Blob<[u8; 32]>,
+    pub application: BinString<'a>,
 }
 
 #[cfg(feature = "rsa")]
@@ -551,6 +566,10 @@ pub enum Signature<'a> {
     #[sshwire(variant = SSH_NAME_ED25519)]
     Ed25519(Ed25519Sig<'a>),
 
+    // MagnumOpus: podpis klice FIDO (podpis, priznaky, citac).
+    #[sshwire(variant = SSH_NAME_SK_ED25519)]
+    SkEd25519(SkEd25519Sig<'a>),
+
     #[cfg(feature = "rsa")]
     #[sshwire(variant = SSH_NAME_RSA_SHA256)]
     RSA(RSASig<'a>),
@@ -568,6 +587,7 @@ impl<'a> Signature<'a> {
     pub fn algorithm_name(&self) -> Result<&'a str, &Unknown<'a>> {
         match self {
             Signature::Ed25519(_) => Ok(SSH_NAME_ED25519),
+            Signature::SkEd25519(_) => Ok(SSH_NAME_SK_ED25519),
             #[cfg(feature = "rsa")]
             Signature::RSA(_) => Ok(SSH_NAME_RSA_SHA256),
             #[cfg(feature = "ecdsa256")]
@@ -585,6 +605,7 @@ impl<'a> Signature<'a> {
     pub fn sig_name_for_pubkey(pubkey: &PubKey) -> Result<&'static str> {
         match pubkey {
             PubKey::Ed25519(_) => Ok(SSH_NAME_ED25519),
+            PubKey::SkEd25519(_) => Ok(SSH_NAME_SK_ED25519),
             #[cfg(feature = "rsa")]
             PubKey::RSA(_) => Ok(SSH_NAME_RSA_SHA256),
             #[cfg(feature = "ecdsa256")]
@@ -599,6 +620,8 @@ impl<'a> Signature<'a> {
     pub fn sig_type(&self) -> Result<SigType> {
         match self {
             Signature::Ed25519(_) => Ok(SigType::Ed25519),
+            // MagnumOpus: sunset podpis FIDO neoveruje (jen aplikace).
+            Signature::SkEd25519(_) => Err(Error::UnknownMethod { kind: "signature" }),
             #[cfg(feature = "rsa")]
             Signature::RSA(_) => Ok(SigType::RSA),
             #[cfg(feature = "ecdsa256")]
@@ -634,6 +657,15 @@ impl<'a> From<&'a OwnedSig> for Signature<'a> {
 #[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
 pub struct Ed25519Sig<'a> {
     pub sig: BinString<'a>,
+}
+
+/// MagnumOpus: podpis `sk-ssh-ed25519@openssh.com` (`PROTOCOL.u2f`).
+#[derive(Debug, SSHEncode, SSHDecode, Clone)]
+#[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
+pub struct SkEd25519Sig<'a> {
+    pub sig: BinString<'a>,
+    pub flags: u8,
+    pub counter: u32,
 }
 
 #[cfg(feature = "rsa")]

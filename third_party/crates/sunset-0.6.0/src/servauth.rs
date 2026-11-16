@@ -36,6 +36,10 @@ pub(crate) struct ServAuth {
     ///
     /// Enabled by default
     pub method_pubkey: bool,
+
+    /// MagnumOpus: podpis klice overuje aplikace (sluzba uctu mimo proces
+    /// spojeni), sunset ho neoveruje a aplikaci da podepsanou zpravu.
+    pub external_verify: bool,
 }
 
 impl Default for ServAuth {
@@ -46,6 +50,7 @@ impl Default for ServAuth {
             username: None,
             method_password: true,
             method_pubkey: true,
+            external_verify: false,
         }
     }
 }
@@ -155,7 +160,8 @@ impl ServAuth {
 
         if let Some(ref sig) = sig {
             // Real signature, validate it.
-            if !self.verify_sig(&p, &sig.0, sess_id) {
+            // MagnumOpus: s external_verify ho overi aplikace (allow()).
+            if !self.external_verify && !self.verify_sig(&p, &sig.0, sess_id) {
                 // Auth failure. OK to return early here since
                 // this doesn't rely on any particular username, no concerns
                 // about timing leaks.
