@@ -30,4 +30,5 @@ pub const MEDIA_HOT: &str = "8";
 pub const MEDIA_SHARE: &str = "5";
 
 /// Porty, ktere test pripojuje nebo obsazuje (kontrola kolizi v testech).
+#[cfg(test)]
 pub const TEST_PORTS: &[&str] = &[USB_TEST_HUB, MEDIA_FAT, MEDIA_EXFAT, MEDIA_NTFS, MEDIA_HOT];
