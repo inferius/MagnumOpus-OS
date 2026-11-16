@@ -23,6 +23,7 @@ pub const TESTS: &[Test] = &[
     ("futex: wait, wake, vyprseni, neznama operace", futex),
     ("registr vlakna: vlastni hodnota kazdeho vlakna", thread_pointer),
     ("hello-std: argumenty, vlakna, TLS, soubory", hello_std),
+    ("uklid: pracovni soubory sady", uklid),
 ];
 
 /// Hodnota se nezmenila -> spani do terminu; jina hodnota -> hned zpet;
@@ -266,4 +267,10 @@ fn hello_std(s: &Startup) -> TestResult {
     run.expect("hello-std", &["args_env", "time", "hashmap", "threads", "files"])?;
     check!(run.stdout.contains("argumenty: alfa beta"), "argumenty ve vystupu");
     Ok(())
+}
+
+/// Posledni test sady: smaze pracovni slozka programu std (`state.rs` jinak sadu
+/// oznaci za selhanou; bezi i po chybe drivejsich testu).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/std-test"])
 }

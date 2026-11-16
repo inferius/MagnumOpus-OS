@@ -351,6 +351,16 @@ pub fn uses_framebuffer() -> bool {
     FBDISPLAY.lock().is_some()
 }
 
+/// Kompozitor `shared` skoncil (testy GUI): konec displeje se vrati do
+/// [`DISPLAY`], aby ho dalsi [`start`] pouzil znovu. Bez toho zanikne
+/// posledni konec klienta, ovladac displeje skonci a dalsi start si vezme
+/// jiny nativni ovladac (`virtio-gpu`, pak `bochs-display`).
+pub fn park_display(shared: &CompdRef) {
+    if let Ok(ch) = shared.lock().display.give() {
+        *DISPLAY.lock() = Some(ch);
+    }
+}
+
 /// Spusti prvni instanci kompozitoru nad displejem z [`display`] a pocka
 /// na jeji start (mimo supervisor: start systemu, testy).
 pub fn start(startup: &Startup) -> Result<Gui> {

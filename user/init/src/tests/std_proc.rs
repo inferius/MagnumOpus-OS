@@ -18,7 +18,7 @@ use super::std_app::run_std_app;
 use super::{Test, TestResult, devices, fail};
 use crate::check;
 
-pub const TESTS: &[Test] = &[("std-proc: Command, roury, stdio, kody, sit, registr", std_proc)];
+pub const TESTS: &[Test] = &[("std-proc: Command, roury, stdio, kody, sit, registr", std_proc), ("uklid: pracovni soubory sady", uklid)];
 
 fn std_proc(s: &Startup) -> TestResult {
     let Some(p) = ports(s, "std-proc")? else {
@@ -70,4 +70,10 @@ fn std_proc(s: &Startup) -> TestResult {
     check!(run.stdout.contains("zdedeny vystup\n"), "zdedeny stdout potomka chybi");
     check!(!run.stdout.contains("zahozeno"), "Stdio::null nezahodil vystup");
     Ok(())
+}
+
+/// Posledni test sady: smaze pracovni slozka programu std (`state.rs` jinak sadu
+/// oznaci za selhanou; bezi i po chybe drivejsich testu).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/std-test"])
 }

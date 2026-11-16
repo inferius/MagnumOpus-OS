@@ -24,6 +24,7 @@ pub const TESTS: &[Test] = &[
     ("dynamicke linkovani: knihovny z disku sdili sablony, initfs bez relace je nenajde", disk_shares_and_needs_session),
     ("dynamicke linkovani: launchd preda zavadeci relaci FS programu ze souboru", via_launchd),
     ("dynamicke linkovani: launchd da JIT jen s [app] jit pod jobem s GRANT", launchd_jit_gate),
+    ("uklid: pracovni soubory sady", uklid),
 ];
 
 const PROGRAM: &str = "/dl4c/bin/dltest-origin";
@@ -180,4 +181,10 @@ fn launch(s: &Startup, fs: &FsClient, job: &Job) -> Result<Result<i64, (Error, S
             Err(e) => return Err(fail("konec programu", e)),
         }
     }
+}
+
+/// Posledni test sady: smaze knihovny DL-4c zkopirovane na disk (`state.rs` jinak sadu
+/// oznaci za selhanou; bezi i po chybe drivejsich testu).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/dl4c"])
 }

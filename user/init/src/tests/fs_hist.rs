@@ -23,6 +23,7 @@ pub const TESTS: &[Test] = &[
     ("seznam datasetu (DATASETS): prava a puvod klonu", super::fs_datasets::datasets),
     ("smazani datasetu s namapovanym souborem: okno na 0", super::fs_datasets::mapped_delete),
     ("kontrola konzistence po historii", check_clean),
+    ("uklid: pracovni soubory sady", uklid),
 ];
 
 /// Druhy start sluzby uctu: dataset uz existuje (`ALREADY_EXISTS`) a dalsi
@@ -293,4 +294,10 @@ fn restricted_session(_: &Startup) -> TestResult {
     f.remove("/f2-omez/moje.txt").map_err(|e| fail("uklid", e))?;
     f.remove("/f2-omez").map_err(|e| fail("uklid", e))?;
     Ok(())
+}
+
+/// Posledni test sady: smaze soubory testu historie (`state.rs` jinak sadu
+/// oznaci za selhanou; bezi i po chybe drivejsich testu).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/f2-attr.txt", "/f2-ls", "/f2-zurnal.txt"])
 }

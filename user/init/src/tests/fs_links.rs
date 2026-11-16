@@ -11,7 +11,7 @@ use libos::{Error, Startup};
 use super::{Test, TestResult, devices, fail};
 use crate::check_eq;
 
-pub const TESTS: &[Test] = &[("symbolicke odkazy: nasledovani, smycka, prava, jmenny prostor relace", links)];
+pub const TESTS: &[Test] = &[("symbolicke odkazy: nasledovani, smycka, prava, jmenny prostor relace", links), ("uklid: pracovni soubory sady", uklid)];
 
 const ALICE: u64 = 1000;
 const BOB: u64 = 1001;
@@ -97,4 +97,10 @@ fn links(_: &Startup) -> TestResult {
         let _ = a.remove(p);
     }
     Ok(())
+}
+
+/// Posledni test sady: smaze odkazy a jejich cile (`state.rs` jinak sadu
+/// oznaci za selhanou; bezi i po chybe drivejsich testu).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/odkazy", "/tajne"])
 }

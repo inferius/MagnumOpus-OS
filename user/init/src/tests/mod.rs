@@ -273,13 +273,15 @@ pub fn run_all(startup: &Startup) -> usize {
                     println!("[pomaly] {suite}: {name}: {ms} ms");
                 }
             }
-            // Co sada nechala (soubory, opravneni, procesy, media).
-            let after = state::settled(&before);
-            let left = state::diff(&before, &after);
+            // Co sada nechala (soubory, opravneni, procesy, media): mimo
+            // vyjimky s duvodem (`state::EXCEPTIONS`) selhani sady.
+            let after = state::settled(suite, &before);
+            let left = state::diff(suite, &before, &after);
             if !left.is_empty() {
-                println!("init: stav po sade {suite}: {}", left.join("; "));
+                println!("[SELHAL] {suite}: stav po sade: {}", left.join("; "));
+                failed += 1;
             }
-            let removed = state::cleanup(&before, &after);
+            let removed = state::cleanup(suite, &before, &after);
             if !removed.is_empty() {
                 println!("init: uklid po sade {suite}: smazano {removed:?}");
             }

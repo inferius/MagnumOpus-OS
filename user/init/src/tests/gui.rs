@@ -51,6 +51,7 @@ pub const TESTS: &[Test] = &[
     ("role Gui: odvolani identity zavre okna i potomkum", super::gui_role::revoke_reaches_children),
     // Posledni: kompozitor sady se ukonci.
     ("compd: pad kompozitoru uprostred prace, okno se vrati", super::gui_recovery::crash_mid_work),
+    ("uklid: pracovni soubory sady", uklid),
 ];
 
 /// Znacky pro xtask (musi sedet s `xtask/src/qmp.rs`, modul `gui`).
@@ -637,4 +638,10 @@ pub(super) fn close_terminal(startup: &Startup, s: &mut State, app: usize, name:
         check!(time::now() < end, "termd po zavreni okna terminalu neskoncil");
         time::sleep(Duration::from_millis(50));
     }
+}
+
+/// Posledni test sady: smaze docasne soubory aplikace Soubory (`state.rs` jinak sadu
+/// oznaci za selhanou; bezi i po chybe drivejsich testu).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/tmp/org.magnumopus.files"])
 }

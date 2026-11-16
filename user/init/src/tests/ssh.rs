@@ -24,6 +24,7 @@ use crate::check;
 pub const TESTS: &[Test] = &[
     ("ssh: prihlaseni klicem z OpenSSH, prikaz, terminal, odmitnuti, vypnuti", remote),
     ("ssh: klient v systemu (known_hosts, vyzva Ucty, scp, sftp, zmeneny klic)", super::ssh_client::client),
+    ("uklid: soukromy /tmp uzivatele testu", uklid),
 ];
 
 /// Ucty, ktere zakladaji jine sady (jmeno, heslo); jinak vlastni.
@@ -139,4 +140,10 @@ fn remote(startup: &Startup) -> TestResult {
     super::firewall::wait_profile(root, from, &before)?;
     ended?;
     neg
+}
+
+/// Posledni test sady: soukromy `/tmp/<uid>` vzdalene relace
+/// (`session::create_tmp`); dalsi prihlaseni ho zalozi znovu.
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/tmp/1000"])
 }

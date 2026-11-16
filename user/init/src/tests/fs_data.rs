@@ -94,16 +94,23 @@ fn scrub(_: &Startup) -> TestResult {
     let f = fs()?;
     f.commit().map_err(|e| fail("commit", e))?;
     f.scrub_start().map_err(|e| fail("scrub_start", e))?;
-    // Scrub bezi na pozadi mezi pozadavky; cekat, az dobehne.
+    // Scrub bezi na pozadi mezi pozadavky; cekat, az dobehne. Delka zavisi
+    // na obsahu svazku a zatezi TCG (pevnych 30 s nestacilo): selhani az
+    // kdyz scrub 15 s nepostoupi (`scanned` neroste), nebo po 5 min.
     let mut st = f.scrub_status().map_err(|e| fail("scrub_status", e))?;
-    for _ in 0..600 {
-        if st.state != SCRUB_RUNNING {
-            break;
-        }
+    let end = libos::time::deadline_after(core::time::Duration::from_secs(300));
+    let stall = core::time::Duration::from_secs(15);
+    let (mut last, mut moved) = (st.scanned, libos::time::now());
+    while st.state == SCRUB_RUNNING && libos::time::now() < end {
         libos::time::sleep(core::time::Duration::from_millis(50));
         st = f.scrub_status().map_err(|e| fail("scrub_status", e))?;
+        if st.scanned != last {
+            (last, moved) = (st.scanned, libos::time::now());
+        } else if libos::time::now() - moved > stall.as_nanos() as u64 {
+            return Err(alloc::format!("scrub 15 s nepostoupil (precteno {last})"));
+        }
     }
-    check!(st.state != SCRUB_RUNNING, "scrub nedobehl");
+    check!(st.state != SCRUB_RUNNING, "scrub nedobehl za 5 min");
     check!(st.scanned > 0, "scrub nic neprecetl");
     check_eq!((st.bad, st.lost), (0, 0), "chyby na cistem svazku");
     Ok(())

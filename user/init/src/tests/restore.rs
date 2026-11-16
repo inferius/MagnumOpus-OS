@@ -13,7 +13,7 @@ use fsproto::FsClient;
 use fsproto::perm::Acl;
 use libos::println;
 
-use super::{TestResult, fail};
+use super::{TestResult, devices, fail};
 
 enum Saved {
     Acl(String, Option<Acl>),
@@ -40,6 +40,16 @@ impl<'a> Restore<'a> {
             self.saved.push(Saved::Acl(String::from(path), old));
         }
         self.fs.set_acl(path, acl).map_err(|e| fail(&alloc::format!("acl {path}"), e))
+    }
+
+    /// Jen ulozi popis opravneni `path` (zmenu udela jiny kod, napr.
+    /// `system::grant_traverse`); puvodni se vrati pri dropu.
+    pub fn save_acl(&mut self, path: &str) -> TestResult {
+        if !self.saved.iter().any(|s| matches!(s, Saved::Acl(p, _) if p == path)) {
+            let old = self.fs.permissions(path).map_err(|e| fail(&alloc::format!("opravneni {path}"), e))?.acl;
+            self.saved.push(Saved::Acl(String::from(path), old));
+        }
+        Ok(())
     }
 
     /// Strom `path` zalozeny testem se pri dropu smaze (soubory i slozky).
@@ -103,4 +113,18 @@ impl Drop for Reap {
             let _ = p.wait_exit(Some(libos::time::deadline_after(core::time::Duration::from_secs(5))));
         }
     }
+}
+
+/// Smaze pracovni soubory sady (zaverecny test `uklid`); chybejici cesta
+/// nevadi (sada neprobehla cela nebo uklidila sama).
+pub(super) fn remove_paths(paths: &[&str]) -> TestResult {
+    let fs = devices().and_then(|d| d.fs.as_ref()).ok_or("sluzba fsd nebezi")?;
+    let mut bad = Vec::new();
+    for p in paths {
+        match remove_tree(fs, p) {
+            Ok(()) | Err(libos::Error::NotFound) => {}
+            Err(e) => bad.push(alloc::format!("{p}: {e}")),
+        }
+    }
+    if bad.is_empty() { Ok(()) } else { Err(alloc::format!("uklid: {}", bad.join(", "))) }
 }

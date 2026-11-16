@@ -41,6 +41,9 @@ pub const TESTS: &[Test] = &[
     // Role Audio (audio_role.rs): stejne jadro zvuku moaudio.
     ("sdl: role Audio - potomek s MO_AUDIO hraje, bez ni ne", super::audio_role::inherit_and_opt_out),
     ("sdl: role Audio - odvolani zvuku zastavi potomka", super::audio_role::revoke_reaches_children),
+    ("uklid: pracovni soubory sady", uklid),
+    // Posledni: kompozitor sady skonci (jako na konci sady gui).
+    ("sdl: konec - kompozitor sady skonci", finish),
 ];
 
 /// Znacky pro fyzicky vstup z QEMU (musi sedet s `xtask/src/qmp.rs`, `sdl`).
@@ -409,4 +412,25 @@ fn demo_games(startup: &Startup) -> TestResult {
         app.kill();
         r
     })
+}
+
+/// Kompozitor sady (vlastni nebo sdileny se sadou gui) a jeho aplikace
+/// skonci: dalsi sady nemaji videt okna ani kompozitor drzici displej.
+fn finish(_: &Startup) -> TestResult {
+    let Some(s) = gt::STATE.lock().take() else { return Ok(()) };
+    for a in &s.gui.apps {
+        let _ = a.process.kill();
+    }
+    if let Some(p) = s.gui.shared.lock().process.as_ref() {
+        let _ = p.kill();
+        let _ = libos::wait_one(p.handle(), libos::Signals::TERMINATED, Some(time::deadline_after(Duration::from_secs(10))));
+    }
+    // Ovladac displeje bezi dal pro dalsi sady (`gui::park_display`).
+    gui::park_display(&s.gui.shared);
+    Ok(())
+}
+
+/// Pracovni slozka programu SDL (`DIR` pod `/std-test`).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/std-test"])
 }

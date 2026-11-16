@@ -23,6 +23,7 @@ pub const TESTS: &[Test] = &[
     ("sqlite: shell sqlite3 nad souborem", sqlite_shell),
     ("sqlite: dva procesy nad jednou databazi (zamky fcntl ve fsd)", sqlite_two),
     ("freetype: glyf z pisma (staticky nad libfreetype.a)", freetype),
+    ("uklid: pracovni soubory sady", uklid),
 ];
 
 pub(super) fn fs() -> Result<&'static FsClient, String> {
@@ -122,6 +123,7 @@ fn freetype(s: &Startup) -> TestResult {
 pub const DYN_TESTS: &[Test] = &[
     ("cdyn: program PIE v C nad libc.so (vlakna, TLS, dlopen pluginu)", cdyn),
     ("cdyn-hello: program jen z clang-dyn.cfg sysrootu C", cdyn_hello),
+    ("uklid: pracovni soubory sady", uklid),
 ];
 
 fn cdyn_hello(s: &Startup) -> TestResult {
@@ -135,4 +137,10 @@ fn cdyn(s: &Startup) -> TestResult {
     fresh_dir(fs, "/std-test/cdyn", &["cdyn.txt"])?;
     let run = run_std_app(s, "cdyn", &["test"], &["CDYN_DIR=/std-test/cdyn"], session(fs)?, Duration::from_secs(60))?;
     run.expect("cdyn", &["args", "libc", "mem-ld", "dlopen", "plugin", "dlsym-chyba", "vlakna-tls", "soubory", "dlclose"])
+}
+
+/// Posledni test sady: smaze pracovni slozka portu C (`state.rs` jinak sadu
+/// oznaci za selhanou; bezi i po chybe drivejsich testu).
+fn uklid(_: &Startup) -> TestResult {
+    super::restore::remove_paths(&["/std-test"])
 }
