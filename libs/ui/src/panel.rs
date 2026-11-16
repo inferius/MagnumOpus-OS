@@ -34,6 +34,8 @@ pub enum TextTone {
     Strong,
     /// Varovani ve stavovem radku: `small`, barva `danger`.
     Danger,
+    /// Nadpis prazdneho stavu: `title`.
+    Title,
 }
 
 /// Vypln kontejneru.
@@ -66,6 +68,35 @@ pub struct RowLook {
 /// Ikona (velikost 0 = `size.icon_m`).
 pub fn icon<M>(name: &'static str) -> Node<M> {
     node(Kind::Icon { name, size: 0 })
+}
+
+/// Ikona dane velikosti (px).
+pub fn icon_sized<M>(name: &'static str, size: u32) -> Node<M> {
+    node(Kind::Icon { name, size })
+}
+
+/// Prvek vodorovne na stred radku.
+fn centered<M>(n: Node<M>) -> Node<M> {
+    row([spacer(), n, spacer()])
+}
+
+/// Prazdny stav (design/komponenty.html#prazdno): kruh s ikonou
+/// `icon_xl` na `surface_3`, nadpis `type.title`, popis `ink_muted`
+/// a nejvys jedna akce. Misto prazdneho ramecku (vysledek hledani, prazdna
+/// slozka).
+pub fn empty_state<M>(t: &theme::Theme, icon_name: &'static str, title: &str, desc: &str, action: Option<Node<M>>) -> Node<M> {
+    let xl = t.size.icon_xl;
+    // Kruh: ikona v odsazeni tak, aby prumer byl 2x xl + xl/4 (72 px pri 32).
+    let ring = (2 * xl + xl / 4 - xl) / 2;
+    let circle = column([icon_sized(icon_name, xl)]).pad(ring, ring, ring, ring).deco(Deco { fill: Some(Fill::Surface3), radius: xl + ring, top_border: false });
+    let mut v = alloc::vec![centered(circle), centered(label(title).tone(TextTone::Title))];
+    if !desc.is_empty() {
+        v.push(centered(label(desc).tone(TextTone::Muted)));
+    }
+    if let Some(a) = action {
+        v.push(centered(a));
+    }
+    column(v).gap(t.space[3]).pad(t.space[6], 0, t.space[6], 0)
 }
 
 impl<M> Node<M> {
@@ -174,13 +205,14 @@ pub(crate) fn tone_style(t: &crate::Look, tone: TextTone) -> theme::TextStyle {
         TextTone::Danger => x.small,
         TextTone::Section => theme::TextStyle { weight: x.body_strong.weight, ..x.caption },
         TextTone::Strong => x.body_strong,
+        TextTone::Title => x.title,
     }
 }
 
 /// Barva stitku podle tonu.
 pub(crate) fn tone_color(c: &theme::Colors, tone: TextTone) -> u32 {
     match tone {
-        TextTone::Normal | TextTone::Strong => c.ink,
+        TextTone::Normal | TextTone::Strong | TextTone::Title => c.ink,
         TextTone::Muted | TextTone::Small | TextTone::Section => c.ink_muted,
         TextTone::Danger => c.danger,
     }

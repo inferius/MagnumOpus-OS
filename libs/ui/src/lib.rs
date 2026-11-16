@@ -61,7 +61,7 @@ pub use node::*;
 
 use layout::{ElemKind, Element};
 pub use look::Look;
-pub use panel::{Deco, Fill, PanelSize, RowLook, TextTone, icon, panel, panel_footer, panel_header, panel_line, panel_section, panel_state};
+pub use panel::{Deco, Fill, PanelSize, RowLook, TextTone, empty_state, icon, icon_sized, panel, panel_footer, panel_header, panel_line, panel_section, panel_state};
 pub use context::{Context, SizeClass};
 pub use spatial::Axis;
 pub use suggest::{Suggest, suggest};

@@ -139,3 +139,40 @@ fn shot_app_shortcut_menu() {
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
+
+/// Spoustec se sekcemi Bezi / Aplikace / Nedavne a patou s uctem (O13,
+/// O14, K9) a paleta s prazdnym vysledkem (K8).
+#[test]
+fn shot_launcher_sections_and_empty() {
+    let mut errors = Vec::new();
+    for (scheme, mname) in [(theme::Scheme::Light, "svetly"), (theme::Scheme::Dark, "tmavy")] {
+        let mut t = T::new();
+        // Volba vzhledu systemu i uzivatele bez prechodu (relace ji meni).
+        let p = theme::Pref { scheme, contrast: false, reduce_motion: true };
+        t.c.set_appearance_system(p, t.now);
+        t.c.set_appearance_user(1000, p, t.now);
+        t.c.set_launchable(alloc::vec![
+            (String::from("org.term"), String::from("Terminál")),
+            (String::from("org.files"), String::from("Soubory")),
+            (String::from("org.tasks"), String::from("Správce úloh")),
+            (String::from("org.demo"), String::from("Ukázka")),
+        ]);
+        t.c.session_opened(1, 1000, "michal", t.now);
+        let a = t.client("org.term");
+        t.window(a, Mode::Standard, RED);
+        t.frame();
+        let g = t.c.clients[&a].windows[&1];
+        t.c.palette_recent = alloc::vec![alloc::format!("win:{g}")];
+        t.c.set_palette(Some(crate::palette::Palette { launcher: true, ..Default::default() }));
+        t.frame();
+        let r = t.c.palette_rect().unwrap();
+        let (px, w, h) = crop(&t, r);
+        errors.extend(compare(&format!("spoustec-sekce-{mname}"), &px, w, h));
+        t.c.set_palette(Some(crate::palette::Palette { query: String::from("xyzzy"), ..Default::default() }));
+        t.frame();
+        let r = t.c.palette_rect().unwrap();
+        let (px, w, h) = crop(&t, r);
+        errors.extend(compare(&format!("paleta-prazdna-{mname}"), &px, w, h));
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}

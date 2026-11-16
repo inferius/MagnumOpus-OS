@@ -895,11 +895,17 @@ grid button in the bar or the Super key alone (press and release without
 another key, local physical keyboard only) opens it. It sits at the left
 above the bar, width token `size.launcher_w` (300). An empty query shows
 the sections Running (started apps, window count on the right),
-Applications and System; the Recent group is prepared and has no source
-yet. Typing gives the same results and ranking as the palette (Ctrl+K).
-Footer: sign-in state and a power button with the menu Lock, Sign out
-(disabled with a reason for now), Restart and Shut down (system
-confirmation).
+Applications (whole, without "more...") and Recent (recently used windows
+and palette actions, not apps from the rows above); the list has no frame
+or lines (`table(..).plain()`), the search field has a magnifier. Typing
+gives the same results and ranking as the palette (Ctrl+K); with no result
+an empty state "Nic nenalezeno" (`ui::empty_state`). Footer: a circle with
+the initial and the display name of the session user, Settings (disabled,
+"Nastavení zatím nejsou") and power with the menu Lock, Sign out (disabled
+with a reason for now), Restart and Shut down (system confirmation). Above
+the launcher, the palette and a bar panel the cursor is always an arrow
+(not the edge shape of a window below). **[implemented]** (screenshots
+`spoustec-sekce-*`, `paleta-prazdna-*`, host `launcher_hides_window_edge_cursor`)
 
 - **Budget:** opening fits into one frame; the test `palette_open_budget`
   measures opening and closing with a composed frame

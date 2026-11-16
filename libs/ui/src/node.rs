@@ -892,6 +892,9 @@ pub struct TableSpec<M> {
     pub multi: bool,
     /// Zobrazit zahlavi sloupcu.
     pub header: bool,
+    /// Seznam bez ramecku a car mezi radky (spoustec, design/spoustec.html d):
+    /// vyber a najeti se zaoblenym pozadim.
+    pub plain: bool,
     /// Razeni: sloupec a vzestupne.
     pub sort: Option<(usize, bool)>,
     pub on_selection: Option<Box<dyn Fn(Vec<u64>) -> M>>,
@@ -930,6 +933,7 @@ pub fn table<M>(columns: Vec<Col>, count: usize, id: impl Fn(usize) -> u64 + 'st
         selection: Vec::new(),
         multi: false,
         header: true,
+        plain: false,
         sort: None,
         on_selection: None,
         on_activate: None,
@@ -974,6 +978,14 @@ impl<M> Node<M> {
     pub fn header(mut self, h: bool) -> Self {
         if let Some(t) = self.spec() {
             t.header = h;
+        }
+        self
+    }
+
+    /// Seznam bez ramecku a car mezi radky ([`TableSpec::plain`]).
+    pub fn plain(mut self) -> Self {
+        if let Some(t) = self.spec() {
+            t.plain = true;
         }
         self
     }

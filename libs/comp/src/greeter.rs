@@ -336,6 +336,13 @@ impl Comp {
         self.greeter.sessions.iter().any(|s| !s.locked)
     }
 
+    /// Zobrazovane jmeno uzivatele aktivni relace (pata spoustece):
+    /// ze seznamu uctu, jinak prihlasovaci jmeno.
+    pub(crate) fn session_display(&self) -> Option<String> {
+        let s = self.greeter.sessions.iter().find(|s| !s.locked)?;
+        Some(self.greeter.accounts.iter().find(|a| a.uid == s.uid).map_or_else(|| s.name.clone(), |a| a.display.clone()))
+    }
+
     /// Pozadavky pro sluzbu uctu (vyprazdni frontu).
     pub fn take_login_requests(&mut self) -> Vec<Request> {
         core::mem::take(&mut self.greeter.requests)

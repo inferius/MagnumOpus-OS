@@ -190,6 +190,12 @@ impl Comp {
         }
     }
 
+    /// Je ukazatel nad systemovou vrstvou (lista, paleta a spoustec, panel
+    /// listy)? Tam vzdy sipka, ne kurzor okna pod ni (O12).
+    pub(crate) fn over_system(&self, x: i32, y: i32) -> bool {
+        self.panel_rect().contains(x, y) || self.palette_rect().is_some_and(|r| r.contains(x, y)) || self.bar_panel_rect().is_some_and(|r| r.contains(x, y))
+    }
+
     /// Zmena tvaru kurzoru: poskodit stare i nove misto.
     pub(crate) fn set_cursor(&mut self, k: Cursor) {
         if self.input.cursor == k {
@@ -650,7 +656,7 @@ impl Comp {
         let now = self.input_now;
         self.max_hover(over, px, py, now);
         let k = match hit {
-            _ if self.panel_rect().contains(px, py) => Cursor::Arrow,
+            _ if self.over_system(px, py) => Cursor::Arrow,
             // Nad obsahem okna kurzor aplikace (jen bez dialogu systemu).
             Some((g, Zone::Content(..))) if self.dialogs.active().is_none() && self.windows.get(&g).is_some_and(|w| w.app_cursor.is_some()) => Cursor::App(g),
             h => h.map_or(Cursor::Arrow, |(_, z)| z.cursor()),
