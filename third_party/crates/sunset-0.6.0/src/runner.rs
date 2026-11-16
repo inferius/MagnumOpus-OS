@@ -470,7 +470,9 @@ impl<'a, CS: CliServ> Runner<'a, CS> {
     pub fn output(&mut self, buf: &mut [u8]) -> usize {
         let out = self.output_buf();
         let l = out.len().min(buf.len());
-        buf.copy_from_slice(&out[..l]);
+        // MagnumOpus: oprava, puvodne `buf.copy_from_slice` (panika, kdyz
+        // je `buf` delsi nez vystup).
+        buf[..l].copy_from_slice(&out[..l]);
         self.consume_output(l);
         l
     }
@@ -755,6 +757,18 @@ impl<'a, CS: CliServ> Runner<'a, CS> {
             trace!("winch as server");
             Err(error::BadUsage.build())
         }
+    }
+
+    /// MagnumOpus: kod ukonceni prikazu (`exit-status`, jen server); pak
+    /// obvykle `channel_done`.
+    pub fn exit_status(&mut self, chan: &ChanHandle, status: u32) -> Result<()> {
+        if CS::is_client() {
+            return Err(error::BadUsage.build());
+        }
+        let mut s = self.traf_out.sender(&mut self.keys);
+        self.conn.channels.exit_status(chan.0, status, &mut s)?;
+        self.wake();
+        Ok(())
     }
 
     // Wake SSH TCP socket input and output as required.

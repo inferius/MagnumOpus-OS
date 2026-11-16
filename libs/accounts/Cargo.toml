@@ -10,7 +10,7 @@ abi = { workspace = true }
 wire = { path = "../wire" }
 accountproto = { path = "../accountproto" }
 # Klice SSH (rozbor, overeni podpisu); bez protokolu (sunset).
-ssh = { path = "../ssh" }
+ssh = { path = "../ssh", default-features = false }
 argon2 = { version = "0.5", default-features = false, features = ["alloc", "zeroize"] }
 blake2 = { version = "0.10", default-features = false }
 sha2 = { version = "0.10", default-features = false, features = ["force-soft"] }

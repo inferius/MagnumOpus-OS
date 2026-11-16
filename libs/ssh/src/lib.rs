@@ -3,14 +3,18 @@
 //! - [`keys`]: verejne klice uzivatelu (rozbor, otisk, overeni podpisu).
 //!   Pouziva ji sluzba uctu; nezavisi na knihovne protokolu.
 //! - Protokol (feature `proto`): server a klient nad sunset.
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
 
 pub mod keys;
 
 #[cfg(feature = "proto")]
+pub mod server;
+#[cfg(feature = "proto")]
 pub use sunset;
 
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, feature = "proto"))]
+mod tests_server;

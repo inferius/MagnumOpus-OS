@@ -278,6 +278,15 @@ impl Channels {
         }
     }
 
+    /// MagnumOpus: server posle kod ukonceni prikazu na kanale `num`.
+    pub(crate) fn exit_status(&self, num: ChanNum, status: u32, s: &mut TrafSend) -> Result<()> {
+        let ch = self.get(num)?;
+        match ch.ty {
+            ChanType::Session => Req::ExitStatus(packets::ExitStatus { status }).send(ch, s),
+            _ => error::BadChannelData.fail(),
+        }
+    }
+
     pub(crate) fn term_break(
         &self,
         num: ChanNum,
@@ -661,7 +670,8 @@ pub enum Req<'a> {
     WinChange(packets::WinChange),
     Break(packets::Break),
     // Signal,
-    // ExitStatus,
+    // MagnumOpus: kod ukonceni prikazu (server -> klient).
+    ExitStatus(packets::ExitStatus),
     // ExitSignal,
 }
 
@@ -690,6 +700,7 @@ impl Req<'_> {
             }),
             Req::WinChange(rt) => ChannelReqType::WinChange(rt),
             Req::Break(rt) => ChannelReqType::Break(rt),
+            Req::ExitStatus(e) => ChannelReqType::ExitStatus(e),
         };
 
         let p = ChannelRequest {
