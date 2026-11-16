@@ -63,6 +63,7 @@ Kód:
 | tažení vybraných položek na složku = přesun (v datasetu přejmenování) | **[implementováno]** (host `drop_on_folder_moves`); mezi okny a aplikacemi **[navrženo]** |
 | odpověď služby „otevři cestu“ ve stavovém řádku (druhý kanál okna) | **[implementováno]** (host `context_menu_and_open_reply`) |
 | složka bez práva výpisu (cizí domov v `/home`): ikona zámku, druh „Složka bez přístupu“; po otevření místo obsahu „Ke složce X nemáte přístup.“ (jiná chyba: „Složku X nejde otevřít: důvod.“). Odmítnutý výpis se nikdy neukáže jako „Složka je prázdná“ | **[implementováno]** (host `foreign_folder_has_lock`, `denied_listing_is_not_empty_folder`) |
+| vyměnitelná média v Místech, Odpojit, kopie a přesun domov <-> médium ([Vyměnitelná média](media.md#média-v-souborech)) | **[implementováno]** (host `media_places_and_eject`), kopie a přesun **[ověřeno v QEMU]** |
 | „Stáhnout z adresy…“ (menu Soubor, paleta): kontrola adresy, stažení do `~/Stažené` přes fetch relace, průběh v Úlohách ([Stahování](stahovani.md)) | **[implementováno]** (host `download_from_address`), stahování **[ověřeno v QEMU]** |
 | pohled ikon (mřížka), miniatury | **[navrženo]** |
 | panel Vlastnosti (kontextová nabídka, Alt+Enter, akce `files.properties`): karta Obecné a karta Oprávnění (vlastník, sdílení s úrovní, zděděné řádky s původem, dědění do obsahu složky, vypnutí dědění) | **[ověřeno v QEMU]** (test `gui: compd: spravce souboru...`: zděděný grant z fsd, přidání sdílení, uložení); úrovně, jen pro čtení, potvrzení host `props_tests.rs` |

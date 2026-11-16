@@ -599,3 +599,25 @@ fn download_from_address() {
     // Prikaz je v menu (paleta Ctrl+K).
     assert!(crate::app_menu(false)[0].children.iter().any(|i| i.action == "files.download"));
 }
+
+#[test]
+fn media_places_and_eject() {
+    let mut m = fm();
+    m.b.fs.dir("/media").dir("/media/MOTEST").file("/media/MOTEST/foto.jpg", b"jpg");
+    let medium = |name: &str, ro: bool| fsproto::v2::MediaEntry { name: name.into(), label: name.into(), fs: "fat".into(), read_only: ro, total_bytes: 64 << 20, free_bytes: 32 << 20 };
+    m.b.media = vec![medium("MOTEST", false), medium("mylabel", true)];
+    m.update(Msg::Refresh);
+    let labels: Vec<&str> = m.places.iter().map(|p| p.label.as_str()).collect();
+    assert!(labels.contains(&"MOTEST") && labels.contains(&"mylabel (jen čtení)"), "{labels:?}");
+    let i = m.places.iter().position(|p| p.label == "MOTEST").unwrap();
+    m.update(Msg::Place(i));
+    assert_eq!(m.nav.cur, "/media/MOTEST");
+    // Odpojit: tlacitko jen ve slozce media.
+    let mut u = ui_for(&m, 1200);
+    press(&mut m, &mut u, "Odpojit");
+    assert!(m.status.contains("můžete ho vytáhnout"), "{}", m.status);
+    assert_eq!(m.nav.cur, "/home/jana");
+    assert!(!m.places.iter().any(|p| p.label == "MOTEST"));
+    let u = ui_for(&m, 1200);
+    assert!(!names(&u, Role::Button).iter().any(|n| n == "Odpojit"), "doma tlacitko neni");
+}

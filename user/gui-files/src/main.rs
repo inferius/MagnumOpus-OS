@@ -50,6 +50,14 @@ struct OsBackend {
 }
 
 impl Backend for OsBackend {
+    fn media(&mut self) -> Vec<fsproto::v2::MediaEntry> {
+        self.fs.media_list().unwrap_or_default()
+    }
+
+    fn eject(&mut self, name: &str) -> Result<()> {
+        self.fs.media_remove(name)
+    }
+
     fn download(&mut self, url: &str) -> bool {
         match &self.downloads {
             Some(c) => c.write(alloc::format!("save-bg {url}").as_bytes(), Vec::new()).is_ok(),

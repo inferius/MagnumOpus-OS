@@ -200,14 +200,19 @@ impl<B: Backend> FileManager<B> {
             Some((Op::Copy, p)) => format!("Vložit ({})", p.len()),
             None => String::from("Vložit"),
         };
-        row([
+        let mut buttons = vec![
             button("Nová složka").on_click(Msg::NewFolder),
             button("Přejmenovat").on_click(Msg::Rename).disabled(self.sel.len() != 1),
             button("Do koše").on_click(Msg::Trash).disabled(none),
             button("Kopírovat").on_click(Msg::Copy).disabled(none),
             button("Vyjmout").on_click(Msg::Cut).disabled(none),
             button(&paste_text).on_click(Msg::Paste).disabled(!self.can_paste(cx)),
-        ])
+        ];
+        // Ve slozce media: bezpecne odpojeni.
+        if self.current_medium().is_some() {
+            buttons.push(button("Odpojit").on_click(Msg::Eject));
+        }
+        row(buttons)
     }
 
     fn preview_panel(&self) -> Node<Msg> {

@@ -232,8 +232,38 @@ A session sees `/media` only when it has it among its mounted paths
   thousands of files in one folder slow copying down **[implemented]**.
 - FAT time has no time zone and is taken as UTC (Windows writes local
   time); exFAT stores and reads the zone.
-- **[designed]** Media in the Places of Files, Eject from the GUI,
-  mount notifications.
+- The list of media in Files is refreshed by Refresh (F5), a click on a
+  place and after Eject; live updates on insertion (an event from fsd)
+  **[designed]**.
+
+## Media in Files
+
+- **Places:** every medium is in the side panel under its label (a
+  read-only medium marked "(jen čtení)"), path `/media/<name>`
+  **[implemented]** (host `media_places_and_eject`).
+- **Eject:** a button in a medium's folder (and the `files.eject`
+  action): safe removal, back home and the message "the medium X is
+  ejected, you can pull it out" **[implemented]** (host
+  `media_places_and_eject`; the ejection itself **[verified in QEMU]**).
+- **Notification:** after attaching, init sends a system notification
+  "medium attached (FAT/exFAT/NTFS…)" ([Notifications](notifications.md))
+  **[implemented]**.
+- **Copying and moving** home <-> medium go through `files-copy` (a task
+  with progress in Tasks): a medium has no instant copy, it copies by
+  reading and writing; name conflicts (Keep both = "name (2)"), moving
+  from the medium home (the source on the medium disappears) and an
+  interruption (process crash, a new process finishes the task, no
+  temporary files left) **[verified in QEMU]**
+  (`user/init/src/tests/removable_copy.rs` in the `vymenna media` suite).
+  Dragging onto a folder uses the same move. There is no trash on a
+  medium (fsd returns `NOT_SUPPORTED` for `TRASH` on a medium): the source
+  of a move from the medium and an overwritten target on the medium are
+  deleted permanently by files-copy **[verified in QEMU]**; Move to trash
+  on a medium in Files ends with an error **[implemented]**, permanent
+  delete with confirmation **[designed]**. An instant copy (`CLONE`)
+  with a medium and a rename into a medium from our FS return
+  `NOT_SUPPORTED` (copy by reading and writing), `DATASET_OF` of a path on
+  a medium is `/media/<name>`.
 
 ## A host folder as a flash drive
 

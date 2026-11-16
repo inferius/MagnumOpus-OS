@@ -86,3 +86,24 @@ pub fn app_handles(startup: &Startup, name: &str, uid: u64) -> Vec<StartHandle> 
 pub fn viewer_handle(uid: u64) -> Option<Handle> {
     viewer(uid).ok().map(Channel::into_handle)
 }
+
+/// Odesilatel systemu (identita `system`, vidi vsichni uzivatele).
+static SYSTEM: spin::Mutex<Option<Channel>> = spin::Mutex::new(None);
+/// Klice systemovych oznameni initu.
+static NEXT_KEY: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(1);
+
+/// Systemove oznameni (pripojene medium, ...), `Normal`. Bez sluzby nic.
+pub fn system(title: &str, body: &str) {
+    let mut g = SYSTEM.lock();
+    if g.is_none() {
+        *g = sender("system", "Systém", 0, true).ok();
+    }
+    let Some(ch) = g.as_ref() else { return };
+    // Odpovedi (Sent) init necte: zahodit, at se fronta neplni.
+    while ch.try_read().is_ok() {}
+    let key = NEXT_KEY.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    let m = notifyproto::Send::Notify { key, title: title.into(), body: body.into(), priority: notifyproto::Priority::Normal, actions: Vec::new() };
+    if ch.write(&m.encode(), Vec::new()).is_err() {
+        *g = None;
+    }
+}

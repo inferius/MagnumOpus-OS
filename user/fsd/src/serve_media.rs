@@ -311,6 +311,38 @@ impl Service {
                 }
                 Ok(Reply::body(w))
             })()),
+            // Okamzita kopie s mediem (medium ji nema) a prejmenovani do
+            // media z vlastniho FS: `NOT_SUPPORTED` (Soubory kopiruji ctenim
+            // a zapisem). Bez toho by cil na mediu sel do vlastniho FS.
+            fsproto::data::op::CLONE | op::RENAME | v2op::RENAME_REPLACE
+                if {
+                    let mut r2 = Reader::new(msg);
+                    let _ = r2.u32();
+                    let a = r2.str().ok().and_then(|p| target(sess, &p));
+                    let b = r2.str().ok().and_then(|p| target(sess, &p));
+                    if opcode == fsproto::data::op::CLONE { a.is_some() || b.is_some() } else { b.is_some() && a.is_none() }
+                } =>
+            {
+                Some(Err(Error::NotSupported))
+            }
+            // Kos na mediu neni (FAT, exFAT, NTFS): klient smaze trvale.
+            fsproto::hist::op::TRASH => {
+                let raw = r.str().ok()?;
+                target(sess, &raw)?;
+                Some(Err(Error::NotSupported))
+            }
+            // Kazde medium je pro klienty vlastni "dataset" (presun mezi nim
+            // a domovem = kopie a smazani, Soubory, files-copy).
+            fsproto::hist::op::DATASET_OF => {
+                let raw = r.str().ok()?;
+                let ((name, _), _) = target(sess, &raw)?;
+                let mut w = Writer::new();
+                w.str(&match name {
+                    Some(n) => format!("{MEDIA_ROOT}/{n}"),
+                    None => String::from(MEDIA_ROOT),
+                });
+                Some(Ok(Reply::body(w)))
+            }
             // Operace nad cestou.
             op::STAT | op::LIST | op::LIST_PAGE | op::LIST_STAT_PAGE | op::READ | op::WRITE | op::CREATE | op::REMOVE | op::RENAME | op::TRUNCATE
             | v2op::OPEN | v2op::LSTAT | v2op::REALPATH | v2op::RENAME_REPLACE => {

@@ -79,6 +79,12 @@ fn try_attach(d: &Devices, o: Offer) -> Result<()> {
     let name = if o.model.is_empty() { "USB disk" } else { o.model.as_str() };
     fs.media_add(name, false, ours)?;
     println!("init: medium {} ({}) predano fsd", name, o.fs);
+    let kind = match o.fs.as_str() {
+        "ntfs" => "NTFS, jen pro čtení",
+        "exfat" => "exFAT",
+        _ => "FAT",
+    };
+    crate::notify::system(&alloc::format!("Připojeno médium ({kind})"), "Najdete ho v Souborech v Místech. Před vytažením ho odpojte.");
     Ok(())
 }
 

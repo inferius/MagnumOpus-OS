@@ -18,6 +18,7 @@ mod disks;
 mod download;
 mod notify;
 mod removable;
+mod removable_copy;
 mod display;
 mod drivers;
 mod driverkit;

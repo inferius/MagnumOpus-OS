@@ -118,6 +118,7 @@ impl<B: Backend> ui::App for FileManager<B> {
             "files.refresh" => Msg::Refresh,
             "files.properties" => Msg::Properties,
             "files.download" => Msg::Download,
+            "files.eject" => Msg::Eject,
             "files.show" => {
                 let path = args.iter().find(|a| a.0 == "path").and_then(|a| match &a.1 {
                     guiproto::action::Value::Path(p) | guiproto::action::Value::Text(p) => Some(p.clone()),

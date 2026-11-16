@@ -70,8 +70,13 @@ impl Vfs for FsVfs<'_> {
         self.0.rename(from, to)
     }
 
+    /// Do kose; na vymennem mediu kos neni (`NOT_SUPPORTED`): trvale
+    /// smazat (zdroj presunu z media, prepsany cil na mediu).
     fn trash(&mut self, path: &str) -> Result<()> {
-        self.0.trash(path).map(|_| ())
+        match self.0.trash(path) {
+            Err(Error::NotSupported) => self.remove_tree(path),
+            r => r.map(|_| ()),
+        }
     }
 
     fn remove_tree(&mut self, path: &str) -> Result<()> {
