@@ -115,6 +115,7 @@ impl Comp {
             return;
         }
         // Cela obrazovka: jen do centra (a uz nevyskoci), krome Urgent.
+        // (Nevidene: uzivatel ho v centru jeste neotevrel.)
         if n.priority != Priority::Urgent && self.do_not_disturb() {
             self.notices.out.push((uid, View::Seen { id }));
             return;
@@ -182,9 +183,31 @@ impl Comp {
         self.notices.out.push((uid, View::SetDnd { until }));
     }
 
+    /// Pocet nevidenych oznameni uzivatele `uid` (odznak zvonku).
+    pub fn notify_unseen(&self, uid: u64) -> usize {
+        self.notices.all.iter().filter(|(u, n)| *u == uid && !n.seen).count()
+    }
+
+    /// Uzivatel videl vsechna oznameni `uid` (otevrel centrum): `SEEN` do
+    /// notifyd, odznak zmizi.
+    pub fn notify_mark_seen(&mut self, uid: u64) {
+        for (u, n) in self.notices.all.iter_mut() {
+            if *u == uid && !n.seen {
+                n.seen = true;
+                self.notices.out.push((uid, View::Seen { id: n.id }));
+            }
+        }
+    }
+
     /// Nerusit uzivatele od notifyd (centrum oznameni, ikona).
     pub fn notify_dnd(&self, uid: u64) -> u64 {
         self.notices.dnd.get(&uid).copied().unwrap_or(0)
+    }
+
+    fn mark_local_seen(&mut self, id: u64) {
+        if let Some((_, n)) = self.notices.all.iter_mut().find(|(_, n)| n.id == id) {
+            n.seen = true;
+        }
     }
 
     fn toast_remove(&mut self, id: u64, now: u64) {
@@ -225,6 +248,7 @@ impl Comp {
         }
         for (uid, id) in gone {
             self.notices.out.push((uid, View::Seen { id }));
+            self.mark_local_seen(id);
             self.toast_remove(id, now);
         }
     }

@@ -15,7 +15,7 @@ use libos::spawn::StartHandle;
 use libos::{Error, Startup, time};
 use notifyproto::{View, ViewReply};
 
-use super::web::{fnv, pattern, ports, start_fetch_with};
+use super::web::{pattern, ports, start_fetch_with};
 use super::{Test, TestResult, devices, fail};
 use crate::{check, check_eq};
 
@@ -71,15 +71,18 @@ fn save(s: &Startup) -> TestResult {
     let r = fetch.run(&format!("save {url} velký soubor.bin"))?;
     check_eq!(r, format!("ok:velký soubor.bin {n}"), "stazeno");
     let path = format!("{DIR}/velký soubor.bin");
-    let mut data = Vec::new();
-    while data.len() < n {
-        let part = f.read(&path, data.len() as u64, 65536).map_err(|e| fail("cteni", e))?;
+    // Po castech (init nedrzi cely soubor v pameti).
+    let mut ok = true;
+    let mut off = 0;
+    loop {
+        let part = f.read(&path, off as u64, 65536).map_err(|e| fail("cteni", e))?;
         if part.is_empty() {
             break;
         }
-        data.extend(part);
+        ok &= part.iter().enumerate().all(|(k, &b)| b == pattern(off + k));
+        off += part.len();
     }
-    check_eq!(fnv(data), fnv((0..n).map(pattern)), "obsah souboru");
+    check!(ok && off == n, format!("obsah souboru ({off} B)").as_str());
     check!(f.list(DIR).map_err(|e| fail("vypis", e))?.iter().all(|e| !e.name.ends_with(".stahuje")), "docasny soubor pryc");
     // Puvod: adresa a cas; uzivatel ho nepodvrhne ani nesmaze.
     let origin = f.get_xattr(&path, fsproto::perm::ORIGIN_XATTR).map_err(|e| fail("puvod", e))?;

@@ -52,7 +52,7 @@ returns `INVALID_ARGS`, the service keeps running **[verified in QEMU]**.
 | viewer | `SUBSCRIBE` (10) | - | `SNAPSHOT` (110, 32 notifications each) and `DND` (113), then changes |
 | viewer | `DISMISS` (11), `INVOKE` (12), `DISMISS_ALL` (13) | notification number, action | `RESULT` (100) |
 | viewer | `SET_DND` (14) | end (wall time ns, 0 = off, `u64::MAX` = until turned off) | `RESULT`, `DND` to all viewers of the user |
-| viewer | `SEEN` (15) | number | `RESULT`: the card went to the centre, it will not pop up again |
+| viewer | `SEEN` (15) | number | `RESULT`: the user saw the notification (the card went to the centre, the centre was opened); it will not pop up again, `seen` in the notification |
 | to viewer | `ADDED` (111), `REMOVED` (112) | notification, or number and reason | - |
 
 - The notification **key** is in the identity's namespace: the same key
@@ -103,7 +103,10 @@ returns `INVALID_ARGS`, the service keeps running **[verified in QEMU]**.
 
 API for the notification centre (bell panel, GUI): `Comp::notifications`,
 `notify_dismiss`, `notify_invoke`, `notify_dismiss_all`, `notify_set_dnd`,
-`notify_dnd`.
+`notify_dnd`, `notify_unseen` (the unseen count for the badge) and
+`notify_mark_seen` (the centre was opened) **[implemented]** (test
+`unseen_count_and_mark_seen`). notifyd keeps the `seen` flag, so it
+survives a compositor restart.
 
 ## Limitations
 

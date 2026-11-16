@@ -143,6 +143,7 @@ impl Core {
     fn view_of(&self, e: &Entry, vuid: u64, now: u64) -> Notification {
         let mut n = e.n.clone();
         n.popup = e.popup && !e.seen && (n.priority == Priority::Urgent || !self.dnd_on(vuid, now));
+        n.seen = e.seen;
         n
     }
 
@@ -262,6 +263,7 @@ impl Core {
             time: wall,
             popup,
             replaced,
+            seen,
         };
         self.list.push(Entry { n, uid: ident.uid, key, popup, seen });
         // Limity: nejstarsi oznameni identity, pak uzivatele.

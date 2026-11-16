@@ -18,6 +18,7 @@ fn n(id: u64, p: Priority, actions: &[(&str, &str)]) -> Notification {
         time: 0,
         popup: true,
         replaced: false,
+        seen: false,
     }
 }
 
@@ -155,4 +156,28 @@ fn snapshot_replaces_state_of_user() {
     assert_eq!(ids, vec![5, 6]);
     t.c.notify_event(UID, ViewReply::Dnd { until: 99 }, t.now);
     assert_eq!(t.c.notify_dnd(UID), 99);
+}
+
+#[test]
+fn unseen_count_and_mark_seen() {
+    let mut t = T::new();
+    t.frame();
+    t.c.notify_event(UID, ViewReply::Added(n(1, Priority::Normal, &[])), t.now);
+    let mut quiet = n(2, Priority::Low, &[]);
+    quiet.popup = false;
+    t.c.notify_event(UID, ViewReply::Added(quiet), t.now);
+    let mut old = n(3, Priority::Low, &[]);
+    old.seen = true;
+    t.c.notify_event(UID, ViewReply::Added(old), t.now);
+    assert_eq!(t.c.notify_unseen(UID), 2);
+    // Karta Normal zmizi do centra: videna.
+    t.now += crate::toast::SHOW;
+    t.c.timers(t.now);
+    assert_eq!(t.c.notify_unseen(UID), 1);
+    t.c.take_notify_requests();
+    // Otevrene centrum: vse videne, SEEN do notifyd.
+    t.c.notify_mark_seen(UID);
+    assert_eq!(t.c.notify_unseen(UID), 0);
+    assert_eq!(t.c.take_notify_requests(), vec![(UID, View::Seen { id: 2 })]);
+    assert_eq!(t.c.notify_unseen(UID + 1), 0);
 }

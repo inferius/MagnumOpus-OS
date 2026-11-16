@@ -50,7 +50,7 @@ Zpráva = kód operace `u32` + pole (`libs/wire`). Neplatná zpráva vrátí
 | prohlížeč | `SUBSCRIBE` (10) | - | `SNAPSHOT` (110, po 32 oznámeních) a `DND` (113), pak změny |
 | prohlížeč | `DISMISS` (11), `INVOKE` (12), `DISMISS_ALL` (13) | číslo oznámení, akce | `RESULT` (100) |
 | prohlížeč | `SET_DND` (14) | konec (reálný čas ns, 0 = vypnout, `u64::MAX` = do vypnutí) | `RESULT`, `DND` všem prohlížečům uživatele |
-| prohlížeč | `SEEN` (15) | číslo | `RESULT`: karta zmizela do centra, znovu nevyskočí |
+| prohlížeč | `SEEN` (15) | číslo | `RESULT`: uživatel oznámení viděl (karta zmizela do centra, otevřené centrum); znovu nevyskočí, v oznámení `seen` |
 | prohlížeči | `ADDED` (111), `REMOVED` (112) | oznámení, nebo číslo a důvod | - |
 
 - **Klíč** oznámení je v prostoru identity: stejný klíč nahradí oznámení
@@ -92,7 +92,10 @@ Zpráva = kód operace `u32` + pole (`libs/wire`). Neplatná zpráva vrátí
 
 API pro centrum oznámení (panel zvonku, GUI): `Comp::notifications`,
 `notify_dismiss`, `notify_invoke`, `notify_dismiss_all`, `notify_set_dnd`,
-`notify_dnd`.
+`notify_dnd`, `notify_unseen` (počet neviděných pro odznak) a
+`notify_mark_seen` (otevřené centrum) **[implementováno]** (test
+`unseen_count_and_mark_seen`). Příznak `seen` drží notifyd, takže přežije
+restart kompozitoru.
 
 ## Omezení
 
