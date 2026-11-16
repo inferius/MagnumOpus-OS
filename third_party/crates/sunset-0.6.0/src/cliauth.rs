@@ -181,6 +181,12 @@ impl CliAuth {
         // TODO: look at existing self.state, handle the failure.
         self.state = AuthState::Idle;
 
+        // MagnumOpus: heslo jen kdyz ho server nabizi (po vycerpani klicu
+        // `resume_pubkey` jinak zadal heslo i serveru bez metody password).
+        if !failure.methods.has_algo(SSH_AUTHMETHOD_PASSWORD)? {
+            self.try_password = false;
+        }
+
         if self.try_pubkey && failure.methods.has_algo(SSH_AUTHMETHOD_PUBLICKEY)? {
             return Ok(DispatchEvent::CliEvent(event::CliEventId::Pubkey));
         }

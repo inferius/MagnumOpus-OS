@@ -11,6 +11,8 @@ pub mod keys;
 pub mod sftp;
 
 #[cfg(feature = "proto")]
+pub mod client;
+#[cfg(feature = "proto")]
 pub mod server;
 #[cfg(feature = "proto")]
 pub use sunset;
@@ -23,3 +25,5 @@ mod tests_sftp;
 mod tests_server;
 #[cfg(all(test, feature = "proto"))]
 mod tests_fuzz;
+#[cfg(all(test, feature = "proto"))]
+mod tests_client;
