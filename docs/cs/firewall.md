@@ -60,6 +60,7 @@ ask = true                       # cíl mimo pravidla: zeptat se uživatele
 sockets = 32                     # nejvíc socketů najednou
 buffers = "4M"                   # nejvíc paměti bufferů socketů
 ops = 32                         # nejvíc souběžných dotazů relace (1 až 1024, výchozí 32; nad limit čekají)
+listen_from = "network"           # odkud přijímat: "network" (výchozí) nebo jen "loopback"
 
 [[network.connect]]
 proto = ["udp"]                  # tcp, udp, icmp (výchozí všechny)

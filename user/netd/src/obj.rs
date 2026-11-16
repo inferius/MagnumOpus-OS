@@ -21,15 +21,19 @@ use smoltcp::iface::SocketHandle;
 use crate::ping::{Ping, PingReq};
 use crate::resolve::{Resolve, ResolveReq};
 use crate::stack::{Stack, now_ns};
-use crate::{fw, session, tcp, udp};
+use crate::{fw, lo, session, tcp, udp};
 
 /// Opravneni relace sdilene s jejimi sockety (sockety UDP podle nej
 /// filtruji, a preklady jmen z relace plati i pro ne).
 pub type AuthRef = Rc<RefCell<Auth>>;
 
+/// Stav objektu sdileny kanaly (`DUP`: vic kanalu ke stejnemu socketu).
+pub type KindRef = Rc<RefCell<Kind>>;
+
 pub struct Obj {
     pub ch: Channel,
-    pub kind: Kind,
+    /// Stav (sdileny s dalsimi kanaly po `DUP`; uklidi se s poslednim).
+    pub kind: KindRef,
     /// Rozpracovane a cekajici dotazy (poradi = poradi prijeti).
     pub ops: Vec<Op>,
     /// Relace s plnym limitem dotazu: odlozene zpravy (FIFO, nejvys
@@ -47,6 +51,11 @@ pub struct Obj {
 
 impl Obj {
     pub fn new(ch: Channel, kind: Kind) -> Self {
+        Self::shared(ch, Rc::new(RefCell::new(kind)))
+    }
+
+    /// Dalsi kanal ke stejnemu objektu (`DUP`).
+    pub fn shared(ch: Channel, kind: KindRef) -> Self {
         Self {
             ch,
             kind,
@@ -107,6 +116,10 @@ pub enum Kind {
     Stream(Stream),
     Listener(Listener),
     Udp(Udp),
+    /// Spojeni na loopbacku (`lo.rs`).
+    LoStream(lo::LoStream),
+    /// Navazany socket TCP pred `LISTEN`/`CONNECT` (`bound.rs`).
+    Bound(crate::bound::Bound),
 }
 
 pub struct Stream {
@@ -125,6 +138,10 @@ pub struct Stream {
 
 pub struct Listener {
     pub port: u16,
+    /// Kam nasloucha (sit, loopback, obe).
+    pub bind: lo::Bind,
+    /// Fronta spojeni z loopbacku.
+    pub lo: Option<lo::AcceptRef>,
     /// Sockety ve stavu naslouchani (prijimaji SYN).
     pub listening: Vec<SocketHandle>,
     /// Navazana spojeni cekajici na `accept`.
@@ -141,8 +158,12 @@ pub struct Listener {
 }
 
 pub struct Udp {
-    pub sock: SocketHandle,
+    /// Socket smoltcp (`None` = jen loopback: 127.x, `::1`, `::`).
+    pub sock: Option<SocketHandle>,
     pub port: u16,
+    pub bind: lo::Bind,
+    /// Fronta datagramu z loopbacku.
+    pub lo: Option<lo::UdpRef>,
     pub auth: AuthRef,
     pub app: String,
     /// Cile, ktere uzivatel pro tento socket povolil jednorazove (plati do
@@ -213,6 +234,8 @@ pub enum Pending {
     Recv {
         max: usize,
         deadline: u64,
+        /// `RECV_PEEK`: data ve fronte zustanou.
+        peek: bool,
     },
     Accept {
         deadline: u64,
@@ -347,16 +370,36 @@ pub fn request(stack: &mut Stack, kind: &mut Kind, code: u32, until: u64, r: &mu
         Kind::Stream(s) => tcp::stream_request(stack, s, code, until, r),
         Kind::Listener(l) => tcp::listener_request(stack, l, code, until, r),
         Kind::Udp(u) => udp::request(stack, u, code, until, r),
+        Kind::LoStream(s) => lo::stream_request(stack, s, code, until, r),
+        Kind::Bound(b) => crate::bound::request(stack, b, code, until, r),
     };
-    match step {
+    let step = match step {
         Ok(s) => s,
         Err(e) => Step::err(e),
+    };
+    convert(kind, step)
+}
+
+/// Navazany socket po `LISTEN`/`CONNECT`: novy stav na miste (vidi ho
+/// vsechny kanaly po `DUP`), klient zadny novy kanal nedostane. Port
+/// prechazi na naslouchani / spojeni.
+fn convert(kind: &mut Kind, step: Step) -> Step {
+    match step {
+        Step::Done(Ok(w), Some(new)) if matches!(kind, Kind::Bound(_)) => {
+            *kind = new;
+            Step::Done(Ok(w), None)
+        }
+        s => s,
     }
 }
 
 /// Posun rozpracovaneho pozadavku (po zpracovani site nebo vyprseni).
 pub fn progress(stack: &mut Stack, kind: &mut Kind, p: Pending) -> Step {
     let now = now_ns();
+    if let Kind::Bound(b) = kind {
+        let step = crate::bound::progress(stack, b, p, now);
+        return convert(kind, step);
+    }
     match (kind, p) {
         (Kind::Session(auth), p) => session::progress(stack, auth, p, now),
         (Kind::Stream(s), p) => tcp::stream_progress(stack, s, p, now),
@@ -364,6 +407,7 @@ pub fn progress(stack: &mut Stack, kind: &mut Kind, p: Pending) -> Step {
             tcp::accept_progress(stack, l, deadline, now)
         }
         (Kind::Udp(u), p) => udp::progress(stack, u, p, now),
+        (Kind::LoStream(s), p) => lo::stream_progress(stack, s, p, now),
         (_, _) => Step::err(Error::BadState),
     }
 }
@@ -390,7 +434,45 @@ pub fn cancel_pending(stack: &mut Stack, p: Pending) -> Result<Writer> {
     Err(Error::Canceled)
 }
 
-/// Uklid po zavreni kanalu klientem.
+/// Druh objektu pro `op::KIND` (navazany socket mohl prevest jiny kanal).
+pub fn sock_kind(kind: &Kind) -> u8 {
+    use netproto::sock_kind as k;
+    match kind {
+        Kind::Session(_) => k::SESSION,
+        Kind::Stream(_) | Kind::LoStream(_) => k::STREAM,
+        Kind::Listener(_) => k::LISTENER,
+        Kind::Udp(_) => k::UDP,
+        Kind::Bound(_) => k::BOUND,
+    }
+}
+
+/// Identita aplikace objektu (relace podle vrstev, socket podle relace,
+/// ktera ho vytvorila; systemove = "system").
+pub fn identity(kind: &Kind) -> String {
+    match kind {
+        Kind::Session(auth) => fw::app_name(&auth.borrow()),
+        Kind::Stream(s) => s.app.clone(),
+        Kind::Listener(l) => l.app.clone(),
+        Kind::Udp(u) => u.app.clone(),
+        Kind::LoStream(s) => s.app.clone(),
+        Kind::Bound(b) => b.app.clone(),
+    }
+}
+
+/// Kanal zavren klientem: zrusi jeho dotazy; objekt se uklidi az
+/// s poslednim kanalem (`DUP`).
+pub fn close_channel(stack: &mut Stack, kind: KindRef, ops: Vec<Op>) {
+    for op in ops {
+        if let OpState::Active(p) = op.state {
+            let _ = cancel_pending(stack, p);
+        }
+    }
+    if let Ok(k) = Rc::try_unwrap(kind) {
+        close(stack, k.into_inner(), Vec::new());
+    }
+}
+
+/// Uklid objektu (posledni kanal zavren, nebo novy objekt bez odpovedi).
 pub fn close(stack: &mut Stack, kind: Kind, ops: Vec<Op>) {
     for op in ops {
         if let OpState::Active(p) = op.state {
@@ -401,9 +483,8 @@ pub fn close(stack: &mut Stack, kind: Kind, ops: Vec<Op>) {
         Kind::Session(_) => {}
         Kind::Stream(s) => tcp::close_stream(stack, s),
         Kind::Listener(l) => tcp::close_listener(stack, l),
-        Kind::Udp(u) => {
-            stack.remove(u.sock);
-            stack.release_port(crate::stack::PortProto::Udp, u.port);
-        }
+        Kind::Udp(u) => udp::close(stack, u),
+        Kind::LoStream(s) => lo::close_stream(stack, s),
+        Kind::Bound(b) => crate::bound::close(stack, b),
     }
 }

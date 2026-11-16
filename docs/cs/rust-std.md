@@ -290,7 +290,7 @@ operace `Unsupported`.
 <figure class="diagram">
 <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Spousteni procesu pres launchd">
 <defs><marker id="rs3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
-<rect class="ok" x="10" y="20" width="230" height="110" rx="6"/><text class="t b" x="125" y="45" text-anchor="middle">rodič (std)</text><text class="m" x="125" y="66" text-anchor="middle">Command::spawn</text><text class="m" x="125" y="84" text-anchor="middle">job, nová relace FS,</text><text class="m" x="125" y="102" text-anchor="middle">síť jen s network(true),</text><text class="m" x="125" y="120" text-anchor="middle">stdio, blok parametrů</text>
+<rect class="ok" x="10" y="20" width="230" height="110" rx="6"/><text class="t b" x="125" y="45" text-anchor="middle">rodič (std)</text><text class="m" x="125" y="66" text-anchor="middle">Command::spawn</text><text class="m" x="125" y="84" text-anchor="middle">job, nová relace FS,</text><text class="m" x="125" y="102" text-anchor="middle">síť podle MO_NET,</text><text class="m" x="125" y="120" text-anchor="middle">stdio, blok parametrů</text>
 <path class="ln" d="M240 75 L298 75" marker-end="url(#rs3)"/><text class="m" x="269" y="66" text-anchor="middle">LAUNCH</text>
 <rect class="acc" x="300" y="20" width="230" height="110" rx="6"/><text class="t b" x="415" y="45" text-anchor="middle">launchd</text><text class="m" x="415" y="66" text-anchor="middle">najde program</text><text class="m" x="415" y="84" text-anchor="middle">manifest: limity jobu,</text><text class="m" x="415" y="102" text-anchor="middle">síť = průnik s manifestem</text><text class="m" x="415" y="120" text-anchor="middle">bez kořenových práv</text>
 <path class="ln" d="M530 75 L588 75" marker-end="url(#rs3)"/>
@@ -309,8 +309,12 @@ i aarch64). Spouští je služba `launchd` (`user/launchd`, protokol
 
 - **Schopnosti potomka** dodává rodič v požadavku: svůj job (potomek
   dostane podřízený job, nikdy víc než rodič), novou relaci FS se stejnou
-  identitou (soubory se dědí), relaci sítě **jen výslovně**
-  (`std::os::magnumopus::process::CommandExt::network(true)`), stdio.
+  identitou (soubory se dědí), relaci sítě podle role Net: potomek
+  s neprázdným `MO_NET` v prostředí (runtime ho nastaví, má-li proces síť;
+  potomek prostředí dědí) nebo s
+  `std::os::magnumopus::process::CommandExt::network(true)` dostane vlastní
+  zúženou relaci se stejnou identitou, `env_remove("MO_NET")` = bez sítě
+  ([Síť](sit.md#předání-socketu-limity-identity-a-odvolání)), stdio.
   launchd nemá kořenová práva; přidává jen to, co rodič sám neumí: najde
   program, uplatní manifest a dá potomkovi vlastní kanál ke launchd.
 - **Manifest potomka** (vedle programu, `<program>.manifest.toml`):
@@ -319,8 +323,8 @@ i aarch64). Spouští je služba `launchd` (`user/launchd`, protokol
   `network(true)`. Program bez manifestu (pomocný) dostane relaci sítě,
   jak ji rodič předal.
 - **Rozdíl proti `posix_spawn` v C** ([cstd](cstd.md#procesy-posix_spawn-a-waitpid)):
-  `Command` předá síť jen s `network(true)`, `posix_spawn` ji předá vždy,
-  když ji rodič má (POSIX: potomek dědí prostředí rodiče). Pravidlo
+  `Command` i `posix_spawn` předají síť podle `MO_NET` v prostředí
+  potomka (role Net); `Command` navíc s `network(true)`. Pravidlo
   manifestu platí pro oba stejně: o síti aplikace s manifestem rozhoduje
   launchd podle manifestu, ne rodič.
 - **Hledání programu:** holé jméno = registr příkazů (`[[command]]`

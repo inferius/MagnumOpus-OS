@@ -36,6 +36,12 @@ pub const TESTS: &[Test] = &[
     ("200 socketu najednou (driv limit 63)", many_sockets),
     ("opravneni: prava a omezeni cilu relace", restricted),
     ("opravneni: pravidlo se jmenem hostitele", host_rule),
+    ("bind: port 0 - adresa hned, listen ho necha", super::net_bind::port_zero),
+    ("bind: stejny port dvakrat -> ADDRESS_IN_USE", super::net_bind::in_use),
+    ("bind: spojeni z pevneho portu (loopback i sit)", super::net_bind::connect_from_port),
+    ("bind: listen a connect na miste, druhy kanal po DUP to vidi", super::net_bind::convert_in_place),
+    ("bind: prijem jen z loopbacku - sit ACCESS_DENIED", super::net_bind::scope),
+    ("bind: UDP port hned, stejny port -> ADDRESS_IN_USE", super::net_bind::udp),
     ("DNS: resolver hostitele pres slirp (jen --net-online)", online_dns),
 ];
 
@@ -516,11 +522,13 @@ fn restricted(s: &Startup) -> TestResult {
         Some(Error::AccessDenied),
         "naslouchani bez prava"
     );
-    check_eq!(
-        app.restrict(rights::ALL, &Policy::unrestricted()).err(),
-        Some(Error::AccessDenied),
-        "dalsi relace bez prava RESTRICT"
-    );
+    // Zuzeni bez nove identity (role Net) smi; nova identita jen s pravem
+    // RESTRICT (jinak by obesla rozpocet identity).
+    let narrow = app.restrict(rights::ALL, &Policy::unrestricted()).map_err(|e| fail("zuzeni bez identity", e))?;
+    check_eq!(narrow.tcp_listen(0, 1).err(), Some(Error::AccessDenied), "zuzena relace nema vic prav");
+    let mut other = netproto::Restriction::new(rights::ALL, Policy::unrestricted());
+    other.app = alloc::string::String::from("org.jina");
+    check_eq!(app.restrict_with(&other).err(), Some(Error::AccessDenied), "nova identita bez prava RESTRICT");
     check_eq!(
         app.set_dns(&[host(p.dns)]).err(),
         Some(Error::AccessDenied),

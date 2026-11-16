@@ -264,6 +264,14 @@ means unrestricted:
   all subdomains without `example.com` itself).
 - `bind`: local port ranges for listening and for a UDP socket on a
   chosen port. Port 0 (assigned by the service) is always allowed.
+- `bind_scope` (`BindScope`): where the session may accept from. `Any`
+  (default) = network and loopback, `Loopback` = only 127.0.0.0/8 and
+  `::1`. TCP listening on the network (`0.0.0.0`, an interface address,
+  port 0 too) and a UDP socket on a chosen network port need `Any` in all
+  layers, otherwise `ACCESS_DENIED` (never a silent narrowing to
+  loopback); UDP on port 0 (a client) is always allowed. In the manifest
+  `listen_from = "loopback"` in `[network]` **[verified in QEMU]** x86_64
+  (suite `sit loopback`, test `loopback: prijem jen z loopbacku`).
 
 <figure class="diagram">
 <svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Session restriction layers">
@@ -443,7 +451,7 @@ stop.cancel();          // the read ends with CANCELED
 | `Net::tcp_connect_with`, `tcp_listen_with`, `udp_bind_with` | as without `_with` | `NO_RESOURCES` (session budget) |
 | `*_ctx` variants | as without `_ctx` | `CANCELED` (cancelled by a token), `TIMED_OUT` (deadline) |
 | every request on a socket | | `NO_RESOURCES` (the direction queue is full, more than 8 requests in one direction) |
-| `Net::tcp_listen_addr`, `udp_bind_addr` | as `tcp_listen`, `udp_bind` | `ADDRESS_NOT_AVAILABLE` (the address is neither `0.0.0.0` nor the interface address; `127.0.0.1` too, there is no loopback yet) |
+| `Net::tcp_listen_addr`, `udp_bind_addr` | as `tcp_listen`, `udp_bind` | `ADDRESS_NOT_AVAILABLE` (the address is not `0.0.0.0`, the interface address, 127.x or `::`/`::1`, see [Loopback](#loopback)) |
 | `Net::set_dns` | `CONFIGURE` | |
 | `Net::ntp_query` | `UDP` + destination | `TIMED_OUT`, `BAD_STATE` (unsynchronized server) |
 | `TcpStream::read`, `write` | | `CONNECTION_RESET`, `TIMED_OUT` |
@@ -523,6 +531,103 @@ loop {
 > events for it (a small change of `OBJECT_SIGNAL`), and `netd` shows the
 > state with them without extra messages.
 
+## Loopback
+
+**[verified in QEMU]** x86_64 and aarch64 (suite "sit loopback"). `netd` has
+a loopback for 127.0.0.0/8 and `::1` **without a link and without the
+smoltcp stack** (`user/netd/src/lo.rs`): TCP connections are two byte
+queues between the sides, UDP datagrams go straight into the target
+socket's queue.
+
+- **The same permissions as the network:** session rights (`TCP_CONNECT`,
+  `TCP_LISTEN`, `UDP`), destination rules (`Policy`, 127.0.0.1 must be
+  allowed like any other destination), the socket and byte budget, bind
+  ports (`allows_bind`). Ports share the space with network sockets.
+- **Binding:** `0.0.0.0` accepts from the network and the loopback, 127.x
+  only from the loopback, the interface address only from the network;
+  IPv6 is loopback only for now (`::` and `::1`). Any other address =
+  `ADDRESS_NOT_AVAILABLE`.
+- **Semantics:** a connection to a port without a listener =
+  `CONNECTION_REFUSED`; the connection waits in the listener queue (up to
+  `backlog`) as after a SYN; shutting down the write side (`SHUTDOWN`) and
+  closing the channel = end of stream at the peer, writing to a closed one
+  = `CONNECTION_RESET`; closing the listener cancels waiting connections.
+  A datagram to a port without a socket or into a full queue (256 KiB) is
+  dropped.
+- The connection queue size = the receive buffer of the receiving side
+  (`Buffers`).
+- It also works before DHCP (it needs no interface address).
+
+## Bound TCP socket
+
+**[verified in QEMU]** x86_64 and aarch64 (suites "sit" and "cstd sit").
+`TCP_BIND` (op 12, session) takes the port **right at binding** like
+`bind` on Linux (`user/netd/src/bound.rs`): the bound socket channel knows
+its address (`LOCAL_ADDR`, C `getsockname` right after `bind` to port 0)
+and a second bind to a taken port is `ADDRESS_IN_USE` (C `EADDRINUSE`)
+already from `bind`, not only from `listen`.
+
+- **Conversion in place:** `LISTEN` (op 32) turns the channel into a
+  listener, `CONNECT` (op 33) into a connection from the bound port. The
+  state changes on the netd object, so all channels after `DUP` see the
+  same (wineserver binds and listens on its channel, the Wine program has
+  its own). The client gets no new channel; the port passes to the
+  listener / connection.
+- **Permissions:** at binding the `TCP_CONNECT` or `TCP_LISTEN` right,
+  `allows_bind` (port 0 always) and accepting from the network for a
+  chosen port on the network (`bind_scope`); at `LISTEN` the `TCP_LISTEN`
+  right and accepting from the network for port 0 too; at `CONNECT` the
+  `TCP_CONNECT` right and the target rules (user prompt as for
+  `TCP_CONNECT`). Budget: binding costs a socket without bytes, buffers
+  are added at `LISTEN`/`CONNECT` (`Usage::grow`).
+- **Target from the bound address:** loopback only with a binding that
+  includes loopback (`0.0.0.0`, 127.x), the network only with `0.0.0.0`
+  or the interface address (otherwise `ADDRESS_NOT_AVAILABLE`); another
+  family `INVALID_ARGS`.
+- **A failed connection** leaves the socket used: another
+  `LISTEN`/`CONNECT` = `BAD_STATE`, the port is held until close (like a
+  socket after a failed `connect` on Linux). A concurrent
+  `LISTEN`/`CONNECT` while connecting = `BAD_STATE`.
+- **UDP** has always assigned the port at `UDP_BIND`.
+- `osrt` (`sock.rs`, state `Bound`) does TCP `bind` this way;
+  inheritance and `SCM_RIGHTS` pass a bound socket as `DUP` (kind 4).
+  Another process with the same socket may have converted it meanwhile
+  (wineserver makes the connection, the Wine program got the fd while it
+  was still bound): in state `Bound` `osrt` asks `KIND` before an
+  operation and takes over the state (`TcpBound::current`).
+
+## Passing sockets, identity limits and revocation
+
+**[verified in QEMU]** x86_64 and aarch64 (suites "sit loopback" and
+"cstd sit").
+
+- **`DUP`** (op 51, every socket): a new channel to the same socket
+  (connection, listener, UDP). This is how a socket goes to another
+  process: cstd inherits it in `posix_spawn` and sends it in `SCM_RIGHTS`
+  over `AF_UNIX` (`osrt::inherit`, fd kind `SOCKET`). The socket ends only
+  when its last channel closes; every channel has its own request queues
+  and readiness event.
+- **Who owns the socket:** still the identity that created it (limits,
+  audit, firewall, revocation); the receiver only uses it.
+- **Limits per identity:** besides the session budget (the session tree)
+  each application identity has one socket and byte budget for all its
+  sessions (`Auth::set_identity`, the `Stack::idents` registry in netd;
+  the quota of the identity's first session). Processes with an inherited
+  network cannot bypass it. A narrowing without a new identity (`RESTRICT`
+  with an empty identity) inherits the budget.
+- **Revocation:** init sends netd `revoke\0<identity>` on the control
+  channel (`system::revoke_net`); netd closes all sessions and sockets of
+  the identity, including channels passed to other processes, and replies
+  `revoked <count>`.
+- **Role Net (network for children):** the runtime of a process with a
+  network session sets `MO_NET=1`; a child with a non-empty `MO_NET` in its
+  environment gets its own session narrowed without a new identity
+  (`RESTRICT` with an empty identity: the same rights, rules and identity
+  budget, never wider), without the variable none (opt-out like `MO_GUI`,
+  `MO_AUDIO`). Any session may narrow like that; a new identity and user
+  prompts need the `RESTRICT` right. Revoking the identity closes the
+  sessions of the parent and the children (the same identity).
+
 ## The netproto protocol
 
 Version 2 **[verified in QEMU]**. Every message has a header with the
@@ -570,14 +675,19 @@ channel between `fwd` and the user agent has its own reply format
 | session | `SET_DNS` (9) | count u8, servers → () |
 | session | `AUDIT` (10) | from u64, max u16 → next u64, count u16, records |
 | session | `STATS` (11) | → profile, count u16, traffic per application |
+| session | `TCP_BIND` (12) | local address → local address + bound socket channel (see [Bound TCP socket](#bound-tcp-socket)) |
 | connection | `SEND` (20) | data → accepted u32 |
-| connection | `RECV` (21) | max u32 → data (empty = end of stream) |
+| connection | `RECV` (21) | max u32 [flags u8: `RECV_PEEK` = 1, the data stays queued, C `MSG_PEEK`] → data (empty = end of stream) |
 | connection | `SHUTDOWN` (22) | → () (FIN, reading continues) |
 | connection | `ADDRS` (23) | → local, remote address |
 | listener | `ACCEPT` (30) | → remote address, local address + connection channel |
-| listener, UDP | `LOCAL_ADDR` (31) | → local address (from the current interface address) |
+| listener, UDP, bound | `LOCAL_ADDR` (31) | → local address (from the current interface address) |
+| bound | `LISTEN` (32) | backlog u16, Buffers → local address (the channel is a listener from then on) |
+| bound | `CONNECT` (33) | target, Buffers → local address (the channel is a connection from then on) |
 | UDP | `SEND_TO` (40) | destination, data → () (at most 5 s for room in the queue) |
 | every socket | `READINESS` (50) | → () + readiness event in the handles (see [Socket readiness](#socket-readiness)) |
+| every channel | `KIND` (52) | → kind u8 (0 session, 1 connection, 2 listener, 3 UDP, 4 bound) |
+| every socket | `DUP` (51) | → () + a new channel to the same socket in the handles (see [Passing sockets](#passing-sockets-identity-limits-and-revocation)) |
 | UDP | `RECV_FROM` (41) | max u32 → sender, data |
 
 **Info:** MAC (6 B), MTU u16, flags u8 (bit 0 link, bit 1 configured),
@@ -593,7 +703,7 @@ u32, bytes u64 (`u32::MAX` / `u64::MAX` = no limit), concurrent requests
 u32 (bounds 1 to 1024; init gives 32).
 
 **Policy:** has connect u8 [count u32, rules], has bind u8 [count u32,
-(from u16, to u16)...]. Rule = protocols u8, target kind u8 (0 any,
+(from u16, to u16)...], bind_scope u8 (0 network and loopback, 1 loopback only). Rule = protocols u8, target kind u8 (0 any,
 1 network: address + prefix u8, 2 name: string), port from u16, port to
 u16. The service rejects (`INVALID_ARGS`) empty protocols, a prefix longer
 than the address, an invalid name and more than 256 rules or 16 layers.
@@ -769,7 +879,9 @@ host's 127.0.0.1.
 | permissions | missing rights, destinations outside restrictions, handing a connection to another channel |
 | host name | the `*.magnumopus` rule applies after a system resolution, not after one by an own server |
 | encrypted DNS | the "sifrovane DNS" suite: validated A, CNAME, wildcard, AAAA; NXDOMAIN (NSEC and NSEC3), NODATA; unsigned and bogus zone; failover from a broken resolver, DoT, cache; the profile rule |
-| concurrency ("sit soubeh" suite) | reading and writing one connection from two threads (the write does not wait behind the read), two readers on one connection (FIFO queue), "only try" = `SHOULD_WAIT` and a 300 ms deadline, cancelling a read from another thread and a token cancelled beforehand, the local address of a listener and a UDP socket (`ADDRESS_NOT_AVAILABLE` for a foreign address and 127.0.0.1) |
+| concurrency ("sit soubeh" suite) | reading and writing one connection from two threads (the write does not wait behind the read), two readers on one connection (FIFO queue), "only try" = `SHOULD_WAIT` and a 300 ms deadline, cancelling a read from another thread and a token cancelled beforehand, the local address of a listener and a UDP socket (`ADDRESS_NOT_AVAILABLE` for a foreign address) |
+| loopback ("sit loopback" suite) | TCP over 127.0.0.1 and `::1` (256 KiB both ways, shutdown, close = end of stream, addresses), a listener on 0.0.0.0 accepts from 127.0.0.1, `CONNECTION_REFUSED` without a listener, UDP over 127.0.0.1 and `::1` (sender address), a restricted session without a loopback rule = `ACCESS_DENIED` |
+| bound TCP socket ("sit" suite, `net_bind.rs`; "cstd sit" step `bind`) | the port right after binding to port 0 and the same after `listen`, a second bind to a taken port `ADDRESS_IN_USE` (and `listen` too), free again after close, a connection from a fixed port (loopback and the network to the host echo server, the peer sees the port), `LISTEN` in place is seen by a channel after `DUP` too, accepting from loopback only: `listen` on the network and a chosen network port `ACCESS_DENIED`, UDP port right away and a taken one `ADDRESS_IN_USE` |
 | full session limit ("firewall" suite) | a session with `ops = 1`: the second request is set aside (it does not fail), its cancellation arrives within 2 s while the first request still waits for the user |
 | connect cancellation ("firewall" suite) | a connect waits for a user question, the session meanwhile answers `INFO`, a `CancelToken` cancels it within 2 s (`CANCELED`), a late user answer changes nothing |
 | NTP | `ntpd` against the host server (the "synchronizace casu" suite, see [time.md](time.md#synchronization-over-the-network-ntpd)) |
@@ -820,6 +932,5 @@ described in [firewall.md](firewall.md#tests).
   with a `PEEK` flag (`RECV_FROM` too), `SHUTDOWN_READ`, `SET_OPTION` and
   `GET_OPTION` (nodelay, TTL, keep-alive, linger, broadcast), the number
   of bytes to read (`FIONREAD`) **[designed]**.
-- **Loopback** (127.0.0.1) in the service **[designed]**.
 - **More cards**, static configuration, DNS cache, NTP servers from DHCP
   (option 42).

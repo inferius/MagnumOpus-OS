@@ -36,6 +36,10 @@ int fmap_child_main(const char *path);
 
 /* Rezim potomka: "child exit N", "child echo TEXT", "child stdin",
  * "child cwd", "child sleep", "child fds" (inheritcheck.c). */
+/* netcheck.c: potomek testu predani socketu. */
+int net_child_main(const char *mode);
+int net_conn_child_main(void);
+
 int spawn_child_main(int argc, char **argv) {
     if (argc == 4 && strcmp(argv[2], "exit") == 0) return atoi(argv[3]);
     if (argc == 4 && strcmp(argv[2], "echo") == 0) {
@@ -70,6 +74,8 @@ int spawn_child_main(int argc, char **argv) {
     if (argc == 3 && strcmp(argv[2], "fds") == 0) return inherit_child_main();
     if (argc == 4 && strcmp(argv[2], "unix") == 0) return unix_child_main(argv[3]);
     if (argc == 3 && strcmp(argv[2], "unixpair") == 0) return unixpair_child_main();
+    if (argc == 3 && (strcmp(argv[2], "sockw") == 0 || strcmp(argv[2], "sockr") == 0)) return net_child_main(argv[2]);
+    if (argc == 3 && strcmp(argv[2], "netconn") == 0) return net_conn_child_main();
     if (argc == 4 && strcmp(argv[2], "fmap") == 0) return fmap_child_main(argv[3]);
     if (argc == 3 && strcmp(argv[2], "sleep") == 0) {
         sleep(60);

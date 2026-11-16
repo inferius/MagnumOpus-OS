@@ -28,9 +28,11 @@
 
 extern crate alloc;
 
+mod bound;
 mod forward;
 mod fw;
 mod link;
+mod lo;
 mod obj;
 mod ops;
 mod ready;
@@ -58,6 +60,10 @@ use crate::stack::{Stack, now_ns};
 const FW_SLOT: u64 = 0xFFFF_FFFF;
 /// Slot klice pro kanal k dnsd.
 const RESOLVER_SLOT: u64 = 0xFFFF_FFFE;
+/// Slot klice pro ridici kanal od initu (bootstrap): odvolani site.
+const CONTROL_SLOT: u64 = 0xFFFF_FFFD;
+/// Zprava initu: odvolat sit identite (za ni identita aplikace).
+const REVOKE_PREFIX: &[u8] = b"revoke\0";
 
 /// Rozpocet korenove relace: 3/4 uzivatelske pameti, kterou job sluzby
 /// jeste muze dostat (zbytek na relace, fronty a smoltcp); bez limitu jobu
@@ -130,6 +136,7 @@ fn main(startup: Startup) -> i64 {
 
     let mut svc = Service::new(
         port,
+        bootstrap,
         Obj::new(
             Channel::from_handle(root_h),
             Kind::Session(Rc::new(RefCell::new(Auth::root_with(root_quota())))),
@@ -145,6 +152,9 @@ fn main(startup: Startup) -> i64 {
 
 struct Service {
     port: Port,
+    /// Ridici kanal od initu (odvolani site identite).
+    control: Channel,
+    control_armed: bool,
     objs: Vec<Option<Obj>>,
     /// Generace slotu (zvysi se pri kazdem uvolneni).
     gens: Vec<u32>,
@@ -164,9 +174,11 @@ struct Service {
 }
 
 impl Service {
-    fn new(port: Port, root: Obj) -> Self {
+    fn new(port: Port, control: Channel, root: Obj) -> Self {
         let mut svc = Self {
             port,
+            control,
+            control_armed: false,
             objs: Vec::new(),
             gens: Vec::new(),
             free_slots: Vec::new(),
@@ -199,6 +211,7 @@ impl Service {
             return;
         }
         loop {
+            stack.lo_dirty = false;
             stack.poll();
             self.progress_pending(stack);
             // Odeslat, co pozadavky zaradily, a uklidit zavrena spojeni.
@@ -219,7 +232,9 @@ impl Service {
                     wake = wake.min(ops::wake_at(o));
                 }
             }
-            if stack.dev.has_rx() {
+            // Rx od karty nebo zmena na loopbacku (protejsek muze cekat):
+            // hned dalsi kolo.
+            if stack.dev.has_rx() || stack.lo_dirty {
                 wake = now;
             }
             // Prvni paket s terminem, dalsi uz jen bez cekani.
@@ -283,6 +298,10 @@ impl Service {
                 .wait_async(ch.handle(), FW_SLOT, Signals::READABLE | Signals::PEER_CLOSED)?;
             self.fw_armed = true;
         }
+        if !self.control_armed {
+            self.port.wait_async(self.control.handle(), CONTROL_SLOT, Signals::READABLE)?;
+            self.control_armed = true;
+        }
         if !self.resolver_armed
             && let Some(ch) = stack.resolver.channel()
         {
@@ -327,6 +346,11 @@ impl Service {
             // Odpovedi vyzvedne progress_pending v tomto kole.
             stack.resolver.pump();
             self.resolver_armed = false;
+            return true;
+        }
+        if slot as u64 == CONTROL_SLOT {
+            self.control_armed = false;
+            self.control_messages(stack);
             return true;
         }
         if slot as u64 == FW_SLOT {
@@ -388,10 +412,32 @@ impl Service {
         true
     }
 
+    /// Zpravy initu na ridicim kanalu. `revoke\0<identita>`: zavre vsechny
+    /// relace a sockety identity (i kanaly predane jinym procesum po
+    /// `DUP`); odpoved `revoked <pocet kanalu>`.
+    fn control_messages(&mut self, stack: &mut Stack) {
+        while let Ok(m) = self.control.try_read() {
+            let Some(app) = m.data.strip_prefix(REVOKE_PREFIX) else { continue };
+            let app = core::str::from_utf8(app).unwrap_or("");
+            let mut n = 0;
+            if !app.is_empty() {
+                let doomed: Vec<usize> = (0..self.objs.len())
+                    .filter(|&i| matches!(&self.objs[i], Some(o) if obj::identity(&o.kind.borrow()) == app))
+                    .collect();
+                for i in doomed {
+                    self.free(stack, i);
+                    n += 1;
+                }
+            }
+            println!("netd: sit {app} odvolana ({n} kanalu zavreno)");
+            let _ = self.control.write(alloc::format!("revoked {n}").as_bytes(), Vec::new());
+        }
+    }
+
     /// Uvolni slot: uklid objektu a nova generace (stare pakety neplati).
     fn free(&mut self, stack: &mut Stack, i: usize) {
         if let Some(o) = self.objs[i].take() {
-            obj::close(stack, o.kind, o.ops);
+            obj::close_channel(stack, o.kind, o.ops);
             self.live -= 1;
             self.free_slots.push(i);
         }

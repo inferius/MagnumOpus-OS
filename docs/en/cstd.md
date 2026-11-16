@@ -185,22 +185,32 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 
 | Header | Functions | Note |
 |---|---|---|
-| `sys/socket.h` | `socket` (`AF_INET`, `AF_INET6`; `SOCK_STREAM`, `SOCK_DGRAM`, `SOCK_NONBLOCK`, `SOCK_CLOEXEC`), `bind`, `listen`, `accept`, `accept4`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg` (control messages only `SCM_RIGHTS` on `AF_UNIX`), `socketpair`, `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt` | `AF_UNIX` only `SOCK_STREAM` (see [AF_UNIX sockets](#af_unix-sockets)); `MSG_PEEK` = `ENOTSUP` |
+| `sys/socket.h` | `socket` (`AF_INET`, `AF_INET6`; `SOCK_STREAM`, `SOCK_DGRAM`, `SOCK_NONBLOCK`, `SOCK_CLOEXEC`), `bind`, `listen`, `accept`, `accept4`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg` (control messages only `SCM_RIGHTS` on `AF_UNIX`), `socketpair`, `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt` | `AF_UNIX` only `SOCK_STREAM` (see [AF_UNIX sockets](#af_unix-sockets)); `MSG_PEEK` only on TCP connections (the data stays at netd), elsewhere `ENOTSUP` |
 | `netinet/in.h`, `arpa/inet.h` | `htons` ..., `inet_pton`, `inet_ntop`, `inet_addr`, `inet_ntoa`, `in6addr_any` | |
 | `netdb.h` | `getaddrinfo`, `freeaddrinfo`, `gai_strerror`, `getnameinfo` | names via the netd resolver; `getnameinfo` numeric only |
 | `poll.h`, `sys/select.h`, `sys/epoll.h` | `poll`, `select`, `epoll_create`, `epoll_create1`, `epoll_ctl`, `epoll_wait` | over `osrt::poll` |
 
 - A socket is an object in the fd table (`osrt::sock`): after `socket()` it
   has no connection at netd yet; `connect`/`listen`/`bind` turn it into a
-  TCP connection, a listener or a UDP socket. `read`, `write`, `fdopen` and
+  TCP connection, a listener or a UDP socket. A TCP `bind` takes the port
+  at netd right away ([bound socket](network.md#bound-tcp-socket)):
+  `getsockname` after `bind` to port 0 knows the port, a taken port =
+  `EADDRINUSE` from `bind` and `connect` after `bind` goes from the bound
+  port. `read`, `write`, `fdopen` and
   `close` also work on a socket.
 - What a program may do (targets, ports, listening) is decided by the
   network session from the manifest: a forbidden target or port = `EACCES`.
   `SO_REUSEADDR`, `SO_KEEPALIVE`, `TCP_NODELAY` and buffer sizes are
   accepted without effect, `SO_RCVTIMEO`/`SO_SNDTIMEO` apply.
 - `O_NONBLOCK` (`SOCK_NONBLOCK`, `MSG_DONTWAIT`) = deadline `TRY` at netd,
-  `EAGAIN` without data. `connect` completes immediately even in
-  non-blocking mode (POSIX allows it), so `SO_ERROR` is always 0.
+  `EAGAIN` without data. A non-blocking TCP `connect` returns
+  `EINPROGRESS` like Linux (on loopback too) and reports completion with
+  `POLLOUT`; netd, however, establishes the connection during the call
+  (it is waited for as in the blocking case), so `SO_ERROR` is always 0
+  and a refused connection is an immediate error. Without `EINPROGRESS`
+  wineserver would never register the socket for waiting (a connection
+  that completes immediately raises neither `FD_CONNECT` nor a wait for
+  data there).
 - **Waiting** (`osrt::poll`): files are always ready, stdin and pipes wait
   for a channel signal (`READABLE`, `PEER_CLOSED`), sockets for the netd
   readiness event (netproto v2). A channel has no "writable" signal, so
@@ -886,7 +896,8 @@ before `main`:
 | memory fd (`memfd_create`) | a duplicate of the memory object, seals, a copy of the position |
 | `/dev/null`, the parent's stdio without a channel | an empty fd without a handle (reading = end, writes are discarded) |
 | file, directory | the durable identity of the object (dataset, oid, generation); the child opens it in its own FS session with `REOPEN` - fsd checks the rights and the session's mounted paths again |
-| socket, `epoll` | **not inherited** (the connection to netd belongs to the parent's session); an inherited number is skipped, `adddup2` of a socket = `ENOTSUP` |
+| TCP/UDP socket | a new channel to the same socket at netd (`DUP`, [Network](network.md#the-netproto-protocol)); the socket still belongs to the identity that created it (limits, network revocation closes it in the child too). The same in `SCM_RIGHTS` over `AF_UNIX`. A socket without a connection (after `socket()`/`bind`) only kind and address **[verified in QEMU]** x86_64 and aarch64 (`ctest net`, step `share`) |
+| `epoll` | **not inherited**; an inherited number is skipped |
 
 Differences from POSIX (explicitly): the file position is **not shared**
 between the parent and the child - the child starts at the parent's

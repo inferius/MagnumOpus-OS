@@ -104,7 +104,8 @@ int inherit_test(const char *dir) {
     if (pread(FD_FILE, c, 8, 0) != 8 || memcmp(c, "XYcdefgh", 8) != 0) return 12;
     if (pread(FD_MEM, c, 6, 0) != 6 || memcmp(c, "pamet!", 6) != 0) return 13;
 
-    /* Socket zdedit nejde: dup2 socketu = ENOTSUP. */
+    /* Socket bez spojeni se zdedi (druh a adresa; socket se spojenim jako
+     * novy kanal u netd, test v netcheck.c, krok share). */
     int s = socket(AF_INET, SOCK_STREAM, 0);
     if (s >= 0) {
         posix_spawn_file_actions_init(&fa);
@@ -113,7 +114,8 @@ int inherit_test(const char *dir) {
         r = posix_spawnp(&pid, "ctest", &fa, NULL, argv2, environ);
         posix_spawn_file_actions_destroy(&fa);
         close(s);
-        if (r != ENOTSUP) return 14;
+        if (r != 0) return 14;
+        if (waitpid(pid, &st, 0) != pid || !WIFEXITED(st) || WEXITSTATUS(st) != 0) return 15;
     }
     close(p[0]);
     close(q[0]);

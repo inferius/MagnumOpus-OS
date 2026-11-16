@@ -5,7 +5,7 @@ Protokol sítě: zprávy mezi programy a službou `netd` (relace a sockety), mez
 ## Klíčové soubory
 
 - `src/msg.rs` - hlavička v2: dotaz `op, id, deadline`, odpověď `id, status`; `CANCEL`.
-- `src/client.rs` - `Net`, `TcpStream`, `TcpListener`, `UdpSocket`, `Deadline`; `src/client/mux.rs` - sdílený kanál (směrování odpovědí podle čísla, futex) a `CancelToken`.
+- `src/client.rs` - `Net`, `TcpBound` (navázaný socket: `TCP_BIND`, převod na místě, `current` podle `KIND`), `TcpStream`, `TcpListener`, `UdpSocket`, `Deadline`; `src/client/mux.rs` - sdílený kanál (směrování odpovědí podle čísla, futex) a `CancelToken`.
 - `src/lib.rs` - kódy operací (`op`), `Info`, `Buffers`, `DIRECTION_QUEUE`; `src/auth.rs` - relace, vrstvy, rozpočet (`Quota`: sockety, bajty, souběžné dotazy).
 - `src/link.rs` - ovladač karty <-> netd (jiný protokol, bez hlavičky v2).
 - `ready` (v `lib.rs`) - bity připravenosti socketu na eventu (`USER_0..3`); `Readiness` v `client.rs` = základ backendu mio.
@@ -16,6 +16,7 @@ Protokol sítě: zprávy mezi programy a službou `netd` (relace a sockety), mez
 - Číslo dotazu je jedinečné mezi rozpracovanými na kanálu a nikdy 0; termín je absolutní čas `libos::time::now` v ns, `u64::MAX` = bez limitu.
 - Klientské typy jsou `Send + Sync` a metody berou `&self`; jedno vlákno nesmí kvůli `Mux` platit syscall navíc.
 - Pozdní odpověď (dotaz vypršel nebo byl zrušen) se zahodí i s handly; kanál se kvůli ní nezavírá.
+- `Policy` na drátě: `connect`, `bind`, `bind_scope` (u8, `BindScope`); nová pole jen na konec a v jednom commitu se všemi, kdo `Policy` skládají (`manifest`, `fwd`, testy).
 - Kanál fwd <-> agent má vlastní formát odpovědi (`fw::agent_reply`, status <= 0 odliší odpověď od zprávy fwd).
 
 ## Testy

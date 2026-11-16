@@ -62,6 +62,7 @@ ask = true                       # target outside rules: ask the user
 sockets = 32                     # most sockets at once
 buffers = "4M"                   # most socket buffer memory
 ops = 32                         # most concurrent session requests (1 to 1024, default 32; more wait)
+listen_from = "network"           # accept from: "network" (default) or "loopback" only
 
 [[network.connect]]
 proto = ["udp"]                  # tcp, udp, icmp (default all)

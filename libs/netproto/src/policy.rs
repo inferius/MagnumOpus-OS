@@ -186,6 +186,29 @@ impl Rule {
     }
 }
 
+/// Odkud smi relace prijimat spojeni (naslouchani TCP, UDP na zvolenem
+/// portu).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum BindScope {
+    /// Sit i loopback.
+    #[default]
+    Any = 0,
+    /// Jen loopback (127.0.0.0/8, `::1`); navazani na sit (`0.0.0.0`,
+    /// adresa rozhrani) = `ACCESS_DENIED`, nikdy tiche zuzeni.
+    Loopback = 1,
+}
+
+impl BindScope {
+    pub fn from_u8(v: u8) -> Result<Self> {
+        match v {
+            0 => Ok(Self::Any),
+            1 => Ok(Self::Loopback),
+            _ => Err(Error::InvalidArgs),
+        }
+    }
+}
+
 /// Jedna vrstva omezeni. `None` = bez omezeni v teto vrstve.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Policy {
@@ -195,6 +218,8 @@ pub struct Policy {
     /// zvolenem portu (UDP): rozsahy `lo..=hi`. Port 0 (prideli sluzba) je
     /// povolen vzdy.
     pub bind: Option<Vec<(u16, u16)>>,
+    /// Odkud smi prijimat (sit, nebo jen loopback).
+    pub bind_scope: BindScope,
 }
 
 impl Policy {
@@ -208,6 +233,7 @@ impl Policy {
         Self {
             connect: Some(rules),
             bind: Some(Vec::new()),
+            bind_scope: BindScope::Any,
         }
     }
 
@@ -249,6 +275,7 @@ impl Policy {
                 }
             }
         }
+        w.u8(self.bind_scope as u8);
     }
 
     pub fn get(r: &mut Reader) -> Result<Self> {
@@ -283,7 +310,8 @@ impl Policy {
             }
             _ => return Err(Error::InvalidArgs),
         };
-        let p = Self { connect, bind };
+        let bind_scope = BindScope::from_u8(r.u8()?)?;
+        let p = Self { connect, bind, bind_scope };
         p.validate()?;
         Ok(p)
     }
