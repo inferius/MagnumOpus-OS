@@ -99,7 +99,7 @@ tlačítko Menu = kontextová nabídka.
 | Textové pole, víceřádkové | ano | `--k-h`, `radius.control`, `s4`; popisek nad, nápověda / chyba pod | šipky, Ctrl+šipky, výběr se Shift, schránka, undo; víceřádkové Ctrl+Enter odešle |
 | Číslo | ano | jako pole, zarovnání vpravo, jednotka, krokovací tlačítka mimo Tab | &uarr; &darr; krok, PgUp / PgDn 10 kroků, Home / End |
 | Heslo | ano | jako pole + oko (`aria-pressed`), varování Caps Lock | jako pole, nikdy návrhy |
-| Hledání | ano | lupa vlevo, křížek jen s textem, filtr s prodlevou 150 ms | Esc smaže, druhé Esc opustí, &darr; do výsledků |
+| Hledání | ano | lupa vlevo, křížek jen s textem, filtr s prodlevou 150 ms; koncový slot (`.trailing`: štítek klávesy `.kbd` jen u prázdného pole, ikona, krátký text `ink_muted`) pro každé jednořádkové pole | Esc smaže, druhé Esc opustí, &darr; do výsledků |
 | Zaškrtávátko | částečně | políčko 18 / 22 / 28, `radius.xs`, okraj 2 px; neurčitý stav | Mezerník |
 | Přepínač | ano | `switch_*`; okamžitý účinek | Mezerník |
 | Radio | částečně | kruh 18 / 22 / 28; skupina je jedna zastávka | šipky rovnou vybírají |

@@ -94,6 +94,8 @@ impl Comp {
         let d2 = alloc::rc::Rc::clone(&data);
         // Pole hledani s lupou (`.q`), ve spousteci napoveda Super.
         let field = ui::search_input(&p.query).placeholder(if p.launcher { "Hledat" } else { "Hledat příkazy, okna a aplikace... (Tab: rozsah, > akce)" }).on_change(SysMsg::Query).key("hledat");
+        // Spoustec: napoveda klavesy Super v koncovem slotu (`.q .kb`).
+        let field = if p.launcher { field.trailing(ui::fieldopts::Trailing::Key(String::from("Super"))) } else { field };
         let list: Node<SysMsg> = if n == 0 && self.palette_query_set() {
             // Prazdny vysledek: prazdny stav misto prazdneho ramecku (K8).
             ui::empty_state(t, "search", "Nic nenalezeno", "Zkuste jiné slovo; Tab přepne rozsah hledání.", None).height(table_h)

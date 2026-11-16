@@ -714,6 +714,15 @@ impl<M> Node<M> {
         self
     }
 
+    /// Koncovy slot pole: napoveda klavesy, ikona nebo text
+    /// ([`crate::fieldopts::Trailing`]).
+    pub fn trailing(mut self, t: crate::fieldopts::Trailing) -> Self {
+        if let Kind::TextInput { opts, .. } = &mut self.kind {
+            opts.trailing = Some(t);
+        }
+        self
+    }
+
     /// Nejvic `n` znaku (grafemu); vlozeni delsiho textu se zkrati.
     pub fn max_len(mut self, n: usize) -> Self {
         if let Kind::TextInput { opts, .. } = &mut self.kind {

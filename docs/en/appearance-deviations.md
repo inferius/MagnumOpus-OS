@@ -77,7 +77,7 @@ whole system, so they go first.
 | ID | What differs | Prototype | Library | P | Size |
 |---|---|---|---|---|---|
 | O13 | **Launcher footer** shows "Signed-in user" instead of the avatar and name; the Settings icon is missing.<br>**Fixed:** a circle with the initial and the display name, Settings (disabled with a reason). Screenshot [05 after](../../design/snimky/odchylky/05-spoustec-po.png). | [spoustec.html](../../design/spoustec.html) (d) | comp | P2 | S |
-| O14 | **Launcher sections:**<br>- the system has Running / More... (1) / System, the prototype has Running / Apps / Recent;<br>- "More..." does not react to a click;<br>- the search field has no magnifier and no Super hint.<br>**Fixed:** sections Running / Applications / Recent without "more...", a field with a magnifier. The Super hint in the field is not there yet (the field has no room for a key label). | [spoustec.html](../../design/spoustec.html) (d) | comp | P2 | M |
+| O14 | **Launcher sections:**<br>- the system has Running / More... (1) / System, the prototype has Running / Apps / Recent;<br>- "More..." does not react to a click;<br>- the search field has no magnifier and no Super hint.<br>**Fixed:** sections Running / Applications / Recent without "more...", a field with a magnifier and the Super hint in the field's trailing slot (`Trailing::Key`, only in an empty field). | [spoustec.html](../../design/spoustec.html) (d) | comp | P2 | M |
 
 ## Windows and decorations
 

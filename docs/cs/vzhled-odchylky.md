@@ -70,7 +70,7 @@ jednou opraví celý systém, proto jdou první.
 | ID | Co je jinak | Prototyp | Knihovna | P | Velikost |
 |---|---|---|---|---|---|
 | O13 | **Pata spouštěče** ukazuje „Přihlášený uživatel“ místo avataru a jména a chybí ikona Nastavení.<br>**Opraveno:** kolečko s počátečním písmenem a zobrazované jméno, Nastavení (vypnuté s důvodem). Snímek [05 po](../../design/snimky/odchylky/05-spoustec-po.png). | [spoustec.html](../../design/spoustec.html) (d) | comp | P2 | S |
-| O14 | **Sekce spouštěče** jsou Běží / Další... (1) / Systém, prototyp má Běží / Aplikace / Nedávné. „Další...“ na klik nereaguje. Pole hledání nemá lupu a nápovědu Super.<br>**Opraveno:** sekce Běží / Aplikace / Nedávné bez „další...“, pole s lupou. Nápověda Super v poli zatím není (pole nemá místo na štítek klávesy). | [spoustec.html](../../design/spoustec.html) (d) | comp | P2 | M |
+| O14 | **Sekce spouštěče** jsou Běží / Další... (1) / Systém, prototyp má Běží / Aplikace / Nedávné. „Další...“ na klik nereaguje. Pole hledání nemá lupu a nápovědu Super.<br>**Opraveno:** sekce Běží / Aplikace / Nedávné bez „další...“, pole s lupou a nápovědou Super v koncovém slotu pole (`Trailing::Key`, jen u prázdného pole). | [spoustec.html](../../design/spoustec.html) (d) | comp | P2 | M |
 
 ## Okna a dekorace
 
