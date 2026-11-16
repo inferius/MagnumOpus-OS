@@ -84,7 +84,7 @@ whole system, so they go first.
 | ID | What differs | Prototype | Library | P | Size |
 |---|---|---|---|---|---|
 | O15 | **Trust badge** on Files and the Task manager says "System". The prototype shows the app name and its permission icon (Files + home).<br>**Fixed:** the badge shows the application name, a system app is marked by a shield with a check mark (init supplies the name and the mark from the manifest). | [okna.html](../../design/okna.html) (Trust badge), [soubory.html](../../design/soubory.html) | comp | P2 | S |
-| O16 | **Window buttons with a custom title** (Terminal) are grey as in an inactive window, even when the window has focus. Screenshot [08](../../design/snimky/odchylky/08-terminal.png).<br>**Not reproducible on the host:** the CPU and the reference GPU path draw custom-title window buttons in the same `ink_muted` as a standard window (checked with a probe in the comp tests). It needs a screenshot from QEMU or hardware with the backend that produced screenshot 08. | [okna.html](../../design/okna.html) (Window modes) | comp | P3 | S |
+| O16 | **Window buttons with a custom title** (Terminal) are grey as in an inactive window, even when the window has focus. Screenshot [08](../../design/snimky/odchylky/08-terminal.png).<br>**Closed as not reproducible:** in a `cargo xtask run --release` run (VGA, CPU composition), the setup of screenshot 08, the buttons of the focused terminal and of the inactive Files window have the same colours (light and dark mode, measured from QMP screenshot pixels); the CPU and the reference GPU path in the comp tests draw them the same as well. Screenshot [08 after](../../design/snimky/odchylky/08-terminal-po.png). | [okna.html](../../design/okna.html) (Window modes) | comp | P3 | S |
 
 ## Files
 
