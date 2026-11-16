@@ -3631,6 +3631,7 @@ dependencies = [
  "ed25519-dalek 3.0.0",
  "sha2 0.11.0",
  "sunset",
+ "zeroize",
 ]
 
 [[package]]

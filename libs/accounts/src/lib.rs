@@ -17,6 +17,7 @@ pub mod engine;
 pub mod kdf;
 pub mod manage;
 pub mod record;
+pub mod client;
 pub mod remote;
 pub mod throttle;
 pub mod wrap;

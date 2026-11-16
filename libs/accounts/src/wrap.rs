@@ -23,6 +23,9 @@ pub mod kind {
     pub const PIN: u8 = 2;
     pub const KEY: u8 = 3;
     pub const RECOVERY: u8 = 5;
+    /// Klic klienta SSH obaleny heslem (`key_id` = cislo klice;
+    /// `client.rs`). Jina domena nez obaly klice domova.
+    pub const CLIENT_KEY: u8 = 6;
 }
 
 /// Jeden obal klice domova.
