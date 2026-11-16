@@ -1299,10 +1299,10 @@ fn tasks_icon_tooltip() {
     t.now += DELAY + 1;
     t.c.timers(t.now);
     assert_eq!(t.c.tooltip_shown(), Some(Tip::Bar(SysKey::Tasks)));
-    assert_eq!(t.c.tip_text(Tip::Bar(SysKey::Tasks)), "Úlohy: 20 běží, z toho agent AI 1");
+    assert_eq!(t.c.tip_text(Tip::Bar(SysKey::Tasks)), "Úlohy - 20 běží, z toho agent AI 1");
     // Zmena poctu: bublina ukazuje nove cislo (stejny zdroj jako ikona).
     t.c.set_tasks(19, 1);
-    assert_eq!(t.c.tip_text(Tip::Bar(SysKey::Tasks)), "Úlohy: 19 běží, z toho agent AI 1");
+    assert_eq!(t.c.tip_text(Tip::Bar(SysKey::Tasks)), "Úlohy - 19 běží, z toho agent AI 1");
     // Presun na zvonek tesne po predchozi: hned, bez prodlevy.
     t.now += REOPEN / 2;
     t.move_to(bar.bell.x + 4, bar.bell.y + 4);

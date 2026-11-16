@@ -435,10 +435,13 @@ fn place<M>(n: Node<M>, key: Key, r: Rect, space: usize, parent: usize, t: &Look
             let grow = children.iter().filter(|c| c.grow).count() as u32;
             let extra = r.h.saturating_sub(fixed);
             let mut y = r.y;
-            for (c, (_, h)) in children.into_iter().zip(sizes) {
+            for (c, (w, h)) in children.into_iter().zip(sizes) {
                 let h = if c.grow && grow > 0 { h + extra / grow } else { h };
                 let k = child_key(&c, key, &mut counts);
-                place(c, k, Rect::new(r.x, y, r.w, h), space, id, t, out);
+                // Segmentovy prepinac jen tak siroky jako obsah (`.seg`
+                // je inline-flex), ostatni prvky na celou sirku sloupce.
+                let w = if matches!(c.kind, Kind::Segmented { .. }) && !c.grow { w.min(r.w) } else { r.w };
+                place(c, k, Rect::new(r.x, y, w, h), space, id, t, out);
                 y += (h + gap) as i32;
             }
         }

@@ -200,3 +200,35 @@ fn shot_clock_panel() {
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
+
+/// Bublina listy (K12): tucny titulek, popis pod nim, u spoustece stitek
+/// klavesy Super.
+#[test]
+fn shot_bar_tooltip() {
+    use crate::input::SysKey;
+    use crate::tooltip::{DELAY, Tip};
+    let mut errors = Vec::new();
+    for (mode, mname) in [(theme::Mode::Light, "svetly"), (theme::Mode::Dark, "tmavy")] {
+        for (tip, name) in [(Tip::Bar(SysKey::Tasks), "ulohy"), (Tip::Bar(SysKey::Launcher), "spoustec")] {
+            let mut t = T::new();
+            t.c.set_mode(mode);
+            t.c.tasks = (3, 1);
+            t.frame();
+            let bar = t.c.bar_layout();
+            let a = match tip {
+                Tip::Bar(SysKey::Tasks) => bar.tasks.unwrap(),
+                _ => bar.launcher,
+            };
+            t.move_to(a.x + 4, a.y + 4);
+            t.now += DELAY + 1;
+            t.c.timers(t.now);
+            t.frame();
+            assert_eq!(t.c.tooltip_shown(), Some(tip));
+            let r = t.c.tip_rect().unwrap();
+            assert!(r.h > t.c.style.theme.text.body_strong.line + 2 * t.c.style.theme.space[2], "dva radky");
+            let (px, w, h) = crop(&t, r);
+            errors.extend(compare(&format!("bublina-{name}-{mname}"), &px, w, h));
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
