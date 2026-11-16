@@ -588,7 +588,7 @@ Kanál mezi `fwd` a agentem uživatele má vlastní formát odpovědi
 | relace | `AUDIT` (10) | od u64, nejvíc u16 → další u64, počet u16, záznamy |
 | relace | `STATS` (11) | → profil, počet u16, provoz aplikací |
 | spojení | `SEND` (20) | data → přijato u32 |
-| spojení | `RECV` (21) | nejvýš u32 → data (prázdná = konec proudu) |
+| spojení | `RECV` (21) | nejvýš u32 [příznaky u8: `RECV_PEEK` = 1, data zůstanou ve frontě, C `MSG_PEEK`] → data (prázdná = konec proudu) |
 | spojení | `SHUTDOWN` (22) | → () (FIN, čtení pokračuje) |
 | spojení | `ADDRS` (23) | → místní, vzdálená adresa |
 | naslouchání | `ACCEPT` (30) | → vzdálená adresa, místní adresa + kanál spojení |

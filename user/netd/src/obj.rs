@@ -232,6 +232,8 @@ pub enum Pending {
     Recv {
         max: usize,
         deadline: u64,
+        /// `RECV_PEEK`: data ve fronte zustanou.
+        peek: bool,
     },
     Accept {
         deadline: u64,

@@ -233,7 +233,8 @@ pub fn stream_request(stack: &mut Stack, s: &mut LoStream, code: u32, until: u64
         }
         op::RECV => {
             let max = (r.u32()? as usize).clamp(1, MAX_IO);
-            Ok(recv_progress(stack, s, max, until, crate::stack::now_ns()))
+            let peek = r.u8().unwrap_or(0) & op::RECV_PEEK != 0;
+            Ok(recv_progress(stack, s, max, until, crate::stack::now_ns(), peek))
         }
         op::SHUTDOWN => {
             s.conn.borrow_mut().pipes[s.side].shut = true;
@@ -252,7 +253,7 @@ pub fn stream_request(stack: &mut Stack, s: &mut LoStream, code: u32, until: u64
 pub fn stream_progress(stack: &mut Stack, s: &mut LoStream, p: Pending, now: u64) -> Step {
     match p {
         Pending::Send { data, done, deadline } => send_progress(stack, s, data, done, deadline, now),
-        Pending::Recv { max, deadline } => recv_progress(stack, s, max, deadline, now),
+        Pending::Recv { max, deadline, peek } => recv_progress(stack, s, max, deadline, now, peek),
         _ => Step::err(Error::BadState),
     }
 }
@@ -294,7 +295,7 @@ fn send_progress(stack: &mut Stack, s: &mut LoStream, data: Vec<u8>, mut done: u
     Step::Wait(Pending::Send { data, done, deadline })
 }
 
-fn recv_progress(stack: &mut Stack, s: &mut LoStream, max: usize, deadline: u64, now: u64) -> Step {
+fn recv_progress(stack: &mut Stack, s: &mut LoStream, max: usize, deadline: u64, now: u64, peek: bool) -> Step {
     let peer = 1 - s.side;
     let mut c = s.conn.borrow_mut();
     if c.reset {
@@ -303,9 +304,13 @@ fn recv_progress(stack: &mut Stack, s: &mut LoStream, max: usize, deadline: u64,
     let pipe = &mut c.pipes[peer];
     if !pipe.buf.is_empty() {
         let n = pipe.buf.len().min(max);
-        let data: Vec<u8> = pipe.buf.drain(..n).collect();
-        stack.lo_dirty = true;
-        stack.fw.traffic(&s.app, 0, n);
+        let data: Vec<u8> = if peek {
+            pipe.buf.iter().take(n).copied().collect()
+        } else {
+            stack.lo_dirty = true;
+            stack.fw.traffic(&s.app, 0, n);
+            pipe.buf.drain(..n).collect()
+        };
         let mut w = Writer::new();
         w.bytes(&data);
         return Step::reply(Ok(w));
@@ -317,7 +322,7 @@ fn recv_progress(stack: &mut Stack, s: &mut LoStream, max: usize, deadline: u64,
     if now >= deadline {
         return Step::err(expired(deadline));
     }
-    Step::Wait(Pending::Recv { max, deadline })
+    Step::Wait(Pending::Recv { max, deadline, peek })
 }
 
 /// Pripravenost strany spojeni: (cteni, zapis, konec, chyba).

@@ -105,22 +105,22 @@ WT="$WINE_OUT/tests"
 mkdir -p "$WT"
 WSRC="$MOS_TOOLS/../../user/wintest"
 TOOLS="$W/tools-$WINE_KEY/tools"
-# wintest.c (konzole), gui.c (W3: okna, GDI) a audio.c (W4: zvuk):
-# user32, gdi32 a winmm navic.
+# wintest.c (konzole), gui.c (W3: okna, GDI), audio.c (W4: zvuk) a net.c
+# (W4b: Winsock): user32, gdi32, winmm a ws2_32 navic.
 : > "$W/logs/wintest.log"
-for c in wintest gui audio; do
+for c in wintest gui audio net; do
     clang -target x86_64-windows -fuse-ld=lld --no-default-config -c -o "$WT/$c.o" "$WSRC/$c.c" \
         -I"$SRC/$WINE_TOP/include" -I"$SRC/$WINE_TOP/include/msvcrt" -Iinclude -D_UCRT -O2 -Wall \
         >> "$W/logs/wintest.log" 2>&1 || { cat "$W/logs/wintest.log"; exit 1; }
 done
 "$TOOLS/winegcc/winegcc" -o "$WT/wintest.exe" --wine-objdir . --winebuild "$TOOLS/winebuild/winebuild" \
-    -b x86_64-windows -mconsole "$WT/wintest.o" "$WT/gui.o" "$WT/audio.o" dlls/winecrt0/x86_64-windows/libwinecrt0.a \
+    -b x86_64-windows -mconsole "$WT/wintest.o" "$WT/gui.o" "$WT/audio.o" "$WT/net.o" dlls/winecrt0/x86_64-windows/libwinecrt0.a \
     libs/compiler-rt/x86_64-windows/libcompiler-rt.a dlls/ucrtbase/x86_64-windows/libucrtbase.a \
     dlls/user32/x86_64-windows/libuser32.a dlls/gdi32/x86_64-windows/libgdi32.a \
-    dlls/winmm/x86_64-windows/libwinmm.a \
+    dlls/winmm/x86_64-windows/libwinmm.a dlls/ws2_32/x86_64-windows/libws2_32.a \
     dlls/kernel32/x86_64-windows/libkernel32.a dlls/ntdll/x86_64-windows/libntdll.a \
     >> "$W/logs/wintest.log" 2>&1 || { cat "$W/logs/wintest.log"; exit 1; }
-rm -f "$WT/gui.o" "$WT/audio.o"
+rm -f "$WT/gui.o" "$WT/audio.o" "$WT/net.o"
 
 # SDK pro programy Windows prekladane na hostiteli (PuTTY,
 # xtask/src/wine/putty.rs: clang --target=x86_64-pc-windows-msvc, lld-link):

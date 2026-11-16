@@ -47,6 +47,7 @@ mod gui_player;
 mod gui_recovery;
 mod gui_role;
 mod wine_gui;
+mod wine_net;
 mod wine_w4;
 mod gui_palette;
 mod gui_snapshot;

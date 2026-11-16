@@ -218,7 +218,8 @@ pub fn stream_request(
         }
         op::RECV => {
             let max = (r.u32()? as usize).clamp(1, MAX_IO);
-            Ok(recv_progress(stack, s, max, until, now_ns()))
+            let peek = r.u8().unwrap_or(0) & op::RECV_PEEK != 0;
+            Ok(recv_progress(stack, s, max, until, now_ns(), peek))
         }
         op::SHUTDOWN => {
             stack.tcp(s.sock).close();
@@ -254,7 +255,7 @@ pub fn stream_progress(stack: &mut Stack, s: &mut Stream, p: Pending, now: u64) 
             }
             send_progress(stack, s, data, done, deadline)
         }
-        Pending::Recv { max, deadline } => recv_progress(stack, s, max, deadline, now),
+        Pending::Recv { max, deadline, peek } => recv_progress(stack, s, max, deadline, now, peek),
         _ => Step::err(Error::BadState),
     }
 }
@@ -302,15 +303,18 @@ fn send_progress(
     })
 }
 
-fn recv_progress(stack: &mut Stack, s: &mut Stream, max: usize, deadline: u64, now: u64) -> Step {
+fn recv_progress(stack: &mut Stack, s: &mut Stream, max: usize, deadline: u64, now: u64, peek: bool) -> Step {
     update_fin(stack, s);
     let sock = stack.tcp(s.sock);
     if sock.can_recv() {
         let mut buf = vec![0u8; max];
-        return match sock.recv_slice(&mut buf) {
+        let r = if peek { sock.peek_slice(&mut buf) } else { sock.recv_slice(&mut buf) };
+        return match r {
             Ok(n) => {
                 buf.truncate(n);
-                stack.fw.traffic(&s.app, 0, n);
+                if !peek {
+                    stack.fw.traffic(&s.app, 0, n);
+                }
                 let mut w = Writer::new();
                 w.bytes(&buf);
                 Step::reply(Ok(w))
@@ -328,7 +332,7 @@ fn recv_progress(stack: &mut Stack, s: &mut Stream, max: usize, deadline: u64, n
     if now >= deadline {
         return Step::err(expired(deadline));
     }
-    Step::Wait(Pending::Recv { max, deadline })
+    Step::Wait(Pending::Recv { max, deadline, peek })
 }
 
 /// Kanal spojeni zavren klientem: korektni ukonceni (FIN) a uklid az po

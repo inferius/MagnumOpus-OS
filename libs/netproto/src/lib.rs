@@ -155,8 +155,11 @@ pub mod op {
     // Kanal spojeni TCP.
     /// data -> prijato u32 (vse, nebo cast pri vyprseni terminu)
     pub const SEND: u32 = 20;
-    /// nejvic u32 -> data (prazdna = druha strana ukoncila zapis)
+    /// nejvic u32 [priznaky u8: `RECV_PEEK`] -> data (prazdna = druha strana
+    /// ukoncila zapis)
     pub const RECV: u32 = 21;
+    /// Priznak `RECV`: data jen precist, ve fronte zustanou (C `MSG_PEEK`).
+    pub const RECV_PEEK: u8 = 1;
     /// () -> () - ukonci zapis (FIN), cteni pokracuje
     pub const SHUTDOWN: u32 = 22;
     /// () -> mistni socket_addr, vzdalena socket_addr

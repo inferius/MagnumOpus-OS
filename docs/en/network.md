@@ -630,7 +630,7 @@ channel between `fwd` and the user agent has its own reply format
 | session | `AUDIT` (10) | from u64, max u16 → next u64, count u16, records |
 | session | `STATS` (11) | → profile, count u16, traffic per application |
 | connection | `SEND` (20) | data → accepted u32 |
-| connection | `RECV` (21) | max u32 → data (empty = end of stream) |
+| connection | `RECV` (21) | max u32 [flags u8: `RECV_PEEK` = 1, the data stays queued, C `MSG_PEEK`] → data (empty = end of stream) |
 | connection | `SHUTDOWN` (22) | → () (FIN, reading continues) |
 | connection | `ADDRS` (23) | → local, remote address |
 | listener | `ACCEPT` (30) | → remote address, local address + connection channel |

@@ -14,7 +14,7 @@ in QEMU]** x86_64, later stages **[designed]** (table below).
 | W1 | console `.exe` (`cmd`, `hostname`, our own test): lower `ntdll`, TEB via GS, SEH, memory, files, `wineserver` as a process | **[verified in QEMU]** x86_64, release (`wine` suite): GS in the kernel and `ucontext_t` in `cstd` **[verified in QEMU]**; the exception patch `signal_x86_64.c` compiles **[implemented]**; Wine on the data disk as an application (`/apps/org.winehq.wine`), the `wine` loader from disk loads `ntdll.so` ([DL-4c](dynamic-linking.md#libraries-from-disk-and-origin-dl-4c)) **[verified in QEMU]**; a new prefix (`wineboot`), `cmd /c echo`, our own console program `user/wintest` and `hostname` ([Wine on disk](#wine-on-disk-w1)); the `wx_compat` permission (RWX, Q6) is not needed yet **[designed]** |
 | W2 | several processes of one application, registry, named objects, `winecfg` without windows | in progress: another process (`CreateProcess`, waiting, exit code), named events and `Read`/`WriteProcessMemory` through wineserver and [`PROCESS_MEMORY`](syscalls.md#process_memory) **[verified in QEMU]** x86_64, release ([Memory of another process](#memory-of-another-process-w2)); shared sections over a file between processes, the registry (`reg add`/`reg query` in another process) **[verified in QEMU]** ([Sections and the registry](#sections-and-the-registry-w2)); server signals to clients, `winecfg` **[designed]** |
 | W3 | windows: a Wine driver over the compositor (`guiproto`), GDI, `notepad`, `winecfg`, clipboard, input | **[designed]** |
-| W4 | sound over `audiod` (role `Audio`, `winemoaudio.drv`), clipboard our app -> Wine, window recovery after a compositor crash, PuTTY (window and configuration) | **[verified in QEMU]** x86_64 ([W4](#sound-clipboard-and-window-recovery-w4)), generic parts (role `Audio`, `moaudio`) also aarch64; network from Wine programs (W4b) **[designed]** |
+| W4 | sound over `audiod` (role `Audio`, `winemoaudio.drv`), clipboard our app -> Wine, window recovery after a compositor crash, PuTTY (window and configuration) | **[verified in QEMU]** x86_64 ([W4](#sound-clipboard-and-window-recovery-w4)), generic parts (role `Audio`, `moaudio`) also aarch64; network from Wine programs ([W4b](#network-from-windows-programs-w4b)): Winsock, PuTTY raw and telnet **[verified in QEMU]** x86_64 |
 | W5 | DXVK and VKD3D-Proton over Vulkan (Venus in QEMU, GPU drivers on HW) | **[designed]** |
 | W6 | 32-bit applications (the new WoW64) | **[designed]** |
 | W7 | fast synchronization (an ntsync analogue), game performance | **[designed]** |
@@ -497,7 +497,7 @@ in the `sdl` suite.
 | Clipboard our app -> Wine (`gui-probe kopiruj`, paste in Notepad, save and file contents) | **[verified in QEMU]** x86_64 (suite `wine`) |
 | Recovery of Wine windows after a compositor crash (`mowin`: state record, new session through the Gui role lease, window owners, popups, focus, `EXPOSE`) | **[verified in QEMU]** x86_64 (test `wine: okna Wine po padu kompozitoru (W4)`, `wintest obnova`: owner, owned dialog centred over it with focus, dialog popup, the same pixels before the crash and after recovery, Wine repaints the windows, the program keeps running) |
 | PuTTY 0.85 (pinned source, SHA-256 and signature in `THIRD-PARTY.md`, built in `xtask wine` with clang over the Wine SDK): window and configuration dialog | **[verified in QEMU]** x86_64 (test `wine: PuTTY - dialog konfigurace (W4)`) |
-| ⚠️ **No network from Wine programs yet** (`ws2_32`): Wine creates the socket in wineserver and sends the fd to the client over `SCM_RIGHTS`, but a socket cannot move between processes (`osrt`, `inherit.rs`) and wineserver has no network session. The PuTTY connection (raw/telnet) and transferable sockets are stage W4b | **[designed]** |
+| Network from Wine programs (`ws2_32`), PuTTY raw/telnet connection | in [W4b](#network-from-windows-programs-w4b) |
 
 **Sound.** The `winemoaudio.drv` driver is a separate DLL (mmdevapi loads
 `wine<name>.drv` and every DLL has one Unix call table, hence not in
@@ -541,6 +541,55 @@ libraries, with Wine headers and PE import libraries as `<dll>.lib`
 start and TLS support (`__declspec(thread)`) come from our
 `xtask/src/wine/wincrt.c`; resources (`.rc`) from `llvm-rc`. `cargo xtask
 wine-putty` builds only PuTTY over a ready SDK.
+
+## Network from Windows programs (W4b)
+
+**Status:** decided on 16 Nov 2026 (coordinator: 1A transferable socket,
+2A ownership and limits per identity, 3A network revocation also closes
+passed sockets; loopback in netd). ⚠️ Windows programs on x86_64 only
+(Q11 A); the generic parts (socket passing, role Net, loopback,
+`MSG_PEEK`) also on aarch64.
+
+| Part | Status |
+|---|---|
+| Loopback in netd (127.0.0.0/8 and `::1` without a link, the same session permissions) | **[verified in QEMU]** x86_64 and aarch64 ([Loopback](network.md#loopback)) |
+| Transferable socket (`posix_spawn` inheritance, `SCM_RIGHTS`; netd `DUP`), limits per identity, network revocation also closes passed sockets | **[verified in QEMU]** x86_64 and aarch64 ([Passing sockets](network.md#passing-sockets-identity-limits-and-revocation)) |
+| Role Net for Wine processes (session from the Wine manifest, `MO_NET`, opt-out like Gui/Audio) | **[verified in QEMU]** x86_64 (suite `wine`) |
+| `MSG_PEEK` on TCP connections (wineserver uses it on `POLLIN` to detect the end of a connection) | **[verified in QEMU]** x86_64 (suites `sit loopback`, `wine`) |
+| Winsock (`wintest tcp`): connection, data in both directions over loopback and to the host echo server (the way out through slirp) | **[verified in QEMU]** x86_64 (tests `wine: Winsock TCP ... (W4b)`) |
+| PuTTY raw and telnet against the test echo server on loopback: the server greeting shows in the terminal, text typed from QEMU reaches the server, its echo shows | **[verified in QEMU]** x86_64 (tests `wine: PuTTY raw/telnet ... (W4b)`) |
+
+**How a socket travels.** Wine creates sockets in wineserver and sends
+the fd to the client over `SCM_RIGHTS`. A TCP/UDP socket is one object at
+netd that several channels can lead to (`DUP`); `osrt` passes it as a new
+channel both in `SCM_RIGHTS` and in inheritance. The socket still belongs
+to the identity that created it (count and buffer limits; revoking the
+application's network closes all its channels). wineserver and every
+Wine program get a network session through role Net (`MO_NET=1`):
+launchd narrows it by the `[network]` section of the Wine manifest.
+
+**Wine manifest (`[network]`).** Rights `info`, `tcp`, `listen`, `udp`,
+`dns`; no user prompt (`ask = false`), connections to any target
+(`to = "*"`), listening on ports 1024-65535; 256 sockets and 64 MiB of
+buffers per identity. ⚠️ Windows programs thus get the network as a
+whole (no prompt per target); finer per-application rules for Windows
+programs belong to point 3 (installing Windows programs).
+
+**Two fixes for Wine.**
+
+- A non-blocking `connect` returns `EINPROGRESS` like Linux (`cstd`). A
+  connection that completes immediately (our previous behaviour) is taken
+  as connected by wineserver, but the socket is never registered for
+  waiting: the program then gets no `FD_READ` before it sends something
+  itself (PuTTY raw waited for the server greeting forever).
+- `ToUnicodeEx` on a key release (`KF_UP` in the scan code) returns no
+  character (`winemo.drv`, like `winex11`): PuTTY asks on `WM_KEYUP` too
+  and would send every character twice.
+
+⚠️ A non-blocking `connect` at netd still waits until the connection is
+established (or fails); for a remote target the call thus blocks for
+the handshake. It does not matter for Wine programs (wineserver makes
+the connection); a truly asynchronous `connect` in netd is separate work.
 
 ## 3D: Vulkan, OpenGL and Direct3D (W5)
 

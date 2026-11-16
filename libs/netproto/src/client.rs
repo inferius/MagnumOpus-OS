@@ -550,11 +550,24 @@ impl TcpStream {
 
     /// Cteni s terminem a moznosti zruseni: pocet bajtu, 0 = konec proudu.
     pub fn recv_ctx(&self, buf: &mut [u8], deadline: Deadline, cancel: Option<&CancelToken>) -> Result<usize> {
+        self.recv_flags(buf, 0, deadline, cancel)
+    }
+
+    /// Jako [`TcpStream::recv_ctx`], data ale zustanou ve fronte (C
+    /// `MSG_PEEK`; sdileny socket po `DUP` je vidi kazdy kanal).
+    pub fn peek_ctx(&self, buf: &mut [u8], deadline: Deadline, cancel: Option<&CancelToken>) -> Result<usize> {
+        self.recv_flags(buf, op::RECV_PEEK, deadline, cancel)
+    }
+
+    fn recv_flags(&self, buf: &mut [u8], flags: u8, deadline: Deadline, cancel: Option<&CancelToken>) -> Result<usize> {
         if buf.is_empty() {
             return Ok(0);
         }
         let mut w = Writer::new();
         w.u32(buf.len().min(MAX_IO) as u32);
+        if flags != 0 {
+            w.u8(flags);
+        }
         let (b, _) = call(&self.mux, op::RECV, w, deadline, Wait::Op, cancel)?;
         let n = b.len().min(buf.len());
         buf[..n].copy_from_slice(&b[..n]);

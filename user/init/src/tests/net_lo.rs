@@ -32,7 +32,7 @@ pub const TESTS: &[Test] = &[
     ("loopback: bez naslouchani -> CONNECTION_REFUSED", tcp_refused),
     ("loopback: UDP 127.0.0.1 a ::1", udp),
     ("loopback: omezena relace -> ACCESS_DENIED", restricted),
-    ("sit: DUP - socket zije do posledniho kanalu", dup),
+    ("sit: DUP - socket zije do posledniho kanalu, MSG_PEEK", dup),
     ("sit: limit socketu na identitu pres relace", identity_limit),
     ("sit: odvolani site zavre i predany socket", revoke),
 ];
@@ -173,7 +173,11 @@ fn dup(_s: &Startup) -> TestResult {
     check_eq!(other.peer_addr(), target, "adresy druheho kanalu");
     drop(c);
     write_all(&other, b"po zavreni prvniho")?;
-    check!(read_exact(&srv, 18)? == b"po zavreni prvniho", "data pres druhy kanal");
+    // MSG_PEEK: data zustanou ve fronte (precte je pak i bezne cteni).
+    let mut pk = [0u8; 4];
+    let n = srv.peek_ctx(&mut pk, netproto::Deadline::after(T), None).map_err(|e| fail("peek", e))?;
+    check!(n > 0 && pk[..n] == b"po z"[..n], format!("peek {:?}", &pk[..n]));
+    check!(read_exact(&srv, 18)? == b"po zavreni prvniho", "data pres druhy kanal (po peek cela)");
     // Posledni kanal zavren: server cte konec proudu.
     drop(other);
     let mut b = [0u8; 4];

@@ -37,10 +37,12 @@ pub fn request(stack: &mut Stack, auth: &AuthRef, code: u32, until: u64, r: &mut
         op::PING => ping::start(stack, auth, until, r),
         op::RESTRICT => {
             let restriction = Restriction::get(r)?;
-            // Zuzeni bez nove identity (role Net pro potomka) smi kazda
-            // relace: jen ubira. Nova identita (a dotazy uzivateli) jen
-            // s pravem RESTRICT (jinak by obesla rozpocet identity).
-            if !restriction.app.is_empty() || restriction.flags & netproto::layer_flags::ASK != 0 {
+            // Zuzeni bez nove identity (role Net pro potomka, manifest
+            // stejne aplikace v launchd) smi kazda relace: jen ubira. Jina
+            // identita (a dotazy uzivateli) jen s pravem RESTRICT (jinak by
+            // obesla rozpocet identity).
+            let other = !restriction.app.is_empty() && restriction.app != auth.borrow().app();
+            if other || restriction.flags & netproto::layer_flags::ASK != 0 {
                 auth.borrow().require(rights::RESTRICT)?;
             }
             let quota = restriction.quota;

@@ -185,7 +185,7 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
 
 | Header | Functions | Note |
 |---|---|---|
-| `sys/socket.h` | `socket` (`AF_INET`, `AF_INET6`; `SOCK_STREAM`, `SOCK_DGRAM`, `SOCK_NONBLOCK`, `SOCK_CLOEXEC`), `bind`, `listen`, `accept`, `accept4`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg` (control messages only `SCM_RIGHTS` on `AF_UNIX`), `socketpair`, `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt` | `AF_UNIX` only `SOCK_STREAM` (see [AF_UNIX sockets](#af_unix-sockets)); `MSG_PEEK` = `ENOTSUP` |
+| `sys/socket.h` | `socket` (`AF_INET`, `AF_INET6`; `SOCK_STREAM`, `SOCK_DGRAM`, `SOCK_NONBLOCK`, `SOCK_CLOEXEC`), `bind`, `listen`, `accept`, `accept4`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg` (control messages only `SCM_RIGHTS` on `AF_UNIX`), `socketpair`, `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt` | `AF_UNIX` only `SOCK_STREAM` (see [AF_UNIX sockets](#af_unix-sockets)); `MSG_PEEK` only on TCP connections (the data stays at netd), elsewhere `ENOTSUP` |
 | `netinet/in.h`, `arpa/inet.h` | `htons` ..., `inet_pton`, `inet_ntop`, `inet_addr`, `inet_ntoa`, `in6addr_any` | |
 | `netdb.h` | `getaddrinfo`, `freeaddrinfo`, `gai_strerror`, `getnameinfo` | names via the netd resolver; `getnameinfo` numeric only |
 | `poll.h`, `sys/select.h`, `sys/epoll.h` | `poll`, `select`, `epoll_create`, `epoll_create1`, `epoll_ctl`, `epoll_wait` | over `osrt::poll` |
@@ -199,8 +199,14 @@ The `cstd` headers (`stdio.h`, `stdlib.h`, `string.h`) extend the base
   `SO_REUSEADDR`, `SO_KEEPALIVE`, `TCP_NODELAY` and buffer sizes are
   accepted without effect, `SO_RCVTIMEO`/`SO_SNDTIMEO` apply.
 - `O_NONBLOCK` (`SOCK_NONBLOCK`, `MSG_DONTWAIT`) = deadline `TRY` at netd,
-  `EAGAIN` without data. `connect` completes immediately even in
-  non-blocking mode (POSIX allows it), so `SO_ERROR` is always 0.
+  `EAGAIN` without data. A non-blocking TCP `connect` returns
+  `EINPROGRESS` like Linux (on loopback too) and reports completion with
+  `POLLOUT`; netd, however, establishes the connection during the call
+  (it is waited for as in the blocking case), so `SO_ERROR` is always 0
+  and a refused connection is an immediate error. Without `EINPROGRESS`
+  wineserver would never register the socket for waiting (a connection
+  that completes immediately raises neither `FD_CONNECT` nor a wait for
+  data there).
 - **Waiting** (`osrt::poll`): files are always ready, stdin and pipes wait
   for a channel signal (`READABLE`, `PEER_CLOSED`), sockets for the netd
   readiness event (netproto v2). A channel has no "writable" signal, so

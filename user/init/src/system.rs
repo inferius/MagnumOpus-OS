@@ -439,7 +439,7 @@ fn time_started() -> Result<()> {
 /// jen uzsi relace (`Net::restrict`).
 pub struct NetService {
     pub process: Process,
-    /// Ridici kanal netd (`revoke <identita>`, [`revoke_net`]).
+    /// Ridici kanal netd (`revoke\0<identita>`, [`revoke_net`]).
     pub control: Channel,
     pub root: Net,
     /// Sluzba firewallu (proces, bootstrap kanal); `None` = nebezi.
@@ -510,7 +510,7 @@ pub fn start_net(startup: &Startup, devices: &mut Devices, sup: &mut crate::supe
 pub fn revoke_net(app: &str) -> Result<usize> {
     let net = NET.get().ok_or(Error::ServiceUnavailable)?;
     while net.control.try_read().is_ok() {}
-    let mut m = Vec::from(&b"revoke "[..]);
+    let mut m = Vec::from(&b"revoke\0"[..]);
     m.extend_from_slice(app.as_bytes());
     net.control.write(&m, Vec::new())?;
     let r = net.control.read(Some(time::deadline_after(Duration::from_secs(5))))?;

@@ -251,6 +251,19 @@ impl Socket {
         }
     }
 
+    /// `MSG_PEEK`: data spojeni jen precist (zustanou ve fronte u netd,
+    /// vidi je i jine procesy se stejnym socketem). Datagram = `NotSupported`.
+    pub fn peek(&self, buf: &mut [u8], nonblock: bool) -> Result<usize> {
+        let d = deadline(nonblock, self.timeouts.lock().0);
+        match self.kind {
+            Kind::Stream => match self.stream()?.peek_ctx(buf, d, None) {
+                Err(Error::PeerClosed) => Ok(0),
+                r => r,
+            },
+            Kind::Datagram => Err(Error::NotSupported),
+        }
+    }
+
     pub fn send(&self, data: &[u8], nonblock: bool) -> Result<usize> {
         match self.kind {
             Kind::Stream => {
@@ -325,6 +338,11 @@ impl Socket {
     }
 
     /// Je socket naslouchani (`SO_ACCEPTCONN`)?
+    /// Socket proudu (TCP), ne datagramu.
+    pub fn is_stream(&self) -> bool {
+        self.kind == Kind::Stream
+    }
+
     pub fn is_listening(&self) -> bool {
         matches!(&*self.state.lock(), State::Listener(_))
     }
