@@ -1,0 +1,5 @@
+MODULE    = winemoaudio.drv
+UNIXLIB   = winemoaudio.so
+
+SOURCES = \
+	moaudio.c

@@ -291,6 +291,46 @@ Po dobu nahrávání ukazuje lišta místo ikony hlasitosti **mikrofon
 v barvě nebezpečí**; bublina vypíše, které aplikace nahrávají (`STATUS`
 pole `capturing`). Uživatel tak vždy vidí, že se nahrává.
 
+### Relace zvuku pro potomky (role `Audio`)
+
+**[ověřeno v QEMU]** x86_64 i aarch64 (sada `sdl`, testy `role Audio: ...`, program
+`user/gui-probe`). Aplikace, která spouští další procesy se zvukem (Wine:
+`wine` -> `notepad`, hra z `cmd`), jim předá relaci zvuku se **stejnou
+identitou** jako relaci okna ([role `Gui`](gui.md#relace-okna-pro-potomky-role-gui)):
+
+- launchd zná role `Audio` a `AudioLease` (`launchproto`), potomek dostane
+  relaci a lístek se štítky `abi::params::tag::AUDIO` a `AUDIO_LEASE`
+  (stejné jako aplikace od initu). Runtime (`osrt::audio`) je předá
+  knihovně zvuku (`take_client_raw`): ta s lístkem dělá obnovu po restartu
+  `audiod` a runtime dá háček pro relace dalších potomků.
+- Relace potomka vzniká `NARROW` s prázdným zúžením (adaptér `audiod`
+  v initu jiné zúžení odmítne): **stejný recept**, tedy stejná identita
+  i pravidla nahrávání. Lístek je svázaný s rodičovským, limit živých
+  a rychlosti jako u `ADOPT`.
+- **Nahrávání nikdy automaticky z manifestu:** i s rolí platí jen
+  `Capture::Ask` (dialog Povolení mikrofonu, uložené rozhodnutí) nebo
+  `Capture::No`; zúžení nic nerozšíří. Po dobu nahrávání je v liště
+  mikrofon (indikátor výše).
+- **Opt-out:** runtime při startu nastaví `MO_AUDIO=1`; potomek bez
+  `MO_AUDIO` v prostředí relaci nedostane.
+- **Odvolání:** `audio::revoke(id)` v initu zruší lístky identity
+  u `audiod` i lístky z nich odvozené a `audiod` (zpráva `revoke` na
+  řídicím kanálu) zavře všechny relace identity: streamy hned zmlknou,
+  obnova přes lístek je odmítnutá.
+- **Limity na identitu:** relace (`MAX_IDENTITY_SESSIONS` 64) a streamy
+  (`MAX_IDENTITY_STREAMS` 32) se sčítají přes všechny relace stejné
+  identity (`user/audiod/src/perm.rs`), procesy je neobejdou.
+- Relace bez lístku (testy) jde knihovně taky, ale bez obnovy a bez
+  relací pro potomky.
+
+**Společné jádro `moaudio`** (`libs/mowin/src/os/audio.rs`, hlavička
+`include/moaudio.h`, část `libc.a`): streamy přes relaci od runtime.
+`mosdl_audio_*` (SDL) jsou jen obálky nad ním a zvukový ovladač Wine
+(`winemoaudio.drv`, [Windows vrstva](windows-vrstva.md#zvuk-schránka-a-obnova-oken-w4))
+volá `moaudio_*`. Zápis a čekání na místo běží bez zámku knihovny;
+`moaudio_put` zapíše jen to, co se vejde, bez čekání a bez volání služby
+(pro volající, kteří píší pod svým zámkem a stream spouštějí mimo něj).
+
 ## Služba `audiod`
 
 ### Takt a rozpočet latence

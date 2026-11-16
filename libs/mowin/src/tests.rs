@@ -98,3 +98,16 @@ fn frame_copy_rejects_short_source() {
     // nepratelske rozmery bez preteceni
     assert!(!copy_frame(&mut dst, 2, 2, &[0; 16], u32::MAX, 2, u32::MAX));
 }
+
+/// `moaudio.h`: formaty vzorku jsou stejna cisla jako `mosdl.h` (spolecne
+/// jadro je preklada jednou tabulkou) a smery streamu jako `audioproto`.
+#[test]
+fn moaudio_header_matches_mosdl() {
+    let h = include_str!("../include/moaudio.h");
+    let sdl = include_str!("../../mosdl/include/mosdl.h");
+    for (i, name) in ["U8", "S16", "S32", "F32"].iter().enumerate() {
+        assert!(h.contains(&format!("MOAUDIO_SAMPLE_{name} = {i}")), "MOAUDIO_SAMPLE_{name}");
+        assert!(sdl.contains(&format!("MOSDL_SAMPLE_{name} = {i}")), "MOSDL_SAMPLE_{name}");
+    }
+    assert!(h.contains("MOAUDIO_OUTPUT = 0") && h.contains("MOAUDIO_INPUT = 1"));
+}

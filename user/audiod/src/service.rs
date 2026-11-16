@@ -334,6 +334,16 @@ impl Service {
                 }
                 continue;
             }
+            // Odvolani zvuku identite, jen init; odpoved = pocet relaci.
+            if self.clients[i].privileged && m.data.starts_with(crate::perm::REVOKE_PREFIX) {
+                let app = String::from_utf8_lossy(&m.data[crate::perm::REVOKE_PREFIX.len()..]).into_owned();
+                let n = if app.is_empty() { 0 } else { self.revoke(&app) };
+                if self.clients[i].chan.write(&encode_reply(Ok(alloc::format!("{n}").into_bytes())), Vec::new()).is_err() {
+                    self.clients[i].open = false;
+                    return;
+                }
+                continue;
+            }
             if self.clients[i].privileged && m.data == b"device" {
                 for h in m.handles {
                     self.add_device(Channel::from_handle(h));
@@ -445,6 +455,10 @@ impl Service {
 
     pub fn open(&mut self, client: usize, dir: Direction, format: Format, latency_us: u32) -> Result<(Vec<u8>, Vec<Handle>)> {
         if self.streams.iter().filter(|s| s.owner == client).count() >= MAX_STREAMS_PER_CLIENT {
+            return Err(Error::NoResources);
+        }
+        // Limit identity (soucet pres jeji relace, procesy s roli Audio).
+        if self.identity_streams(client) >= crate::perm::MAX_IDENTITY_STREAMS {
             return Err(Error::NoResources);
         }
         let clock = match dir {

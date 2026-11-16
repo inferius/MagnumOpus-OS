@@ -9,13 +9,18 @@
 //! - `event.rs` - preklad udalosti okna a kopie snimku (ciste, testy na
 //!   hostiteli); spolecny modul s `libs/mosdl`,
 //! - `os/` - symboly `mowin_*` nad spojenim s kompozitorem (jen cil
-//!   magnumopus).
+//!   magnumopus); `os/audio.rs` zvuk `moaudio_*` (`include/moaudio.h`),
+//!   spolecne jadro se `mosdl_audio_*`.
 
 #![cfg_attr(target_os = "magnumopus", feature(rustc_private))]
 
 pub mod event;
 #[cfg(target_os = "magnumopus")]
 mod os;
+
+/// Zvuk aplikace (`moaudio_*`): spolecne jadro i pro `mosdl_audio_*`.
+#[cfg(target_os = "magnumopus")]
+pub use os::audio;
 
 #[cfg(test)]
 mod tests;

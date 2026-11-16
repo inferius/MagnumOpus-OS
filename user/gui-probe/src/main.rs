@@ -16,6 +16,11 @@
 //!   a po prvnim fyzickem stisku klavesy v okne (Ctrl+V z QEMU) pozada
 //!   o text schranky; vypise `gui-probe: vlozeno <text>` (test schranky
 //!   Wine -> kompozitor, `wine_gui.rs`). Kod 0 = vlozeno, 5 = odmitnuto.
+//! - `kopiruj <text>`: jako `vloz`, ale po stisku klavesy nabidne `text` do
+//!   schranky (`gui-probe: nabidnuto`) a data posila, kdyz o ne kompozitor
+//!   pozada (smer nase aplikace -> Wine). Bezi, dokud ho test neukonci.
+//! - `hraj`, `hraj-kratce`, `zvuk-dite`, `zvuk-odvolani`: role `Audio`
+//!   (`audio.rs`).
 
 #![feature(magnumopus_runtime, rustc_private)]
 
@@ -24,6 +29,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use guiproto::window::{ClientMsg, Mode, ServerMsg};
+
+mod audio;
 
 const NO_SESSION: i32 = 3;
 const REFUSED: i32 = 4;
@@ -82,6 +89,9 @@ fn code(c: &mut Command) -> i32 {
 }
 
 fn run(mode: &str) -> i32 {
+    if let Some(c) = audio::run(mode) {
+        return c;
+    }
     match mode {
         "okno" => match window() {
             Ok(_) => {
@@ -136,7 +146,8 @@ fn run(mode: &str) -> i32 {
                 }
             }
         }
-        "vloz" => paste(),
+        "vloz" => clip(None),
+        "kopiruj" => clip(Some(std::env::args().nth(2).unwrap_or_default())),
         _ => {
             eprintln!("gui-probe: neznamy rezim {mode}");
             2
@@ -144,8 +155,9 @@ fn run(mode: &str) -> i32 {
     }
 }
 
-/// Rezim `vloz`: poloha okna, pak vlozeni po fyzickem stisku klavesy.
-fn paste() -> i32 {
+/// Rezimy `vloz` (`copy = None`) a `kopiruj`: poloha okna, pak po fyzickem
+/// stisku klavesy vlozeni, nebo nabidka textu `copy`.
+fn clip(copy: Option<String>) -> i32 {
     let ch = match window() {
         Ok(ch) => ch,
         Err(c) => return c,
@@ -174,9 +186,15 @@ fn paste() -> i32 {
                         let key = matches!(r.event, guiproto::window::InputEvent::Key { action: 1, .. });
                         if key && r.serial != 0 && !asked {
                             asked = true;
-                            let req = clipproto::ClientMsg::Request { gesture: r.serial, serial: 1, format: String::from(clipproto::TEXT) };
-                            if send(ClientMsg::Clipboard { data: req.encode() }).is_err() {
+                            let m = match &copy {
+                                Some(_) => clipproto::ClientMsg::Offer { gesture: r.serial, formats: vec![String::from(clipproto::TEXT)] },
+                                None => clipproto::ClientMsg::Request { gesture: r.serial, serial: 1, format: String::from(clipproto::TEXT) },
+                            };
+                            if send(ClientMsg::Clipboard { data: m.encode() }).is_err() {
                                 return REFUSED;
+                            }
+                            if copy.is_some() {
+                                println!("gui-probe: nabidnuto");
                             }
                         }
                     }
@@ -189,6 +207,14 @@ fn paste() -> i32 {
                     Ok(clipproto::ServerMsg::Denied { serial: 1, why }) => {
                         println!("gui-probe: vlozeni odmitnuto {why:?}");
                         return 5;
+                    }
+                    // Kompozitor chce nase data (kopie nabidky, vlozeni jinde).
+                    Ok(clipproto::ServerMsg::Send { serial, .. }) if copy.is_some() => {
+                        let data = copy.as_deref().unwrap_or_default().as_bytes().to_vec();
+                        let m = clipproto::ClientMsg::Data { serial, data };
+                        if send(ClientMsg::Clipboard { data: m.encode() }).is_err() {
+                            return REFUSED;
+                        }
                     }
                     _ => {}
                 },
@@ -203,6 +229,9 @@ fn paste() -> i32 {
                 return REFUSED;
             }
         }
+    }
+    if copy.is_some() {
+        return 0;
     }
     eprintln!("gui-probe: vlozeni nedoslo");
     1

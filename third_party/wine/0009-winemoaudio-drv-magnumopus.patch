@@ -1,0 +1,43 @@
+diff --git a/configure b/configure
+--- a/configure
++++ b/configure
+@@ -1553,6 +1553,7 @@
+ enable_wineusb_sys
+ enable_winevulkan
+ enable_winemo_drv
++enable_winemoaudio_drv
+ enable_winewayland_drv
+ enable_winex11_drv
+ enable_winexinput_sys
+@@ -23231,6 +23232,7 @@
+ wine_fn_config_makefile dlls/wineusb.sys enable_wineusb_sys
+ wine_fn_config_makefile dlls/winevulkan enable_winevulkan
+ wine_fn_config_makefile dlls/winemo.drv enable_winemo_drv
++wine_fn_config_makefile dlls/winemoaudio.drv enable_winemoaudio_drv
+ wine_fn_config_makefile dlls/winewayland.drv enable_winewayland_drv
+ wine_fn_config_makefile dlls/winex11.drv enable_winex11_drv
+ wine_fn_config_makefile dlls/winexinput.sys enable_winexinput_sys
+diff --git a/configure.ac b/configure.ac
+--- a/configure.ac
++++ b/configure.ac
+@@ -3372,6 +3372,7 @@
+ WINE_CONFIG_MAKEFILE(dlls/wineusb.sys)
+ WINE_CONFIG_MAKEFILE(dlls/winevulkan)
+ WINE_CONFIG_MAKEFILE(dlls/winemo.drv)
++WINE_CONFIG_MAKEFILE(dlls/winemoaudio.drv)
+ WINE_CONFIG_MAKEFILE(dlls/winewayland.drv)
+ WINE_CONFIG_MAKEFILE(dlls/winex11.drv)
+ WINE_CONFIG_MAKEFILE(dlls/winexinput.sys)
+diff --git a/dlls/mmdevapi/main.c b/dlls/mmdevapi/main.c
+--- a/dlls/mmdevapi/main.c
++++ b/dlls/mmdevapi/main.c
+@@ -125,7 +125,8 @@
+ 
+ static BOOL WINAPI init_driver(INIT_ONCE *once, void *param, void **context)
+ {
+-    static WCHAR default_list[] = L"pulse,alsa,oss,coreaudio";
++    /* MagnumOpus: zvuk pres audiod (dlls/winemoaudio.drv). */
++    static WCHAR default_list[] = L"moaudio,pulse,alsa,oss,coreaudio";
+     DriverFuncs driver;
+     HKEY key;
+     WCHAR reg_list[256], *p, *next, *driver_list = default_list;

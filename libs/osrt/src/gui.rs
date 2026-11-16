@@ -73,10 +73,15 @@ pub fn wanted(env: &[Vec<u8>]) -> bool {
         && env.iter().any(|e| e.len() > ENV.len() + 1 && e.starts_with(ENV) && e[ENV.len()] == b'=')
 }
 
-/// Pozadavek na listku a odpoved (handly odpovedi pri uspechu).
+/// Pozadavek na listku procesu a odpoved (handly odpovedi pri uspechu).
 fn call(req: Request, timeout: Duration) -> Result<Vec<libos::Handle>> {
     let lease = LEASE.lock();
-    let lease = lease.as_ref().ok_or(Error::NotSupported)?;
+    lease_call(lease.as_ref().ok_or(Error::NotSupported)?, req, timeout)
+}
+
+/// Pozadavek na listku `lease` a odpoved (i `crate::audio`; volajici drzi
+/// zamek listku, aby odpovedi necetl nikdo jiny).
+pub(crate) fn lease_call(lease: &Channel, req: Request, timeout: Duration) -> Result<Vec<libos::Handle>> {
     let id = req.id();
     let op = req.op();
     lease.write(&req.encode(), Vec::new())?;
@@ -108,6 +113,12 @@ pub fn child() -> Result<(Channel, Channel)> {
 
 /// Nova relace po padu kompozitoru (`RECONNECT`, ceka nejvys `wait`).
 /// Odvolane GUI = `PEER_CLOSED` nebo `SERVICE_UNAVAILABLE`.
+/// Jako [`reconnect`], syrove cislo handlu a kod chyby (pro knihovnu
+/// s vlastni kopii libos, `libs/mowin`).
+pub fn reconnect_raw(wait: Duration) -> core::result::Result<u32, i32> {
+    reconnect(wait).map(|c| c.into_handle().into_raw()).map_err(|e| e.code())
+}
+
 pub fn reconnect(wait: Duration) -> Result<Channel> {
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let wait_ms = u32::try_from(wait.as_millis()).unwrap_or(u32::MAX);
