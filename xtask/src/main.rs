@@ -17,6 +17,7 @@
 mod arch;
 mod audio;
 mod boottest;
+mod bootwatch;
 mod crashtest;
 mod datadisk;
 mod devmode;
