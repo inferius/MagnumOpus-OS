@@ -68,6 +68,24 @@ pub fn winsock_loopback(s: &Startup) -> TestResult {
     })
 }
 
+/// Naslouchani programu Windows: na loopbacku ano (spojeni sam se sebou),
+/// na siti ne (manifest Wine `listen_from = "loopback"`, `WSAEACCES`).
+pub fn winsock_listen(s: &Startup) -> TestResult {
+    with(s, |w| {
+        let exe = format!("{TESTS_APP}/wintest.exe");
+        for (ip, want) in [("127.0.0.1", "listen: ok "), ("0.0.0.0", "10013")] {
+            let mut run = launch(s, w, &[&exe, "listen", ip])?;
+            let out = wait_for(s, w, &mut run, "vysledek naslouchani", |_, r| {
+                let t = String::from_utf8_lossy(&r.stdout);
+                Ok(t.lines().find(|l| l.starts_with("listen: ")).map(String::from))
+            })?;
+            check!(out.contains(want), format!("{ip}: {out} (cekano {want})"));
+            println!("init: test wine: naslouchani na {ip}: {out}");
+        }
+        Ok(())
+    })
+}
+
 /// Winsock k echo serveru hostitele (cesta ven pres slirp).
 pub fn winsock_host(s: &Startup) -> TestResult {
     let Some(p) = super::net::ports(s, "wine winsock hostitel")? else {

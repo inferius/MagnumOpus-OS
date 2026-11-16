@@ -30,6 +30,8 @@
 //!
 //! [[network.listen]]
 //! ports = "8080"
+//! # listen_from = "loopback"      # v [network]: prijimat jen z loopbacku
+//!                                  # (vychozi "network" = sit i loopback)
 //!
 //! [audio]                          # zvuk (prehravani ma kazda aplikace s oknem)
 //! capture = true                   # nahravani: dotaz uzivateli pri prvnim pouziti
@@ -227,9 +229,15 @@ fn network(n: &Table, id: &str) -> Result<Restriction, Error> {
     for l in n.tables("listen") {
         bind.push(ports(l.get("ports"))?);
     }
+    let bind_scope = match n.get_str("listen_from") {
+        None | Some("network") => netproto::BindScope::Any,
+        Some("loopback") => netproto::BindScope::Loopback,
+        Some(o) => return Err(Error(alloc::format!("network.listen_from: nezname {o} (network, loopback)"))),
+    };
     let policy = Policy {
         connect: Some(connect),
         bind: Some(bind),
+        bind_scope,
     };
     policy.validate().map_err(|_| err("network: neplatna pravidla"))?;
     let ask = n.get_bool("ask").unwrap_or(false);

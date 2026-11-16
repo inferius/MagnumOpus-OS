@@ -374,7 +374,9 @@ pub fn listen(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step>
     let backlog = (r.u16()? as usize).clamp(1, BACKLOG_MAX);
     let buffers = Buffers::get(r)?;
     auth.borrow().require(rights::TCP_LISTEN)?;
-    if !auth.borrow().allows_bind(port) {
+    // Naslouchani na siti (`0.0.0.0`, adresa rozhrani) jen s `BindScope::Any`
+    // ve vsech vrstvach, i pro port 0.
+    if !auth.borrow().allows_bind(port) || (bind.net && !auth.borrow().allows_bind_net()) {
         return Err(Error::AccessDenied);
     }
     let (rx, tx) = buffers.resolved();

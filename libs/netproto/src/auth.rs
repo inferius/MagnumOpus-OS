@@ -474,6 +474,12 @@ impl Auth {
         }
     }
 
+    /// Smi relace prijimat spojeni ze site (ne jen z loopbacku)? Vsechny
+    /// vrstvy musi mit `BindScope::Any`.
+    pub fn allows_bind_net(&self) -> bool {
+        self.layers.iter().all(|l| l.policy.bind_scope == crate::policy::BindScope::Any)
+    }
+
     /// Smi relace naslouchat / prijimat na mistnim portu `port`?
     pub fn allows_bind(&self, port: u16) -> bool {
         port == 0

@@ -61,7 +61,7 @@ use abi::Result;
 pub use codec::{ReadAddr, Reader, WriteAddr, Writer};
 pub use msg::{Header, NO_DEADLINE, TRY, parse_reply, reply, reply_id};
 pub use auth::{Auth, Quota, Restriction, UserRules, Verdict, layer_flags};
-pub use policy::{Policy, Rule, Target, proto, rights, rights_names};
+pub use policy::{BindScope, Policy, Rule, Target, proto, rights, rights_names};
 
 #[cfg(feature = "client")]
 pub use client::{CancelToken, Deadline, Net, NtpSync, Readiness, TcpListener, TcpStream, UdpSocket};

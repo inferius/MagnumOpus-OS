@@ -27,7 +27,9 @@ pub fn bind(stack: &mut Stack, auth: &AuthRef, r: &mut Reader) -> Result<Step> {
     let port = bind.port;
     let buffers = Buffers::get(r)?;
     auth.borrow().require(rights::UDP)?;
-    if !auth.borrow().allows_bind(port) {
+    // Port 0 (klient, odpovedi na vlastni datagramy) smi vzdy; zvoleny port
+    // na siti jen s `BindScope::Any`.
+    if !auth.borrow().allows_bind(port) || (bind.net && port != 0 && !auth.borrow().allows_bind_net()) {
         return Err(Error::AccessDenied);
     }
     let (rx, tx) = buffers.resolved();

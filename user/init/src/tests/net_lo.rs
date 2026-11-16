@@ -7,6 +7,9 @@
 //! - nikdo nenasloucha -> `CONNECTION_REFUSED`,
 //! - UDP pres 127.0.0.1 i ::1 (adresa odesilatele),
 //! - omezena relace bez pravidla pro loopback -> `ACCESS_DENIED`,
+//! - relace s prijmem jen z loopbacku (`BindScope::Loopback`): naslouchani
+//!   na 127.0.0.1 ano, na 0.0.0.0 `ACCESS_DENIED`, UDP na portu 0 ano,
+//!   zvoleny port UDP na siti ne,
 //! - `DUP`: socket zije do zavreni posledniho kanalu (predani jinemu
 //!   procesu), limit socketu na identitu (pres relace), odvolani site
 //!   identite zavre i predane kanaly.
@@ -19,7 +22,7 @@ use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use core::time::Duration;
 
 use libos::{Error, Startup};
-use netproto::{Buffers, Policy, Quota, Restriction, Rule, Target, TcpStream, proto, rights};
+use netproto::{BindScope, Buffers, Policy, Quota, Restriction, Rule, Target, TcpStream, proto, rights};
 
 use super::net::net;
 use super::{Test, TestResult, fail};
@@ -32,6 +35,7 @@ pub const TESTS: &[Test] = &[
     ("loopback: bez naslouchani -> CONNECTION_REFUSED", tcp_refused),
     ("loopback: UDP 127.0.0.1 a ::1", udp),
     ("loopback: omezena relace -> ACCESS_DENIED", restricted),
+    ("loopback: prijem jen z loopbacku -> sit ACCESS_DENIED", bind_scope),
     ("sit: DUP - socket zije do posledniho kanalu, MSG_PEEK", dup),
     ("sit: limit socketu na identitu pres relace", identity_limit),
     ("sit: odvolani site zavre i predany socket", revoke),
@@ -147,6 +151,30 @@ fn restricted(_s: &Startup) -> TestResult {
     let policy = Policy::only(vec![Rule::port(proto::TCP, Target::Any, port.wrapping_add(1))]);
     let app = net.restrict(rights::CLIENT, &policy).map_err(|e| fail("restrict", e))?;
     check_eq!(app.tcp_connect(SocketAddr::new(V4, port), T).err(), Some(Error::AccessDenied), "loopback mimo pravidla");
+    Ok(())
+}
+
+fn bind_scope(_s: &Startup) -> TestResult {
+    let mut policy = Policy::unrestricted();
+    policy.bind_scope = BindScope::Loopback;
+    let app = net()?.restrict(rights::ALL, &policy).map_err(|e| fail("restrict", e))?;
+    let any = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+    let l = app.tcp_listen_addr(SocketAddr::new(V4, 0), 1, Buffers::DEFAULT).map_err(|e| fail("naslouchani na 127.0.0.1", e))?;
+    let port = l.local_addr().map_err(|e| fail("adresa", e))?.port();
+    let c = app.tcp_connect(SocketAddr::new(V4, port), T).map_err(|e| fail("spojeni na loopback", e))?;
+    drop(c);
+    check_eq!(
+        app.tcp_listen_addr(SocketAddr::new(any, 0), 1, Buffers::DEFAULT).err(),
+        Some(Error::AccessDenied),
+        "naslouchani na 0.0.0.0"
+    );
+    app.udp_bind_addr(SocketAddr::new(any, 0), Buffers::DEFAULT).map_err(|e| fail("UDP 0.0.0.0:0", e))?;
+    app.udp_bind_addr(SocketAddr::new(V4, 47123), Buffers::DEFAULT).map_err(|e| fail("UDP 127.0.0.1:47123", e))?;
+    check_eq!(
+        app.udp_bind_addr(SocketAddr::new(any, 47124), Buffers::DEFAULT).err(),
+        Some(Error::AccessDenied),
+        "UDP 0.0.0.0:47124"
+    );
     Ok(())
 }
 

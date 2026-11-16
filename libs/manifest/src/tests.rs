@@ -69,7 +69,20 @@ fn full_manifest() {
     assert!(!a.allows(proto::TCP, SocketAddr::new(ip, 3000), 0));
     assert!(!a.allows(proto::UDP, SocketAddr::new(ip, 1500), 0));
     assert!(a.allows_bind(8080) && !a.allows_bind(80));
+    assert!(a.allows_bind_net());
     assert!(!a.has(rights::UDP));
+}
+
+#[test]
+fn listen_from_loopback() {
+    let base = "[app]\nid = \"org.x\"\n[network]\nrights = [\"listen\"]\n";
+    let m = Manifest::parse(&alloc::format!("{base}listen_from = \"loopback\"\n")).unwrap();
+    let n = m.network.unwrap();
+    assert_eq!(n.policy.bind_scope, netproto::BindScope::Loopback);
+    assert!(!Auth::root().restrict_with(n).unwrap().allows_bind_net());
+    let m = Manifest::parse(&alloc::format!("{base}listen_from = \"network\"\n")).unwrap();
+    assert_eq!(m.network.unwrap().policy.bind_scope, netproto::BindScope::Any);
+    assert!(Manifest::parse(&alloc::format!("{base}listen_from = \"lan\"\n")).is_err());
 }
 
 #[test]

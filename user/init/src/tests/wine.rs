@@ -37,6 +37,7 @@ pub const TESTS: &[Test] = &[
     // W4b (wine_net.rs).
     ("wine: Winsock TCP pres loopback (W4b)", super::wine_net::winsock_loopback),
     ("wine: Winsock TCP k echo serveru hostitele (W4b)", super::wine_net::winsock_host),
+    ("wine: Winsock naslouchani - loopback ano, sit EACCES (W4b)", super::wine_net::winsock_listen),
     ("wine: PuTTY raw - pozdrav, psani z QEMU, ozvena (W4b)", super::wine_net::putty_raw),
     ("wine: PuTTY telnet - pozdrav, psani z QEMU, ozvena (W4b)", super::wine_net::putty_telnet),
     // Posledni: zabije kompozitor testu (dalsi testy by bezely nad novou instanci).
