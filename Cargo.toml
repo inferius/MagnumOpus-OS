@@ -93,6 +93,8 @@ members = [
     "libs/virtio",
     "libs/web",
     "libs/wire",
+    "libs/volproto",
+    "user/volfs",
     "tools/osfs",
     "user/acpid",
     "user/console",

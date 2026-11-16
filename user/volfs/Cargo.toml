@@ -1,0 +1,26 @@
+[package]
+name = "volfs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Proces vymenneho media: FAT a NTFS nad kanalem oddilu, protokol volproto"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "volfs"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+volproto = { path = "../../libs/volproto" }
+fatfs = { version = "0.3.6", default-features = false, features = ["std", "alloc"] }
+ntfs = "0.4.0"
+
+# Jen v systemu (program se std, stdsys::STD_PROGRAMS).
+[target.'cfg(target_os = "magnumopus")'.dependencies]
+libos = { path = "../../libs/libos", default-features = false }
+blockproto = { path = "../../libs/blockproto" }

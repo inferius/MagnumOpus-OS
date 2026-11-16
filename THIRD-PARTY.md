@@ -157,6 +157,22 @@ the C sysroot without source changes.
   dekodéru `ffdec`. / All only inside the `ffdec` decoder process.
 - **Popis / Description:** `docs/cs/multimedia.md`, `docs/en/multimedia.md`.
 
+## Souborové systémy vyměnitelných médií / Removable media file systems
+
+Proces média `user/volfs` (docs/cs/media.md); kód cizích FS běží jen v něm,
+nikdy ve `fsd`. / The media process `user/volfs` (docs/en/media.md);
+foreign FS code runs only there, never in `fsd`.
+
+| Název / Name | Verze / Version | Zdroj / Source | Licence / License | Cesta / Path | Jak použito / How used |
+|---|---|---|---|---|---|
+| crate `fatfs` | 0.3.6 | https://github.com/rafalh/rust-fatfs | MIT | závislost `user/volfs` (feature `std`) | FAT12/16/32 s dlouhými jmény, čtení i zápis / read and write |
+| crate `ntfs` | 0.4.0 | https://github.com/ColinFinck/ntfs | MIT OR Apache-2.0 | závislost `user/volfs` | NTFS jen pro čtení / read only |
+| obraz `testfs1` z crate `ntfs` | 0.4.0 | https://github.com/ColinFinck/ntfs/tree/master/testdata | MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE` vedle) | `third_party/test-images/ntfs/` | testovací obraz NTFS 2 MiB beze změny; vytvořen nástrojem `mkntfs` (ntfs-3g, GPL - jen nástroj, nelinkuje se) skriptem `create-testfs1.sh` / unchanged 2 MiB NTFS test image made with `mkntfs` by the script |
+
+exFAT zatím ne: patenty Microsoftu (licence OIN jen pro „Linux System“),
+rozhodnutí uživatele čeká. / exFAT not yet: Microsoft patents (the OIN
+licence covers only the "Linux System"), the user's decision is pending.
+
 ## Testovací vektory AV1 a VP9 / AV1 and VP9 test vectors
 
 Jen v obrazu testů a vývoje (`media/` v initfs), stažené s SHA-256
