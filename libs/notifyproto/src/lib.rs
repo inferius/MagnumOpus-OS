@@ -136,6 +136,9 @@ pub struct Notification {
     pub popup: bool,
     /// Odesilatel ho nahradil (prubeh): vyskakovaci se jen prekresli.
     pub replaced: bool,
+    /// Uzivatel ho videl (karta zmizela do centra nebo prohlizec poslal
+    /// `SEEN`); odznak zvonku pocita jen nevidena.
+    pub seen: bool,
 }
 
 fn put_str(w: &mut Writer, s: &str) {
@@ -151,7 +154,7 @@ impl Notification {
         put_str(w, &self.body);
         w.u8(self.priority.to_u8());
         encode_actions(w, &self.actions);
-        w.u64(self.time).u8(self.popup as u8).u8(self.replaced as u8);
+        w.u64(self.time).u8(self.popup as u8).u8(self.replaced as u8).u8(self.seen as u8);
     }
 
     pub fn decode(r: &mut Reader<'_>) -> Result<Self> {
@@ -166,6 +169,7 @@ impl Notification {
             time: r.u64()?,
             popup: r.u8()? != 0,
             replaced: r.u8()? != 0,
+            seen: r.u8()? != 0,
         })
     }
 }
@@ -322,8 +326,9 @@ pub enum View {
     DismissAll,
     /// Nerusit do casu (`DndUntil`).
     SetDnd { until: DndUntil },
-    /// Vyskakovaci oznameni zmizelo do centra (uz nevyskoci znovu, ani po
-    /// restartu prohlizece).
+    /// Oznameni videl uzivatel (karta zmizela do centra, otevrene centrum):
+    /// uz nevyskoci znovu ani po restartu prohlizece a nepocita se do
+    /// nevidenych.
     Seen { id: u64 },
 }
 

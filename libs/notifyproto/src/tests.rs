@@ -12,6 +12,7 @@ fn n(id: u64) -> Notification {
         time: 1_700_000_000_000_000_000,
         popup: true,
         replaced: false,
+        seen: false,
     }
 }
 

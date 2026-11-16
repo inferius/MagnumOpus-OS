@@ -124,6 +124,7 @@ fn dnd_suppresses_popup_except_urgent() {
     let ViewReply::Snapshot { list, last: true } = &viewer_replies(&out, v2)[0] else { panic!() };
     assert_eq!(list.len(), 2);
     assert!(list.iter().all(|n| !n.popup), "tiché bylo v Nerušit, naléhavé už viděné");
+    assert_eq!(list.iter().filter(|n| n.seen).count(), 1, "videne jen naléhavé");
 }
 
 #[test]
