@@ -172,6 +172,23 @@ pub struct Node<M> {
     pub tone: crate::panel::TextTone,
     /// Prvek jako radek panelu s ikonou a popisem.
     pub row: Option<Box<crate::panel::RowLook>>,
+    /// Varianta tlacitka (`.btn.primary`, `.danger`, `.ghost`).
+    pub variant: Variant,
+}
+
+/// Varianta tlacitka (design/komponenty.html#tlacitka). Na obrazovce je
+/// nejvys jedno primarni; nebezpecne jen pro nevratnou akci.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Variant {
+    /// Sekundarni: ram `border_strong`, pozadi `surface`.
+    #[default]
+    Secondary,
+    /// Hlavni akce: vypln `accent`, text `on_accent`.
+    Primary,
+    /// Nevratna akce: vypln `danger`, text `on_danger`.
+    Danger,
+    /// Bez ramu a pozadi (najeti `surface_3`): pomocne akce v radku.
+    Ghost,
 }
 
 /// Co polozka nabidky udela.
@@ -306,6 +323,7 @@ pub(crate) fn node<M>(kind: Kind<M>) -> Node<M> {
         deco: None,
         tone: crate::panel::TextTone::Normal,
         row: None,
+        variant: Variant::Secondary,
     }
 }
 
@@ -526,6 +544,24 @@ impl<M> Node<M> {
         if let Kind::Button { icon, .. } = &mut self.kind {
             *icon = Some(name);
         }
+        self
+    }
+
+    /// Hlavni akce obrazovky (vypln `accent`).
+    pub fn primary(mut self) -> Self {
+        self.variant = Variant::Primary;
+        self
+    }
+
+    /// Nevratna akce (vypln `danger`).
+    pub fn danger(mut self) -> Self {
+        self.variant = Variant::Danger;
+        self
+    }
+
+    /// Bez ramu a pozadi (pomocna akce).
+    pub fn ghost(mut self) -> Self {
+        self.variant = Variant::Ghost;
         self
     }
 

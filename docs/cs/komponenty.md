@@ -95,7 +95,7 @@ tlačítko Menu = kontextová nabídka.
 
 | Komponenta | `libs/ui` | Rozměry a tokeny | Klávesnice |
 |---|---|---|---|
-| Tlačítko: primární, sekundární, nebezpečné, ikonové | částečně | výška `--k-h`, min. šířka 2 &times; výška, `s5`, pilulka; primární `accent`, nebezpečné `danger`; stav *probíhá* (kolečko, pevná šířka) | Enter, Mezerník při uvolnění |
+| Tlačítko: primární, sekundární, nebezpečné, ikonové | ano | výška `--k-h`, min. šířka 2 &times; výška, `s5`, pilulka; primární `accent`, nebezpečné `danger`; stav *probíhá* (kolečko, pevná šířka) | Enter, Mezerník při uvolnění |
 | Textové pole, víceřádkové | ano | `--k-h`, `radius.control`, `s4`; popisek nad, nápověda / chyba pod | šipky, Ctrl+šipky, výběr se Shift, schránka, undo; víceřádkové Ctrl+Enter odešle |
 | Číslo | ano | jako pole, zarovnání vpravo, jednotka, krokovací tlačítka mimo Tab | &uarr; &darr; krok, PgUp / PgDn 10 kroků, Home / End |
 | Heslo | ano | jako pole + oko (`aria-pressed`), varování Caps Lock | jako pole, nikdy návrhy |

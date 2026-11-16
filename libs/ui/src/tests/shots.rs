@@ -227,3 +227,21 @@ fn shot_suggest() {
         },
     );
 }
+
+/// K4: varianty tlacitka (primarni, sekundarni, nebezpecne, ghost, ikonove,
+/// nedostupne) ve svetlem, tmavem a kontrastnim rezimu.
+#[test]
+fn shot_button_variants() {
+    shot(
+        "tlacitka",
+        420,
+        120,
+        &|| {
+            column([
+                row([button::<M>("Uložit").primary(), button("Zrušit"), button("Smazat").danger(), button("Více").ghost(), spacer()]),
+                row([button::<M>("Uložit").primary().disabled(true), button("").icon("settings").tooltip("Nastavení"), button("Kopírovat").icon("copy").ghost(), spacer()]),
+            ])
+        },
+        &none,
+    );
+}

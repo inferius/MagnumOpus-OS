@@ -110,7 +110,7 @@ for `libs/ui`: sizes, key behaviour and implementation status (**yes**,
 
 | Component | `libs/ui` | Sizes and tokens | Keyboard |
 |---|---|---|---|
-| Button: primary, secondary, danger, icon | partial | height `--k-h`, min width 2 &times; height, `s5`, pill; primary `accent`, danger `danger`; *busy* state (spinner, fixed width) | Enter, Space on release |
+| Button: primary, secondary, danger, icon | yes | height `--k-h`, min width 2 &times; height, `s5`, pill; primary `accent`, danger `danger`; *busy* state (spinner, fixed width) | Enter, Space on release |
 | Text field, multiline | yes | `--k-h`, `radius.control`, `s4`; label above, hint / error below | arrows, Ctrl+arrows, Shift selection, clipboard, undo; multiline Ctrl+Enter submits |
 | Number | yes | like a field, right aligned, unit, stepper buttons outside the Tab order | &uarr; &darr; step, PgUp / PgDn 10 steps, Home / End |
 | Password | yes | field + eye toggle (`aria-pressed`), Caps Lock warning | like a field, never suggestions |
