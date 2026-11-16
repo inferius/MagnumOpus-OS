@@ -283,6 +283,7 @@ impl ServerConn {
         let Some(i) = self.chans.iter().position(|c| c.num().0 == chan) else { return Ok(()) };
         let h = self.chans.remove(i);
         self.runner.exit_status(&h, status)?;
+        self.runner.close_channel(&h)?;
         self.runner.channel_done(h)
     }
 }

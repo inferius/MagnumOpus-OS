@@ -41,7 +41,7 @@ use netproto::{Deadline, Net, TcpListener};
 use proto::Req;
 
 /// Nejvic soubeznych spojeni (i neoverenych).
-const MAX_CONNS: usize = 16;
+const MAX_CONNS: usize = 8;
 /// Pamet procesu spojeni (sunset, terminal, buffery).
 const CONN_MEMORY: u64 = 24 << 20;
 /// Neoverene spojeni smi trvat nejvys tolik (OpenSSH LoginGraceTime).

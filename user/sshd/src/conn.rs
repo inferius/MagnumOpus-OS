@@ -80,6 +80,16 @@ struct Shell {
     keys: VtKeys,
     dirty: bool,
     drawn_at: u64,
+    /// Vstup od klienta pred pripojenim k relaci (jinak by se ztratil).
+    early: Vec<u8>,
+}
+
+/// Velikost terminalu klienta; 0 (klient bez terminalu, `ssh -tt`
+/// z roury) = 80 x 24.
+fn size(cols: u32, rows: u32) -> (usize, usize) {
+    let c = if cols == 0 { 80 } else { cols as usize };
+    let r = if rows == 0 { 24 } else { rows as usize };
+    (c.clamp(20, 500), r.clamp(5, 200))
 }
 
 /// Radek bez terminalu (exec, shell bez PTY).
@@ -174,11 +184,12 @@ impl Worker {
         let termd = connect_termd(self.win.as_ref().ok_or(Error::BadState)?)?;
         let kind = match start {
             Start::Shell { pty: Some(Pty { cols, rows, .. }) } => {
-                let mut app = App::new(Theme::dark(), (cols as usize).clamp(20, 500), (rows as usize).clamp(5, 200));
+                let (cols, rows) = size(cols, rows);
+                let mut app = App::new(Theme::dark(), cols, rows);
                 app.welcome = true;
                 app.start(0);
                 send(&termd, app.take_out());
-                Kind::Shell(Shell { app, keys: VtKeys::new(), dirty: true, drawn_at: 0 })
+                Kind::Shell(Shell { app, keys: VtKeys::new(), dirty: true, drawn_at: 0, early: Vec::new() })
             }
             Start::Shell { pty: None } => {
                 send(&termd, vec![ClientMsg::Attach { session: 0 }]);
@@ -206,6 +217,12 @@ impl Worker {
                 Kind::Shell(s) => {
                     s.app.on_msg(sm);
                     s.dirty = true;
+                    // Pripojeno: vstup, ktery prisel driv.
+                    if s.app.session != 0 && !s.early.is_empty() {
+                        let early = core::mem::take(&mut s.early);
+                        Self::input(c, &early);
+                        return;
+                    }
                 }
                 Kind::Line(l) => match sm {
                     ServerMsg::Attached { session, .. } => {
@@ -217,11 +234,8 @@ impl Worker {
                     }
                     ServerMsg::BlockStart { block, .. } if l.block.is_none() => l.block = Some(block),
                     ServerMsg::Item { block, item, .. } if Some(block) == l.block => {
-                        let text = term::vt::item(&item, None);
-                        c.out.extend(text.replace('\n', "\r\n").bytes().filter(|_| true));
-                        if l.input.is_some() {
-                            // Shell bez PTY: obycejne LF (klient nema terminal).
-                        }
+                        // Bez PTY obycejne LF (klient nema terminal).
+                        c.out.extend(term::vt::item(&item, None).bytes());
                     }
                     ServerMsg::BlockEnd { block, ok, .. } if Some(block) == l.block => {
                         l.block = None;
@@ -239,6 +253,10 @@ impl Worker {
     fn input(c: &mut Chan, data: &[u8]) {
         match &mut c.kind {
             Kind::Shell(s) => {
+                if s.app.session == 0 {
+                    s.early.extend_from_slice(data);
+                    return;
+                }
                 for k in s.keys.feed(data) {
                     // exit / Ctrl+D na prazdnem radku: konec terminalu.
                     let empty = s.app.editor.text.trim().is_empty();

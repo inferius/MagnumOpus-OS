@@ -39,6 +39,7 @@ mod stdsys;
 mod webhelper;
 mod powertest;
 mod qmp;
+mod sshtest;
 mod symbolize;
 mod testdisks;
 mod unicode;
@@ -485,8 +486,17 @@ fn run_cli() -> Result<()> {
                 drivers::test_plan(&expect, opts.test_driver.as_deref(), &opts.iommu).into_bytes(),
             ));
             // Pomocne servery pro testy site bezi, dokud bezi xtask.
-            let helper = nethelper::start()?;
+            let mut helper = nethelper::start()?;
             let web = webhelper::start()?;
+            // Test SSH (sada `ssh`): klient OpenSSH hostitele na port 22
+            // hosta. Bez klienta OpenSSH test v hostu selze s duvodem.
+            match sshtest::start(&run_file("ssh-test", "d")) {
+                Ok(t) => {
+                    helper.add_forward(&t.hostfwd);
+                    opts.extra_initfs.push((String::from("ssh-test"), t.config.into_bytes()));
+                }
+                Err(e) => println!("xtask: test ssh nepujde: {e}"),
+            }
             let config = format!("{}{}", helper.config, web.config);
             opts.extra_initfs.push((String::from("net-test"), config.into_bytes()));
             opts.extra_initfs.push((String::from("accounts-qemu"), b"1".to_vec()));

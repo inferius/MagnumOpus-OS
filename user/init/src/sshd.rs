@@ -87,7 +87,7 @@ pub fn enabled() -> bool {
     fs().is_ok_and(|fs| fs.stat(ENABLED).is_ok())
 }
 
-fn set_enabled(on: bool) -> Result<()> {
+pub(crate) fn set_enabled(on: bool) -> Result<()> {
     let fs = fs()?;
     if on {
         ensure_dir(fs)?;
@@ -154,7 +154,7 @@ fn unsafe_zero(s: &mut String) {
 }
 
 /// Zastavi sshd a ukonci vzdalene relace.
-fn stop() {
+pub(crate) fn stop() {
     if let Some(s) = SSHD.lock().take() {
         let _ = s.process.kill();
     }
@@ -262,7 +262,7 @@ fn elevate_sshd(session: u64, on: bool) -> Result<String> {
 }
 
 /// Pozadavek `account-admin` jmenem uzivatele `uid`.
-fn account_admin(uid: u64, req: Request) -> Result<Vec<u8>> {
+pub(crate) fn account_admin(uid: u64, req: Request) -> Result<Vec<u8>> {
     let ch = crate::accounts::channel("account-admin")?;
     let mut msg = uid.to_le_bytes().to_vec();
     msg.extend_from_slice(&req.encode());

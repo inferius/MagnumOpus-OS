@@ -278,6 +278,11 @@ impl Channels {
         }
     }
 
+    /// MagnumOpus: EOF a CLOSE od aplikace (kanal `num`).
+    pub(crate) fn close_local(&mut self, num: ChanNum, s: &mut TrafSend) -> Result<()> {
+        self.get_mut(num)?.close_local(s)
+    }
+
     /// MagnumOpus: server posle kod ukonceni prikazu na kanale `num`.
     pub(crate) fn exit_status(&self, num: ChanNum, status: u32, s: &mut TrafSend) -> Result<()> {
         let ch = self.get(num)?;
@@ -1009,6 +1014,20 @@ impl Channel {
                 Err(Error::SSHProtoUnsupported)
             }
         }
+    }
+
+    /// MagnumOpus: aplikace kanal zavira sama (server po skonceni prikazu):
+    /// EOF a CLOSE, kdyz jeste neodesly.
+    fn close_local(&mut self, s: &mut TrafSend) -> Result<()> {
+        if !self.sent_eof {
+            s.send(packets::ChannelEof { num: self.send_num()? })?;
+            self.sent_eof = true;
+        }
+        if !self.sent_close {
+            s.send(packets::ChannelClose { num: self.send_num()? })?;
+            self.sent_close = true;
+        }
+        Ok(())
     }
 
     fn handle_eof(&mut self, s: &mut TrafSend, is_client: bool) -> Result<()> {

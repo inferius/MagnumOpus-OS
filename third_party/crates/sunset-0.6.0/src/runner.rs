@@ -759,8 +759,17 @@ impl<'a, CS: CliServ> Runner<'a, CS> {
         }
     }
 
+    /// MagnumOpus: aplikace kanal zavre (EOF a CLOSE); kanal zmizi az po
+    /// CLOSE od protistrany a `channel_done`.
+    pub fn close_channel(&mut self, chan: &ChanHandle) -> Result<()> {
+        let mut s = self.traf_out.sender(&mut self.keys);
+        self.conn.channels.close_local(chan.0, &mut s)?;
+        self.wake();
+        Ok(())
+    }
+
     /// MagnumOpus: kod ukonceni prikazu (`exit-status`, jen server); pak
-    /// obvykle `channel_done`.
+    /// obvykle `close_channel` a `channel_done`.
     pub fn exit_status(&mut self, chan: &ChanHandle, status: u32) -> Result<()> {
         if CS::is_client() {
             return Err(error::BadUsage.build());

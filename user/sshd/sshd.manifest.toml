@@ -5,7 +5,9 @@ id = "org.magnumopus.sshd"
 name = "Vzdálený přístup (SSH)"
 
 [limits]
-memory = "8M"
+# Procesy spojeni bezi v jobech pod jobem sshd: limit pokryva i je
+# (MAX_CONNS x CONN_MEMORY v src/main.rs + vlastni pamet).
+memory = "208M"
 kernel_memory = "2M"
 stack = "256K"
 
