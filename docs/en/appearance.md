@@ -487,8 +487,9 @@ Curves: standard `cubic-bezier(0.2, 0, 0, 1)`, enter
   name, and after a separator the icons of the currently valid permissions
   (folder, network, camera, microphone, screen capture). A **red dot** =
   the device is running right now.
-- System applications have the word "System" instead of a name and a shield
-  with a check mark.
+- System applications have the application name and a shield with a check
+  mark (`shieldcheck`) instead of the shield; init supplies both from the
+  manifest. **[implemented]**
 - Click, Enter or Space opens the **permission overview** (drawn by the
   compositor in the menu layer): the application, signature, a list of
   permissions with the time of last use and a **Remove** button. Removal

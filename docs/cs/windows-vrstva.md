@@ -498,8 +498,11 @@ obsahem), buffer na obrazovce označí jako držený novou instancí a ovladači
 pošle `MOWIN_EV_EXPOSE` pro každé okno (Wine je překreslí). Dialog se pak
 znovu vystředí nad vlastníkem a převezme fokus (pravidlo kompozitoru pro
 vlastněné okno okna s fokusem). Popupy (vrstvy `POPOVER`) kreslí kompozitor
-jen u okna s fokusem (nabídky aktivního okna); popup vlastníka, kterému
-fokus vzal jeho dialog, se ukáže až s návratem fokusu. Bez lístku (proces bez role Gui) nebo po
+nad všemi okny u okna s fokusem (nabídky aktivního okna); popupy jeho
+vlastníků (okno, kterému fokus vzal jeho dialog) zůstanou vidět hned nad
+vlastníkem, tedy pod dialogem (`Comp::owner_popovers`, test
+`owner_popover_stays_under_its_dialog`). Vstup do nich jde až s návratem
+fokusu. Bez lístku (proces bez role Gui) nebo po
 odvolání GUI je ztráta spojení konec (`SERVICE_UNAVAILABLE`).
 
 **PuTTY.** Překládá se na hostiteli (žádné nástroje navíc: CMake, Ninja

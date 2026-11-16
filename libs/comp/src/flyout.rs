@@ -31,6 +31,8 @@ pub enum Flyout {
     /// Vzhled: radky Svetly, Tmavy, Automaticky (zvoleny s fajfkou),
     /// pak stav (kdy se automaticky prepne, kontrast z Pristupnosti).
     Look,
+    /// Hodiny: kalendar mesice a svetovy cas (`calendar.rs`).
+    Clock,
     /// Rezim vyvojare (jen vyvojove sestaveni, `devmode.rs`).
     #[cfg(feature = "dev-mode")]
     Dev,
@@ -89,6 +91,7 @@ impl Comp {
                 (String::from("Zvuk"), vec![line])
             }
             Flyout::Bell => (String::from("Oznámení"), self.dnd_lines()),
+            Flyout::Clock => (String::from("Kalendář"), Vec::new()),
             Flyout::Look => (String::from("Vzhled"), self.look_lines()),
             #[cfg(feature = "dev-mode")]
             Flyout::Dev => self.dev_flyout_text(),
@@ -129,6 +132,7 @@ impl Comp {
             Flyout::Net => bar.net,
             Flyout::Volume => bar.volume,
             Flyout::Bell => Some(bar.bell),
+            Flyout::Clock => bar.clock,
             Flyout::Look => Some(bar.look),
             #[cfg(feature = "dev-mode")]
             Flyout::Dev => bar.dev,
@@ -181,6 +185,10 @@ impl Comp {
         // Ikona v liste ukazuje otevreny stav.
         self.damage_panel();
         self.flyout = f;
+        // Kalendar se otevre na dnesnim mesici.
+        if f == Some(Flyout::Clock) {
+            self.calendar_offset = 0;
+        }
         self.bar_panel_rebuild();
         if let Some(r) = self.flyout_rect() {
             self.damage_top(self.panel_shadow_area(r));

@@ -362,3 +362,17 @@ fn zamek_citelny_ve_vsech_rezimech() {
         }
     }
 }
+
+/// Enter s prazdnym polem nic neposle, ale rekne proc (O25); psani zpravu
+/// zase smaze.
+#[test]
+fn prazdne_heslo_rekne_proc() {
+    let mut t = login();
+    t.now += dialog::INPUT_DELAY;
+    t.key(KEY_ENTER, false);
+    assert!(t.c.take_login_requests().is_empty());
+    assert_eq!(t.c.greeter.msg, Some((String::from("Zadejte PIN."), true)));
+    text(&mut t, "1");
+    t.key(KEY_ENTER, false);
+    assert_eq!(t.c.take_login_requests().len(), 1);
+}

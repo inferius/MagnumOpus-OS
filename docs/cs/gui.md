@@ -902,6 +902,12 @@ Panely Vzhled, Síť, Zvuk, Oznámení a Režim vývojáře jsou pohledy
 knihovny `ui` nad [komponentou panel](komponenty.md)
 (`libs/comp/src/barpanel.rs`): šířka `size.panel_w`, výška podle obsahu,
 střed nad ikonou, zaoblení `radius.window`, stín `shadow.popover`.
+Klik na hodiny otevře panel s kalendářem měsíce (dnešek zvýrazněný,
+listování šipkami) a světovým časem; datum a časy jiných pásem počítá
+`compd` z `libs/tz` každou minutu (`Comp::set_calendar`,
+`libs/comp/src/calendar.rs`). Panel Síť ukazuje stav a adresu rozhraní
+z `netd`. **[implementováno]** (host `clock_panel_calendar_and_world_time`,
+snímek `panel-hodiny-*`)
 Nabídka zástupce aplikace v liště (pravé tlačítko, nebo klik při víc
 oknech) je nabídka knihovny `ui` (`Ui::open_menu`): okna aplikace
 (aktivní s fajfkou), Nové okno, Připnout na lištu (vypnuté, „zatím
@@ -2061,11 +2067,12 @@ v panelu kompozitoru.
 | Část | Kde | Co dělá |
 |---|---|---|
 | protokol | `libs/taskproto` (návrh, odsouhlasuje vlákno shellu, které dělá `taskd`) | seznam úloh, odběr změn se snímkem a pořadovým číslem (navázání po výpadku), akce zrušit, pozastavit, pokračovat, výpis; registrace úloh producenty |
-| model a okno | `libs/taskview` (testy na hostiteli), program `gui-tasks` | seznam (úlohy agenta nahoře), filtr „jen agent“ a „dokončené“, detail s průběhem a spotřebou z jobu, tlačítka akcí |
+| model a okno | `libs/taskview` (testy na hostiteli), program `gui-tasks` | tabulka (Úloha, Kdo spustil, Stav, Průběh, Paměť; úlohy agenta nahoře), filtr segmenty Vše / Moje / Agent / Systém a „dokončené“, akce pozastavit / pokračovat a zrušit jako ikonová tlačítka v řádku, pruh detailu dole se stavem, časem CPU a výpisem |
 | ikona v panelu | `libs/comp` | „Úlohy: N“, oranžově „Úlohy: N (agent M)“, když běží úloha agenta AI; klik dá správce úloh do popředí |
 
-- **Úlohy agenta AI** jsou výrazně označené: štítek „[AGENT AI]“ v seznamu,
-  oranžový štítek „Spustil agent AI (kdo)“ v detailu, počet v záhlaví
+- **Úlohy agenta AI** jsou výrazně označené: řádek tabulky s podkladem
+  `ai_soft`, levým pruhem a štítkem „agent“ (`Cells::agent`, průběh barvou
+  `ai`), štítek „Spustil agent AI (kdo)“ v detailu, počet v záhlaví
   a oranžová ikona v panelu.
 - **Oprávnění:** tlačítko je aktivní jen tehdy, když akci `taskd`
   volajícímu povolil (bity `actions` úlohy) a dovoluje ji stav úlohy.
@@ -2077,15 +2084,7 @@ v panelu kompozitoru.
   `tasks <běží> <agent>`. Až bude `taskd`, dostane init od něj kanál
   (`connect`) pro okno a kompozitor (jen čtení).
 
-```text
-Úlohy: běží 4                         [Agent AI: 1 běžících úloh]
-[x] Jen úlohy agenta   [x] Zobrazit dokončené
-[AGENT AI] Refaktorace projektu (klon) - běží 15 %
-Kopírování 3 souborů do /zaloha - běží 40 %
-Scrub svazku data - běží 12 %
-build.sh - čeká: Přepsat výstup? [a/n]
-Stažení aktualizací - hotovo: 3 balíky
-```
+![Správce úloh: tabulka, řádek agenta, pruh detailu](../../design/snimky/odchylky/o22-ulohy-po.png)
 
 ## 3D: Venus a virgl (stav)
 

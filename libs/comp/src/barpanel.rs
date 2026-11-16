@@ -44,6 +44,8 @@ pub(crate) enum PanelMsg {
     Window(u32),
     NewWindow,
     CloseAll,
+    /// Panel hodin: o mesic zpet nebo dopredu.
+    Month(i32),
 }
 
 /// Otevreny panel listy.
@@ -68,7 +70,7 @@ impl Comp {
     /// Kresli panel `f` knihovna ui (ostatni karty jsou ve `flyout.rs`)?
     pub(crate) fn is_ui_panel(f: Flyout) -> bool {
         match f {
-            Flyout::Look | Flyout::Net | Flyout::Volume | Flyout::Bell | Flyout::AppWindows(_) => true,
+            Flyout::Look | Flyout::Net | Flyout::Volume | Flyout::Bell | Flyout::AppWindows(_) | Flyout::Clock => true,
             #[cfg(feature = "dev-mode")]
             Flyout::Dev => true,
             _ => false,
@@ -112,9 +114,19 @@ impl Comp {
             None => ("neodpovídá", "služba sítě neodpovídá"),
         };
         let icon = if self.status.net == Some(NetState::NoDevice) { "network" } else { "ethernet" };
+        // Radek rozhrani: stav a adresa (rychlost linky netd nehlasi);
+        // pripojene ma stitek "aktivni" (`.chip.ok`).
+        let desc = match (&self.status.net_addr, self.status.net) {
+            (Some(a), Some(NetState::Online)) => alloc::format!("{desc} · IP {a}"),
+            _ => String::from(desc),
+        };
+        let mut row = vec![ui::icon(icon), column([label("Ethernet"), label(&desc).tone(ui::TextTone::Small)]).gap(0).grow()];
+        if self.status.net == Some(NetState::Online) {
+            row.push(label("aktivní").tone(ui::TextTone::Small).key("aktivni"));
+        }
         panel(vec![
             panel_header(s, "network", "Síť", sum),
-            label("Pevná síť").panel_row(Some(icon), desc),
+            panel_line(s, row),
             panel_footer(s, vec![button("Nastavení sítě").icon("settings").disabled(true).tooltip(NO_SETTINGS).grow()]),
         ])
     }
@@ -223,6 +235,7 @@ impl Comp {
             Flyout::Net => self.net_view(&s),
             Flyout::Volume => self.volume_view(&s),
             Flyout::Bell => self.bell_view(&s),
+            Flyout::Clock => self.clock_view(&s),
             #[cfg(feature = "dev-mode")]
             Flyout::Dev => self.dev_view(&s),
             _ => return None,
@@ -237,6 +250,7 @@ impl Comp {
             "net" => Flyout::Net,
             "volume" => Flyout::Volume,
             "bell" => Flyout::Bell,
+            "clock" => Flyout::Clock,
             #[cfg(feature = "dev-mode")]
             "dev" => Flyout::Dev,
             "none" => {
@@ -256,6 +270,7 @@ impl Comp {
             Flyout::Net => "Síť",
             Flyout::Volume => "Zvuk",
             Flyout::Bell => "Oznámení",
+            Flyout::Clock => "Kalendář",
             _ => "Panel",
         }
     }
@@ -444,6 +459,7 @@ impl Comp {
             }
             PanelMsg::Output(i) => self.out.push(crate::Out::Audio(crate::AudioReq::Output(i))),
             PanelMsg::Input(i) => self.out.push(crate::Out::Audio(crate::AudioReq::Input(i))),
+            PanelMsg::Month(d) => self.calendar_offset = self.calendar_offset.saturating_add(d).clamp(-1200, 1200),
             PanelMsg::Window(w) => {
                 self.set_flyout(None);
                 self.activate_window(w);

@@ -116,8 +116,11 @@ impl<M: Clone> Ui<M> {
         let ElemKind::Slider { value, min, max, .. } = self.elems[i].kind else { return None };
         let r = self.elems[i].rect;
         let k = self.look.theme.size.switch_knob;
-        let th = self.look.theme.space[1];
-        let track = Rect::new(r.x + k as i32 / 2, r.y + (r.h - th) as i32 / 2, r.w.saturating_sub(k), th);
+        // Draha 4 px (`.k-sl .tr`).
+        let th = self.look.theme.space[2];
+        // Okraj na zvetseny jezdec pri najeti (`s1` na kazdou stranu).
+        let m = k / 2 + self.look.theme.space[1];
+        let track = Rect::new(r.x + m as i32, r.y + (r.h - th) as i32 / 2, r.w.saturating_sub(2 * m), th);
         let span = (max - min).max(1) as i64;
         let x = track.x + ((value - min) as i64 * track.w as i64 / span) as i32;
         Some((track, Rect::new(x - k as i32 / 2, r.y + (r.h - k) as i32 / 2, k, k)))
@@ -473,11 +476,18 @@ impl<M: Clone> Ui<M> {
             }
             ElemKind::Slider { .. } => {
                 let Some((track, knob)) = self.slider_geo(i) else { return true };
-                c.round_fill(track, track.h / 2, fade(col.surface_3));
+                // Draha `surface_3` s okrajem `border`, vypln `accent`.
+                c.round_fill_bordered(track, track.h / 2, fade(col.surface_3), fade(col.border), 1);
                 let filled = Rect::new(track.x, track.y, (knob.x + knob.w as i32 / 2 - track.x).max(0) as u32, track.h);
                 c.round_fill(filled, track.h / 2, fade(col.accent));
-                let edge = if st.pressed || st.hover { col.accent } else { col.border_strong };
-                c.round_fill_bordered(knob, knob.w / 2, col.surface, fade(edge), 2);
+                // Jezdec: `surface` s okrajem `accent` 2 px; najeti a stisk
+                // ho zvetsi (o `s1` na kazdou stranu), stisk podklad
+                // `accent_soft` (`.k-sl:active .kn`).
+                let grow = if !st.disabled && (st.pressed || st.hover) { sp[1] as i32 } else { 0 };
+                let kn = Rect::new(knob.x - grow, knob.y - grow, knob.w + 2 * grow as u32, knob.h + 2 * grow as u32);
+                let bg = if st.pressed && !st.disabled { col.accent_soft } else { col.surface };
+                c.round_fill_bordered(kn, kn.w / 2, bg, fade(col.accent), 2);
+                let knob = kn;
                 if st.focus_visible {
                     crate::draw::focus_ring(c, knob, knob.w / 2, ring, off, col.focus);
                 }

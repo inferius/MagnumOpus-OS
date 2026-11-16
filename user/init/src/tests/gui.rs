@@ -462,39 +462,42 @@ fn task_manager(startup: &Startup) -> TestResult {
         check!(s.gui.command(b"tasks x", Vec::new()).is_err(), "neplatny prikaz tasks");
         s.gui.launch(startup, "gui-tasks").map_err(|e| fail("spusteni gui-tasks", e))?;
         let w = wait_window(&s.inspect, "org.magnumopus.tasks")?;
-        let t = wait_tree(&s.inspect, w.id, "seznam uloh", |t| t.iter().any(|n| n.role == Role::ListItem))?;
+        let t = wait_tree(&s.inspect, w.id, "seznam uloh", |t| t.iter().any(|n| n.role == Role::Row))?;
         // Uloha agenta je vyrazne oznacena a nahore.
-        let first = t.iter().find(|n| n.role == Role::ListItem).unwrap();
+        // Prvni radek podle polohy (poradi uzlu ve stromu je podle id, u radku
+        // tabulky id ulohy).
+        let first = t.iter().filter(|n| n.role == Role::Row).min_by_key(|n| n.bounds.y).unwrap();
         check!(first.name.starts_with("agent: "), "uloha agenta nahore a oznacena");
         check!(t.iter().any(|n| n.role == Role::Label && n.name.starts_with("agent: Agent AI:")), "stitek agenta v zahlavi");
         // Systemova uloha bez opravneni: Zrusit neaktivni.
-        let scrub = t.iter().find(|n| n.role == Role::ListItem && n.name.contains("Scrub")).ok_or("uloha Scrub chybi")?;
+        let scrub = t.iter().find(|n| n.role == Role::Row && n.name.contains("Scrub")).ok_or("uloha Scrub chybi")?;
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: scrub.id, action: actions::ACTIVATE, value: String::new() })?;
         let t = wait_tree(&s.inspect, w.id, "detail systemove ulohy", |t| t.iter().any(|n| n.role == Role::Label && n.name.contains("chybí oprávnění")))?;
-        let cancel = node(&t, Role::Button, "Zrušit")?;
+        let cancel = node(&t, Role::Button, "Zrušit: Scrub svazku data")?;
         check!(cancel.state & guiproto::a11y::state::DISABLED != 0, "Zrusit bez prava neaktivni");
         // Uloha agenta: pozastavit pres pristupnost.
-        let agent = t.iter().find(|n| n.role == Role::ListItem && n.name.starts_with("agent: ")).unwrap();
+        let agent = t.iter().find(|n| n.role == Role::Row && n.name.starts_with("agent: ")).unwrap();
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: agent.id, action: actions::ACTIVATE, value: String::new() })?;
         let t = wait_tree(&s.inspect, w.id, "detail ulohy agenta", |t| has(t, Role::Label, "agent: Spustil agent AI (asistent)"))?;
-        let pause = node(&t, Role::Button, "Pozastavit")?;
+        // Tlacitko v radku ulohy (popisek nese jmeno ulohy).
+        let pause = t.iter().find(|n| n.role == Role::Button && n.name.starts_with("Pozastavit: Refaktorace")).ok_or("tlacitko Pozastavit v radku agenta chybi")?;
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: pause.id, action: actions::ACTIVATE, value: String::new() })?;
         wait_tree(&s.inspect, w.id, "pozastaveni ulohy agenta", |t| t.iter().any(|n| n.role == Role::Label && n.name == "Stav: pozastaveno 15 %"))?;
-        // Fyzicky klik mysi na filtr "Jen úlohy agenta": seznam ukaze jen
+        // Fyzicky klik mysi na segment filtru "Agent": seznam ukaze jen
         // ulohy agenta (klik dojde tam, kde je ukazatel, i kdyz pohyb
         // a stisk prijdou v jednom hlaseni zarizeni).
-        let only = node(&t, Role::Checkbox, "Jen úlohy agenta")?;
+        let only = node(&t, Role::Radio, "Agent")?;
         // Meze z inspekce jsou uz v souradnicich obrazovky.
-        let (x, y) = (only.bounds.x + 8, only.bounds.y + only.bounds.h as i32 / 2);
+        let (x, y) = (only.bounds.x + only.bounds.w as i32 / 2, only.bounds.y + only.bounds.h as i32 / 2);
         println!("{QEMU_CLICK}{x} {y}");
         let t = wait_tree(&s.inspect, w.id, "filtr po kliku mysi", |t| {
-            let rows: Vec<&Node> = t.iter().filter(|n| n.role == Role::ListItem).collect();
+            let rows: Vec<&Node> = t.iter().filter(|n| n.role == Role::Row).collect();
             !rows.is_empty() && rows.iter().all(|n| n.name.starts_with("agent: "))
         })?;
         // Zpet vsechny ulohy (snimky vzhledu).
-        let only = node(&t, Role::Checkbox, "Jen úlohy agenta")?;
-        ask(&s.inspect, InspectRequest::Act { window: w.id, node: only.id, action: actions::TOGGLE, value: String::new() })?;
-        wait_tree(&s.inspect, w.id, "filtr zpet", |t| t.iter().any(|n| n.role == Role::ListItem && !n.name.starts_with("agent: ")))?;
+        let all = node(&t, Role::Radio, "Vše")?;
+        ask(&s.inspect, InspectRequest::Act { window: w.id, node: all.id, action: actions::ACTIVATE, value: String::new() })?;
+        wait_tree(&s.inspect, w.id, "filtr zpet", |t| t.iter().any(|n| n.role == Role::Row && !n.name.starts_with("agent: ")))?;
         Ok(())
     })
 }

@@ -14,6 +14,11 @@ use crate::Comp;
 /// Jak dlouho po zadosti uzivatele o spusteni dostane nove okno fokus.
 pub const EXPECT_FOCUS: u64 = 30_000_000_000;
 
+/// Jak dlouho po otevreni relace okna otevrena na pozadi (automaticky
+/// spustene aplikace) nezadaji o pozornost: znacka v liste zustane seda
+/// (zadost o pozornost hned po startu je sum, O9).
+pub const STARTUP_QUIET: u64 = 15_000_000_000;
+
 impl Comp {
     /// Seznam spustitelnych aplikaci: (id, jmeno), v poradi listy.
     pub fn set_launchable(&mut self, apps: Vec<(String, String)>) {
@@ -93,9 +98,10 @@ impl Comp {
         };
         let client = self.windows.get(&gid).map(|w| w.client);
         let other = self.focus.and_then(|f| self.windows.get(&f)).is_some_and(|w| Some(w.client) != client);
+        let quiet = self.session_since.is_some_and(|t| now.saturating_sub(t) < STARTUP_QUIET);
         if user || !other {
             self.set_focus(Some(gid));
-        } else if let Some(w) = self.windows.get_mut(&gid) {
+        } else if !quiet && let Some(w) = self.windows.get_mut(&gid) {
             w.attention = true;
         }
         self.damage_panel();

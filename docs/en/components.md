@@ -114,7 +114,7 @@ for `libs/ui`: sizes, key behaviour and implementation status (**yes**,
 | Text field, multiline | yes | `--k-h`, `radius.control`, `s4`; label above, hint / error below | arrows, Ctrl+arrows, Shift selection, clipboard, undo; multiline Ctrl+Enter submits |
 | Number | yes | like a field, right aligned, unit, stepper buttons outside the Tab order | &uarr; &darr; step, PgUp / PgDn 10 steps, Home / End |
 | Password | yes | field + eye toggle (`aria-pressed`), Caps Lock warning | like a field, never suggestions |
-| Search | yes | magnifier on the left, clear button only with text, filtering with a 150 ms delay | Esc clears, second Esc leaves, &darr; into the results |
+| Search | yes | magnifier on the left, clear button only with text, filtering with a 150 ms delay; a trailing slot (`.trailing`: a `.kbd` key label only in an empty field, an icon, short `ink_muted` text) for every single-line field | Esc clears, second Esc leaves, &darr; into the results |
 | Checkbox | partial | box 18 / 22 / 28, `radius.xs`, 2 px border; indeterminate state | Space |
 | Switch | yes | `switch_*`; immediate effect | Space |
 | Radio | partial | circle 18 / 22 / 28; the group is one stop | arrows select directly |
@@ -128,7 +128,7 @@ for `libs/ui`: sizes, key behaviour and implementation status (**yes**,
 | Application dialog | no | `dialog_w`, `radius.window`, `shadow.dialog`, `scrim` | focus trap, Enter default, Esc cancel, focus returns |
 | Toast | no | max 440, min height 48, inverted colours, 5 s / 8 s with an action, at most 3 | does not take focus; F6, Esc |
 | List | yes | row `--k-row`, `radius.control` | arrows, Ctrl+Space, Shift+arrows, Ctrl+A, letters, Enter |
-| Table | yes | row `--k-row`, header `type.caption` on `surface_2`, numbers right aligned | like the list, Enter on a header sorts |
+| Table | yes | row `--k-row`, header `type.caption` on `surface_2`, numbers right aligned; cells can hold a progress bar, the agent chip (system only) and row icon buttons (`Cells::actions`, ghost style) | like the list, Enter on a header sorts; Right / Left arrow between the row buttons, Enter / Space presses |
 | Tree | no | row `--k-row`, 20 px per level, triangle rotated 90&deg; | &rarr; expand / child, &larr; collapse / parent, `*` siblings |
 | Progress, spinner, skeleton | partial | 8 px bar; spinner 24 / 16 / 40; skeleton 12 px | not focusable; announced every 10 % |
 | Badge, status tag, filter tag | partial | badge 18; tag 24 `type.caption`; filter tag `--k-h-sm` | tag group: arrows, Space, Delete |

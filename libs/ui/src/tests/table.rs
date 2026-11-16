@@ -399,3 +399,89 @@ fn context_menu_reflects_selection_made_by_right_click() {
     let item = f.ui.a11y().into_iter().find(|n| n.role == Role::MenuItem && n.name == "Otevřít").expect("polozka Otevrit");
     assert_eq!(item.state & state::DISABLED, 0, "nabidka ze stavu pred vyberem");
 }
+
+/// Radek agenta (`Cells::agent`) a pruh prubehu (`Cells::progress`):
+/// predpona "agent: " v pristupnosti, podklad a pruh barvou `ai`, pruh
+/// prubehu misto textu bunky.
+#[test]
+fn agent_row_and_progress_cell() {
+    let mut ui: Ui<M> = Ui::new(crate::Look::ui_fonts(), 400, 200);
+    let node = || {
+        table::<M>(
+            vec![col("Úloha", 0), col("Průběh", 120)],
+            2,
+            |i| i as u64,
+            |i| if i == 0 { Cells::new([String::from("Agent"), String::from("50 %")]).agent(0).progress(1, 50) } else { Cells::new([String::from("Kopie"), String::from("-")]) },
+        )
+    };
+    ui.rebuild(String::new(), node());
+    let rows: Vec<_> = ui.a11y().into_iter().filter(|n| n.role == Role::Row).collect();
+    assert_eq!(rows[0].name, "agent: Agent, 50 %");
+    assert_eq!(rows[1].name, "Kopie, -");
+    let (w, h) = (400u32, 200u32);
+    let mut px = vec![0u32; (w * h) as usize];
+    let mut c = Canvas::new(&mut px, w, h, w).unwrap();
+    ui.draw(&mut c, 0);
+    let col = ui.look.theme.color.clone();
+    let b = rows[0].bounds;
+    // Levy pruh `ai` na zacatku radku agenta.
+    assert_eq!(px[((b.y + b.h as i32 / 2) as u32 * w + b.x as u32) as usize], col.ai);
+    // Pruh prubehu: v leve casti bunky vypln `ai` (uloha agenta).
+    let y = (b.y + b.h as i32 / 2) as u32;
+    let x0 = (b.x + b.w as i32 - 120) as u32;
+    assert!((x0..x0 + 60).any(|x| px[(y * w + x) as usize] == col.ai), "pruh prubehu barvou ai");
+    assert!(!(x0..x0 + 120).any(|x| px[((rows[1].bounds.y + rows[1].bounds.h as i32 / 2) as u32 * w + x) as usize] == col.ai), "bezny radek bez ai");
+}
+
+/// Tlacitka v radku (`Cells::actions`): uzly `Button` pod radkem, neaktivni
+/// s `DISABLED`, akce pristupnosti posle `on_row_action`; Sipka vpravo
+/// da fokus tlacitku, Enter ho stiskne, Sipka dolu ho vrati radku.
+#[test]
+fn row_action_buttons() {
+    #[derive(Clone, Debug, PartialEq)]
+    enum A {
+        Sel(Vec<u64>),
+        Act(u64, u32),
+    }
+    let view = |sel: Vec<u64>| {
+        table::<A>(vec![col("Úloha", 0), col("", 80)], 2, |i| 10 + i as u64, |i| {
+            Cells::new([alloc::format!("uloha {i}"), String::new()])
+                .actions(vec![CellAction::new(1, "pause", &alloc::format!("Pozastavit {i}")), CellAction::new(2, "stop", &alloc::format!("Zrušit {i}")).disabled(i == 1)])
+        })
+        .selection(sel)
+        .on_selection(A::Sel)
+        .on_row_action(A::Act)
+    };
+    let mut ui: Ui<A> = Ui::new(crate::Look::ui_fonts(), 400, 200);
+    ui.rebuild(String::new(), view(vec![]));
+    let btns: Vec<_> = ui.a11y().into_iter().filter(|n| n.role == Role::Button).collect();
+    assert_eq!(btns.len(), 4);
+    let stop1 = btns.iter().find(|n| n.name == "Zrušit 1").unwrap();
+    assert!(stop1.state & state::DISABLED != 0);
+    let rows: Vec<_> = ui.a11y().into_iter().filter(|n| n.role == Role::Row).collect();
+    assert_eq!(btns[0].parent, rows[0].id, "tlacitko je pod radkem");
+    // Pristupnost: stisk aktivniho tlacitka, neaktivni nic.
+    let p0 = btns.iter().find(|n| n.name == "Pozastavit 0").unwrap();
+    assert_eq!(ui.a11y_action(p0.id, actions::ACTIVATE, "").msgs, vec![A::Act(10, 1)]);
+    assert!(ui.a11y_action(stop1.id, actions::ACTIVATE, "").msgs.is_empty());
+    // Mys: klik na tlacitko nevybere radek.
+    let b = btns.iter().find(|n| n.name == "Zrušit 0").unwrap().bounds;
+    let r = ui.event(InputEvent::Button { code: BTN_LEFT, pressed: true, x: b.x + 4, y: b.y + 4 }, 0);
+    assert_eq!(r.msgs, vec![A::Act(10, 2)]);
+    ui.event(InputEvent::Button { code: BTN_LEFT, pressed: false, x: b.x + 4, y: b.y + 4 }, 0);
+    // Klavesnice: radek 0 vybrany, vpravo = prvni tlacitko, Enter.
+    ui.rebuild(String::new(), view(vec![10]));
+    let row0 = ui.a11y().into_iter().find(|n| n.role == Role::Row).unwrap();
+    ui.a11y_action(row0.id, actions::FOCUS, "");
+    let key = |ui: &mut Ui<A>, code: u16| ui.event(InputEvent::Key { code, action: 1, ch: None }, 0).msgs;
+    assert!(key(&mut ui, KEY_RIGHT).is_empty());
+    let f: Vec<String> = ui.a11y().into_iter().filter(|n| n.role == Role::Button && n.state & state::FOCUSED != 0).map(|n| n.name).collect();
+    assert_eq!(f, vec![String::from("Pozastavit 0")]);
+    assert_eq!(key(&mut ui, KEY_ENTER), vec![A::Act(10, 1)]);
+    key(&mut ui, KEY_RIGHT);
+    assert_eq!(key(&mut ui, KEY_SPACE), vec![A::Act(10, 2)]);
+    // Jiny radek: fokus tlacitka konci, Enter = bezna aktivace radku.
+    let m = key(&mut ui, KEY_DOWN);
+    assert_eq!(m, vec![A::Sel(vec![11])]);
+    assert!(ui.a11y().into_iter().all(|n| n.role != Role::Button || n.state & state::FOCUSED == 0));
+}

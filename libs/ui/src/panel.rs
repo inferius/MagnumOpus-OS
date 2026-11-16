@@ -36,6 +36,10 @@ pub enum TextTone {
     Danger,
     /// Nadpis prazdneho stavu: `title`.
     Title,
+    /// Mene dulezite (den jineho mesice v kalendari): `ink_faint`.
+    Faint,
+    /// Text na vyplni `accent` (dnesni den): `on_accent`, tucne.
+    OnAccent,
 }
 
 /// Vypln kontejneru.
@@ -45,6 +49,8 @@ pub enum Fill {
     Surface3,
     /// `danger_soft` (varovani).
     DangerSoft,
+    /// `accent` (dnesni den v kalendari).
+    Accent,
 }
 
 /// Vzhled kontejneru (sloupec, radek): vypln se zaoblenim, cara nahore.
@@ -206,6 +212,8 @@ pub(crate) fn tone_style(t: &crate::Look, tone: TextTone) -> theme::TextStyle {
         TextTone::Section => theme::TextStyle { weight: x.body_strong.weight, ..x.caption },
         TextTone::Strong => x.body_strong,
         TextTone::Title => x.title,
+        TextTone::Faint => x.body,
+        TextTone::OnAccent => x.body_strong,
     }
 }
 
@@ -215,6 +223,8 @@ pub(crate) fn tone_color(c: &theme::Colors, tone: TextTone) -> u32 {
         TextTone::Normal | TextTone::Strong | TextTone::Title => c.ink,
         TextTone::Muted | TextTone::Small | TextTone::Section => c.ink_muted,
         TextTone::Danger => c.danger,
+        TextTone::Faint => c.ink_faint,
+        TextTone::OnAccent => c.on_accent,
     }
 }
 
@@ -223,6 +233,7 @@ pub(crate) fn draw_deco(c: &mut gfx::Canvas<'_>, r: gfx::Rect, d: &Deco, col: &t
     match d.fill {
         Some(Fill::Surface3) => c.round_fill(r, d.radius, col.surface_3),
         Some(Fill::DangerSoft) => c.round_fill(r, d.radius, col.danger_soft),
+        Some(Fill::Accent) => c.round_fill(r, d.radius, col.accent),
         None => {}
     }
     if d.top_border {

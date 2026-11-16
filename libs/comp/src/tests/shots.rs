@@ -176,3 +176,86 @@ fn shot_launcher_sections_and_empty() {
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
+
+/// Panel hodin (O5): kalendar listopadu 2026 s dneskem a svetovy cas.
+#[test]
+fn shot_clock_panel() {
+    let mut errors = Vec::new();
+    for (mode, mname) in [(theme::Mode::Light, "svetly"), (theme::Mode::Dark, "tmavy")] {
+        let mut t = T::new();
+        t.c.set_mode(mode);
+        t.c.set_clock(Some((String::from("14:05"), String::from("čt 12. 11."))));
+        t.c.set_calendar(Some(crate::calendar::CalendarInfo {
+            year: 2026,
+            month: 11,
+            day: 12,
+            world: alloc::vec![(String::from("Londýn"), String::from("13:05"), String::from("-1 h")), (String::from("New York"), String::from("8:05"), String::from("-6 h"))],
+        }));
+        t.frame();
+        assert!(t.c.open_panel("clock"));
+        t.frame();
+        let r = t.c.bar_panel_rect().unwrap();
+        let (px, w, h) = crop(&t, r);
+        errors.extend(compare(&format!("panel-hodiny-{mname}"), &px, w, h));
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+
+/// Bublina listy (K12): tucny titulek, popis pod nim, u spoustece stitek
+/// klavesy Super.
+#[test]
+fn shot_bar_tooltip() {
+    use crate::input::SysKey;
+    use crate::tooltip::{DELAY, Tip};
+    let mut errors = Vec::new();
+    for (mode, mname) in [(theme::Mode::Light, "svetly"), (theme::Mode::Dark, "tmavy")] {
+        for (tip, name) in [(Tip::Bar(SysKey::Tasks), "ulohy"), (Tip::Bar(SysKey::Launcher), "spoustec")] {
+            let mut t = T::new();
+            t.c.set_mode(mode);
+            t.c.tasks = (3, 1);
+            t.frame();
+            let bar = t.c.bar_layout();
+            let a = match tip {
+                Tip::Bar(SysKey::Tasks) => bar.tasks.unwrap(),
+                _ => bar.launcher,
+            };
+            t.move_to(a.x + 4, a.y + 4);
+            t.now += DELAY + 1;
+            t.c.timers(t.now);
+            t.frame();
+            assert_eq!(t.c.tooltip_shown(), Some(tip));
+            let r = t.c.tip_rect().unwrap();
+            assert!(r.h > t.c.style.theme.text.body_strong.line + 2 * t.c.style.theme.space[2], "dva radky");
+            let (px, w, h) = crop(&t, r);
+            errors.extend(compare(&format!("bublina-{name}-{mname}"), &px, w, h));
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+
+/// Bezpecna obrazovka a potvrzeni vypnuti (O26): dlazdice zavaznosti
+/// u nadpisu, vychozi (bezpecna) volba jako primarni tlacitko.
+#[test]
+fn shot_system_dialogs() {
+    let mut errors = Vec::new();
+    for (mode, mname) in [(theme::Mode::Light, "svetly"), (theme::Mode::Dark, "tmavy")] {
+        for (name, power) in [("bezpecna", false), ("vypnout", true)] {
+            let mut t = T::new();
+            t.c.set_mode(mode);
+            if power {
+                t.c.confirm_power(false);
+            } else {
+                t.c.secure_attention(t.now);
+            }
+            t.frame();
+            let d = t.c.dialogs.active().unwrap();
+            assert_eq!(d.primary, d.sel, "vychozi volba je primarni");
+            let l = t.c.dialog_layout().unwrap();
+            let b = l.buttons[d.primary];
+            assert_eq!(t.px(b.x + b.w as i32 / 2, b.y + 3), t.c.style.theme.color.accent, "primarni tlacitko accent");
+            let (px, w, h) = crop(&t, l.frame);
+            errors.extend(compare(&format!("dialog-{name}-{mname}"), &px, w, h));
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}

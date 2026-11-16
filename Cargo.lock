@@ -3377,6 +3377,7 @@ version = "0.1.0"
 dependencies = [
  "gfx",
  "guiproto",
+ "inputproto",
  "taskproto",
  "theme",
  "ui",

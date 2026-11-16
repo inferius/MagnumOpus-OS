@@ -21,7 +21,7 @@ pub(crate) fn fade(c: u32, bg: u32, k: u32) -> u32 {
 /// Stitek agenta: pilulka `ai_soft`, ikona agenta (dve jiskry) a text
 /// `ai_ink`. Vraci sirku.
 #[allow(clippy::too_many_arguments)]
-fn agent_chip(c: &mut Canvas<'_>, look: &mut crate::Look, icons: &mut gfx::icon::Icons, x: i32, y: i32, h: u32, text: &str) -> u32 {
+pub(crate) fn agent_chip(c: &mut Canvas<'_>, look: &mut crate::Look, icons: &mut gfx::icon::Icons, x: i32, y: i32, h: u32, text: &str) -> u32 {
     let th = look.theme.clone();
     let (sp, col) = (&th.space, &th.color);
     let s = look.chip();

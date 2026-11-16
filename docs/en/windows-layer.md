@@ -528,9 +528,12 @@ once (they are visible with the old content), marks the buffer on screen
 as held by the new instance and sends the driver `MOWIN_EV_EXPOSE` for
 every window (Wine repaints them). The dialog is centred over its owner
 again and takes the focus (the compositor rule for an owned window of the
-focused window). The compositor draws popups (`POPOVER` layers) only for the
-focused window (menus of the active window); a popup of an owner whose
-dialog took the focus shows again when the focus returns. Without a lease (a process without role Gui) or after GUI
+focused window). The compositor draws popups (`POPOVER` layers) of the focused
+window above all windows (menus of the active window); popups of its
+owners (a window whose dialog took the focus) stay visible right above the
+owner, i.e. below the dialog (`Comp::owner_popovers`, test
+`owner_popover_stays_under_its_dialog`). Input reaches them once the focus
+returns. Without a lease (a process without role Gui) or after GUI
 revocation a lost connection is the end (`SERVICE_UNAVAILABLE`).
 
 **PuTTY.** Built on the host (no extra tools: CMake, Ninja and LLVM as for
