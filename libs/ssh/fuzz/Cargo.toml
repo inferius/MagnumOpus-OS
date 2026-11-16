@@ -1,0 +1,41 @@
+# Fuzz cile pro cargo-fuzz (libFuzzer; Linux nebo WSL):
+#   cd libs/ssh/fuzz && cargo +nightly fuzz run server -- -max_total_time=600
+# Samostatny workspace (neni v hlavnim): sunset se zmenami MagnumOpus
+# pres [patch] jako v hlavnim workspace.
+[package]
+name = "ssh-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+ssh = { path = ".." }
+abi = { path = "../../abi" }
+
+[[bin]]
+name = "server"
+path = "fuzz_targets/server.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "sftp"
+path = "fuzz_targets/sftp.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "keys"
+path = "fuzz_targets/keys.rs"
+test = false
+doc = false
+
+[workspace]
+
+[patch.crates-io]
+sunset = { path = "../../../third_party/crates/sunset-0.6.0" }
+getrandom = { path = "../../../third_party/crates/getrandom-0.4.3" }

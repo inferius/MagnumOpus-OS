@@ -283,3 +283,31 @@ fn velky_prenos_dat_v_kanalu() {
     assert_eq!(got.len(), total, "odeslano {sent}");
     assert!(got == data);
 }
+
+/// Cely proud bajtu klienta pri prihlaseni a exec (pro fuzz serveru):
+/// uvod, vymena klicu, overeni, kanal.
+pub(crate) fn client_hello() -> Vec<u8> {
+    let mut b = TestBackend { alice: pubkey(1), probes: 0, started: Vec::new(), winch: Vec::new(), data: Vec::new() };
+    let mut s = ServerConn::new(&HOST).unwrap();
+    let mut c = Cli::new(1, Plan::Exec);
+    let mut rec = Vec::new();
+    let mut buf = vec![0u8; 40_000];
+    for _ in 0..20 {
+        c.progress();
+        let n = c.runner.output(&mut buf);
+        rec.extend_from_slice(&buf[..n]);
+        let mut off = 0;
+        while off < n {
+            off += s.input(&buf[off..n]).unwrap();
+            serve(&mut s, &mut b);
+        }
+        serve(&mut s, &mut b);
+        let n = s.output(&mut buf);
+        let mut off = 0;
+        while off < n {
+            off += c.runner.input(&buf[off..n]).unwrap();
+            c.progress();
+        }
+    }
+    rec
+}

@@ -21,3 +21,5 @@ mod tests;
 mod tests_sftp;
 #[cfg(all(test, feature = "proto"))]
 mod tests_server;
+#[cfg(all(test, feature = "proto"))]
+mod tests_fuzz;
