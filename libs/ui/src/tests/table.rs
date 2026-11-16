@@ -399,3 +399,36 @@ fn context_menu_reflects_selection_made_by_right_click() {
     let item = f.ui.a11y().into_iter().find(|n| n.role == Role::MenuItem && n.name == "Otevřít").expect("polozka Otevrit");
     assert_eq!(item.state & state::DISABLED, 0, "nabidka ze stavu pred vyberem");
 }
+
+/// Radek agenta (`Cells::agent`) a pruh prubehu (`Cells::progress`):
+/// predpona "agent: " v pristupnosti, podklad a pruh barvou `ai`, pruh
+/// prubehu misto textu bunky.
+#[test]
+fn agent_row_and_progress_cell() {
+    let mut ui: Ui<M> = Ui::new(crate::Look::ui_fonts(), 400, 200);
+    let node = || {
+        table::<M>(
+            vec![col("Úloha", 0), col("Průběh", 120)],
+            2,
+            |i| i as u64,
+            |i| if i == 0 { Cells::new([String::from("Agent"), String::from("50 %")]).agent(0).progress(1, 50) } else { Cells::new([String::from("Kopie"), String::from("-")]) },
+        )
+    };
+    ui.rebuild(String::new(), node());
+    let rows: Vec<_> = ui.a11y().into_iter().filter(|n| n.role == Role::Row).collect();
+    assert_eq!(rows[0].name, "agent: Agent, 50 %");
+    assert_eq!(rows[1].name, "Kopie, -");
+    let (w, h) = (400u32, 200u32);
+    let mut px = vec![0u32; (w * h) as usize];
+    let mut c = Canvas::new(&mut px, w, h, w).unwrap();
+    ui.draw(&mut c, 0);
+    let col = ui.look.theme.color.clone();
+    let b = rows[0].bounds;
+    // Levy pruh `ai` na zacatku radku agenta.
+    assert_eq!(px[((b.y + b.h as i32 / 2) as u32 * w + b.x as u32) as usize], col.ai);
+    // Pruh prubehu: v leve casti bunky vypln `ai` (uloha agenta).
+    let y = (b.y + b.h as i32 / 2) as u32;
+    let x0 = (b.x + b.w as i32 - 120) as u32;
+    assert!((x0..x0 + 60).any(|x| px[(y * w + x) as usize] == col.ai), "pruh prubehu barvou ai");
+    assert!(!(x0..x0 + 120).any(|x| px[((rows[1].bounds.y + rows[1].bounds.h as i32 / 2) as u32 * w + x) as usize] == col.ai), "bezny radek bez ai");
+}

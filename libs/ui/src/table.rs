@@ -651,6 +651,12 @@ impl<M: Clone> Ui<M> {
                 c.round_fill(rr, rad, col.accent_soft);
             } else if hover_row == Some(k) {
                 c.round_fill(rr, rad, col.surface_3);
+            } else if cells.agent.is_some() {
+                // Radek agenta: `ai_soft` na 45 % (jako polozka seznamu).
+                c.round_fill(rr, rad, gfx::scale(col.ai_soft, th.opacity.hung_content));
+            }
+            if cells.agent.is_some() {
+                c.fill(Rect::new(rr.x, rr.y, sp[1], rr.h), col.ai);
             }
             // Cil pusteni: ram akcentu kolem radku pod ukazatelem.
             if dropping && hover_row == Some(k) && !self.dragging.as_ref().is_some_and(|d| d.1.contains(&id)) {
@@ -669,6 +675,19 @@ impl<M: Clone> Ui<M> {
                     self.icons.draw(c, icon, tx, y + (rh - is as i32) / 2, is, th.icon_stroke, col.ink_muted);
                     tx += (is + sp[2]) as i32;
                     room = room.saturating_sub(is + sp[2]);
+                }
+                if cells.agent == Some(ci) {
+                    let h = th.size.badge_h - sp[2];
+                    let w = crate::draw::agent_chip(c, &mut self.look, &mut self.icons, tx, y + (rh - h as i32) / 2, h, "agent");
+                    tx += (w + sp[2]) as i32;
+                    room = room.saturating_sub(w + sp[2]);
+                }
+                if let Some((pc, v)) = cells.progress
+                    && pc == ci
+                {
+                    let bh = sp[2];
+                    crate::draw::progress_bar(c, Rect::new(tx, y + (rh - bh as i32) / 2, room, bh), v, cells.agent.is_some(), col);
+                    continue;
                 }
                 let Some(text) = cells.cells.get(ci) else { continue };
                 let f = self.look.face(bs);
@@ -736,7 +755,8 @@ impl<M: Clone> Ui<M> {
                 id: virt_id(id, 2, rid),
                 parent: id,
                 role: if cells.header { Role::Label } else { Role::Row },
-                name: cells.cells.join(", "),
+                // Radek agenta: predpona jako u polozky seznamu `.agent()`.
+                name: if cells.agent.is_some() { alloc::format!("agent: {}", cells.cells.join(", ")) } else { cells.cells.join(", ") },
                 value: String::new(),
                 state,
                 layer,

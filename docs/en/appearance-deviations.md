@@ -100,7 +100,7 @@ whole system, so they go first.
 | ID | What differs | Prototype | Library | P | Size |
 |---|---|---|---|---|---|
 | O21 | **Terminal is light in the dark theme.** The cause is the same as K1, but the terminal draws its own `term_*` colours; check it together with K1.<br>**Fixed** with K1: the terminal takes the mode from the greeting, screenshot [01 after](../../design/snimky/odchylky/01-plocha-okna-po.png). | [terminal.html](../../design/terminal.html) | ui, app | P1 | within K1 |
-| O22 | **Task manager** is a list of texts "Application X - running"; the prototype has a table with columns, progress and actions. | [plocha.html](../../design/plocha.html) (Task manager) | app | P2 | M |
+| O22 | **Task manager** is a list of texts "Application X - running"; the prototype has a table with columns, progress and actions.<br>**Fixed:** a table with columns Task (origin icon), Started by, State, Progress (bar, `ai` for the agent) and Memory; the agent row has an `ai_soft` background, a left stripe and an "agent" chip; filter segments All / Mine / Agent / System; at the bottom a detail strip with the name, who started it, the state and actions as icon buttons (pause, resume, cancel, log; disabled when `taskd` does not allow them). Deviation: the actions are in the detail strip for the selected task, not in every row (table cells cannot hold buttons yet). Screenshot [O22 after](../../design/snimky/odchylky/o22-ulohy-po.png). | [plocha.html](../../design/plocha.html) (Task manager) | app | P2 | M |
 | O23 | **Read-only field** in the Components demo shows its text scrolled (the start is cut off). | [komponenty.html#pole](../../design/komponenty.html#pole) | ui | P3 | S |
 
 ## System dialogs, lock and sign-in

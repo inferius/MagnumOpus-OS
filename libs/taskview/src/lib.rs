@@ -26,7 +26,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use taskproto::{Applied, Reply, Request, State, Task, TaskList, actions};
-use ui::{App, Node, button, checkbox, column, label, list, progress, row, scroll, spacer};
+use ui::{App, Cells, Node, button, checkbox, col, column, label, row, segmented, spacer, table};
 
 pub use test_backend::TestBackend;
 
@@ -56,10 +56,47 @@ pub trait Backend {
     fn send(&mut self, req: Request) -> Vec<Reply>;
 }
 
+/// Filtr seznamu (segmenty Vse / Moje / Agent / System, design/plocha.html).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Filter {
+    #[default]
+    All,
+    /// Spustil uzivatel: primo, skriptem nebo z aplikace.
+    Mine,
+    /// Ulohy agenta AI.
+    Agent,
+    /// Sluzby a neznamy proces.
+    System,
+}
+
+impl Filter {
+    pub const ALL: [Filter; 4] = [Filter::All, Filter::Mine, Filter::Agent, Filter::System];
+
+    fn label(self) -> &'static str {
+        match self {
+            Filter::All => "Vše",
+            Filter::Mine => "Moje",
+            Filter::Agent => "Agent",
+            Filter::System => "Systém",
+        }
+    }
+
+    pub fn matches(self, t: &Task) -> bool {
+        use taskproto::Origin::*;
+        match self {
+            Filter::All => true,
+            Filter::Mine => !t.agent && matches!(t.origin, User | Script | App),
+            Filter::Agent => t.agent,
+            Filter::System => !t.agent && matches!(t.origin, Service | Unknown),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
-    Select(usize),
-    OnlyAgent(bool),
+    /// Vyber radku tabulky (id ulohy).
+    Select(Vec<u64>),
+    Filter(Filter),
     ShowDone(bool),
     Cancel,
     Pause,
@@ -71,7 +108,7 @@ pub struct TaskManager<B: Backend> {
     pub list: TaskList,
     pub backend: B,
     selected: Option<u64>,
-    only_agent: bool,
+    filter: Filter,
     show_done: bool,
     next_req: u32,
     /// Text o posledni akci ("Zruseno", "Odmitnuto: ACCESS_DENIED").
@@ -91,7 +128,16 @@ pub fn running_tasks(n: u32) -> String {
 }
 
 pub fn state_text(t: &Task) -> String {
-    let base = match &t.state {
+    let base = state_word(t);
+    match (t.progress, t.state.finished()) {
+        (Some(p), false) => format!("{base} {p} %"),
+        _ => base,
+    }
+}
+
+/// Stav bez prubehu (sloupec Stav; prubeh ma vlastni sloupec).
+fn state_word(t: &Task) -> String {
+    match &t.state {
         State::Running => String::from("běží"),
         State::Paused => String::from("pozastaveno"),
         State::Waiting(p) => format!("čeká: {p}"),
@@ -100,10 +146,6 @@ pub fn state_text(t: &Task) -> String {
         State::Done(r) => format!("hotovo: {r}"),
         State::Failed { message, .. } => format!("chyba: {message}"),
         State::Cancelled => String::from("zrušeno"),
-    };
-    match (t.progress, t.state.finished()) {
-        (Some(p), false) => format!("{base} {p} %"),
-        _ => base,
     }
 }
 
@@ -116,6 +158,19 @@ fn origin_text(o: taskproto::Origin) -> &'static str {
         Service => "služba",
         Agent => "agent AI",
         Unknown => "neznámý proces",
+    }
+}
+
+/// Ikona puvodu ulohy (sloupec Uloha).
+fn origin_icon(t: &Task) -> &'static str {
+    use taskproto::Origin::*;
+    match t.origin {
+        _ if t.agent => "agent",
+        User | Script => "terminal",
+        App => "window",
+        Service => "settings",
+        Agent => "agent",
+        Unknown => "alert",
     }
 }
 
@@ -143,7 +198,7 @@ impl<B: Backend> TaskManager<B> {
             list: TaskList::default(),
             backend,
             selected: None,
-            only_agent: false,
+            filter: Filter::All,
             show_done: true,
             next_req: 2,
             status: String::new(),
@@ -193,7 +248,7 @@ impl<B: Backend> TaskManager<B> {
             .list
             .tasks
             .iter()
-            .filter(|t| (!self.only_agent || t.agent) && (self.show_done || !t.state.finished()))
+            .filter(|t| self.filter.matches(t) && (self.show_done || !t.state.finished()))
             .collect();
         v.sort_by_key(|t| (t.state.finished(), !t.agent, t.id));
         v
@@ -225,8 +280,58 @@ impl<B: Backend> TaskManager<B> {
         }
     }
 
-    fn row_text(t: &Task) -> String {
-        format!("{} - {}", t.name, state_text(t))
+    /// Bunky radku: Uloha, Kdo spustil, Stav, Prubeh, Pamet.
+    fn cells(t: &Task) -> Cells {
+        let who = if t.agent { t.who.clone() } else { format!("{} ({})", t.who, origin_text(t.origin)) };
+        let running = !t.state.finished();
+        let prog = match (t.progress, running) {
+            (Some(p), true) => format!("{p} %"),
+            _ => String::from("-"),
+        };
+        let mem = t.memory.map_or(String::from("-"), bytes);
+        let mut c = Cells::new([t.name.clone(), who, state_word(t), prog, mem]).icon(origin_icon(t));
+        if t.agent {
+            c = c.agent(1);
+        }
+        if let (Some(p), true) = (t.progress, running) {
+            c = c.progress(3, p as u32);
+        }
+        c
+    }
+
+    /// Pruh detailu dole (`.tm-detail`): jmeno, kdo a stav, akce nad
+    /// vybranou ulohou jako tlacitka s ikonou.
+    fn detail(&self) -> Node<Msg> {
+        let Some(t) = self.selected() else {
+            return row([label("Vyberte úlohu: šipkami nahoru a dolů, Enter otevře výpis.").tone(ui::TextTone::Muted)]);
+        };
+        let who = if t.agent {
+            label(&format!("Spustil agent AI ({})", t.who)).agent()
+        } else {
+            label(&format!("Spustil: {} ({})", origin_text(t.origin), t.who)).tone(ui::TextTone::Muted)
+        };
+        let cpu = t.cpu_ns.map_or(String::from("-"), |n| format!("{} ms", n / 1_000_000));
+        let mut v = vec![row([
+            label(&t.name).tone(ui::TextTone::Strong),
+            who,
+            spacer(),
+            button("").icon("pause").ghost().tooltip("Pozastavit").on_click(Msg::Pause).disabled(!can(t, actions::PAUSE)),
+            button("").icon("play").ghost().tooltip("Pokračovat").on_click(Msg::Resume).disabled(!can(t, actions::RESUME)),
+            button("").icon("stop").ghost().tooltip("Zrušit").on_click(Msg::Cancel).disabled(!can(t, actions::CANCEL)),
+            button("").icon("log").ghost().tooltip("Výpis").on_click(Msg::Log).disabled(!can(t, actions::LOG)),
+        ])];
+        let mut info = vec![label(&format!("Stav: {}", state_text(t))), label(&format!("Čas CPU: {cpu}")).tone(ui::TextTone::Muted)];
+        if t.actions == 0 {
+            info.push(label("Tuto úlohu nemůžete řídit (chybí oprávnění).").tone(ui::TextTone::Muted));
+        }
+        v.push(row(info));
+        if !self.status.is_empty() {
+            v.push(label(&self.status));
+        }
+        for l in self.log.iter().rev().take(5).rev() {
+            v.push(label(l).tone(ui::TextTone::Small));
+        }
+        column(v)
     }
 }
 
@@ -238,59 +343,40 @@ impl<B: Backend> App for TaskManager<B> {
         format!("Správce úloh ({run} běží)")
     }
 
-    fn view(&self, _cx: &ui::Context) -> Node<Msg> {
-        let (run, agent) = self.list.running();
-        let vis = self.visible();
-        let sel = self.selected.and_then(|id| vis.iter().position(|t| t.id == id));
-        let rows: Vec<String> = vis.iter().map(|t| Self::row_text(t)).collect();
-        let agents: Vec<bool> = vis.iter().map(|t| t.agent).collect();
-        let mut head = vec![label(&format!("Úlohy: běží {run}")).heading(), spacer()];
-        if agent > 0 {
-            head.push(label(&format!("Agent AI: {}", running_tasks(agent as u32))).agent());
-        }
-        let mut items = vec![
-            row(head),
-            row([
-                checkbox("Jen úlohy agenta", self.only_agent).on_toggle(Msg::OnlyAgent),
-                checkbox("Zobrazit dokončené", self.show_done).on_toggle(Msg::ShowDone),
-            ]),
-            scroll(list(rows, sel).on_select(Msg::Select).agent_rows(agents)).height(190),
+    fn view(&self, cx: &ui::Context) -> Node<Msg> {
+        // design/plocha.html "Spravce uloh": filtr nahore, tabulka uloh
+        // (uloha agenta oznacena), pruh detailu s akcemi dole.
+        // Sirky sloupcu v nasobcich nejmensiho cile (roste s dotykem
+        // a velikosti textu, jako ostatni prvky).
+        let w = cx.min_hit.max(1);
+        let (_, agent) = self.list.running();
+        let vis: Vec<Task> = self.visible().into_iter().cloned().collect();
+        let n = vis.len();
+        let ids: Vec<u64> = vis.iter().map(|t| t.id).collect();
+        let sel: Vec<u64> = self.selected.filter(|id| ids.contains(id)).into_iter().collect();
+        let fi = Filter::ALL.iter().position(|f| *f == self.filter).unwrap_or(0);
+        let mut tools = vec![
+            segmented(Filter::ALL.iter().map(|f| String::from(f.label())), fi).on_pick(|i| Msg::Filter(Filter::ALL[i])).key("filtr"),
+            checkbox("Zobrazit dokončené", self.show_done).on_toggle(Msg::ShowDone),
+            spacer(),
         ];
-        match self.selected() {
-            None => items.push(label("Vyberte úlohu v seznamu.")),
-            Some(t) => {
-                items.push(label(&t.name).heading());
-                if t.agent {
-                    items.push(label(&format!("Spustil agent AI ({})", t.who)).agent());
-                } else {
-                    items.push(label(&format!("Spustil: {} ({})", origin_text(t.origin), t.who)));
-                }
-                items.push(label(&format!("Stav: {}", state_text(t))));
-                if let (Some(p), false) = (t.progress, t.state.finished()) {
-                    let bar = progress(p as u32);
-                    items.push(if t.agent { bar.agent() } else { bar });
-                }
-                let mem = t.memory.map_or(String::from("-"), bytes);
-                let cpu = t.cpu_ns.map_or(String::from("-"), |n| format!("{} ms", n / 1_000_000));
-                items.push(label(&format!("Paměť: {mem}, čas CPU: {cpu}")));
-                items.push(row([
-                    button("Zrušit").on_click(Msg::Cancel).disabled(!can(t, actions::CANCEL)),
-                    button("Pozastavit").on_click(Msg::Pause).disabled(!can(t, actions::PAUSE)),
-                    button("Pokračovat").on_click(Msg::Resume).disabled(!can(t, actions::RESUME)),
-                    button("Výpis").on_click(Msg::Log).disabled(!can(t, actions::LOG)),
-                ]));
-                if t.actions == 0 {
-                    items.push(label("Tuto úlohu nemůžete řídit (chybí oprávnění)."));
-                }
-            }
+        if agent > 0 {
+            tools.push(label(&format!("Agent AI: {}", running_tasks(agent as u32))).agent());
         }
-        if !self.status.is_empty() {
-            items.push(label(&self.status));
-        }
-        for l in self.log.iter().rev().take(5).rev() {
-            items.push(label(l));
-        }
-        column(items)
+        let data = alloc::rc::Rc::new(vis);
+        let d2 = alloc::rc::Rc::clone(&data);
+        let tasks = table(
+            vec![col("Úloha", 0), col("Kdo spustil", 5 * w), col("Stav", 3 * w), col("Průběh", 2 * w + w / 2), col("Paměť", 2 * w).numeric()],
+            n,
+            move |i| data.get(i).map_or(0, |t| t.id),
+            move |i| d2.get(i).map_or_else(Cells::default, Self::cells),
+        )
+        .selection(sel)
+        .on_selection(Msg::Select)
+        .on_activate(|_| Msg::Log)
+        .key("ulohy");
+        let detail = column([self.detail()]).pad(w / 4, 0, 0, 0).deco(ui::Deco { fill: None, radius: 0, top_border: true });
+        column([row(tools), tasks, detail])
     }
 
     fn external(&mut self, data: &[u8]) -> bool {
@@ -305,15 +391,15 @@ impl<B: Backend> App for TaskManager<B> {
 
     fn update(&mut self, m: Msg) {
         match m {
-            Msg::Select(i) => {
-                let id = self.visible().get(i).map(|t| t.id);
+            Msg::Select(ids) => {
+                let id = ids.first().copied();
                 if id != self.selected {
                     self.log.clear();
                     self.status.clear();
                 }
                 self.selected = id;
             }
-            Msg::OnlyAgent(b) => self.only_agent = b,
+            Msg::Filter(f) => self.filter = f,
             Msg::ShowDone(b) => self.show_done = b,
             Msg::Cancel => self.act(actions::CANCEL),
             Msg::Pause => self.act(actions::PAUSE),

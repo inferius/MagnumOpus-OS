@@ -2175,11 +2175,12 @@ running" icon in the compositor panel.
 | Part | Where | What it does |
 |---|---|---|
 | protocol | `libs/taskproto` (proposal, agreed with the shell thread that builds `taskd`) | task list, change subscription with a snapshot and sequence numbers (resume after an outage), actions cancel, pause, resume, log; task registration by producers |
-| model and window | `libs/taskview` (host tests), program `gui-tasks` | list (agent tasks first), filters "agent only" and "finished", detail with progress and job usage, action buttons |
+| model and window | `libs/taskview` (host tests), program `gui-tasks` | table (Task, Started by, State, Progress, Memory; agent tasks first), filter segments All / Mine / Agent / System and "finished", a detail strip at the bottom with state, CPU time and actions (icon buttons) |
 | panel icon | `libs/comp` | "Úlohy: N", orange "Úlohy: N (agent M)" while an AI agent task runs; a click brings the task manager to the front |
 
-- **AI agent tasks** are clearly marked: a "[AGENT AI]" tag in the list,
-  an orange "Spustil agent AI (who)" label in the detail, a count in the
+- **AI agent tasks** are clearly marked: a table row with an `ai_soft`
+  background, a left stripe and an "agent" chip (`Cells::agent`, progress
+  in `ai`), a "Spustil agent AI (who)" label in the detail, a count in the
   header and an orange panel icon.
 - **Permissions:** a button is enabled only when `taskd` allowed the action
   for the caller (the task's `actions` bits) and the task state permits
@@ -2190,6 +2191,8 @@ running" icon in the compositor panel.
   events) and init sends the icon count with the control command
   `tasks <running> <agent>`. Once `taskd` exists, init gets a channel from
   it (`connect`) for the window and the compositor (read-only).
+
+![Task manager: table, agent row, detail strip](../../design/snimky/odchylky/o22-ulohy-po.png)
 
 ## 3D: Venus and virgl (status)
 

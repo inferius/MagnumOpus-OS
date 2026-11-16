@@ -7,7 +7,7 @@ use ui::App;
 use crate::*;
 
 fn ui_for<B: Backend>(m: &TaskManager<B>) -> ui::Ui<Msg> {
-    let mut u = ui::Ui::new(gfx_text(), 560, 620);
+    let mut u = ui::Ui::new(gfx_text(), 680, 540);
     u.refresh(m);
     u
 }
@@ -34,8 +34,8 @@ fn press<B: Backend>(m: &mut TaskManager<B>, u: &mut ui::Ui<Msg>, name: &str) ->
 }
 
 fn select<B: Backend>(m: &mut TaskManager<B>, u: &mut ui::Ui<Msg>, prefix: &str) {
-    let i = m.visible().iter().position(|t| TaskManager::<B>::row_text(t).contains(prefix)).unwrap();
-    m.update(Msg::Select(i));
+    let id = m.visible().iter().find(|t| t.name.contains(prefix)).unwrap().id;
+    m.update(Msg::Select(vec![id]));
     u.refresh(m);
 }
 
@@ -44,8 +44,11 @@ fn agent_tasks_are_marked_and_sorted_first() {
     let m = TaskManager::new(TestBackend::default());
     let u = ui_for(&m);
     assert_eq!(m.title(), "Správce úloh (4 běží)");
-    let items = names(&u, Role::ListItem);
+    let items = names(&u, Role::Row);
     assert!(items[0].starts_with("agent: Refaktorace"), "{items:?}");
+    // Bunky: Uloha, Kdo spustil, Stav, Prubeh, Pamet.
+    assert_eq!(items[0], "agent: Refaktorace projektu (klon), asistent, běží, 15 %, 17 MiB");
+    assert!(items.iter().any(|n| n == "Scrub svazku data, fsd (služba), běží, 12 %, 24 MiB"), "{items:?}");
     assert!(items.last().unwrap().contains("hotovo"), "dokoncene dole");
     // Vyrazny stitek v zahlavi.
     assert!(names(&u, Role::Label).iter().any(|l| l == "agent: Agent AI: 1 běžící úloha"));
@@ -55,11 +58,17 @@ fn agent_tasks_are_marked_and_sorted_first() {
 }
 
 #[test]
-fn filters_only_agent_and_hide_done() {
+fn filters_segments_and_hide_done() {
     let mut m = TaskManager::new(TestBackend::default());
-    m.update(Msg::OnlyAgent(true));
+    m.update(Msg::Filter(Filter::Agent));
     assert_eq!(m.visible().len(), 1);
-    m.update(Msg::OnlyAgent(false));
+    m.update(Msg::Filter(Filter::Mine));
+    let mine: Vec<u64> = m.visible().iter().map(|t| t.id).collect();
+    assert_eq!(mine, vec![1, 4, 5], "uzivatel, skript a aplikace");
+    m.update(Msg::Filter(Filter::System));
+    assert!(m.visible().iter().all(|t| t.name.starts_with("Scrub")));
+    m.update(Msg::Filter(Filter::All));
+    assert_eq!(m.visible().len(), 5);
     m.update(Msg::ShowDone(false));
     assert!(m.visible().iter().all(|t| !t.state.finished()));
 }
@@ -125,10 +134,10 @@ fn channel_backend_sends_requests_and_applies_replies() {
     assert!(!m.external(b"nesmysl"));
 }
 
-/// Klik mysi (stisk a pusteni) do stredu zaskrtavaciho pole `name`.
-fn click_checkbox<B: Backend>(m: &mut TaskManager<B>, u: &mut ui::Ui<Msg>, name: &str) {
+/// Klik mysi (stisk a pusteni) do stredu prvku `role` jmenem `name`.
+fn click<B: Backend>(m: &mut TaskManager<B>, u: &mut ui::Ui<Msg>, role: Role, name: &str) {
     use guiproto::window::InputEvent;
-    let b = u.a11y().into_iter().find(|n| n.role == Role::Checkbox && n.name == name).unwrap().bounds;
+    let b = u.a11y().into_iter().find(|n| n.role == role && n.name == name).unwrap().bounds;
     let (x, y) = (b.x + b.w as i32 / 2, b.y + b.h as i32 / 2);
     for pressed in [true, false] {
         let r = u.event(InputEvent::Button { code: 0x110, pressed, x, y }, 0);
@@ -140,23 +149,25 @@ fn click_checkbox<B: Backend>(m: &mut TaskManager<B>, u: &mut ui::Ui<Msg>, name:
 }
 
 #[test]
-fn checkbox_click_changes_list() {
+fn segment_click_changes_list() {
     let mut m = TaskManager::new(TestBackend::default());
     let mut u = ui_for(&m);
-    let all = names(&u, Role::ListItem).len();
-    click_checkbox(&mut m, &mut u, "Jen úlohy agenta");
-    let only = names(&u, Role::ListItem);
+    let all = names(&u, Role::Row).len();
+    click(&mut m, &mut u, Role::Radio, "Agent");
+    let only = names(&u, Role::Row);
     assert!(only.len() < all && only.iter().all(|n| n.starts_with("agent: ")), "{only:?}");
-    click_checkbox(&mut m, &mut u, "Jen úlohy agenta");
-    assert_eq!(names(&u, Role::ListItem).len(), all);
+    click(&mut m, &mut u, Role::Radio, "Vše");
+    assert_eq!(names(&u, Role::Row).len(), all);
 }
 
 /// Prepnuti rezimu: okno se prekresli barvami motivu (svetly, tmavy,
 /// kontrast). Snimky do `target/shots/ulohy-*.png`.
 #[test]
 fn theme_modes_redraw_window() {
-    let m = TaskManager::new(TestBackend::default());
-    let (w, h) = (560u32, 620u32);
+    // Vybrana uloha agenta: snimek ukaze i pruh detailu s akcemi.
+    let mut m = TaskManager::new(TestBackend::default());
+    m.update(Msg::Select(vec![2]));
+    let (w, h) = (680u32, 540u32);
     let mut last = None;
     for (name, th) in [
         ("svetly", theme::Theme::builtin(theme::Mode::Light)),

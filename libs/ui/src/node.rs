@@ -851,16 +851,35 @@ pub struct Cells {
     pub icon: Option<&'static str>,
     /// Nadpis sekce (`.sec` v navrhu): nejde vybrat, klavesy ho preskoci.
     pub header: bool,
+    /// Radek ulohy agenta AI: sloupec se stitkem "agent" (radek ma
+    /// podklad `ai_soft` a levy pruh `ai`, jako polozka seznamu `.agent()`).
+    /// Jen pro systemova okna (spravce uloh), barvy `ai_*` patri agentovi.
+    pub agent: Option<usize>,
+    /// Pruh prubehu (sloupec, 0-100) misto textu bunky; text bunky zustava
+    /// ve stromu pristupnosti.
+    pub progress: Option<(usize, u32)>,
 }
 
 impl Cells {
     pub fn new(cells: impl IntoIterator<Item = String>) -> Self {
-        Self { cells: cells.into_iter().collect(), icon: None, header: false }
+        Self { cells: cells.into_iter().collect(), ..Self::default() }
     }
 
     /// Nadpis sekce (Bezi, Aplikace, System) v seznamu.
     pub fn header(text: &str) -> Self {
-        Self { cells: alloc::vec![String::from(text)], icon: None, header: true }
+        Self { cells: alloc::vec![String::from(text)], header: true, ..Self::default() }
+    }
+
+    /// Radek agenta AI se stitkem "agent" ve sloupci `col`.
+    pub fn agent(mut self, col: usize) -> Self {
+        self.agent = Some(col);
+        self
+    }
+
+    /// Pruh prubehu `value` (0-100) ve sloupci `col`.
+    pub fn progress(mut self, col: usize, value: u32) -> Self {
+        self.progress = Some((col, value.min(100)));
+        self
     }
 
     pub fn icon(mut self, name: &'static str) -> Self {
