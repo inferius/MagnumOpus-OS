@@ -49,6 +49,11 @@ pub(crate) enum PanelMsg {
     /// Panel uloh: akce nad ulohou, otevrit Spravce uloh.
     Task(crate::TaskAct),
     OpenTasks,
+    /// Centrum oznameni: Nerusit, zavrit, akce, vymazat vse.
+    Dnd(bool),
+    NotifyDismiss(u64),
+    NotifyInvoke(u64, String),
+    NotifyClearAll,
 }
 
 /// Otevreny panel listy.
@@ -202,18 +207,6 @@ impl Comp {
             items.push(column(rows).gap(0).key("aplikace"));
         }
         items.push(panel_footer(s, vec![button("Nastavení zvuku").icon("settings").disabled(true).tooltip(NO_SETTINGS).grow()]));
-        panel(items)
-    }
-
-    fn bell_view(&self, s: &PanelSize) -> Node<PanelMsg> {
-        let dnd = self.do_not_disturb();
-        let mut items = vec![panel_header(s, if dnd { "bell-off" } else { "bell" }, "Oznámení", if dnd { "Nerušit" } else { "žádná nová" })];
-        if dnd {
-            items.push(label("Nerušit").panel_row(Some("bell-off"), "zapnuto při celé obrazovce; oznámení se ukážou po návratu"));
-        } else {
-            items.push(label("Žádná oznámení").panel_row(Some("bell"), ""));
-        }
-        items.push(panel_footer(s, vec![button("Nastavení oznámení").icon("settings").disabled(true).tooltip(NO_SETTINGS).grow()]));
         panel(items)
     }
 
@@ -466,6 +459,21 @@ impl Comp {
             PanelMsg::Output(i) => self.out.push(crate::Out::Audio(crate::AudioReq::Output(i))),
             PanelMsg::Input(i) => self.out.push(crate::Out::Audio(crate::AudioReq::Input(i))),
             PanelMsg::Task(a) => self.out.push(crate::Out::Task(a)),
+            PanelMsg::Dnd(on) => {
+                if let Some(uid) = self.active_uid() {
+                    self.notify_set_dnd(uid, if on { u64::MAX } else { 0 });
+                }
+            }
+            PanelMsg::NotifyDismiss(id) => self.notify_dismiss(id, now),
+            PanelMsg::NotifyInvoke(id, a) => {
+                self.set_flyout(None);
+                self.notify_invoke(id, &a, now);
+            }
+            PanelMsg::NotifyClearAll => {
+                if let Some(uid) = self.active_uid() {
+                    self.notify_dismiss_all(uid, now);
+                }
+            }
             PanelMsg::OpenTasks => {
                 self.set_flyout(None);
                 self.launch_or_activate(crate::render::TASKS_APP, time);

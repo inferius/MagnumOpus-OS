@@ -97,6 +97,9 @@ impl Comp {
             }
             ViewReply::Result { .. } => {}
         }
+        // Centrum oznameni a odznak zvonku ukazuji tentyz seznam.
+        self.damage_panel();
+        self.bar_panel_changed();
     }
 
     fn notice_added(&mut self, uid: u64, n: Notification, now: u64) {

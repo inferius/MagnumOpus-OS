@@ -25,6 +25,7 @@ pub mod appearance;
 pub mod barpanel;
 pub mod calendar;
 pub mod taskpanel;
+pub(crate) mod notifypanel;
 pub mod clipboard;
 pub mod diag;
 pub mod dialog;

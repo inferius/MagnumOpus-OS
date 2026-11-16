@@ -63,8 +63,11 @@ impl Comp {
         let mut items = alloc::vec![panel_header(s, "tasks", "Úlohy na pozadí", &sub)];
         match &self.task_rows {
             Some(rows) if !rows.is_empty() => {
+                // Sirka textu: panel bez okraju a dvou tlacitek.
+                let ctl = self.style.theme.size.control_h;
+                let tw = s.width.saturating_sub(2 * s.side + 2 * ctl + 2 * s.gap);
                 for t in rows.iter().take(MAX_ROWS) {
-                    items.push(task_line(s, t));
+                    items.push(task_line(s, t, tw));
                 }
                 if rows.len() > MAX_ROWS {
                     items.push(panel_line(s, alloc::vec![label(&format!("a další ({}) ve Správci úloh", rows.len() - MAX_ROWS)).tone(ui::TextTone::Small)]));
@@ -80,7 +83,7 @@ impl Comp {
 
 /// Radek ulohy (`.task-row`): tucne jmeno a stitek agenta, pod nim kdo,
 /// prubeh a stav, pruh prubehu; vpravo pozastavit nebo pokracovat a zrusit.
-fn task_line(s: &PanelSize, t: &TaskRow) -> Node<PanelMsg> {
+fn task_line(s: &PanelSize, t: &TaskRow, tw: u32) -> Node<PanelMsg> {
     let mut head = alloc::vec![label(&t.name).tone(ui::TextTone::Strong)];
     if t.agent {
         head.push(label("agent").agent());
@@ -98,5 +101,5 @@ fn task_line(s: &PanelSize, t: &TaskRow) -> Node<PanelMsg> {
         button("").icon("pause").ghost().tooltip(&format!("Pozastavit: {}", t.name)).disabled(!t.can_pause).on_click(PanelMsg::Task(crate::TaskAct::Pause(t.id)))
     };
     let cancel = button("").icon("stop").ghost().tooltip(&format!("Zrušit: {}", t.name)).disabled(!t.can_cancel).on_click(PanelMsg::Task(crate::TaskAct::Cancel(t.id)));
-    panel_line(s, alloc::vec![column(text).gap(s.s1).grow(), pause, cancel])
+    panel_line(s, alloc::vec![column(text).gap(s.s1).width(tw), pause, cancel])
 }
