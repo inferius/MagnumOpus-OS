@@ -17,11 +17,14 @@ use crate::sys;
 /// selze, namapuje se dalsi objekt pameti hned za konec (`MAP_FIXED`).
 /// Jadro pro mapovani bez pevne adresy vybira adresy od `USER_ALLOC_BASE`,
 /// daleko pod timto rozsahem.
+///
+/// Objekt pameti si pri vytvoreni vezme slib (commit) za celou velikost
+/// (docs/cs/sprava-pameti.md), i kdyz stranky vznikaji az zapisem. Heap
+/// proto zacina maly a roste po krocich: driv 4 MiB hned u kazdeho procesu
+/// = 70 relaci shellu ~300 MiB slibu, ktery skoro nikdo nepouzil.
 const HEAP_BASE: u64 = 0x0000_6000_0000_0000;
-/// Pocatecni velikost.
-const HEAP_INITIAL: u64 = 4 * 1024 * 1024;
-/// Nejmensi prirustek.
-const HEAP_GROW_MIN: u64 = 4 * 1024 * 1024;
+/// Pocatecni velikost a rust (host testy v `sizeclass`).
+use sizeclass::{HEAP_INITIAL, heap_grow};
 /// Heap smi rust az ke konci pameti procesu (~32 TiB adres); kolik
 /// skutecne dostane, urcuje rozpocet uzivatelske pameti jobu.
 const HEAP_MAX: u64 = abi::vm::USER_MAX - HEAP_BASE;
@@ -76,12 +79,8 @@ impl GrowingHeap {
             return p.as_ptr();
         }
         let need = (layout.size() + layout.align() + 64) as u64;
-        // Rust o polovinu (mene volani pri postupnem rustu), zarovnane na stranky.
         // `page_size` tady nesmi alokovat (jsme uvnitr alokatoru) - nealokuje.
-        let grow = need
-            .max(HEAP_GROW_MIN)
-            .max(heap.size() as u64 / 2)
-            .next_multiple_of(crate::vm::page_size());
+        let grow = heap_grow(need, heap.size() as u64, crate::vm::page_size());
         let top = heap.top() as u64;
         if top + grow > HEAP_BASE + HEAP_MAX || !map_heap(self_process(), top, grow) {
             return core::ptr::null_mut();

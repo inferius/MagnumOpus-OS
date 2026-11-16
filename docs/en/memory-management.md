@@ -336,6 +336,32 @@ into existence) or with the frame. **Later** (noted as an option): a
 `SPARSE` flag for sparse objects (`malloc` arenas in `cstd`) whose commit
 would be charged only on a fault.
 
+### Program heap
+
+The heap of `no_std` programs (`libs/libos/src/rt_own.rs`) starts at a
+fixed address and grows upwards by memory objects. Because an object
+promises its whole size right away, the heap starts small: **256 KiB** and
+grows by at least 256 KiB, a bigger heap by half its size, so the number
+of mappings and kernel calls grows only logarithmically
+(`sizeclass::heap_grow`, host test
+`heap_grows_from_small_start_logarithmically`) **[verified in QEMU]**
+(suites `pamet`, `shell`, `gui`). Before, every service had 4 MiB right
+away. Programs with `std` (`osrt`) have dlmalloc with its own small
+segments.
+
+Measurements (x86_64, debug, QEMU TCG, test `termd: 70 soucasnych relaci`):
+
+| | 4 MiB heap right away | heap from 256 KiB |
+|---|---|---|
+| system memory after boot (before sessions) | 412 MiB (`77251c6b*`) | 277 MiB (`77251c6b*`) |
+| 70 shell sessions (`shsess`) | +298 MiB, 4360 KiB per session (`77251c6b*`) | +34 MiB, 486 KiB per session (`77251c6b*`) |
+| `vykon FS` suite: shell line, reading 8 MiB by 32 KiB / via VMO by 1 MiB | 38 ms, 173 ms / 29 ms (`77251c6b*`) | 35-36 ms, 175-192 ms / 31-56 ms (`77251c6b*`, three runs) |
+
+Hot paths (compositor, fsd) did not slow down: the heap grows only when it
+runs out of space, settled services no longer grow. The spread of reading
+via VMO is TCG noise (old and new measurements in one range). Returning
+free heap pages to the system (decommit) **[designed]**.
+
 ## Key files
 
 | File | What |

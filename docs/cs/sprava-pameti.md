@@ -323,6 +323,30 @@ s rámcem. **Později** (zapsáno jako možnost): příznak `SPARSE` pro řídk�
 objekty (arény `malloc` v `cstd`), u kterých by se slib strhával až při
 výpadku.
 
+### Halda programů
+
+Halda programů `no_std` (`libs/libos/src/rt_own.rs`) začíná na pevné
+adrese a roste nahoru po objektech paměti. Protože objekt slíbí celou
+velikost hned, halda začíná malá: **256 KiB** a roste aspoň o 256 KiB,
+u větší haldy o polovinu své velikosti, takže počet mapování a volání
+jádra roste jen logaritmicky (`sizeclass::heap_grow`, host test
+`heap_grows_from_small_start_logarithmically`) **[ověřeno v QEMU]**
+(sady `pamet`, `shell`, `gui`). Dřív měla každá služba hned 4 MiB.
+Programy se `std` (`osrt`) mají dlmalloc s vlastními malými segmenty.
+
+Měření (x86_64, debug, QEMU TCG, test `termd: 70 soucasnych relaci`):
+
+| | halda 4 MiB hned | halda od 256 KiB |
+|---|---|---|
+| paměť systému po startu (před relacemi) | 412 MiB (`77251c6b*`) | 277 MiB (`77251c6b*`) |
+| 70 relací shellu (`shsess`) | +298 MiB, 4360 KiB na relaci (`77251c6b*`) | +34 MiB, 486 KiB na relaci (`77251c6b*`) |
+| sada `vykon FS`: řádek shellu, čtení 8 MiB po 32 KiB / přes VMO po 1 MiB | 38 ms, 173 ms / 29 ms (`77251c6b*`) | 35-36 ms, 175-192 ms / 31-56 ms (`77251c6b*`, tři běhy) |
+
+Horké cesty (kompozitor, fsd) se nezpomalily: halda roste jen při
+nedostatku místa, ustálené služby už nerostou. Rozptyl čtení přes VMO je
+šum TCG (staré i nové měření v jednom intervalu). Vracení volných stránek
+haldy systému (decommit) **[navrženo]**.
+
 ## Klíčové soubory
 
 | Soubor | Co |
