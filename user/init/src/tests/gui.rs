@@ -364,6 +364,9 @@ fn terminal_window(startup: &Startup) -> TestResult {
             .launch_extra(startup, "gui-term", vec![StartHandle::user(conn.into_handle())])
             .map_err(|e| fail("spusteni gui-term", e))?;
         let pump = || crate::terminal::TERMINALS.lock().poll(startup);
+        // Telo v closure: terminal se zavre i po chybe (jinak by okno
+        // a termd zustaly a dalsi testy terminalu cekaly na uvitani marne).
+        let r = (|| -> TestResult {
         let w = wait_window(&s.inspect, "org.magnumopus.terminal")?;
         let t = wait_tree(&s.inspect, w.id, "uvitani terminalu", |t| {
             pump();
@@ -453,7 +456,10 @@ fn terminal_window(startup: &Startup) -> TestResult {
         settle(&s.inspect)?;
         let px = pixel(&s.inspect, w.rect.x + 9, w.rect.y + 16)?;
         check!(px == badge() || px == badge_inactive(), alloc::format!("odznak nad vlastnim titulkem: {px:#x}"));
-        close_terminal(startup, s, app, "gui-term (test)")
+        Ok(())
+        })();
+        let c = close_terminal(startup, s, app, "gui-term (test)");
+        r.and(c)
     })
 }
 
@@ -550,6 +556,8 @@ fn terminal_shot(startup: &Startup, s: &mut State) -> TestResult {
         .launch_extra(startup, "gui-term", vec![StartHandle::user(conn.into_handle())])
         .map_err(|e| fail("spusteni gui-term", e))?;
     let pump = || crate::terminal::TERMINALS.lock().poll(startup);
+    // Telo v closure: terminal se zavre i po chybe (viz `terminal_window`).
+    let r = (|| -> TestResult {
     // Nove okno je navrch; ceka se na uvitani (relace pripojena).
     let end = time::deadline_after(TIMEOUT);
     let w = loop {
@@ -598,7 +606,10 @@ fn terminal_shot(startup: &Startup, s: &mut State) -> TestResult {
         pump();
         t.iter().any(|n| n.role == Role::Terminal && n.value.contains("nebyly převzaty"))
     })?;
-    close_terminal(startup, s, app, "gui-term (snimek)")
+    Ok(())
+    })();
+    let c = close_terminal(startup, s, app, "gui-term (snimek)");
+    r.and(c)
 }
 
 /// Konec testu terminalu: okno zavrit, init pak ukonci jeho termd a relace
