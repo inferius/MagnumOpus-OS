@@ -128,15 +128,25 @@ impl App {
         let t = &self.theme;
         let Some(p) = &self.prompt else { return };
         let bold = Style { bold: true, ..Style::fg(t.ui.fg) };
+        // Systemova vyzva: odznak zdroje (program ho svym vystupem
+        // nenakresli, vyzvu posila jen sluzba relaci).
+        let question = |q: &str| {
+            let mut l = Line::new();
+            if !p.label.is_empty() {
+                l.push_bg(Some(Style { bold: true, ..Style::fg(t.ui.bg) }), t.ui.warn, &format!(" {} ", p.label));
+                l.push(None, " ");
+            }
+            l.text(Some(bold), q)
+        };
         if let Some((secret, text)) = &p.input {
-            bottom.push(Line::new().text(Some(bold), &p.question));
+            bottom.push(question(&p.question));
             let shown: String = if *secret { text.chars().map(|_| '*').collect() } else { text.clone() };
             bottom.push(Line::new().text(Some(Style::fg(t.ui.fg)), &format!("> {shown}_")));
             return;
         }
         let ch = if p.choices.is_empty() { changes(&p.detail) } else { None };
         let preview = ch.is_some();
-        bottom.push(Line::new().text(Some(bold), &p.question).role(Role::Prompt(PromptRow::Question { preview })));
+        bottom.push(question(&p.question).role(Role::Prompt(PromptRow::Question { preview })));
         if let Some(ch) = &ch {
             // Druh zmeny barvou (smazano cervene, nove zelene, jinak zlute),
             // cesta s domovem jako `~`.

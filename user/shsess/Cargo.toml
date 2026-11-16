@@ -30,4 +30,7 @@ wire = { path = "../../libs/wire" }
 powerproto = { path = "../../libs/powerproto" }
 openwith = { path = "../../libs/openwith" }
 launchproto = { path = "../../libs/launchproto" }
+ttyproto = { path = "../../libs/ttyproto" }
+accountproto = { path = "../../libs/accountproto" }
+zeroize = { version = "1.8", default-features = false, features = ["alloc"] }
 spin = "0.12"

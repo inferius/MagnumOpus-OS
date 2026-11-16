@@ -57,7 +57,11 @@ pub mod flags {
     /// programy ze shellu (`exec`): rozhoduje manifest v okamziku spusteni,
     /// ne dotaz pred nim.
     pub const NET_NEEDS_MANIFEST: u32 = 1 << 1;
-    pub const ALL: u32 = ALLOW_FOREIGN | NET_NEEDS_MANIFEST;
+    /// Program jen z initfs (system): zadny registr, `/system/bin` ani
+    /// aplikace z disku si jmeno nevezmou. Init ho pouziva u programu,
+    /// kterym dava vic (kanal podpisu SSH).
+    pub const INITFS_ONLY: u32 = 1 << 2;
+    pub const ALL: u32 = ALLOW_FOREIGN | NET_NEEDS_MANIFEST | INITFS_ONLY;
 }
 
 /// Co znamena handle v `LAUNCH`.
@@ -89,6 +93,11 @@ pub enum Role {
     Audio = 10,
     /// Listek k relaci `Audio` (`abi::params::tag::AUDIO_LEASE`).
     AudioLease = 11,
+    /// Ridici kanal terminalu (`ttyproto`, `abi::params::tag::TTY`).
+    Tty = 12,
+    /// Kanal podpisu klienta SSH (`abi::params::tag::SSH_AGENT`); launchd
+    /// ho preda jen s `INITFS_ONLY`.
+    Agent = 13,
 }
 
 impl Role {
@@ -105,15 +114,17 @@ impl Role {
             9 => Self::GuiLease,
             10 => Self::Audio,
             11 => Self::AudioLease,
+            12 => Self::Tty,
+            13 => Self::Agent,
             _ => return None,
         })
     }
 }
 
-/// Nejvic roli (handlu) v jednom `LAUNCH`: deset jedinecnych (vsechny
+/// Nejvic roli (handlu) v jednom `LAUNCH`: dvanact jedinecnych (vsechny
 /// role krome `Fd`) a handly zdedenych fd (vejde se do
 /// `CHANNEL_MAX_HANDLES`).
-pub const MAX_ROLES: usize = 10 + abi::params::MAX_FDS;
+pub const MAX_ROLES: usize = 12 + abi::params::MAX_FDS;
 
 /// Pozadavek `LAUNCH` (bez handlu; ty jdou ve zprave v poradi `roles`).
 #[derive(Debug, Clone, PartialEq, Eq)]

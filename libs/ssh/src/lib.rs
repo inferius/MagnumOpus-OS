@@ -9,6 +9,7 @@ extern crate alloc;
 
 pub mod keys;
 pub mod sftp;
+pub mod sftp_client;
 
 #[cfg(feature = "proto")]
 pub mod client;

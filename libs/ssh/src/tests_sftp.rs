@@ -199,3 +199,64 @@ fn cesty() {
     assert_eq!(resolve("/home/a", ".."), "/home");
     assert_eq!(resolve("/home/a", "/"), "/");
 }
+
+/// Klient SFTP (`sftp_client.rs`) proti serveru: nahrani a stazeni po
+/// kouscich (jako scp), vypis, mazani, chyby jako status.
+#[test]
+fn klient_proti_serveru() {
+    use crate::sftp_client::{CHUNK, Reply, SftpClient, eof, ok};
+    let mut fs = Mem::default();
+    fs.dirs.insert("/home/a".into());
+    let mut srv = Sftp::new("/home/a");
+    let mut c = SftpClient::new();
+    let ask = |c: &mut SftpClient, srv: &mut Sftp, fs: &mut Mem, p: &[u8]| -> Reply {
+        c.feed(&srv.input(p, fs).unwrap());
+        c.next_reply().unwrap().expect("cela odpoved")
+    };
+    let init = c.init();
+    assert_eq!(ask(&mut c, &mut srv, &mut fs, &init), Reply::Version(3));
+    // Nahrani 100 KiB po kouscich.
+    let data: Vec<u8> = (0..100_000u32).map(|i| i as u8).collect();
+    let (_, p) = c.open("soubor.bin", true);
+    let Reply::Handle { handle, .. } = ask(&mut c, &mut srv, &mut fs, &p) else { panic!("handle") };
+    for (i, ch) in data.chunks(CHUNK).enumerate() {
+        let (id, p) = c.write(&handle, (i * CHUNK) as u64, ch);
+        let r = ask(&mut c, &mut srv, &mut fs, &p);
+        assert!(ok(&r) && r.id() == Some(id), "{r:?}");
+    }
+    let (_, p) = c.close(&handle);
+    assert!(ok(&ask(&mut c, &mut srv, &mut fs, &p)));
+    assert_eq!(fs.files["/home/a/soubor.bin"], data);
+    // Stazeni zpet.
+    let (_, p) = c.open("/home/a/soubor.bin", false);
+    let Reply::Handle { handle, .. } = ask(&mut c, &mut srv, &mut fs, &p) else { panic!("handle") };
+    let mut back = Vec::new();
+    loop {
+        let (_, p) = c.read(&handle, back.len() as u64, CHUNK as u32);
+        match ask(&mut c, &mut srv, &mut fs, &p) {
+            Reply::Data { data, .. } => back.extend(data),
+            r if eof(&r) => break,
+            r => panic!("{r:?}"),
+        }
+    }
+    assert_eq!(back, data);
+    // Atributy, vypis, chyby.
+    let (_, p) = c.stat("soubor.bin");
+    assert!(matches!(ask(&mut c, &mut srv, &mut fs, &p), Reply::Attrs { attrs, .. } if attrs.size == Some(100_000)));
+    let (_, p) = c.opendir(".");
+    let Reply::Handle { handle, .. } = ask(&mut c, &mut srv, &mut fs, &p) else { panic!("dir") };
+    let (_, p) = c.readdir(&handle);
+    assert!(matches!(ask(&mut c, &mut srv, &mut fs, &p), Reply::Name { entries, .. } if entries.iter().any(|(n, _)| n == "soubor.bin")));
+    let (_, p) = c.open("/system/x", true);
+    let r = ask(&mut c, &mut srv, &mut fs, &p);
+    assert!(matches!(r, Reply::Status { code: status::PERMISSION_DENIED, .. }), "{r:?}");
+    let (_, p) = c.remove("soubor.bin");
+    assert!(ok(&ask(&mut c, &mut srv, &mut fs, &p)));
+    // Rozdelena odpoved: cela az po vsech bajtech.
+    let (_, p) = c.stat("/home/a");
+    let out = srv.input(&p, &mut fs).unwrap();
+    c.feed(&out[..3]);
+    assert_eq!(c.next_reply(), Ok(None));
+    c.feed(&out[3..]);
+    assert!(matches!(c.next_reply(), Ok(Some(Reply::Attrs { attrs, .. })) if attrs.is_dir()));
+}

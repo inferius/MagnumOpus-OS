@@ -168,12 +168,70 @@ scp -P 2222 soubor.txt uzivatel@127.0.0.1:
 Klíč vytvoří `ssh-keygen -t ed25519` (OpenSSH je ve Windows 10/11
 součástí systému). Firewall hosta musí být v profilu „domácí“.
 
+## Klient
+
+Příkazy `ssh`, `scp` a `sftp` (program `user/sshtools`, jeden program
+podle jména, každý s vlastním manifestem) spouští shell službou exec
+initu ([Návrh shellu](navrh-shell.md)) **[ověřeno v QEMU]** (test `ssh:
+klient v systemu ...`, klient proti našemu sshd přes loopback).
+
+| Příkaz | Co dělá |
+|---|---|
+| `ssh [--port N] [uživatel@]server [příkaz...]` | příkaz na serveru (výstup, kód); bez příkazu shell serveru po řádcích (surový terminál zatím ne) |
+| `scp [--port N] soubor server:[cesta]` / `scp server:cesta [soubor]` | jeden soubor tam nebo zpět, jen přes SFTP (jako OpenSSH 9, starý protokol scp ne) |
+| `sftp [--port N] [uživatel@]server` | příkazy ze vstupu: `ls`, `cd`, `pwd`, `get`, `put`, `rm`, `mkdir`, `quit` |
+| `ssh-keygen [komentář]` | nový klíč klienta přímo ve službě účtů; vypíše veřejný klíč pro `authorized_keys` serveru |
+| `ssh-key identities` / `import <soubor\|->` / `forget <číslo>` | klíče klienta: výpis, převzetí soukromého klíče OpenSSH (jen nešifrovaný ed25519), odebrání |
+
+**Klíče drží služba účtů** **[ověřeno v QEMU]**:
+
+- Soukromý klíč klienta (seed ed25519) vznikne nebo se naimportuje do
+  služby účtů a je obalený heslem účtu (`accounts::client`). Žádný program
+  ho nedostane. `ssh` má od initu jen **kanál podpisu**
+  (`accountproto::agent`) a služba podepíše jen zprávu přihlášení SSH
+  (RFC 4252) s blobem právě toho klíče.
+- Kanál podpisu dostane jen systémový program z initfs (`ssh`, `scp`,
+  `sftp`): init ho spouští s příznakem launchd `INITFS_ONLY`, takže
+  program z `/system/bin` ani aplikace z disku si jméno nevezme, a launchd
+  roli `Agent` bez tohoto příznaku odmítne (test ověří obojí).
+- **Odemčení:** přihlášení heslem u počítače klíče relace rovnou odemkne
+  (jako ssh-agent). Jinak (relace přes SSH, klíč přidaný později) se
+  služba zeptá **systémovou výzvou** se štítkem **Účty**: zobrazí ji
+  systémová část shellu na žádost služby účtů a heslo jde přímo službě,
+  program `ssh` heslo účtu nikdy nevidí. Odznak výzvy program svým
+  výstupem nenakreslí.
+- **Potvrzení klíče pro nový server** je druhá systémová výzva (při
+  prvním použití klíče k serveru); služba si server zapamatuje.
+- Zamčení obrazovky klíče nezahodí, zahodí je až konec relace. Volba
+  „zamknout klíče se zámkem obrazovky“ v nastavení účtu **[navrženo]**.
+- Každý podpis, odemčení a odmítnutí jde do logu (logd).
+- Změna hesla klíče přebalí; nové heslo od správy nebo obnovovací klíč je
+  rozbalit neumí, klíče klienta pak zaniknou (bez starého hesla nejdou
+  otevřít). Odemčení klíčem FIDO **[navrženo]** (dnes jen heslem).
+
+**Ověření serveru:** `~/.ssh/known_hosts` ve formátu OpenSSH. Neznámý
+server = dotaz s otiskem ve vstupu programu (`yes` uloží), změněný klíč
+= spojení odmítnuto s varováním **[ověřeno v QEMU]**.
+
+**Heslo k cizímu serveru** (jen když ho server nabízí) jde do skryté
+výzvy programu: `ssh` vypne ECHO přes řídicí kanál terminálu (`ttyproto`)
+a shell výzvu zamaskuje, do bloku ani logu nejde **[implementováno]**.
+
+Omezení v1: shell serveru bez příkazu běží po řádcích (surový terminál
+pro programy **[navrženo]**), šifrovaný soukromý klíč OpenSSH nejde
+importovat (bcrypt-pbkdf), spolupráce klienta se serverem OpenSSH není
+automaticky ověřená (náš sshd přes loopback; OpenSSH server ve WSL je
+otázka pro uživatele).
+
 ## Testy
 
 | Test | Co ověřuje |
 |---|---|
 | `cargo test -p ssh` | server proti klientovi sunset (exec, PTY, cizí klíč, heslo odmítnuto, velký přenos), SFTP, klíče (vektory OpenSSH 9.7), fuzz |
 | `cargo test -p accounts remote` | klíče v účtu, ověření podpisu, zpomalení, opakovaný identifikátor relace |
+| `cargo test -p ssh` (klient) | klient proti našemu serveru (exec, výstup, kód, EOF, cizí klíč serveru, špatný klíč), klient SFTP, soukromý klíč OpenSSH, fuzz klienta |
+| `cargo test -p accounts client` | klíče klienta: vytvoření, import, odemčení, změna hesla, reset, potvrzené servery |
+| `cargo xtask test --only ssh` (klient) | `ssh`, `scp`, `sftp` v systému proti našemu sshd: known_hosts, výzva Účty, scp tam a zpět, sftp, podvrh v `/system/bin`, změněný klíč serveru, role Agent bez `INITFS_ONLY` **[ověřeno v QEMU]** |
 | `cargo xtask test --only ssh` | klient OpenSSH z hostitele: přihlášení klíčem, příkaz a kód, PTY, cizí klíč a heslo odmítnuty, scp tam a zpět (70 KB), sftp, zápis a čtení souboru shellem, vypnutý server odmítne spojení **[ověřeno v QEMU]** |
 
 Odchylka od zadání: test z hostitele používá klienta OpenSSH (systémový
@@ -182,8 +240,8 @@ a ring/aws-lc, OpenSSH ověří skutečnou spolupráci.
 
 ## Plán
 
-- klient `ssh` a `scp` v shellu **[navrženo]** (`ping`, `nc` a `resolve` jsou
-  hotové, [Síť](sit.md#síťové-příkazy-shellu)),
+- interaktivní `ssh` se surovým terminálem pro programy **[navrženo]**
+  (`ping`, `nc` a `resolve` jsou hotové, [Síť](sit.md#síťové-příkazy-shellu)),
 - heslo s druhým faktorem (TOTP přes accountd) **[navrženo]**,
 - podpis výměny klíčů v samostatné službě (hostitelský klíč mimo proces
   spojení) **[navrženo]**,

@@ -181,9 +181,11 @@ pub fn request_from_shell(data: &[u8], chan: Channel, session: Option<u64>) -> O
             Err(e) => Reply::Failed(e),
         },
         // Vzdaleny pristup SSH (`sshd`, `ssh-key`, `remote-access`).
-        Ok(Request::Ssh { op, arg, mut password }) => {
+        Ok(Request::Ssh { op, mut arg, mut password }) => {
             let r = crate::sshd::from_shell(session, &op, &arg, &password);
             zeroize::Zeroize::zeroize(&mut password);
+            // `client-import` nese soukromy klic.
+            zeroize::Zeroize::zeroize(&mut arg);
             match r {
                 Ok(Some(ch)) => {
                     let _ = chan.write(&Reply::Ok.encode(), alloc::vec![ch.into_handle()]);

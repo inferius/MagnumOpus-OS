@@ -14,7 +14,7 @@ fn change(c: &str, p: &str) -> Value {
 fn app_with_prompt(detail: Item) -> App {
     let mut a = App::new(crate::theme::Theme::dark(), 80, 30);
     a.on_msg(ServerMsg::Attached { session: 7, cwd: "/home/eva".into(), blocks: 0 });
-    a.on_msg(ServerMsg::Prompt { prompt: 3, question: "Převzít změny?".into(), detail, choices: Vec::new() });
+    a.on_msg(ServerMsg::Prompt { prompt: 3, question: "Převzít změny?".into(), detail, choices: Vec::new(), label: String::new() });
     a
 }
 

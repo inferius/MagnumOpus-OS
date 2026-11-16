@@ -214,7 +214,7 @@ pub fn drain(t: &Shared, next_prompt: &mut u64) -> Vec<ServerMsg> {
             *next_prompt += 1;
             p.sent = Some(id);
             let detail = Item::Value(decode_value(&p.detail));
-            out.push(ServerMsg::Prompt { prompt: id, question: p.question.clone(), detail, choices: Vec::new() });
+            out.push(ServerMsg::Prompt { prompt: id, question: p.question.clone(), detail, choices: Vec::new(), label: String::new() });
         }
     }
     // Zrusene a dobehle bez zmen souboru: uklidit. Se zmenami (dobehla

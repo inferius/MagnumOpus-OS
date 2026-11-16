@@ -33,7 +33,7 @@ pub(crate) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, in
         "audio" => audio::call(it, host, a),
         "theme" | "permissions" => system::call(host, name, a),
         "acl" => acl::call(it, host, a),
-        "sshd" | "ssh-key" | "remote-access" => remote::call(it, host, name, a, input),
+        "sshd" | "ssh-key" | "ssh-keygen" | "remote-access" => remote::call(it, host, name, a, input),
         "start" => start::call(it, host, a),
         "convert" => convert::call(it, host, a, input),
         "install" => install::run(it, host, &a),

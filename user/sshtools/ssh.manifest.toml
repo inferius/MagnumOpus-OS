@@ -1,0 +1,19 @@
+# ssh: klient SSH (prikaz na serveru, shell). Spojeni TCP na libovolny
+# server a port; soukromy klic program nema (podpis dela sluzba uctu pres
+# kanal od initu, docs/cs/ssh.md, Klient).
+[app]
+id = "org.magnumopus.ssh"
+name = "Klient SSH"
+
+[limits]
+memory = "48M"
+
+[network]
+rights = ["info", "tcp", "dns"]
+sockets = 2
+buffers = "1M"
+
+[[network.connect]]
+proto = ["tcp"]
+to = "*"
+ports = "*"

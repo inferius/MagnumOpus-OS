@@ -108,6 +108,8 @@ pub struct PromptUi {
     pub sel: usize,
     /// Dotaz na text: (skryty, napsany text). `None` = volba.
     pub input: Option<(bool, String)>,
+    /// Zdroj systemove vyzvy (odznak pred otazkou); prazdne = bezna.
+    pub label: String,
 }
 
 pub struct App {
@@ -379,10 +381,10 @@ impl App {
                 }
                 self.block_ended(block);
             }
-            ServerMsg::Prompt { prompt, question, detail, choices } => {
-                self.prompt = Some(PromptUi { id: prompt, question, detail, choices, sel: 0, input: None });
+            ServerMsg::Prompt { prompt, question, detail, choices, label } => {
+                self.prompt = Some(PromptUi { id: prompt, question, detail, choices, sel: 0, input: None, label });
             }
-            ServerMsg::Ask { prompt, question, secret, default } => {
+            ServerMsg::Ask { prompt, question, secret, default, label } => {
                 self.prompt = Some(PromptUi {
                     id: prompt,
                     question,
@@ -390,6 +392,7 @@ impl App {
                     choices: Vec::new(),
                     sel: 0,
                     input: Some((secret, default)),
+                    label,
                 });
             }
             // Sedy navrh argumentu (automaticky pozadavek, ne Tab).

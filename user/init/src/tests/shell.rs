@@ -48,6 +48,16 @@ impl Window {
         ServerMsg::decode(&msg.data).map_err(|_| String::from("neplatna zprava od termd"))
     }
 
+    /// Jako `recv`, ale s kratkym terminem (`None` = nic neprislo):
+    /// volajici mezi tim obsluhuje dalsi veci (terminaly vzdalenych relaci).
+    pub(super) fn recv_for(&self, ms: u64) -> Result<Option<ServerMsg>, String> {
+        match self.chan.read(Some(time::deadline_after(Duration::from_millis(ms)))) {
+            Ok(msg) => ServerMsg::decode(&msg.data).map(Some).map_err(|_| String::from("neplatna zprava od termd")),
+            Err(libos::Error::TimedOut) => Ok(None),
+            Err(e) => Err(fail("cteni z termd", e)),
+        }
+    }
+
     /// Pocka na odpoved, kterou vybere `pick`; ostatni zpravy (udalosti
     /// jinych bloku) preskoci. Vlastni limit 60 s.
     fn reply<T>(&self, pick: impl Fn(&ServerMsg) -> Option<T>) -> Result<T, String> {

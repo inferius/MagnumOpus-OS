@@ -65,9 +65,10 @@ fn serve(session: u64, ch: Channel) {
         };
         let mut hs = m.handles.into_iter();
         let Some(back) = hs.next().map(Channel::from_handle) else { continue };
-        let stdio: Vec<Handle> = hs.collect();
+        let stdio: Vec<Handle> = hs.by_ref().take(3).collect();
+        let (tty, prompt) = (hs.next(), hs.next().map(Channel::from_handle));
         let r = match Exec::decode(&m.data) {
-            Ok(req) if stdio.len() == 3 => run(session, &req, stdio, &mut launchd),
+            Ok(req) if stdio.len() == 3 => run(session, &req, stdio, tty, prompt, &mut launchd),
             Ok(_) => Err((Error::InvalidArgs, String::from("chybi stdio"))),
             Err(e) => Err((e, String::from("neplatny pozadavek"))),
         };
@@ -86,7 +87,7 @@ fn err(e: Error, msg: impl Into<String>) -> Fail {
 }
 
 /// Spusti program; vraci handly pro shell `[proces, kanal k potomkovi]`.
-fn run(session: u64, req: &Exec, stdio: Vec<Handle>, launchd: &mut Option<Channel>) -> core::result::Result<Vec<Handle>, Fail> {
+fn run(session: u64, req: &Exec, stdio: Vec<Handle>, tty: Option<Handle>, prompt: Option<Channel>, launchd: &mut Option<Channel>) -> core::result::Result<Vec<Handle>, Fail> {
     let program = req.program.as_str();
     // v1: jen programy systemu z registru launchd (initfs, /system/bin).
     if !is_bare_name(program) {
@@ -96,7 +97,10 @@ fn run(session: u64, req: &Exec, stdio: Vec<Handle>, launchd: &mut Option<Channe
     let fs = session_fs(session, uid, &req.mounts).map_err(|e| err(e, "relace FS programu"))?;
     let job = crate::session::job(session).map_err(|e| err(e, "job relace"))?;
     let net = if req.net { program_net().map_err(|e| err(e, "relace site"))? } else { None };
-    let params = params(program, &req.cwd, &req.args).ok_or_else(|| err(Error::InvalidArgs, "prilis dlouhe argumenty"))?;
+    // Prostredi: domov a jmeno uzivatele relace (napr. `~/.ssh` klienta SSH).
+    let name = crate::session::name(session).unwrap_or_default();
+    let env = [alloc::format!("HOME=/home/{name}"), alloc::format!("USER={name}")];
+    let params = params(program, &req.cwd, &req.args, &env).ok_or_else(|| err(Error::InvalidArgs, "prilis dlouhe argumenty"))?;
     let mut roles = alloc::vec![Role::Job, Role::Fs];
     let mut handles: Vec<Handle> = alloc::vec![job.into_handle(), fs.into_channel().into_handle()];
     if let Some(n) = net {
@@ -107,7 +111,27 @@ fn run(session: u64, req: &Exec, stdio: Vec<Handle>, launchd: &mut Option<Channe
         roles.push(role);
         handles.push(h);
     }
-    let l = Launch { program: String::from(program), flags: flags::NET_NEEDS_MANIFEST, roles, params };
+    if let Some(t) = tty {
+        roles.push(Role::Tty);
+        handles.push(t);
+    }
+    // Klient SSH: kanal podpisu u sluzby uctu (soukromy klic program nema)
+    // a jen program z initfs (jmeno si nikdo jiny nevezme).
+    let mut fl = flags::NET_NEEDS_MANIFEST;
+    if launchproto::exec::SSH_PROGRAMS.contains(&program) {
+        fl |= flags::INITFS_ONLY;
+        let initfs = crate::install::STARTUP_INITFS.get().ok_or_else(|| err(Error::NotFound, "initfs"))?;
+        let app = crate::apps::manifest(initfs, program)
+            .ok()
+            .flatten()
+            .map(|m| m.id)
+            .ok_or_else(|| err(Error::NotFound, alloc::format!("{program}: chybi manifest v systemu")))?;
+        let (ours, theirs) = Channel::create().map_err(|e| err(e, "kanal podpisu"))?;
+        crate::accounts::agent(session, uid, &app, theirs, prompt).map_err(|e| err(e, "sluzba uctu (podpis SSH)"))?;
+        roles.push(Role::Agent);
+        handles.push(ours.into_handle());
+    }
+    let l = Launch { program: String::from(program), flags: fl, roles, params };
     let msg = l.encode(1).map_err(|e| err(e, "pozadavek launchd"))?;
     let ch = match launchd.take() {
         Some(c) => c,
@@ -149,10 +173,10 @@ fn program_net() -> Result<Option<Handle>> {
     Ok(Some(net.root.restrict_with(&r)?.into_channel()?.into_handle()))
 }
 
-/// Blok parametru: `argv[0]` = jmeno programu, prostredi prazdne.
-fn params(program: &str, cwd: &str, args: &[String]) -> Option<Vec<u8>> {
+/// Blok parametru: `argv[0]` = jmeno programu, prostredi `env`.
+fn params(program: &str, cwd: &str, args: &[String], env: &[String]) -> Option<Vec<u8>> {
     let argv: Vec<&[u8]> = core::iter::once(program.as_bytes()).chain(args.iter().map(|a| a.as_bytes())).collect();
-    let env: [&[u8]; 0] = [];
+    let env: Vec<&[u8]> = env.iter().map(|e| e.as_bytes()).collect();
     let len = libos::abi::params::encoded_len(cwd.as_bytes(), argv.iter().copied(), env.iter().copied(), &[]);
     let mut out = alloc::vec![0u8; len];
     libos::abi::params::encode(&mut out, 0, cwd.as_bytes(), argv.iter().copied(), env.iter().copied(), &[])?;

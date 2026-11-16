@@ -23,6 +23,30 @@ fn paint(out: &mut String, theme: Option<&Theme>, style: impl Fn(&Theme) -> Styl
     }
 }
 
+/// Odznak zdroje systemove vyzvy (inverzne v barve upozorneni; bez barev
+/// v hranatych zavorkach).
+fn badge(out: &mut String, theme: Option<&Theme>, label: &str) {
+    if label.is_empty() {
+        return;
+    }
+    match theme {
+        Some(t) => {
+            out.push_str("[7m");
+            out.push_str(&sgr(Style { bold: true, ..Style::fg(t.ui.warn) }));
+            out.push(' ');
+            out.push_str(label);
+            out.push(' ');
+            out.push_str(RESET);
+            out.push(' ');
+        }
+        None => {
+            out.push('[');
+            out.push_str(label);
+            out.push_str("] ");
+        }
+    }
+}
+
 fn fg(c: impl Fn(&Theme) -> Rgb) -> impl Fn(&Theme) -> Style {
     move |t| Style::fg(c(t))
 }
@@ -110,8 +134,9 @@ pub fn message(m: &ServerMsg, theme: Option<&Theme>) -> String {
                 out.push('\n');
             }
         }
-        ServerMsg::Prompt { question, detail, choices, .. } => {
+        ServerMsg::Prompt { question, detail, choices, label, .. } => {
             out.push_str(&item(detail, theme));
+            badge(&mut out, theme, label);
             let opts = if choices.is_empty() {
                 String::from("[a/n]")
             } else {
@@ -119,7 +144,8 @@ pub fn message(m: &ServerMsg, theme: Option<&Theme>) -> String {
             };
             paint(&mut out, theme, |t| Style { bold: true, ..Style::fg(t.ui.fg) }, &alloc::format!("{question} {opts} "));
         }
-        ServerMsg::Ask { question, secret, default, .. } => {
+        ServerMsg::Ask { question, secret, default, label, .. } => {
+            badge(&mut out, theme, label);
             let d = if default.is_empty() || *secret { String::new() } else { alloc::format!(" [{default}]") };
             paint(&mut out, theme, |t| Style { bold: true, ..Style::fg(t.ui.fg) }, &alloc::format!("{question}{d}: "));
         }

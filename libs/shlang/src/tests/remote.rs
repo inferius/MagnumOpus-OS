@@ -41,6 +41,8 @@ impl Host for RemoteHost {
         Ok(match op {
             "key-list" => String::from("1\tssh-ed25519\tSHA256:abc\talice@pc\t60\n"),
             "key-add" => String::from("2\tSHA256:def\n"),
+            "client-create" | "client-import" => String::from("3\tssh-ed25519 AAAA x\tSHA256:kli\n"),
+            "client-list" => String::from("3\tssh-ed25519\tSHA256:kli\tx\t60\n"),
             "access" | "access-on" => String::from("on\n"),
             "sshd-status" => String::from("enabled\ton\nrunning\tyes\nport\t22\nhost_key\tSHA256:host\nsessions\t1\nconnected\talice@10.0.2.2\n"),
             _ => String::new(),
@@ -97,4 +99,29 @@ fn remote_access_a_sshd() {
     assert_eq!(v.field("host_key"), Some(Value::str("SHA256:host")));
     let (_, r) = run("sshd zapni", None);
     assert_eq!(r.err().as_deref(), Some("SH_ARGS"));
+}
+
+#[test]
+fn klice_klienta() {
+    let (h, r) = run("ssh-keygen alice@pc", Some("heslo uctu"));
+    assert_eq!(r, Ok(()));
+    assert_eq!(h.calls[0], ("client-create".into(), "alice@pc".into(), "heslo uctu".into()));
+    let Some(v) = h.emitted.last() else { panic!() };
+    assert_eq!(v.field("public"), Some(Value::str("ssh-ed25519 AAAA x")));
+    let (h, r) = run("ssh-key identities", None);
+    assert_eq!(r, Ok(()));
+    let Some(Value::List(rows)) = h.emitted.last() else { panic!("{:?}", h.emitted) };
+    assert_eq!(rows[0].field("fingerprint"), Some(Value::str("SHA256:kli")));
+    // Import: soubor musi byt soukromy klic OpenSSH, heslo jen dotazem.
+    let (_, r) = run("ssh-key import /home/klic.pub", Some("x"));
+    assert_eq!(r, Err(String::from("SH_ARGS")));
+    let (h, r) = run("\"-----BEGIN OPENSSH PRIVATE KEY-----\" | ssh-key import -", Some("heslo"));
+    assert_eq!(r, Ok(()));
+    assert_eq!(h.calls[0].0, "client-import");
+    assert_eq!(h.calls[0].2, "heslo");
+    let (_, r) = run("ssh-keygen", None);
+    assert_eq!(r, Err(String::from("SH_REJECTED")), "bez hesla nic");
+    let (h, r) = run("ssh-key forget 3", None);
+    assert_eq!(r, Ok(()));
+    assert_eq!(h.calls[0], ("client-remove".into(), "3".into(), String::new()));
 }

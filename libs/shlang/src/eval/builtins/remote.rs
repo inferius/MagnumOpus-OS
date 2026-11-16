@@ -17,6 +17,7 @@ pub(super) fn call(it: &mut Interp, host: &mut dyn Host, name: &str, a: Args, in
     match name {
         "sshd" => sshd(host, &a),
         "ssh-key" => ssh_key(it, host, &a, input),
+        "ssh-keygen" => ssh_keygen(host, &a),
         _ => remote_access(host, &a),
     }
 }
@@ -144,8 +145,85 @@ fn ssh_key(it: &mut Interp, host: &mut dyn Host, a: &Args, input: Value) -> R<Va
             })?;
             Ok(Value::Nothing)
         }
-        Some(_) => Err(a.err(code::ARGS, "ssh-key: list, add <soubor|->, remove <číslo>")),
+        Some("identities") => {
+            let text = host.ssh("client-list", "", "").map_err(|e| sys(e, "ssh-key identities", a))?;
+            Ok(Value::List(key_rows(&text)))
+        }
+        Some("import") => {
+            // Soukromy klic OpenSSH (nesifrovany ed25519) ze souboru nebo
+            // z roury: do sluzby uctu, soubor pak jde smazat.
+            let src = word(a, 1).ok_or_else(|| a.err(code::ARGS, "ssh-key import: chybí soubor se soukromým klíčem (~/.ssh/id_ed25519) nebo -"))?;
+            let text = if src == "-" {
+                match input {
+                    Value::Str(s) => s,
+                    Value::Bytes(b) => String::from_utf8_lossy(&b).into_owned(),
+                    _ => return Err(a.err(code::ARGS, "ssh-key import -: čekám soukromý klíč na vstupu (text)")),
+                }
+            } else {
+                let p = it.abs(&src);
+                String::from_utf8_lossy(&it.fs_read(host, &p)?).into_owned()
+            };
+            if !text.contains("OPENSSH PRIVATE KEY") {
+                return Err(a.err(code::ARGS, "ssh-key import: čekám soukromý klíč OpenSSH (BEGIN OPENSSH PRIVATE KEY); veřejný klíč přidá ssh-key add"));
+            }
+            let pw = password(host, a, "import klíče SSH")?;
+            let text = host.ssh("client-import", &text, &pw).map_err(|e| match e {
+                abi::Error::AlreadyExists => a.err(e.name(), "ssh-key import: tenhle klíč už účet má"),
+                abi::Error::NotSupported => a.err(e.name(), "ssh-key import: jen nešifrovaný klíč ed25519 (šifrovaný zatím ne: v1 neumí heslo souboru)"),
+                abi::Error::InvalidArgs => a.err(e.name(), "ssh-key import: poškozený soukromý klíč"),
+                abi::Error::AccessDenied => a.err(e.name(), "ssh-key import: špatné heslo"),
+                _ => sys(e, "ssh-key import", a),
+            })?;
+            Ok(created(&text))
+        }
+        Some("forget") => {
+            let id = word(a, 1).ok_or_else(|| a.err(code::ARGS, "ssh-key forget: chybí číslo klíče (ssh-key identities)"))?;
+            host.ssh("client-remove", &id, "").map_err(|e| match e {
+                abi::Error::NotFound => a.err(e.name(), alloc::format!("ssh-key forget: klíč {id} účet nemá")),
+                _ => sys(e, "ssh-key forget", a),
+            })?;
+            Ok(Value::Nothing)
+        }
+        Some(_) => Err(a.err(code::ARGS, "ssh-key: list, add <soubor|->, remove <číslo>, identities, import <soubor|->, forget <číslo>")),
     }
+}
+
+/// Radky klicu `id\talgo\totisk\tkomentar\tpridan`.
+fn key_rows(text: &str) -> Vec<Value> {
+    text.lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            let [id, algo, fp, comment, added] = f.as_slice() else { return None };
+            Some(Value::record(&[
+                ("id", Value::Int(id.parse().ok()?)),
+                ("algo", Value::str(*algo)),
+                ("fingerprint", Value::str(*fp)),
+                ("comment", Value::str(*comment)),
+                ("added", Value::Time(added.parse::<i64>().unwrap_or(0).saturating_mul(1_000_000_000))),
+            ]))
+        })
+        .collect()
+}
+
+/// Odpoved vytvoreni / importu `id\tradek\totisk`.
+fn created(text: &str) -> Value {
+    let mut f = text.trim().split('\t');
+    let id = f.next().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+    let public = f.next().unwrap_or("");
+    let fp = f.next().unwrap_or("");
+    Value::record(&[("id", Value::Int(id)), ("public", Value::str(public)), ("fingerprint", Value::str(fp))])
+}
+
+/// `ssh-keygen [komentar]`: novy klic klienta primo ve sluzbe uctu.
+fn ssh_keygen(host: &mut dyn Host, a: &Args) -> R<Value> {
+    let comment = word(a, 0).unwrap_or_default();
+    let pw = password(host, a, "nový klíč SSH")?;
+    let text = host.ssh("client-create", &comment, &pw).map_err(|e| match e {
+        abi::Error::AccessDenied => a.err(e.name(), "ssh-keygen: špatné heslo"),
+        abi::Error::NoSpace => a.err(e.name(), "ssh-keygen: účet už má nejvíc klíčů (ssh-key forget)"),
+        _ => sys(e, "ssh-keygen", a),
+    })?;
+    Ok(created(&text))
 }
 
 fn remote_access(host: &mut dyn Host, a: &Args) -> R<Value> {

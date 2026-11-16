@@ -22,6 +22,7 @@ pub mod ctap;
 pub mod elevate;
 pub mod perm;
 pub mod ssh;
+pub mod agent;
 mod msg;
 #[cfg(feature = "client")]
 pub mod client;
@@ -93,6 +94,12 @@ pub mod op {
     pub const SSH_KEY_LIST: u32 = 25;
     pub const SSH_KEY_REMOVE: u32 = 26;
     pub const SET_REMOTE: u32 = 27;
+    /// Klice klienta SSH vlastniho uctu (`agent.rs`): vytvoreni, import
+    /// soukromeho klice, vypis, odebrani.
+    pub const CLIENT_KEY_CREATE: u32 = 28;
+    pub const CLIENT_KEY_IMPORT: u32 = 29;
+    pub const CLIENT_KEY_LIST: u32 = 31;
+    pub const CLIENT_KEY_REMOVE: u32 = 32;
     // setup
     pub const CREATE_FIRST: u32 = 30;
     // grants (sluzby ukonu)

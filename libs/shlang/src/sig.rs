@@ -165,7 +165,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("Úlohy", &["tasks", "jobs", "fg", "wait", "kill", "cancel"]),
     ("Relace a bezpečnost", &["undo", "preview", "history", "run", "error", "exit"]),
     ("Nápověda", &["help", "explain"]),
-    ("Účet a oprávnění", &["permissions", "acl", "ssh-key", "remote-access"]),
+    ("Účet a oprávnění", &["permissions", "acl", "ssh-key", "ssh-keygen", "remote-access"]),
     (
         "Systém",
         &[
@@ -303,7 +303,9 @@ pub const BUILTINS: &[Sig] = &[
         "vzdálený přístup SSH pro celý počítač: bez argumentu stav, `sshd enable` / `sshd disable` (potvrdí správce)"),
     sig!("ssh-key", "remote-ssh-key", &[opt("action", Kind::Str)], Some(Kind::Any), NOFLAGS, IA,
         Io::Records(&["id", "algo", "fingerprint", "comment", "added"]),
-        "klíče SSH vašeho účtu: výpis, `ssh-key add <soubor.pub|->` (chce heslo), `ssh-key remove <číslo>`"),
+        "klíče SSH vašeho účtu: výpis, `ssh-key add <soubor.pub|->` (chce heslo), `ssh-key remove <číslo>`; klíče klienta `identities`, `import`, `forget`"),
+    sig!("ssh-keygen", "remote-ssh-keygen", &[opt("comment", Kind::Str)], None, NOFLAGS, IN, Io::Records(&["id", "public", "fingerprint"]),
+        "nový klíč klienta SSH přímo ve službě účtů (chce heslo); vypíše veřejný klíč pro server"),
     sig!("remote-access", "remote-access", &[opt("state", Kind::Str)], None, NOFLAGS, IN, Io::Records(&["remote_access"]),
         "vzdálený přístup vašeho účtu: bez argumentu stav, `remote-access on` (chce heslo) / `off`"),
     sig!("acl", "file-acl", &[p("path", Kind::Any)], Some(Kind::Any),

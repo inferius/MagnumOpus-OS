@@ -11,7 +11,7 @@
 - **Tasks:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Session and safety:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Help:** [`help`](#help), [`explain`](#explain)
-- **Account and permissions:** [`permissions`](#permissions), [`acl`](#acl), [`ssh-key`](#ssh-key), [`remote-access`](#remote-access)
+- **Account and permissions:** [`permissions`](#permissions), [`acl`](#acl), [`ssh-key`](#ssh-key), [`ssh-keygen`](#ssh-keygen), [`remote-access`](#remote-access)
 - **System:** [`audio`](#audio), [`theme`](#theme), [`sshd`](#sshd), [`system`](#system), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Files
@@ -1857,9 +1857,9 @@ acl remove bob ~/Projekty
 
 ### `ssh-key`
 
-SSH keys of your account: list, `ssh-key add <file.pub|->` (asks for the password), `ssh-key remove <number>`
+SSH keys of your account: list, `ssh-key add <file.pub|->` (asks for the password), `ssh-key remove <number>`; client keys `identities`, `import`, `forget`
 
-Public SSH keys you use to sign in to the account remotely. Without arguments a list (`id`, `algo`, `fingerprint`, `comment`, `added`). `ssh-key add` adds a key from a `*.pub` file (also from a USB stick), from text or from a pipe (`-`); it asks for the account password and shows the key fingerprint. The account service keeps the keys, so they work with an encrypted home too. Supported are ed25519 and FIDO `sk-ssh-ed25519` keys (a security key at the client); RSA and ECDSA not yet. `ssh-key remove <number>` removes a key (no password).
+Public SSH keys you use to sign in to the account remotely. Without arguments a list (`id`, `algo`, `fingerprint`, `comment`, `added`). `ssh-key add` adds a key from a `*.pub` file (also from a USB stick), from text or from a pipe (`-`); it asks for the account password and shows the key fingerprint. The account service keeps the keys, so they work with an encrypted home too. Supported are ed25519 and FIDO `sk-ssh-ed25519` keys (a security key at the client); RSA and ECDSA not yet. `ssh-key remove <number>` removes a key (no password). Client keys (signing in from here to other servers with `ssh`, `scp`, `sftp`) are kept by the account service and no program gets the private key: `ssh-key identities` lists them, `ssh-key import <file|->` takes over an OpenSSH private key (unencrypted ed25519 only; asks for the password, then delete the file), `ssh-key forget <number>` removes a client key. `ssh-keygen` creates a new client key.
 
 ```shell
 ssh-key [action] ...
@@ -1869,7 +1869,7 @@ Full name `remote-ssh-key` · input: any value · output: table (id, algo, finge
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `[action]` | text | list | list, add or remove |
+| `[action]` | text | list | list, add, remove, identities, import or forget |
 | `...` | value |  | a key file, `-` or a key number |
 
 Adds a key from a USB stick (asks for the password).
@@ -1882,7 +1882,36 @@ ssh-key add /media/flash/id_ed25519.pub
 
 **Errors:** `SH_ARGS`, `SH_REJECTED`, `ACCESS_DENIED`, `ALREADY_EXISTS`, `NOT_SUPPORTED`, `NOT_FOUND`
 
-**Related:** [`remote-access`](#remote-access), [`sshd`](#sshd)
+**Related:** [`ssh-keygen`](#ssh-keygen), [`remote-access`](#remote-access), [`sshd`](#sshd)
+
+
+### `ssh-keygen`
+
+a new SSH client key right in the account service (asks for the password); prints the public key for the server
+
+Creates a new ed25519 key for signing in from here to other servers (`ssh`, `scp`, `sftp`). The private key is created in and stays in the account service, wrapped by the account password; no program gets it, the service signs. Prints the number, the public key (`public`, the line for the server's `authorized_keys`) and the fingerprint. Asks for the account password. Keys are unlocked by a password login; otherwise the service asks in a system prompt labelled Účty.
+
+```shell
+ssh-keygen [comment]
+```
+
+Full name `remote-ssh-keygen` · input: nothing · output: table (id, public, fingerprint)
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `[comment]` | text |  | key comment (e.g. alice@pc) |
+
+A new client key (asks for the password).
+
+```shell
+ssh-keygen alice@pc
+```
+
+**Needs:** a signed-in session
+
+**Errors:** `SH_REJECTED`, `ACCESS_DENIED`, `NO_SPACE`
+
+**Related:** [`ssh-key`](#ssh-key)
 
 
 ### `remote-access`

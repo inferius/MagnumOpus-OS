@@ -21,7 +21,10 @@ use netproto::io::Write;
 use super::{Test, TestResult, fail, net_service};
 use crate::check;
 
-pub const TESTS: &[Test] = &[("ssh: prihlaseni klicem z OpenSSH, prikaz, terminal, odmitnuti, vypnuti", remote)];
+pub const TESTS: &[Test] = &[
+    ("ssh: prihlaseni klicem z OpenSSH, prikaz, terminal, odmitnuti, vypnuti", remote),
+    ("ssh: klient v systemu (known_hosts, vyzva Ucty, scp, sftp, zmeneny klic)", super::ssh_client::client),
+];
 
 /// Ucty, ktere zakladaji jine sady (jmeno, heslo); jinak vlastni.
 const KNOWN: &[(&str, &str)] = &[("alice", "Kocka leze dirou"), ("sdltest", "Zvuk jen s povolenim 42")];
@@ -36,7 +39,7 @@ fn config() -> Option<(u16, String)> {
 }
 
 /// Ucet testu: (uid, jmeno, heslo).
-fn user() -> Result<(u64, &'static str, &'static str), String> {
+pub(super) fn user() -> Result<(u64, &'static str, &'static str), String> {
     let login = Login(crate::accounts::channel("login").map_err(|e| fail("kanal login", e))?);
     let list = login.list().map_err(|e| fail("vypis uctu", e))?;
     for (name, pw) in KNOWN.iter().chain([&OWN]) {

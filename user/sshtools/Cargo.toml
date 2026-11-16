@@ -1,0 +1,22 @@
+[package]
+name = "sshtools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Klient SSH: ssh, scp a sftp (jeden program, chovani podle argv[0])"
+
+[[bin]]
+name = "sshtools"
+test = false
+bench = false
+
+# Program se std. Sestavuje `cargo xtask build` (stdsys::STD_PROGRAMS); do
+# initfs jako `ssh`, `scp` a `sftp` (xtask STD_ALIASES), kazdy s vlastnim
+# manifestem. Kanal podpisu u sluzby uctu dostane od initu jen z initfs.
+[dependencies]
+ssh = { path = "../../libs/ssh" }
+# Jen zpravy kanalu podpisu (`agent`); kryptografie CTAP se nepouzije
+# a do programu se nepripoji.
+accountproto = { path = "../../libs/accountproto" }
+ttyproto = { path = "../../libs/ttyproto" }

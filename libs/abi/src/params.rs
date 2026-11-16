@@ -76,6 +76,9 @@ pub mod tag {
     /// Kanal odesilatele oznameni (`notifyproto::Send`) s identitou
     /// aplikace z manifestu (`docs/cs/oznameni.md`).
     pub const NOTIFY: u32 = 0x7FFF_000C;
+    /// Kanal podpisu klienta SSH u sluzby uctu (`accountproto::agent`):
+    /// jen systemove programy `ssh`, `scp`, `sftp` z initfs.
+    pub const SSH_AGENT: u32 = 0x7FFF_000D;
 }
 
 /// Nejvic zdedenych fd v jednom bloku (handly jdou ve startovni zprave

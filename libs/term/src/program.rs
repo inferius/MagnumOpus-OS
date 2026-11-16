@@ -79,6 +79,32 @@ pub trait Running: Send {
     fn exit_code(&mut self) -> Option<i64>;
     /// Ukonci proces (Ctrl+C).
     fn kill(&mut self);
+    /// Obslouzi ridici kanal terminalu programu (`ttyproto`: rezim,
+    /// velikost).
+    fn poll_control(&mut self) {}
+    /// Ma program zapnute ECHO? `false` = skryty vstup (heslo).
+    fn echo(&self) -> bool {
+        true
+    }
+    /// Systemova vyzva sluzby uctu, ktera ceka na zobrazeni.
+    fn system_prompt(&mut self) -> Option<SystemPrompt> {
+        None
+    }
+    /// Odpoved na systemovou vyzvu (jde primo sluzbe uctu, ne programu).
+    fn answer_system(&mut self, _id: u32, _ok: bool, _text: String) {}
+}
+
+/// Stitek systemove vyzvy sluzby uctu (odznak v okne).
+pub const SYSTEM_LABEL: &str = "Účty";
+
+/// Systemova vyzva (sluzba uctu): heslo k odemceni klicu SSH nebo
+/// potvrzeni klice pro novy server. Program ji nevidi.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemPrompt {
+    pub id: u32,
+    pub question: String,
+    /// Skryty text (heslo); `false` = ano / ne.
+    pub secret: bool,
 }
 
 /// Rozdeli vystup na cele radky; zbytek zustane v `buf`.

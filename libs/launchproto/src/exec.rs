@@ -11,8 +11,11 @@
 //! Zprava na kanalu sluzby: `op u32 (EXEC), program str, cwd str, sit u8,
 //! argc u32,
 //! argumenty str..., pocet cest u32, (jmeno str, cil str, jen cteni u8)...`.
-//! Handly: `[odpoved, stdin, stdout, stderr]` (stdio = konce kanalu pro
-//! program, protokol proudu bajtu jako `std`). Odpoved na kanalu odpovedi:
+//! Handly: `[odpoved, stdin, stdout, stderr, tty?, vyzva?]` (stdio = konce
+//! kanalu pro program, protokol proudu bajtu jako `std`; `tty` = ridici
+//! kanal terminalu programu, `ttyproto`; `vyzva` = systemova vyzva shellu
+//! pro sluzbu uctu, init ji preda accountd jen u programu se kanalem
+//! podpisu SSH, `accountproto::agent`). Odpoved na kanalu odpovedi:
 //! `status i32 (0 nebo kod abi::Error), popis str` a pri uspechu handle
 //! procesu (cekani a ukonceni).
 
@@ -25,6 +28,9 @@ use crate::{Reader, Writer};
 
 /// Operace kanalu sluzby.
 pub const EXEC: u32 = 1;
+
+/// Programy, ktere dostanou kanal podpisu SSH (jen z initfs).
+pub const SSH_PROGRAMS: &[&str] = &["ssh", "scp", "sftp"];
 
 /// Nejvic argumentu a pripojenych cest (pozadavek se vejde do zpravy).
 pub const MAX_ARGS: usize = 256;
