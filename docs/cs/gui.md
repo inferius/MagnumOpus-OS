@@ -1303,7 +1303,7 @@ Kompozitor -> aplikace:
 | 110 | `A11Y_ACTION` | uzel, akce, hodnota |
 | 111 | `ACTION_INVOKE` | volání, akce, argumenty |
 | 112 | `ERROR` | op, kód |
-| 113 | `THEME` | režim barev u8 (0 světlý, 1 tmavý, 2 vysoký kontrast); po `WELCOME` a při změně |
+| 113 | `THEME` | režim barev u8 (0 světlý, 1 tmavý, 2 vysoký kontrast); po `WELCOME` (skutečný stav, je součástí pozdravu: klient ho drží v `Window::mode` a použije před prvním kreslením, i po obnově) a při změně |
 | 118 | `POINTER_LOCK_STATE` | okno, zamčeno (0/1): odpověď na `POINTER_LOCK` i zrušení systémem |
 | 119 | `POPOVER_DISMISS` | okno: stisk mimo jeho popovery; verze 7 |
 

@@ -253,7 +253,11 @@ fn now() -> Option<i64> {
 
 impl Term {
     fn new(win: Window, conn: Option<Channel>) -> Self {
-        let look = Look::new();
+        let mut look = Look::new();
+        // Rezim z pozdravu kompozitoru pred prvnim kreslenim.
+        if let Some(m) = win.mode {
+            look.t = theme::Theme::builtin(m);
+        }
         let (c, r) = grid(&look, win.w, win.h, panel::shown(win.screen.0, win.w));
         let th = look.term_theme();
         let mut app = App::new(th, c, r);

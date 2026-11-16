@@ -92,6 +92,13 @@ impl Window {
             self.context = g.context;
             self.queue.push(super::Event::Context);
         }
+        // Rezim se mohl zmenit, kdyz kompozitor nebezel.
+        if let Some(m) = g.mode
+            && self.mode != Some(m)
+        {
+            self.mode = Some(m);
+            self.queue.push(super::Event::Theme(m));
+        }
         self.frame_pending = false;
         self.ack = None;
         self.reset_buffers();

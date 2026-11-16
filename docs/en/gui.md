@@ -1361,7 +1361,7 @@ Compositor -> application:
 | 110 | `A11Y_ACTION` | node, action, value |
 | 111 | `ACTION_INVOKE` | call, action, arguments |
 | 112 | `ERROR` | op, code |
-| 113 | `THEME` | color mode u8 (0 light, 1 dark, 2 high contrast); after `WELCOME` and on change |
+| 113 | `THEME` | color mode u8 (0 light, 1 dark, 2 high contrast); after `WELCOME` (the real state, part of the greeting: the client keeps it in `Window::mode` and uses it before the first drawing, also after a restore) and on change |
 | 118 | `POINTER_LOCK_STATE` | window, locked (0/1): reply to `POINTER_LOCK` and cancellation by the system |
 | 119 | `POPOVER_DISMISS` | window: a press outside its popovers; version 7 |
 
