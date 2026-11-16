@@ -388,14 +388,16 @@ fn terminal_window(startup: &Startup) -> TestResult {
             t.iter().any(|n| n.role == Role::Terminal && n.value.lines().any(|l| l.trim() == "ahoj z GUI"))
         })?;
         // `help`: nadpis skupiny i kazdy prikaz na vlastnim radku (text
-        // s konci radku se nesmi spojit do odstavce). Vidi se konec vypisu.
+        // s konci radku se nesmi spojit do odstavce). Vidi se konec vypisu:
+        // nadpis nektere skupiny (ktera je videt, zavisi na delce vypisu
+        // a vysce okna) a posledni prikazy kazdy na svem radku.
         ask(&s.inspect, InspectRequest::Act { window: w.id, node: term.id, action: actions::SET_VALUE, value: "help".into() })?;
         wait_tree(&s.inspect, w.id, "help po radcich", |t| {
             pump();
             t.iter().any(|n| {
                 n.role == Role::Terminal && {
                     let l: Vec<&str> = n.value.lines().map(str::trim).collect();
-                    l.contains(&"Systém")
+                    l.iter().any(|x| shlang::sig::GROUPS.iter().any(|(g, _)| x == g))
                         && l.iter().any(|x| x.starts_with("shutdown "))
                         && l.iter().any(|x| x.starts_with("reboot "))
                 }

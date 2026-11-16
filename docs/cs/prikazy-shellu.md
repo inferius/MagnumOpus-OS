@@ -11,7 +11,8 @@
 - **Úlohy:** [`tasks`](#tasks), [`jobs`](#jobs), [`fg`](#fg), [`wait`](#wait), [`kill`](#kill), [`cancel`](#cancel)
 - **Relace a bezpečnost:** [`undo`](#undo), [`preview`](#preview), [`history`](#history), [`run`](#run), [`error`](#error), [`exit`](#exit)
 - **Nápověda:** [`help`](#help), [`explain`](#explain)
-- **Systém:** [`audio`](#audio), [`theme`](#theme), [`permissions`](#permissions), [`acl`](#acl), [`sshd`](#sshd), [`ssh-key`](#ssh-key), [`remote-access`](#remote-access), [`system`](#system), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
+- **Účet a oprávnění:** [`permissions`](#permissions), [`acl`](#acl), [`ssh-key`](#ssh-key), [`remote-access`](#remote-access)
+- **Systém:** [`audio`](#audio), [`theme`](#theme), [`sshd`](#sshd), [`system`](#system), [`loglevel`](#loglevel), [`report`](#report), [`install`](#install), [`shutdown`](#shutdown), [`reboot`](#reboot)
 
 ## Soubory
 
@@ -1778,80 +1779,7 @@ explain SH_TYPE
 **Souvisí:** [`help`](#help), [`error`](#error)
 
 
-## Systém
-
-### `audio`
-
-zvuk: tone [Hz], play soubor.wav, volume [%], mute, unmute, status, devices, device N
-
-Ovládá zvuk: tón pro test, přehrání souboru WAV, hlasitost, ztlumení, stav a výběr zařízení.
-
-```shell
-audio action ... [--duration hodnota] [--level hodnota]
-```
-
-Plné jméno `audio-control` · vstup: nic · výstup: libovolná hodnota
-
-| Argument | Typ | Výchozí | Popis |
-|---|---|---|---|
-| `action` | text |  | tone, play, volume, mute, unmute, status, devices nebo device |
-| `...` | hodnota |  | hodnota akce (Hz, soubor, %, číslo zařízení) |
-| `-d, --duration` | doba | 1s | délka tónu |
-| `-l, --level` | číslo | 50 | úroveň tónu v % |
-
-Krátký tón 440 Hz.
-
-```shell
-audio tone 440 -d 500ms
-```
-
-**Potřebuje:** zvuková služba (audiod)
-
-**Chyby:** `NOT_FOUND`, `NOT_SUPPORTED`
-
-
-### `theme`
-
-vzhled: light, dark, auto (podle slunce); contrast on|off, reduce-motion on|off; bez argumentu stav
-
-Přepne vzhled celého prostředí: světlý (`light`), tmavý (`dark`) nebo automaticky podle východu a západu slunce v časovém pásmu (`auto`). `contrast on` zapne vysoký kontrast (Přístupnost, přebije světlý i tmavý), `reduce-motion on` omezí pohyb (přechod bez animace). Bez argumentu vypíše stav (`scheme`, `contrast`, `reduce_motion`). Volba se uloží k účtu a platí hned i po dalším přihlášení. S `--system` mění volbu přihlašovací obrazovky pro všechny; to je úkon správy a potvrdí ho člověk s rolí správy v systémovém dialogu.
-
-```shell
-theme [what] [value] [-s]
-```
-
-Plné jméno `system-theme` · vstup: nic · výstup: tabulka (scheme, contrast, reduce_motion)
-
-| Argument | Typ | Výchozí | Popis |
-|---|---|---|---|
-| `[what]` | text |  | light, dark, auto, contrast nebo reduce-motion |
-| `[value]` | text |  | on nebo off (u contrast a reduce-motion) |
-| `-s, --system` | přepínač |  | systémová volba (přihlašovací obrazovka) |
-
-Tmavý vzhled.
-
-```shell
-theme dark
-```
-
-Světlý přes den, tmavý v noci.
-
-```shell
-theme auto
-```
-
-Vysoký kontrast.
-
-```shell
-theme contrast on
-```
-
-**Potřebuje:** relace uživatele (s `--system` potvrzení správce)
-
-**Chyby:** `SH_ARGS`, `ACCESS_DENIED`, `CANCELED`, `NOT_SUPPORTED`
-
-**Souvisí:** [`audio`](#audio)
-
+## Účet a oprávnění
 
 ### `permissions`
 
@@ -1927,35 +1855,6 @@ acl remove bob ~/Projekty
 **Souvisí:** [`ls`](#ls)
 
 
-### `sshd`
-
-vzdálený přístup SSH pro celý počítač: bez argumentu stav, `sshd enable` / `sshd disable` (potvrdí správce)
-
-Server SSH pro připojení z jiného počítače (`ssh`, `scp` z Windows, Linuxu, macOS). Bez argumentu vypíše stav: zapnuto, běží, port, otisk klíče serveru a připojené relace. `sshd enable` a `sshd disable` jsou úkony správy: potvrdí je člověk s rolí správy v systémovém dialogu, který ukáže i otisk klíče serveru (při prvním připojení ho porovnejte s tím, co ukáže klient). Ve výchozím stavu je vypnuto. Server poslouchá na portu 22 na všech síťových rozhraních, firewall ale ve veřejné síti příchozí spojení zahodí (jen domácí síť nebo výjimka). Přihlásit se jde jen klíčem; účet si vzdálený přístup povolí sám (`remote-access on`) a přidá klíč (`ssh-key add`).
-
-```shell
-sshd [action]
-```
-
-Plné jméno `remote-sshd` · vstup: nic · výstup: tabulka (enabled, running, port, host_key, sessions, connected)
-
-| Argument | Typ | Výchozí | Popis |
-|---|---|---|---|
-| `[action]` | text | status | status, enable nebo disable |
-
-Zapne vzdálený přístup (potvrdí správce).
-
-```shell
-sshd enable
-```
-
-**Potřebuje:** přihlášená relace u počítače (úkon správy jen místně)
-
-**Chyby:** `SH_ARGS`, `ACCESS_DENIED`, `NOT_SUPPORTED`
-
-**Souvisí:** [`ssh-key`](#ssh-key), [`remote-access`](#remote-access)
-
-
 ### `ssh-key`
 
 klíče SSH vašeho účtu: výpis, `ssh-key add <soubor.pub|->` (chce heslo), `ssh-key remove <číslo>`
@@ -2013,6 +1912,110 @@ remote-access on
 **Chyby:** `SH_ARGS`, `SH_REJECTED`, `ACCESS_DENIED`, `NOT_SUPPORTED`
 
 **Souvisí:** [`ssh-key`](#ssh-key), [`sshd`](#sshd)
+
+
+## Systém
+
+### `audio`
+
+zvuk: tone [Hz], play soubor.wav, volume [%], mute, unmute, status, devices, device N
+
+Ovládá zvuk: tón pro test, přehrání souboru WAV, hlasitost, ztlumení, stav a výběr zařízení.
+
+```shell
+audio action ... [--duration hodnota] [--level hodnota]
+```
+
+Plné jméno `audio-control` · vstup: nic · výstup: libovolná hodnota
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `action` | text |  | tone, play, volume, mute, unmute, status, devices nebo device |
+| `...` | hodnota |  | hodnota akce (Hz, soubor, %, číslo zařízení) |
+| `-d, --duration` | doba | 1s | délka tónu |
+| `-l, --level` | číslo | 50 | úroveň tónu v % |
+
+Krátký tón 440 Hz.
+
+```shell
+audio tone 440 -d 500ms
+```
+
+**Potřebuje:** zvuková služba (audiod)
+
+**Chyby:** `NOT_FOUND`, `NOT_SUPPORTED`
+
+
+### `theme`
+
+vzhled: light, dark, auto (podle slunce); contrast on|off, reduce-motion on|off; bez argumentu stav
+
+Přepne vzhled celého prostředí: světlý (`light`), tmavý (`dark`) nebo automaticky podle východu a západu slunce v časovém pásmu (`auto`). `contrast on` zapne vysoký kontrast (Přístupnost, přebije světlý i tmavý), `reduce-motion on` omezí pohyb (přechod bez animace). Bez argumentu vypíše stav (`scheme`, `contrast`, `reduce_motion`). Volba se uloží k účtu a platí hned i po dalším přihlášení. S `--system` mění volbu přihlašovací obrazovky pro všechny; to je úkon správy a potvrdí ho člověk s rolí správy v systémovém dialogu.
+
+```shell
+theme [what] [value] [-s]
+```
+
+Plné jméno `system-theme` · vstup: nic · výstup: tabulka (scheme, contrast, reduce_motion)
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[what]` | text |  | light, dark, auto, contrast nebo reduce-motion |
+| `[value]` | text |  | on nebo off (u contrast a reduce-motion) |
+| `-s, --system` | přepínač |  | systémová volba (přihlašovací obrazovka) |
+
+Tmavý vzhled.
+
+```shell
+theme dark
+```
+
+Světlý přes den, tmavý v noci.
+
+```shell
+theme auto
+```
+
+Vysoký kontrast.
+
+```shell
+theme contrast on
+```
+
+**Potřebuje:** relace uživatele (s `--system` potvrzení správce)
+
+**Chyby:** `SH_ARGS`, `ACCESS_DENIED`, `CANCELED`, `NOT_SUPPORTED`
+
+**Souvisí:** [`audio`](#audio)
+
+
+### `sshd`
+
+vzdálený přístup SSH pro celý počítač: bez argumentu stav, `sshd enable` / `sshd disable` (potvrdí správce)
+
+Server SSH pro připojení z jiného počítače (`ssh`, `scp` z Windows, Linuxu, macOS). Bez argumentu vypíše stav: zapnuto, běží, port, otisk klíče serveru a připojené relace. `sshd enable` a `sshd disable` jsou úkony správy: potvrdí je člověk s rolí správy v systémovém dialogu, který ukáže i otisk klíče serveru (při prvním připojení ho porovnejte s tím, co ukáže klient). Ve výchozím stavu je vypnuto. Server poslouchá na portu 22 na všech síťových rozhraních, firewall ale ve veřejné síti příchozí spojení zahodí (jen domácí síť nebo výjimka). Přihlásit se jde jen klíčem; účet si vzdálený přístup povolí sám (`remote-access on`) a přidá klíč (`ssh-key add`).
+
+```shell
+sshd [action]
+```
+
+Plné jméno `remote-sshd` · vstup: nic · výstup: tabulka (enabled, running, port, host_key, sessions, connected)
+
+| Argument | Typ | Výchozí | Popis |
+|---|---|---|---|
+| `[action]` | text | status | status, enable nebo disable |
+
+Zapne vzdálený přístup (potvrdí správce).
+
+```shell
+sshd enable
+```
+
+**Potřebuje:** přihlášená relace u počítače (úkon správy jen místně)
+
+**Chyby:** `SH_ARGS`, `ACCESS_DENIED`, `NOT_SUPPORTED`
+
+**Souvisí:** [`ssh-key`](#ssh-key), [`remote-access`](#remote-access)
 
 
 ### `system`
