@@ -24,8 +24,39 @@ use crate::check;
 const USER: u64 = 1000;
 const HOME: &str = "/home/mediakopie";
 
-fn data(n: usize, seed: u8) -> Vec<u8> {
-    (0..n).map(|i| (i as u32).wrapping_mul(2654435761).rotate_left(seed as u32) as u8).collect()
+/// Bajt testovaciho souboru na pozici `i` (obsah se generuje a overuje po
+/// castech: init nedrzi megabajty v pameti, heap initu se nezmensuje).
+fn byte(i: usize, seed: u8) -> u8 {
+    (i as u32).wrapping_mul(2654435761).rotate_left(seed as u32) as u8
+}
+
+const PART: usize = 32 * 1024;
+
+/// Zapise soubor `n` bajtu po castech.
+fn write_file(f: &FsClient, path: &str, n: usize, seed: u8) -> TestResult {
+    f.create(path, kind::FILE).map_err(|e| fail("soubor", e))?;
+    let mut off = 0;
+    while off < n {
+        let part: Vec<u8> = (off..(off + PART).min(n)).map(|i| byte(i, seed)).collect();
+        f.write(path, off as u64, &part).map_err(|e| fail("zapis", e))?;
+        off += part.len();
+    }
+    Ok(())
+}
+
+/// Soubor ma presne `n` bajtu obsahu `seed` (cteni po castech).
+fn same(fs: &FsClient, path: &str, n: usize, seed: u8) -> Result<bool, String> {
+    let mut off = 0;
+    loop {
+        let part = fs.read(path, off as u64, PART).map_err(|e| fail(path, e))?;
+        if part.is_empty() {
+            return Ok(off == n);
+        }
+        if part.iter().enumerate().any(|(k, &b)| b != byte(off + k, seed)) {
+            return Ok(false);
+        }
+        off += part.len();
+    }
 }
 
 struct Copier {
@@ -74,7 +105,9 @@ impl Copier {
     }
 }
 
-/// Domov testovaciho uzivatele (dataset s pravy jen pro nej).
+/// Domov testovaciho uzivatele (dataset s pravy jen pro nej). Prechod
+/// pres `/` a `/home` uzivatel potrebuje; puvodni popis opravneni se vrati
+/// na konci testu ([`run`]), jinak by ho videly dalsi sady (ucty).
 fn prepare(f: &FsClient) -> TestResult {
     let _ = f.create("/home", kind::DIR);
     let _ = f.delete_dataset(HOME);
@@ -87,26 +120,28 @@ fn prepare(f: &FsClient) -> TestResult {
     f.set_acl(HOME, Some(&own)).map_err(|e| fail("acl", e))
 }
 
-fn read_all(fs: &FsClient, path: &str) -> Result<Vec<u8>, String> {
-    let mut out = Vec::new();
-    loop {
-        let part = fs.read(path, out.len() as u64, 32 * 1024).map_err(|e| fail(path, e))?;
-        if part.is_empty() {
-            return Ok(out);
+/// `medium` = jmeno media FAT v `/media`. Popis opravneni `/` a `/home`
+/// vrati i po chybe.
+pub fn run(s: &Startup, f: &FsClient, medium: &str) -> TestResult {
+    let saved: Vec<(&str, Option<Acl>)> = ["/", "/home"].iter().map(|p| (*p, f.permissions(p).ok().and_then(|x| x.acl))).collect();
+    let r = run_inner(s, f, medium);
+    let _ = f.delete_dataset(HOME);
+    for (p, acl) in &saved {
+        if let Err(e) = f.set_acl(p, acl.as_ref()) {
+            return Err(fail(&format!("vraceni opravneni {p}"), e));
         }
-        out.extend(part);
     }
+    r
 }
 
-/// `medium` = jmeno media FAT v `/media`.
-pub fn run(s: &Startup, f: &FsClient, medium: &str) -> TestResult {
+const BIG: usize = 3 << 20;
+const HUGE: usize = 8 << 20;
+
+fn run_inner(s: &Startup, f: &FsClient, medium: &str) -> TestResult {
     prepare(f)?;
-    let big = data(3 << 20, 3);
-    let huge = data(8 << 20, 7);
-    for (name, d) in [("velky.bin", &big), ("obrovsky.bin", &huge)] {
+    for (name, n, seed) in [("velky.bin", BIG, 3), ("obrovsky.bin", HUGE, 7)] {
         let p = format!("{HOME}/{name}");
-        f.create(&p, kind::FILE).map_err(|e| fail("soubor", e))?;
-        f.write(&p, 0, d).map_err(|e| fail("zapis", e))?;
+        write_file(f, &p, n, seed)?;
         f.set_owner(&p, USER).map_err(|e| fail("vlastnik", e))?;
     }
     let (_, user) = f.connect_as(USER, &[], &Profile::Standard.user_mounts()).map_err(|e| fail("relace uzivatele", e))?;
@@ -118,7 +153,7 @@ pub fn run(s: &Startup, f: &FsClient, medium: &str) -> TestResult {
     c.send(ClientMsg::Start { req: 1, op: Op::Copy, sources: vec![format!("{HOME}/velky.bin")], dest: dest.clone() })?;
     // (Prubeh po castech overuje krok 4: velky soubor, stav "bezi" s bajty.)
     c.wait("kopie na medium", |st| st.phase == Phase::Done)?;
-    check!(read_all(&user, &format!("{dest}/velky.bin"))? == big, "obsah na mediu");
+    check!(same(&user, &format!("{dest}/velky.bin"), BIG, 3)?, "obsah na mediu");
 
     // 2. Stejne jmeno: konflikt, "ponechat obe" = nove jmeno.
     c.send(ClientMsg::Start { req: 2, op: Op::Copy, sources: vec![format!("{HOME}/velky.bin")], dest: dest.clone() })?;
@@ -131,7 +166,7 @@ pub fn run(s: &Startup, f: &FsClient, medium: &str) -> TestResult {
     c.send(ClientMsg::Start { req: 3, op: Op::Move, sources: vec![format!("{dest}/velky (2).bin")], dest: String::from(HOME) })?;
     c.wait("presun z media", |st| st.op == Op::Move && st.phase == Phase::Done)?;
     check!(user.stat(&format!("{dest}/velky (2).bin")).is_err(), "na mediu po presunu neni");
-    check!(read_all(&user, &format!("{HOME}/velky (2).bin"))? == big, "doma po presunu");
+    check!(same(&user, &format!("{HOME}/velky (2).bin"), BIG, 3)?, "doma po presunu");
 
     // 4. Preruseni: pad uprostred kopie, novy proces ulohu dokonci.
     c.send(ClientMsg::Start { req: 4, op: Op::Copy, sources: vec![format!("{HOME}/obrovsky.bin")], dest: dest.clone() })?;
@@ -140,10 +175,13 @@ pub fn run(s: &Startup, f: &FsClient, medium: &str) -> TestResult {
     let c = start(s, f)?;
     c.send(ClientMsg::Subscribe)?;
     c.wait("dokonceni po preruseni", |st| st.op == Op::Copy && st.phase == Phase::Done && st.dest == dest)?;
-    check!(read_all(&user, &format!("{dest}/obrovsky.bin"))? == huge, "obsah po preruseni a obnove");
+    check!(same(&user, &format!("{dest}/obrovsky.bin"), HUGE, 7)?, "obsah po preruseni a obnove");
     let tmp: Vec<String> = user.list(&dest).map_err(|e| fail("vypis", e))?.into_iter().map(|e| e.name).filter(|n| n.starts_with('.')).collect();
     check!(tmp.is_empty(), format!("docasne soubory po obnove: {tmp:?}").as_str());
     c.kill();
-    let _ = f.delete_dataset(HOME);
+    // Na mediu nechat misto (dalsi kroky testu, kontrola na hostiteli).
+    for n in ["velky.bin", "obrovsky.bin"] {
+        let _ = user.remove(&format!("{dest}/{n}"));
+    }
     Ok(())
 }
