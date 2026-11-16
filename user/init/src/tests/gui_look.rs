@@ -82,37 +82,72 @@ pub fn fade(_: &Startup) -> TestResult {
     })
 }
 
-/// Aplikace spustena az v tmavem rezimu (jako po startu systemu s ulozenou
+/// Znacka snimku obrazovky po startu aplikaci v tmavem rezimu (xtask
+/// `qmp.rs`, `gui::DARK_START`).
+pub const QEMU_SHOT_DARK_START: &str = "init: test gui: snimek tmavy-start";
+
+/// Je pixel tmavy (jas pod ctvrtinou)?
+fn dark_px(p: u32) -> bool {
+    let (r, g, b) = ((p >> 16) & 0xff, (p >> 8) & 0xff, p & 0xff);
+    (r * 299 + g * 587 + b * 114) / 1000 < 64
+}
+
+/// Nove okno aplikace `app` (jine nez `before`).
+fn new_window(s: &super::gui::State, app: &str, before: &[u32]) -> Result<guiproto::control::WindowInfo, alloc::string::String> {
+    let end = time::deadline_after(Duration::from_secs(20));
+    loop {
+        if let Some(w) = windows(&s.inspect)?.into_iter().find(|w| w.app == app && !before.contains(&w.id)) {
+            return Ok(w);
+        }
+        check!(time::now() < end, alloc::format!("nove okno {app} se neobjevilo"));
+        time::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Aplikace spustene az v tmavem rezimu (jako po startu systemu s ulozenou
 /// tmavou volbou): rezim prijde v pozdravu kompozitoru (`THEME` hned po
-/// `WELCOME`) a obsah okna je tmavy od prvniho snimku, bez dalsi zmeny.
+/// `WELCOME`) a obsah oken je tmavy od prvniho snimku, bez dalsi zmeny.
+/// Ukazka (`ui`) i terminal (vlastni barvy `term_*`); snimek obrazovky
+/// `target/shots/tmavy-start.png`.
 pub fn start_dark(startup: &Startup) -> TestResult {
     with(|s| {
         cmd(s, "appearance system tmavy ne ano")?;
         settle(&s.inspect)?;
-        let app = s.gui.launch(startup, "gui-demo").map_err(|e| super::fail("spusteni gui-demo", e))?;
+        let before: Vec<u32> = windows(&s.inspect)?.into_iter().map(|w| w.id).collect();
+        let first = s.gui.apps.len();
         let r = (|| -> TestResult {
-            let end = time::deadline_after(Duration::from_secs(20));
-            let w = loop {
-                if let Some(w) = windows(&s.inspect)?.into_iter().find(|w| w.app == "org.magnumopus.demo" && w.id != s.demo) {
-                    break w;
-                }
-                check!(time::now() < end, "druhe okno ukazky se neobjevilo");
-                time::sleep(Duration::from_millis(50));
-            };
-            wait_tree(&s.inspect, w.id, "strom noveho okna", |t| t.iter().any(|n| n.role == Role::Button && n.name == "Přičíst"))?;
+            s.gui.launch(startup, "gui-demo").map_err(|e| super::fail("spusteni gui-demo", e))?;
+            let demo = new_window(s, "org.magnumopus.demo", &before)?;
+            wait_tree(&s.inspect, demo.id, "strom noveho okna", |t| t.iter().any(|n| n.role == Role::Button && n.name == "Přičíst"))?;
             settle(&s.inspect)?;
+            // Ukazka pred spustenim terminalu (ten se otevre navrch).
             let dark = Theme::builtin(Mode::Dark);
-            let (ax, ay) = (w.rect.x + w.rect.w as i32 / 2, w.rect.y + w.rect.h as i32 - 4);
-            let p = pixel(&s.inspect, ax, ay)?;
+            let p = pixel(&s.inspect, demo.rect.x + demo.rect.w as i32 / 2, demo.rect.y + demo.rect.h as i32 - 4)?;
             check!(p == dark.color.surface, alloc::format!("obsah noveho okna v tmavem rezimu: {p:08x}, cekano {:08x}", dark.color.surface));
+            let conn = crate::terminal::TERMINALS.lock().client("gui-term (tmavy start)").map_err(|e| super::fail("kanal terminalu", e))?;
+            s.gui
+                .launch_extra(startup, "gui-term", alloc::vec![libos::spawn::StartHandle::user(conn.into_handle())])
+                .map_err(|e| super::fail("spusteni gui-term", e))?;
+            let pump = || crate::terminal::TERMINALS.lock().poll(startup);
+            let term = new_window(s, "org.magnumopus.terminal", &before)?;
+            wait_tree(&s.inspect, term.id, "uvitani terminalu", |t| {
+                pump();
+                t.iter().any(|n| n.role == Role::Terminal && n.value.contains("Napište help"))
+            })?;
+            settle(&s.inspect)?;
+            // Terminal: pozadi radku dole (pod uvitanim nic neni).
+            let p = pixel(&s.inspect, term.rect.x + term.rect.w as i32 / 2, term.rect.y + term.rect.h as i32 - 8)?;
+            check!(dark_px(p), alloc::format!("terminal v tmavem rezimu: pozadi {p:08x}"));
+            libos::println!("{QEMU_SHOT_DARK_START}");
+            // xtask porizuje snimek; pockat, nez skonci.
+            time::sleep(Duration::from_millis(1500));
             Ok(())
         })();
-        if let Some(a) = s.gui.apps.get(app) {
-            let _ = a.process.kill();
-            let _ = a.process.wait_exit(Some(time::deadline_after(Duration::from_secs(5))));
-        }
-        if app + 1 == s.gui.apps.len() {
-            drop(s.gui.apps.pop());
+        while s.gui.apps.len() > first {
+            if let Some(a) = s.gui.apps.pop() {
+                let _ = a.process.kill();
+                let _ = a.process.wait_exit(Some(time::deadline_after(Duration::from_secs(5))));
+            }
         }
         // Zpet jako na zacatku sady (dalsi testy ocekavaji svetly).
         cmd(s, "appearance system svetly ne ano")?;
