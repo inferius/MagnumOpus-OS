@@ -1,0 +1,10 @@
+[package]
+name = "ssh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SSH pro MagnumOpus: server a klient nad sunset (sans-IO), adapter na netproto"
+
+[dependencies]
+# Bez std; mlkem = hybridni vymena klicu mlkem768x25519 (vychozi v OpenSSH 10).
+sunset = { version = "0.6", default-features = false, features = ["mlkem"] }
