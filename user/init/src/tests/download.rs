@@ -42,6 +42,10 @@ fn next_notice(v: &libos::Channel) -> Result<notifyproto::Notification, String> 
 fn save(s: &Startup) -> TestResult {
     let Some(p) = ports(s)? else { return Ok(()) };
     let f = sys()?;
+    // Stazene soubory po testu pryc (i po chybe): v korenovem datasetu by
+    // je videly dalsi sady (nahled `preview` v terminalu sady gui).
+    let mut g = super::restore::Restore::new(f);
+    g.remove_later(HOME);
     // Domov testovaciho uzivatele se slozkou Stazene.
     for d in [HOME, DIR] {
         match f.create(d, kind::DIR) {

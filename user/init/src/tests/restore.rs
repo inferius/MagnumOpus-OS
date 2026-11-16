@@ -1,8 +1,10 @@
 //! "Obnov po sobe": testy, ktere meni globalni stav FS (popis opravneni
-//! `/` a `/home`, zakaz spousteni), ho menit jen pres [`Restore`]. Pri
-//! dropu (konec testu, i po chybe a predcasnem `?`) vrati puvodni hodnoty
-//! v opacnem poradi. Jinak by zmena prosakla do dalsich sad (napr.
-//! `ucty`: vypis `/home` po testu, ktery na nem nechal jen TRAVERSE).
+//! `/` a `/home`, zakaz spousteni) nebo v nem nechavaji soubory, to delaji
+//! pres [`Restore`]. Pri dropu (konec testu, i po chybe a predcasnem `?`)
+//! vrati puvodni hodnoty a smaze zalozene stromy v opacnem poradi. Jinak by
+//! stav prosakl do dalsich sad (napr. `ucty`: vypis `/home` po testu, ktery
+//! na nem nechal jen TRAVERSE; `gui`: nahled `preview` v terminalu videl
+//! zmenu zbyleho souboru jineho testu, kterou udelala udrzba FS na pozadi).
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -16,6 +18,8 @@ use super::{TestResult, fail};
 enum Saved {
     Acl(String, Option<Acl>),
     Noexec(String, bool),
+    /// Strom zalozeny testem: smazat.
+    Remove(String),
 }
 
 pub struct Restore<'a> {
@@ -38,6 +42,11 @@ impl<'a> Restore<'a> {
         self.fs.set_acl(path, acl).map_err(|e| fail(&alloc::format!("acl {path}"), e))
     }
 
+    /// Strom `path` zalozeny testem se pri dropu smaze (soubory i slozky).
+    pub fn remove_later(&mut self, path: &str) {
+        self.saved.push(Saved::Remove(String::from(path)));
+    }
+
     /// Nastavi zakaz spousteni `path`; puvodni se vrati pri dropu.
     pub fn set_noexec(&mut self, path: &str, on: bool) -> TestResult {
         if !self.saved.iter().any(|s| matches!(s, Saved::Noexec(p, _) if p == path)) {
@@ -54,10 +63,23 @@ impl Drop for Restore<'_> {
             let r = match &s {
                 Saved::Acl(p, acl) => self.fs.set_acl(p, acl.as_ref()).map_err(|e| (p.clone(), e)),
                 Saved::Noexec(p, on) => self.fs.set_noexec(p, *on).map_err(|e| (p.clone(), e)),
+                Saved::Remove(p) => match remove_tree(self.fs, p) {
+                    Err(libos::Error::NotFound) => Ok(()),
+                    r => r.map_err(|e| (p.clone(), e)),
+                },
             };
             if let Err((p, e)) = r {
                 println!("init: test: puvodni stav {p} nejde vratit: {e}");
             }
         }
     }
+}
+
+fn remove_tree(fs: &FsClient, path: &str) -> libos::Result<()> {
+    if fs.stat(path)?.kind == fsproto::kind::DIR {
+        for e in fs.list(path)? {
+            remove_tree(fs, &alloc::format!("{path}/{}", e.name))?;
+        }
+    }
+    fs.remove(path)
 }
