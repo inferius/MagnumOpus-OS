@@ -29,6 +29,7 @@ mod serve_perm;
 mod filevmo;
 mod links;
 mod serve_map;
+mod serve_media;
 mod serve_sock;
 mod serve_v2;
 mod stream;
@@ -171,6 +172,7 @@ fn main(startup: Startup) -> i64 {
         lock_pids: Default::default(),
         listeners: Default::default(),
         vmos: Default::default(),
+        media: Default::default(),
         in_handles: Vec::new(),
     };
     if let Some(g) = restart {
@@ -271,6 +273,9 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
         if svc.vmos.any_shared() {
             deadline = deadline.min(next_writeback);
         }
+        if let Some(t) = svc.media.next_deadline() {
+            deadline = deadline.min(t);
+        }
         for s in &sessions {
             if let Some(w) = &s.watch {
                 deadline = deadline.min(w.deadline);
@@ -284,7 +289,13 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
         // paketu), ji dostane znovu; uz splnene signaly doruci paket hned.
         let mask = Signals::READABLE | Signals::PEER_CLOSED;
         for s in sessions.iter_mut() {
-            arm(&waiter, s.channel.handle(), &mut s.key, &mut s.armed, mask);
+            // Relace cekajici na medium se neobsluhuje (poradi odpovedi).
+            if !s.media_wait {
+                arm(&waiter, s.channel.handle(), &mut s.key, &mut s.armed, mask);
+            }
+        }
+        for m in svc.media.list.iter_mut() {
+            arm(&waiter, m.ch.handle(), &mut m.key, &mut m.armed, Signals::READABLE | Signals::PEER_CLOSED);
         }
         for s in svc.streams.iter_mut() {
             let m = s.signals();
@@ -316,6 +327,8 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
                         s.armed = false;
                     } else if let Some(s) = svc.streams.iter_mut().find(|s| s.key == key) {
                         s.armed = false;
+                    } else if let Some(m) = svc.media.list.iter_mut().find(|m| m.key == key) {
+                        m.armed = false;
                     }
                 }
                 // Obslouzit relace s paketem (a nove, ty maji `armed` false).
@@ -364,6 +377,7 @@ fn serve(svc: &mut Service, client: Channel, control: Channel) {
                 as_background(|| scrub(svc));
             }
             poll_watches(svc, &mut sessions);
+            media_pump(svc, &mut sessions);
             control_msgs(svc, &control);
             if svc.tasks.chan.is_some() && svc.tasks.due() {
                 report_tasks(svc, idle);
@@ -416,6 +430,9 @@ fn pump_streams(svc: &mut Service) -> bool {
 fn serve_session(svc: &mut Service, sessions: &mut Vec<Session>, i: usize) -> Option<bool> {
     let mut did = false;
     loop {
+        if sessions[i].media_wait {
+            return Some(did);
+        }
         let msg = match sessions[i].channel.try_read() {
             Ok(m) => m,
             Err(Error::ShouldWait) => return Some(did),
@@ -436,6 +453,12 @@ fn serve_session(svc: &mut Service, sessions: &mut Vec<Session>, i: usize) -> Op
             Ok(r) => (fsproto::reply(Ok(r.body)), r.handles, r.new_session, r.session_ops, r.watch),
             Err(e) => (fsproto::reply(Err(e)), Vec::new(), None, Vec::new(), None),
         };
+        // Pozadavek odesel procesu media: odpoved pozdeji (`media_pump`),
+        // dalsi pozadavky relace az po ni.
+        if core::mem::take(&mut svc.media.deferred) {
+            sessions[i].media_wait = true;
+            return Some(did);
+        }
         if let Some(w) = watch {
             // Odpoved az po dalsim potvrzeni zmen nebo po limitu.
             sessions[i].watch = Some(w);
@@ -478,6 +501,32 @@ fn serve_session(svc: &mut Service, sessions: &mut Vec<Session>, i: usize) -> Op
                     return None;
                 }
             }
+        }
+    }
+}
+
+/// Odpovedi procesu medii (a uplynule terminy) do cekajicich relaci; ty
+/// se pak obslouzi znovu (dalsi pozadavky ve fronte).
+fn media_pump(svc: &mut Service, sessions: &mut [Session]) {
+    let mut out = svc.media_timeouts();
+    let mut i = 0;
+    while i < svc.media.list.len() {
+        if svc.media.list[i].armed {
+            i += 1;
+            continue;
+        }
+        let before = svc.media.list.len();
+        out.extend(svc.media_replies(i));
+        // Medium zmizelo: stejny index je dalsi medium.
+        if svc.media.list.len() == before {
+            i += 1;
+        }
+    }
+    for d in out {
+        if let Some(s) = sessions.iter_mut().find(|s| s.key == d.session) {
+            let _ = s.channel.write(&d.reply, Vec::new());
+            s.media_wait = false;
+            s.armed = false;
         }
     }
 }

@@ -20,7 +20,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use diskguard::Decision;
+use diskguard::{Decision, Kind};
 use libos::abi::vm::{MAP_READ, MAP_WRITE};
 use libos::hw::Resource;
 use libos::{Channel, Error, Mapping, Result, Signals, Vmo, println};
@@ -44,6 +44,11 @@ pub trait Disks {
     fn sector_size(&self, d: usize) -> usize;
     /// Vlastnosti zarizeni (bity [`feature`]).
     fn features(&self, d: usize) -> u64;
+    /// Vymenne medium (USB mass storage s bitem RMB): jen na nem smi byt
+    /// oddil media zapisovatelny ([`diskguard::media`]). Vychozi ne.
+    fn removable(&self, _d: usize) -> bool {
+        false
+    }
     /// Precte `out.len() / sector_size` sektoru.
     fn read(&mut self, d: usize, lba: u64, out: &mut [u8]) -> Result<()>;
     /// Zapise `data.len() / sector_size` sektoru.
@@ -55,6 +60,13 @@ pub trait Disks {
     /// Test ochrany DMA (`op::TEST_DMA_PROTECTION`).
     fn test_dma_protection(&mut self, d: usize) -> Result<u64>;
     /// Model disku pro instalator (z identifikace zarizeni).
+    /// Handle, jehoz zavreni (`PEER_CLOSED`) znamena odpojene zarizeni
+    /// (kanal USB): [`serve`] pak skonci a zavre kanaly klientu, proces
+    /// media vi, ze medium zmizelo.
+    fn gone(&self) -> Option<&libos::Handle> {
+        None
+    }
+
     fn model(&self, _d: usize) -> alloc::string::String {
         alloc::string::String::new()
     }
@@ -182,6 +194,20 @@ fn log_view(disks: &mut impl Disks, d: usize) -> Option<Decision> {
     })
 }
 
+/// Oddily media na disku `d` (`diskguard::media_partitions`); zapis jen
+/// na vymennem zarizeni bez ochrany proti zapisu.
+fn media_views(disks: &mut impl Disks, d: usize) -> Vec<Decision> {
+    let sectors = disks.sectors(d);
+    let ss = disks.sector_size(d);
+    if ss > IO_MAX || !diskguard::valid_sector_size(ss) {
+        return Vec::new();
+    }
+    let removable = disks.removable(d) && disks.features(d) & feature::READ_ONLY == 0;
+    diskguard::media_partitions(sectors, ss, removable, |lba, buf| {
+        lba.checked_add((buf.len() / ss) as u64).is_some_and(|end| end <= sectors) && read_dev(disks, d, lba, buf).is_ok()
+    })
+}
+
 /// Klient jednoho disku.
 pub struct Client {
     pub disk: usize,
@@ -218,6 +244,28 @@ pub fn report_disks(name: &str, disks: &mut impl Disks, bootstrap: &Channel) -> 
                 raw_table: None,
             });
         }
+        // Oddily vymenneho media (FAT, exFAT, NTFS): kanal na kazdy oddil,
+        // init pro nej spusti proces media (docs/cs/media.md). Zprava:
+        // `block-media <fs> <index> <model>`.
+        for v in media_views(disks, d) {
+            let Kind::Media { index, fs } = v.kind else { continue };
+            let part = if index == diskguard::media::WHOLE { alloc::string::String::from("cely disk") } else { alloc::format!("oddil {index}") };
+            println!(
+                "{name}: disk {d}: medium {} {part}, {} MiB, {}",
+                fs.name(),
+                v.sectors * v.sector_size as u64 >> 20,
+                if v.writable { "zapis povolen" } else { "JEN PRO CTENI" }
+            );
+            let (mine, theirs) = Channel::create()?;
+            let text = alloc::format!("block-media {} {} {}", fs.name(), index, disks.model(d));
+            bootstrap.write(text.as_bytes(), vec![theirs.into_handle()])?;
+            clients.push(Client {
+                disk: d,
+                view: v,
+                channel: mine,
+                raw_table: None,
+            });
+        }
         // Raw kanal instalatoru (cely disk, zapis jen do GPT a nasich
         // oddilu). Init ho drzi a preda jen instalatoru; zprava nese model.
         let ss = disks.sector_size(d);
@@ -249,20 +297,33 @@ pub fn report_disks(name: &str, disks: &mut impl Disks, bootstrap: &Channel) -> 
 /// Cteni, ktera klient poslal bez cekani (`BlockClient::read`) a ktera na
 /// sebe navazuji, server u ovladace s vetsim [`Disks::max_read`] precte
 /// jednim volanim (`read_batch`).
-pub fn serve(name: &str, disks: &mut impl Disks, mut clients: Vec<Client>) {
+///
+/// Vraci `true`, kdyz skoncil kvuli odpojenemu zarizeni ([`Disks::gone`]):
+/// pak uz nema smysl zapisovat mezipamet.
+pub fn serve(name: &str, disks: &mut impl Disks, mut clients: Vec<Client>) -> bool {
     while !clients.is_empty() {
-        let items: Vec<_> = clients
+        let mut items: Vec<_> = clients
             .iter()
             .map(|c| (c.channel.handle(), Signals::READABLE | Signals::PEER_CLOSED))
             .collect();
-        let observed = match libos::wait_many(&items, None) {
+        if let Some(g) = disks.gone() {
+            items.push((g, Signals::PEER_CLOSED));
+        }
+        let mut observed = match libos::wait_many(&items, None) {
             Ok((_, o)) => o,
             Err(e) => {
                 println!("{name}: cekani na klienty selhalo: {e}");
-                return;
+                return false;
             }
         };
         drop(items);
+        if observed.len() > clients.len() {
+            if observed[clients.len()].intersects(Signals::PEER_CLOSED) {
+                println!("{name}: zarizeni odpojeno, koncim");
+                return true;
+            }
+            observed.truncate(clients.len());
+        }
         let mut closed = Vec::new();
         for (i, s) in observed.iter().enumerate() {
             let c = &mut clients[i];
@@ -297,6 +358,7 @@ pub fn serve(name: &str, disks: &mut impl Disks, mut clients: Vec<Client>) {
             clients.remove(i);
         }
     }
+    false
 }
 
 /// Jeden pozadavek klienta a odpoved; `false` = kanal je zavreny.

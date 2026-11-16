@@ -27,6 +27,7 @@ mod docs_books;
 mod docs_check;
 mod highlight;
 mod image;
+mod mediadisks;
 mod qemu;
 mod nethelper;
 mod dnshelper;
@@ -106,6 +107,11 @@ prepinace:
   --headless       (run) bez okna, jen seriova linka v terminalu
   --wine           (run, test; x86_64) datovy disk s Wine v /apps/org.winehq.wine
                    (strom z `cargo xtask wine`, sablona disku se dela jednou)
+  --share <slozka> (run) slozka hostitele jako flash disk USB jen pro cteni
+                   (QEMU vvfat, FAT16 do 504 MB) v /media
+  --share-rw <slozka>
+                   (run) totez se zapisem; zapis vvfat je v QEMU experimentalni
+                   a muze poskodit soubory ve slozce (jen zalohovana slozka)
   --accel <name>   (run) akcelerace QEMU: tcg, kvm, whpx, hvf
   --res <SxV>      (run, x86_64) vychozi rozliseni, napr. 1920x1080
   --cpu <model>    (run, test) model CPU QEMU misto vychoziho (x86_64 max,
@@ -212,6 +218,9 @@ pub struct Options {
     /// Datovy disk s Wine v `/apps/org.winehq.wine` (`--wine`, jen x86_64;
     /// predpoklad `cargo xtask wine`).
     wine: bool,
+    /// `--share` / `--share-rw`: slozka hostitele jako flash disk USB
+    /// (vvfat); `true` = se zapisem.
+    share: Option<(PathBuf, bool)>,
     /// Zvlastni beh testu zaznamu padu (`crashtest`): QEMU bez
     /// `-no-reboot` (jadro po panice restartuje).
     crash_test: bool,
@@ -320,6 +329,7 @@ fn run_cli() -> Result<()> {
         power_test: None,
         data_image: None,
         wine: false,
+        share: None,
         crash_test: false,
     };
     let mut gpu_set = false;
@@ -403,6 +413,14 @@ fn run_cli() -> Result<()> {
             }
             Some("--headless") => opts.headless = true,
             Some("--wine") => opts.wine = true,
+            Some(flag @ ("--share" | "--share-rw")) => {
+                let rw = flag == "--share-rw";
+                let dir = PathBuf::from(args.next().ok_or_else(|| format!("{flag} ocekava slozku"))?);
+                if !dir.is_dir() {
+                    return Err(format!("{flag}: {} neni slozka", dir.display()).into());
+                }
+                opts.share = Some((dir, rw));
+            }
             Some("--accel") => {
                 let value = args.next().ok_or("--accel ocekava hodnotu")?;
                 opts.accel = Some(
@@ -793,6 +811,10 @@ fn host_tests(found: &[drivers::Found], only_driver: Option<&str>) -> Result<()>
             "dns",
             "--package",
             "diskguard",
+            "--package",
+            "volproto",
+            "--package",
+            "volfs",
             "--package",
             "crashrec",
             "--package",

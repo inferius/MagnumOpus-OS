@@ -16,6 +16,11 @@ abi = { workspace = true }
 cbuild = { path = "../libs/cbuild" }
 netproto = { path = "../libs/netproto", features = ["std", "nts"] }
 fatfs = "0.3"
+# Media exFAT pro testy: priprava vlastni implementaci (volfs), overeni
+# nezavislym ctenarem a formatovacem `exfat-fs`.
+exfat-fs = "0.1.3"
+volfs = { path = "../user/volfs" }
+volproto = { path = "../libs/volproto" }
 diskguard = { path = "../libs/diskguard" }
 installplan = { path = "../libs/installplan" }
 accounts = { path = "../libs/accounts" }

@@ -1323,6 +1323,11 @@ Co zatím funguje jednodušeji, než návrh popisuje (a proč to nevadí teď):
   soft-float a stav FPU vláken ukládá (FPU-2: XSAVE s AVX a AVX-512, bez
   XSAVE FXSAVE; [jadro.md](jadro.md)). Starší CPU jádro zastaví při startu
   ([pozadavky-hw.md](pozadavky-hw.md)). AMX zatím zapnuté není.
+- **Vyměnitelná média bez vlastníků a práv** **[ověřeno v QEMU]**: soubory
+  na FAT, exFAT i NTFS patří přihlášenému uživateli relace a ACL NTFS se
+  ignorují; dočasně jako „Pracovní složky“. Mapování vlastníků a práv,
+  rozšířené atributy a zápis podle volby uživatele v přísném profilu jsou
+  **[navrženo]** ([media.md](media.md#vlastník-a-oprávnění)).
 - **IOMMU (Intel VT-d, AMD-Vi) jen pro překlad DMA:** chybí překlad
   přerušení a oblasti RMRR/IVMD; na stroji bez IOMMU DMA omezené není
   (jádro to zaloguje).

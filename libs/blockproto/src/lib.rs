@@ -149,6 +149,11 @@ pub struct BlockClient {
 }
 
 impl BlockClient {
+    /// Handle kanalu (cekani na zavreni: medium vytazeno).
+    pub fn handle(&self) -> &libos::Handle {
+        self.channel.handle()
+    }
+
     pub fn new(channel: Channel) -> Result<Self> {
         let mut c = Self {
             channel,

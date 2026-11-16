@@ -113,7 +113,7 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
             }
             Err(TestError::PortTaken(e)) => break Err(format!("QEMU nenastartovalo: {e}").into()),
             Err(TestError::Other(e)) => break Err(e),
-            Ok(()) => break crate::audio::check(&run.wav, &serial_log, opts),
+            Ok(()) => break crate::audio::check(&run.wav, &serial_log, opts).and_then(|()| media_check(&run, &serial_log)),
         }
     };
     // Pri panice nebo fatalni vyjimce prelozit adresy na jmena funkci.
@@ -122,6 +122,19 @@ pub fn run(image: &Path, artifacts: &Artifacts, opts: &Options) -> Result<()> {
     }
     println!("xtask: vystup seriove linky je v {}", serial_log.display());
     result
+}
+
+/// Test medii zapsal na flashku FAT (znacka v logu): overit obsah obrazu
+/// na hostiteli.
+fn media_check(run: &RunFiles, serial_log: &Path) -> Result<()> {
+    let log = std::fs::read_to_string(serial_log).unwrap_or_default();
+    if log.contains(crate::mediadisks::GUEST_MARK) {
+        crate::mediadisks::verify_fat(&run.media_fat)?;
+    }
+    if log.contains(crate::mediadisks::EXFAT_MARK) {
+        crate::mediadisks::verify_exfat(&run.media_exfat)?;
+    }
+    Ok(())
 }
 
 /// Prikaz QEMU s porty `qmp_port` a `hostfwd` (pri opakovanem startu nove).
@@ -315,8 +328,43 @@ fn disk_controllers(cmd: &mut Command, opts: &Options, run: &RunFiles, blk: &dyn
             .arg("-drive")
             .arg(drive("foreign", &testdisks::foreign(&run.foreign)?))
             .args(["-device", "ide-hd,drive=foreign,bus=ahci0.1"]);
+        // Vymenna media (docs/cs/media.md): flash disky FAT32 a NTFS pri
+        // startu, superfloppy FAT jen jako disk bez zarizeni - test ho
+        // pripoji za behu (QMP `device_add`, `qmp.rs`).
+        cmd.arg("-drive")
+            .arg(drive("mediafat", &crate::mediadisks::fat(&run.media_fat)?))
+            .args(["-device", "usb-storage,bus=xhci.0,drive=mediafat,removable=on,id=usbmediafat"])
+            .arg("-drive")
+            .arg(drive("mediaexfat", &crate::mediadisks::exfat(&run.media_exfat)?))
+            .args(["-device", "usb-storage,bus=xhci.0,drive=mediaexfat,removable=on,id=usbmediaexfat"])
+            .arg("-drive")
+            .arg(drive("mediantfs", &crate::mediadisks::ntfs(&run.media_ntfs)?))
+            .args(["-device", "usb-storage,bus=xhci.0,drive=mediantfs,removable=on,id=usbmediantfs"])
+            .arg("-drive")
+            .arg(drive("mediahot", &crate::mediadisks::hot(&run.media_hot)?));
+    }
+    if let Some((dir, rw)) = &opts.share {
+        share_drive(cmd, dir, *rw);
     }
     Ok(())
+}
+
+/// Slozka hostitele jako vymenny flash disk USB (`--share`, docs/cs/media.md):
+/// QEMU vvfat sestavi FAT16 s MBR ze slozky. Bez zapisu `readonly=on`
+/// (ovladac hlasi ochranu proti zapisu, medium je jen pro cteni); se
+/// zapisem (`--share-rw`) jen s varovanim - zapis vvfat je v QEMU
+/// experimentalni a muze poskodit soubory ve slozce.
+fn share_drive(cmd: &mut Command, dir: &Path, rw: bool) {
+    // Carka v hodnote volby QEMU se zdvojuje.
+    let d = dir.display().to_string().replace(',', ",,");
+    if rw {
+        eprintln!("xtask: VAROVANI: --share-rw: zapis do {} pres QEMU vvfat je experimentalni", dir.display());
+        eprintln!("xtask: VAROVANI: muze poskodit nebo smazat soubory ve slozce; pouzivejte jen zalohovanou slozku");
+        cmd.arg("-drive").arg(format!("if=none,id=share,format=raw,file.driver=vvfat,file.dir={d},file.rw=on"));
+    } else {
+        cmd.arg("-drive").arg(format!("if=none,id=share,format=raw,readonly=on,file.driver=vvfat,file.dir={d}"));
+    }
+    cmd.args(["-device", "usb-storage,bus=xhci.0,drive=share,removable=on,id=usbshare"]);
 }
 
 /// Ukazatel: pri behu s oknem tablet (absolutni poloha, sedi i po
@@ -618,6 +666,11 @@ struct RunFiles {
     nvme4k: PathBuf,
     ahci: PathBuf,
     foreign: PathBuf,
+    /// Vymenna media (testy, `mediadisks.rs`).
+    media_fat: PathBuf,
+    media_ntfs: PathBuf,
+    media_exfat: PathBuf,
+    media_hot: PathBuf,
     fw_vars: PathBuf,
     serial_log: PathBuf,
 }
@@ -635,6 +688,10 @@ impl RunFiles {
             nvme4k: t.join(format!("nvme4k-test-{pid}.img")),
             ahci: t.join(format!("ahci-test-{pid}.img")),
             foreign: t.join(format!("foreign-{pid}.img")),
+            media_fat: t.join(format!("media-fat-{pid}.img")),
+            media_ntfs: t.join(format!("media-ntfs-{pid}.img")),
+            media_exfat: t.join(format!("media-exfat-{pid}.img")),
+            media_hot: t.join(format!("media-hot-{pid}.img")),
             fw_vars: t.join(format!("fw-{arch}-vars-{pid}.fd")),
             serial_log: t.join(if test {
                 format!("serial-test-{arch}-{pid}.log")
@@ -655,7 +712,7 @@ impl Drop for RunFiles {
             let _ = std::fs::remove_file(&self.data);
             let _ = std::fs::remove_file(&self.data_gpt);
         }
-        for f in [&self.scratch, &self.nvme, &self.nvme4k, &self.ahci, &self.foreign, &self.wav, &self.fw_vars] {
+        for f in [&self.scratch, &self.nvme, &self.nvme4k, &self.ahci, &self.foreign, &self.media_fat, &self.media_ntfs, &self.media_exfat, &self.media_hot, &self.wav, &self.fw_vars] {
             let _ = std::fs::remove_file(f);
         }
     }

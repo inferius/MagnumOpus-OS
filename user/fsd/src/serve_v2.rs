@@ -50,6 +50,9 @@ pub struct Session {
     /// delkou pri mapovani; soucet je v kvote `filevmo::SESSION_QUOTA`.
     pub mapped: BTreeMap<(u64, u64, u64), u64>,
     pub mapped_bytes: u64,
+    /// Ceka na odpoved procesu media (`serve_media.rs`): dalsi pozadavky
+    /// relace az po ni (poradi odpovedi).
+    pub media_wait: bool,
 }
 
 impl Session {
@@ -68,6 +71,7 @@ impl Session {
             armed: false,
             mapped: BTreeMap::new(),
             mapped_bytes: 0,
+            media_wait: false,
         }
     }
 
@@ -164,6 +168,7 @@ impl Service {
         self.posix.release_owner(sess.id);
         self.lock_pids.remove(&sess.id);
         self.release_mapped(sess);
+        self.media.close_session(sess.key);
         for &h in &sess.handles {
             self.posix.release_owner(flock_owner(h));
             self.lock_pids.remove(&flock_owner(h));

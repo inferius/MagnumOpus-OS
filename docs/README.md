@@ -99,6 +99,7 @@ site menu.
 | [Souborový systém](cs/souborovy-system.md) | [File system](en/file-system.md) | formát, algoritmy, oprávnění, služba fsd, protokol / format, algorithms, permissions, fsd service, protocol |
 | [Historie a verze souborů](cs/fs-historie.md) | [File history](en/fs-history.md) | žurnál změn, koš, verze, commity, větve, merge / change journal, trash, versions, commits, branches, merge |
 | [Data FS](cs/fs-data.md) | [FS data](en/fs-data.md) | komprese, okamžité kopie, deduplikace, předalokace, metadata 2x, scrub / compression, instant copies, deduplication, preallocation, metadata 2x, scrub |
+| [Vyměnitelná média](cs/media.md) | [Removable media](en/media.md) | flash disky s FAT, exFAT (vlastní implementace) a NTFS v `/media`, proces média `volfs` na každé médium, protokol volproto, pravidla zápisu, bezpečné odpojení / flash drives with FAT, exFAT (own implementation) and NTFS in `/media`, a `volfs` media process per medium, the volproto protocol, write rules, safe removal |
 | [Verze formátu](cs/fs-verze.md) | [Format versions](en/fs-versions.md) | co se mezi verzemi změnilo a proč / what changed between versions and why |
 | [Nástroj osfs](cs/osfs.md) | [osfs tool](en/osfs.md) | obraz FS, kontrola, připojení ve Windows / FS image, check, mounting on Windows |
 | [API pro Windows](cs/osfs-api.md) | [Windows API](en/osfs-api.md) | rozšířené API FS pro aplikace ve Windows / extended FS API for Windows applications |

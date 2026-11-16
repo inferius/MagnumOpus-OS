@@ -54,6 +54,8 @@ struct Lun {
     sectors: u64,
     sector_size: usize,
     read_only: bool,
+    /// Bit RMB z INQUIRY: vymenne medium (flash disk, ctecka karet).
+    removable: bool,
     /// SYNCHRONIZE CACHE funguje (po ILLEGAL REQUEST uz se nezkousi).
     flush: bool,
 }
@@ -126,10 +128,12 @@ fn main(startup: Startup) -> i64 {
             return 4;
         }
     };
-    server::serve("usb-storage", &mut dev, clients);
-    // Konec: zapsat mezipamet (vytazeni flash disku po vypnuti systemu).
-    for i in 0..dev.luns.len() {
-        let _ = dev.flush(i);
+    // Konec: zapsat mezipamet (vytazeni flash disku po vypnuti systemu);
+    // vytazene zarizeni uz ne.
+    if !server::serve("usb-storage", &mut dev, clients) {
+        for i in 0..dev.luns.len() {
+            let _ = dev.flush(i);
+        }
     }
     0
 }
@@ -206,6 +210,7 @@ impl Storage {
             sectors: last + 1,
             sector_size,
             read_only,
+            removable: inq.removable,
             flush: true,
         }))
     }
@@ -300,6 +305,11 @@ impl Storage {
 }
 
 impl Disks for Storage {
+    /// Vytazeni flash disku: kanal USB zarizeni se zavre.
+    fn gone(&self) -> Option<&libos::Handle> {
+        Some(self.bot.usb.channel.handle())
+    }
+
     fn model(&self, d: usize) -> alloc::string::String {
         self.luns[d].model.clone()
     }
@@ -314,6 +324,10 @@ impl Disks for Storage {
 
     fn sector_size(&self, d: usize) -> usize {
         self.luns[d].sector_size
+    }
+
+    fn removable(&self, d: usize) -> bool {
+        self.luns[d].removable
     }
 
     fn features(&self, d: usize) -> u64 {
